@@ -251,6 +251,10 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
               textOutputTokens: 0,
               reasoningOutputTokens: 0,
               audioDurationMs: 0,
+              imageOutputTokens: 0,
+              audioOutputTokens: 0,
+              outputImages: 0,
+              inputCharacters: 0,
             },
           },
           costs: {

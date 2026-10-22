@@ -1975,6 +1975,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -1991,6 +2007,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2021,6 +2041,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2037,6 +2073,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2069,6 +2109,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2085,6 +2141,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2118,6 +2178,22 @@ export type GetAiAccountingOverviewResponses = {
              * Audio content duration in milliseconds; not billed duration.
              */
             audioDurationMs?: number
+            /**
+             * Output tokens that encode generated images, within outputTokens.
+             */
+            imageOutputTokens?: number
+            /**
+             * Output tokens that encode generated audio, within outputTokens.
+             */
+            audioOutputTokens?: number
+            /**
+             * Images the call returned.
+             */
+            outputImages?: number
+            /**
+             * Input characters, counted by the provider's own billing rule.
+             */
+            inputCharacters?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2134,6 +2210,10 @@ export type GetAiAccountingOverviewResponses = {
               textOutputTokens: number
               reasoningOutputTokens: number
               audioDurationMs: number
+              imageOutputTokens: number
+              audioOutputTokens: number
+              outputImages: number
+              inputCharacters: number
             }
           }
           costs: {
@@ -2165,6 +2245,22 @@ export type GetAiAccountingOverviewResponses = {
              * Audio content duration in milliseconds; not billed duration.
              */
             audioDurationMs?: number
+            /**
+             * Output tokens that encode generated images, within outputTokens.
+             */
+            imageOutputTokens?: number
+            /**
+             * Output tokens that encode generated audio, within outputTokens.
+             */
+            audioOutputTokens?: number
+            /**
+             * Images the call returned.
+             */
+            outputImages?: number
+            /**
+             * Input characters, counted by the provider's own billing rule.
+             */
+            inputCharacters?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2181,6 +2277,10 @@ export type GetAiAccountingOverviewResponses = {
               textOutputTokens: number
               reasoningOutputTokens: number
               audioDurationMs: number
+              imageOutputTokens: number
+              audioOutputTokens: number
+              outputImages: number
+              inputCharacters: number
             }
           }
           costs: {
@@ -2215,6 +2315,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2231,6 +2347,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2309,6 +2429,7 @@ export type ListAiModelCallsResponses = {
           | "embedding"
           | "decision"
           | "transcription"
+          | "speech"
           | "reranking"
         requestedReasoning?:
           | "provider-default"
@@ -2342,6 +2463,22 @@ export type ListAiModelCallsResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         occurredAt: string
@@ -6989,6 +7126,22 @@ export type GetWorkflowRunResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -7065,6 +7218,22 @@ export type GetWorkflowAgentNodeExecutionResponses = {
        * Audio content duration in milliseconds; not billed duration.
        */
       audioDurationMs?: number
+      /**
+       * Output tokens that encode generated images, within outputTokens.
+       */
+      imageOutputTokens?: number
+      /**
+       * Output tokens that encode generated audio, within outputTokens.
+       */
+      audioOutputTokens?: number
+      /**
+       * Images the call returned.
+       */
+      outputImages?: number
+      /**
+       * Input characters, counted by the provider's own billing rule.
+       */
+      inputCharacters?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -7492,6 +7661,22 @@ export type CancelWorkflowRunResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -11460,6 +11645,22 @@ export type PostAgentThreadMessageResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11722,6 +11923,22 @@ export type CancelAgentRunResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11901,6 +12118,22 @@ export type RetryAgentRunResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -12047,6 +12280,22 @@ export type ListAgentThreadRunsResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -12190,6 +12439,22 @@ export type GetAgentRunResponses = {
        * Audio content duration in milliseconds; not billed duration.
        */
       audioDurationMs?: number
+      /**
+       * Output tokens that encode generated images, within outputTokens.
+       */
+      imageOutputTokens?: number
+      /**
+       * Output tokens that encode generated audio, within outputTokens.
+       */
+      audioOutputTokens?: number
+      /**
+       * Images the call returned.
+       */
+      outputImages?: number
+      /**
+       * Input characters, counted by the provider's own billing rule.
+       */
+      inputCharacters?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {

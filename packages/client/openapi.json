@@ -5724,6 +5724,26 @@
                               "minimum": 0,
                               "description": "Audio content duration in milliseconds; not billed duration."
                             },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -5775,6 +5795,22 @@
                                 "audioDurationMs": {
                                   "type": "integer",
                                   "minimum": 0
+                                },
+                                "imageOutputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "audioOutputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "outputImages": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "inputCharacters": {
+                                  "type": "integer",
+                                  "minimum": 0
                                 }
                               },
                               "required": [
@@ -5785,7 +5821,11 @@
                                 "cacheWriteInputTokens",
                                 "textOutputTokens",
                                 "reasoningOutputTokens",
-                                "audioDurationMs"
+                                "audioDurationMs",
+                                "imageOutputTokens",
+                                "audioOutputTokens",
+                                "outputImages",
+                                "inputCharacters"
                               ],
                               "additionalProperties": false
                             }
@@ -5888,6 +5928,26 @@
                                 "minimum": 0,
                                 "description": "Audio content duration in milliseconds; not billed duration."
                               },
+                              "imageOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated images, within outputTokens."
+                              },
+                              "audioOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated audio, within outputTokens."
+                              },
+                              "outputImages": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Images the call returned."
+                              },
+                              "inputCharacters": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Input characters, counted by the provider's own billing rule."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -5939,6 +5999,22 @@
                                   "audioDurationMs": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -5949,7 +6025,11 @@
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
                                   "reasoningOutputTokens",
-                                  "audioDurationMs"
+                                  "audioDurationMs",
+                                  "imageOutputTokens",
+                                  "audioOutputTokens",
+                                  "outputImages",
+                                  "inputCharacters"
                                 ],
                                 "additionalProperties": false
                               }
@@ -6068,6 +6148,26 @@
                                 "minimum": 0,
                                 "description": "Audio content duration in milliseconds; not billed duration."
                               },
+                              "imageOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated images, within outputTokens."
+                              },
+                              "audioOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated audio, within outputTokens."
+                              },
+                              "outputImages": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Images the call returned."
+                              },
+                              "inputCharacters": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Input characters, counted by the provider's own billing rule."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -6119,6 +6219,22 @@
                                   "audioDurationMs": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -6129,7 +6245,11 @@
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
                                   "reasoningOutputTokens",
-                                  "audioDurationMs"
+                                  "audioDurationMs",
+                                  "imageOutputTokens",
+                                  "audioOutputTokens",
+                                  "outputImages",
+                                  "inputCharacters"
                                 ],
                                 "additionalProperties": false
                               }
@@ -6248,6 +6368,26 @@
                                     "minimum": 0,
                                     "description": "Audio content duration in milliseconds; not billed duration."
                                   },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated images, within outputTokens."
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated audio, within outputTokens."
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Images the call returned."
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Input characters, counted by the provider's own billing rule."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -6299,6 +6439,22 @@
                                       "audioDurationMs": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "imageOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "audioOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "outputImages": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "inputCharacters": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -6309,7 +6465,11 @@
                                       "cacheWriteInputTokens",
                                       "textOutputTokens",
                                       "reasoningOutputTokens",
-                                      "audioDurationMs"
+                                      "audioDurationMs",
+                                      "imageOutputTokens",
+                                      "audioOutputTokens",
+                                      "outputImages",
+                                      "inputCharacters"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -6420,6 +6580,26 @@
                                     "minimum": 0,
                                     "description": "Audio content duration in milliseconds; not billed duration."
                                   },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated images, within outputTokens."
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated audio, within outputTokens."
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Images the call returned."
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Input characters, counted by the provider's own billing rule."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -6471,6 +6651,22 @@
                                       "audioDurationMs": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "imageOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "audioOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "outputImages": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "inputCharacters": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -6481,7 +6677,11 @@
                                       "cacheWriteInputTokens",
                                       "textOutputTokens",
                                       "reasoningOutputTokens",
-                                      "audioDurationMs"
+                                      "audioDurationMs",
+                                      "imageOutputTokens",
+                                      "audioOutputTokens",
+                                      "outputImages",
+                                      "inputCharacters"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -6605,6 +6805,26 @@
                                 "minimum": 0,
                                 "description": "Audio content duration in milliseconds; not billed duration."
                               },
+                              "imageOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated images, within outputTokens."
+                              },
+                              "audioOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated audio, within outputTokens."
+                              },
+                              "outputImages": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Images the call returned."
+                              },
+                              "inputCharacters": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Input characters, counted by the provider's own billing rule."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -6656,6 +6876,22 @@
                                   "audioDurationMs": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -6666,7 +6902,11 @@
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
                                   "reasoningOutputTokens",
-                                  "audioDurationMs"
+                                  "audioDurationMs",
+                                  "imageOutputTokens",
+                                  "audioOutputTokens",
+                                  "outputImages",
+                                  "inputCharacters"
                                 ],
                                 "additionalProperties": false
                               }
@@ -6931,6 +7171,7 @@
                                   "embedding",
                                   "decision",
                                   "transcription",
+                                  "speech",
                                   "reranking"
                                 ]
                               },
@@ -7023,6 +7264,26 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "description": "Audio content duration in milliseconds; not billed duration."
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated images, within outputTokens."
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated audio, within outputTokens."
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Images the call returned."
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Input characters, counted by the provider's own billing rule."
                                   },
                                   "reportingStatus": {
                                     "type": "string",
@@ -20927,6 +21188,26 @@
                                     "minimum": 0,
                                     "description": "Audio content duration in milliseconds; not billed duration."
                                   },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated images, within outputTokens."
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated audio, within outputTokens."
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Images the call returned."
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Input characters, counted by the provider's own billing rule."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -21159,6 +21440,26 @@
                           "type": "integer",
                           "minimum": 0,
                           "description": "Audio content duration in milliseconds; not billed duration."
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Output tokens that encode generated images, within outputTokens."
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Output tokens that encode generated audio, within outputTokens."
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Images the call returned."
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Input characters, counted by the provider's own billing rule."
                         },
                         "reportingStatus": {
                           "type": "string",
@@ -22315,6 +22616,26 @@
                                     "type": "integer",
                                     "minimum": 0,
                                     "description": "Audio content duration in milliseconds; not billed duration."
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated images, within outputTokens."
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Output tokens that encode generated audio, within outputTokens."
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Images the call returned."
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Input characters, counted by the provider's own billing rule."
                                   },
                                   "reportingStatus": {
                                     "type": "string",
@@ -34283,6 +34604,26 @@
                               "minimum": 0,
                               "description": "Audio content duration in milliseconds; not billed duration."
                             },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -35030,6 +35371,26 @@
                               "minimum": 0,
                               "description": "Audio content duration in milliseconds; not billed duration."
                             },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -35476,6 +35837,26 @@
                               "type": "integer",
                               "minimum": 0,
                               "description": "Audio content duration in milliseconds; not billed duration."
+                            },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
                             },
                             "reportingStatus": {
                               "type": "string",
@@ -35987,6 +36368,26 @@
                                 "minimum": 0,
                                 "description": "Audio content duration in milliseconds; not billed duration."
                               },
+                              "imageOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated images, within outputTokens."
+                              },
+                              "audioOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated audio, within outputTokens."
+                              },
+                              "outputImages": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Images the call returned."
+                              },
+                              "inputCharacters": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Input characters, counted by the provider's own billing rule."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -36376,6 +36777,26 @@
                           "type": "integer",
                           "minimum": 0,
                           "description": "Audio content duration in milliseconds; not billed duration."
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Output tokens that encode generated images, within outputTokens."
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Output tokens that encode generated audio, within outputTokens."
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Images the call returned."
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Input characters, counted by the provider's own billing rule."
                         },
                         "reportingStatus": {
                           "type": "string",

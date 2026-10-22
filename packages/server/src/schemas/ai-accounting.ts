@@ -59,6 +59,10 @@ const AiAccountingAggregateSchema = z.object({
       textOutputTokens: z.number().int().nonnegative(),
       reasoningOutputTokens: z.number().int().nonnegative(),
       audioDurationMs: z.number().int().nonnegative(),
+      imageOutputTokens: z.number().int().nonnegative(),
+      audioOutputTokens: z.number().int().nonnegative(),
+      outputImages: z.number().int().nonnegative(),
+      inputCharacters: z.number().int().nonnegative(),
     }),
   }),
   costs: AiCostSummarySchema,
@@ -195,7 +199,16 @@ const AiModelCallUsageRecordSchema = z.object({
   providerId: z.string(),
   requestedModelId: z.string(),
   modelKind: z
-    .enum(["language", "image", "video", "embedding", "decision", "transcription", "reranking"])
+    .enum([
+      "language",
+      "image",
+      "video",
+      "embedding",
+      "decision",
+      "transcription",
+      "speech",
+      "reranking",
+    ])
     .optional(),
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),

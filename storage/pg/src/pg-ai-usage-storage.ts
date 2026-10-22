@@ -51,6 +51,10 @@ export class PgAiUsageStorage implements AiUsageStorage {
           text_output_tokens,
           reasoning_output_tokens,
           audio_duration_ms,
+          image_output_tokens,
+          audio_output_tokens,
+          output_images,
+          input_characters,
           reporting_status,
           raw_usage,
           occurred_at,
@@ -81,6 +85,10 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.usage.textOutputTokens ?? null},
           ${record.usage.reasoningOutputTokens ?? null},
           ${record.usage.audioDurationMs ?? null},
+          ${record.usage.imageOutputTokens ?? null},
+          ${record.usage.audioOutputTokens ?? null},
+          ${record.usage.outputImages ?? null},
+          ${record.usage.inputCharacters ?? null},
           ${record.usage.reportingStatus},
           ${record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage)}::text::jsonb,
           ${record.occurredAt},
@@ -275,6 +283,10 @@ interface AiUsageRow {
   readonly text_output_tokens: number | string | null
   readonly reasoning_output_tokens: number | string | null
   readonly audio_duration_ms: number | string | null
+  readonly image_output_tokens: number | string | null
+  readonly audio_output_tokens: number | string | null
+  readonly output_images: number | string | null
+  readonly input_characters: number | string | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: ReadonlyJsonObject | string | null
   readonly occurred_at: Date | string
@@ -319,6 +331,14 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       ? {}
       : { reasoningOutputTokens: Number(row.reasoning_output_tokens) }),
     ...(row.audio_duration_ms === null ? {} : { audioDurationMs: Number(row.audio_duration_ms) }),
+    ...(row.image_output_tokens === null
+      ? {}
+      : { imageOutputTokens: Number(row.image_output_tokens) }),
+    ...(row.audio_output_tokens === null
+      ? {}
+      : { audioOutputTokens: Number(row.audio_output_tokens) }),
+    ...(row.output_images === null ? {} : { outputImages: Number(row.output_images) }),
+    ...(row.input_characters === null ? {} : { inputCharacters: Number(row.input_characters) }),
   }
 }
 
