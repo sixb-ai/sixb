@@ -37,6 +37,7 @@ import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
   readArtifactVersionFiles,
+  type TurnArtifacts,
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
@@ -116,10 +117,14 @@ interface PublishToolsInput {
   /** For the transaction that publishes. */
   readonly storage: Storage
   readonly artifacts: ArtifactStorage
+  /** The requester's view of artifacts: what the turn may read, revise, and refer to. */
+  readonly reader: TurnArtifacts
   readonly blobStorage: BlobStorage
   readonly run: PublishingRun
-  /** The thread's owner, who owns what the Agent publishes. */
+  /** The thread's owner, who owns what the Agent creates in it. */
   readonly owner: Principal
+  /** Whoever asked for the turn, named as each version's author. */
+  readonly author: Principal
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
@@ -129,8 +134,9 @@ interface PublishToolsInput {
 
 /**
  * `publish_artifact` and `publish_artifact_version`: each reads a file or a directory from the
- * sandbox, stores its bytes, and publishes them as the thread's owner with the thread and run as
- * origin. The version exists when the tool returns, so the conversation shows it mid-turn and a
+ * sandbox, stores its bytes, and publishes them with the thread and run as origin: a new artifact
+ * for the thread's owner, or the next version of one the requester may update, authored by the
+ * requester. The version exists when the tool returns, so the conversation shows it mid-turn and a
  * cancelled run keeps it. Publishing commits only while the run still owns its execution: a run
  * reclaimed by another delivery publishes nothing.
  */
@@ -185,7 +191,7 @@ async function publish(
   const kind: ArtifactKind =
     "kind" in request.target
       ? request.target.kind
-      : (await ownedArtifact(input, artifacts, request.target.artifactId, tool)).kind
+      : (await updatableArtifact(input, request.target.artifactId, tool)).kind
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
@@ -248,7 +254,12 @@ async function publish(
         kind,
         title: request.title,
         files,
-        author: input.owner,
+        author: input.author,
+        owner: input.owner,
+        readable: async (artifact) => {
+          const access = await input.reader.access(artifact.id)
+          return access !== null && access !== "none"
+        },
         origin: { threadId: input.run.threadId, runId: input.run.id },
       }
     )
@@ -257,8 +268,11 @@ async function publish(
       const stored = tx.artifacts
       if (!stored) throw new Error("[SixbAgentWorker] Storage transactions hold no artifacts.")
       // The owner may have deleted it since the check above.
-      if ("artifactId" in request.target) {
-        await ownedArtifact(input, stored, request.target.artifactId, tool)
+      if (
+        "artifactId" in request.target &&
+        !(await stored.get({ projectId: input.projectId, id: request.target.artifactId }))
+      ) {
+        throw noArtifact(tool, request.target.artifactId)
       }
       return storeArtifactVersion(
         { projectId: input.projectId, storage: stored, blobStorage: input.blobStorage },
@@ -364,21 +378,27 @@ async function publish(
   }
 }
 
-/** The artifact to publish a version of: one the thread's owner has. */
-async function ownedArtifact(
+/**
+ * The artifact to publish a version of: one the requester may update, as its owner or as someone
+ * reading a conversation that shares it. Another is refused as if it did not exist.
+ */
+async function updatableArtifact(
   input: PublishToolsInput,
-  artifacts: ArtifactStorage,
   artifactId: string,
   tool: PublishToolName
 ): Promise<ArtifactRecord> {
-  const artifact = await artifacts.get({ projectId: input.projectId, id: artifactId })
-  if (!artifact || !principalsEqual(artifact.owner, input.owner)) {
-    throw publishError(
-      tool,
-      `there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
-    )
-  }
+  const access = await input.reader.access(artifactId)
+  const artifact =
+    access === "owner" || access === "update" ? await input.reader.get(artifactId) : null
+  if (!artifact) throw noArtifact(tool, artifactId)
   return artifact
+}
+
+function noArtifact(tool: PublishToolName, artifactId: string): AgentToolPublicError {
+  return publishError(
+    tool,
+    `there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call ${CREATE_TOOL}`
+  )
 }
 
 /**
@@ -395,12 +415,9 @@ async function artifactMoved(
   { artifactId, baseVersion }: { readonly artifactId: string; readonly baseVersion: number },
   signal: AbortSignal
 ): Promise<AgentToolPublicError> {
-  const artifact = await ownedArtifact(input, input.artifacts, artifactId, VERSION_TOOL)
-  const latest = await input.artifacts.getVersion({
-    projectId: input.projectId,
-    artifactId,
-    version: artifact.latestVersion,
-  })
+  // Read as the requester: whatever moved it, it is a version they can read.
+  const artifact = await updatableArtifact(input, artifactId, VERSION_TOOL)
+  const latest = await input.reader.getVersion(artifactId, artifact.latestVersion)
   if (!latest) {
     throw new Error(
       `[SixbAgentWorker] Version ${artifact.latestVersion} of '${artifactId}' is missing.`
