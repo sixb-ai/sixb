@@ -225,6 +225,19 @@ test("catalog prices images by the variant a request matches, or not at all", as
       dimensions,
     })
 
+  // Removal proof: drop pricedSizes from imageResolution; no model lists its sizes.
+  expect((await provider.image("bfl/flux-3-image").resolve!()).definition.sizes).toEqual([
+    "768x768",
+    "1024x1024",
+  ])
+  expect(
+    (await provider.image("google/gemini-3.1-flash-lite-image").resolve!()).definition.sizes
+  ).toEqual(["1K"])
+  // Token-priced, or priced by style: any size passes through.
+  expect(
+    (await provider.image("openai/gpt-image-1-mini").resolve!()).definition.sizes
+  ).toBeUndefined()
+  expect((await provider.image("recraft/recraft-v3").resolve!()).definition.sizes).toBeUndefined()
   expect((await provider.image("bfl/flux-3-image").resolve!()).rateCard).toEqual({
     currency: "USD",
     images: {
