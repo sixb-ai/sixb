@@ -43,6 +43,7 @@ import {
   insertRows,
   setCells,
   setColumn,
+  sheetRefusal,
   startDraft,
   type WorkbookDraft,
 } from "./draft"
@@ -375,6 +376,16 @@ function useWorkbookEdit(
     if (!editing || !model || !table || !current) return null
     const format = (column: number) => model.columns[column]?.format ?? { type: "text" as const }
     const images = new Set(version.files.map((file) => file.path))
+
+    /** A change the rules publishing checks may refuse: why, in words, when they do. */
+    const checked = (apply: (draft: WorkbookDraft) => WorkbookDraft): string | null => {
+      const refused = attempt((last) => {
+        const next = apply(last)
+        return next === last ? next : (sheetRefusal(next, sheetName, table) ?? next)
+      })
+      return refused ? refusalText(refused, messages.column, () => "") : null
+    }
+
     return {
       editable: (column) => !format(column).formula,
       inputText: (column, raw) => cellInputText(raw, format(column), locale),
@@ -383,8 +394,8 @@ function useWorkbookEdit(
           image: (path) => images.has(path.replace(/^\.\//, "")),
           pasted: pasted ?? false,
         }),
-      write: (edits, grow) => change((last) => setCells(last, sheetName, table, edits, grow)),
-      insertRows: (at, count) => change((last) => insertRows(last, sheetName, table, at, count)),
+      write: (edits, grow) => checked((last) => setCells(last, sheetName, table, edits, grow)),
+      insertRows: (at, count) => checked((last) => insertRows(last, sheetName, table, at, count)),
       deleteRows: (rows) => change((last) => deleteRows(last, sheetName, table, rows)),
       insertColumn: (at) => change((last) => insertColumn(last, sheetName, table, at)),
       deleteColumn: (column) => {

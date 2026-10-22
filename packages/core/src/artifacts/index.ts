@@ -77,6 +77,7 @@ export {
   type ResolvedArtifactPart,
   resolveArtifactAddress,
 } from "./resolve"
+export { checkSheet } from "./sheet-rules"
 export { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "./theme"
 export { ARTIFACT_TONES, type ArtifactTone } from "./tones"
 export {

@@ -26,6 +26,7 @@ import {
   insertRows,
   setCells,
   setColumn,
+  sheetRefusal,
   startDraft,
 } from "../src/artifacts/renderers/sheet/draft"
 import { SheetGrid, type SheetGridEditor } from "../src/artifacts/renderers/sheet/grid"
@@ -298,14 +299,18 @@ function EditedGrid({ sort }: { readonly sort?: boolean }) {
         parseCellInput(text, model.columns[column]?.format ?? { type: "text" }, "en-US", {
           pasted: pasted ?? false,
         }),
-      write: (edits, grow) =>
+      write: (edits, grow) => {
         setHistory((last) =>
           recordChange(last, setCells(last.present, "Regions", TABLE, edits, grow))
-        ),
-      insertRows: (at, count) =>
+        )
+        return null
+      },
+      insertRows: (at, count) => {
         setHistory((last) =>
           recordChange(last, insertRows(last.present, "Regions", TABLE, at, count))
-        ),
+        )
+        return null
+      },
       deleteRows: (rows) =>
         setHistory((last) => recordChange(last, deleteRows(last.present, "Regions", TABLE, rows))),
       insertColumn: (at) =>
@@ -579,6 +584,81 @@ describe("a sheet's columns, as edited", () => {
         read
       )
     ).toEqual({ refused: "formula-type", computes: "text" })
+  })
+
+  test("refuses what publishing would, by its rules: charts, formulas, and a pie's slices", () => {
+    // Reproduce by checking only the columns a chart plots in y: the scatter's x turns to text.
+    const rooms = parseCsv("Region,Rooms,Revenue\nNorth,120,\nSouth,80,\n")
+    const scatter = {
+      sheets: [workbookSheet({ Rooms: "number", Revenue: "currency" })],
+      charts: [
+        {
+          name: "rooms",
+          type: "scatter" as const,
+          sheet: "Regions",
+          x: "Rooms",
+          y: ["Revenue"],
+          line: [],
+          stacked: false,
+        },
+      ],
+    }
+    expect(
+      setColumn(
+        startDraft(scatter),
+        "Regions",
+        rooms,
+        1,
+        { name: "Rooms", format: { type: "text" } },
+        read
+      )
+    ).toEqual({
+      refused: "invalid",
+      message: `workbook.json chart 'rooms' plots column 'Rooms', which is text; give it a number, currency, or percent type in "columns".`,
+    })
+
+    // A formula that reads the column refuses it too, as publishing computes it.
+    const hotels = workbookSheet({
+      Rooms: "number",
+      Revenue: { type: "currency", formula: "[@Rooms]*1000" },
+    })
+    const unplotted = setColumn(
+      startDraft({ sheets: [hotels], charts: [] }),
+      "Regions",
+      rooms,
+      1,
+      { name: "Rooms", format: { type: "text" } },
+      read
+    )
+    expect(unplotted).toEqual({
+      refused: "invalid",
+      message: `workbook.json sheet 'Regions' column 'Revenue' "formula": '*' needs numbers on both sides, not text.`,
+    })
+
+    // A pie of five regions takes no sixth row.
+    const pie = {
+      sheets: [workbookSheet({ Visits: "number" })],
+      charts: [
+        {
+          name: "share",
+          type: "pie" as const,
+          sheet: "Regions",
+          x: "Region",
+          y: ["Visits"],
+          line: [],
+          stacked: false,
+        },
+      ],
+    }
+    const five = parseCsv("Region,Visits\nA,1\nB,2\nC,3\nD,4\nE,5\n")
+    expect(sheetRefusal(startDraft(pie), "Regions", five)).toBeNull()
+    expect(
+      sheetRefusal(insertRows(startDraft(pie), "Regions", five, 5, 1), "Regions", five)
+    ).toEqual({
+      refused: "invalid",
+      message:
+        "workbook.json chart 'share' is a pie with 6 slices; a pie reads well with at most 5. Use a bar chart instead.",
+    })
   })
 })
 

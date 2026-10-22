@@ -124,14 +124,15 @@ export interface SheetGridEditor {
   readonly read: (column: number, text: string, pasted?: boolean) => CellInput
   /**
    * Stores values, as one change. `grow` adds empty rows at the end and columns at the right
-   * first, as a paste past the sheet's edge does; edits may name them.
+   * first, as a paste past the sheet's edge does; edits may name them. Returns why the sheet
+   * can't take them, in words, when it can't.
    */
   readonly write: (
     edits: readonly CellEdit[],
     grow?: { readonly rows: number; readonly columns: number }
-  ) => void
-  /** Adds empty rows before a data row; at the row count, after the last. */
-  readonly insertRows: (at: number, count: number) => void
+  ) => string | null
+  /** Adds empty rows before a data row; at the row count, after the last. Returns why not. */
+  readonly insertRows: (at: number, count: number) => string | null
   readonly deleteRows: (rows: readonly number[]) => void
   /** Adds an empty column before a column; at the column count, after the last. */
   readonly insertColumn: (at: number) => void
@@ -260,6 +261,8 @@ export function SheetGrid({
     readonly point: CellPoint
     readonly text: string
     readonly error?: CellInputError
+    /** A value the sheet's rules refuse, such as a chart's: the rule, in words. */
+    readonly refused?: string
   } | null>(null)
   const typedText = editing?.text
   const typedAt = editing?.point
@@ -270,6 +273,10 @@ export function SheetGrid({
     const timer = setTimeout(() => setNotice(null), NOTICE_MS)
     return () => clearTimeout(timer)
   }, [notice])
+  /** Says why the sheet refused a change, when it did. */
+  const refuse = (why: string | null) => {
+    if (why) setNotice(why)
+  }
   /** The column whose filter is open. */
   const [filtering, setFiltering] = useState<number | null>(null)
   /** What the reader right-clicked, which decides what the context menu offers. */
@@ -530,7 +537,13 @@ export function SheetGrid({
       return false
     }
     const row = order[point.row - 1]
-    if (row !== undefined) editor.write([{ row, column: point.column, value: result.value }])
+    const refused =
+      row === undefined ? null : editor.write([{ row, column: point.column, value: result.value }])
+    if (refused) {
+      setEditing({ point, text, refused })
+      return false
+    }
+
     endEdit()
     if (move) {
       const next =
@@ -572,7 +585,7 @@ export function SheetGrid({
   /** Delete clears the selection's cells. */
   const clearSelection = () => {
     if (!editor) return
-    editor.write(editableCells().map((cell) => ({ ...cell, value: "" })))
+    refuse(editor.write(editableCells().map((cell) => ({ ...cell, value: "" }))))
   }
 
   /**
@@ -586,7 +599,7 @@ export function SheetGrid({
     const allOn = checks.every(
       (cell) => (model.rows[cell.row]?.[cell.column] ?? "").trim().toLowerCase() === "true"
     )
-    editor.write(checks.map((cell) => ({ ...cell, value: allOn ? "false" : "true" })))
+    refuse(editor.write(checks.map((cell) => ({ ...cell, value: allOn ? "false" : "true" }))))
   }
 
   /** The data rows of the selection's rows, in the order they're shown. */
@@ -606,7 +619,7 @@ export function SheetGrid({
     const first = order[Math.max(1, range.top) - 1]
     const last = order[range.bottom - 1]
     const at = where === "above" ? first : last === undefined ? undefined : last + 1
-    editor.insertRows(at ?? model.rows.length, Math.max(1, rows.length))
+    refuse(editor.insertRows(at ?? model.rows.length, Math.max(1, rows.length)))
   }
 
   const deleteSelectedRows = () => {
@@ -633,7 +646,7 @@ export function SheetGrid({
         edits.push({ row: dataRow, column, value: model.rows[source]?.[column] ?? "" })
       }
     }
-    editor.write(edits)
+    refuse(editor.write(edits))
   }
 
   /**
@@ -675,7 +688,12 @@ export function SheetGrid({
         else edits.push({ row: dataRow, column, value: read.value })
       }
     }
-    editor.write(edits, { rows: extraRows, columns: extraColumns })
+    const refused = editor.write(edits, { rows: extraRows, columns: extraColumns })
+    if (refused) {
+      setNotice(refused)
+      return
+    }
+
     setAnchor({ row: top, column: range.left })
     setFocus({ row: top + height - 1, column: range.left + width - 1 })
     setNotice(skipped > 0 ? messages.pasteSkipped(skipped) : null)
@@ -1113,7 +1131,11 @@ export function SheetGrid({
           {typing && editor ? (
             <CellEditor
               text={typing.text}
-              {...(typing.error ? { error: messages.inputErrors[typing.error] } : {})}
+              {...(typing.error
+                ? { error: messages.inputErrors[typing.error] }
+                : typing.refused
+                  ? { error: typing.refused }
+                  : {})}
               numeric={model.columns[column]?.numeric ?? false}
               label={messages.editCell(`${columnLetter(column)}${row + 1}`)}
               {...(editor.suggestions ? { suggestions: editor.suggestions(column) } : {})}
@@ -1543,7 +1565,7 @@ export function SheetGrid({
       {notice ? (
         <div
           role="status"
-          className="pointer-events-none absolute bottom-12 left-1/2 z-10 -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-xs font-medium whitespace-nowrap text-popover-foreground shadow-[0_8px_24px_-12px_rgb(0_0_0/0.35)] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
+          className="pointer-events-none absolute bottom-12 left-1/2 z-10 w-max max-w-[min(36rem,calc(100%-2rem))] -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-center text-xs font-medium text-balance text-popover-foreground shadow-[0_8px_24px_-12px_rgb(0_0_0/0.35)] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
         >
           {notice}
         </div>

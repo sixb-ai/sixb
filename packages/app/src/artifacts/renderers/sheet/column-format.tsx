@@ -334,6 +334,8 @@ export function refusalText(
       return formulaType(refusal.computes)
     case "formula-cycle":
       return text.refusals.cycle
+    case "invalid":
+      return refusal.message
   }
 }
 
