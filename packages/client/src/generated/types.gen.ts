@@ -3434,7 +3434,13 @@ export type ListAiModelCallGroupsResponses = {
             parentRunId: string
           }
       modelCallCount: number
+      /**
+       * Present when every call that reports tokens did; images and speech don't.
+       */
       totalTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
       costs: {
         amounts: Array<{
           currency: string
@@ -3482,7 +3488,13 @@ export type ListAiModelCallGroupsResponses = {
               parentRunId: string
             }
         modelCallCount: number
+        /**
+         * Present when every call that reports tokens did; images and speech don't.
+         */
         totalTokens?: number
+        outputImages?: number
+        inputCharacters?: number
+        audioDurationMs?: number
         costs: {
           amounts: Array<{
             currency: string

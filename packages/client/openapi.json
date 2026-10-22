@@ -10489,6 +10489,19 @@
                           },
                           "totalTokens": {
                             "type": "integer",
+                            "minimum": 0,
+                            "description": "Present when every call that reports tokens did; images and speech don't."
+                          },
+                          "outputImages": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "inputCharacters": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "audioDurationMs": {
+                            "type": "integer",
                             "minimum": 0
                           },
                           "costs": {
@@ -10672,6 +10685,19 @@
                                   "minimum": 0
                                 },
                                 "totalTokens": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "description": "Present when every call that reports tokens did; images and speech don't."
+                                },
+                                "outputImages": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "inputCharacters": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "audioDurationMs": {
                                   "type": "integer",
                                   "minimum": 0
                                 },

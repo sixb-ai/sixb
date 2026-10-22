@@ -19,6 +19,17 @@ export const MODEL_KINDS = [
 
 export type ModelKind = (typeof MODEL_KINDS)[number]
 
+/**
+ * @internal Kinds billed per audio second, search, image or character, whose providers mostly
+ * report no tokens. Token limits skip them, and a missing token count from one is not a gap.
+ */
+export const TOKENLESS_MODEL_KINDS: readonly ModelKind[] = [
+  "transcription",
+  "reranking",
+  "image",
+  "speech",
+]
+
 /** Common catalog identity shared by every present and future model runtime. */
 export interface ModelDefinition {
   readonly kind: ModelKind

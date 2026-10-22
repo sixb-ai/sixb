@@ -1,3 +1,4 @@
+import { TOKENLESS_MODEL_KINDS } from "../../models/definitions"
 import type { AiAccountingRecordSetItem } from "./analytics"
 import { aiAccountingItemMatchesQuery, normalizeAiModelCallAccountingQuery } from "./analytics"
 import { directModelCallAttribution } from "./attribution"
@@ -27,7 +28,12 @@ export interface AiModelCallGroupFragment {
   readonly lastCallAt: Date
   readonly callCount: string
   readonly tokenCount: string
+  /** Calls of a tokenless kind that reported no tokens, which leave no gap in the total. */
+  readonly tokenlessCount: string
   readonly totalTokens: string | null
+  readonly outputImages: string | null
+  readonly inputCharacters: string | null
+  readonly audioDurationMs: string | null
   readonly valuationStatus: "rated" | "unpriceable" | "unvalued"
   readonly money?: AiMoney
 }
@@ -42,7 +48,11 @@ export interface AiModelCallGroupRow {
   readonly last_call_at: Date | string
   readonly call_count: string
   readonly token_count: string
+  readonly tokenless_count: string
   readonly total_tokens: string | null
+  readonly output_images: string | null
+  readonly input_characters: string | null
+  readonly audio_duration_ms: string | null
   readonly valuation_status: AiModelCallGroupFragment["valuationStatus"]
   readonly amount_currency: string | null
   readonly amount_high: string | null
@@ -98,7 +108,11 @@ export function aiModelCallGroupFragmentFromRow(
     lastCallAt: new Date(row.last_call_at),
     callCount: row.call_count,
     tokenCount: row.token_count,
+    tokenlessCount: row.tokenless_count,
     totalTokens: row.total_tokens,
+    outputImages: row.output_images,
+    inputCharacters: row.input_characters,
+    audioDurationMs: row.audio_duration_ms,
     valuationStatus: row.valuation_status,
     ...(row.amount_currency === null
       ? {}
@@ -178,7 +192,16 @@ export function buildAiModelCallGroups(
         lastCallAt: item.usage.occurredAt,
         callCount: "1",
         tokenCount: item.usage.usage.totalTokens === undefined ? "0" : "1",
+        tokenlessCount:
+          item.usage.usage.totalTokens === undefined &&
+          item.usage.modelKind !== undefined &&
+          TOKENLESS_MODEL_KINDS.includes(item.usage.modelKind)
+            ? "1"
+            : "0",
         totalTokens: item.usage.usage.totalTokens?.toString() ?? null,
+        outputImages: item.usage.usage.outputImages?.toString() ?? null,
+        inputCharacters: item.usage.usage.inputCharacters?.toString() ?? null,
+        audioDurationMs: item.usage.usage.audioDurationMs?.toString() ?? null,
         valuationStatus: item.cost?.status ?? "unvalued",
         ...(item.cost && item.cost.status !== "unpriceable" ? { money: item.cost.money } : {}),
       })
@@ -195,14 +218,25 @@ export function buildAiModelCallGroups(
 function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroupSummary {
   let calls = 0n
   let tokenCount = 0n
+  let tokenless = 0n
   let tokens = 0n
+  const media = {
+    outputImages: undefined as bigint | undefined,
+    inputCharacters: undefined as bigint | undefined,
+    audioDurationMs: undefined as bigint | undefined,
+  }
   const counts = { rated: 0n, unpriceable: 0n, unvalued: 0n }
   const money = new Map<string, bigint>()
   for (const item of items) {
     const count = BigInt(item.callCount)
     calls += count
     tokenCount += BigInt(item.tokenCount)
+    tokenless += BigInt(item.tokenlessCount)
     tokens += BigInt(item.totalTokens ?? "0")
+    for (const field of ["outputImages", "inputCharacters", "audioDurationMs"] as const) {
+      const value = item[field]
+      if (value !== null) media[field] = (media[field] ?? 0n) + BigInt(value)
+    }
     counts[item.valuationStatus] += count
     if (item.money)
       money.set(
@@ -220,7 +254,16 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
   }
   return {
     modelCallCount: safeCount(calls),
-    ...(calls === tokenCount ? { totalTokens: safeCount(tokens) } : {}),
+    ...(tokenCount > 0n && calls === tokenCount + tokenless
+      ? { totalTokens: safeCount(tokens) }
+      : {}),
+    ...(media.outputImages === undefined ? {} : { outputImages: safeCount(media.outputImages) }),
+    ...(media.inputCharacters === undefined
+      ? {}
+      : { inputCharacters: safeCount(media.inputCharacters) }),
+    ...(media.audioDurationMs === undefined
+      ? {}
+      : { audioDurationMs: safeCount(media.audioDurationMs) }),
     costs,
   }
 }
