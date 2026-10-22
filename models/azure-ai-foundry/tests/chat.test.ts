@@ -25,7 +25,6 @@ const definition = {
 }
 const rateCard = {
   currency: "USD",
-  unit: "million-tokens",
   input: "2",
   output: "10",
   cacheReadInput: "1",

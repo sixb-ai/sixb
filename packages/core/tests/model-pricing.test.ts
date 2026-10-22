@@ -16,7 +16,6 @@ describe("model definitions and rate cards", () => {
         outputTokens: 100,
         rateCard: {
           currency: "USD",
-          unit: "million-tokens",
           input: "2",
           cacheReadInput: "0.2",
           cacheWriteInput5m: "2.5",
@@ -31,7 +30,6 @@ describe("model definitions and rate cards", () => {
         outputTokens: 1,
         rateCard: {
           currency: "USD",
-          unit: "million-tokens",
           input: "0.0000011",
           output: "0.0000011",
         },
@@ -50,7 +48,6 @@ describe("model definitions and rate cards", () => {
       },
       rateCard: {
         currency: "USD",
-        unit: "million-tokens",
         input: "2.5",
         cacheReadInput: "0.5",
         output: {
@@ -111,7 +108,7 @@ describe("model definitions and rate cards", () => {
           outputTokens: 1,
           cacheReadInputTokens: 11,
         },
-        rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "1" },
+        rateCard: { currency: "USD", input: "1", output: "1" },
       })
     ).toEqual({ status: "unpriceable", reason: "inconsistent-usage" })
   })
@@ -146,9 +143,9 @@ describe("model definitions and rate cards", () => {
       modelId: "canonical",
       capabilities: {},
     })
-    expect(() =>
-      defineModelRateCard({ currency: "USD", unit: "million-tokens", input: "free", output: "2" })
-    ).toThrow("nonnegative decimal")
+    expect(() => defineModelRateCard({ currency: "USD", input: "free", output: "2" })).toThrow(
+      "nonnegative decimal"
+    )
   })
 
   test("validates reasoning preferences against known provider controls", () => {

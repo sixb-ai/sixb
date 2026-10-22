@@ -1,4 +1,4 @@
-import type { JsonObject, LanguageModelRateCard } from "@sixb/core/models"
+import type { JsonObject, ModelRateCard } from "@sixb/core/models"
 
 interface TokenRates {
   readonly input: string
@@ -186,7 +186,7 @@ export function anthropicMaxOutputTokens(modelId: string): number | undefined {
 export function anthropicRateCard(
   modelId: string,
   request: JsonObject | undefined
-): LanguageModelRateCard | undefined {
+): ModelRateCard | undefined {
   const rule = PRICES.find((candidate) => candidate.modelIds.includes(modelId))
   if (!rule) return undefined
   if (Object.keys(request ?? {}).some((key) => !PRICED_REQUEST_KEYS.has(key))) return undefined
@@ -206,7 +206,6 @@ export function anthropicRateCard(
   const adjusted = (value: string) => (residency ? scale(value, 11n, 10n) : value)
   return {
     currency: "USD",
-    unit: "million-tokens",
     input: adjusted(rates.input),
     output: adjusted(rates.output),
     cacheReadInput: adjusted(rates.cacheReadInput),

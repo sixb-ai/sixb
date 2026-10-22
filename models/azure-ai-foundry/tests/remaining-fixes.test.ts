@@ -7,7 +7,7 @@ import { createAzureAIFoundry } from "./provider-fixture"
 // Removal proof: restore unconditional zero TTL components in partitionInputUsage.
 test("zero cache partitions need no price; positive missing cache rates remain unpriceable", () => {
   const estimator = foundryMessagesEstimator(
-    { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
+    { currency: "USD", input: "1", output: "2" },
     undefined
   )
   for (const ttl of [false, true]) {

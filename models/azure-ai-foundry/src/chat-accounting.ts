@@ -1,9 +1,4 @@
-import type {
-  JsonObject,
-  LanguageModelRateCard,
-  ModelCostEstimator,
-  ModelUsage,
-} from "@sixb/core/models"
+import type { JsonObject, ModelCostEstimator, ModelRateCard, ModelUsage } from "@sixb/core/models"
 import { tokenEstimator } from "./accounting"
 import { counter, object } from "./util"
 
@@ -43,7 +38,7 @@ export function foundryChatUsage(
 }
 
 export function foundryChatEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
   modelVersion?: string,

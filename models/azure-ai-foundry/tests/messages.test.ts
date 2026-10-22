@@ -35,7 +35,6 @@ const definition = {
 const metadata = { publisher: "Anthropic", modelName: "claude-sonnet-4-6", modelVersion: "1" }
 const rateCard = {
   currency: "USD",
-  unit: "million-tokens",
   input: "3",
   output: "15",
   cacheReadInput: "0.3",

@@ -566,7 +566,6 @@ describe("runModelLoop", () => {
           usage,
           rateCard: {
             currency: "USD",
-            unit: "million-tokens",
             input: "1",
             output: "2",
             cacheReadInput: "0.1",

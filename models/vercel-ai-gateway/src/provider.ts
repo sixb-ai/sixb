@@ -13,7 +13,6 @@ import {
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
   type LanguageModelProvider,
-  type LanguageModelRateCard,
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
   MODEL_REASONING_LEVELS,
@@ -21,6 +20,7 @@ import {
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
+  type ModelRateCard,
   type ModelReasoningCapabilities,
   type ModelReasoningLevel,
   type ModelReportedCost,
@@ -366,7 +366,7 @@ function configuredModelDefinitions(
 }
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
-  private readonly rateCards = new Map<string, LanguageModelRateCard>()
+  private readonly rateCards = new Map<string, ModelRateCard>()
   private readonly decisionDefinitions = new Map<string, DecisionModelDefinition>()
   private readonly transcriptionRates = new Map<string, string>()
 
@@ -393,7 +393,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     providerOptions: JsonObject | undefined
   ): Promise<GatewayDecisionResolution> {
     let definition: DecisionModelDefinition | undefined
-    let card: LanguageModelRateCard | undefined
+    let card: ModelRateCard | undefined
     try {
       await this.load()
       definition = this.decisionDefinitions.get(modelId)
@@ -440,7 +440,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     modelId: string,
     kind: "Embedding" | "Reranking"
   ): Promise<ModelCostEstimator> {
-    let card: LanguageModelRateCard | undefined
+    let card: ModelRateCard | undefined
     try {
       await this.load()
       const available = this.rateCards.get(modelId)
@@ -538,7 +538,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       const definition = catalogDefinition(entry)
       return definition ? [definition] : []
     })
-    const rateCards = new Map<string, LanguageModelRateCard>()
+    const rateCards = new Map<string, ModelRateCard>()
     const decisions = new Map<string, DecisionModelDefinition>()
     const transcriptionRates = new Map<string, string>()
     for (const entry of body.data) {
@@ -665,7 +665,7 @@ function gatewayReasoningCapabilities(
   }
 }
 
-function modelRateCard(raw: JsonObject | undefined): LanguageModelRateCard | undefined {
+function modelRateCard(raw: JsonObject | undefined): ModelRateCard | undefined {
   if (!raw || raw.varies_by_provider === true) return undefined
   const input = tokenPrice(raw.input, raw.input_tiers)
   const output = tokenPrice(raw.output, raw.output_tiers)
@@ -674,7 +674,6 @@ function modelRateCard(raw: JsonObject | undefined): LanguageModelRateCard | und
   const cacheWriteInput = tokenPrice(raw.input_cache_write, raw.input_cache_write_tiers)
   return {
     currency: "USD",
-    unit: "million-tokens",
     input,
     output,
     ...(cacheReadInput === undefined ? {} : { cacheReadInput }),
@@ -682,7 +681,7 @@ function modelRateCard(raw: JsonObject | undefined): LanguageModelRateCard | und
   }
 }
 
-function tokenPrice(base: unknown, rawTiers: unknown): LanguageModelRateCard["input"] | undefined {
+function tokenPrice(base: unknown, rawTiers: unknown): ModelRateCard["input"] | undefined {
   if (typeof base !== "string" || !decimal(base)) return undefined
   const defaultPrice = perTokenToPerMillion(base)
   if (!Array.isArray(rawTiers)) return defaultPrice

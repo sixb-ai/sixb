@@ -342,7 +342,6 @@ live.skipIf(!fast)(
       // Synthetic rates verify the accounting path, not Azure's actual invoice.
       rateCard: {
         currency: "USD",
-        unit: "million-tokens",
         input: "1",
         output: "2",
         cacheReadInput: "0.5",

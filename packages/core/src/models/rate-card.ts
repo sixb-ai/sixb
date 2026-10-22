@@ -11,9 +11,8 @@ export type ModelTokenPrice =
   | ModelUnitPrice
   | { readonly default: ModelUnitPrice; readonly tiers: readonly ModelPricingTier[] }
 
-export interface LanguageModelRateCard {
+export interface ModelRateCard {
   readonly currency: "USD"
-  readonly unit: "million-tokens"
   readonly input: ModelTokenPrice
   readonly output: ModelTokenPrice
   readonly cacheReadInput?: ModelTokenPrice
@@ -23,14 +22,13 @@ export interface LanguageModelRateCard {
 }
 
 /** Validate and snapshot provider-owned pricing independently of operational metadata. */
-export function defineModelRateCard(rateCard: LanguageModelRateCard): LanguageModelRateCard {
+export function defineModelRateCard(rateCard: ModelRateCard): ModelRateCard {
   assertRecord(rateCard, "rate card")
-  if (rateCard.currency !== "USD" || rateCard.unit !== "million-tokens") {
-    throw new TypeError("[Sixb] Model rate cards must use USD per million tokens.")
+  if (rateCard.currency !== "USD") {
+    throw new TypeError("[Sixb] Model rate cards must use USD.")
   }
   return Object.freeze({
     currency: "USD",
-    unit: "million-tokens",
     input: tokenPrice(rateCard.input),
     output: tokenPrice(rateCard.output),
     ...(rateCard.cacheReadInput === undefined
