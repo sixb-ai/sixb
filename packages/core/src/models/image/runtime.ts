@@ -156,6 +156,7 @@ export function createImageRuntime(
           })
         )
       }
+      await accounting.recordFiles(callId, files)
 
       return {
         files,

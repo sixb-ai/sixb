@@ -1280,6 +1280,8 @@ describe("agent routes", () => {
           summaryInputs.push(input)
           return aiUsage.summarizeExecutions(input)
         },
+        recordModelCallFiles: (input) => aiUsage.recordModelCallFiles(input),
+        getModelCallFiles: (input) => aiUsage.getModelCallFiles(input),
       } satisfies AiUsageStorage,
     })
     const response = await app.fetch(

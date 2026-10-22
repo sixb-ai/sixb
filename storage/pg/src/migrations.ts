@@ -445,6 +445,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("072-forked-context-checkpoints", forkedContextCheckpointsSql),
     pgSql("073-unique-values", uniqueValuesSql),
     pgSql("074-generated-media-usage", generatedMediaUsageSql),
+    pgSql("075-model-call-files", modelCallFilesSql),
   ],
 })
 
@@ -499,3 +500,4 @@ import uniqueValuesSql from "./migrations/073-unique-values.sql" with { type: "t
 import generatedMediaUsageSql from "./migrations/074-generated-media-usage.sql" with {
   type: "text",
 }
+import modelCallFilesSql from "./migrations/075-model-call-files.sql" with { type: "text" }

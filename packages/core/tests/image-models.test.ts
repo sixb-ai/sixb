@@ -106,6 +106,7 @@ describe("image generation", () => {
   })
 
   // Removal proof: omit onModelCallEnd in image/runtime.ts; the durable-usage assertion fails.
+  // Removal proof: omit recordFiles in image/runtime.ts; the call's files are not found.
   test("stores generated images and records the call by images returned", async () => {
     const { sixb, blobStorage, storage, identity } = await setup()
 
@@ -122,6 +123,12 @@ describe("image generation", () => {
       callId: result.callId,
       usage: { outputImages: 2, reportingStatus: "partial" },
     })
+    expect(
+      await storage.aiUsage.getModelCallFiles({
+        projectId: identity.projectId,
+        callId: result.callId,
+      })
+    ).toMatchObject({ executionId: identity.executionId, files: result.files })
   })
 
   // Removal proof: drop `dimensions` from estimateModelCall in image/runtime.ts; the card has no

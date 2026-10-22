@@ -1790,6 +1790,8 @@ function withAiUsageRecordInterceptor(
     recordModelCall: (input) => intercept(input, () => usage.recordModelCall(input)),
     summarizeExecution: (input) => usage.summarizeExecution(input),
     summarizeExecutions: (input) => usage.summarizeExecutions(input),
+    recordModelCallFiles: (input) => usage.recordModelCallFiles(input),
+    getModelCallFiles: (input) => usage.getModelCallFiles(input),
   })
   return {
     ...storage,

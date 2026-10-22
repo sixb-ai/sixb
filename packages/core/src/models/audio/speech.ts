@@ -117,6 +117,7 @@ export function createSpeak(
       mediaType: audio.mediaType,
       signal,
     })
+    await accounting.recordFiles(callId, [file])
     return {
       file,
       warnings: [...(result.warnings ?? [])],

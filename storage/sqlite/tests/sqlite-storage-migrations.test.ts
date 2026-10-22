@@ -191,6 +191,7 @@ const shippedMigrationIds = [
   "070-forked-context-checkpoints",
   "071-unique-values",
   "072-generated-media-usage",
+  "073-model-call-files",
 ]
 
 afterEach(async () => {

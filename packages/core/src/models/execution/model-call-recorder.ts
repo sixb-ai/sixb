@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto"
-import type { ReadonlyJsonObject, RecordAiModelCallInput } from "../../storage"
+import type { FileRef } from "../../blob-storage/types"
+import {
+  AiUsageStorageError,
+  type ReadonlyJsonObject,
+  type RecordAiModelCallInput,
+} from "../../storage"
 import type { ModelCallEndEvent, ModelUsage } from "../events"
 import type { LanguageModel } from "../language-model"
 import { ModelUsageRecordingError } from "./errors"
@@ -222,6 +227,29 @@ export class AiModelCallRecorder {
             })
       this.recordingError ??= recordingError
       throw recordingError
+    }
+  }
+
+  /** Record the files a completed call produced; the call's readers download them through it. */
+  async recordFiles(callId: string, files: readonly FileRef[]): Promise<void> {
+    try {
+      await retryOperation(
+        () =>
+          this.input.storage.aiUsage.recordModelCallFiles({
+            projectId: this.input.projectId,
+            executionId: this.input.executionId,
+            callId,
+            files,
+          }),
+        this.retryDelaysMs,
+        this.sleep,
+        (error) => !(error instanceof TypeError || error instanceof AiUsageStorageError)
+      )
+    } catch (error) {
+      throw new Error(
+        `[SixbModels] Model call '${callId}' completed, but its files could not be recorded.`,
+        { cause: error }
+      )
     }
   }
 

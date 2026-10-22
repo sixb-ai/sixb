@@ -53,6 +53,12 @@ const provider = {
   async summarizeExecutions({ executionIds }) {
     return executionIds.map(() => emptySummary)
   },
+  async recordModelCallFiles(input) {
+    return { ...input, recordedAt: new Date("2026-06-23T10:00:01.000Z") }
+  },
+  async getModelCallFiles() {
+    return null
+  },
 } satisfies AiUsageStorage
 
 declare const agentRun: AgentRunRecord
