@@ -230,7 +230,7 @@ describe("image generation", () => {
     for (const [input, message] of [
       [{ prompt: " " }, "nonblank prompt"],
       [{ prompt: "a fox", n: 5 }, "at most 4 images"],
-      [{ prompt: "a fox", size: "4096x4096" }, "not supported"],
+      [{ prompt: "a fox", size: "4096x4096" }, "Use one of: 768x768, 1024x1024."],
       [{ prompt: "a fox", images: [reference, reference] }, "at most 1 reference"],
       [{ prompt: "a fox", images: [jpeg] }, "not supported"],
       [{ prompt: "a fox", images: [{ ...reference, sizeBytes: 2048 }] }, "input limit"],
