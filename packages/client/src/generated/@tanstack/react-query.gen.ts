@@ -41,6 +41,9 @@ import {
   existsObjects,
   facetObjects,
   forkAgentThread,
+  generateImages,
+  generateSpeech,
+  generateText,
   getAction,
   getActionRun,
   getActionRunFileContent,
@@ -173,6 +176,7 @@ import {
   startConnectorConnectionRun,
   submitWorkflowIntervention,
   suspendAuthMember,
+  transcribeAudio,
   updateAiLimitPolicy,
   updateAuthMemberGroups,
   updateAuthProfile,
@@ -274,6 +278,15 @@ import type {
   ForkAgentThreadData,
   ForkAgentThreadError,
   ForkAgentThreadResponse,
+  GenerateImagesData,
+  GenerateImagesError,
+  GenerateImagesResponse,
+  GenerateSpeechData,
+  GenerateSpeechError,
+  GenerateSpeechResponse,
+  GenerateTextData,
+  GenerateTextError,
+  GenerateTextResponse,
   GetActionData,
   GetActionError,
   GetActionResponse,
@@ -654,6 +667,9 @@ import type {
   SuspendAuthMemberData,
   SuspendAuthMemberError,
   SuspendAuthMemberResponse,
+  TranscribeAudioData,
+  TranscribeAudioError,
+  TranscribeAudioResponse,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
@@ -1966,6 +1982,102 @@ export const getAiModelCallFileContentOptions = (options: Options<GetAiModelCall
     },
     queryKey: getAiModelCallFileContentQueryKey(options),
   })
+
+/**
+ * Generate text with a language model
+ */
+export const generateTextMutation = (
+  options?: Partial<Options<GenerateTextData>>
+): UseMutationOptions<GenerateTextResponse, GenerateTextError, Options<GenerateTextData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateTextResponse,
+    GenerateTextError,
+    Options<GenerateTextData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateText({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Generate images with an image model
+ */
+export const generateImagesMutation = (
+  options?: Partial<Options<GenerateImagesData>>
+): UseMutationOptions<GenerateImagesResponse, GenerateImagesError, Options<GenerateImagesData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateImagesResponse,
+    GenerateImagesError,
+    Options<GenerateImagesData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateImages({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Generate speech with a speech model
+ */
+export const generateSpeechMutation = (
+  options?: Partial<Options<GenerateSpeechData>>
+): UseMutationOptions<GenerateSpeechResponse, GenerateSpeechError, Options<GenerateSpeechData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateSpeechResponse,
+    GenerateSpeechError,
+    Options<GenerateSpeechData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateSpeech({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Transcribe audio with a transcription model
+ */
+export const transcribeAudioMutation = (
+  options?: Partial<Options<TranscribeAudioData>>
+): UseMutationOptions<
+  TranscribeAudioResponse,
+  TranscribeAudioError,
+  Options<TranscribeAudioData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    TranscribeAudioResponse,
+    TranscribeAudioError,
+    Options<TranscribeAudioData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await transcribeAudio({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getProjectInfoQueryKey = (options?: Options<GetProjectInfoData>) =>
   createQueryKey("getProjectInfo", options)

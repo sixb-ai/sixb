@@ -149,3 +149,84 @@ export const ModelCallFilesSchema = z.object({
   files: z.array(FileRefSchema),
   recordedAt: z.string(),
 })
+
+const ModelUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  uncachedInputTokens: z.number().int().nonnegative().optional(),
+  cacheReadInputTokens: z.number().int().nonnegative().optional(),
+  cacheWriteInputTokens: z.number().int().nonnegative().optional(),
+  textOutputTokens: z.number().int().nonnegative().optional(),
+  reasoningOutputTokens: z.number().int().nonnegative().optional(),
+  imageOutputTokens: z.number().int().nonnegative().optional(),
+  audioOutputTokens: z.number().int().nonnegative().optional(),
+  outputImages: z.number().int().nonnegative().optional(),
+  inputCharacters: z.number().int().nonnegative().optional(),
+  audioDurationMs: z.number().int().nonnegative().optional(),
+})
+
+/** What the call cost: reported by the provider, rated from the binding's card, or unknown. */
+const ModelCallCostSchema = z.object({
+  status: z.enum(["reported", "rated", "unpriceable"]),
+  money: z.object({ currency: z.literal("USD"), amountNanos: z.string() }).optional(),
+  reason: z.string().optional(),
+})
+
+const GenerationBodyBase = z.object({
+  /** Omit for the kind's default model. */
+  model: LanguageModelRefSchema.optional(),
+})
+
+const GenerationResultBase = z.object({
+  callId: z.string(),
+  model: LanguageModelRefSchema,
+  usage: ModelUsageSchema,
+  cost: ModelCallCostSchema,
+})
+
+export const TextGenerationBodySchema = GenerationBodyBase.extend({
+  prompt: z.string().trim().min(1),
+  instructions: z.string().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  reasoning: ModelReasoningSchema.optional(),
+})
+
+export const TextGenerationSchema = GenerationResultBase.extend({
+  text: z.string(),
+  finishReason: z.string(),
+})
+
+export const ImageGenerationBodySchema = GenerationBodyBase.extend({
+  prompt: z.string().trim().min(1),
+  n: z.number().int().positive().optional(),
+  size: z.string().min(1).optional(),
+  aspectRatio: z.string().min(1).optional(),
+  quality: z.string().min(1).optional(),
+  style: z.string().min(1).optional(),
+  seed: z.number().int().optional(),
+  /** Reference images uploaded through /api/files. */
+  images: z.array(FileRefSchema).optional(),
+})
+
+export const SpeechGenerationBodySchema = GenerationBodyBase.extend({
+  text: z.string().trim().min(1),
+  voice: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  mediaType: z.string().min(1).optional(),
+  speed: z.number().positive().optional(),
+  language: z.string().min(1).optional(),
+})
+
+export const FileGenerationSchema = GenerationResultBase.extend({
+  files: z.array(FileRefSchema),
+  warnings: z.array(z.string()),
+})
+
+export const TranscriptionBodySchema = GenerationBodyBase.extend({
+  /** Audio uploaded through /api/files. */
+  audio: FileRefSchema,
+})
+
+export const TranscriptionSchema = GenerationResultBase.extend({
+  text: z.string(),
+})

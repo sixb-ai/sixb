@@ -359,6 +359,43 @@ the binding sets, so you can switch models without changing calls. You can also 
 `instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
 never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
 
+## Call models over the API
+
+The same calls are available over HTTP, to a user or service account granted
+`can.run(project.models)`:
+
+```ts
+defineRole("model.users", { grantedTo: [designers], grants: [can.run(project.models)] })
+```
+
+```text
+POST /api/models/language/generations   { prompt, instructions?, maxOutputTokens?, reasoning? }
+POST /api/models/image/generations      { prompt, n?, size?, aspectRatio?, quality?, style?, seed?, images? }
+POST /api/models/audio/speech           { text, voice?, mediaType?, instructions?, speed?, language? }
+POST /api/models/audio/transcriptions   { audio }
+```
+
+Each body takes an optional `model: { provider, modelId }`; without one, the kind's default
+answers. Reference images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files).
+The response carries the `callId`, the `model` that answered, `usage` and `cost`, plus `text` or
+`files`:
+
+```json
+{
+  "callId": "call_…",
+  "model": { "provider": "vercel-ai-gateway", "modelId": "bfl/flux-3-image-klein" },
+  "files": [{ "blobId": "blob_…", "mediaType": "image/jpeg", "sizeBytes": 82749 }],
+  "warnings": [],
+  "usage": { "outputImages": 1 },
+  "cost": { "status": "reported", "money": { "currency": "USD", "amountNanos": "8000000" } }
+}
+```
+
+A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that
+is reached answers `429`. An option the model does not accept answers `400` before any inference,
+and a provider failure answers `502`. Calls are synchronous; download a generated file through
+its call, below.
+
 ## Read a call's files later
 
 Every image and speech result carries a `callId`. The files a call produced stay readable through

@@ -3656,6 +3656,471 @@ export type HeadAiModelCallFileContentResponses = {
   206: unknown
 }
 
+export type GenerateTextData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    prompt: string
+    instructions?: string
+    maxOutputTokens?: number
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
+  }
+  path?: never
+  query?: never
+  url: "/api/models/language/generations"
+}
+
+export type GenerateTextErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateTextError = GenerateTextErrors[keyof GenerateTextErrors]
+
+export type GenerateTextResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    text: string
+    finishReason: string
+  }
+}
+
+export type GenerateTextResponse = GenerateTextResponses[keyof GenerateTextResponses]
+
+export type GenerateImagesData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    prompt: string
+    n?: number
+    size?: string
+    aspectRatio?: string
+    quality?: string
+    style?: string
+    seed?: number
+    images?: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+  }
+  path?: never
+  query?: never
+  url: "/api/models/image/generations"
+}
+
+export type GenerateImagesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateImagesError = GenerateImagesErrors[keyof GenerateImagesErrors]
+
+export type GenerateImagesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+  }
+}
+
+export type GenerateImagesResponse = GenerateImagesResponses[keyof GenerateImagesResponses]
+
+export type GenerateSpeechData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    text: string
+    voice?: string
+    instructions?: string
+    mediaType?: string
+    speed?: number
+    language?: string
+  }
+  path?: never
+  query?: never
+  url: "/api/models/audio/speech"
+}
+
+export type GenerateSpeechErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateSpeechError = GenerateSpeechErrors[keyof GenerateSpeechErrors]
+
+export type GenerateSpeechResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+  }
+}
+
+export type GenerateSpeechResponse = GenerateSpeechResponses[keyof GenerateSpeechResponses]
+
+export type TranscribeAudioData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    audio: {
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }
+  }
+  path?: never
+  query?: never
+  url: "/api/models/audio/transcriptions"
+}
+
+export type TranscribeAudioErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type TranscribeAudioError = TranscribeAudioErrors[keyof TranscribeAudioErrors]
+
+export type TranscribeAudioResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    text: string
+  }
+}
+
+export type TranscribeAudioResponse = TranscribeAudioResponses[keyof TranscribeAudioResponses]
+
 export type GetProjectInfoData = {
   body?: never
   path?: never
