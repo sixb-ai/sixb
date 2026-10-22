@@ -32,6 +32,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
+  ShareArtifactInThreadInput,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -170,14 +171,14 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       where.push("a.owner_principal_type = ? AND a.owner_principal_id = ?")
       params.push(input.owner.type, input.owner.id)
     }
-    if (input.originThreadId !== undefined) {
+    if (input.threadId !== undefined) {
       where.push(
         `EXISTS (
-          SELECT 1 FROM artifact_versions v
-          WHERE v.project_id = a.project_id AND v.artifact_id = a.id AND v.origin_thread_id = ?
+          SELECT 1 FROM artifact_threads t
+          WHERE t.project_id = a.project_id AND t.artifact_id = a.id AND t.thread_id = ?
         )`
       )
-      params.push(input.originThreadId)
+      params.push(input.threadId)
     }
     if (input.kind !== undefined) {
       where.push("a.kind = ?")
@@ -252,6 +253,27 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       )
       .all(input.projectId, prefix.length, prefix, prefix.length) as Row[]
     return rows.map(parseArtifactVersionRow)
+  }
+
+  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+    const rows = this.db
+      .query(
+        `SELECT thread_id AS threadId FROM artifact_threads
+         WHERE project_id = ? AND artifact_id = ? ORDER BY thread_id`
+      )
+      .all(input.projectId, input.id) as { readonly threadId: string }[]
+    return rows.map((row) => row.threadId)
+  }
+
+  async shareInThread(input: ShareArtifactInThreadInput): Promise<void> {
+    runImmediateTransaction(this.db, () => {
+      const artifact = this.db
+        .query("SELECT id FROM artifacts WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.artifactId)
+      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+
+      this.linkThread(input.projectId, input.artifactId, input.threadId, input.sharedAt)
+    })
   }
 
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
@@ -441,6 +463,25 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         input.origin?.runId ?? null,
         input.createdAt.toISOString()
       ) as Row
+    if (input.origin) {
+      this.linkThread(projectId, artifactId, input.origin.threadId, input.createdAt)
+    }
     return parseArtifactVersionRow(row)
+  }
+
+  /** Shares an artifact in a thread, keeping when it was first shared there. */
+  private linkThread(
+    projectId: string,
+    artifactId: string,
+    threadId: string,
+    sharedAt: Date = new Date()
+  ): void {
+    this.db
+      .query(
+        `INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (project_id, artifact_id, thread_id) DO NOTHING`
+      )
+      .run(projectId, artifactId, threadId, sharedAt.toISOString())
   }
 }

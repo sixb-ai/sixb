@@ -25,6 +25,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
+  ShareArtifactInThreadInput,
 } from "./types"
 
 interface StoredArtifact {
@@ -33,6 +34,8 @@ interface StoredArtifact {
   readonly versions: readonly ArtifactVersionRecord[]
   /** The number the next version gets; it only grows, so a deleted number is never reused. */
   readonly nextVersion: number
+  /** The threads it is shared in, with when it was first shared in each. */
+  readonly threads: ReadonlyMap<string, Date>
 }
 
 interface InMemoryArtifactSnapshot {
@@ -61,7 +64,12 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       createdAt: new Date(version.createdAt),
       updatedAt: new Date(version.createdAt),
     }
-    this.artifacts.set(key, { record, versions: [version], nextVersion: 2 })
+    this.artifacts.set(key, {
+      record,
+      versions: [version],
+      nextVersion: 2,
+      threads: sharedIn(new Map(), version),
+    })
     return published(record, version)
   }
 
@@ -97,6 +105,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       record,
       versions: [...stored.versions, version],
       nextVersion: stored.nextVersion + 1,
+      threads: sharedIn(stored.threads, version),
     })
     return published(record, version)
   }
@@ -109,12 +118,11 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   async list(input: ListArtifactsInput): Promise<ListArtifactsResult> {
     const matching = [...this.artifacts.values()]
       .filter(
-        ({ record, versions }) =>
+        ({ record, threads }) =>
           record.projectId === input.projectId &&
           (!input.owner || principalsEqual(record.owner, input.owner)) &&
           (input.kind === undefined || record.kind === input.kind) &&
-          (input.originThreadId === undefined ||
-            versions.some((version) => version.origin?.threadId === input.originThreadId))
+          (input.threadId === undefined || threads.has(input.threadId))
       )
       .map(({ record }) => record)
       .sort(
@@ -136,6 +144,23 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     const newestFirst = [...(stored?.versions ?? [])].reverse()
     const { page, hasMore, total } = paginate(newestFirst, input)
     return { versions: structuredClone(page), hasMore, total }
+  }
+
+  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
+    // Code-unit order, as SQLite compares text.
+    return [...(stored?.threads.keys() ?? [])].sort((left, right) => (left < right ? -1 : 1))
+  }
+
+  async shareInThread(input: ShareArtifactInThreadInput): Promise<void> {
+    const key = artifactKey(input.projectId, input.artifactId)
+    const stored = this.artifacts.get(key)
+    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
+    if (stored.threads.has(input.threadId)) return
+
+    const threads = new Map(stored.threads)
+    threads.set(input.threadId, new Date(input.sharedAt ?? new Date()))
+    this.artifacts.set(key, { ...stored, threads })
   }
 
   async listReferencingVersions(
@@ -293,6 +318,17 @@ function versionRecord(
   input: ArtifactVersionInput
 ): ArtifactVersionRecord {
   return structuredClone({ ...input, projectId, artifactId, version })
+}
+
+/** The links an artifact has once this version is stored: its origin's thread among them. */
+function sharedIn(
+  threads: ReadonlyMap<string, Date>,
+  version: ArtifactVersionRecord
+): ReadonlyMap<string, Date> {
+  const threadId = version.origin?.threadId
+  if (!threadId || threads.has(threadId)) return threads
+
+  return new Map(threads).set(threadId, new Date(version.createdAt))
 }
 
 function published(

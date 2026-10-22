@@ -156,7 +156,7 @@ export function createArtifactsRuntime(
       return requireStorage().list({
         projectId: runtime.projectId,
         ...(ownerFilter ? { owner: ownerFilter } : {}),
-        ...(input.threadId === undefined ? {} : { originThreadId: input.threadId }),
+        ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
         ...(input.kind === undefined ? {} : { kind: input.kind }),
         ...(input.limit === undefined ? {} : { limit: input.limit }),
         ...(input.offset === undefined ? {} : { offset: input.offset }),
