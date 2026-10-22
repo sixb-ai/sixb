@@ -673,6 +673,7 @@ describe("runModelLoop", () => {
     expect(calls).toEqual([
       {
         callId: "call-1",
+        modelKind: "language",
         providerId: "mock",
         modelId: "mock-model",
         responseId: "response-1",

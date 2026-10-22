@@ -77,6 +77,7 @@ describe("decision evaluation", () => {
     expect(result.cost.status).toBe("unpriceable")
     expect(await storage.aiUsage.getLatestForExecution(identity)).toMatchObject({
       callId: result.callId,
+      modelKind: "decision",
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     })
   })

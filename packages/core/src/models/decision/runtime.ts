@@ -170,6 +170,7 @@ async function recordDecision(
   })
   const event = {
     callId,
+    modelKind: "decision" as const,
     providerId: model.providerId,
     modelId: model.modelId,
     responseId: metadata.providerIds?.responseId ?? callId,
