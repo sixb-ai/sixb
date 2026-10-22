@@ -527,4 +527,61 @@ describe("artifacts a shared conversation shares", () => {
     expect(await token.artifacts.access(artifact.id)).toBe("none")
     expect(await token.artifacts.get(artifact.id)).toBeNull()
   })
+
+  // Guard proof: return no copies from copySharedArtifacts; the fork's message then names Alice's
+  // artifact, which Bob loses once removed from her thread.
+  test("a fork gets its own copies, at their latest, and its messages name them", async () => {
+    const { host } = setup()
+    const { owner, participant, thread, run, artifact, content } = await sharedArtifact(host)
+    await owner.artifacts.publish(artifact.id, { ...content, title: "Latest" })
+    await host.storage.agents?.messages.append({
+      projectId,
+      id: "msg_shown",
+      threadId: thread.id,
+      runId: run.id,
+      role: "assistant",
+      parts: [{ type: "text", text: `Here: ![Deals](artifact:${artifact.id})` }],
+    })
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const copies = await participant.artifacts.list({ threadId: fork.id })
+    expect(copies.artifacts).toHaveLength(1)
+    const [copy] = copies.artifacts
+    expect(copy).toMatchObject({ owner: bob, title: "Latest", latestVersion: 1 })
+    expect(copy?.id).not.toBe(artifact.id)
+
+    const { messages } = (await host.storage.agents?.messages.list({
+      projectId,
+      threadId: fork.id,
+    })) ?? { messages: [] }
+    expect(JSON.stringify(messages)).toContain(`artifact:${copy?.id}`)
+    expect(JSON.stringify(messages)).not.toContain(artifact.id)
+
+    // The copy is Bob's: it stays when he leaves Alice's thread, and the original stays hers.
+    await participant.agent.threads.participants.remove(thread.id, bob)
+    expect(await participant.artifacts.access(copy?.id ?? "")).toBe("owner")
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+  })
+
+  // Guard proof: fork outside the storage transaction in forkAgentThread; the copies then outlive
+  // the fork that failed.
+  test("a fork that fails leaves no copy behind", async () => {
+    const { host } = setup()
+    const { participant, thread, artifact } = await sharedArtifact(host)
+    const agents = host.storage.agents
+    if (!agents) throw new Error("Expected agent storage.")
+    const fork = agents.threads.fork.bind(agents.threads)
+    agents.threads.fork = async () => {
+      throw new Error("storage went away")
+    }
+
+    try {
+      await expect(participant.agent.threads.fork(thread.id)).rejects.toThrow("storage went away")
+    } finally {
+      agents.threads.fork = fork
+    }
+    // Alice's report and notes, and no copy.
+    expect((await host.storage.artifacts?.list({ projectId }))?.total).toBe(2)
+    expect(await participant.artifacts.get(artifact.id)).not.toBeNull()
+  })
 })
