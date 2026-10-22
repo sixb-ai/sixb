@@ -81,6 +81,8 @@ export type FrameEvent =
 
 /** One `<sixb-embed>` the frame shows. */
 export interface FrameEmbed {
+  /** The element's own id while the page is loaded: the same as it scrolls out and back. */
+  readonly id: number
   readonly address: string
   readonly rect: {
     readonly x: number
@@ -235,12 +237,19 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
       const { embeds } = params
       if (!Array.isArray(embeds) || embeds.length > ARTIFACT_LIMITS.maxReferences) return null
       const parsed: FrameEmbed[] = []
+      const ids = new Set<number>()
       for (const embed of embeds) {
         if (!isRecord(embed) || !isAddress(embed.address) || !isRecord(embed.rect)) return null
+
+        // Two embeds with one id would be one element drawn twice.
+        if (!isCount(embed.id) || ids.has(embed.id)) return null
+        ids.add(embed.id)
+
         const { x, y, width, height } = embed.rect
         if (![x, y, width, height, embed.scale].every(Number.isFinite)) return null
         if (Number(width) < 0 || Number(height) < 0 || Number(embed.scale) <= 0) return null
         parsed.push({
+          id: embed.id,
           address: embed.address,
           rect: { x: Number(x), y: Number(y), width: Number(width), height: Number(height) },
           scale: Number(embed.scale),

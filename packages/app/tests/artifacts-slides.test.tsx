@@ -530,8 +530,8 @@ describe("a deck's embeds", () => {
       event: "embeds",
       params: {
         embeds: [
-          { address: LINKED, rect, scale: 0.5 },
-          { address: "artifact:art_0000000000#chart=secret", rect, scale: 0.5 },
+          { id: 1, address: LINKED, rect, scale: 0.5 },
+          { id: 2, address: "artifact:art_0000000000#chart=secret", rect, scale: 0.5 },
         ],
       },
     })

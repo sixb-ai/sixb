@@ -143,8 +143,8 @@ describe("a page's embeds", () => {
       event: "embeds",
       params: {
         embeds: [
-          { address: EMBEDDED, rect: rect(420), scale: 1 },
-          { address: "artifact:art_0000000000#chart=secret", rect: rect(900), scale: 1 },
+          { id: 1, address: EMBEDDED, rect: rect(420), scale: 1 },
+          { id: 2, address: "artifact:art_0000000000#chart=secret", rect: rect(900), scale: 1 },
         ],
       },
     })
@@ -157,9 +157,75 @@ describe("a page's embeds", () => {
     // The page scrolled 300px: the frame says where the box is now, and it follows.
     await post({
       event: "embeds",
-      params: { embeds: [{ address: EMBEDDED, rect: rect(120), scale: 1 }] },
+      params: { embeds: [{ id: 1, address: EMBEDDED, rect: rect(120), scale: 1 }] },
     })
     expect(drawn()[0]?.style.top).toBe("120px")
+  })
+
+  test("stay mounted while the ones before them scroll out of reach", async () => {
+    // Reproduce by keying FrameEmbeds by rank among the embeds reported: once the first one goes,
+    // every one after it mounts again, and an embedded page loads in a new frame.
+    const calculator = { ...pageVersion(), artifactId: "art_ca1c4at0rs", title: "Calculator" }
+    const version = {
+      ...pageVersion(),
+      references: [
+        ...pageVersion().references,
+        {
+          address: `artifact:${calculator.artifactId}`,
+          as: "embed" as const,
+          at: "",
+          resolvedVersion: 1,
+        },
+      ],
+    }
+    const cache = frameCache(version)
+    seedVersion(cache, calculator, {}, { as: "latest" })
+    cache.setQueryData(["artifact-frame", calculator.artifactId, 1], {
+      path: "/api/artifact-frames/calculator/",
+      expiresAt: "2026-10-18T13:00:00.000Z",
+    })
+    const ui = render(
+      <QueryClientProvider client={cache}>
+        <ArtifactReferencesProvider open={() => {}}>
+          <PageRenderer version={version} />
+        </ArtifactReferencesProvider>
+      </QueryClientProvider>
+    )
+    const { show, post } = frameOf(ui.container.querySelector("iframe"))
+    await show()
+
+    // The chart twice, then the calculator, as the page lays them out.
+    const rect = (y: number) => ({ x: 32, y, width: 640, height: 360 })
+    const embed = (id: number, address: string, y: number) => ({
+      id,
+      address,
+      rect: rect(y),
+      scale: 1,
+    })
+    const page = `artifact:${calculator.artifactId}`
+    await post({
+      event: "embeds",
+      params: {
+        embeds: [embed(1, EMBEDDED, 0), embed(2, EMBEDDED, 400), embed(3, page, 800)],
+      },
+    })
+    const drawn = () =>
+      Array.from(ui.container.querySelectorAll<HTMLElement>("[data-sixb-frame-embed]"))
+    const [, chart, calculatorBox] = drawn()
+    const calculatorFrame = calculatorBox?.querySelector("iframe")
+    expect(calculatorFrame?.getAttribute("src")).toContain("/api/artifact-frames/calculator/")
+
+    // The reader scrolls down: the first chart is more than a screen above, and no longer reported.
+    await post({
+      event: "embeds",
+      params: { embeds: [embed(2, EMBEDDED, -800), embed(3, page, -400)] },
+    })
+
+    // The same elements, not new ones drawn alike: the calculator's frame did not load again.
+    const [chartNow, calculatorNow] = drawn()
+    expect(chartNow).toBe(chart as HTMLElement)
+    expect(calculatorNow).toBe(calculatorBox as HTMLElement)
+    expect(calculatorNow?.querySelector("iframe")).toBe(calculatorFrame as HTMLIFrameElement)
   })
 
   test("pass a wheel turned over them on to the page", async () => {
@@ -169,7 +235,9 @@ describe("a page's embeds", () => {
     await post({
       event: "embeds",
       params: {
-        embeds: [{ address: EMBEDDED, rect: { x: 0, y: 0, width: 640, height: 360 }, scale: 1 }],
+        embeds: [
+          { id: 1, address: EMBEDDED, rect: { x: 0, y: 0, width: 640, height: 360 }, scale: 1 },
+        ],
       },
     })
     const embed = ui.container.querySelector("[data-sixb-frame-embed]")
