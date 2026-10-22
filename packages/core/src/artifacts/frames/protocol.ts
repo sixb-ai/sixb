@@ -162,12 +162,18 @@ export function parseFrameCall(data: unknown): FrameCall | null {
   }
 }
 
+/**
+ * A key the app can send: the client puts it in the URL's path, where `.` and `..` would name
+ * another route, `..` the artifact itself.
+ */
 function isStateKey(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= ARTIFACT_STATE_LIMITS.maxKeyLength &&
-    !/\p{Cc}/u.test(value)
+    !/\p{Cc}/u.test(value) &&
+    value !== "." &&
+    value !== ".."
   )
 }
 

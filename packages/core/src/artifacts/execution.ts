@@ -228,13 +228,18 @@ export function createArtifactsRuntime(
   }
 }
 
-/** A key a page names a value by: a short line of text. */
+/**
+ * A key a page names a value by: a short line of text. Not `.` or `..`, which a page could never
+ * reach: the API takes the key in its path, where those name another route.
+ */
 function stateKey(key: string): string {
   if (
     typeof key !== "string" ||
     key.length === 0 ||
     key.length > ARTIFACT_STATE_LIMITS.maxKeyLength ||
-    /\p{Cc}/u.test(key)
+    /\p{Cc}/u.test(key) ||
+    key === "." ||
+    key === ".."
   ) {
     throw new ArtifactRequestError(
       "invalid_state",
