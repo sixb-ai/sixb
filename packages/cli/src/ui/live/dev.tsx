@@ -78,9 +78,9 @@ export async function startDevFooter(options: {
   const event = (mark: string, text: string) =>
     footer.print(`  ${mark} ${text}  ${tone.faint(clock())}`)
 
-  footer.print(
-    `\n  ${tone.blue(glyph.mark)} ${tone.strong("sixb dev")}  ${tone.muted(basename(options.root))}\n `
-  )
+  // The footer's top rule names the session; the scrollback only needs room under the prompt. A
+  // space, not "": the scrollback drops empty lines.
+  footer.print(" ")
   footer.render(
     <DevFooter
       store={store}
