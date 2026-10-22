@@ -46,7 +46,14 @@ export const en = {
     loadingConversation: "Loading conversation…",
     messagesLoadFailed: "Could not load this conversation.",
     threadsLoadFailed: "Could not load threads.",
+    sharedThreadsLoadFailed: "Could not load the conversations shared with you.",
     sendFailed: "Couldn't send your message. Please try again.",
+    busy: "An answer is already in progress. Send yours when it finishes.",
+    busyOther: "Someone else's message is being answered. Send yours when it finishes.",
+    sandboxUnavailable: "This conversation's sandbox must be recovered before another answer.",
+    retryFailed: "Couldn't retry this answer. Try again.",
+    stopFailed: "Couldn't stop this answer. Try again.",
+    removed: "You no longer take part in this conversation.",
   },
   composer: {
     message: "Message",
@@ -157,6 +164,10 @@ export const en = {
     all: "All",
     archivedFilter: (archived: number) => `Archived ${number(archived)}`,
     archived: "Archived",
+    sharedFilter: (shared: number) =>
+      shared > 0 ? `Shared with me ${number(shared)}` : "Shared with me",
+    sharedEmpty: "Conversations others share with you appear here.",
+    sharedBy: (owner: string, messages: number) => `${owner} · ${count(messages, "message")}`,
     current: "Current",
     currentState: "current",
     today: "Today",
@@ -494,6 +505,58 @@ export const en = {
       "The next run will initialize a new environment. Local files from the previous workspace will not be copied. Conversation history and published attachments stay available. The previous sandbox is not deleted and remains subject to provider retention.",
     cancel: "Cancel",
     create: "Create fresh sandbox",
+    ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
+  },
+  /** A conversation its owner shares with other users of the project. */
+  sharing: {
+    share: "Share conversation",
+    shareShort: "Share",
+    names: (names: readonly string[]) => names.join(", "),
+    emailPlaceholderEmpty: "Add people by email",
+    addHint: "Press Enter to add each email.",
+    people: (people: number) => `${count(people, "person", "people")} in this conversation`,
+    shareTitle: "Share conversation",
+    peopleTitle: "People in this conversation",
+    description:
+      "Everyone here reads the whole conversation and talks to the agent with their own access.",
+    owner: "Owner",
+    you: "You",
+    remove: (name: string) => `Remove ${name}`,
+    removeFailed: "Couldn't remove this person. Try again.",
+    email: "Email",
+    emailPlaceholder: "colleague@example.com",
+    invalidEmail: "Enter an email address, such as colleague@example.com.",
+    unstage: (email: string) => `Don't add ${email}`,
+    warning:
+      "Participants will see the whole conversation, including data the agent read with your access, now and in future messages. Some of it may be data they cannot normally see.",
+    confirm: (people: number) => `Share with ${count(people, "person", "people")}`,
+    sharing: "Sharing…",
+    shareRefused:
+      "Couldn't add them: each email must belong to an active member other than you, up to 50 people.",
+    shareFailed: "Couldn't share this conversation.",
+    staged: "People to add",
+    leave: "Leave conversation",
+    leaveTitle: "Leave this conversation?",
+    leaveDescription: (owner: string) =>
+      `You will no longer see it or its new messages. ${owner} can add you again.`,
+    leaveFailed: "Couldn't leave this conversation. Try again.",
+    cancel: "Cancel",
+    close: "Close",
+    sharedBy: (owner: string) => `${owner}'s conversation`,
+    answering: (name: string) => `${name} is getting an answer…`,
+    continueMine: "Continue in my conversation",
+    continuing: "Copying…",
+    continueHint: "A copy of the finished messages, that only you take part in.",
+    forkFailed: "Couldn't copy this conversation. Try again.",
+    sharedWith: (names: readonly string[]) =>
+      names.length === 1
+        ? `Shared with ${names[0]}`
+        : names.length === 2
+          ? `Shared with ${names[0]} and ${names[1]}`
+          : `Shared with ${number(names.length)} people`,
+    removed: (name: string) => `Removed ${name}`,
+    left: "You left the conversation",
+    copied: "Copied to your conversations",
   },
   /** Someone else's conversation, read with can.observe(agent.threads). */
   observed: {

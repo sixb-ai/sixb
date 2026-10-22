@@ -114,6 +114,9 @@ function conversationCache() {
   for (const id of ["a", "b"]) {
     cache.setQueryData(getAgentThreadQueryKey({ path: { threadId: id } }), {
       id,
+      ownerPrincipal: { type: "user", id: "usr_1" },
+      owner: { type: "user", id: "usr_1" },
+      participants: [],
       title: `Conversation ${id}`,
       activeRunId: null,
     })

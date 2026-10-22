@@ -14,12 +14,14 @@ import type {
   AgentThread,
   LanguageModel,
 } from "../types"
-import { AgentThreadSwitcher } from "./agent-thread-switcher"
+import { AgentThreadSwitcher, type SharedThreadList } from "./agent-thread-switcher"
 import { Composer } from "./composer"
 import { Transcript } from "./transcript"
 
 export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
+  /** A line above the composer, such as whose shared conversation this is. */
+  readonly composerNotice?: ReactNode
   readonly agent: Agent | undefined
   readonly threadId: string | null
   readonly messages: readonly AgentMessage[]
@@ -50,6 +52,8 @@ export interface ConversationPanelProps {
   readonly currentThread: AgentThread | null
   /** Other chats with this agent, for the header history menu. */
   readonly agentThreads: readonly AgentThread[]
+  /** Chats other people shared with the reader. */
+  readonly sharedThreads?: SharedThreadList
   /** Runs active across the threads visible to this agent surface. */
   readonly runningThreadCount: number
   readonly threadsError?: string | null
@@ -66,11 +70,12 @@ export interface ConversationPanelProps {
   readonly onSelectThread: (threadId: string) => void
   readonly composerDisabled: boolean
   readonly composerPending: boolean
-  /** A run is in flight: the composer shows a stop button wired to {@link onStop}. */
+  /** A run is in flight: the composer shows a stop button wired to {@link onStop}, if any. */
   readonly composerRunning: boolean
   /** A stop has been requested and we're waiting for the run to end. */
   readonly composerStopping: boolean
-  readonly onStop: () => void
+  /** Omitted when the reader may not stop the answer in flight. */
+  readonly onStop?: () => void
   readonly models: readonly LanguageModel[]
   readonly selectedModel?: LanguageModel
   readonly selectedReasoning?: ModelReasoningLevel
@@ -82,6 +87,8 @@ export interface ConversationPanelProps {
   readonly usingDefaultModel?: boolean
   readonly onResetModelSelection?: () => void
   readonly composerPlaceholder?: string
+  /** A status line under the composer, such as whose answer holds the thread. */
+  readonly composerHint?: string
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
   readonly composerDraftAttachments?: readonly AgentFileRef[]
@@ -119,6 +126,7 @@ export function ConversationPanel({
   sendError,
   currentThread,
   agentThreads,
+  sharedThreads,
   runningThreadCount,
   threadsError,
   hasMoreThreads,
@@ -144,6 +152,7 @@ export function ConversationPanel({
   usingDefaultModel,
   onResetModelSelection,
   composerPlaceholder,
+  composerHint,
   composerDraft,
   composerDraftAttachments,
   composerDraftContext,
@@ -153,6 +162,7 @@ export function ConversationPanel({
   welcomeContent,
   headerActions,
   sandboxRecovery,
+  composerNotice,
 }: ConversationPanelProps) {
   const labels = useAgentMessages()
   const name = agent?.name ?? "Agent"
@@ -185,6 +195,7 @@ export function ConversationPanel({
       usingDefaultModel={usingDefaultModel}
       onResetModelSelection={onResetModelSelection}
       placeholder={composerPlaceholder}
+      hint={composerHint}
       className={compact ? "px-4 pt-2 pb-4" : wideClassName}
       draft={composerDraft}
       draftAttachments={composerDraftAttachments}
@@ -200,6 +211,7 @@ export function ConversationPanel({
       agentName={name}
       currentThread={currentThread}
       threads={agentThreads}
+      sharedThreads={sharedThreads}
       runningThreadCount={runningThreadCount}
       threadsError={threadsError}
       hasMoreThreads={hasMoreThreads}
@@ -242,6 +254,7 @@ export function ConversationPanel({
           <Welcome agent={agent} compact={compact} content={welcomeContent} />
           <div className="shrink-0">
             {sandboxRecovery}
+            {composerNotice}
             {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
@@ -282,6 +295,7 @@ export function ConversationPanel({
 
           <div className="shrink-0">
             {sandboxRecovery}
+            {composerNotice}
             {renderComposer()}
           </div>
         </>

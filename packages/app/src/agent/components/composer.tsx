@@ -54,7 +54,10 @@ export interface ComposerProps {
   ) => void
   readonly disabled?: boolean
   readonly pending?: boolean
-  /** A run is in flight: the send button becomes a stop button that calls {@link onStop}. */
+  /**
+   * A run is in flight: the send button becomes a stop button that calls {@link onStop}, or stays
+   * disabled without one, when the reader may not stop someone else's answer.
+   */
   readonly running?: boolean
   /** A stop has been requested and we're waiting for the run to end. */
   readonly stopping?: boolean
@@ -210,6 +213,7 @@ export function Composer({
     mention === null &&
     !disabled &&
     !pending &&
+    !running &&
     !uploading &&
     failedCount === 0
 
@@ -665,7 +669,7 @@ export function Composer({
                 onResetToDefault={onResetModelSelection}
               />
             ) : null}
-            {running ? (
+            {running && onStop ? (
               <button
                 type="button"
                 onClick={onStop}

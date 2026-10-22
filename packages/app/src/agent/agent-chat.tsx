@@ -1,15 +1,25 @@
-import { Button, EmptyState } from "@sixb/ui/components"
+import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useId } from "react"
 import type { ArtifactTarget } from "../artifacts/target"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { ConversationPanel } from "./components/conversation-panel"
 import { SandboxRecovery } from "./components/sandbox-recovery"
+import { SharedThreadNotice } from "./components/shared-thread-notice"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
+import { ThreadPeople } from "./components/thread-people"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
+import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
-import type { AgentContextInput } from "./types"
+import {
+  type MessageAuthor,
+  MessageAuthorsContext,
+  principalKey,
+  useConversationAuthors,
+} from "./message-authors"
+import { personName, threadOwner, threadParticipants } from "./sharing"
+import type { AgentContextInput, AgentThread } from "./types"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -53,13 +63,49 @@ export function AgentChat({
     threadId,
     onThreadCreated: onNavigateThread,
   })
+  // Each chat has its own toaster, so a toast shows once however many chats are mounted.
+  const toasterId = useId()
+  const sharing = useThreadSharing({
+    thread: conversation.currentThread,
+    onForked: onNavigateThread,
+    onLeft: onNavigateHome,
+    toasterId,
+  })
+  const authors = useConversationAuthors({
+    thread: conversation.currentThread,
+    authors: conversation.authors,
+    user: conversation.user,
+    you: messages.sharing.you,
+  })
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
+  const currentThread = conversation.currentThread
+  const owner = currentThread ? personName(threadOwner(currentThread)) : ""
+
+  // Someone else's answer holds a shared thread: the reader keeps typing, and sends once it ends.
+  const answeringFor = conversation.answeringFor
+  const answeringName = answeringFor
+    ? personNameOf(answeringFor, currentThread, conversation.authors)
+    : null
+
+  // Sharing needs someone signed in: without auth, the project owns every conversation.
+  const sharingThread = conversation.user ? currentThread : null
+  const participant = sharingThread !== null && conversation.access === "participant"
+
+  // A turn that never answered can run again, by whoever asked for it, once the sandbox works.
+  const canRetry =
+    !conversation.sandboxRecovery &&
+    (presentation.kind === "failed" ||
+      ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
+        !presentation.hasProgress)) &&
+    conversation.canRetry(presentation.run)
+
+  const listedThreads = [...conversation.threads, ...conversation.sharedThreads]
   const runningThreadCount =
-    conversation.threads.filter((entry) => entry.activeRunId !== null).length +
+    listedThreads.filter((entry) => entry.activeRunId !== null).length +
     (threadId &&
     conversation.isRunning &&
-    !conversation.threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
+    !listedThreads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
       ? 1
       : 0)
 
@@ -67,6 +113,14 @@ export function AgentChat({
     threadId || hostHeaderActions ? (
       <>
         {threadId ? <ThreadArtifactsMenu threadId={threadId} /> : null}
+        {sharingThread ? (
+          <ThreadPeople
+            thread={sharingThread}
+            access={conversation.access}
+            user={conversation.user}
+            sharing={sharing}
+          />
+        ) : null}
         {hostHeaderActions}
       </>
     ) : null
@@ -96,7 +150,9 @@ export function AgentChat({
     content = (
       <ErrorState
         title={messages.chat.conversationUnavailable}
-        description={messages.chat.conversationGone}
+        description={
+          conversation.removedFromThread ? messages.chat.removed : messages.chat.conversationGone
+        }
       >
         <Button variant="outline" onClick={onNavigateHome}>
           {messages.threads.new}
@@ -136,14 +192,7 @@ export function AgentChat({
             ? { hasProgress: presentation.hasProgress }
             : undefined
         }
-        onRetry={
-          !conversation.sandboxRecovery &&
-          (presentation.kind === "failed" ||
-            ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-              !presentation.hasProgress))
-            ? () => conversation.retry(presentation.run)
-            : undefined
-        }
+        onRetry={canRetry ? () => conversation.retry(presentation.run) : undefined}
         onContinue={
           !conversation.sandboxRecovery &&
           (presentation.kind === "timeout" || presentation.kind === "interrupted") &&
@@ -163,6 +212,21 @@ export function AgentChat({
         loadMoreThreadsError={conversation.threadsLoadMoreError}
         onLoadMoreThreads={() => void conversation.loadMoreThreads()}
         agentThreads={conversation.agentThreads}
+        sharedThreads={
+          conversation.user
+            ? {
+                threads: conversation.sharedThreads,
+                total: conversation.sharedThreadsTotal,
+                error: conversation.sharedThreadsError
+                  ? messages.chat.sharedThreadsLoadFailed
+                  : null,
+                hasMore: conversation.sharedThreadsHasMore,
+                loadingMore: conversation.sharedThreadsLoadingMore,
+                loadMoreError: conversation.sharedThreadsLoadMoreError,
+                onLoadMore: () => void conversation.loadMoreSharedThreads(),
+              }
+            : undefined
+        }
         onSend={conversation.send}
         onNewChat={onNavigateHome}
         onSelectThread={onNavigateThread}
@@ -172,14 +236,20 @@ export function AgentChat({
               pending={conversation.recreatingSandbox}
               error={conversation.sandboxRecoveryError}
               onRecreate={conversation.recreateSandbox}
+              canRecreate={conversation.canRecreateSandbox}
+              owner={owner}
             />
           ) : undefined
         }
-        composerDisabled={conversation.isRunning || Boolean(conversation.sandboxRecovery)}
+        composerDisabled={
+          (conversation.isRunning && answeringName === null) ||
+          Boolean(conversation.sandboxRecovery)
+        }
+        composerHint={answeringName ? messages.sharing.answering(answeringName) : undefined}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
         composerStopping={conversation.stopping}
-        onStop={conversation.stop}
+        onStop={conversation.canStop ? conversation.stop : undefined}
         models={conversation.models}
         selectedModel={conversation.selectedModel}
         selectedReasoning={conversation.selectedReasoning}
@@ -199,6 +269,9 @@ export function AgentChat({
         compact={compact}
         welcomeContent={welcomeContent}
         headerActions={conversationHeaderActions}
+        composerNotice={
+          participant ? <SharedThreadNotice owner={owner} sharing={sharing} /> : undefined
+        }
       />
     )
   }
@@ -221,10 +294,28 @@ export function AgentChat({
             {conversationHeaderActions}
           </div>
         ) : null}
-        <main className="min-h-0 min-w-0 flex-1">{content}</main>
+        <MessageAuthorsContext.Provider value={authors}>
+          <main className="min-h-0 min-w-0 flex-1">{content}</main>
+        </MessageAuthorsContext.Provider>
+        <Toaster id={toasterId} position="top-center" />
       </div>
     </ArtifactPanelRoot>
   )
+}
+
+/** Someone's name, from the thread's people or else the page's authors, or else their id. */
+function personNameOf(
+  principal: { readonly type: string; readonly id: string },
+  thread: AgentThread | null,
+  authors: readonly MessageAuthor[] | undefined
+): string {
+  const key = principalKey(principal)
+  const people = thread ? [threadOwner(thread), ...threadParticipants(thread)] : []
+  const person = people.find((entry) => principalKey(entry.principal) === key)
+  if (person?.displayName) return person.displayName
+
+  const author = authors?.find((entry) => principalKey(entry) === key)
+  return author?.displayName ?? principal.id
 }
 
 function ErrorState({

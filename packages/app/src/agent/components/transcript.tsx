@@ -10,7 +10,7 @@ import {
 } from "@sixb/ui/components"
 import { memo, useMemo } from "react"
 import { hasLiveContent, type LiveRunState } from "../live-run"
-import { useMessageAuthors } from "../message-authors"
+import { authorKey, useMessageAuthors } from "../message-authors"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
 import { ContextChips } from "./context-chips"
 import {
@@ -76,6 +76,10 @@ export function Transcript({
 }: TranscriptProps) {
   const authors = useMessageAuthors()
 
+  // Messages one person sends in a row name them once; an answer in between names them again.
+  const { continuedIds, lastUserAuthor } = useMemo(() => userMessageRuns(messages), [messages])
+  const pendingContinues = authors?.reader !== undefined && lastUserAuthor === authors.reader.key
+
   // Keep the live row until the finalized assistant message is present in durable state, so the
   // handoff from streaming to stored content never flashes empty.
   const finalizedInDurable =
@@ -138,6 +142,7 @@ export function Transcript({
               <TranscriptMessage
                 key={message.id}
                 message={message}
+                continued={continuedIds.has(message.id)}
                 scrollAnchor={message.id === anchoredUserMessageId}
               />
             ))}
@@ -146,7 +151,7 @@ export function Transcript({
             pendingUserContext.length > 0 ? (
               <MessageScrollerItem messageId="pending-user" scrollAnchor>
                 <div className="flex flex-col items-end gap-1.5">
-                  <AuthorLine name={authors?.pending} />
+                  {pendingContinues ? null : <AuthorLine author={authors?.reader} />}
                   <ContextChips entries={pendingUserContext} className="justify-end" />
                   {pendingUserAttachments.length > 0 ? (
                     <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
@@ -231,14 +236,39 @@ export function Transcript({
 // substantial Markdown, tables, and file previews, so keep their scroller wrappers stable too.
 const TranscriptMessage = memo(function TranscriptMessage({
   message,
+  continued,
   scrollAnchor,
 }: {
   readonly message: AgentMessage
+  readonly continued: boolean
   readonly scrollAnchor: boolean
 }) {
   return (
     <MessageScrollerItem messageId={message.id} scrollAnchor={scrollAnchor}>
-      <MessageView message={message} />
+      <MessageView message={message} continued={continued} />
     </MessageScrollerItem>
   )
 })
+
+/**
+ * The user messages that directly follow another from the same author, and who wrote the last
+ * message if it is a user's. An answer between two messages starts a new run.
+ */
+function userMessageRuns(messages: readonly AgentMessage[]) {
+  const continuedIds = new Set<string>()
+  let lastUserAuthor: string | null = null
+
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      lastUserAuthor = null
+      continue
+    }
+    if (message.role !== "user") continue
+
+    const key = authorKey(message)
+    if (key !== null && key === lastUserAuthor) continuedIds.add(message.id)
+    lastUserAuthor = key
+  }
+
+  return { continuedIds, lastUserAuthor }
+}
