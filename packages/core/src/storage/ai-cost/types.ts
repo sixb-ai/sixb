@@ -4,9 +4,11 @@ import type {
   AiUsageReportingStatus,
 } from "../ai-usage"
 
-/** Token meters supported by deterministic local rate cards. */
+/** Meters supported by deterministic local rate cards. */
 export type AiBillableMeter =
   | "audio.input.milliseconds"
+  | "characters.input"
+  | "images.output"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"
@@ -16,6 +18,8 @@ export type AiBillableMeter =
   | "tokens.output.total"
   | "tokens.output.text"
   | "tokens.output.reasoning"
+  | "tokens.output.image"
+  | "tokens.output.audio"
 
 /** Exact money in nanounits of a currency's major unit. */
 export interface AiMoney {
@@ -58,6 +62,8 @@ export interface AiCostComponent {
   readonly quantity: string
   readonly rateAmountNanosPerMillion: string
   readonly chargeAmountNanos: string
+  /** The price variant that applied, such as `1024x1024 · high`. Display only. */
+  readonly variant?: string
 }
 
 export type AiUnpriceableReason =

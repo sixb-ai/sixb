@@ -91,6 +91,7 @@ function costComponentsFromUnknown(
       quantity: requiredString(component.quantity),
       rateAmountNanosPerMillion: requiredString(component.rateAmountNanosPerMillion),
       chargeAmountNanos: requiredString(component.chargeAmountNanos),
+      ...optionalStringProperty(component, "variant"),
     }
   })
 }
@@ -111,7 +112,11 @@ function billableMeter(value: unknown): AiBillableMeter {
     value !== "tokens.output.total" &&
     value !== "tokens.output.text" &&
     value !== "tokens.output.reasoning" &&
-    value !== "audio.input.milliseconds"
+    value !== "tokens.output.image" &&
+    value !== "tokens.output.audio" &&
+    value !== "audio.input.milliseconds" &&
+    value !== "images.output" &&
+    value !== "characters.input"
   ) {
     throw invalidDetails()
   }

@@ -2538,10 +2538,18 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "tokens.output.image"
+                      | "tokens.output.audio"
                       | "audio.input.milliseconds"
+                      | "images.output"
+                      | "characters.input"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
+                    /**
+                     * The price variant that applied, such as an image size. Display only.
+                     */
+                    variant?: string
                   }>
                 }
               | {
@@ -2562,7 +2570,11 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "tokens.output.image"
+                    | "tokens.output.audio"
                     | "audio.input.milliseconds"
+                    | "images.output"
+                    | "characters.input"
                   >
                 }
             billingIdentity: {
@@ -2603,10 +2615,18 @@ export type ListAiModelCallsResponses = {
                 | "tokens.output.total"
                 | "tokens.output.text"
                 | "tokens.output.reasoning"
+                | "tokens.output.image"
+                | "tokens.output.audio"
                 | "audio.input.milliseconds"
+                | "images.output"
+                | "characters.input"
               quantity: string
               rateAmountNanosPerMillion: string
               chargeAmountNanos: string
+              /**
+               * The price variant that applied, such as an image size. Display only.
+               */
+              variant?: string
             }>
             ratedAt: string
           }
@@ -2631,10 +2651,18 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "tokens.output.image"
+                      | "tokens.output.audio"
                       | "audio.input.milliseconds"
+                      | "images.output"
+                      | "characters.input"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
+                    /**
+                     * The price variant that applied, such as an image size. Display only.
+                     */
+                    variant?: string
                   }>
                 }
               | {
@@ -2655,7 +2683,11 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "tokens.output.image"
+                    | "tokens.output.audio"
                     | "audio.input.milliseconds"
+                    | "images.output"
+                    | "characters.input"
                   >
                 }
             billingIdentity?: {
@@ -2697,7 +2729,11 @@ export type ListAiModelCallsResponses = {
               | "tokens.output.total"
               | "tokens.output.text"
               | "tokens.output.reasoning"
+              | "tokens.output.image"
+              | "tokens.output.audio"
               | "audio.input.milliseconds"
+              | "images.output"
+              | "characters.input"
             >
             ratedAt: string
           }
@@ -13046,6 +13082,22 @@ export type ListObservedAgentThreadRunsResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
