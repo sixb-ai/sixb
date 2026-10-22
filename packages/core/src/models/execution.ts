@@ -18,6 +18,7 @@ import type {
   LanguageModelOutputShape,
   ModelsRuntime,
 } from "./generation-types"
+import { createImageRuntime } from "./image/runtime"
 import { modelReasoningSupportIssue } from "./language-model"
 import type { ModelMessage } from "./messages"
 import { languageModelOutput } from "./output"
@@ -134,6 +135,7 @@ export function createModelsRuntime(
     language: { generate },
     decision: createDecisionRuntime(runtime, execution, catalog, session),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
+    image: createImageRuntime(runtime, execution, catalog, session, blobs),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)

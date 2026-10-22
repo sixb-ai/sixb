@@ -1275,6 +1275,11 @@ export type {
   ScoreQuestion,
 } from "./models/decision/types"
 export type {
+  ImageGenerateInput,
+  ImageGenerateResult,
+  ImageModelsRuntime,
+} from "./models/image/types"
+export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   LinkProjectionTarget,
