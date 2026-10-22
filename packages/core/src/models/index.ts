@@ -147,10 +147,13 @@ export type {
 } from "./pricing"
 export { estimateModelReservation, rateModelCall } from "./pricing"
 export type {
+  ModelPriceVariant,
+  ModelPricingDimensions,
   ModelPricingTier,
   ModelRateCard,
   ModelTokenPrice,
   ModelUnitPrice,
+  ModelVariantPrice,
 } from "./rate-card"
 export { defineModelRateCard } from "./rate-card"
 export type {

@@ -125,11 +125,19 @@ const AiCostComponentSchema = z.object({
     "tokens.output.total",
     "tokens.output.text",
     "tokens.output.reasoning",
+    "tokens.output.image",
+    "tokens.output.audio",
     "audio.input.milliseconds",
+    "images.output",
+    "characters.input",
   ]),
   quantity: IntegerStringSchema,
   rateAmountNanosPerMillion: IntegerStringSchema,
   chargeAmountNanos: IntegerStringSchema,
+  variant: z
+    .string()
+    .optional()
+    .describe("The price variant that applied, such as an image size. Display only."),
 })
 
 const AiBillingIdentitySchema = z.object({
