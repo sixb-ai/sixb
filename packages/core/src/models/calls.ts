@@ -33,7 +33,9 @@ const MAX_SUBAGENT_DEPTH = 32
 
 export function createModelCallsRuntime(
   runtime: Pick<SixbRuntimeContext, "projectId" | "runtimeAuthorization" | "storage">,
-  runs: ModelCallRunVisibility
+  runs: ModelCallRunVisibility,
+  /** The execution reading; it reads what it produced, whoever can see its run. */
+  executionId?: string
 ): ModelCallsRuntime {
   const projectId = runtime.projectId
 
@@ -82,12 +84,17 @@ export function createModelCallsRuntime(
       }
       const record = await runtime.storage.aiUsage?.getModelCallFiles({ projectId, callId })
       if (!record) return null
+
+      // A workflow's agent step runs as a service account that cannot view its own workflow run,
+      // yet must read back the image it just made.
+      const visible = { callId: record.callId, files: record.files, recordedAt: record.recordedAt }
+      if (record.executionId === executionId) return visible
+
       const execution = await runtime.storage.executions.getById({
         projectId,
         id: record.executionId,
       })
-      if (!execution || !(await canRead(execution))) return null
-      return { callId: record.callId, files: record.files, recordedAt: record.recordedAt }
+      return execution && (await canRead(execution)) ? visible : null
     },
   }
 }
