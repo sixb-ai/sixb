@@ -15,6 +15,14 @@ export interface AiModelCallUsageInput {
   readonly cacheWriteInputTokens?: number
   readonly textOutputTokens?: number
   readonly reasoningOutputTokens?: number
+  /** Output tokens that encode generated images, within outputTokens. */
+  readonly imageOutputTokens?: number
+  /** Output tokens that encode generated audio, within outputTokens. */
+  readonly audioOutputTokens?: number
+  /** Images the call returned. */
+  readonly outputImages?: number
+  /** Input characters, counted by the provider's own billing rule. */
+  readonly inputCharacters?: number
 }
 
 /** Normalized usage for one completed model call. Token details overlap their input/output totals. */

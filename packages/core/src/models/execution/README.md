@@ -64,8 +64,8 @@ and ranking validation. A complete permutation with finite scores is required; t
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
 Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
-neither admit nor count reranking or transcription calls (`aiLimitMeterApplies` in the limit
-storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
+neither admit nor count reranking, transcription, image or speech calls (`aiLimitMeterApplies` in
+the limit storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
 costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
 remains the existing accounting-only replay.
 

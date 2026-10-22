@@ -12,6 +12,7 @@ export type ModelKind =
   | "embedding"
   | "decision"
   | "transcription"
+  | "speech"
   | "reranking"
 
 /** Common catalog identity shared by every present and future model runtime. */

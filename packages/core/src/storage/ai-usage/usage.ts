@@ -9,6 +9,10 @@ const USAGE_FIELDS = [
   "textOutputTokens",
   "reasoningOutputTokens",
   "audioDurationMs",
+  "imageOutputTokens",
+  "audioOutputTokens",
+  "outputImages",
+  "inputCharacters",
 ] as const
 
 type AiUsageField = (typeof USAGE_FIELDS)[number]
@@ -48,6 +52,14 @@ export function normalizeAiModelCallUsage(input: AiModelCallUsageInput): AiModel
     ...(input.reasoningOutputTokens === undefined
       ? {}
       : { reasoningOutputTokens: input.reasoningOutputTokens }),
+    ...(input.imageOutputTokens === undefined
+      ? {}
+      : { imageOutputTokens: input.imageOutputTokens }),
+    ...(input.audioOutputTokens === undefined
+      ? {}
+      : { audioOutputTokens: input.audioOutputTokens }),
+    ...(input.outputImages === undefined ? {} : { outputImages: input.outputImages }),
+    ...(input.inputCharacters === undefined ? {} : { inputCharacters: input.inputCharacters }),
     reportingStatus,
   }
 }

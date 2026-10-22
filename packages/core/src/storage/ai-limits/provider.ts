@@ -18,9 +18,14 @@ import type {
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
 
-// These calls are billed per audio second or per search, and their providers report no tokens.
-// Token limits neither admit nor count them; cost limits still do.
-const TOKENLESS_MODEL_KINDS: ReadonlySet<ModelKind> = new Set(["transcription", "reranking"])
+// These calls are billed per audio second, search, image or character, and most of their providers
+// report no tokens. Token limits neither admit nor count them; cost limits still do.
+const TOKENLESS_MODEL_KINDS: ReadonlySet<ModelKind> = new Set([
+  "transcription",
+  "reranking",
+  "image",
+  "speech",
+])
 
 /** @internal Whether a limit meter governs calls of this kind. Unclassified calls are metered. */
 export function aiLimitMeterApplies(

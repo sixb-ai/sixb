@@ -69,6 +69,10 @@ export interface AiAccountingAggregateFragment {
     readonly textOutputTokens: AiAccountingUsageMeterFragment
     readonly reasoningOutputTokens: AiAccountingUsageMeterFragment
     readonly audioDurationMs: AiAccountingUsageMeterFragment
+    readonly imageOutputTokens: AiAccountingUsageMeterFragment
+    readonly audioOutputTokens: AiAccountingUsageMeterFragment
+    readonly outputImages: AiAccountingUsageMeterFragment
+    readonly inputCharacters: AiAccountingUsageMeterFragment
   }
   readonly costs: {
     readonly amount?: AiMoney
@@ -408,6 +412,10 @@ const AGGREGATE_USAGE_FIELDS = [
   "textOutputTokens",
   "reasoningOutputTokens",
   "audioDurationMs",
+  "imageOutputTokens",
+  "audioOutputTokens",
+  "outputImages",
+  "inputCharacters",
 ] as const
 
 type AggregateUsageField = (typeof AGGREGATE_USAGE_FIELDS)[number]

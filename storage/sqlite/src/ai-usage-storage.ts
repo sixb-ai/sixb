@@ -140,12 +140,16 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             text_output_tokens,
             reasoning_output_tokens,
             audio_duration_ms,
+            image_output_tokens,
+            audio_output_tokens,
+            output_images,
+            input_characters,
             reporting_status,
             raw_usage,
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
@@ -171,6 +175,10 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.usage.textOutputTokens ?? null,
         record.usage.reasoningOutputTokens ?? null,
         record.usage.audioDurationMs ?? null,
+        record.usage.imageOutputTokens ?? null,
+        record.usage.audioOutputTokens ?? null,
+        record.usage.outputImages ?? null,
+        record.usage.inputCharacters ?? null,
         record.usage.reportingStatus,
         record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage),
         record.occurredAt.toISOString(),
@@ -307,6 +315,10 @@ interface AiUsageRow {
   readonly text_output_tokens: number | null
   readonly reasoning_output_tokens: number | null
   readonly audio_duration_ms: number | null
+  readonly image_output_tokens: number | null
+  readonly audio_output_tokens: number | null
+  readonly output_images: number | null
+  readonly input_characters: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
   readonly occurred_at: string
@@ -349,6 +361,10 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       ? {}
       : { reasoningOutputTokens: row.reasoning_output_tokens }),
     ...(row.audio_duration_ms === null ? {} : { audioDurationMs: row.audio_duration_ms }),
+    ...(row.image_output_tokens === null ? {} : { imageOutputTokens: row.image_output_tokens }),
+    ...(row.audio_output_tokens === null ? {} : { audioOutputTokens: row.audio_output_tokens }),
+    ...(row.output_images === null ? {} : { outputImages: row.output_images }),
+    ...(row.input_characters === null ? {} : { inputCharacters: row.input_characters }),
   }
 }
 

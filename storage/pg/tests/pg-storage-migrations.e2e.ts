@@ -111,6 +111,7 @@ const SHIPPED_MIGRATIONS = [
   "071-agent-thread-participants",
   "072-forked-context-checkpoints",
   "073-unique-values",
+  "074-generated-media-usage",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -1625,6 +1626,10 @@ describe("Postgres storage migrations", () => {
           provider_ids: null,
           audio_duration_ms: null,
           model_kind: null,
+          image_output_tokens: null,
+          audio_output_tokens: null,
+          output_images: null,
+          input_characters: null,
         }))
       )
       await expect(

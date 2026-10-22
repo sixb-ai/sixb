@@ -79,6 +79,10 @@ const fieldCounts = (counts: Partial<Totals["usageCoverage"]["fieldCallCounts"]>
   cacheWriteInputTokens: 0,
   textOutputTokens: 0,
   audioDurationMs: 0,
+  imageOutputTokens: 0,
+  audioOutputTokens: 0,
+  outputImages: 0,
+  inputCharacters: 0,
   reasoningOutputTokens: 0,
   ...counts,
 })

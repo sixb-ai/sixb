@@ -21,9 +21,16 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
 
   if (
     input.modelKind !== undefined &&
-    !["language", "image", "video", "embedding", "decision", "transcription", "reranking"].includes(
-      input.modelKind
-    )
+    ![
+      "language",
+      "image",
+      "video",
+      "embedding",
+      "decision",
+      "transcription",
+      "speech",
+      "reranking",
+    ].includes(input.modelKind)
   ) {
     throw new TypeError("[Sixb] AI model kind is invalid.")
   }
