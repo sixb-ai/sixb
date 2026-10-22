@@ -404,10 +404,28 @@ The link button in an artifact's header copies a link to its page, and the one b
 link to that section. A link to the latest version keeps following the artifact as new versions
 are published; a link copied from an earlier version stays on it.
 
-Only the artifact's owner can open it. Server code that runs as the system, outside any user's
-request, reaches every artifact in the project. Someone who
-[reads another user's conversation](../apps/activity.md#read-a-conversation) also sees, read-only,
-the versions the agent published in it.
+An artifact belongs to its owner. Server code that runs as the system, outside any user's request,
+reaches every artifact in the project.
+
+### Shared in a conversation
+
+When the agent publishes an artifact in a conversation, the conversation shares it: everyone who
+reads the conversation reads the artifact, at its latest version, whatever published it.
+
+| | Owner | [Participant](../models/overview.md#share-a-conversation) | [Observer](../apps/activity.md#read-a-conversation) |
+| --- | --- | --- | --- |
+| Read every version, list the conversation's artifacts | ✓ | ✓ | ✓ |
+| Publish a version, keep page data with `sixb.state` | ✓ | ✓ | – |
+| Delete it | ✓ | – | – |
+
+- A version saved by anyone who can update it is seen by every reader of every conversation that
+  shares the artifact. Its author is whoever saved it; the artifact stays its owner's.
+- The owner's other artifacts stay private. An embed or link to one is refused with 403
+  `not_shared` for whoever cannot read it, so a page can say it is not shared in this
+  conversation; an unknown id is a 404.
+- An observer's page runs, but keeps nothing: its `sixb.state` values last as long as the tab.
+- An access token reaches only its own artifacts, never shared ones.
+- `sixb.artifacts.access(id)` says what the caller may do: `owner`, `update`, `read`, or `none`.
 
 ## Theme an artifact
 
