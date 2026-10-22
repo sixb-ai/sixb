@@ -33,8 +33,8 @@ export interface DevState {
   readonly readySince: number | null
 }
 
-/** Rows the footer takes: the titled rule, three body rows, warnings, the keys. */
-const FULL_ROWS = 5
+/** Rows the footer takes: the titled rule, a gap, three body rows, warnings, a gap, the keys. */
+const FULL_ROWS = 7
 /** Below this many terminal rows, the footer keeps to its titled rule and one line. */
 const COMPACT_BELOW = 30
 const COMPACT_ROWS = 2
@@ -75,12 +75,17 @@ export async function startDevFooter(options: {
     },
     get: () => state,
   }
-  const event = (mark: string, text: string) =>
-    footer.print(`  ${mark} ${text}  ${tone.faint(clock())}`)
+  // The footer's top rule names the session, so the scrollback opens with nothing but room under
+  // the prompt, and only once there is something to set apart. A space, not "": the scrollback
+  // drops empty lines.
+  let spaced = false
+  const print = (text: string) => {
+    if (!spaced) footer.print(" ")
+    spaced = true
+    footer.print(text)
+  }
+  const event = (mark: string, text: string) => print(`  ${mark} ${text}  ${tone.faint(clock())}`)
 
-  // The footer's top rule names the session; the scrollback only needs room under the prompt. A
-  // space, not "": the scrollback drops empty lines.
-  footer.print(" ")
   footer.render(
     <DevFooter
       store={store}
@@ -93,7 +98,7 @@ export async function startDevFooter(options: {
   return {
     output: "pipe",
     line(text) {
-      footer.print(text)
+      print(text)
     },
     message(message: DevChildMessage) {
       if (message.type === "status") {
@@ -107,12 +112,16 @@ export async function startDevFooter(options: {
       } else if (message.type === "ready") {
         const seconds = ((Date.now() - bootStartedAt) / 1000).toFixed(1)
         const view = message.view ?? state.view
+        // The footer says it is ready. The scrollback records only what changed: a restart's
+        // ready line answers the change that started it.
+        if (state.restarts > 0) {
+          event(tone.blue(glyph.live), `${tone.strong("ready")} ${tone.muted(`in ${seconds}s`)}`)
+        }
         set({ phase: { kind: "ready" }, view, readySince: Date.now() })
-        event(tone.blue(glyph.live), `${tone.strong("ready")} ${tone.muted(`in ${seconds}s`)}`)
       } else if (message.type === "startup-error") {
         const error = message.error ?? { message: "The dev process failed to start." }
         set({ phase: { kind: "failed", error } })
-        footer.print(
+        print(
           errorView({
             message: error.message,
             ...(error.remediation ? { remediation: error.remediation } : {}),
@@ -156,7 +165,7 @@ export async function startDevFooter(options: {
       const up = state.readySince
         ? ` ${glyph.dot} up ${duration(Date.now() - state.readySince)}`
         : ""
-      footer.print(`  ${tone.faint(glyph.idle)} ${tone.muted(`sixb dev stopped${up}`)}\n`)
+      print(`  ${tone.faint(glyph.idle)} ${tone.muted(`sixb dev stopped${up}`)}\n`)
       await footer.stop()
     },
   }
@@ -225,10 +234,12 @@ export function DevFooter({
   return (
     <box flexDirection="column">
       <TitleRule state={state} colors={colors} title={title} width={width} />
+      <box height={1} />
       <box flexDirection="column" paddingLeft={3} height={3}>
         <Body state={state} colors={colors} width={inner} />
       </box>
       <Warnings view={state.view} colors={colors} width={inner} />
+      <box height={1} />
       <box paddingLeft={3}>
         <Hints colors={colors} items={keys} />
       </box>
