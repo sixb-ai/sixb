@@ -115,7 +115,9 @@ function mount() {
     })
   }
   const results = () => posted.filter((message) => "result" in message)
-  return { cache, posted, call, results }
+  /** Where the frame mounted now loads its page. */
+  const source = () => ui.container.querySelector("iframe")?.getAttribute("src")
+  return { cache, posted, call, results, source }
 }
 
 describe("a page's data", () => {
@@ -189,5 +191,28 @@ describe("a page's data", () => {
     expect(posted.some((message) => message.method === "reload")).toBe(true)
     await call({ call: 2, method: "state.get", params: { key: "inputs" } })
     expect(posted.at(-1)).toEqual({ protocol: FRAME_PROTOCOL, result: 2 })
+  })
+
+  test("reset loads the page again on the newest link, not the one the frame kept", async () => {
+    // Reproduce by sending `reload` on a reset again: the page reloads on the link it opened with,
+    // which lasts an hour, and shows "Not found" once that is over.
+    const { cache, posted, source } = mount()
+    expect(source()).toContain("/api/artifact-frames/token/")
+
+    // Another frame of the version mints a newer link; this one keeps loading the page it has.
+    act(() => {
+      cache.setQueryData(["artifact-frame", PAGE, 1], {
+        path: "/api/artifact-frames/renewed/",
+        expiresAt: "2026-10-19T14:00:00.000Z",
+      })
+    })
+    expect(source()).toContain("/api/artifact-frames/token/")
+
+    await act(async () => {
+      await resetPageState(cache, PAGE)
+    })
+
+    expect(source()).toContain("/api/artifact-frames/renewed/")
+    expect(posted.some((message) => message.method === "reload")).toBe(false)
   })
 })
