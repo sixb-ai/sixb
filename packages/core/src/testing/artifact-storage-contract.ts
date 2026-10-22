@@ -143,8 +143,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         })
         expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
 
-        // Of two publishes racing from one base, one is stored and the other finds it moved.
-        // Reproduce by checking the base outside the publish's transaction.
+        // Of two publishes racing from one base, one is stored and the other finds it moved. This
+        // fixes the outcome only: the in-memory and SQLite storages run each call whole under
+        // their own lock, so the race cannot fail there. Postgres proves its row lock in
+        // `storage/pg/tests/pg-artifact-storage.e2e.ts`.
         const raced = await Promise.allSettled([
           artifacts.publish({ ...publishInput({ createdAt: at(3) }), baseVersion: 2 }),
           artifacts.publish({ ...publishInput({ createdAt: at(4) }), baseVersion: 2 }),
