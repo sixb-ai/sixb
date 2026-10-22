@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process"
 import type { WriteStream } from "node:fs"
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { Readable } from "node:stream"
 import { openProcessLog, processLogPath, rotateLogIfLarge } from "./logs"
@@ -19,6 +19,7 @@ import {
   type ProcessInstanceStatus,
   type ProcessState,
   readProcessState,
+  writeFileAtomically,
   writeProcessState,
 } from "./state"
 
@@ -97,7 +98,7 @@ export async function sendSupervisorCommand(
 
   const id = `${Date.now()}-${process.pid}-${Math.random().toString(16).slice(2)}`
   await mkdir(controlDir(manifest), { recursive: true })
-  await writeFile(
+  await writeFileAtomically(
     resolve(controlDir(manifest), `${id}.json`),
     `${JSON.stringify({ id, type, ...(service ? { service } : {}) })}\n`
   )
@@ -305,7 +306,7 @@ class Supervisor {
 
   private async writeResponse(id: string, ok: boolean, message: string): Promise<void> {
     await mkdir(responseDir(this.manifest), { recursive: true })
-    await writeFile(
+    await writeFileAtomically(
       resolve(responseDir(this.manifest), `${id}.json`),
       `${JSON.stringify({ id, ok, message } satisfies SupervisorResponse)}\n`
     )
