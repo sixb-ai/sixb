@@ -22,6 +22,7 @@ const CLI_COMMANDS = {
   files: ["upload", "download"],
   workflows: ["list", "get", "start"],
   "workflow-runs": ["list", "get"],
+  models: ["list", "get", "text", "image", "speech", "transcribe", "calls"],
   api: ["get", "post"],
 } as const
 
@@ -245,6 +246,10 @@ export type BashIcon =
   | "actions"
   | "project"
   | "skill"
+  | "image"
+  | "audio"
+  | "transcript"
+  | "model"
   | "terminal"
 
 interface BashDescription {
@@ -540,6 +545,24 @@ function describeSixb(
       return withDetail(icon("object", m.upload), filePath(parsed?.json))
     case "files.download":
       return withDetail(icon("object", m.download), filePath(parsed?.json))
+    case "models.list":
+    case "models.get":
+      return icon("model", m.models)
+    case "models.text":
+      return icon("model", m.askModel)
+    case "models.image": {
+      const media = modelMedia(intent, parsed)
+      if (media?.kind !== "image") return icon("image", m.makeImage, 1)
+      return media.sources.length > 0
+        ? icon("image", m.editImage, media.count)
+        : icon("image", m.makeImage, media.count)
+    }
+    case "models.speech":
+      return icon("audio", m.makeSpeech)
+    case "models.transcribe":
+      return withDetail(icon("transcript", m.transcribe), baseName(intent.args[0]))
+    case "models.calls":
+      return icon("image", m.reopenCall)
     case "project.show":
       return icon("project", m.project)
     case "api.get":
@@ -618,6 +641,93 @@ function commandObjectType(
     return intent.args[0]
   }
   return findObjectTypeId(parsed?.json)
+}
+
+/** What a `sixb models` call takes and makes, as the chat shows it: its inputs and its output. */
+export type ModelMedia =
+  | {
+      readonly kind: "image"
+      readonly prompt: string
+      /** Local files the agent started from, by name. */
+      readonly sources: readonly string[]
+      readonly count: number
+      /** Width over height, from the requested size or aspect ratio; square when unknown. */
+      readonly aspect: number
+      readonly callId?: string
+    }
+  | { readonly kind: "speech"; readonly text: string; readonly callId?: string }
+  | {
+      readonly kind: "transcript"
+      readonly source: string
+      readonly text?: string
+      readonly callId?: string
+    }
+  | { readonly kind: "answer"; readonly prompt: string; readonly text?: string }
+
+export function modelMedia(intent: BashIntent, parsed: ParsedBashOutput | null): ModelMedia | null {
+  const call = intent.kind === "compound" ? intent.primary : intent
+  if (call.kind !== "sixb") return null
+  const output = isRecord(parsed?.json) ? parsed.json : {}
+  const callId = typeof output.callId === "string" ? output.callId : undefined
+  const text = typeof output.text === "string" ? output.text : undefined
+  const [first = ""] = positionals(call.args)
+  switch (call.command) {
+    case "models.image": {
+      const files = Array.isArray(output.files) ? output.files.length : 0
+      const requested = Number(optionValue(call.args, "--n") ?? 1)
+      return {
+        kind: "image",
+        prompt: first,
+        sources: optionValues(call.args, "--image").map(baseName),
+        count: files || (Number.isSafeInteger(requested) && requested > 0 ? requested : 1),
+        aspect: requestedAspect(
+          optionValue(call.args, "--size"),
+          optionValue(call.args, "--aspect-ratio")
+        ),
+        ...(callId ? { callId } : {}),
+      }
+    }
+    case "models.speech":
+      return { kind: "speech", text: first, ...(callId ? { callId } : {}) }
+    case "models.transcribe":
+      return {
+        kind: "transcript",
+        source: baseName(first),
+        ...(text === undefined ? {} : { text }),
+        ...(callId ? { callId } : {}),
+      }
+    case "models.text":
+      return { kind: "answer", prompt: first, ...(text === undefined ? {} : { text }) }
+    default:
+      return null
+  }
+}
+
+/** Arguments that are not options or their values. */
+function positionals(args: readonly string[]): string[] {
+  const values: string[] = []
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ""
+    if (arg.startsWith("--")) {
+      if (!arg.includes("=")) index += 1
+      continue
+    }
+    values.push(arg)
+  }
+  return values
+}
+
+function optionValues(args: readonly string[], option: string): string[] {
+  return args.flatMap((arg, index) => (arg === option && args[index + 1] ? [args[index + 1]!] : []))
+}
+
+function requestedAspect(size: string | undefined, ratio: string | undefined): number {
+  const [width, height] = (ratio ?? size ?? "").split(/[x:]/).map(Number)
+  return width && height && width > 0 && height > 0 ? width / height : 1
+}
+
+function baseName(path: string | undefined): string {
+  return path?.split("/").filter(Boolean).at(-1) ?? ""
 }
 
 function optionValue(args: readonly string[], option: string): string | undefined {

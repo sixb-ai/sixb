@@ -1,6 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
 import {
   Activity,
+  AudioLines,
   BarChart3,
   BookOpen,
   Boxes,
@@ -8,7 +9,10 @@ import {
   FileText,
   FolderGit2,
   Hash,
+  Image as ImageIcon,
   type LucideIcon,
+  Quote,
+  Sparkles,
   Table2,
   Terminal,
   Zap,
@@ -24,8 +28,11 @@ import {
   coerceBashOutput,
   commandPreview,
   describeBash,
+  type ModelMedia,
+  modelMedia,
   type ParsedBashOutput,
 } from "./interpret"
+import { ModelAnswerView, ModelMediaView } from "./model-media-view"
 import {
   ActionRunView,
   FacetsView,
@@ -58,6 +65,10 @@ const ICONS: Record<BashIcon, LucideIcon> = {
   actions: Zap,
   project: FolderGit2,
   skill: BookOpen,
+  image: ImageIcon,
+  audio: AudioLines,
+  transcript: Quote,
+  model: Sparkles,
   terminal: Terminal,
 }
 
@@ -109,6 +120,28 @@ export function BashToolView({ tool }: { tool: BashTool }) {
     )
   }
 
+  // An image or voice clip shows under the work it belongs to (see `generatedMedia`), so its step
+  // is one line here; a transcript, which feeds the answer, reads in place under its line.
+  const media = modelMedia(intent, parsed)
+  if (media?.kind === "image" || media?.kind === "speech") {
+    return <ToolLine icon={Icon} label={label} running={running} />
+  }
+  if (media?.kind === "transcript") {
+    return (
+      <div className="min-w-0 space-y-2">
+        <ToolLine
+          icon={Icon}
+          label={label}
+          detail={running ? undefined : description.detail}
+          running={running}
+        />
+        <div className="pl-5">
+          <ModelMediaView media={media} running={running} />
+        </div>
+      </div>
+    )
+  }
+
   // These answer fully from the headline (and we never expose internal skill docs), so they render
   // as a plain one-line marker with no disclosure.
   if (intent.kind === "read-skill" || isLeafResult(intent, running)) {
@@ -148,6 +181,23 @@ export function BashToolView({ tool }: { tool: BashTool }) {
   )
 }
 
+/**
+ * The image or voice clip a bash step made or is making, which the work group shows under its
+ * closed line: what the user asked for, not how it was made. A failed call shows nothing.
+ */
+export function generatedMedia(tool: BashTool): {
+  readonly media: Extract<ModelMedia, { kind: "image" | "speech" }>
+  readonly running: boolean
+} | null {
+  if (tool.state === "input-streaming" || tool.state === "output-error") return null
+  const command = coerceBashInput(tool.input)?.command ?? tool.inputText ?? ""
+  const parsed = coerceBashOutput(tool.output)
+  if (parsed && !parsed.ok) return null
+  const media = modelMedia(classifyCommand(command), parsed)
+  if (media?.kind !== "image" && media?.kind !== "speech") return null
+  return { media, running: tool.state === "input-available" }
+}
+
 /** A quiet, non-interactive marker row matching the reasoning label style. */
 function ToolLine({
   icon: Icon,
@@ -178,7 +228,13 @@ function ToolLine({
 /** Results whose headline already says everything — no expandable body needed. */
 function isLeafResult(intent: BashIntent, running: boolean): boolean {
   if (running || intent.kind !== "sixb") return false
-  return ["objects.count", "objects.exists", "telemetry.latest"].includes(intent.command)
+  return [
+    "objects.count",
+    "objects.exists",
+    "telemetry.latest",
+    "models.list",
+    "models.get",
+  ].includes(intent.command)
 }
 
 function BashResult({
@@ -227,6 +283,14 @@ function BashResult({
     case "actions.request":
     case "action-runs.get":
       return <ActionRunView parsed={parsed} />
+    case "models.text": {
+      const media = modelMedia(intent, parsed)
+      return media?.kind === "answer" ? (
+        <ModelAnswerView media={media} />
+      ) : (
+        <StructuredDataView parsed={parsed} />
+      )
+    }
     // Remaining CLI surfaces render through the neutral data view — structured, never raw JSON.
     default:
       return <StructuredDataView parsed={parsed} />
