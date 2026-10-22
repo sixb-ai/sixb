@@ -941,6 +941,7 @@ export type {
 } from "./agents/memory-execution"
 export type { AgentThreadParticipantInput } from "./agents/participants"
 export type { AgentThreadParticipant, AgentThreadView } from "./agents/thread-access"
+export type { ArtifactAccess } from "./artifacts/access"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {
@@ -952,7 +953,6 @@ export type {
   PublishArtifactRuntimeInput,
 } from "./artifacts/execution"
 export type { ArtifactKind } from "./artifacts/kinds"
-export type { ObservedAgentArtifactsRuntime } from "./artifacts/observed"
 export type { ArtifactOutline } from "./artifacts/outline"
 export type { PublishedArtifact } from "./artifacts/publish/publish"
 export type { ArtifactReference } from "./artifacts/references"

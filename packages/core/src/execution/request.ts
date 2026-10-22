@@ -29,7 +29,6 @@ export type {
   ObservedAgentThreadsRuntime,
 } from "../agents/execution"
 export type { AgentDescriptor } from "../agents/types"
-export type { ObservedAgentArtifactsRuntime } from "../artifacts/observed"
 export type { AuthorizationContext } from "../authorization"
 export type { DatasetsRuntime } from "../datasets/execution"
 export type { EventsRuntime } from "../events/execution"

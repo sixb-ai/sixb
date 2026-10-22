@@ -41802,7 +41802,7 @@
     "/api/artifacts": {
       "get": {
         "summary": "List artifacts",
-        "description": "The caller's artifacts, most recently updated first.",
+        "description": "The caller's artifacts, most recently updated first. With thread, every artifact the conversation shares, for whoever reads it.",
         "tags": ["Artifacts"],
         "operationId": "listArtifacts",
         "security": [
@@ -41942,7 +41942,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -41989,7 +41989,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -42642,7 +42642,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -42689,7 +42689,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -42736,7 +42736,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -42783,7 +42783,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -42830,7 +42830,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43004,9 +43004,61 @@
                         "additionalProperties": false
                       },
                       "description": "Newest first"
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": ["owner", "update", "read"],
+                      "description": "What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one"
                     }
                   },
-                  "required": ["artifact", "versions"],
+                  "required": ["artifact", "versions", "access"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
                   "additionalProperties": false
                 }
               }
@@ -43024,7 +43076,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43071,7 +43123,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43110,7 +43162,7 @@
       },
       "delete": {
         "summary": "Delete an artifact",
-        "description": "Deletes the artifact with every version.",
+        "description": "Deletes the artifact with every version, from every conversation that shares it. Only its owner can.",
         "tags": ["Artifacts"],
         "operationId": "deleteArtifact",
         "security": [
@@ -43154,6 +43206,53 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -43166,7 +43265,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43213,7 +43312,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43311,6 +43410,53 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -43323,7 +43469,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43370,7 +43516,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43453,6 +43599,53 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -43465,7 +43658,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43512,7 +43705,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43666,7 +43859,54 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43713,7 +43953,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43760,7 +44000,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43807,7 +44047,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43911,7 +44151,54 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -43958,7 +44245,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44005,7 +44292,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44689,7 +44976,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44736,7 +45023,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44783,7 +45070,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44830,7 +45117,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44877,7 +45164,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -44976,6 +45263,53 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -44988,7 +45322,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -45035,7 +45369,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -45082,7 +45416,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -45477,6 +45811,53 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -45489,7 +45870,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -45536,7 +45917,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",

@@ -628,6 +628,7 @@ function sheetCache(): QueryClient {
           createdAt: "2026-10-01T12:00:00.000Z",
         },
       ],
+      access: "owner",
     } satisfies GetArtifactResponse)
     cache.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
       artifactId,

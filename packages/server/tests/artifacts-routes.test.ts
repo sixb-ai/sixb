@@ -256,7 +256,10 @@ describe("artifact routes", () => {
       `${base}/versions/1`,
       `${base}/versions/1/content?path=document.md`,
     ]) {
-      expect((await app.fetch(new Request(url(path), bob))).status, path).toBe(404)
+      // It exists but is not shared with Bob: refused, not hidden, so a page can say why.
+      const refused = await app.fetch(new Request(url(path), bob))
+      expect(refused.status, path).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "not_shared" })
     }
     expect((await (await app.fetch(new Request(url("/api/artifacts"), bob))).json()).total).toBe(0)
     const bobPublish = await app.fetch(
@@ -266,11 +269,11 @@ describe("artifact routes", () => {
         body: JSON.stringify({ kind: "document", title: "Mine", files }),
       })
     )
-    expect(bobPublish.status).toBe(404)
+    expect(bobPublish.status).toBe(403)
     const bobDelete = await app.fetch(
       new Request(url(base), { method: "DELETE", headers: bob.mutationHeaders })
     )
-    expect(bobDelete.status).toBe(404)
+    expect(bobDelete.status).toBe(403)
 
     for (const path of [
       "/api/artifacts/art_missing",
@@ -346,8 +349,8 @@ describe("what a page keeps", () => {
     // writes into Alice's page.
     const { storage, call } = await page()
     const bob = await seedSession(storage, "bob")
-    expect((await call("/inputs", { method: "PUT", body: { value: 1 } }, bob)).status).toBe(404)
-    expect((await call("", {}, bob)).status).toBe(404)
+    expect((await call("/inputs", { method: "PUT", body: { value: 1 } }, bob)).status).toBe(403)
+    expect((await call("", {}, bob)).status).toBe(403)
   })
 
   test("refuses a value past the limits, and a key or a value that is not one", async () => {
