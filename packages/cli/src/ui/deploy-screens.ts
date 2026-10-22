@@ -7,13 +7,14 @@ import type {
 } from "@sixb/core/deploy"
 import {
   type Block,
+  commands,
   header,
   headline,
-  isUrl,
   marked,
   pad,
   plural,
   type Row,
+  remedy,
   rows,
   type Status,
   screen,
@@ -21,7 +22,7 @@ import {
   stack,
   table,
 } from "./layout"
-import { glyph, paint, palette, tone } from "./theme"
+import { glyph, tone } from "./theme"
 
 export function deployReleaseView({
   release,
@@ -63,7 +64,7 @@ export function deployReleaseView({
         .map(([key, value]) => tone.muted(`${key}=${value}`)),
     ]
     return [
-      `${tone.strong(pad(service.name, labelWidth))}${first}`,
+      `${pad(service.name, labelWidth)}${first}`,
       ...extra.map((line) => `${continuation}${line}`),
     ].join("\n")
   })
@@ -79,7 +80,7 @@ export function deployReleaseView({
       steps
         .map(
           (step) =>
-            `${tone.strong(pad(step.label, labelWidth))}${step.commands
+            `${pad(step.label, labelWidth)}${step.commands
               .map(formatDeployCommand)
               .join(tone.faint(` ${glyph.arrow} `))}`
         )
@@ -101,10 +102,9 @@ export function deployStepLine(label: string, seconds: string): string {
   return `${tone.ok(glyph.ok)} ${label} ${tone.faint(`(${seconds}s)`)}`
 }
 
+/** How a deploy ended. What was deployed, and where, opened the deploy's output already. */
 export function deployCompleteView({
   release,
-  commit,
-  ref,
   seconds,
 }: {
   release: DeployRelease
@@ -116,13 +116,10 @@ export function deployCompleteView({
     service.http ? [{ label: service.name, value: service.http.publicOrigin }] : []
   )
   return screen(
-    stack(
-      headline(
-        "ok",
-        `${release.name} deployed`,
-        seconds === undefined ? undefined : `${seconds.toFixed(1)}s`
-      ),
-      `  ${tone.muted(`${commit.slice(0, 12)} ${glyph.dot} ${ref} ${glyph.dot} ${release.target.kind} ${release.target.location}`)}`
+    headline(
+      "ok",
+      `${release.name} deployed`,
+      seconds === undefined ? undefined : `${seconds.toFixed(1)}s`
     ),
     urls.length > 0 ? rows(urls) : null
   )
@@ -148,18 +145,12 @@ export function deployStatusView({
     status.running && status.processes.every((process) => process.status === "running")
   const release = status.release
   return screen(
-    stack(
-      headline(
-        healthy ? "live" : "warn",
-        `${name} ${healthy ? "is running" : status.running ? "needs attention" : "is stopped"}`
-      ),
-      `  ${tone.muted(`${release.commit.slice(0, 12)} ${glyph.dot} ${release.ref} ${glyph.dot} deployed ${formatAge(release.deployedAt)} by ${release.deployedBy} ${glyph.dot} ${location}`)}`
-    ),
+    header("deploy status", location),
     status.processes.length > 0
       ? table(
           ["", "service", "pid", "cpu", "memory", "restarts", "up"],
           status.processes.map((process) => [
-            process.status === "running" ? tone.ok(glyph.live) : tone.warn(glyph.idle),
+            process.status === "running" ? tone.blue(glyph.live) : tone.warn(glyph.idle),
             process.instance === 0 ? process.service : `${process.service}#${process.instance}`,
             process.pid === undefined ? "-" : String(process.pid),
             process.cpuPercent === undefined ? "-" : `${process.cpuPercent.toFixed(1)}%`,
@@ -177,7 +168,14 @@ export function deployStatusView({
         .map((process) =>
           marked(tone.warn(glyph.warn), `${process.service}: ${process.lastError}`, tone.muted)
         )
-    ) || null
+    ) || null,
+    stack(
+      headline(
+        healthy ? "live" : "warn",
+        `${name} ${healthy ? "is running" : status.running ? "needs attention" : "is stopped"}`
+      ),
+      `  ${tone.muted(`${release.commit.slice(0, 12)} ${glyph.dot} ${release.ref} ${glyph.dot} deployed ${formatAge(release.deployedAt)} by ${release.deployedBy}`)}`
+    )
   )
 }
 
@@ -213,7 +211,7 @@ export function deployChecksView({
           label: check.label,
           value: check.detail,
           status: CHECK_STATUS[check.status],
-          ...(check.remedy ? { notes: [check.remedy], noteStyle: tone.blue } : {}),
+          ...(check.remedy ? { notes: [check.remedy], noteStyle: remedy } : {}),
         })
       )
     ),
@@ -224,7 +222,7 @@ export function deployChecksView({
           `${name} is ready to deploy`,
           warnings.length > 0 ? `${warnings.length} to look at` : undefined
         ),
-    `${tone.muted("Next")}  ${next.startsWith("sixb") ? tone.blue(next) : next}`
+    nextStep(next)
   )
 }
 
@@ -285,7 +283,7 @@ export function deployCiView({
             notes: [
               `Create a fine-grained token with Contents: read on ${token.submodules.map((submodule) => submodule.repo ?? submodule.url).join(", ")}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
             ],
-            noteStyle: tone.blue,
+            noteStyle: remedy,
           },
         ]
       : []),
@@ -302,7 +300,7 @@ export function deployCiView({
       token ? "warn" : "ok",
       `${name} deploys from GitHub Actions on every push to ${branch}`
     ),
-    `${tone.muted("Next")}  ${next}`
+    nextStep(next)
   )
 }
 
@@ -320,20 +318,17 @@ export function deployAccessView({
       : keys
           .map((key) =>
             stack(
-              `${tone.strong(key.comment || "(no comment)")}${key.restricted ? tone.warn("  restricted") : ""}`,
+              `${key.comment || "(no comment)"}${key.restricted ? tone.warn("  restricted") : ""}`,
               tone.muted(`${key.type} ${key.fingerprint}`)
             )
           )
           .join("\n")
-  return screen(headline("ok", title), list)
+  return screen(header(), list, headline("ok", title))
 }
 
-export function deployLiveUrls(release: DeployRelease): string {
-  return release.services
-    .flatMap((service) => (service.http ? [service.http.publicOrigin] : []))
-    .filter(isUrl)
-    .map((url) => paint(url, { color: palette.blue, underline: true }))
-    .join("  ")
+/** The one thing to do next: a command to run, or what to do in words. */
+function nextStep(next: string): string {
+  return section("Next steps", next.startsWith("sixb ") ? commands([next]) : remedy(next))
 }
 
 export function formatAge(iso: string, suffix = " ago"): string {

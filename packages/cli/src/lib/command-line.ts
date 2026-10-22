@@ -250,7 +250,7 @@ const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({
 }))
 
 const commandTree: readonly CommandNode[] = [
-  command("dev", "Start local development (server + app)", {
+  command("dev", "Run the project locally, restarting as you edit", {
     options: [
       "entry",
       "port",
@@ -266,7 +266,7 @@ const commandTree: readonly CommandNode[] = [
     ],
     repeatable: ["concurrency"],
   }),
-  command("api", "Start production API/docs/WebSocket server", {
+  command("api", "Start the production API, docs, and event stream", {
     options: [
       "entry",
       "no-migrate",
@@ -279,10 +279,10 @@ const commandTree: readonly CommandNode[] = [
       "trusted-proxies",
     ],
   }),
-  command("app", "Start production app server", {
+  command("app", "Start the production app server", {
     options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],
   }),
-  command("login", "Save and select a local API profile", {
+  command("login", "Sign in to an instance and save it as a profile", {
     usage: "sixb login <api-url> [--profile <name>] [--token-stdin]",
     options: ["profile", "token-stdin", "json"],
     // Asked for in a terminal when it is missing.
@@ -290,12 +290,12 @@ const commandTree: readonly CommandNode[] = [
     rootHelpLabel: "login <api-url>",
   }),
   command("logout", "Remove a saved profile", { options: ["profile", "json"] }),
-  command("status", "Check the selected API profile", {
+  command("status", "Check the current profile's connection", {
     options: [...CONNECTION_OPTIONS, "json"],
   }),
   {
     name: "profile",
-    summary: "Manage local API profiles",
+    summary: "List, show, or switch saved profiles",
     usage: "sixb profile <list|show|use> [name]",
     rootHelpLabel: "profile list|show|use",
     children: [
@@ -322,12 +322,12 @@ const commandTree: readonly CommandNode[] = [
   {
     name: "token",
     summary: "Manage personal access tokens",
+    rootHelpLabel: "token list|create|revoke",
     usage: "sixb token <list|create|revoke>",
     children: [
       command("token:list", "List personal access tokens", {
         path: ["token", "list"],
         options: [...CONNECTION_OPTIONS, "json"],
-        rootHelpLabel: "token list",
       }),
       command("token:create", "Create a personal access token", {
         path: ["token", "create"],
@@ -336,7 +336,6 @@ const commandTree: readonly CommandNode[] = [
         repeatable: ["group"],
         maximumPositionals: 1,
         requiredInputs: [{ option: "name", positional: 0 }],
-        rootHelpLabel: "token create",
       }),
       command("token:revoke", "Revoke a personal access token", {
         path: ["token", "revoke"],
@@ -344,19 +343,18 @@ const commandTree: readonly CommandNode[] = [
         options: [...CONNECTION_OPTIONS, "id", "json"],
         maximumPositionals: 1,
         requiredInputs: [{ option: "id", positional: 0 }],
-        rootHelpLabel: "token revoke <id>",
       }),
     ],
   },
   {
     name: "service-account",
-    summary: "Manage service accounts",
+    summary: "Manage service accounts and their tokens",
+    rootHelpLabel: "service-account ...",
     usage: "sixb service-account <list|create|disable|token>",
     children: [
       command("service-account:list", "List service accounts", {
         path: ["service-account", "list"],
         options: [...CONNECTION_OPTIONS, "json"],
-        rootHelpLabel: "service-account list",
       }),
       command("service-account:create", "Create a service account", {
         path: ["service-account", "create"],
@@ -365,7 +363,6 @@ const commandTree: readonly CommandNode[] = [
         repeatable: ["group"],
         maximumPositionals: 1,
         requiredInputs: [{ option: "name", positional: 0 }],
-        rootHelpLabel: "service-account create",
       }),
       command("service-account:disable", "Disable a service account", {
         path: ["service-account", "disable"],
@@ -373,13 +370,11 @@ const commandTree: readonly CommandNode[] = [
         options: [...CONNECTION_OPTIONS, "id", "json"],
         maximumPositionals: 1,
         requiredInputs: [{ option: "id", positional: 0 }],
-        rootHelpLabel: "service-account disable",
       }),
       {
         name: "token",
         summary: "Manage service-account tokens",
         usage: "sixb service-account token <list|create|revoke> <service-account-id>",
-        rootHelpLabel: "service-account token",
         children: [
           command("service-account:token:list", "List service-account tokens", {
             path: ["service-account", "token", "list"],
@@ -409,14 +404,14 @@ const commandTree: readonly CommandNode[] = [
       },
     ],
   },
-  command("scheduler", "Start production scheduler event producer", {
+  command("scheduler", "Start the production scheduler", {
     options: ["entry", "no-migrate"],
   }),
-  command("orchestrator", "Start production event-to-queue dispatcher", {
+  command("orchestrator", "Start the production orchestrator, which queues work for events", {
     options: ["entry", "no-migrate"],
   }),
-  command("rules", "Start production rules runtime", { options: ["entry", "no-migrate"] }),
-  command("worker", "Start production queue worker: sync, agent, pipeline, projection, workflow", {
+  command("rules", "Start the production rules runtime", { options: ["entry", "no-migrate"] }),
+  command("worker", "Start one queue worker: sync, agent, pipeline, projection, workflow", {
     usage: "sixb worker <sync|agent|pipeline|projection|workflow> [options]",
     options: [
       "entry",
@@ -430,7 +425,7 @@ const commandTree: readonly CommandNode[] = [
     maximumPositionals: 1,
     rootHelpLabel: "worker <type>",
   }),
-  command("worker-group", "Co-host multiple queue workers in one process (constrained resources)", {
+  command("worker-group", "Run several queue workers in one process", {
     usage: "sixb worker-group [types...] [options]",
     options: [
       "entry",
@@ -446,7 +441,9 @@ const commandTree: readonly CommandNode[] = [
   }),
   command("check", "Validate project configuration and health", { options: ["entry"] }),
   command("typegen", "Generate ontology types for typed queries", { options: ["entry"] }),
-  command("build", "Build runtime and production UI/app assets", { options: ["entry", "outdir"] }),
+  command("build", "Build the runtime and the app for production", {
+    options: ["entry", "outdir"],
+  }),
   {
     name: "desktop",
     summary: "Ship the app as a desktop app",
@@ -473,7 +470,7 @@ const commandTree: readonly CommandNode[] = [
           rootHelpLabel: "db prepare",
         }
       ),
-      command("db:migrate", "Run adapter-owned database migrations ahead of a role", {
+      command("db:migrate", "Run database migrations ahead of a role", {
         path: ["db", "migrate"],
         options: ["entry"],
         rootHelpLabel: "db migrate",
@@ -490,7 +487,7 @@ const commandTree: readonly CommandNode[] = [
         options: ["entry"],
         rootHelpLabel: "lake check",
       }),
-      command("lake:cleanup", "Run lake storage maintenance cleanup", {
+      command("lake:cleanup", "Clean up old lake snapshots and files", {
         path: ["lake", "cleanup"],
         options: ["entry", "dry-run", "expire-older-than", "delete-older-than"],
         rootHelpLabel: "lake cleanup",
@@ -558,7 +555,7 @@ const commandTree: readonly CommandNode[] = [
       },
     ],
   },
-  command("init", "Initialize sixb project in a directory", {
+  command("init", "Create a Sixb project in a directory", {
     usage: "sixb init [dir]",
     maximumPositionals: 1,
     rootHelpLabel: "init [dir]",
@@ -610,21 +607,20 @@ export const ROOT_HELP: CliHelp = {
   usage: "sixb <command> [options]",
   summary: "Real-time digital twin framework",
   commands: rootHelpItems(commandTree),
-  // Each command lists its own options; the root names the ones most commands share.
-  options: [
-    ...(["entry", "profile", "json"] as const).map((name) => ({
-      label: CLI_OPTION_DEFINITIONS[name].syntax,
-      value: CLI_OPTION_DEFINITIONS[name].summary,
-    })),
-    { label: "--help", value: "Show contextual help" },
-    { label: "--version", value: "Show version" },
-  ],
+  // Each command lists its own options; the root names the ones most commands share. Its last
+  // line points to `--help`.
+  options: (["entry", "profile", "json"] as const).map((name) => ({
+    label: CLI_OPTION_DEFINITIONS[name].syntax,
+    value: CLI_OPTION_DEFINITIONS[name].summary,
+  })),
 }
 
 /** The root help's commands, grouped by what they are for. Order is the reading order. */
 const ROOT_HELP_GROUP_COMMANDS: readonly {
   readonly title: string
   readonly names: readonly string[]
+  /** Listed by name only: each has its own help. */
+  readonly compact?: boolean
 }[] = [
   { title: "Develop", names: ["init", "dev", "check", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
@@ -637,17 +633,19 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
     title: "Connect to an instance",
     names: ["login", "logout", "status", "profile", "token", "service-account"],
   },
-  { title: "Work with an instance", names: INSTANCE_COMMANDS },
+  { title: "Work with an instance", names: INSTANCE_COMMANDS, compact: true },
 ]
 
 export const ROOT_HELP_GROUPS: readonly {
   readonly title: string
   readonly items: readonly CliHelpItem[]
+  readonly compact?: boolean
 }[] = (() => {
   const grouped = new Set(ROOT_HELP_GROUP_COMMANDS.flatMap((group) => group.names))
   const ungrouped = commandTree.filter((node) => !grouped.has(node.name))
   const groups = ROOT_HELP_GROUP_COMMANDS.map((group) => ({
     title: group.title,
+    ...(group.compact ? { compact: true } : {}),
     items: rootHelpItems(
       group.names.flatMap((name) => commandTree.filter((node) => node.name === name))
     ),
@@ -662,8 +660,6 @@ export const CLI_EXAMPLES = [
   "sixb init my-project",
   "sixb dev",
   "sixb login https://api.example.com",
-  "sixb objects inspect Customer customer-123",
-  "sixb worker-group sync agent --concurrency agent=8",
   "sixb deploy",
 ] as const
 
