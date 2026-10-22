@@ -911,4 +911,57 @@ describe("saving an edited sheet", () => {
     expect(requests.at(-1)?.body).toMatchObject({ baseVersion: 2 })
     ui.unmount()
   })
+
+  test("keeps the draft when a version arrives while editing, and says so at once", async () => {
+    // Reproduce by following the latest version while editing: the sheet opens version 2 under
+    // the draft, North reads 1,284 again, and nothing says why.
+    const queries = cache()
+    const ui = await editNorth(queries)
+    const v1 = queries.getQueryData<GetArtifactVersionResponse>(
+      getArtifactVersionQueryKey({ path: { artifactId, version: "1" } })
+    ) as GetArtifactVersionResponse
+    const detail = queries.getQueryData<GetArtifactResponse>(
+      getArtifactQueryKey({ path: { artifactId } })
+    ) as GetArtifactResponse
+
+    // The Agent publishes version 2, ready in the cache, and the artifact is read again.
+    await act(async () => {
+      queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "2" } }), {
+        ...v1,
+        version: 2,
+      })
+      for (const file of v1.files) {
+        const at = (version: number) =>
+          artifactFileSource({ artifactId, version, ...file, fileRef: file.file }).queryKey
+        queries.setQueryData([...at(2), "text"], queries.getQueryData([...at(1), "text"]))
+      }
+      queries.setQueryData(getArtifactQueryKey({ path: { artifactId } }), {
+        artifact: { ...detail.artifact, latestVersion: 2 },
+        versions: [
+          {
+            version: 2,
+            title: "Regions",
+            author: { type: "user", id: "user-2" },
+            createdAt: "2026-10-01T13:00:00.000Z",
+          },
+          ...detail.versions,
+        ],
+      } satisfies GetArtifactResponse)
+    })
+
+    // The header counts from version 2 once the viewer has it, with the fix or without.
+    await waitFor(() => expect(ui.getByRole("button", { name: "Save as version 3" })).toBeTruthy())
+
+    // The draft is still there, and the reader is told before saving, with the same choices.
+    expect(
+      ui.container.querySelector('[role="grid"] [data-row="1"][data-column="1"]')?.textContent
+    ).toBe("1,300")
+    expect(ui.getByText("Unsaved changes")).toBeTruthy()
+    expect(ui.getByRole("alert").textContent).toContain(
+      "Version 2 was published while you were editing."
+    )
+    expect(ui.getByRole("button", { name: "Open version 2" })).toBeTruthy()
+    expect(ui.getByRole("button", { name: "Save as version 3 anyway" })).toBeTruthy()
+    ui.unmount()
+  })
 })
