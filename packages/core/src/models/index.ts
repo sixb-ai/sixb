@@ -4,14 +4,25 @@ export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "..
 export type {
   AudioModelCatalog,
   AudioModelCatalogInput,
+  SpeechModelCatalog,
+  SpeechModelEntry,
   TranscriptionModelCatalog,
   TranscriptionModelEntry,
 } from "./audio/catalog"
-export { TranscriptionModelResponseError } from "./audio/errors"
+export { SpeechModelResponseError, TranscriptionModelResponseError } from "./audio/errors"
 export type {
   AudioModelsRuntime,
+  AudioSpeakInput,
+  AudioSpeakResult,
   AudioTranscribeInput,
   AudioTranscribeResult,
+  SpeechCostEstimator,
+  SpeechModel,
+  SpeechModelDefinition,
+  SpeechModelRequest,
+  SpeechModelResponseMetadata,
+  SpeechModelResult,
+  SpeechReservationInput,
   TranscriptionCostEstimator,
   TranscriptionModel,
   TranscriptionModelDefinition,

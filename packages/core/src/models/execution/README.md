@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision, reranking and image calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking, image and speech calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -96,3 +96,15 @@ style; without one, cost limits refuse the call. The call is recorded before its
 validated or written: `outputImages` is the number the provider actually returned, whatever its
 own usage says, and the same dimensions select the rate-card variant. Generated images are written
 to blob storage only after accounting, so a cancelled call is billed but stores nothing.
+
+## Speech flow
+
+Speech generation in `../audio/speech.ts` follows the image flow. A request without a voice takes
+the binding's `defaultVoice`, and voice, format, length and instructions are checked against the
+definition before admission. Sixb never transcodes: a reply in a format other than the one requested
+is an invalid response, recorded but not stored.
+
+Characters and voice tiers are provider rules, so the binding owns both: `estimateReservation`
+receives the text and voice and counts characters itself, providers report `inputCharacters` in
+usage, and `pricingDimensions` in the reply names the tier the provider billed, which selects the
+rate-card variant.

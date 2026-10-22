@@ -1254,6 +1254,8 @@ export type {
 } from "./actions/descriptor"
 export type {
   AudioModelsRuntime,
+  AudioSpeakInput,
+  AudioSpeakResult,
   AudioTranscribeInput,
   AudioTranscribeResult,
   TranscriptionOutput,

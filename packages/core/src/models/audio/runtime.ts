@@ -11,6 +11,7 @@ import { prepareModelInputFile, readModelInputFile } from "../input-file"
 import { estimateModelCall, type ModelMoney } from "../pricing"
 import { assertTranscriptionModel } from "./catalog"
 import { TranscriptionModelResponseError } from "./errors"
+import { createSpeak } from "./speech"
 import type {
   AudioModelsRuntime,
   TranscriptionModel,
@@ -26,6 +27,7 @@ export function createAudioRuntime(
   blobs: BlobStorage | undefined
 ): AudioModelsRuntime {
   return {
+    speak: createSpeak(runtime, execution, catalog, session, blobs),
     async transcribe(input) {
       assertProviderAccess(runtime, execution, "models.audio.transcribe")
 

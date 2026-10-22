@@ -1,5 +1,5 @@
 import { ModelProviderError } from "../errors"
-import type { TranscriptionModelResponseMetadata } from "./types"
+import type { SpeechModelResponseMetadata, TranscriptionModelResponseMetadata } from "./types"
 
 /** Retains billing metadata even when the provider returns an invalid transcript. */
 export class TranscriptionModelResponseError extends ModelProviderError {
@@ -13,6 +13,23 @@ export class TranscriptionModelResponseError extends ModelProviderError {
     super(message, providerId, modelId, {
       ...options,
       code: "invalid_transcription_response",
+      retryable: false,
+    })
+  }
+}
+
+/** Retains billing metadata even when the provider returns invalid audio. */
+export class SpeechModelResponseError extends ModelProviderError {
+  constructor(
+    message: string,
+    providerId: string,
+    modelId: string,
+    readonly metadata: SpeechModelResponseMetadata,
+    options?: ErrorOptions
+  ) {
+    super(message, providerId, modelId, {
+      ...options,
+      code: "invalid_speech_response",
       retryable: false,
     })
   }

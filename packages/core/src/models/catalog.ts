@@ -102,6 +102,13 @@ export type ModelCatalogFor<TInput extends ModelCatalogInput> = ModelCatalog &
           readonly transcription: NonNullable<AudioModelCatalog["transcription"]>
         }
       }
+    : unknown) &
+  ([TInput] extends [{ readonly audio: { readonly speech: readonly unknown[] } }]
+    ? {
+        readonly audio: AudioModelCatalog & {
+          readonly speech: NonNullable<AudioModelCatalog["speech"]>
+        }
+      }
     : unknown)
 
 /** Build an immutable catalog while preserving each family's default and empty-list rules. */
