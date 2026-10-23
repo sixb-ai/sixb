@@ -3,6 +3,7 @@
 export { artifactAccessRule, artifactQueryChecker } from "../execution"
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS } from "../limits"
+export { artifactQueryName } from "../queries"
 export {
   artifactVersionWarnings,
   type PreparedArtifactVersion,

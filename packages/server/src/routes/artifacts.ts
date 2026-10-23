@@ -8,7 +8,10 @@ import {
   type PublishedArtifact,
   type SixbHostView,
 } from "@sixb/core"
-import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
+import {
+  createArtifactFrame,
+  serializeArtifactQueryResult,
+} from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -42,7 +45,7 @@ import {
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
-import { handleObjectQueryError, serializeExpandedObject } from "./objects"
+import { handleObjectQueryError } from "./objects"
 
 type RouteSet = { status?: number | string }
 
@@ -639,9 +642,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           if (!result) return await refusal(context, artifactId, context.set)
 
           // Typed by the ArtifactQueryResponse component, as the query route types its rows.
-          return result.kind === "objects"
-            ? { ...result, objects: result.objects.map(serializeExpandedObject) }
-            : result
+          return serializeArtifactQueryResult(result)
         } catch (error) {
           // What the query itself runs into answers as the objects API answers it.
           return error instanceof ArtifactRequestError || error instanceof ZodError
