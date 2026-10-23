@@ -51,6 +51,8 @@ work/overdue/
   show one, since it shows rows.
 - A version holds up to 20 queries. Publishing runs each one as the user who asked, and refuses
   one they could not run.
+- What an open artifact shows is read again when the objects its queries read change, so the
+  figures you saw are those of when you ran it: date the ones you cite (`SKILL.md`, Publish).
 
 ## When to copy instead
 
