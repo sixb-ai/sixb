@@ -180,9 +180,9 @@ const mine = await sixb.agent.threads.fork(thread.id)
 
 - The copy holds the finished messages and their files. A turn still running is not copied.
 - In the copy, the agent works with the permissions of its owner.
-- The copy gets its own copies of the artifacts the original shares, at their latest version: they
-  are yours, and its messages show them. An artifact that embeds or links another still names the
-  original one inside its content.
+- The copy gets its own copies of the artifacts the original shares, with their history: they are
+  yours, and its messages show them at the versions they showed. An artifact that embeds or links
+  another still names the original one inside its content.
 - The copy starts with a new [sandbox](../sandboxes/overview.md#keep-files-across-conversation-runs).
   Files from the original's sandbox are not in it, and the agent is told so.
 

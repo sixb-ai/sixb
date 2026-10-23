@@ -244,6 +244,7 @@ export type {
   ArtifactStorageErrorCode,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -259,7 +260,6 @@ export type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
-  ShareArtifactInThreadInput,
 } from "./artifacts"
 export type {
   AccessTokenRecord,

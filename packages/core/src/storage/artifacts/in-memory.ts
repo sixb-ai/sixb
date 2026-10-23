@@ -10,6 +10,7 @@ import type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -25,7 +26,6 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
-  ShareArtifactInThreadInput,
 } from "./types"
 
 interface StoredArtifact {
@@ -34,8 +34,15 @@ interface StoredArtifact {
   readonly versions: readonly ArtifactVersionRecord[]
   /** The number the next version gets; it only grows, so a deleted number is never reused. */
   readonly nextVersion: number
-  /** The threads it is shared in, with when it was first shared in each. */
-  readonly threads: ReadonlyMap<string, Date>
+  /** The threads it is shared in, by id. */
+  readonly threads: ReadonlyMap<string, ThreadLink>
+}
+
+interface ThreadLink {
+  /** When it was first shared there. */
+  readonly sharedAt: Date
+  /** Copied for the thread: shared there whatever versions it keeps. */
+  readonly copied: boolean
 }
 
 interface InMemoryArtifactSnapshot {
@@ -152,15 +159,25 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return [...(stored?.threads.keys() ?? [])].sort((left, right) => (left < right ? -1 : 1))
   }
 
-  async shareInThread(input: ShareArtifactInThreadInput): Promise<void> {
-    const key = artifactKey(input.projectId, input.artifactId)
-    const stored = this.artifacts.get(key)
-    if (!stored) throw artifactStorageErrors.notFound(input.artifactId)
-    if (stored.threads.has(input.threadId)) return
+  async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {
+    const source = this.artifacts.get(artifactKey(input.projectId, input.sourceId))
+    if (!source) throw artifactStorageErrors.notFound(input.sourceId)
 
-    const threads = new Map(stored.threads)
-    threads.set(input.threadId, new Date(input.sharedAt ?? new Date()))
-    this.artifacts.set(key, { ...stored, threads })
+    const key = artifactKey(input.projectId, input.id)
+    if (this.artifacts.has(key)) throw artifactStorageErrors.exists(input.id)
+
+    const record: ArtifactRecord = { ...source.record, id: input.id, owner: { ...input.owner } }
+    const versions = source.versions.map(({ origin: _origin, ...version }) =>
+      structuredClone({ ...version, artifactId: input.id })
+    )
+    const sharedAt = new Date(input.copiedAt ?? new Date())
+    this.artifacts.set(key, {
+      record,
+      versions,
+      nextVersion: source.nextVersion,
+      threads: new Map([[input.threadId, { sharedAt, copied: true }]]),
+    })
+    return structuredClone(record)
   }
 
   async listReferencingVersions(
@@ -267,6 +284,19 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         this.deleteArtifact(key)
         continue
       }
+
+      // A run publishes from one thread: the link stays only if a version from it remains.
+      const threadId = stored.versions.find((version) => version.origin?.runId === input.runId)
+        ?.origin?.threadId
+      const threads = new Map(stored.threads)
+      if (
+        threadId &&
+        !threads.get(threadId)?.copied &&
+        !remaining.some((version) => version.origin?.threadId === threadId)
+      ) {
+        threads.delete(threadId)
+      }
+
       this.artifacts.set(key, {
         ...stored,
         record: {
@@ -276,6 +306,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
           updatedAt: new Date(latest.createdAt),
         },
         versions: remaining,
+        threads,
       })
     }
     return deleted
@@ -322,13 +353,13 @@ function versionRecord(
 
 /** The links an artifact has once this version is stored: its origin's thread among them. */
 function sharedIn(
-  threads: ReadonlyMap<string, Date>,
+  threads: ReadonlyMap<string, ThreadLink>,
   version: ArtifactVersionRecord
-): ReadonlyMap<string, Date> {
+): ReadonlyMap<string, ThreadLink> {
   const threadId = version.origin?.threadId
   if (!threadId || threads.has(threadId)) return threads
 
-  return new Map(threads).set(threadId, new Date(version.createdAt))
+  return new Map(threads).set(threadId, { sharedAt: new Date(version.createdAt), copied: false })
 }
 
 function published(

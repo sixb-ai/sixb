@@ -565,43 +565,89 @@ describe("artifacts a shared conversation shares", () => {
     expect(await withoutCredential.artifacts.access(artifact.id)).toBe("none")
   })
 
-  // Guard proof: return no copies from copySharedArtifacts; the fork's message then names Alice's
-  // artifact, which Bob loses once removed from her thread.
-  test("a fork gets its own copies, at their latest, and its messages name them", async () => {
+  // Guard proofs: return no copies from copySharedArtifacts, and the fork's messages name Alice's
+  // artifact, which Bob loses once removed from her thread; copy only the latest version, and the
+  // copy has no version 2 for the card nor 1 for the pinned embed.
+  test("a fork gets its own copies, with their history, and its messages name them", async () => {
     const { host } = setup()
     const { owner, participant, thread, run, artifact, content } = await sharedArtifact(host)
     await owner.artifacts.publish(artifact.id, { ...content, title: "Latest" })
+    // A card for version 2, as publish_artifact_version leaves one, and an embed pinned to @1.
     await host.storage.agents?.messages.append({
       projectId,
       id: "msg_shown",
       threadId: thread.id,
       runId: run.id,
       role: "assistant",
-      parts: [{ type: "text", text: `Here: ![Deals](artifact:${artifact.id})` }],
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_publish",
+          toolName: "publish_artifact_version",
+          input: { id: artifact.id },
+          state: "output-available",
+          output: { artifactId: artifact.id, version: 2 },
+        },
+        { type: "text", text: `As it was: ![Deals](artifact:${artifact.id}@1)` },
+      ],
     })
 
     const fork = await participant.agent.threads.fork(thread.id)
     const copies = await participant.artifacts.list({ threadId: fork.id })
     expect(copies.artifacts).toHaveLength(1)
     const [copy] = copies.artifacts
-    expect(copy).toMatchObject({ owner: bob, title: "Latest", latestVersion: 1 })
-    expect(copy?.id).not.toBe(artifact.id)
+    if (!copy) throw new Error("Expected the fork's copy.")
+    expect(copy).toMatchObject({ owner: bob, title: "Latest", latestVersion: 3 })
+    expect(copy.id).not.toBe(artifact.id)
 
     const { messages } = (await host.storage.agents?.messages.list({
       projectId,
       threadId: fork.id,
     })) ?? { messages: [] }
-    expect(JSON.stringify(messages)).toContain(`artifact:${copy?.id}`)
-    expect(JSON.stringify(messages)).not.toContain(artifact.id)
+    const copied = JSON.stringify(messages)
+    expect(copied).toContain(`"artifactId":"${copy.id}","version":2`)
+    expect(copied).toContain(`artifact:${copy.id}@1`)
+    expect(copied).not.toContain(artifact.id)
+
+    // What they name is there, as it was.
+    const original = await owner.artifacts.listVersions(artifact.id)
+    const history = await participant.artifacts.listVersions(copy.id)
+    expect(
+      history?.versions.map(({ version, title, author }) => ({ version, title, author }))
+    ).toEqual(original?.versions.map(({ version, title, author }) => ({ version, title, author })))
+    expect(await participant.artifacts.getVersion(copy.id, 2)).toMatchObject({
+      title: "Late deals",
+    })
 
     // The copy is Bob's: it stays when he leaves Alice's thread, and the original stays hers.
     await participant.agent.threads.participants.remove(thread.id, bob)
-    expect(await participant.artifacts.access(copy?.id ?? "")).toBe("owner")
+    expect(await participant.artifacts.access(copy.id)).toBe("owner")
     expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
   })
 
-  // Guard proof: fork outside the storage transaction in forkAgentThread; the copies then outlive
-  // the fork that failed.
+  // Guard proof: copy every artifact the source shares in copySharedArtifacts, whatever the
+  // caller reaches; Bob's token then copies Alice's artifact into his own.
+  test("a fork through an access token copies only the caller's own artifacts", async () => {
+    const { host } = setup()
+    const { thread } = await sharedArtifact(host)
+    const token = bindRequestExecution(host, {
+      request: new Request("http://localhost/test"),
+      authorization: {
+        type: "principal",
+        credential: { type: "accessToken", id: "pat_bob" },
+        context: {
+          principal: bob,
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true },
+        },
+      },
+    })
+
+    const fork = await token.agent.threads.fork(thread.id)
+    expect((await host.storage.artifacts?.list({ projectId, threadId: fork.id }))?.total).toBe(0)
+  })
+
   test("a fork that fails leaves no copy behind", async () => {
     const { host } = setup()
     const { participant, thread, artifact } = await sharedArtifact(host)
