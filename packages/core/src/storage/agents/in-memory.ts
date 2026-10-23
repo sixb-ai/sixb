@@ -6,6 +6,8 @@ import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
 import {
   agentContextCheckpointMatchesCreateInput,
+  agentMemoryConflicts,
+  agentMemoryHistoryCutoff,
   assertAgentContextCheckpointAnchors,
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
@@ -13,7 +15,9 @@ import {
   assertConversationAgentRunSpec,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
+  assertSaveAgentMemoryInput,
   assertSubagentRunResult,
+  compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   participantsToAdd,
   planAgentThreadFork,
@@ -25,6 +29,10 @@ import type {
   AddAgentThreadParticipantsInput,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
+  AgentMemoryChange,
+  AgentMemoryRepoRecord,
+  AgentMemoryRevisionRecord,
+  AgentMemoryStore,
   AgentMessageRecord,
   AgentMessageStore,
   AgentRunFailureCode,
@@ -46,6 +54,8 @@ import type {
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
+  ListAgentMemoryRevisionsInput,
+  ListAgentMemoryRevisionsResult,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -55,6 +65,8 @@ import type {
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
   RemoveAgentThreadParticipantInput,
+  SaveAgentMemoryInput,
+  SaveAgentMemoryResult,
   StartAgentRunInput,
   SubagentRunRecord,
   TransitionAgentThreadSandboxInput,
@@ -106,7 +118,7 @@ function applyWindow<T>(rows: T[], offset = 0, limit?: number): Window<T> {
 }
 
 /**
- * Shared in-memory state behind the four sub-stores. They are tiered for ergonomics
+ * Shared in-memory state behind the sub-stores. They are tiered for ergonomics
  * (`storage.runs.create(...)`), but several operations span tables — creating/finishing a run
  * updates the thread anchor, appending a message bumps thread stats, and checkpoint creation reads
  * run/thread/message anchors — so they all read and write the same maps through this object.
@@ -118,6 +130,15 @@ interface AgentStoreState {
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
+  readonly memory: Map<string, StoredAgentMemoryRepo>
+}
+
+/** A memory repo as its two SQL tables hold it: revisions, and the file versions each wrote. */
+interface StoredAgentMemoryRepo {
+  /** Oldest first. */
+  readonly revisions: readonly Omit<AgentMemoryRevisionRecord, "changes">[]
+  /** In insertion order, so by revision. `contents: null` deleted the path. */
+  readonly files: readonly (AgentMemoryChange & { readonly revision: number })[]
 }
 
 export interface InMemoryAgentStorageSnapshot {
@@ -126,6 +147,7 @@ export interface InMemoryAgentStorageSnapshot {
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
+  readonly memory: Map<string, StoredAgentMemoryRepo>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -953,6 +975,88 @@ function compareLatestCheckpoints(
   )
 }
 
+// ── memory ────────────────────────────────────────────────────────────────────────────────────
+
+class InMemoryAgentMemoryStore implements AgentMemoryStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async get(input: { projectId: string; repoId: string }): Promise<AgentMemoryRepoRecord> {
+    const repo = this.state.memory.get(key(input.projectId, input.repoId))
+    if (!repo) return { revision: 0, files: [] }
+    const files = [...latestMemoryFiles(repo).values()]
+      .flatMap((file) =>
+        file.contents === null ? [] : [{ path: file.path, contents: file.contents }]
+      )
+      .sort((left, right) => compareAgentMemoryPaths(left.path, right.path))
+    return { revision: repo.revisions.at(-1)?.revision ?? 0, files }
+  }
+
+  async save(input: SaveAgentMemoryInput): Promise<SaveAgentMemoryResult> {
+    assertSaveAgentMemoryInput(input)
+    const repoKey = key(input.projectId, input.repoId)
+    const repo = this.state.memory.get(repoKey) ?? { revisions: [], files: [] }
+    const head = repo.revisions.at(-1)?.revision ?? 0
+    const conflicts = agentMemoryConflicts(input, head, latestMemoryFiles(repo))
+    if (conflicts.length > 0) return { saved: false, revision: head, conflicts }
+
+    const revision = head + 1
+    const createdAt = input.createdAt ?? new Date()
+    const revisions = [
+      ...repo.revisions,
+      {
+        revision,
+        message: input.message,
+        author: clone(input.author),
+        ...(input.source === undefined ? {} : { source: input.source }),
+        createdAt: new Date(createdAt),
+      },
+    ]
+    const files = [...repo.files, ...input.changes.map((change) => ({ ...change, revision }))]
+
+    const cutoff = agentMemoryHistoryCutoff(createdAt).getTime()
+    const savedAt = new Map(revisions.map((entry) => [entry.revision, entry.createdAt.getTime()]))
+    const latest = latestMemoryFiles({ revisions, files })
+    this.state.memory.set(repoKey, {
+      revisions,
+      files: files.filter(
+        (file) => latest.get(file.path) === file || (savedAt.get(file.revision) ?? 0) >= cutoff
+      ),
+    })
+    return { saved: true, revision }
+  }
+
+  async listRevisions(
+    input: ListAgentMemoryRevisionsInput
+  ): Promise<ListAgentMemoryRevisionsResult> {
+    const repo = this.state.memory.get(key(input.projectId, input.repoId))
+    const newestFirst = [...(repo?.revisions ?? [])].reverse()
+    const { page, hasMore, total } = applyWindow(newestFirst, input.offset, input.limit)
+    const revisions = page.map(
+      (entry): AgentMemoryRevisionRecord => ({
+        ...clone(entry),
+        changes: (repo?.files ?? [])
+          .filter((file) => file.revision === entry.revision)
+          .map((file) => ({ path: file.path, deleted: file.contents === null }))
+          .sort((left, right) => compareAgentMemoryPaths(left.path, right.path)),
+      })
+    )
+    return { revisions, hasMore, total }
+  }
+
+  async delete(input: { projectId: string; repoId: string }): Promise<void> {
+    this.state.memory.delete(key(input.projectId, input.repoId))
+  }
+}
+
+/** Each path's highest-revision version, the deleted ones included. */
+function latestMemoryFiles(
+  repo: StoredAgentMemoryRepo
+): Map<string, StoredAgentMemoryRepo["files"][number]> {
+  const latest = new Map<string, StoredAgentMemoryRepo["files"][number]>()
+  for (const file of repo.files) latest.set(file.path, file)
+  return latest
+}
+
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
@@ -960,18 +1064,21 @@ export class InMemoryAgentStorage implements AgentStorage {
     runs: new Map(),
     messages: new Map(),
     checkpoints: new Map(),
+    memory: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
   readonly runs: InMemoryAgentRunStore
   readonly messages: InMemoryAgentMessageStore
   readonly checkpoints: InMemoryAgentContextCheckpointStore
+  readonly memory: InMemoryAgentMemoryStore
 
   constructor(executions: ExecutionStorage) {
     this.threads = new InMemoryAgentThreadStore(this.state)
     this.runs = new InMemoryAgentRunStore(this.state, executions)
     this.messages = new InMemoryAgentMessageStore(this.state)
     this.checkpoints = new InMemoryAgentContextCheckpointStore(this.state)
+    this.memory = new InMemoryAgentMemoryStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -981,6 +1088,7 @@ export class InMemoryAgentStorage implements AgentStorage {
       runs: structuredClone(this.state.runs),
       messages: structuredClone(this.state.messages),
       checkpoints: structuredClone(this.state.checkpoints),
+      memory: structuredClone(this.state.memory),
     }
   }
 
@@ -990,6 +1098,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.runs, snapshot.runs)
     replace(this.state.messages, snapshot.messages)
     replace(this.state.checkpoints, snapshot.checkpoints)
+    replace(this.state.memory, snapshot.memory)
   }
 }
 

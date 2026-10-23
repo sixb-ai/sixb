@@ -285,6 +285,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("071-unique-values", uniqueValuesSql),
     sqliteSql("072-generated-media-usage", generatedMediaUsageSql),
     sqliteSql("073-model-call-files", modelCallFilesSql),
+    sqliteSql("074-agent-memory", agentMemorySql),
   ],
 })
 
@@ -655,3 +656,4 @@ import generatedMediaUsageSql from "./migrations/072-generated-media-usage.sql" 
   type: "text",
 }
 import modelCallFilesSql from "./migrations/073-model-call-files.sql" with { type: "text" }
+import agentMemorySql from "./migrations/074-agent-memory.sql" with { type: "text" }
