@@ -12,6 +12,7 @@ import {
 import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
 import { memo } from "react"
 import { type FileSource, messageFileSource } from "../../artifacts/file-source"
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
@@ -30,7 +31,6 @@ import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-s
 import { ContextChips } from "./context-chips"
 import { FileAttachmentCard } from "./file-attachment-card"
 import { AssistantBody } from "./message-parts"
-import { PersonAvatar } from "./person-avatar"
 
 /**
  * Render a single durable message. System messages are not shown in the reading transcript.

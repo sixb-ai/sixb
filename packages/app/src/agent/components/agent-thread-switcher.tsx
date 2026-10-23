@@ -11,12 +11,12 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { History, LoaderCircle, Plus, Search, X } from "lucide-react"
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
 import { useAgentMessages } from "../i18n"
 import { personName, threadOwner } from "../sharing"
 import { agentThreadTitle } from "../thread-navigation"
 import type { AgentThread } from "../types"
-import { PersonAvatar } from "./person-avatar"
 
 /** The conversations other people shared with the reader, paged like their own. */
 export interface SharedThreadList {

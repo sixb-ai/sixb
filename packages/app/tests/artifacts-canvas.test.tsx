@@ -220,7 +220,7 @@ describe("a canvas's board", () => {
     // runs live, filling the item.
     expect(node("plan")?.querySelector("[data-sixb-page-embed]")).not.toBeNull()
     expect(node("plan")?.style.width).toBe("480px")
-    expect(node("gone")?.textContent).toContain("It was deleted, or it isn't shared with you.")
+    expect(node("gone")?.textContent).toContain("It may have been deleted.")
     view.unmount()
   })
 

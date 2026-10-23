@@ -28,6 +28,7 @@ import { useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertTriangle, GitBranchPlus, LogOut, UserPlus, X } from "lucide-react"
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react"
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import type { CurrentUser } from "../../session"
 import type { ThreadSharing } from "../hooks/use-thread-sharing"
 import { useAgentMessages } from "../i18n"
@@ -42,7 +43,6 @@ import {
 } from "../sharing"
 import type { AgentThread } from "../types"
 import { type ParticipantChoice, ParticipantInput, participantChoiceKey } from "./participant-input"
-import { PersonAvatar } from "./person-avatar"
 
 export interface ThreadPeopleProps {
   readonly thread: AgentThread

@@ -1,4 +1,4 @@
-import { type GetArtifactResponse, isSixbApiError } from "@sixb/client"
+import { deleteArtifact, type GetArtifactResponse, isSixbApiError } from "@sixb/client"
 import {
   getArtifactOptions,
   getArtifactQueryKey,
@@ -20,6 +20,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -59,6 +60,8 @@ import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { resetPageState, usePageStateCount } from "./page-state"
+import { type ArtifactAuthor, useArtifactPeople } from "./people"
+import { PersonAvatar } from "./person-avatar"
 import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
@@ -156,20 +159,10 @@ function ArtifactView({
   const guarded = edit.guard(chrome)
 
   if (error || (artifactQuery.isSuccess && !detail)) {
-    const notFound = isSixbApiError(error) && error.status === 404
     return (
       <>
         <ViewerBar chrome={chrome} />
-        <ViewerNotice
-          title={notFound ? messages.notFound : messages.loadFailed}
-          description={
-            notFound
-              ? messages.notFoundDescription
-              : isSixbApiError(error) && error.status === 501
-                ? messages.storageUnavailable
-                : undefined
-          }
-        />
+        <LoadFailure error={error} />
       </>
     )
   }
@@ -203,6 +196,7 @@ function ArtifactView({
       {edit.saving.state === "moved" || edit.saving.state === "failed" ? (
         <EditNotice edit={edit} />
       ) : null}
+      {edit.savedShared ? <SavedSharedNotice /> : null}
       <EditSessionProvider editing={edit.editing} report={edit.report}>
         <ArtifactBody
           key={bodyKey(version, kind, target.part)}
@@ -214,6 +208,30 @@ function ArtifactView({
       </EditSessionProvider>
       <DiscardDialog edit={edit} />
     </>
+  )
+}
+
+/**
+ * Why the artifact can't be shown: it isn't shared with the reader, it no longer exists, or
+ * reading it failed.
+ */
+function LoadFailure({ error }: { readonly error: unknown }) {
+  const messages = useArtifactMessages().viewer
+  const refusal = isSixbApiError(error) ? error : null
+
+  if (refusal?.code === "not_shared") {
+    return <ViewerNotice title={messages.notShared} description={messages.notSharedDescription} />
+  }
+
+  if (refusal?.status === 404) {
+    return <ViewerNotice title={messages.notFound} description={messages.notFoundDescription} />
+  }
+
+  return (
+    <ViewerNotice
+      title={messages.loadFailed}
+      {...(refusal?.status === 501 ? { description: messages.storageUnavailable } : {})}
+    />
   )
 }
 
@@ -230,6 +248,8 @@ type SaveState =
 interface ArtifactEdit {
   /** Whether the reader may edit what is shown: the latest version of a kind that edits. */
   readonly available: boolean
+  /** A save just published to an artifact the reader shares through a conversation. */
+  readonly savedShared: boolean
   readonly editing: boolean
   readonly changed: boolean
   readonly saving: SaveState
@@ -262,20 +282,20 @@ function useArtifactEdit(
   [edited, setEdited]: readonly [number | null, (version: number | null) => void]
 ): ArtifactEdit {
   const queries = useQueryClient()
-  const user = useCurrentUser()
   const editing = edited !== null
   const [draft, setDraft] = useState<ArtifactDraft | null>(null)
   const [state, setSaving] = useState<SaveState>({ state: "idle" })
   const [confirming, setConfirming] = useState<(() => void) | null>(null)
+  const [savedShared, setSavedShared] = useState(false)
   const artifact = detail?.artifact
-  // The owner publishes; with sign-in off, everyone does.
-  const owns = !user || (artifact?.owner.type === "user" && artifact.owner.id === user.id) || false
+  // Its owner and the participants of a conversation that shares it publish; an observer reads.
+  const canPublish = detail?.access === "owner" || detail?.access === "update"
   const available =
     !!artifact &&
     !!version &&
     EDITABLE_KINDS.has(artifact.kind) &&
     version.version === artifact.latestVersion &&
-    owns
+    canPublish
   const changed = editing && !!draft?.changed
 
   // A version published while the reader edits is announced at once, as a save would meet it: with
@@ -315,6 +335,8 @@ function useArtifactEdit(
             (query.queryKey[0] as { _id?: string } | undefined)?._id === "listArtifacts",
         })
         stop()
+        // Someone else's artifact, saved through a conversation: say who sees the change.
+        setSavedShared(detail?.access === "update")
         onTargetChange({ type: "artifact", artifactId: version.artifactId })
       } catch (error) {
         const refused = publishRefusal(error)
@@ -325,8 +347,15 @@ function useArtifactEdit(
         )
       }
     },
-    [version, draft, saving, queries, stop, onTargetChange]
+    [version, draft, saving, queries, stop, onTargetChange, detail?.access]
   )
+
+  // The confirmation says its piece and goes.
+  useEffect(() => {
+    if (!savedShared) return
+    const timer = window.setTimeout(() => setSavedShared(false), 5_000)
+    return () => window.clearTimeout(timer)
+  }, [savedShared])
 
   // ⌘S saves, as an editor's does; leaving the page with changes asks first.
   useEffect(() => {
@@ -353,6 +382,7 @@ function useArtifactEdit(
     editing,
     changed,
     saving,
+    savedShared,
     ...(editing && draft?.undo ? { undo: draft.undo } : {}),
     ...(editing && draft?.redo ? { redo: draft.redo } : {}),
     next: (saving.state === "moved" ? saving.latest.version : (artifact?.latestVersion ?? 0)) + 1,
@@ -425,6 +455,20 @@ function EditNotice({ edit }: { readonly edit: ArtifactEdit }) {
         </div>
       ) : null}
     </div>
+  )
+}
+
+/** Under the header for a moment after a save that everyone in the conversation now sees. */
+function SavedSharedNotice() {
+  const messages = useArtifactMessages().edit
+  return (
+    <p
+      role="status"
+      className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-muted/40 px-4 py-2 text-[13px] text-muted-foreground animate-in fade-in-0 duration-200"
+    >
+      <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />
+      {messages.savedShared}
+    </p>
   )
 }
 
@@ -631,7 +675,7 @@ function ArtifactHeader({
       ) : (
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
-      {artifact.kind === "page" ? <PageMenu artifactId={artifact.id} /> : null}
+      <ArtifactMenu detail={detail} chrome={chrome} />
       {chrome.withoutPageLink ? null : (
         <CopyLinkButton
           link={() => artifactLink(target, artifact.latestVersion, location.origin)}
@@ -689,7 +733,10 @@ function VersionPicker({
                 <span className="text-[13px] font-medium tabular-nums">
                   {messages.versionLabel(entry.version)}
                 </span>
-                <span className="text-xs text-muted-foreground">{date(entry.createdAt)}</span>
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  <VersionAuthor author={entry.author} />
+                  <span className="shrink-0">{date(entry.createdAt)}</span>
+                </span>
               </span>
               {entry.version === latest ? (
                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
@@ -704,70 +751,251 @@ function VersionPicker({
   )
 }
 
+/**
+ * Who published a version, when the reader can tell: themselves, or someone of the conversation the
+ * artifact opens in.
+ */
+function VersionAuthor({ author }: { readonly author: ArtifactAuthor }) {
+  const messages = useArtifactMessages().viewer
+  const user = useCurrentUser()
+  const nameOf = useArtifactPeople()
+  const own = author.type === "user" && author.id === user?.id
+  const name = own ? (user?.displayName ?? user?.email) : nameOf(author)
+  if (!name) return null
+
+  return (
+    <>
+      <PersonAvatar name={name} size="xs" />
+      <span className="min-w-0 truncate">{own ? messages.you : name}</span>
+      <span aria-hidden="true">·</span>
+    </>
+  )
+}
+
 /** A sheet downloads as its workbook, built in the browser, or any of its sheets as CSV. */
 function SheetDownloadMenu({ version }: { readonly version: ArtifactVersion }) {
   return <DownloadMenu options={useWorkbookDownloads(version, version.title)} />
 }
 
 /**
- * A page's More: *Reset page data*, once the page keeps something for the reader. The page starts
- * over wherever it is open; a reset that fails says so beside the button.
+ * The header's More: *Reset page data* once a page keeps something for the reader, and *Delete*
+ * for the artifact's owner. An observer keeps nothing in a page and deletes nothing, so it has
+ * neither. A reset that fails says so beside the button; a delete, in its confirmation.
  */
-function PageMenu({ artifactId }: { readonly artifactId: string }) {
-  const messages = useArtifactMessages().page
+function ArtifactMenu({
+  detail,
+  chrome,
+}: {
+  readonly detail: ArtifactDetail
+  readonly chrome: ViewerChrome
+}) {
+  const { viewer: messages, page } = useArtifactMessages()
   const queries = useQueryClient()
-  const count = usePageStateCount(artifactId)
-  const [state, setState] = useState<"idle" | "working" | "failed">("idle")
-  if (count === 0 && state !== "working") return null
-  const reset = async () => {
-    setState("working")
+  const { artifact, access } = detail
+  const count = usePageStateCount(artifact.id)
+  const [reset, setReset] = useState<"idle" | "working" | "failed">("idle")
+  const [deleting, setDeleting] = useState(false)
+
+  const resettable =
+    artifact.kind === "page" && access !== "read" && (count > 0 || reset === "working")
+  const deletable = access === "owner"
+  if (!resettable && !deletable) return null
+
+  const resetData = async () => {
+    setReset("working")
     try {
-      await resetPageState(queries, artifactId)
-      setState("idle")
+      await resetPageState(queries, artifact.id)
+      setReset("idle")
     } catch (error) {
       console.warn("[SixbApp] Could not reset the page's data:", error)
-      setState("failed")
+      setReset("failed")
     }
   }
+
   return (
     <span className="flex shrink-0 items-center gap-2">
-      {state === "failed" ? (
+      {reset === "failed" ? (
         <span role="status" className="hidden text-xs text-destructive @lg:inline">
-          {messages.resetFailed}
+          {page.resetFailed}
         </span>
       ) : null}
+
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           aria-label={messages.more}
           title={messages.more}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground [&_svg]:size-[17px] [&_svg]:stroke-[1.75]"
         >
-          {state === "working" ? (
+          {reset === "working" ? (
             <LoaderCircle className="animate-spin" aria-hidden="true" />
           ) : (
             <MoreHorizontal aria-hidden="true" />
           )}
         </DropdownMenuTrigger>
+
         <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1.5">
-          <DropdownMenuItem
-            className="items-start gap-3 rounded-md px-2 py-1.5"
-            disabled={state === "working"}
-            onSelect={() => void reset()}
-          >
-            <RotateCcw
-              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
+          {resettable ? (
+            <MenuAction
+              icon={RotateCcw}
+              title={page.reset}
+              detail={page.resetDetail(count)}
+              disabled={reset === "working"}
+              onSelect={() => void resetData()}
             />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-[13px] font-medium text-foreground">{messages.reset}</span>
-              <span className="text-xs leading-snug text-muted-foreground">
-                {messages.resetDetail(count)}
-              </span>
-            </span>
-          </DropdownMenuItem>
+          ) : null}
+
+          {resettable && deletable ? <DropdownMenuSeparator className="my-1" /> : null}
+
+          {deletable ? (
+            <MenuAction
+              icon={Trash2}
+              title={messages.delete}
+              detail={messages.deleteDetail}
+              destructive
+              onSelect={() => setDeleting(true)}
+            />
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {deletable ? (
+        <DeleteDialog
+          artifact={artifact}
+          chrome={chrome}
+          open={deleting}
+          onOpenChange={setDeleting}
+        />
+      ) : null}
     </span>
+  )
+}
+
+/** An entry of the header's More: what it does, and a line on what that means. */
+function MenuAction({
+  icon: Icon,
+  title,
+  detail,
+  destructive = false,
+  disabled = false,
+  onSelect,
+}: {
+  readonly icon: typeof Trash2
+  readonly title: string
+  readonly detail: string
+  readonly destructive?: boolean
+  readonly disabled?: boolean
+  readonly onSelect: () => void
+}) {
+  return (
+    <DropdownMenuItem
+      className="items-start gap-3 rounded-md px-2 py-1.5"
+      disabled={disabled}
+      onSelect={onSelect}
+    >
+      <Icon
+        className={cn(
+          "mt-0.5 size-4 shrink-0",
+          destructive ? "text-destructive" : "text-muted-foreground"
+        )}
+        aria-hidden="true"
+      />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span
+          className={cn(
+            "text-[13px] font-medium",
+            destructive ? "text-destructive" : "text-foreground"
+          )}
+        >
+          {title}
+        </span>
+        <span className="text-xs leading-snug text-muted-foreground">{detail}</span>
+      </span>
+    </DropdownMenuItem>
+  )
+}
+
+/**
+ * Asks before the owner deletes the artifact, which takes it from every conversation that shares
+ * it. Deleted, the viewer closes, or goes back on the full page.
+ */
+function DeleteDialog({
+  artifact,
+  chrome,
+  open,
+  onOpenChange,
+}: {
+  readonly artifact: ArtifactDetail["artifact"]
+  readonly chrome: ViewerChrome
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+}) {
+  const messages = useArtifactMessages().viewer
+  const queries = useQueryClient()
+  const [state, setState] = useState<"idle" | "working" | "failed">("idle")
+
+  const remove = async () => {
+    setState("working")
+    try {
+      await deleteArtifact({ path: { artifactId: artifact.id }, throwOnError: true })
+    } catch (error) {
+      console.warn("[SixbApp] Could not delete the artifact:", error)
+      setState("failed")
+      return
+    }
+
+    onOpenChange(false)
+    ;(chrome.onClose ?? chrome.onBack)?.()
+
+    // Lists drop it; a viewer still on it reads that it is gone.
+    void queries.invalidateQueries({
+      predicate: (query) =>
+        (query.queryKey[0] as { _id?: string } | undefined)?._id === "listArtifacts",
+    })
+    void queries.invalidateQueries({
+      queryKey: getArtifactQueryKey({ path: { artifactId: artifact.id } }),
+    })
+  }
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (state === "working") return
+        setState("idle")
+        onOpenChange(next)
+      }}
+    >
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{messages.deleteTitle(artifact.title)}</AlertDialogTitle>
+          <AlertDialogDescription>{messages.deleteDescription}</AlertDialogDescription>
+        </AlertDialogHeader>
+
+        {state === "failed" ? (
+          <p role="alert" className="text-sm text-destructive">
+            {messages.deleteFailed}
+          </p>
+        ) : null}
+
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={state === "working"}>{messages.cancel}</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={state === "working"}
+            onClick={(event) => {
+              // It closes once the artifact is gone, not as the button is pressed.
+              event.preventDefault()
+              void remove()
+            }}
+          >
+            {state === "working" ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : null}
+            {state === "working" ? messages.deleting : messages.delete}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
