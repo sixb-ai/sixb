@@ -3522,16 +3522,16 @@ export type ListAiModelCallGroupsResponses = {
 export type ListAiModelCallGroupsResponse =
   ListAiModelCallGroupsResponses[keyof ListAiModelCallGroupsResponses]
 
-export type GetAiModelCallData = {
+export type GetAiModelCallFilesData = {
   body?: never
   path: {
     callId: string
   }
   query?: never
-  url: "/api/ai/model-calls/{callId}"
+  url: "/api/ai/model-calls/{callId}/files"
 }
 
-export type GetAiModelCallErrors = {
+export type GetAiModelCallFilesErrors = {
   /**
    * Response for status 404
    */
@@ -3540,9 +3540,9 @@ export type GetAiModelCallErrors = {
   }
 }
 
-export type GetAiModelCallError = GetAiModelCallErrors[keyof GetAiModelCallErrors]
+export type GetAiModelCallFilesError = GetAiModelCallFilesErrors[keyof GetAiModelCallFilesErrors]
 
-export type GetAiModelCallResponses = {
+export type GetAiModelCallFilesResponses = {
   /**
    * Response for status 200
    */
@@ -3560,7 +3560,8 @@ export type GetAiModelCallResponses = {
   }
 }
 
-export type GetAiModelCallResponse = GetAiModelCallResponses[keyof GetAiModelCallResponses]
+export type GetAiModelCallFilesResponse =
+  GetAiModelCallFilesResponses[keyof GetAiModelCallFilesResponses]
 
 export type GetAiModelCallFileContentData = {
   body?: never

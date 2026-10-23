@@ -650,9 +650,9 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
-    operationId: "getAiModelCall",
+    operationId: "getAiModelCallFiles",
     method: "GET",
-    path: "/api/ai/model-calls/:callId",
+    path: "/api/ai/model-calls/:callId/files",
     accessToken: true,
     agentApi: false,
   },

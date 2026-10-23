@@ -17,7 +17,7 @@ export interface ModelCallsRuntime {
    * principal, the agent thread's readers, or the action or workflow run's viewers. Null when the
    * call produced none or is hidden; usage observers see a call's cost, not its content.
    */
-  get(callId: string): Promise<ModelCallFiles | null>
+  files(callId: string): Promise<ModelCallFiles | null>
 }
 
 /** Whether the caller sees a run, as the runtime's own run lookups decide it. */
@@ -76,7 +76,7 @@ export function createModelCallsRuntime(
   }
 
   return {
-    async get(callId) {
+    async files(callId) {
       if (typeof callId !== "string" || !callId.trim()) {
         throw new TypeError("[SixbModels] A model call ID must be a nonblank string.")
       }

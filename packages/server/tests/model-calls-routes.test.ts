@@ -73,7 +73,7 @@ describe("model call routes", () => {
   test("a call's files are served to the run's readers, and hidden from others", async () => {
     const { file, alice, bob } = await setup()
 
-    const call = await alice("/api/ai/model-calls/call_1")
+    const call = await alice("/api/ai/model-calls/call_1/files")
     expect(call.status).toBe(200)
     expect(await call.json()).toEqual({
       callId: "call_1",
@@ -90,9 +90,9 @@ describe("model call routes", () => {
     expect(await head.text()).toBe("")
 
     // Another user learns nothing, not even that the call exists.
-    expect((await bob("/api/ai/model-calls/call_1")).status).toBe(404)
+    expect((await bob("/api/ai/model-calls/call_1/files")).status).toBe(404)
     expect((await bob("/api/ai/model-calls/call_1/files/content?path=/files/0")).status).toBe(404)
-    expect((await alice("/api/ai/model-calls/call_missing")).status).toBe(404)
+    expect((await alice("/api/ai/model-calls/call_missing/files")).status).toBe(404)
   })
 
   test("content paths stay inside the call's files", async () => {

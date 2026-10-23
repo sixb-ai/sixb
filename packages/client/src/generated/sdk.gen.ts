@@ -142,12 +142,12 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsErrors,
   GetAiLimitSubjectOptionsResponses,
-  GetAiModelCallData,
-  GetAiModelCallErrors,
   GetAiModelCallFileContentData,
   GetAiModelCallFileContentErrors,
   GetAiModelCallFileContentResponses,
-  GetAiModelCallResponses,
+  GetAiModelCallFilesData,
+  GetAiModelCallFilesErrors,
+  GetAiModelCallFilesResponses,
   GetArtifactData,
   GetArtifactErrors,
   GetArtifactFileContentData,
@@ -1253,15 +1253,19 @@ export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
 /**
  * Get the files a model call produced
  */
-export const getAiModelCall = <ThrowOnError extends boolean = false>(
-  options: Options<GetAiModelCallData, ThrowOnError>
+export const getAiModelCallFiles = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiModelCallFilesData, ThrowOnError>
 ) =>
-  (options.client ?? client).get<GetAiModelCallResponses, GetAiModelCallErrors, ThrowOnError>({
+  (options.client ?? client).get<
+    GetAiModelCallFilesResponses,
+    GetAiModelCallFilesErrors,
+    ThrowOnError
+  >({
     security: [
       { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
-    url: "/api/ai/model-calls/{callId}",
+    url: "/api/ai/model-calls/{callId}/files",
     ...options,
   })
 

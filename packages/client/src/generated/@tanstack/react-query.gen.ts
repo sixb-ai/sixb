@@ -55,8 +55,8 @@ import {
   getAiAccountingOverview,
   getAiLimitStatus,
   getAiLimitSubjectOptions,
-  getAiModelCall,
   getAiModelCallFileContent,
+  getAiModelCallFiles,
   getArtifact,
   getArtifactFileContent,
   getArtifactState,
@@ -316,12 +316,12 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsError,
   GetAiLimitSubjectOptionsResponse,
-  GetAiModelCallData,
-  GetAiModelCallError,
   GetAiModelCallFileContentData,
   GetAiModelCallFileContentError,
   GetAiModelCallFileContentResponse,
-  GetAiModelCallResponse,
+  GetAiModelCallFilesData,
+  GetAiModelCallFilesError,
+  GetAiModelCallFilesResponse,
   GetArtifactData,
   GetArtifactError,
   GetArtifactFileContentData,
@@ -1916,21 +1916,21 @@ export const listAiModelCallGroupsInfiniteOptions = (options: Options<ListAiMode
     }
   )
 
-export const getAiModelCallQueryKey = (options: Options<GetAiModelCallData>) =>
-  createQueryKey("getAiModelCall", options)
+export const getAiModelCallFilesQueryKey = (options: Options<GetAiModelCallFilesData>) =>
+  createQueryKey("getAiModelCallFiles", options)
 
 /**
  * Get the files a model call produced
  */
-export const getAiModelCallOptions = (options: Options<GetAiModelCallData>) =>
+export const getAiModelCallFilesOptions = (options: Options<GetAiModelCallFilesData>) =>
   queryOptions<
-    GetAiModelCallResponse,
-    GetAiModelCallError,
-    GetAiModelCallResponse,
-    ReturnType<typeof getAiModelCallQueryKey>
+    GetAiModelCallFilesResponse,
+    GetAiModelCallFilesError,
+    GetAiModelCallFilesResponse,
+    ReturnType<typeof getAiModelCallFilesQueryKey>
   >({
     queryFn: async ({ queryKey, signal }) => {
-      const { data } = await getAiModelCall({
+      const { data } = await getAiModelCallFiles({
         ...options,
         ...queryKey[0],
         signal,
@@ -1938,7 +1938,7 @@ export const getAiModelCallOptions = (options: Options<GetAiModelCallData>) =>
       })
       return data
     },
-    queryKey: getAiModelCallQueryKey(options),
+    queryKey: getAiModelCallFilesQueryKey(options),
   })
 
 export const getAiModelCallFileContentQueryKey = (

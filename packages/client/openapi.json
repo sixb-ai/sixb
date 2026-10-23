@@ -10866,11 +10866,11 @@
         }
       }
     },
-    "/api/ai/model-calls/{callId}": {
+    "/api/ai/model-calls/{callId}/files": {
       "get": {
         "summary": "Get the files a model call produced",
         "tags": ["Models"],
-        "operationId": "getAiModelCall",
+        "operationId": "getAiModelCallFiles",
         "security": [
           {
             "sixbAccessToken": []

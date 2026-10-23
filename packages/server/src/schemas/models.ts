@@ -144,7 +144,7 @@ export const ModelCallParamsSchema = z.object({
   callId: z.string().min(1),
 })
 
-export const ModelCallSchema = z.object({
+export const ModelCallFilesSchema = z.object({
   callId: z.string(),
   files: z.array(FileRefSchema),
   recordedAt: z.string(),
