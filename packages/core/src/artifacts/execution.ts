@@ -31,6 +31,7 @@ import {
   publishArtifact,
   storeArtifactVersion,
 } from "./publish/publish"
+import { type ArtifactQueryChecker, createArtifactQueryChecker } from "./publish/queries"
 
 /** A version's content: what its kind renders from, and what it is called. */
 export interface ArtifactContentInput {
@@ -124,8 +125,23 @@ export interface ArtifactStateValue {
 /** Where an access rule reads: the project's storage, or a transaction's to decide inside it. */
 export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents">
 
-/** Each runtime's access rule, for this repo's packages: an Agent turn publishes by it. */
-const accessRules = new WeakMap<object, (storage?: ArtifactAccessStorage) => ArtifactAccessRule>()
+/**
+ * What each runtime's caller publishes by, for this repo's packages: an Agent turn publishes with
+ * the access rule and the query checker of whoever asked for it.
+ */
+const publishers = new WeakMap<
+  object,
+  {
+    readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
+    readonly checkQuery: ArtifactQueryChecker
+  }
+>()
+
+function publisherOf(artifacts: Partial<ArtifactsRuntime>) {
+  const publisher = publishers.get(artifacts)
+  if (!publisher) throw new Error("[Sixb] These artifacts are not a Sixb runtime's.")
+  return publisher
+}
 
 /**
  * The access rule of the caller `artifacts` acts for, reading from `storage`: a transaction's, to
@@ -135,9 +151,12 @@ export function artifactAccessRule(
   artifacts: Partial<ArtifactsRuntime>,
   storage: ArtifactAccessStorage
 ): ArtifactAccessRule {
-  const rule = accessRules.get(artifacts)
-  if (!rule) throw new Error("[Sixb] These artifacts have no access rule.")
-  return rule(storage)
+  return publisherOf(artifacts).rule(storage)
+}
+
+/** What checks a version's queries as the caller `artifacts` acts for. */
+export function artifactQueryChecker(artifacts: Partial<ArtifactsRuntime>): ArtifactQueryChecker {
+  return publisherOf(artifacts).checkQuery
 }
 
 /** The access rule for the runtime's caller, reading from `storage`. */
@@ -206,6 +225,7 @@ export function createArtifactsRuntime(
 
   const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
     createRuntimeArtifactAccessRule(runtime, storage)
+  const checkQuery = createArtifactQueryChecker(runtime)
 
   /** The artifact with what the caller may do with it; `null` when there is none. */
   const reach = async (
@@ -252,7 +272,7 @@ export function createArtifactsRuntime(
       const author = requireCaller()
       return publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, author, readable: readableBy(rule()) },
+        { ...input, author, readable: readableBy(rule()), checkQuery },
         (artifact) => rule().publishAccess(artifact)
       )
     },
@@ -267,6 +287,7 @@ export function createArtifactsRuntime(
         artifactId,
         author,
         readable: readableBy(rule()),
+        checkQuery,
       })
       const stored = await store(prepared)
 
@@ -362,7 +383,7 @@ export function createArtifactsRuntime(
     },
   }
 
-  accessRules.set(artifacts, rule)
+  publishers.set(artifacts, { rule, checkQuery })
   return artifacts
 }
 

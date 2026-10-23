@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
+  defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -19,6 +20,7 @@ import {
   InMemoryStorage,
   type JsonValue,
   type Principal,
+  prop,
   SixbHost,
 } from "@sixb/core"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
@@ -35,6 +37,12 @@ const projectId = "publish-tests"
 const owner: Principal = { type: "user", id: "usr_owner" }
 const run = { id: "run_1", threadId: "thr_1", executionToken: "exec_1" }
 const context = { signal: new AbortController().signal, callId: "call", toolCallId: "call" }
+
+const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
 
 let root: string
 let storage: InMemoryStorage
@@ -90,7 +98,7 @@ beforeEach(async () => {
   blobStorage = new InMemoryBlobStorage()
   host = new SixbHost({
     id: projectId,
-    ontology: [],
+    ontology: [Invoice],
     storage,
     blobStorage,
     broker: new InMemoryBroker(),
@@ -130,6 +138,8 @@ type ToolOptions = {
   readonly author?: Principal
   /** The turn that publishes; `run`, in thr_1, when omitted. */
   readonly run?: typeof run
+  /** What the requester may do besides running the Agent. */
+  readonly grants?: Partial<GrantIndex>
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -166,7 +176,7 @@ function tools(options: ToolOptions = {}) {
     projectId,
     storage,
     artifacts: storage.artifacts,
-    reader: readerFor(options.author ?? owner),
+    reader: readerFor(options.author ?? owner, options.grants),
     blobStorage,
     run: {
       ...(options.run ?? run),
@@ -1023,5 +1033,24 @@ describe("materializeThreadArtifacts", () => {
       }),
     ]).finally(() => clearTimeout(bound))
     expect(outcome).toEqual(new Error("cancelled"))
+  })
+})
+
+describe("a version's queries", () => {
+  // Guard proof: drop `checkQuery: artifactQueryChecker(input.reader)` from the tool's publish; the
+  // second version is then refused too, as a query nothing checks.
+  test("are checked as the requester, who must be able to run each one", async () => {
+    write("work/overdue/index.html", "<!doctype html><title>Overdue</title><p>Overdue</p>")
+    write("work/overdue/queries/invoices.json", '{"kind":"start","objectTypeId":"Invoice"}')
+    const request = { path: "work/overdue", kind: "page", title: "Overdue" }
+
+    const refused = await publish(request).catch((error: unknown) => error)
+    expect(tools().create.errorText(refused)).toContain(
+      "queries/invoices.json: Principal 'usr_owner' is not allowed to view object type 'Invoice'."
+    )
+
+    expect(
+      await publish(request, { grants: { "view:object": new Set(["Invoice"]) } })
+    ).toMatchObject({ version: 1 })
   })
 })

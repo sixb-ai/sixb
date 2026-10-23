@@ -39,6 +39,11 @@ export const ARTIFACT_LIMITS = {
   maxBoardBytes: 2 * 1024 * 1024,
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,
+  /** `queries/<name>.json` files, each run for every reader who opens the version. */
+  maxQueries: 20,
+  maxQueryBytes: 64 * 1024,
+  /** What one query returns at most; past it, its result says it is truncated. */
+  maxQueryRows: 10_000,
 } as const
 
 /**
