@@ -45,6 +45,11 @@ export type FrameRequest =
   | FrameRequestOf<"scroll", { readonly x: number; readonly y: number }>
   /** Loads the entry again, as a page whose data was reset starts over. */
   | FrameRequestOf<"reload", Record<string, never>>
+  /**
+   * A query the page read has new rows: the objects it reads changed. The page reads them with
+   * `sixb.query(name)` again; the app sends it only for the queries that frame has read.
+   */
+  | FrameRequestOf<"query.changed", { readonly name: string }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL

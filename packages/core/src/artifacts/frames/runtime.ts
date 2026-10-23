@@ -22,6 +22,10 @@
  * runs it and answers with the query route's JSON. Opened on its own, it reads
  * `__sixb/queries/<name>.json` beside the runtime instead, where the layout check serves what the
  * query returned for the Agent's requester.
+ *
+ * When the objects a query reads change, the app reads it again and tells the frame, which fires
+ * `sixb:query` on the window with `detail.name`, for the page to call `sixb.query(name)` again.
+ * Opened on its own, nothing tells it: the rows the check served are all there is.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -225,6 +229,14 @@ export function frameRuntime(): void {
         // After the answer is posted, so the app hears it before the page goes.
         setTimeout(() => window.location.reload())
         return
+      case "query.changed": {
+        // The page reads the new rows itself: what it drew from the old ones is its own.
+        const name = String(params.name)
+        if (!QUERY_NAME.test(name)) throw new Error(`Unknown query '${name}'.`)
+
+        window.dispatchEvent(new CustomEvent("sixb:query", { detail: { name } }))
+        return
+      }
       case "scroll":
         if (deck) throw new Error("Only a page scrolls.")
         window.scrollBy({ left: Number(params.x) || 0, top: Number(params.y) || 0 })

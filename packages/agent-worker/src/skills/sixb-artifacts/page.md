@@ -129,6 +129,9 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   `redactions` (`{ amount: { reason: "missing_clearance" } }`): a permission they lack. Show it as
   locked, with that reason ("You don't have permission to see Amount"), never as 0 or empty, and
   never total, chart, or compare over it: a figure that reads it is locked too.
+- The rows move while the page is open: when the objects a query reads change, the window gets
+  `sixb:query` with the query's name in `event.detail.name`. Read it again and draw, keeping what
+  the reader set: `addEventListener("sixb:query", (event) => event.detail.name === "overdue" && load())`.
 - Copy values into JSON files beside the page only when `queries.md` says to copy, such as a
   snapshot or figures the user gave you, and read them with `fetch("data/regions.json")`.
 - Load a library from a CDN, by exact version, when it does real work: ECharts for interactive

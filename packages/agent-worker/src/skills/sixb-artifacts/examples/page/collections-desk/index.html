@@ -60,7 +60,7 @@
       </table>
     </div>
 
-    <p class="note">Each reader sees the invoices they may view, read when the page opens.</p>
+    <p class="note">Each reader sees the invoices they may view, as they change.</p>
   </main>
 
   <script type="module">
@@ -82,26 +82,30 @@
 
     // One row per invoice, from the query's rows and the customer it expands.
     let invoices = []
-    try {
-      const { objects, total, truncated } = await sixb.query("overdue")
-      invoices = objects.map((row) => {
-        const hidden = hiddenOf(row, "amount", "paid")
-        return {
-          number: row.properties.number ?? row.primaryId,
-          customer: row.links?.customer?.properties.name ?? "No customer",
-          due: row.properties.dueDate,
-          // Nothing paid yet is 0; an amount the reader can't see is not.
-          outstanding: hidden ? null : (row.properties.amount ?? 0) - (row.properties.paid ?? 0),
-          locked: hidden ? permission(hidden) : null,
-        }
-      })
-      status.textContent = truncated
-        ? `The first ${number.format(objects.length)} of ${number.format(total)} overdue invoices.`
-        : ""
-    } catch (error) {
-      status.textContent = `The overdue invoices could not be read: ${error.message}`
-      status.classList.add("failed")
-      rows.innerHTML = ""
+    const load = async () => {
+      try {
+        const { objects, total, truncated } = await sixb.query("overdue")
+        invoices = objects.map((row) => {
+          const hidden = hiddenOf(row, "amount", "paid")
+          return {
+            number: row.properties.number ?? row.primaryId,
+            customer: row.links?.customer?.properties.name ?? "No customer",
+            due: row.properties.dueDate,
+            // Nothing paid yet is 0; an amount the reader can't see is not.
+            outstanding: hidden ? null : (row.properties.amount ?? 0) - (row.properties.paid ?? 0),
+            locked: hidden ? permission(hidden) : null,
+          }
+        })
+        status.textContent = truncated
+          ? `The first ${number.format(objects.length)} of ${number.format(total)} overdue invoices.`
+          : ""
+        status.classList.remove("failed")
+        render()
+      } catch (error) {
+        status.textContent = `The overdue invoices could not be read: ${error.message}`
+        status.classList.add("failed")
+        rows.innerHTML = ""
+      }
     }
 
     // The query takes no parameters: the chips and the search filter its rows here.
@@ -156,7 +160,10 @@
 
     for (const chip of document.querySelectorAll('input[name="age"]')) chip.addEventListener("change", render)
     search.addEventListener("input", render)
-    if (!status.classList.contains("failed")) render()
+
+    // The invoices move while the page is open: read them again when they do, filters kept.
+    addEventListener("sixb:query", (event) => event.detail.name === "overdue" && load())
+    await load()
   </script>
 </body>
 </html>
