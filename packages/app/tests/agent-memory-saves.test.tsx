@@ -42,10 +42,16 @@ describe("what a turn saved to memory", () => {
           `cat >> "$SIXB_MEMORY_DIR/user/MEMORY.md" <<'EOF'\n- Prefers bullets\nEOF\nsixb memory save user -m "Prefers bullets"`,
           '{"repo":"user","saved":true,"revision":6,"changed":["MEMORY.md"]}'
         ),
+        // An entry linking a topic file, as the sixb-memory skill writes them. Reproduce by
+        // refusing every `[[` in lexShellCommand, quoted or not: this save is not said.
+        bash(
+          `echo '- Billing projects: [[projects/payments]] (added 2026-10-23)' >> "$SIXB_MEMORY_DIR/user/MEMORY.md" && sixb memory save user -m "Billing projects"`,
+          '{"repo":"user","saved":true,"revision":7,"changed":["MEMORY.md"]}'
+        ),
         // Saved again, under the same words: one line is enough.
         merged,
       ])
-    ).toEqual(["Invoices exclude VAT", "Prefers bullets"])
+    ).toEqual(["Invoices exclude VAT", "Prefers bullets", "Billing projects"])
   })
 
   test("is said below the reply, where the collapsed work would hide it", () => {
