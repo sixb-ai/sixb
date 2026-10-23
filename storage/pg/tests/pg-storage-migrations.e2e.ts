@@ -113,7 +113,8 @@ const SHIPPED_MIGRATIONS = [
   "073-unique-values",
   "074-generated-media-usage",
   "075-model-call-files",
-  "076-artifact-threads",
+  "076-agent-memory",
+  "077-artifact-threads",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -638,8 +639,8 @@ describe("Postgres storage migrations", () => {
   })
 
   test("shares each existing artifact in the threads its versions came from", async () => {
-    // Removal proof: drop the INSERT from 076; the artifact is then shared nowhere.
-    const index = indexOf("076-artifact-threads")
+    // Removal proof: drop the INSERT from 077; the artifact is then shared nowhere.
+    const index = indexOf("077-artifact-threads")
     await withDatabase({ migrateThrough: index }, async ({ storage, sql, migrateThrough }) => {
       await sql.unsafe(`
         INSERT INTO artifacts (

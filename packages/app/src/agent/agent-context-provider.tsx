@@ -87,6 +87,7 @@ export function useAgentContext(context: AgentContextInput | null | undefined): 
   }, [contextKey, register, unregister])
 }
 
+/** The context pages registered with {@link useAgentContext}, for a chat's `ambientContext`. */
 export function useRegisteredAgentContext(): readonly AgentContextInput[] {
   return useContext(RegistryContext)?.context ?? []
 }

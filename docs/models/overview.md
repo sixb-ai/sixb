@@ -65,6 +65,59 @@ The chat agent receives the file as written in every conversation, so keep it sh
 instructions for a particular task in a [skill](./tools-and-authorization.md#add-a-skill), which
 the agent reads only when relevant. AI workflow steps use their own `instructions` instead.
 
+## It remembers
+
+The chat agent keeps a memory for each user: what it learned in earlier conversations, such as their
+preferences, vocabulary, and how they measure things. Memory is a folder of Markdown files with a
+`MEMORY.md` entry point. The agent reads `MEMORY.md` at the start of every conversation, opens the
+other files when it needs them, and saves what it learns as it goes. Below its reply, the chat shows
+each thing it saved.
+
+Memory needs no configuration and no grant. A user's memory is theirs alone, and AI workflow steps
+have none. A conversation keeps the `MEMORY.md` it started with, so what it saves shapes the next
+conversation, or the same one once its history is summarized.
+
+The project also has a memory, built up from everyone's conversations, for what every user's agent
+should know: your team's vocabulary, conventions, and how things are measured. The agent decides
+what goes there and what stays in the user's own memory, and the chat says which it saved to.
+Everyone who can use the agent reads and adds to it. Because people who cannot see the same data
+read it, the agent only puts there what users told it, never records, data, or anything about a
+particular person. Each save is recorded with who made it and in which conversation.
+
+Deleting the project's memory requires `can.manage(agent.memory)`:
+
+File: `security/roles/knowledge-keeper.ts`
+
+```ts
+import { agent, can, defineRole } from "@sixb/core"
+import { teamLeads } from "../groups/team-leads"
+
+export const knowledgeKeeper = defineRole("assistant.knowledge-keeper", {
+  grantedTo: [teamLeads],
+  grants: [can.manage(agent.memory)],
+})
+```
+
+Settings › Memory shows both memories, as the agent reads them. A person can correct any entry,
+see every change with who made it, restore a file as an earlier change left it, or delete their
+memory. Their edits are saves like the agent's, and the next conversation reads them.
+
+Read or delete the project's memory from your code:
+
+```ts
+const { revision, files } = await sixb.agent.memory.get("project")
+const before = await sixb.agent.memory.get("project", { revision: 3 })
+await sixb.agent.memory.delete("project")
+```
+
+A user's memory is reachable only as that user: in their conversations, in Settings › Memory, or
+through `/api/agent-memory/user` with their session. Your code runs as the system, so
+`get("user")` there reads the system's own memory, not a person's.
+
+Each save is a revision with the agent's own description of what it learned. `MEMORY.md` holds at
+most 16 KB, any other file 256 KB, and each memory 4 MB in all. Earlier versions of a file are
+kept for 90 days.
+
 ## Control access
 
 The agent's access depends on where it runs:
@@ -129,6 +182,70 @@ reads the object itself.
 ```tsx
 agentContext.object(Project, project.id, { label: project.name })
 ```
+
+### Build your own chat
+
+`AgentPanel` is assembled from parts that `@sixb/app` exports, so a chat with its own layout keeps
+the built-in behavior: streaming, retries, attachments, `@` context and the model picker.
+`useAgentConversation` runs one conversation and returns the props for its transcript and its
+composer:
+
+File: `app/_components/assistant.tsx`
+
+```tsx
+import {
+  ArtifactPanelRoot,
+  Composer,
+  SandboxRecovery,
+  Transcript,
+  useAgentConversation,
+  useRegisteredAgentContext,
+} from "@sixb/app"
+import { useState } from "react"
+
+export function Assistant() {
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const conversation = useAgentConversation({ threadId, onThreadCreated: setThreadId })
+  const pageContext = useRegisteredAgentContext()
+
+  return (
+    <ArtifactPanelRoot scopeKey={threadId ?? "new"}>
+      <div className="flex h-full flex-col">
+        <Transcript {...conversation.transcriptProps} />
+        {conversation.sandboxRecoveryProps && (
+          <SandboxRecovery {...conversation.sandboxRecoveryProps} />
+        )}
+        <Composer
+          {...conversation.composerProps}
+          ambientContext={pageContext}
+          placeholder="Ask about invoices"
+        />
+      </div>
+    </ArtifactPanelRoot>
+  )
+}
+```
+
+`ArtifactPanelRoot` opens the files and artifacts a reply shows. Without it, they cannot be opened.
+Pass `compact` when the chat is narrow so they open in a dialog. `SandboxRecovery` appears when a
+thread's sandbox stops responding; the composer stays disabled until the person starts over.
+
+Before showing the conversation, handle `conversation.agentLoading`, `conversation.agentError`, no
+`conversation.currentAgent` once loaded (the project has no agent), and
+`conversation.threadUnavailable` (the thread was deleted or is not theirs).
+
+| Part | Use it for |
+| --- | --- |
+| `useAgentConversation` | One conversation: messages, the live run, threads, models, and `send`, `stop` and `retry` |
+| `Transcript` | The messages, the streaming reply, and retry or continue after a run stops early |
+| `Composer` | Text, attachments, `@` context and the model picker |
+| `AgentThreadSwitcher` | Search and switch between the person's threads |
+| `ThreadArtifactsMenu` | The artifacts a thread produced |
+| `ModelControls` | The model picker on its own; `ProviderLogo` and `ReasoningEffortSlider` to build another |
+| `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |
+| `useRegisteredAgentContext` | The context open pages set with `useAgentContext` |
+
+Types such as `AgentThread`, `AgentMessage` and `AgentFileRef` are exported alongside them.
 
 ## Share a conversation
 

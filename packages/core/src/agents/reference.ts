@@ -5,4 +5,5 @@ export const agent: AgentReference = Object.freeze({
   kind: "agent",
   usage: Object.freeze({ kind: "aiUsage" }),
   threads: Object.freeze({ kind: "agentThreads" }),
+  memory: Object.freeze({ kind: "agentMemory" }),
 })

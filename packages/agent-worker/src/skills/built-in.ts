@@ -75,6 +75,7 @@ import referencesGuide from "./sixb-artifacts/references.md" with { type: "text"
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
 import slidesGuide from "./sixb-artifacts/slides.md" with { type: "text" }
+import memorySkillMarkdown from "./sixb-memory/SKILL.md" with { type: "text" }
 
 /**
  * Skills the worker ships, in every conversation's catalog. They describe formats the publisher
@@ -115,6 +116,12 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/canvas/retro/canvas.json": text(retroCanvas),
   }),
 ])
+
+/**
+ * How to write and save the Agent's memory. Installed with the memory, outside the catalog: the
+ * memory section of the prompt names it, so runs without memory never see it.
+ */
+export const MEMORY_SKILL: AgentSkillDefinition = builtInSkill(memorySkillMarkdown, {})
 
 /** The project's skills, then the built-in ones. */
 export function withBuiltInSkills(

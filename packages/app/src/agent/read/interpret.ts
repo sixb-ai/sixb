@@ -1,5 +1,6 @@
 import { humanize } from "../bash/interpret"
 import { type AgentMessages, en } from "../i18n/en"
+import { memoryFile, memoryFileLabel } from "../memory-paths"
 
 export interface ReadInput {
   readonly path: string
@@ -21,6 +22,8 @@ export interface ReadDescription {
   readonly failedTitle: string
   readonly detail?: string
   readonly skill: boolean
+  /** A file of the Agent's memory, which the detail names instead of the lines read. */
+  readonly memory: boolean
 }
 
 export function coerceReadInput(value: unknown): ReadInput | null {
@@ -59,6 +62,20 @@ export function describeRead(
 ): ReadDescription {
   const m = messages.read
   const path = output?.path ?? input?.path ?? ""
+  const memory = memoryFile(path)
+  if (memory !== null) {
+    const name = memoryFileLabel(memory.path)
+    const project = memory.repo === "project"
+    return {
+      path,
+      title: m.memory.title(project),
+      runningTitle: m.memory.running(project),
+      failedTitle: m.memory.failed(project),
+      ...(name ? { detail: name } : {}),
+      skill: false,
+      memory: true,
+    }
+  }
   const skill = describeSkillPath(path)
   const target = skill ? m[skill.kind] : m.file
   const name = skill?.name ?? fileName(path)
@@ -69,6 +86,7 @@ export function describeRead(
     failedTitle: target.failed(name),
     ...(output ? { detail: readDetail(output, m) } : {}),
     skill: skill !== null,
+    memory: false,
   }
 }
 

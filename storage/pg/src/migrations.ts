@@ -446,7 +446,8 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("073-unique-values", uniqueValuesSql),
     pgSql("074-generated-media-usage", generatedMediaUsageSql),
     pgSql("075-model-call-files", modelCallFilesSql),
-    pgSql("076-artifact-threads", artifactThreadsSql),
+    pgSql("076-agent-memory", agentMemorySql),
+    pgSql("077-artifact-threads", artifactThreadsSql),
   ],
 })
 
@@ -502,4 +503,5 @@ import generatedMediaUsageSql from "./migrations/074-generated-media-usage.sql" 
   type: "text",
 }
 import modelCallFilesSql from "./migrations/075-model-call-files.sql" with { type: "text" }
-import artifactThreadsSql from "./migrations/076-artifact-threads.sql" with { type: "text" }
+import agentMemorySql from "./migrations/076-agent-memory.sql" with { type: "text" }
+import artifactThreadsSql from "./migrations/077-artifact-threads.sql" with { type: "text" }

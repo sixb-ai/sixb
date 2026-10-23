@@ -6,6 +6,7 @@ export type {
 export type { MicrosoftClient } from "./client"
 export type { GraphErrorDetail } from "./errors"
 export {
+  isMailboxNotEnabled,
   MicrosoftApiError,
   MicrosoftAuthError,
   MicrosoftConfigurationError,
@@ -37,6 +38,7 @@ export type {
   OrgContactsResource,
 } from "./surfaces/directory/contacts"
 export type { OrgContactDeltaResource } from "./surfaces/directory/delta"
+export type { UsersResource } from "./surfaces/directory/users"
 export type { DrivesSurface } from "./surfaces/drives"
 export type { DriveDeltaResource } from "./surfaces/drives/delta"
 export type {
