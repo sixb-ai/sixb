@@ -440,6 +440,56 @@ describe("agent API gateway", () => {
     ).toBe(1)
   })
 
+  // Reproduce by dropping the shared-thread check in handleAgentApiGatewayRequest: each refused
+  // request below then reaches the caller's own memory. Make it compare the repo name to `user`,
+  // and `%75ser` does. Without auth, the run may read and save every memory, so only that check
+  // stands between it and its own.
+  for (const executionKind of ["conversation", "subagent"] as const) {
+    test(`keeps the caller's own memory out of a shared conversation (${executionKind})`, async () => {
+      const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+        auth: false,
+        executionKind,
+      })
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thread-1",
+        principals: [{ type: "user", id: "usr_bob" }],
+        addedBy: { type: "user", id: "usr_requester" },
+        maxParticipants: 50,
+      })
+      const save = (repo: string) =>
+        app.fetch(
+          new Request(`${gatewayBaseUrl}/api/agent-memory/${repo}/revisions`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              baseRevision: 0,
+              message: "Remember the team's vocabulary",
+              changes: [{ path: "MEMORY.md", contents: "# Memory\n" }],
+            }),
+          })
+        )
+
+      const refused = [
+        await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`)),
+        await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/%75ser`)),
+        await save("user"),
+      ]
+      for (const response of refused) {
+        expect(response.status).toBe(403)
+        await expect(response.json()).resolves.toEqual({
+          error:
+            "This conversation is shared with other people, so only the project's memory is available in it.",
+        })
+      }
+
+      expect(
+        (await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/project`))).status
+      ).toBe(200)
+      expect((await save("project")).status).toBe(201)
+    })
+  }
+
   test("gives workflow agent nodes no memory", async () => {
     // Reproduce by dropping the Agent memory check in handleAgentApiGatewayRequest: the node's
     // service account then reaches the project's memory through can.run(agent).

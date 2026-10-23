@@ -9,6 +9,12 @@ import {
 /** The repos a conversation installs and shows, in the order the prompt lists them. */
 const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user", "project"]
 
+/**
+ * A turn runs with its sender's rights, but everyone in a shared conversation sees what it reads,
+ * in the sandbox and in the answer: the sender's own memory stays out of it.
+ */
+const SHARED_CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["project"]
+
 /** The Agent's memory for one conversational run. */
 export interface ConversationMemory {
   /** Installed under `$SIXB_MEMORY_DIR` at their latest revision, for the Agent to read and save. */
@@ -22,15 +28,25 @@ export interface ConversationMemory {
  * `asOf`, the start of the thread or its latest compaction, so a save leaves the prompt and its
  * cache as they are until the context is next compacted; the installed files are the latest.
  * A requester without a repo of its own, such as a service account, gets the project's alone.
+ *
+ * In a shared conversation, the project's is the only one loaded. Which repos are loaded follows
+ * the participants when the turn prepares, not `asOf`: the turn after someone is added drops the
+ * user's section, and the turn after the last one leaves brings it back, each one prompt-cache
+ * miss on a turn whose prompt also starts or stops naming its sender. The project's section keeps
+ * its `asOf` entry throughout, so the prompt is the same whoever sends a shared turn.
  */
 export async function loadConversationMemory(input: {
   readonly sixb: Sixb
   readonly asOf: Date
+  /** The thread has participants. */
+  readonly shared?: boolean
 }): Promise<ConversationMemory | undefined> {
   const { sixb, asOf } = input
+  const repos = input.shared ? SHARED_CONVERSATION_MEMORY_REPOS : CONVERSATION_MEMORY_REPOS
+
   const loaded = (
     await Promise.all(
-      CONVERSATION_MEMORY_REPOS.map(async (repo) => {
+      repos.map(async (repo) => {
         try {
           const [latest, then] = await Promise.all([
             sixb.agent.memory.get(repo),

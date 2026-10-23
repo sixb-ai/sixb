@@ -146,6 +146,31 @@ describe("a conversation's memory", () => {
     ])
   })
 
+  // Guard proof: load CONVERSATION_MEMORY_REPOS whatever `shared` says; the user's repo is back.
+  test("loads the project's memory alone in a shared conversation", async () => {
+    const { sixbAs, save } = setup()
+    await save({
+      baseRevision: 0,
+      at: minutes(-5),
+      changes: [{ path: "MEMORY.md", contents: "# Priya's own\n" }],
+    })
+    await save({
+      repoId: "project",
+      baseRevision: 0,
+      at: minutes(-5),
+      changes: [{ path: "MEMORY.md", contents: "# Project\n" }],
+    })
+
+    const memory = await loadConversationMemory({
+      sixb: sixbAs(priya),
+      asOf: threadStart,
+      shared: true,
+    })
+
+    expect(memory?.repos.map((repo) => repo.repo)).toEqual(["project"])
+    expect(memory?.prompt.repos).toEqual([{ repo: "project", entry: "# Project\n" }])
+  })
+
   test("gives a requester with no memory of its own the project's alone", async () => {
     const { sixbAs, save } = setup()
     await save({

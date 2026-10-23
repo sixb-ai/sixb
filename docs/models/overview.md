@@ -269,6 +269,10 @@ await sixb.agent.runs.request({ threadId: thread.id, text: "Why did Acme slip?" 
 - **One answer at a time.** A message sent while the agent answers is refused with a 409.
 - **Only the owner adds or removes participants**, and recreates the conversation's sandbox. A
   participant can remove themself to leave.
+- **Only the project's [memory](#it-remembers).** From the first message after someone is added,
+  the agent reads and saves the project's memory, never the sender's own, so nothing personal
+  reaches the others. Once the last participant leaves, and in a
+  [copy](#continue-a-conversation), it uses both again.
 - **Whoever sent a message can retry it; the owner can stop any answer.**
 - **Removing someone applies to what comes next.** They no longer read the conversation, and a
   message of theirs still waiting for an answer is cancelled. An answer already being written

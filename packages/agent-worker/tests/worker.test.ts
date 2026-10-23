@@ -4161,8 +4161,144 @@ describe("AgentWorker", () => {
       })
       // The memory section names the memory skill, installed with the memory.
       expect(sandbox.readFileContents(`${agentDir}/skills/sixb-memory/SKILL.md`)).toContain(
-        "sixb memory save user"
+        "sixb memory save project"
       )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Guard proof: drop `hasParticipants` from the environment worker.ts creates; the shared turns
+  // then install and show the sender's own memory.
+  test("loads only the project's memory while the thread has participants", async () => {
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const sandboxes = new RecordingSandboxFactory()
+    const assistants = defineGroup("assistants")
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        captureSummaryPrompt: () => {},
+        captureAnswerPrompt: (prompt) => {
+          answerPrompts.push(prompt)
+        },
+      }),
+      new InMemoryBroker(),
+      sandboxes,
+      {
+        security: {
+          ontology: [],
+          groups: [AGENT_RUNTIME_GROUP, assistants],
+          roles: [
+            defineRole("assistant.user", { grantedTo: [assistants], grants: [can.run(agent)] }),
+          ],
+        },
+      }
+    )
+    const bob = { type: "user", id: "usr_bob" } as const
+    for (const member of [REQUESTER, bob]) {
+      await authStorageOf(sixb).users.create({
+        id: member.id,
+        projectId: PROJECT_ID,
+        email: `${member.id}@example.com`,
+      })
+      await authStorageOf(sixb).groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId: member.id,
+        groupId: assistants.id,
+        source: "manual",
+      })
+    }
+
+    const threadId = "shared_memory_thread"
+    await seedMemoryAroundThreadStart(sixb, threadId)
+    const saveAt = new Date(Date.now() - 600_000)
+    await agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: "project",
+      baseRevision: 0,
+      message: "Share",
+      author: bob,
+      changes: [{ path: "MEMORY.md", contents: "# Shared\n" }],
+      createdAt: saveAt,
+    })
+    await agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: `user:${bob.id}`,
+      baseRevision: 0,
+      message: "Remember",
+      author: bob,
+      changes: [{ path: "MEMORY.md", contents: "# Bob's own\n" }],
+      createdAt: saveAt,
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const turn = async (sender: typeof REQUESTER | typeof bob) => {
+        const request = await requestAgentAs(sixb, sender, { threadId, text: "Go on." })
+        expect((await waitForSettledRun(sixb, request.run.id)).status).toBe("succeeded")
+
+        const sandbox = await waitFor(
+          () =>
+            sandboxes.sandboxes
+              .filter((candidate) =>
+                candidate.writtenFiles.some((file) => file.path.endsWith("/memory.json"))
+              )
+              .at(answerPrompts.length - 1),
+          { label: "installed memory" }
+        )
+        const agentDir = `${sandbox.workingDirectory}/.sixb/agent`
+        return {
+          system: systemPromptOf(answerPrompts.at(-1)),
+          installed: Object.keys(
+            JSON.parse(sandbox.readFileContents(`${agentDir}/context/memory.json`)).repos
+          ),
+          files: sandbox.writtenFiles
+            .map((file) => file.path)
+            .filter((path) => path.startsWith(`${agentDir}/memory/`)),
+          agentDir,
+        }
+      }
+
+      const alone = await turn(REQUESTER)
+      expect(alone.installed).toEqual(["user", "project"])
+      expect(alone.system).toContain('<memory repo="user">\n# Before\n</memory>')
+
+      await agentStorageOf(sixb).threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId,
+        principals: [bob],
+        addedBy: REQUESTER,
+        maxParticipants: 50,
+      })
+
+      // Whoever sends the turn, neither one's own memory is installed nor shown.
+      const fromBob = await turn(bob)
+      const fromOwner = await turn(REQUESTER)
+      for (const shared of [fromBob, fromOwner]) {
+        expect(shared.installed).toEqual(["project"])
+        expect(shared.files).toEqual([`${shared.agentDir}/memory/project/MEMORY.md`])
+        expect(shared.system).toContain(
+          "<sixb_memory>\nYou have a memory from earlier conversations under .sixb/agent/memory/ ($SIXB_MEMORY_DIR):\n- project/:"
+        )
+        expect(shared.system).toContain(
+          '<memory repo="project">\n# Shared\n</memory>\n</sixb_memory>'
+        )
+        expect(shared.system).not.toContain("user/")
+        expect(shared.system).not.toContain("# Before")
+        expect(shared.system).not.toContain("# Bob's own")
+      }
+      // The prompt names nobody and loads the same memory, so it is the same whoever sends.
+      expect(fromOwner.system).toBe(fromBob.system)
+
+      // Once the last participant leaves, the owner's memory is back.
+      await agentStorageOf(sixb).threads.removeParticipant({
+        projectId: PROJECT_ID,
+        threadId,
+        principal: bob,
+      })
+      const aloneAgain = await turn(REQUESTER)
+      expect(aloneAgain.installed).toEqual(["user", "project"])
+      expect(aloneAgain.system).toContain('<memory repo="user">\n# Before\n</memory>')
     } finally {
       await worker.stop()
     }

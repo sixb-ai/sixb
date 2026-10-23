@@ -8,7 +8,8 @@ description: Organize the memory into topic files, and merge a save that conflic
 The memory is a folder of Markdown files under `$SIXB_MEMORY_DIR/<repo>/`. Later conversations
 start from its `MEMORY.md` and open the other files when a topic comes up.
 
-- `user/` is this user's own memory: only their conversations read it.
+- `user/` is this user's own memory: only their conversations read it. A conversation shared with
+  other people has no `user/`.
 - `project/` is built up from every user's conversations, and everyone who uses the agent in this
   project reads it, including people who cannot see the data this user sees. Put in it what holds
   for everyone, such as the team's vocabulary, a convention, or how something is measured, and
@@ -48,7 +49,7 @@ files keep their extension: `[[metrics/keep_rate.sql]]`.
 End every edit with the save of the repo you edited, in the same command:
 
 ```sh
-echo '- Report invoice amounts excluding VAT (added 2026-10-21)' >> "$SIXB_MEMORY_DIR/user/MEMORY.md" && sixb memory save user -m "Invoice amounts excluding VAT"
+echo '- Report invoice amounts excluding VAT (added 2026-10-21)' >> "$SIXB_MEMORY_DIR/project/MEMORY.md" && sixb memory save project -m "Invoice amounts excluding VAT"
 ```
 
 Only the files are remembered. The chat shows the message under your reply, so keep it to a few

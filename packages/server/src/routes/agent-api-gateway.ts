@@ -105,6 +105,20 @@ async function handleAgentApiGatewayRequest(input: {
     return jsonError(403, "Workflow agent nodes have no Agent memory.")
   }
 
+  // A turn runs with its sender's rights, but everyone in a shared conversation sees what it
+  // reads: the worker installs the project's memory alone, and the sender's cannot be pulled or
+  // saved either. Any repo name but `project` is refused, an encoded `user` included.
+  if (
+    matchesAgentMemory(upstreamPath) &&
+    pathSegmentsFor(upstreamPath)[2] !== "project" &&
+    (await answersInSharedThread(input.host, authState.agentExecution))
+  ) {
+    return jsonError(
+      403,
+      "This conversation is shared with other people, so only the project's memory is available in it."
+    )
+  }
+
   let body: Uint8Array<ArrayBuffer> | undefined
   try {
     body = await readGatewayRequestBody(input.request, upstreamPath)
@@ -359,6 +373,26 @@ async function readGatewayRequestBody(
 
 function isSimpleFileUpload(method: string, pathname: string): boolean {
   return method === "POST" && normalizeRoutePath(pathname) === "/api/files"
+}
+
+/** Whether the run, or the conversation run that started it, answers in a shared thread. */
+async function answersInSharedThread(
+  host: SixbHostView,
+  agentExecution: GatewayRunState["agentExecution"]
+): Promise<boolean> {
+  const agents = host.storage.agents
+  if (!agents || agentExecution.kind === "workflow") return false
+
+  const conversationRunId =
+    agentExecution.kind === "subagent" ? agentExecution.parentRunId : agentExecution.runId
+  const run = await agents.runs.getById({ projectId: host.id, id: conversationRunId })
+  if (run?.kind !== "conversation") return false
+
+  const participants = await agents.threads.listParticipants({
+    projectId: host.id,
+    threadIds: [run.threadId],
+  })
+  return participants.length > 0
 }
 
 function matchesAgentMemory(pathname: string): boolean {

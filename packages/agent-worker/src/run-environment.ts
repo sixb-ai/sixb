@@ -94,6 +94,11 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly thread?: AgentThreadRecord | null
   /** Who can read the thread now: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
+  /**
+   * The owner added someone to the thread, even someone who cannot read it now and would once
+   * their access is back: the turn loads the project's memory alone.
+   */
+  readonly hasParticipants?: boolean
   readonly sandboxDefinition?: SandboxDefinition
   /** Run preflight only after current sandbox access has been resolved. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
@@ -144,11 +149,15 @@ export async function createConversationAgentEnvironment(
       })
     : ephemeralRunSandbox({ context })
   let environment: AgentExecutionEnvironment | undefined
-  // The prompt shows memory as of the thread's start or its latest compaction (see
-  // loadConversationMemory).
+  // The prompt shows memory as of the thread's start or its latest compaction, and a shared
+  // thread loads the project's alone (see loadConversationMemory).
   const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
   const loadMemory: LoadConversationMemory = (checkpoint) =>
-    loadConversationMemory({ sixb: context.sixb, asOf: checkpoint?.createdAt ?? threadCreatedAt })
+    loadConversationMemory({
+      sixb: context.sixb,
+      asOf: checkpoint?.createdAt ?? threadCreatedAt,
+      shared: input.hasParticipants === true,
+    })
   try {
     const ontologyDocs = renderRunOntologyDocs(context)
     // Resolve application access before any compaction model call. Once acquired, this
