@@ -13,11 +13,24 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsResult,
 } from "../storage/artifacts/types"
-import { type ArtifactAccess, type ArtifactAccessRule, createArtifactAccessRule } from "./access"
+import type { Storage } from "../storage/types"
+import {
+  type ArtifactAccess,
+  type ArtifactAccessRule,
+  assertUpdatable,
+  createArtifactAccessRule,
+} from "./access"
 import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_STATE_LIMITS } from "./limits"
-import { type PublishedArtifact, publishArtifact } from "./publish/publish"
+import {
+  artifactVersionWarnings,
+  type PreparedArtifactVersion,
+  type PublishedArtifact,
+  prepareArtifactVersion,
+  publishArtifact,
+  storeArtifactVersion,
+} from "./publish/publish"
 
 /** A version's content: what its kind renders from, and what it is called. */
 export interface ArtifactContentInput {
@@ -108,6 +121,59 @@ export interface ArtifactStateValue {
   readonly updatedAt: Date
 }
 
+/** Where an access rule reads: the project's storage, or a transaction's to decide inside it. */
+export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents">
+
+/** Each runtime's access rule, for this repo's packages: an Agent turn publishes by it. */
+const accessRules = new WeakMap<object, (storage?: ArtifactAccessStorage) => ArtifactAccessRule>()
+
+/**
+ * The access rule of the caller `artifacts` acts for, reading from `storage`: a transaction's, to
+ * check inside it. Each call returns a rule of its own.
+ */
+export function artifactAccessRule(
+  artifacts: Partial<ArtifactsRuntime>,
+  storage: ArtifactAccessStorage
+): ArtifactAccessRule {
+  const rule = accessRules.get(artifacts)
+  if (!rule) throw new Error("[Sixb] These artifacts have no access rule.")
+  return rule(storage)
+}
+
+/** The access rule for the runtime's caller, reading from `storage`. */
+export function createRuntimeArtifactAccessRule(
+  runtime: SixbRuntimeContext,
+  storage: ArtifactAccessStorage = runtime.storage
+): ArtifactAccessRule {
+  const artifacts = storage.artifacts
+  if (!artifacts) {
+    throw new ArtifactRequestError(
+      "storage_unavailable",
+      "[Sixb] Artifacts need storage that supports them."
+    )
+  }
+
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  const threads = createAgentThreadAccessRule(runtime, authority, storage.agents)
+
+  return createArtifactAccessRule({
+    storage: artifacts,
+    projectId: runtime.projectId,
+    // Shared-link sessions and unresolved authority reach no artifact.
+    caller:
+      authority.type === "unrestricted"
+        ? "system"
+        : authority.type === "principal"
+          ? authority.context.principal
+          : null,
+    sharing: authority.type === "principal" && authority.ref.credential?.type === "session",
+    conversation: async (threadId) => {
+      if (await threads.read(threadId)) return "update"
+      return isRuntimeAllowed(runtime, { kind: "agentThreads.observe" }) ? "read" : null
+    },
+  })
+}
+
 export function createArtifactsRuntime(
   runtime: SixbRuntimeContext,
   blobStorage: BlobStorage
@@ -120,7 +186,6 @@ export function createArtifactsRuntime(
       : authority.type === "unrestricted"
         ? SYSTEM_PRINCIPAL
         : null
-  const threads = createAgentThreadAccessRule(runtime, authority)
 
   const requireStorage = (): ArtifactStorage => {
     const storage = runtime.storage.artifacts
@@ -139,17 +204,8 @@ export function createArtifactsRuntime(
     return caller
   }
 
-  const rule = (): ArtifactAccessRule =>
-    createArtifactAccessRule({
-      storage: requireStorage(),
-      projectId: runtime.projectId,
-      caller: authority.type === "unrestricted" ? "system" : caller,
-      sharing: authority.type === "principal" && authority.ref.credential?.type !== "accessToken",
-      conversation: async (threadId) => {
-        if (await threads.read(threadId)) return "update"
-        return isRuntimeAllowed(runtime, { kind: "agentThreads.observe" }) ? "read" : null
-      },
-    })
+  const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
+    createRuntimeArtifactAccessRule(runtime, storage)
 
   /** The artifact with what the caller may do with it; `null` when there is none. */
   const reach = async (
@@ -162,34 +218,59 @@ export function createArtifactsRuntime(
     const reached = await reach(artifactId)
     return reached && reached.access !== "none" ? reached.artifact : null
   }
-  const readable = async (artifact: ArtifactRecord): Promise<boolean> =>
-    (await rule().accessTo(artifact)) !== "none"
+
+  /** What an address in a version may name: one artifact the caller reads, by one rule. */
+  const readableBy = (access: ArtifactAccessRule) => async (artifact: ArtifactRecord) =>
+    (await access.accessTo(artifact)) !== "none"
 
   /** The artifact, refused unless the caller may update it. */
   const requireUpdatable = async (artifactId: string): Promise<ArtifactRecord> => {
     const reached = await reach(artifactId)
     if (!reached) throw notFound(artifactId)
-    if (reached.access === "none") throw notShared(artifactId)
-    if (reached.access === "read") throw readOnly(artifactId)
+    assertUpdatable(artifactId, reached.access)
     return reached.artifact
   }
 
-  return {
+  /**
+   * Stores in one transaction, which checks again what the caller may do: a participant removed
+   * while the files were checked publishes nothing.
+   */
+  const store = (prepared: PreparedArtifactVersion) =>
+    runtime.storage.transaction(async (tx) => {
+      const storage = tx.artifacts
+      if (!storage) throw new Error("[Sixb] Storage transactions hold no artifacts.")
+
+      return storeArtifactVersion(
+        { projectId: runtime.projectId, storage, blobStorage },
+        prepared,
+        (artifact) => rule(tx).publishAccess(artifact)
+      )
+    })
+
+  const artifacts: ArtifactsRuntime = {
     async create(input) {
       const author = requireCaller()
       return publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, author, readable }
+        { ...input, author, readable: readableBy(rule()) },
+        (artifact) => rule().publishAccess(artifact)
       )
     },
 
     async publish(artifactId, input) {
       const author = requireCaller()
       await requireUpdatable(artifactId)
-      return publishArtifact(
-        { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, artifactId, author, readable }
-      )
+
+      const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
+      const prepared = await prepareArtifactVersion(context, {
+        ...input,
+        artifactId,
+        author,
+        readable: readableBy(rule()),
+      })
+      const stored = await store(prepared)
+
+      return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
     },
 
     async access(artifactId) {
@@ -280,6 +361,9 @@ export function createArtifactsRuntime(
       }
     },
   }
+
+  accessRules.set(artifacts, rule)
+  return artifacts
 }
 
 /**
@@ -324,19 +408,5 @@ function notFound(artifactId: string): ArtifactRequestError {
   return new ArtifactRequestError(
     "artifact_not_found",
     `[Sixb] Artifact '${artifactId}' was not found.`
-  )
-}
-
-function notShared(artifactId: string): ArtifactRequestError {
-  return new ArtifactRequestError(
-    "not_shared",
-    `[Sixb] Artifact '${artifactId}' is not shared in a conversation you read.`
-  )
-}
-
-function readOnly(artifactId: string): ArtifactRequestError {
-  return new ArtifactRequestError(
-    "read_only",
-    `[Sixb] You read artifact '${artifactId}' as an observer: you cannot change it or keep page data in it.`
   )
 }

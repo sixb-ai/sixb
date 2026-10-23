@@ -121,10 +121,12 @@ required each model adapter sends both schemas strict. Offered only to conversat
 holds artifacts, each reads a file or directory from the sandbox, stores its bytes against the run's
 file budget, which counts identical content once, and publishes it with the thread and run as its
 origin, authored by whoever asked for the turn: a new artifact for the thread's owner, or the next
-version of one the requester may update. The turn installs, revises and refers to artifacts through
-the requester's own `sixb.artifacts`, so it reaches nothing they could not. Validation runs first;
-the version commits in a transaction that checks the run still holds its execution token, so a run
-reclaimed by another delivery publishes nothing. The version exists when the tool returns: the
+version of one the requester owns or this conversation already shares, so a turn never shares
+someone else's artifact in another conversation. The turn installs, revises and refers to
+artifacts through the requester's own `sixb.artifacts`, so it reaches nothing they could not.
+Validation runs first; the version commits in a transaction that checks the run still holds its
+execution token and asks core's access rule again, so a run reclaimed by another delivery, or a
+requester removed meanwhile, publishes nothing. The version exists when the tool returns: the
 conversation shows it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the
 run's messages. After a deck publishes, the
 layout check (`src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
