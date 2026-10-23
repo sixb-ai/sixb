@@ -41,6 +41,9 @@ import {
   existsObjects,
   facetObjects,
   forkAgentThread,
+  generateImages,
+  generateSpeech,
+  generateText,
   getAction,
   getActionRun,
   getActionRunFileContent,
@@ -55,6 +58,8 @@ import {
   getAiAccountingOverview,
   getAiLimitStatus,
   getAiLimitSubjectOptions,
+  getAiModelCallFileContent,
+  getAiModelCallFiles,
   getArtifact,
   getArtifactFileContent,
   getArtifactState,
@@ -171,6 +176,7 @@ import {
   startConnectorConnectionRun,
   submitWorkflowIntervention,
   suspendAuthMember,
+  transcribeAudio,
   updateAiLimitPolicy,
   updateAuthMemberGroups,
   updateAuthProfile,
@@ -272,6 +278,15 @@ import type {
   ForkAgentThreadData,
   ForkAgentThreadError,
   ForkAgentThreadResponse,
+  GenerateImagesData,
+  GenerateImagesError,
+  GenerateImagesResponse,
+  GenerateSpeechData,
+  GenerateSpeechError,
+  GenerateSpeechResponse,
+  GenerateTextData,
+  GenerateTextError,
+  GenerateTextResponse,
   GetActionData,
   GetActionError,
   GetActionResponse,
@@ -314,6 +329,12 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsError,
   GetAiLimitSubjectOptionsResponse,
+  GetAiModelCallFileContentData,
+  GetAiModelCallFileContentError,
+  GetAiModelCallFileContentResponse,
+  GetAiModelCallFilesData,
+  GetAiModelCallFilesError,
+  GetAiModelCallFilesResponse,
   GetArtifactData,
   GetArtifactError,
   GetArtifactFileContentData,
@@ -646,6 +667,9 @@ import type {
   SuspendAuthMemberData,
   SuspendAuthMemberError,
   SuspendAuthMemberResponse,
+  TranscribeAudioData,
+  TranscribeAudioError,
+  TranscribeAudioResponse,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
@@ -1907,6 +1931,153 @@ export const listAiModelCallGroupsInfiniteOptions = (options: Options<ListAiMode
       queryKey: listAiModelCallGroupsInfiniteQueryKey(options),
     }
   )
+
+export const getAiModelCallFilesQueryKey = (options: Options<GetAiModelCallFilesData>) =>
+  createQueryKey("getAiModelCallFiles", options)
+
+/**
+ * Get the files a model call produced
+ */
+export const getAiModelCallFilesOptions = (options: Options<GetAiModelCallFilesData>) =>
+  queryOptions<
+    GetAiModelCallFilesResponse,
+    GetAiModelCallFilesError,
+    GetAiModelCallFilesResponse,
+    ReturnType<typeof getAiModelCallFilesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAiModelCallFiles({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAiModelCallFilesQueryKey(options),
+  })
+
+export const getAiModelCallFileContentQueryKey = (
+  options: Options<GetAiModelCallFileContentData>
+) => createQueryKey("getAiModelCallFileContent", options)
+
+/**
+ * Get model call file content
+ */
+export const getAiModelCallFileContentOptions = (options: Options<GetAiModelCallFileContentData>) =>
+  queryOptions<
+    GetAiModelCallFileContentResponse,
+    GetAiModelCallFileContentError,
+    GetAiModelCallFileContentResponse,
+    ReturnType<typeof getAiModelCallFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAiModelCallFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAiModelCallFileContentQueryKey(options),
+  })
+
+/**
+ * Generate text with a language model
+ */
+export const generateTextMutation = (
+  options?: Partial<Options<GenerateTextData>>
+): UseMutationOptions<GenerateTextResponse, GenerateTextError, Options<GenerateTextData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateTextResponse,
+    GenerateTextError,
+    Options<GenerateTextData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateText({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Generate images with an image model
+ */
+export const generateImagesMutation = (
+  options?: Partial<Options<GenerateImagesData>>
+): UseMutationOptions<GenerateImagesResponse, GenerateImagesError, Options<GenerateImagesData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateImagesResponse,
+    GenerateImagesError,
+    Options<GenerateImagesData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateImages({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Generate speech with a speech model
+ */
+export const generateSpeechMutation = (
+  options?: Partial<Options<GenerateSpeechData>>
+): UseMutationOptions<GenerateSpeechResponse, GenerateSpeechError, Options<GenerateSpeechData>> => {
+  const mutationOptions: UseMutationOptions<
+    GenerateSpeechResponse,
+    GenerateSpeechError,
+    Options<GenerateSpeechData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await generateSpeech({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Transcribe audio with a transcription model
+ */
+export const transcribeAudioMutation = (
+  options?: Partial<Options<TranscribeAudioData>>
+): UseMutationOptions<
+  TranscribeAudioResponse,
+  TranscribeAudioError,
+  Options<TranscribeAudioData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    TranscribeAudioResponse,
+    TranscribeAudioError,
+    Options<TranscribeAudioData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await transcribeAudio({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getProjectInfoQueryKey = (options?: Options<GetProjectInfoData>) =>
   createQueryKey("getProjectInfo", options)
@@ -5313,7 +5484,7 @@ export const listModelsQueryKey = (options?: Options<ListModelsData>) =>
   createQueryKey("listModels", options)
 
 /**
- * List the project model catalog
+ * List the project's models of every kind, with their options and prices
  */
 export const listModelsOptions = (options?: Options<ListModelsData>) =>
   queryOptions<

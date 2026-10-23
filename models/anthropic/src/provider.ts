@@ -16,6 +16,7 @@ import {
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
+  type ModelRateCard,
   type ModelReasoningCapabilities,
   type ModelReasoningEffort,
   type ModelReasoningLevel,
@@ -295,6 +296,7 @@ class AnthropicLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
+  readonly rateCard?: ModelRateCard
   readonly defaultReasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
   /** Messages requires `max_tokens` on every request: the binding's limit, else the model's. */
@@ -352,6 +354,7 @@ class AnthropicLanguageModel implements LanguageModel {
       estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard }),
       estimate: ({ usage }) => rateModelCall({ usage, rateCard }),
     }
+    if (rateCard) this.rateCard = rateCard
   }
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {

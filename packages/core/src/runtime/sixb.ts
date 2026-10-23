@@ -125,9 +125,18 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
   execution: ExecutionContext,
   dependencies: SixbDependencies
 ): Omit<Sixb<TParams>, "execution"> {
+  const actions = createActionsRuntime(runtime, execution)
+  const workflows = createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows)
+  const agent = createAgentRuntime<TParams>(
+    runtime,
+    execution,
+    dependencies.definitions.models,
+    dependencies.sandbox,
+    dependencies.definitions.security
+  )
   return {
     objects: createObjectsRuntime(runtime, execution, dependencies.blobStorage),
-    actions: createActionsRuntime(runtime, execution),
+    actions,
     datasets: createDatasetsRuntime(
       runtime,
       execution,
@@ -136,23 +145,22 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.blobStorage,
       dependencies.datasetVersionMarkings
     ),
-    workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
+    workflows,
     syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs),
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
-    agent: createAgentRuntime<TParams>(
-      runtime,
-      execution,
-      dependencies.definitions.models,
-      dependencies.sandbox,
-      dependencies.definitions.security
-    ),
+    agent,
     artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage),
     models: createModelsRuntime(
       runtime,
       execution,
       dependencies.definitions.models,
+      {
+        canViewActionRun: async (id) => (await actions.runs.getById(id)) !== null,
+        canViewWorkflowRun: async (id) => (await workflows.runs.getById(id)) !== null,
+        canViewAgentRun: async (id) => (await agent.runs.getById(id)) !== null,
+      },
       dependencies.blobStorage
     ),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),

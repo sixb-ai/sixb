@@ -98,6 +98,7 @@ export async function prepareAgentConversationContext(input: {
           project: context,
           requester: context.requester,
         }),
+        ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
       }),
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),

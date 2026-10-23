@@ -33,6 +33,7 @@ export type AuthzRequest =
   | { readonly kind: "sync.run"; readonly syncId: string }
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
   | { readonly kind: "agent.run" }
+  | { readonly kind: "models.run" }
   | { readonly kind: "logs.observe" }
   | { readonly kind: "aiUsage.observe" }
   | { readonly kind: "activity.observe" }
@@ -87,6 +88,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "run:pipeline", id: request.pipelineId }]
     case "agent.run":
       return [{ kind: "run:agent" }]
+    case "models.run":
+      return [{ kind: "run:models" }]
     case "logs.observe":
       return [{ kind: "observe:logs" }]
     case "aiUsage.observe":
@@ -257,6 +260,33 @@ export function assertProviderAccess(
   )
 }
 
+/**
+ * Assert a model call is allowed. Trusted code and genuine agent runs always may; a principal
+ * needs `can.run(project.models)`, which covers every model in the catalog.
+ */
+export function assertModelAccess(
+  runtime: AuthorizedRuntime & { readonly runtimeAuthorization: RuntimeAuthorization },
+  execution: ExecutionContext,
+  operation: string
+): void {
+  const resolved = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  if (resolved.type === "unrestricted" || execution.executor.type === "agent") return
+  if (resolved.type === "principal") {
+    if (isAllowed(resolved.context, { kind: "models.run" })) return
+    throw new AuthorizationError(
+      "run:models",
+      deniedMessage(resolved.context, { kind: "models.run" })
+    )
+  }
+  throw new AuthorizationError(
+    `delegated:${operation}`,
+    `[Sixb] Operation '${operation}' is not covered by delegated authorization.`
+  )
+}
+
 function deniedMessage(
   authorization: AuthorizationContext | null | undefined,
   request: AuthzRequest
@@ -285,6 +315,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to run pipeline '${request.pipelineId}'.`
     case "agent.run":
       return `[Sixb] Principal '${principalId}' is not allowed to run the project Agent.`
+    case "models.run":
+      return `[Sixb] Principal '${principalId}' is not allowed to call the project's models.`
     case "logs.observe":
       return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
     case "aiUsage.observe":

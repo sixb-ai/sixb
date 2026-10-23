@@ -41,9 +41,20 @@ export class ApiClient {
     })
   }
 
-  async upload(path: string, source: string, logicalPath?: string): Promise<unknown> {
+  /** `mediaType` labels the part; without it, the server reads the type from the file name. */
+  async upload(
+    path: string,
+    source: string,
+    logicalPath?: string,
+    mediaType?: string
+  ): Promise<unknown> {
     const form = new FormData()
-    form.append("file", new Blob([new Uint8Array(await readFile(source))]), basename(source))
+    const bytes = new Uint8Array(await readFile(source))
+    form.append(
+      "file",
+      new Blob([bytes], mediaType ? { type: mediaType } : undefined),
+      basename(source)
+    )
     if (logicalPath) form.append("logicalPath", logicalPath)
     return this.json(this.url(path), { method: "POST", body: form })
   }

@@ -1,6 +1,7 @@
 import {
   client,
   getAgentMessageFileContent,
+  getAiModelCallFileContent,
   getArtifactFileContent,
   getObservedAgentMessageFileContent,
 } from "@sixb/client"
@@ -17,7 +18,7 @@ export interface ViewerFileRef {
 
 /**
  * A file the viewer can show, tied to the route that authorizes reading it: a file of an artifact
- * version, or a file in a conversation message.
+ * version, a file in a conversation message, or a file a model call produced.
  */
 export interface FileSource {
   readonly id: string
@@ -93,6 +94,39 @@ export function messageFileSource(input: {
       const response = await read({
         path: { threadId: input.threadId, messageId: input.messageId },
         query: { path: input.path, disposition: "inline" },
+        parseAs: "blob",
+        throwOnError: true,
+        signal,
+      })
+      return response.data
+    },
+  }
+}
+
+/** A file a model call produced, such as an image the agent made, by its place in the call. */
+export function modelCallFileSource(input: {
+  readonly callId: string
+  readonly index: number
+  readonly fileRef: ViewerFileRef
+  /** The name the file was saved under, for a file the call stored without one. */
+  readonly fileName?: string
+  readonly baseUrl?: string
+}): FileSource {
+  const routePath = `/api/ai/model-calls/${encodeURIComponent(input.callId)}/files/content`
+  const path = `/files/${input.index}`
+  const url = (disposition: "inline" | "attachment") =>
+    contentUrl(routePath, { path, disposition }, input.baseUrl)
+  return {
+    id: `model-call:${input.callId}${path}`,
+    fileRef: input.fileRef,
+    name: input.fileRef.fileName?.trim() || input.fileName?.trim() || "",
+    inlineUrl: url("inline"),
+    downloadUrl: url("attachment"),
+    queryKey: ["model-call-file", input.callId, input.index, input.fileRef.digest],
+    load: async (signal) => {
+      const response = await getAiModelCallFileContent({
+        path: { callId: input.callId },
+        query: { path, disposition: "inline" },
         parseAs: "blob",
         throwOnError: true,
         signal,

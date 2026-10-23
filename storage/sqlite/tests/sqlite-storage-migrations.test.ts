@@ -190,7 +190,9 @@ const shippedMigrationIds = [
   "069-agent-thread-participants",
   "070-forked-context-checkpoints",
   "071-unique-values",
-  "072-artifact-threads",
+  "072-generated-media-usage",
+  "073-model-call-files",
+  "074-artifact-threads",
 ]
 
 afterEach(async () => {
@@ -312,6 +314,33 @@ describe("SQLite storage migrations", () => {
         { id: "reranking", model_kind: "reranking" },
         { id: "transcription", model_kind: "transcription" },
         { id: "unclassified", model_kind: null },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("keeps recorded model kinds and admits speech", async () => {
+    // Removal proof: omit 072's UPDATE; the reranking kind below is lost in the swap.
+    const db = replayedDatabase("072-generated-media-usage")
+    try {
+      const insertUsage = (id: string, modelKind: string) =>
+        db.run(
+          `INSERT INTO ai_model_call_usage (
+            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+            response_id, reporting_status, occurred_at, recorded_at, model_kind
+          ) VALUES ('p', ?, 'execution', 1, ?, 'provider', 'model', ?, 'unavailable',
+            '2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z', ?)`,
+          [id, id, id, modelKind]
+        )
+      insertUsage("reranking", "reranking")
+      expect(() => insertUsage("early-speech", "speech")).toThrow()
+
+      await migration("072-generated-media-usage").up(db)
+      insertUsage("speech", "speech")
+      expect(db.query("SELECT id, model_kind FROM ai_model_call_usage ORDER BY id").all()).toEqual([
+        { id: "reranking", model_kind: "reranking" },
+        { id: "speech", model_kind: "speech" },
       ])
     } finally {
       db.close()
@@ -2637,8 +2666,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("shares each existing artifact in the threads its versions came from", () => {
-    // Removal proof: drop the INSERT from migration 072; the artifact is then shared nowhere.
-    const db = replayedDatabase("072-artifact-threads")
+    // Removal proof: drop the INSERT from migration 074; the artifact is then shared nowhere.
+    const db = replayedDatabase("074-artifact-threads")
     try {
       db.run(`
         INSERT INTO artifacts (
@@ -2677,7 +2706,7 @@ describe("SQLite storage migrations", () => {
         )
       `)
 
-      const applied = migration("072-artifact-threads").up(db)
+      const applied = migration("074-artifact-threads").up(db)
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
 
       expect(

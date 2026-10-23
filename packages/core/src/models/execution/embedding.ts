@@ -124,6 +124,7 @@ async function recordEmbedding(
   })
   await accounting.onModelCallEnd({
     callId,
+    modelKind: "embedding",
     providerId: model.providerId,
     modelId: model.modelId,
     responseId: metadata.providerIds?.responseId ?? callId,

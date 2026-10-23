@@ -30,8 +30,9 @@ Limits reset at the start of each UTC calendar month. Editing a limit does not r
 Every applicable limit must allow a call before it starts. Once a limit is reached, further calls
 are blocked.
 
-Token limits count calls billed by tokens: generation, embeddings, and decisions. Transcription and
-reranking are billed by audio duration or per search, so only cost limits apply to them.
+Token limits count calls billed by tokens: generation, embeddings, and decisions. Transcription,
+reranking, image generation, and speech are billed by audio duration, search, image, or character,
+so only cost limits apply to them.
 
 Limits control whether calls can start. They are not hard caps on a provider's bill, because a
 call's actual usage can exceed its estimate. Use
@@ -53,6 +54,22 @@ when available.
 
 Vercel Gateway transcription is currently blocked when a cost limit applies, because Sixb
 cannot estimate its cost before the call.
+
+## Image and speech generation
+
+Calls to `sixb.models.image.generate()` and `sixb.models.audio.speak()` appear in **AI usage** with
+their cost.
+
+A cost limit lets a call start only when Sixb can estimate its cost first:
+
+| Model priced | Under a cost limit |
+| --- | --- |
+| Per image (most image models, Gemini image models) | Runs. Sixb reserves the price of every image requested. |
+| Per character (most speech models) | Runs. Sixb reserves the price of the text. |
+| By tokens (GPT Image, Gemini speech) | Blocked: the output's size is unknown before the call. |
+
+A call with reference images is also blocked under a cost limit when its model is priced by
+tokens. A model whose provider has no published price can only run without a cost limit.
 
 ## Reranking
 

@@ -566,7 +566,6 @@ describe("runModelLoop", () => {
           usage,
           rateCard: {
             currency: "USD",
-            unit: "million-tokens",
             input: "1",
             output: "2",
             cacheReadInput: "0.1",
@@ -674,6 +673,7 @@ describe("runModelLoop", () => {
     expect(calls).toEqual([
       {
         callId: "call-1",
+        modelKind: "language",
         providerId: "mock",
         modelId: "mock-model",
         responseId: "response-1",

@@ -469,6 +469,7 @@ export type {
   MarkingDefinition,
   MembershipOperation,
   MembershipPolicyDefinition,
+  ModelsRunGrant,
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,
@@ -981,7 +982,7 @@ export type {
 export type {
   LanguageModel,
   LanguageModelDefinition,
-  LanguageModelRateCard,
+  ModelRateCard,
   ProviderData,
 } from "./models"
 export type {
@@ -1231,6 +1232,7 @@ export type {
   RerankingModelResult,
   RerankingResult,
 } from "./models"
+export type { ModelCallFiles, ModelCallsRuntime } from "./models/calls"
 export type {
   InferLanguageModelOutput,
   LanguageModelGenerateInput,
@@ -1254,6 +1256,8 @@ export type {
 } from "./actions/descriptor"
 export type {
   AudioModelsRuntime,
+  AudioSpeakInput,
+  AudioSpeakResult,
   AudioTranscribeInput,
   AudioTranscribeResult,
   TranscriptionOutput,
@@ -1274,6 +1278,11 @@ export type {
   ProbabilityQuestion,
   ScoreQuestion,
 } from "./models/decision/types"
+export type {
+  ImageGenerateInput,
+  ImageGenerateResult,
+  ImageModelsRuntime,
+} from "./models/image/types"
 export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,

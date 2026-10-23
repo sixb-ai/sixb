@@ -1,11 +1,19 @@
 import type { ExecutionStorage } from "../executions"
 import { AiUsageStorageError } from "./errors"
-import { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./record"
+import {
+  assertAiUsageExecutionId,
+  assertSameCallExecution,
+  normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallRecord,
+} from "./record"
 import type {
+  AiModelCallFilesRecord,
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageStorage,
+  GetAiModelCallFilesInput,
   GetLatestAiModelCallForExecutionInput,
+  RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SummarizeAiUsageExecutionInput,
@@ -24,6 +32,7 @@ export interface InMemoryAiUsageStorageSnapshot {
   readonly records: Map<string, AiModelCallUsageRecord>
   readonly recordKeysByIdempotencyKey: Map<string, string>
   readonly groupRows: Map<string, InMemoryAiUsageGroupRow>
+  readonly callFiles: Map<string, AiModelCallFilesRecord>
 }
 
 /** In-memory model-call ledger used by development runtimes and storage contract tests. */
@@ -31,6 +40,7 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
   private readonly records = new Map<string, AiModelCallUsageRecord>()
   private readonly recordKeysByIdempotencyKey = new Map<string, string>()
   private readonly groupRows = new Map<string, InMemoryAiUsageGroupRow>()
+  private readonly callFiles = new Map<string, AiModelCallFilesRecord>()
 
   constructor(private readonly executions: Pick<ExecutionStorage, "getById">) {}
 
@@ -130,11 +140,27 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     })
   }
 
+  async recordModelCallFiles(input: RecordAiModelCallFilesInput): Promise<AiModelCallFilesRecord> {
+    const record = normalizeAiModelCallFilesRecord(input)
+    const key = modelCallRecordKey(record.projectId, record.callId)
+    const existing = this.callFiles.get(key)
+    if (existing) return structuredClone(assertSameCallExecution(existing, record))
+    await this.assertExecutionExists(record.projectId, record.executionId)
+    this.callFiles.set(key, structuredClone(record))
+    return structuredClone(record)
+  }
+
+  async getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null> {
+    const record = this.callFiles.get(modelCallRecordKey(input.projectId, input.callId))
+    return record ? structuredClone(record) : null
+  }
+
   snapshot(): InMemoryAiUsageStorageSnapshot {
     return structuredClone({
       records: this.records,
       recordKeysByIdempotencyKey: this.recordKeysByIdempotencyKey,
       groupRows: this.groupRows,
+      callFiles: this.callFiles,
     })
   }
 
@@ -142,6 +168,7 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     replaceMap(this.records, snapshot.records)
     replaceMap(this.recordKeysByIdempotencyKey, snapshot.recordKeysByIdempotencyKey)
     replaceMap(this.groupRows, snapshot.groupRows)
+    replaceMap(this.callFiles, snapshot.callFiles)
   }
 
   /** @internal Immutable accounting source used by in-memory AI limit enforcement. */

@@ -5,15 +5,23 @@ export type {
   InMemoryAiUsageStorageSnapshot,
 } from "./in-memory"
 export { InMemoryAiUsageStorage } from "./in-memory"
-export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./record"
+export {
+  assertAiUsageExecutionId,
+  assertSameCallExecution,
+  normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallRecord,
+} from "./record"
 export type {
+  AiModelCallFilesRecord,
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageReportingStatus,
   AiUsageStorage,
+  GetAiModelCallFilesInput,
   GetLatestAiModelCallForExecutionInput,
+  RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SummarizeAiUsageExecutionInput,

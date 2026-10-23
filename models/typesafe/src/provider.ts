@@ -1,7 +1,7 @@
 import {
   type DecisionModel,
   estimateModelReservation,
-  type LanguageModelRateCard,
+  type ModelRateCard,
   rateModelCall,
 } from "@sixb/core/models"
 import { evaluateTypesafe, type TypesafeTransport } from "./transport"
@@ -9,9 +9,8 @@ import { evaluateTypesafe, type TypesafeTransport } from "./transport"
 const DEFAULT_BASE_URL = "https://api.typesafe.ai/v1"
 
 // Published retail estimate, verified 2026-09-22: https://docs.typesafe.ai/models
-const RATE_CARD: LanguageModelRateCard = {
+const RATE_CARD: ModelRateCard = {
   currency: "USD",
-  unit: "million-tokens",
   input: "0.042",
   output: "0",
 }

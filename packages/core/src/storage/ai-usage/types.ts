@@ -1,3 +1,4 @@
+import type { FileRef } from "../../blob-storage/types"
 import type { ReadonlyJsonObject } from "../../json"
 import type { ModelReasoning } from "../../models/language-model"
 
@@ -15,6 +16,14 @@ export interface AiModelCallUsageInput {
   readonly cacheWriteInputTokens?: number
   readonly textOutputTokens?: number
   readonly reasoningOutputTokens?: number
+  /** Output tokens that encode generated images, within outputTokens. */
+  readonly imageOutputTokens?: number
+  /** Output tokens that encode generated audio, within outputTokens. */
+  readonly audioOutputTokens?: number
+  /** Images the call returned. */
+  readonly outputImages?: number
+  /** Input characters, counted by the provider's own billing rule. */
+  readonly inputCharacters?: number
 }
 
 /** Normalized usage for one completed model call. Token details overlap their input/output totals. */
@@ -93,6 +102,27 @@ export interface GetLatestAiModelCallForExecutionInput {
   readonly executionId: string
 }
 
+/**
+ * The files one completed call produced, recorded once they are stored. The execution that made
+ * the call decides who may read them.
+ */
+export interface AiModelCallFilesRecord {
+  readonly projectId: string
+  readonly executionId: string
+  readonly callId: string
+  readonly files: readonly FileRef[]
+  readonly recordedAt: Date
+}
+
+export type RecordAiModelCallFilesInput = Omit<AiModelCallFilesRecord, "recordedAt"> & {
+  readonly recordedAt?: Date
+}
+
+export interface GetAiModelCallFilesInput {
+  readonly projectId: string
+  readonly callId: string
+}
+
 /** Durable, provider-neutral accounting for completed model calls. */
 export interface AiUsageStorage {
   /**
@@ -117,4 +147,12 @@ export interface AiUsageStorage {
   summarizeExecutions(
     input: SummarizeAiUsageExecutionsInput
   ): Promise<readonly AiUsageExecutionSummary[]>
+
+  /**
+   * Record the files a call produced, once per project and call ID. Recording the same call again
+   * returns the first record; naming another execution for it is refused.
+   */
+  recordModelCallFiles(input: RecordAiModelCallFilesInput): Promise<AiModelCallFilesRecord>
+
+  getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null>
 }

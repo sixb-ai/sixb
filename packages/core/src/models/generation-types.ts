@@ -1,7 +1,9 @@
 import type { InferSchemaOrRef, SchemaOrRef } from "../ontology"
 import type { AudioModelsRuntime } from "./audio/types"
+import type { ModelCallsRuntime } from "./calls"
 import type { DecisionModelsRuntime } from "./decision/types"
 import type { ModelFinishReason, ModelUsage } from "./events"
+import type { ImageModelsRuntime } from "./image/types"
 import type { LanguageModel, ModelReasoning } from "./language-model"
 import type { ModelMessage } from "./messages"
 import type { ModelCallCost } from "./pricing"
@@ -51,4 +53,7 @@ export interface ModelsRuntime {
   readonly audio: AudioModelsRuntime
   readonly language: LanguageModelsRuntime
   readonly decision: DecisionModelsRuntime
+  readonly image: ImageModelsRuntime
+  /** What past calls produced, as visible as the runs that made them. */
+  readonly calls: ModelCallsRuntime
 }

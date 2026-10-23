@@ -6,6 +6,7 @@ import type {
   AgentToolCatalog,
   AgentToolDefinition,
   LanguageModelCatalog,
+  ModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { LanguageModel } from "@sixb/core/models"
@@ -32,6 +33,32 @@ export interface ResolvedAgentExecutionPlan {
   /** The requester's time zone and locale, when the run captured them. */
   readonly timeZone?: string
   readonly locale?: string
+  /** Media models the sandbox CLI can call beside the agent's own, listed in the prompt. */
+  readonly sandboxModels?: readonly SandboxModel[]
+}
+
+export type SandboxModelKind = "image" | "speech" | "transcription"
+
+/** One media model the agent reaches through `sixb models`, as its prompt describes it. */
+export interface SandboxModel {
+  readonly kind: SandboxModelKind
+  readonly modelId: string
+  readonly description?: string
+}
+
+/** The project's media models, each kind's default first, with what each is for. */
+export function listSandboxModels(models: ModelCatalog | undefined): readonly SandboxModel[] {
+  const kinds = [
+    ["image", models?.image],
+    ["speech", models?.audio?.speech],
+    ["transcription", models?.audio?.transcription],
+  ] as const
+  return kinds.flatMap(([kind, catalog]) =>
+    (catalog?.list() ?? []).map((entry) => {
+      const description = entry.model.definition.description
+      return { kind, modelId: entry.modelId, ...(description ? { description } : {}) }
+    })
+  )
 }
 
 /**
@@ -45,6 +72,7 @@ export function resolveAgentExecutionPlan(input: {
   readonly skills: AgentSkillCatalog
   readonly projectInstructions?: string
   readonly defaultMaxSteps: number
+  readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
   const entry = modelRef ? input.models?.getByRef(modelRef) : undefined
@@ -66,6 +94,7 @@ export function resolveAgentExecutionPlan(input: {
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
     ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
+    ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
 }
 
@@ -77,6 +106,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
   readonly defaultMaxSteps: number
+  readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
   const selected = resolveWorkflowAgentStepModel(step, models)
@@ -124,6 +154,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     skills: Object.freeze(skills),
     maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
 }
 
@@ -136,6 +167,7 @@ export function resolveSubagentExecutionPlan(input: {
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
+  readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { run, models } = input
   const model = models?.getByRef(run.spec.model)?.model ?? null
@@ -166,6 +198,7 @@ export function resolveSubagentExecutionPlan(input: {
     skills: input.skills.list(),
     maxSteps: run.spec.maxSteps,
     ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
+    ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
 }
 

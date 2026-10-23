@@ -226,3 +226,61 @@ SIXB_VERCEL_GATEWAY_TRANSCRIPTION_E2E_FILE=/path/to/sample.wav \
 SIXB_VERCEL_GATEWAY_TRANSCRIPTION_E2E_MEDIA_TYPE=audio/wav \
 bun --env-file=.env.test test ./models/vercel-ai-gateway/tests/transcription.e2e.ts
 ```
+
+## Image generation
+
+```ts
+const flux = vercelGateway.image("bfl/flux-3-image")
+const gemini = vercelGateway.image("google/gemini-3.1-flash-lite-image")
+const models = { image: [flux, gemini] }
+
+// Inside an action writeback/effects handler or a workflow step:
+const { files, usage, cost } = await sixb.models.image.generate({ prompt, size: "1024x1024" })
+```
+
+The catalog decides how a model is called. Image models use the `/v4/ai/image-model` endpoint.
+Language models that answer with images, such as Gemini image models, use chat completions with
+image output and return one image per call; `size` and `aspectRatio` become Gemini's image size
+and aspect ratio. `quality` and `style` go to the routed provider's options under its name (for
+`openai/gpt-image-1`, `providerOptions.openai.quality`). No inference retries are made.
+
+The binding accepts a `description` (when to pick the model; defaults to the catalog's),
+`providerOptions`, `timeoutMs` (default 120,000), `maxResponseBytes` (default 64 MiB), and
+`inputImages` (default 4 reference images of up to 10 MiB each). The limits
+bound client memory; they do not promise upstream support. Proxies without the `/v1` layout set
+the full `imageUrl` in `createVercelGateway()`.
+
+Pricing comes from the catalog: a flat price per image, prices by size, quality or style, or
+token prices. A Gemini image model's listed output price is its text rate, so it is priced only
+with its per-image price; without one, it stays unpriceable rather than under-reported. Tables
+that mix dimensions, and models with custom `providerOptions`, keep the Gateway-reported cost
+only. Under a cost limit, per-image models reserve every requested image; token-priced models
+and token-priced calls with reference images are blocked.
+
+## Speech generation
+
+```ts
+const voice = vercelGateway.speech("openai/tts-1-hd", { voice: "alloy" })
+const models = { audio: { speech: [voice] } }
+
+const { file, usage, cost } = await sixb.models.audio.speak({ text, mediaType: "audio/mpeg" })
+```
+
+Speech uses the `/v4/ai/speech-model` endpoint. The binding accepts `voice` (the default),
+a `description`,
+`voices` and `outputMediaTypes` allowlists, `providerOptions`, `timeoutMs` (default 120,000) and
+`maxResponseBytes` (default 32 MiB). It can request `audio/mpeg`, `audio/wav`, `audio/ogg`,
+`audio/aac` and `audio/flac`; a model that returns another format fails the call. Proxies without
+the `/v1` layout set the full `speechUrl`.
+
+The Gateway bills characters as UTF-16 code units (JavaScript string length), so `usage` reports
+`inputCharacters` that way and character-priced models are estimated and reserved exactly.
+Token-priced models, such as Gemini speech, report no tokens through this endpoint: they keep the
+Gateway-reported cost and are blocked under a cost limit.
+
+A live test is opt-in and makes three billable requests, a few cents in all:
+
+```bash
+SIXB_VERCEL_GATEWAY_MEDIA_E2E=1 \
+bun --env-file=.env.test test ./models/vercel-ai-gateway/tests/media.e2e.ts
+```

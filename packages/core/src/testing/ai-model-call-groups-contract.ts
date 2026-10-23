@@ -96,6 +96,80 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
       }
     })
 
+    // Removal proof: drop tokenless_count from a storage's group query (or tokenlessCount from
+    // summarize); the mixed run then hides its token total behind the image call.
+    test("sums media per run, and tokenless calls leave no gap in its tokens", async () => {
+      const storage = await options.createStorage()
+      try {
+        await options.setup?.(storage)
+        const runs = {
+          mixed: [
+            { kind: "language", usage: { inputTokens: 2, outputTokens: 3 } },
+            { kind: "image", usage: { outputImages: 2 } },
+            { kind: "speech", usage: { inputCharacters: 12, audioDurationMs: 1160 } },
+          ],
+          images: [{ kind: "image", usage: { outputImages: 1 } }],
+          gap: [
+            { kind: "language", usage: {} },
+            { kind: "image", usage: { outputImages: 1 } },
+          ],
+        } as const
+        for (const [id, calls] of Object.entries(runs)) {
+          const execution = await storage.executions.create({
+            projectId,
+            id,
+            executor: { type: "request", requestId: id },
+            source: { type: "http", requestId: id },
+            correlationId: id,
+            authorizationRef: { type: "disabled" },
+          })
+          for (const [index, call] of calls.entries()) {
+            await storage.aiUsage.recordModelCall({
+              projectId,
+              id: `${id}:${index}`,
+              executionId: execution.id,
+              attempt: 1,
+              callId: `${id}:${index}`,
+              requesterGroupIds: [],
+              providerId: "test",
+              requestedModelId: call.kind,
+              modelKind: call.kind,
+              responseId: `${id}:${index}`,
+              usage: call.usage,
+              occurredAt: new Date("2026-09-01T12:00:00Z"),
+            })
+          }
+        }
+
+        const groups = await storage.aiCosts.listModelCallGroups(range)
+        const group = (id: string) => {
+          const found = groups.items.find((item) => item.executionId === id)
+          return {
+            totalTokens: found?.totalTokens,
+            outputImages: found?.outputImages,
+            inputCharacters: found?.inputCharacters,
+            audioDurationMs: found?.audioDurationMs,
+          }
+        }
+        expect(group("mixed")).toEqual({
+          totalTokens: 5,
+          outputImages: 2,
+          inputCharacters: 12,
+          audioDurationMs: 1160,
+        })
+        expect(group("images")).toEqual({
+          totalTokens: undefined,
+          outputImages: 1,
+          inputCharacters: undefined,
+          audioDurationMs: undefined,
+        })
+        // A language call without tokens is a real gap.
+        expect(group("gap").totalTokens).toBeUndefined()
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("attributes workflow usage to step references and keeps same-named steps separate", async () => {
       const storage = await options.createStorage()
       try {

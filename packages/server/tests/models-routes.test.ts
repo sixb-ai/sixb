@@ -12,8 +12,11 @@ import {
 } from "@sixb/core"
 import {
   defineLanguageModel,
+  type ImageModel,
   type LanguageModel,
   ModelCatalogUnavailableError,
+  type SpeechModel,
+  type TranscriptionModel,
 } from "@sixb/core/models"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -147,13 +150,127 @@ describe("GET /api/models", () => {
           reasoningLevels: [],
         },
       ],
+      image: [],
+      audio: { speech: [], transcription: [] },
     })
   })
 
   test("returns an empty catalog when no models are configured", async () => {
     const response = await createApp().fetch(new Request("http://localhost/api/models"))
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ language: [] })
+    expect(await response.json()).toEqual({
+      language: [],
+      image: [],
+      audio: { speech: [], transcription: [] },
+    })
+  })
+
+  // Removal proof: serialize entry.model instead of the resolved binding; the image model's
+  // price and catalog name disappear, because only resolution knows them.
+  test("lists every kind with what a caller needs to choose and fill a request", async () => {
+    const flux: ImageModel = {
+      providerId: "gateway",
+      modelId: "bfl/flux",
+      definition: {
+        kind: "image",
+        providerId: "gateway",
+        modelId: "bfl/flux",
+        inputImages: { maxCount: 4, maxBytes: 10_485_760 },
+      },
+      resolve: async () => ({
+        ...flux,
+        definition: { ...flux.definition, name: "FLUX", sizes: ["768x768", "1024x1024"] },
+        rateCard: {
+          currency: "USD",
+          images: { variants: [{ size: "768x768", price: "0.008" }] },
+        },
+      }),
+      async generate() {
+        throw new Error("Route tests do not run inference.")
+      },
+    }
+    const voice: SpeechModel = {
+      providerId: "gateway",
+      modelId: "openai/tts-1",
+      defaultVoice: "alloy",
+      definition: {
+        kind: "speech",
+        providerId: "gateway",
+        modelId: "openai/tts-1",
+        description: "Short notifications",
+        outputMediaTypes: ["audio/mpeg"],
+      },
+      // A card the rate card rules reject is never shown as a price.
+      rateCard: { currency: "USD" },
+      async speak() {
+        throw new Error("Route tests do not run inference.")
+      },
+    }
+    const transcriber: TranscriptionModel = {
+      providerId: "gateway",
+      modelId: "openai/whisper",
+      definition: {
+        kind: "transcription",
+        providerId: "gateway",
+        modelId: "openai/whisper",
+        maxInputBytes: 26_214_400,
+      },
+      rateCard: { currency: "USD", audioInputSeconds: "0.0001" },
+      async transcribe() {
+        throw new Error("Route tests do not run inference.")
+      },
+    }
+    const warning = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const response = await createApp({
+        image: [flux],
+        audio: { speech: [voice], transcription: [transcriber] },
+      }).fetch(new Request("http://localhost/api/models"))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        language: [],
+        image: [
+          {
+            provider: "gateway",
+            modelId: "bfl/flux",
+            isDefault: true,
+            name: "FLUX",
+            sizes: ["768x768", "1024x1024"],
+            inputImages: { maxCount: 4, maxBytes: 10_485_760 },
+            rateCard: {
+              currency: "USD",
+              images: { variants: [{ size: "768x768", price: "0.008" }] },
+            },
+          },
+        ],
+        audio: {
+          speech: [
+            {
+              provider: "gateway",
+              modelId: "openai/tts-1",
+              isDefault: true,
+              name: "openai/tts-1",
+              description: "Short notifications",
+              defaultVoice: "alloy",
+              outputMediaTypes: ["audio/mpeg"],
+            },
+          ],
+          transcription: [
+            {
+              provider: "gateway",
+              modelId: "openai/whisper",
+              isDefault: true,
+              name: "openai/whisper",
+              maxInputBytes: 26_214_400,
+              rateCard: { currency: "USD", audioInputSeconds: "0.0001" },
+            },
+          ],
+        },
+      })
+      expect(warning).toHaveBeenCalledTimes(1)
+    } finally {
+      warning.mockRestore()
+    }
   })
 
   test("keeps configured metadata when a provider catalog is unavailable", async () => {

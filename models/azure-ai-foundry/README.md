@@ -193,7 +193,6 @@ const model = foundry.chat("production", {
   },
   rateCard: {
     currency: "USD",
-    unit: "million-tokens",
     input: "1.00", // Illustrative rates; replace with your prices.
     output: "4.00",
     cacheReadInput: "0.25",

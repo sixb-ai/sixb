@@ -2,8 +2,8 @@ import {
   defineModelRateCard,
   estimateModelReservation,
   type JsonObject,
-  type LanguageModelRateCard,
   type ModelCostEstimator,
+  type ModelRateCard,
   type ModelUsage,
   rateModelCall,
 } from "@sixb/core/models"
@@ -43,13 +43,16 @@ export function foundryUsage(
   }
 }
 
+/** An estimator, with the card it prices by when it prices this configuration at all. */
+export type PricedEstimator = ModelCostEstimator & { readonly rateCard?: ModelRateCard }
+
 export function foundryEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   return tokenEstimator(
     card,
     request,
@@ -62,17 +65,18 @@ export function foundryEstimator(
 }
 
 export function tokenEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   requestKeys: readonly string[],
   tokenMeters: (raw: JsonObject | undefined) => boolean,
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   const rateCard = card && defineModelRateCard(card)
   const fixed = Object.keys(request ?? {}).every((key) => requestKeys.includes(key))
   return {
+    ...(fixed && rateCard ? { rateCard } : {}),
     estimateReservation: (tokens) =>
       fixed ? estimateModelReservation({ ...tokens, rateCard }) : undefined,
     estimate: ({ usage, responseModelId, route }) => {

@@ -15,5 +15,15 @@ export const AiUsageSummarySchema = z.object({
   audioDurationMs: TokenCountSchema.optional().describe(
     "Audio content duration in milliseconds; not billed duration."
   ),
+  imageOutputTokens: TokenCountSchema.optional().describe(
+    "Output tokens that encode generated images, within outputTokens."
+  ),
+  audioOutputTokens: TokenCountSchema.optional().describe(
+    "Output tokens that encode generated audio, within outputTokens."
+  ),
+  outputImages: TokenCountSchema.optional().describe("Images the call returned."),
+  inputCharacters: TokenCountSchema.optional().describe(
+    "Input characters, counted by the provider's own billing rule."
+  ),
   reportingStatus: z.enum(["complete", "partial", "unavailable"]),
 })

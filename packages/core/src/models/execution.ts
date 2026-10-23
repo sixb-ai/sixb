@@ -1,9 +1,10 @@
 import { runModelLoop } from "../agents/model-loop"
-import { assertProviderAccess } from "../authorization"
+import { assertModelAccess } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createAudioRuntime } from "./audio/runtime"
+import { createModelCallsRuntime, type ModelCallRunVisibility } from "./calls"
 import type { ModelCatalog } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
@@ -18,6 +19,7 @@ import type {
   LanguageModelOutputShape,
   ModelsRuntime,
 } from "./generation-types"
+import { createImageRuntime } from "./image/runtime"
 import { modelReasoningSupportIssue } from "./language-model"
 import type { ModelMessage } from "./messages"
 import { languageModelOutput } from "./output"
@@ -27,6 +29,7 @@ export function createModelsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
+  runs: ModelCallRunVisibility,
   blobs?: BlobStorage
 ): ModelsRuntime {
   const session = runtime.modelExecution ?? new ModelExecutionSession(runtime, execution)
@@ -41,7 +44,7 @@ export function createModelsRuntime(
   async function generate(
     input: LanguageModelGenerateInput<LanguageModelOutputShape | undefined>
   ): Promise<LanguageModelGenerateResult<unknown>> {
-    assertProviderAccess(runtime, execution, "models.language.generate")
+    assertModelAccess(runtime, execution, "models.language.generate")
     const messages = generationMessages(input)
     const signal = session.signal(input.signal)
     signal.throwIfAborted()
@@ -134,6 +137,8 @@ export function createModelsRuntime(
     language: { generate },
     decision: createDecisionRuntime(runtime, execution, catalog, session),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
+    image: createImageRuntime(runtime, execution, catalog, session, blobs),
+    calls: createModelCallsRuntime(runtime, runs, execution.id),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)

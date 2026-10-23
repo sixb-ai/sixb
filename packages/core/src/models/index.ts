@@ -4,14 +4,25 @@ export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "..
 export type {
   AudioModelCatalog,
   AudioModelCatalogInput,
+  SpeechModelCatalog,
+  SpeechModelEntry,
   TranscriptionModelCatalog,
   TranscriptionModelEntry,
 } from "./audio/catalog"
-export { TranscriptionModelResponseError } from "./audio/errors"
+export { SpeechModelResponseError, TranscriptionModelResponseError } from "./audio/errors"
 export type {
   AudioModelsRuntime,
+  AudioSpeakInput,
+  AudioSpeakResult,
   AudioTranscribeInput,
   AudioTranscribeResult,
+  SpeechCostEstimator,
+  SpeechModel,
+  SpeechModelDefinition,
+  SpeechModelRequest,
+  SpeechModelResponseMetadata,
+  SpeechModelResult,
+  SpeechReservationInput,
   TranscriptionCostEstimator,
   TranscriptionModel,
   TranscriptionModelDefinition,
@@ -20,6 +31,7 @@ export type {
   TranscriptionModelResult,
   TranscriptionOutput,
 } from "./audio/types"
+export type { ModelCallFiles, ModelCallsRuntime } from "./calls"
 export type {
   EmbeddingModelCatalog,
   EmbeddingModelEntry,
@@ -102,6 +114,21 @@ export type {
   LanguageModelsRuntime,
   ModelsRuntime,
 } from "./generation-types"
+export type { ImageModelCatalog, ImageModelEntry } from "./image/catalog"
+export { ImageModelResponseError } from "./image/errors"
+export type {
+  ImageCostEstimator,
+  ImageData,
+  ImageGenerateInput,
+  ImageGenerateResult,
+  ImageModel,
+  ImageModelDefinition,
+  ImageModelRequest,
+  ImageModelResponseMetadata,
+  ImageModelResult,
+  ImageModelsRuntime,
+  ImageReservationInput,
+} from "./image/types"
 export type {
   LanguageModel,
   LanguageModelProvider,
@@ -147,10 +174,13 @@ export type {
 } from "./pricing"
 export { estimateModelReservation, rateModelCall } from "./pricing"
 export type {
-  LanguageModelRateCard,
+  ModelPriceVariant,
+  ModelPricingDimensions,
   ModelPricingTier,
+  ModelRateCard,
   ModelTokenPrice,
   ModelUnitPrice,
+  ModelVariantPrice,
 } from "./rate-card"
 export { defineModelRateCard } from "./rate-card"
 export type {

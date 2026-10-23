@@ -99,7 +99,7 @@ test("uses explicit definitions during a public catalog outage without bypassing
   })
   const options = {
     definition: { contextWindow: 10000, maxOutputTokens: 100, capabilities: {} },
-    rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" } as const,
+    rateCard: { currency: "USD", input: "1", output: "2" } as const,
   }
   const model = await provider.responses("production", options).resolve()
   expect(model.definition.contextWindow).toBe(10000)
@@ -329,7 +329,6 @@ test.each([
       request: { cache_control: { type: "ephemeral", ttl: "1h" } },
       rateCard: {
         currency: "USD",
-        unit: "million-tokens",
         input: "3",
         output: "15",
         cacheWriteInput5m: "3.75",
@@ -564,7 +563,7 @@ test("honors explicit overrides, unknown identities, false capabilities and unsu
   expect(model.costEstimator.estimate({ usage }).status).toBe("unpriceable")
   const override = await provider("deployment", {
     definition: { capabilities: { localTools: false } },
-    rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
+    rateCard: { currency: "USD", input: "1", output: "2" },
   }).resolve()
   expect(override.definition.capabilities.localTools).toBe(false)
   expect(override.costEstimator.estimate({ usage })).toMatchObject({

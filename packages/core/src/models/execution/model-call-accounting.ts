@@ -152,7 +152,9 @@ function modelCostRecord(
       ? "missingRateCard"
       : input.cost.reason === "missing-usage"
         ? "missingUsageMeter"
-        : "invalidUsageForFormula"
+        : input.cost.reason === "unsupported-pricing-dimension"
+          ? "unsupportedPricingDimension"
+          : "invalidUsageForFormula"
   const missingMeters =
     reason === "missingUsageMeter" ? normalizeMissingMeters(input.cost.missingMeters) : undefined
   return {

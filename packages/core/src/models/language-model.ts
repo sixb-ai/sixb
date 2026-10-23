@@ -4,6 +4,7 @@ import type { LanguageModelDefinition } from "./definitions"
 import type { LanguageModelStreamEvent } from "./events"
 import type { ModelMessage } from "./messages"
 import type { ModelCostEstimator } from "./pricing"
+import type { ModelRateCard } from "./rate-card"
 
 export const MODEL_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -83,6 +84,11 @@ export interface LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly costEstimator?: ModelCostEstimator
+  /**
+   * The prices this binding bills by, for people and agents choosing a model. Pricing itself
+   * goes through costEstimator; absent when the price is unknown.
+   */
+  readonly rateCard?: ModelRateCard
   /**
    * Reasoning Sixb applies whenever this model runs without an explicit choice: chat turns, AI
    * workflow steps, subagents, and direct generation. Providers set it from their model options;

@@ -536,6 +536,7 @@ async function startAgentEnvironment(
         project: context,
         requester: context.requester,
       }),
+      ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
     })
   } catch (error) {
     // Provisioning has started: give back what it acquires, or the sandbox outlives the run.

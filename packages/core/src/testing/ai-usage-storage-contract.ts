@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { FileRef } from "../blob-storage/types"
 import {
   type AiUsageStorage,
   AiUsageStorageError,
@@ -101,6 +102,51 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           })
         )
         expect((await latest())?.modelKind).toBe("reranking")
+      })
+    })
+    // Removal proof: omit a media count from a row codec, or 'speech' from a storage migration's
+    // model_kind check; the round trip or the write fails.
+    test("persists generated-media usage and the speech kind", async () => {
+      await withStorage(async (storage) => {
+        const latest = () =>
+          storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
+        await storage.recordModelCall(
+          modelCallInput({
+            modelKind: "speech",
+            usage: { inputCharacters: 12, audioOutputTokens: 29, audioDurationMs: 1160 },
+          })
+        )
+        expect((await latest())?.modelKind).toBe("speech")
+        expect((await latest())?.usage).toEqual({
+          inputCharacters: 12,
+          audioOutputTokens: 29,
+          audioDurationMs: 1160,
+          reportingStatus: "partial",
+        })
+
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_image",
+            callId: "call_image",
+            responseId: "response_image",
+            modelKind: "image",
+            usage: {
+              inputTokens: 14,
+              outputTokens: 1120,
+              imageOutputTokens: 1120,
+              outputImages: 1,
+            },
+            occurredAt: at("2026-06-23T10:01:00.000Z"),
+          })
+        )
+        expect((await latest())?.usage).toEqual({
+          inputTokens: 14,
+          outputTokens: 1120,
+          totalTokens: 1134,
+          imageOutputTokens: 1120,
+          outputImages: 1,
+          reportingStatus: "complete",
+        })
       })
     })
     test("retains native provider IDs across reads and replay", async () => {
@@ -593,7 +639,65 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         })
       })
     })
+
+    test("records a call's files once, for the execution that made it", async () => {
+      await withStorage(async (storage) => {
+        const files = [generatedFile("a"), { ...generatedFile("b"), fileName: "voice.mp3" }]
+        const input = {
+          projectId,
+          executionId: agentExecutionId,
+          callId: "call_image",
+          files,
+          recordedAt: at("2026-06-23T10:00:02.000Z"),
+        }
+        const recorded = await storage.recordModelCallFiles(input)
+        expect(recorded).toEqual(input)
+        expect(await storage.getModelCallFiles({ projectId, callId: "call_image" })).toEqual(input)
+
+        // A retry keeps the first record; another execution cannot claim the call.
+        expect(
+          await storage.recordModelCallFiles({ ...input, files: [generatedFile("c")] })
+        ).toEqual(input)
+        const conflict = await storage
+          .recordModelCallFiles({ ...input, executionId: otherAgentExecutionId })
+          .catch((error) => error)
+        expect(conflict).toBeInstanceOf(AiUsageStorageError)
+        expect(conflict).toMatchObject({ code: "duplicate_id" })
+
+        expect(await storage.getModelCallFiles({ projectId, callId: "call_other" })).toBeNull()
+        expect(
+          await storage.getModelCallFiles({ projectId: "other-project", callId: "call_image" })
+        ).toBeNull()
+      })
+    })
+
+    test("refuses files without a known execution or a valid reference", async () => {
+      await withStorage(async (storage) => {
+        const input = {
+          projectId,
+          executionId: agentExecutionId,
+          callId: "call_image",
+          files: [generatedFile("a")],
+        }
+        const missing = await storage
+          .recordModelCallFiles({ ...input, executionId: "exec_missing" })
+          .catch((error) => error)
+        expect(missing).toMatchObject({ code: "missing_execution" })
+        for (const files of [[], [{ ...generatedFile("a"), blobId: "blob_other" }]]) {
+          const invalid = await storage
+            .recordModelCallFiles({ ...input, files })
+            .catch((error) => error)
+          expect(invalid).toBeInstanceOf(TypeError)
+        }
+        expect(await storage.getModelCallFiles({ projectId, callId: "call_image" })).toBeNull()
+      })
+    })
   })
+}
+
+function generatedFile(seed: string): FileRef {
+  const digest = `sha256:${seed.repeat(64).slice(0, 64)}` as const
+  return { blobId: `blob_${digest.slice(7)}`, digest, sizeBytes: 3, mediaType: "image/png" }
 }
 
 /** Seed the immutable execution references used by the provider-neutral AI usage contract. */

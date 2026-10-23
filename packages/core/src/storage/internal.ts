@@ -25,7 +25,12 @@ export {
   serializeActivityAttribution,
   validateActivityAppend,
 } from "./activity/policy"
-export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
+export {
+  assertAiUsageExecutionId,
+  assertSameCallExecution,
+  normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallRecord,
+} from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {
   artifactStateBytes,

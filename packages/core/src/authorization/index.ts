@@ -4,6 +4,7 @@ export {
   assertCanAppendTelemetry,
   assertCanEdit,
   assertCanManageConnector,
+  assertModelAccess,
   assertPrivileged,
   assertProviderAccess,
   assertRuntimeAuthorizationBound,

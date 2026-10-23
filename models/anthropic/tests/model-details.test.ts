@@ -27,7 +27,6 @@ test("prices cache reads explicitly for each covered version", () => {
 test("applies residency to explicit rates, including the special cache price", () => {
   expect(anthropicRateCard("claude-fable-5-1", { inference_geo: "us" })).toEqual({
     currency: "USD",
-    unit: "million-tokens",
     input: "11",
     output: "55",
     cacheReadInput: "0.275",
@@ -36,7 +35,6 @@ test("applies residency to explicit rates, including the special cache price", (
   })
   expect(anthropicRateCard("claude-opus-5", { speed: "fast", inference_geo: "us" })).toEqual({
     currency: "USD",
-    unit: "million-tokens",
     input: "11",
     output: "55",
     cacheReadInput: "1.1",
