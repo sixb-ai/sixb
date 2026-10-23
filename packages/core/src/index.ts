@@ -955,6 +955,11 @@ export type {
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"
 export type { PublishedArtifact } from "./artifacts/publish/publish"
+export type {
+  ArtifactFacetsQueryResult,
+  ArtifactObjectsQueryResult,
+  ArtifactQueryResult,
+} from "./artifacts/queries"
 export type { ArtifactReference } from "./artifacts/references"
 export type { ArtifactWarning } from "./artifacts/warnings"
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"

@@ -75,6 +75,11 @@ export {
   type SheetSummary,
   type SlidesOutline,
 } from "./outline"
+export type {
+  ArtifactFacetsQueryResult,
+  ArtifactObjectsQueryResult,
+  ArtifactQueryResult,
+} from "./queries"
 export {
   type ArtifactAddressTarget,
   type ResolvedArtifactPart,
