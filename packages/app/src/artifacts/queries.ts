@@ -5,9 +5,20 @@ import {
   isSixbApiError,
 } from "@sixb/client"
 import { events, useEvents } from "@sixb/client/hooks"
-import { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "@sixb/core/artifacts"
-import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo } from "react"
+import {
+  ARTIFACT_THEME_FILE,
+  type ArtifactTheme,
+  artifactQueryName,
+  parseArtifactTheme,
+} from "@sixb/core/artifacts"
+import {
+  type QueryClient,
+  queryOptions,
+  useIsFetching,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
+import { useCallback, useMemo, useSyncExternalStore } from "react"
 import { artifactFileSource, type FileSource } from "./file-source"
 import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./file-view"
 
@@ -84,7 +95,7 @@ export function artifactQueryKey(artifactId: string, version: number, name: stri
 }
 
 /** Where every query result of a version is cached, one key under it each. */
-function versionQueriesKey(version: QueriedVersion) {
+export function versionQueriesKey(version: QueriedVersion) {
   return [ARTIFACT_QUERIES, version.artifactId, version.version] as const
 }
 
@@ -163,6 +174,49 @@ async function readQuery(
     throwOnError: true,
   })
   return data
+}
+
+/** Whether a version holds queries: what it shows is read live, as each reader opens it. */
+export function holdsQueries(version: Pick<ArtifactVersion, "files">): boolean {
+  return version.files.some((file) => artifactQueryName(file.path) !== undefined)
+}
+
+/**
+ * The version's queries the reader has read, as the header shows them: when the last read came in,
+ * none until one has, whether one is being read, and `refresh`, which reads every one again. The
+ * views that show one refetch it, and a frame's page hears its rows changed; one no view shows is
+ * read when one opens.
+ */
+export function useVersionQueries(version: QueriedVersion): {
+  readonly readAt: number | null
+  readonly refreshing: boolean
+  readonly refresh: () => void
+} {
+  const queries = useQueryClient()
+  const { artifactId, version: number } = version
+
+  const subscribe = useCallback(
+    (onChange: () => void) => queries.getQueryCache().subscribe(onChange),
+    [queries]
+  )
+  const readAt = useSyncExternalStore(subscribe, () =>
+    lastRead(queries, versionQueriesKey({ artifactId, version: number }))
+  )
+  const refreshing = useIsFetching({ queryKey: versionQueriesKey(version) }) > 0
+
+  const refresh = useCallback(() => {
+    void queries.invalidateQueries({ queryKey: versionQueriesKey({ artifactId, version: number }) })
+  }, [queries, artifactId, number])
+
+  return { readAt, refreshing, refresh }
+}
+
+function lastRead(queries: QueryClient, key: readonly unknown[]): number | null {
+  let last = 0
+  for (const query of queries.getQueryCache().findAll({ queryKey: key })) {
+    if (query.state.data !== undefined) last = Math.max(last, query.state.dataUpdatedAt)
+  }
+  return last > 0 ? last : null
 }
 
 /** A sync writes in bursts: what changes within a second reads each query again once. */

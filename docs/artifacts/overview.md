@@ -439,6 +439,8 @@ File: `queries/overdue.json`
 - A sheet shows a query's rows as its [live rows](#live-rows), and a page, a deck, or a canvas
   board reads one with `sixb.query("overdue")` (see [Write a page](#write-a-page)). What an open
   artifact shows is read again when the objects its queries read change.
+- The header of a version with queries says **Live**, with the time its data was last read, and
+  **Refresh** reads every query again. An embed of live data says so under it.
 - `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does
   `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. Its `schema` gives the type
   of each property its rows and the links it expands hold, as the caller may view them. A query the

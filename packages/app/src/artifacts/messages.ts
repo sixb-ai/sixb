@@ -51,6 +51,13 @@ export const en = {
     deleting: "Deleting…",
     deleteFailed: "The artifact could not be deleted. Try again.",
     cancel: "Cancel",
+    live: "Live",
+    liveAt: (time: string) => `Live · ${time}`,
+    liveDetail: (at?: string) =>
+      at
+        ? `Live data as of ${at}. It is read again when the objects it reads change.`
+        : "Live data: it is read again when the objects it reads change.",
+    refresh: "Refresh data",
   },
   edit: {
     edit: "Edit",
@@ -91,6 +98,7 @@ export const en = {
   references: {
     open: "Open",
     latest: "Latest",
+    live: "Live data",
     loading: "Loading…",
     unavailable: "Unavailable",
     unavailableDescription: "It may have been deleted.",
@@ -481,6 +489,13 @@ export const fr: Translation<ArtifactMessages> = {
     deleting: "Suppression…",
     deleteFailed: "Impossible de supprimer l’artefact. Réessayez.",
     cancel: "Annuler",
+    live: "En direct",
+    liveAt: (time) => `En direct · ${time}`,
+    liveDetail: (at) =>
+      at
+        ? `Données en direct, lues le ${at}. Elles sont relues quand les objets qu’elles lisent changent.`
+        : "Données en direct : elles sont relues quand les objets qu’elles lisent changent.",
+    refresh: "Actualiser les données",
   },
   edit: {
     edit: "Modifier",
@@ -522,6 +537,7 @@ export const fr: Translation<ArtifactMessages> = {
   references: {
     open: "Ouvrir",
     latest: "Dernière version",
+    live: "Données en direct",
     loading: "Chargement…",
     unavailable: "Indisponible",
     unavailableDescription: "Il a peut-être été supprimé.",

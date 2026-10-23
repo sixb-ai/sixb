@@ -84,13 +84,14 @@ export {
   type SheetSummary,
   type SlidesOutline,
 } from "./outline"
-export type {
-  ArtifactFacetsQueryResult,
-  ArtifactObjectsQueryResult,
-  ArtifactQueryProperty,
-  ArtifactQueryPropertyType,
-  ArtifactQueryResult,
-  ArtifactQuerySchema,
+export {
+  type ArtifactFacetsQueryResult,
+  type ArtifactObjectsQueryResult,
+  type ArtifactQueryProperty,
+  type ArtifactQueryPropertyType,
+  type ArtifactQueryResult,
+  type ArtifactQuerySchema,
+  artifactQueryName,
 } from "./queries"
 export {
   type ArtifactAddressTarget,
