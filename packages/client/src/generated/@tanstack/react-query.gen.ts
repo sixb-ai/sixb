@@ -64,6 +64,7 @@ import {
   getAiModelCallFiles,
   getArtifact,
   getArtifactFileContent,
+  getArtifactQuery,
   getArtifactState,
   getArtifactVersion,
   getAuthAccessManagementOptions,
@@ -350,6 +351,9 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentError,
   GetArtifactFileContentResponse,
+  GetArtifactQueryData,
+  GetArtifactQueryError,
+  GetArtifactQueryResponse,
   GetArtifactResponse,
   GetArtifactStateData,
   GetArtifactStateError,
@@ -5633,6 +5637,33 @@ export const getArtifactVersionOptions = (options: Options<GetArtifactVersionDat
       return data
     },
     queryKey: getArtifactVersionQueryKey(options),
+  })
+
+export const getArtifactQueryQueryKey = (options: Options<GetArtifactQueryData>) =>
+  createQueryKey("getArtifactQuery", options)
+
+/**
+ * Run an artifact's query
+ *
+ * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.
+ */
+export const getArtifactQueryOptions = (options: Options<GetArtifactQueryData>) =>
+  queryOptions<
+    GetArtifactQueryResponse,
+    GetArtifactQueryError,
+    GetArtifactQueryResponse,
+    ReturnType<typeof getArtifactQueryQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactQuery({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactQueryQueryKey(options),
   })
 
 export const getArtifactFileContentQueryKey = (options: Options<GetArtifactFileContentData>) =>

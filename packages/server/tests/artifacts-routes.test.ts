@@ -1,25 +1,47 @@
 import { describe, expect, test } from "bun:test"
 import {
+  can,
+  defineGroup,
+  defineObjectType,
+  defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  prop,
   SixbHost,
 } from "@sixb/core"
 import { FRAME_PROTOCOL, parseFrameCall } from "@sixb/core/artifacts"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const PROJECT_ID = "artifact-route-tests"
+
+const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("status", "string", { query: { searchable: true, filterable: true } }),
+  ],
+})
+const readers = defineGroup("invoice-readers")
+const invoiceReader = defineRole("invoice-reader", {
+  grantedTo: [readers],
+  grants: [can.view(Invoice)],
+})
 
 function createApp() {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
   const host = new SixbHost({
     id: PROJECT_ID,
-    ontology: [],
+    ontology: [Invoice],
+    groups: [readers],
+    roles: [invoiceReader],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -38,7 +60,7 @@ function createApp() {
       mediaType,
     }),
   })
-  return { app, storage, put }
+  return { app, host, storage, put }
 }
 
 async function seedSession(storage: InMemoryStorage, userId: string) {
@@ -394,5 +416,73 @@ describe("what a page keeps", () => {
     const kept = await call("")
     expect(kept.status).toBe(200)
     expect((await kept.json()).entries).toMatchObject([{ key: "inputs", value: 1 }])
+  })
+})
+
+describe("an artifact's queries", () => {
+  // Guard proof: drop `case "query_not_found"` from handleArtifactRouteError; the query the
+  // version does not hold then answers 422, not 404.
+  test("run as the caller, by name, at a version", async () => {
+    const { app, host, storage, put } = createApp()
+    const alice = await seedSession(storage, "alice")
+    const bob = await seedSession(storage, "bob")
+    for (const userId of ["alice", "bob"]) {
+      await storage.auth.groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId,
+        groupId: readers.id,
+        source: "manual",
+      })
+    }
+    await createTestSixb(host).objects.upsert("Invoice", { id: "inv_1", status: "open" })
+
+    const open = {
+      kind: "filter",
+      input: { kind: "start", objectTypeId: "Invoice" },
+      predicate: { op: "eq", propertyId: "status", value: "open" },
+    }
+    const files = [
+      await put("index.html", "<!doctype html><title>Open</title><p>Open</p>", "text/html"),
+      await put("queries/open.json", JSON.stringify(open), "application/json"),
+    ]
+    const created = await app.fetch(
+      new Request(url("/api/artifacts"), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({ kind: "page", title: "Open", files }),
+      })
+    )
+    const body = await created.json()
+    expect(created.status).toBe(201)
+    const base = `/api/artifacts/${body.artifact.id}/versions`
+
+    const read = await app.fetch(new Request(url(`${base}/latest/queries/open`), alice))
+    expect(read.status).toBe(200)
+    expect(await read.json()).toEqual({
+      kind: "objects",
+      objects: [
+        {
+          primaryId: "inv_1",
+          objectTypeId: "Invoice",
+          properties: { id: "inv_1", status: "open" },
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+      ],
+      total: 1,
+      truncated: false,
+      resultObjectTypeIds: ["Invoice"],
+      readObjectTypeIds: ["Invoice"],
+    })
+
+    const missing = await app.fetch(new Request(url(`${base}/1/queries/closed`), alice))
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toMatchObject({ code: "query_not_found" })
+    expect((await app.fetch(new Request(url(`${base}/2/queries/open`), alice))).status).toBe(404)
+
+    // It exists but is not shared with Bob: refused, as every read of it is.
+    const refused = await app.fetch(new Request(url(`${base}/1/queries/open`), bob))
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({ code: "not_shared" })
   })
 })
