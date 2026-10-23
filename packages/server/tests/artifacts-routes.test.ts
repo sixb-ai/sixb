@@ -473,6 +473,7 @@ describe("an artifact's queries", () => {
       truncated: false,
       resultObjectTypeIds: ["Invoice"],
       readObjectTypeIds: ["Invoice"],
+      schema: { properties: { id: { type: "string" }, status: { type: "string" } }, links: {} },
     })
 
     const missing = await app.fetch(new Request(url(`${base}/1/queries/closed`), alice))

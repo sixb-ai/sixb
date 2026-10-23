@@ -3438,7 +3438,7 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
 /**
  * Run an artifact's query
  *
- * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.
+ * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.
  */
 export const getArtifactQuery = <ThrowOnError extends boolean = false>(
   options: Options<GetArtifactQueryData, ThrowOnError>

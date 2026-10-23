@@ -139,6 +139,7 @@ export type ArtifactQueryResponse =
        * Every object type the query reads: where it starts, and what it traverses or expands
        */
       readObjectTypeIds: Array<string>
+      schema: ArtifactQuerySchema
     }
   | {
       kind: "facets"
@@ -155,7 +156,55 @@ export type ArtifactQueryResponse =
        * Every object type the query reads: where it starts, and what it traverses or expands
        */
       readObjectTypeIds: Array<string>
+      schema: ArtifactQuerySchema
     }
+
+/**
+ * What each value of a row holds, from the ontology as the caller may view it: a property their view leaves out is absent
+ */
+export type ArtifactQuerySchema = {
+  /**
+   * The properties of the types the query returns, by id; the first type's when two disagree
+   */
+  properties: {
+    [key: string]: ArtifactQueryProperty
+  }
+  /**
+   * By link id, for each link the query expands on its rows: the properties of what it reaches
+   */
+  links: {
+    [key: string]: {
+      properties: {
+        [key: string]: ArtifactQueryProperty
+      }
+    }
+  }
+}
+
+export type ArtifactQueryProperty = {
+  /**
+   * The property's type, a value type resolved to the schema it names
+   */
+  type:
+    | "string"
+    | "integer"
+    | "double"
+    | "decimal"
+    | "boolean"
+    | "date"
+    | "timestamp"
+    | "uuid"
+    | "fileRef"
+    | "userRef"
+    | "enum"
+    | "array"
+    | "object"
+    | "map"
+  /**
+   * What an enum's values are
+   */
+  valueType?: "string" | "integer"
+}
 
 export type ObjectQueryLink = {
   source: ObjectRef
@@ -14504,8 +14553,15 @@ export type CreateArtifactResponses = {
             kind: "sheet"
             sheets: Array<{
               name: string
+              /**
+               * The rows of its CSV; none for a live sheet
+               */
               rows: number
               columns: Array<string>
+              /**
+               * A live sheet's query, queries/<name>.json, whose rows each reader reads
+               */
+              query?: string
             }>
             charts: Array<string>
           }
@@ -15392,8 +15448,15 @@ export type PublishArtifactVersionResponses = {
             kind: "sheet"
             sheets: Array<{
               name: string
+              /**
+               * The rows of its CSV; none for a live sheet
+               */
               rows: number
               columns: Array<string>
+              /**
+               * A live sheet's query, queries/<name>.json, whose rows each reader reads
+               */
+              query?: string
             }>
             charts: Array<string>
           }
@@ -15687,8 +15750,15 @@ export type GetArtifactVersionResponses = {
           kind: "sheet"
           sheets: Array<{
             name: string
+            /**
+             * The rows of its CSV; none for a live sheet
+             */
             rows: number
             columns: Array<string>
+            /**
+             * A live sheet's query, queries/<name>.json, whose rows each reader reads
+             */
+            query?: string
           }>
           charts: Array<string>
         }

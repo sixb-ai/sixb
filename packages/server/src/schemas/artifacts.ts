@@ -21,7 +21,15 @@ const DocumentOutlineSchema = z.object({
 const SheetOutlineSchema = z.object({
   kind: z.literal("sheet"),
   sheets: z.array(
-    z.object({ name: z.string(), rows: z.number().int(), columns: z.array(z.string()) })
+    z.object({
+      name: z.string(),
+      rows: z.number().int().describe("The rows of its CSV; none for a live sheet"),
+      columns: z.array(z.string()),
+      query: z
+        .string()
+        .optional()
+        .describe("A live sheet's query, queries/<name>.json, whose rows each reader reads"),
+    })
   ),
   charts: z.array(z.string()),
 })
