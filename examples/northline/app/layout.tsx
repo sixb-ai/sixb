@@ -1,5 +1,6 @@
 import { type AppMetadata, AppShellProvider } from "@sixb/app"
 import type { CSSProperties, PropsWithChildren } from "react"
+import { responsePolicyView } from "./_agent/response-policy-view"
 import { NorthlineShell } from "./_components/northline-shell"
 
 export const metadata = {
@@ -9,6 +10,8 @@ export const metadata = {
   themeColor: "#132a33",
   backgroundColor: "#f5f7f7",
 } satisfies AppMetadata
+
+export const toolViews = [responsePolicyView]
 
 export default function RootLayout({ children }: PropsWithChildren) {
   return (
