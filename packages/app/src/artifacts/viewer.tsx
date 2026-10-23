@@ -42,6 +42,7 @@ import {
   MoreHorizontal,
   PencilLine,
   Redo2,
+  RefreshCw,
   RotateCcw,
   Trash2,
   TriangleAlert,
@@ -63,7 +64,7 @@ import { resetPageState, usePageStateCount } from "./page-state"
 import { type ArtifactAuthor, useArtifactPeople } from "./people"
 import { PersonAvatar } from "./person-avatar"
 import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
-import { type ArtifactVersion, versionFileSource } from "./queries"
+import { type ArtifactVersion, holdsQueries, useVersionQueries, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
 import { CanvasRenderer } from "./renderers/canvas/renderer"
 import { DocumentRenderer } from "./renderers/document"
@@ -573,6 +574,7 @@ function ArtifactHeader({
 }) {
   const messages = useArtifactMessages()
   const { artifact } = detail
+  const live = holdsQueries(version)
   if (edit.editing) {
     // The draft bar: what is being edited, Discard, and Save as the next version. As the header
     // narrows, down to a phone's dialog, the state and Discard fold to icons, Save drops the
@@ -660,9 +662,13 @@ function ArtifactHeader({
       leading={<ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />}
       title={version.title}
       accessory={
-        <VersionPicker detail={detail} version={version} onVersionChange={onVersionChange} />
+        <>
+          <VersionPicker detail={detail} version={version} onVersionChange={onVersionChange} />
+          {live ? <LiveStatus version={version} /> : null}
+        </>
       }
     >
+      {live ? <RefreshButton version={version} /> : null}
       {edit.available ? (
         <Button
           size="sm"
@@ -773,6 +779,50 @@ function VersionAuthor({ author }: { readonly author: ArtifactAuthor }) {
       <span className="min-w-0 truncate">{own ? messages.you : name}</span>
       <span aria-hidden="true">·</span>
     </>
+  )
+}
+
+/**
+ * Says a version's data is live, and when the reader last read it, in their time zone: the time
+ * alone on the day, the date with it after. A narrow header keeps its dot, the words in its title.
+ */
+function LiveStatus({ version }: { readonly version: ArtifactVersion }) {
+  const messages = useArtifactMessages().viewer
+  const locale = useLocale()
+  const { readAt } = useVersionQueries(version)
+
+  const read = readAt === null ? null : new Date(readAt)
+  const sameDay = read?.toDateString() === new Date().toDateString()
+  const time = read?.toLocaleString(locale, {
+    ...(sameDay ? {} : { month: "short", day: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  })
+  const label = time ? messages.liveAt(time) : messages.live
+  const detail = messages.liveDetail(
+    read?.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })
+  )
+
+  return (
+    <span
+      title={detail}
+      data-live=""
+      className="hidden h-5 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-[7px] py-0.5 text-xs font-medium whitespace-nowrap text-success tabular-nums @xs:flex @lg:px-2"
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
+      <span className="sr-only @lg:not-sr-only">{label}</span>
+    </span>
+  )
+}
+
+/** Reads every query of the version again, its icon turning while one is read. */
+function RefreshButton({ version }: { readonly version: ArtifactVersion }) {
+  const messages = useArtifactMessages().viewer
+  const { refreshing, refresh } = useVersionQueries(version)
+  return (
+    <HeaderButton label={messages.refresh} onClick={refresh}>
+      <RefreshCw className={cn(refreshing && "animate-spin motion-reduce:animate-none")} />
+    </HeaderButton>
   )
 }
 

@@ -1,9 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test"
-import { type GetArtifactQueryResponse, type GetArtifactResponse, SixbApiError } from "@sixb/client"
+import {
+  client,
+  type GetArtifactQueryResponse,
+  type GetArtifactResponse,
+  SixbApiError,
+} from "@sixb/client"
 import { getArtifactQueryKey } from "@sixb/client/hooks"
 import { ARTIFACT_LIMITS, parseCsv, parseWorkbook } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render } from "@testing-library/react"
+import { act, fireEvent, render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { en } from "../src/artifacts/messages"
@@ -233,11 +238,11 @@ function cache(
   return queries
 }
 
-async function view(queries: QueryClient) {
+async function view(queries: QueryClient, artifactId = OVERDUE) {
   const ui = render(
     <QueryClientProvider client={queries}>
       <MemoryRouter>
-        <Viewer target={{ type: "artifact", artifactId: OVERDUE }} onTargetChange={() => {}} />
+        <Viewer target={{ type: "artifact", artifactId }} onTargetChange={() => {}} />
       </MemoryRouter>
     </QueryClientProvider>
   )
@@ -647,6 +652,108 @@ describe("a live sheet shown in a document", () => {
     )
     await settle()
     expect(ui.container.textContent).toContain(CHART_LOCKED)
+    ui.unmount()
+  })
+})
+
+describe("a live artifact's header", () => {
+  // Guard proof: show LiveStatus and RefreshButton whatever the version holds; the document's
+  // header then says it is live too.
+  test("says its data is live and when it was read, with a way to read it again", async () => {
+    const ui = await view(cache(result()))
+
+    const live = ui.container.querySelector("header [data-live]")
+    expect(live?.textContent).toMatch(/^Live · \d{1,2}:\d{2}/)
+    expect(live?.getAttribute("title")).toStartWith("Live data as of ")
+    expect(ui.getByRole("button", { name: "Refresh data" })).not.toBeNull()
+    ui.unmount()
+  })
+
+  test("says nothing of the kind for a version that holds no queries", async () => {
+    const queries = cache(result())
+    const markdown = "# Review\n\nNo live data here.\n"
+    const review = artifactVersion({
+      artifactId: REVIEW,
+      title: "Review",
+      entry: "document.md",
+      files: textFiles({ "document.md": markdown }, REVIEW),
+      outline: { kind: "document", headings: [{ depth: 1, text: "Review", slug: "review" }] },
+    })
+    seedVersion(queries, review, { "document.md": markdown })
+    queries.setQueryData(getArtifactQueryKey({ path: { artifactId: REVIEW } }), {
+      artifact: {
+        id: REVIEW,
+        projectId: "project",
+        kind: "document",
+        title: "Review",
+        owner: { type: "user", id: "user-1" },
+        latestVersion: 1,
+        createdAt: "2026-10-01T12:00:00.000Z",
+        updatedAt: "2026-10-01T12:00:00.000Z",
+      },
+      versions: [
+        {
+          version: 1,
+          title: "Review",
+          author: { type: "user", id: "user-1" },
+          createdAt: "2026-10-01T12:00:00.000Z",
+        },
+      ],
+      access: "owner",
+    } satisfies GetArtifactResponse)
+
+    const ui = await view(queries, REVIEW)
+    expect(ui.container.textContent).toContain("No live data here.")
+    expect(ui.container.querySelector("header [data-live]")).toBeNull()
+    expect(ui.queryByRole("button", { name: "Refresh data" })).toBeNull()
+    ui.unmount()
+  })
+
+  // Guard proof: make `refresh` in useVersionQueries do nothing; the query is not read again.
+  test("reads the version's queries again on Refresh", async () => {
+    const requests: string[] = []
+    const original = client.getConfig()
+    client.setConfig({
+      baseUrl: "http://localhost:3002",
+      fetch: Object.assign(
+        async (input: Request) => {
+          requests.push(new URL(input.url).pathname)
+          return Response.json(result())
+        },
+        { preconnect: globalThis.fetch.preconnect }
+      ) as unknown as typeof fetch,
+    })
+
+    try {
+      const ui = await view(cache(result()))
+      expect(requests).toEqual([])
+
+      await act(async () => {
+        fireEvent.click(ui.getByRole("button", { name: "Refresh data" }))
+      })
+      await settle()
+
+      expect(requests).toEqual([`/api/artifacts/${OVERDUE}/versions/1/queries/overdue`])
+      ui.unmount()
+    } finally {
+      client.setConfig(original)
+    }
+  })
+})
+
+describe("an embed of live data", () => {
+  // Guard proof: return null from ReadsQuery; the line no longer says the range is live.
+  test("says so on the line that names its source", async () => {
+    const ui = render(
+      <QueryClientProvider client={cache(result())}>
+        <ArtifactReferencesProvider open={() => {}}>
+          <ReferencingMarkdown>{`![Overdue](artifact:${OVERDUE}#Overdue!A1:C4)`}</ReferencingMarkdown>
+        </ArtifactReferencesProvider>
+      </QueryClientProvider>
+    )
+    await act(async () => {})
+
+    expect(ui.container.querySelector("figcaption")?.textContent).toContain("Latest · Live data")
     ui.unmount()
   })
 })
