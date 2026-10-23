@@ -43,19 +43,15 @@ export async function runProjectionDispatchReconciler(
  */
 export class ProjectionDispatchReconciler {
   readonly intervalMs: number
-  private readonly descriptorsByDatasetId = new Map<string, ProjectionDispatchDescriptor[]>()
+  private readonly descriptorsByDatasetId: ReadonlyMap<string, ProjectionDispatchDescriptor[]>
   /** Projections whose latest data version must be looked up rather than taken from the feed. */
-  private readonly unverified = new Set<string>()
+  private readonly unverified: Set<string>
   private cursor: string | null = null
 
   constructor(private readonly input: ProjectionDispatchReconcilerInput) {
     this.intervalMs = input.intervalMs ?? INTERVAL_MS
-    for (const descriptor of input.descriptors) {
-      const siblings = this.descriptorsByDatasetId.get(descriptor.datasetId) ?? []
-      siblings.push(descriptor)
-      this.descriptorsByDatasetId.set(descriptor.datasetId, siblings)
-      this.unverified.add(descriptor.projectionId)
-    }
+    this.descriptorsByDatasetId = groupByDataset(input.descriptors)
+    this.unverified = new Set(input.descriptors.map((descriptor) => descriptor.projectionId))
   }
 
   async pass(now = Date.now()): Promise<void> {
@@ -118,23 +114,33 @@ export class ProjectionDispatchReconciler {
     )
   }
 
-  /** Dispatches each projection's latest data version; returns the projections that succeeded. */
+  /**
+   * Dispatches each projection's latest data version; returns the projections that succeeded.
+   * Projections of one dataset share its lookup.
+   */
   private async reconcileLatest(
     descriptors: readonly ProjectionDispatchDescriptor[]
   ): Promise<readonly string[]> {
     const reconciled: string[] = []
-    for (const descriptor of descriptors) {
+    for (const [datasetId, siblings] of groupByDataset(descriptors)) {
+      let version: DatasetVersion | null
       try {
-        const version = await findLatestDataVersion({
+        version = await findLatestDataVersion({
           lakeStorage: this.input.lakeStorage,
           projectId: this.input.projectId,
-          projectionId: descriptor.projectionId,
-          datasetId: descriptor.datasetId,
+          datasetId,
         })
-        if (version) await this.dispatch(descriptor, version)
-        reconciled.push(descriptor.projectionId)
       } catch (error) {
-        reportReconciliationFailure(descriptor, error)
+        for (const descriptor of siblings) reportReconciliationFailure(descriptor, error)
+        continue
+      }
+      for (const descriptor of siblings) {
+        try {
+          if (version) await this.dispatch(descriptor, version)
+          reconciled.push(descriptor.projectionId)
+        } catch (error) {
+          reportReconciliationFailure(descriptor, error)
+        }
       }
     }
     return reconciled
@@ -240,10 +246,21 @@ function admittedUnder(
   )
 }
 
+function groupByDataset(
+  descriptors: readonly ProjectionDispatchDescriptor[]
+): Map<string, ProjectionDispatchDescriptor[]> {
+  const byDatasetId = new Map<string, ProjectionDispatchDescriptor[]>()
+  for (const descriptor of descriptors) {
+    const siblings = byDatasetId.get(descriptor.datasetId) ?? []
+    siblings.push(descriptor)
+    byDatasetId.set(descriptor.datasetId, siblings)
+  }
+  return byDatasetId
+}
+
 async function findLatestDataVersion(input: {
   readonly lakeStorage: ProjectionReconciliationPorts["lakeStorage"]
   readonly projectId: string
-  readonly projectionId: string
   readonly datasetId: string
 }): Promise<DatasetVersion | null> {
   let version = await input.lakeStorage.getLatestVersion(input.datasetId)
@@ -261,7 +278,6 @@ async function findLatestDataVersion(input: {
         {
           details: {
             projectId: input.projectId,
-            projectionId: input.projectionId,
             datasetId: input.datasetId,
             versionId: version.versionId,
           },
@@ -279,7 +295,6 @@ async function findLatestDataVersion(input: {
         {
           details: {
             projectId: input.projectId,
-            projectionId: input.projectionId,
             datasetId: input.datasetId,
             versionId: schemaVersionId,
             parentVersionId,

@@ -28,23 +28,31 @@ const invoices = defineDataset("raw.invoices", { schema: [col("id", "string")] }
 const invoiceProjection = defineProjection("invoice-projection", Invoice)
   .fromDataset(invoices)
   .properties({ id: "id" })
+const InvoiceArchive = defineObjectType({
+  id: "InvoiceArchive",
+  name: "Invoice archive",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+const archiveProjection = defineProjection("invoice-archive-projection", InvoiceArchive)
+  .fromDataset(invoices)
+  .properties({ id: "id" })
 
 const INTERVAL_MS = 30_000
 
-function createReconciliation() {
+function createReconciliation(projections = [invoiceProjection]) {
   const storage = new InMemoryStorage()
   const lakeStorage = new InMemoryLakeStorage()
   const queues = new InMemoryQueues()
   const host = new SixbHost({
     id: "projection-reconciliation-tests",
-    ontology: [Invoice],
+    ontology: [Invoice, InvoiceArchive],
     broker: new InMemoryBroker(),
     blobStorage: new InMemoryBlobStorage(),
     storage,
     lakeStorage,
     queues,
     datasets: [invoices],
-    projections: [invoiceProjection],
+    projections,
   })
   const dispatcher = new ProjectionRunDispatcher(host)
   const lookups: string[] = []
@@ -171,6 +179,20 @@ describe("ProjectionDispatchReconciler", () => {
 
     expect(await reconciliation.runVersions()).toEqual([
       { versionId: latest.versionId, status: "queued" },
+    ])
+  })
+
+  test("looks a dataset up once for every projection that reads it", async () => {
+    // Red check: look each projection's dataset up on its own; the restart reads it twice.
+    const reconciliation = createReconciliation([invoiceProjection, archiveProjection])
+    const version = await reconciliation.commit("invoice-1")
+
+    await reconciliation.createReconciler().pass()
+
+    expect(reconciliation.lookups).toEqual([invoices.id])
+    expect(await reconciliation.runVersions()).toEqual([
+      { versionId: version.versionId, status: "queued" },
+      { versionId: version.versionId, status: "queued" },
     ])
   })
 
