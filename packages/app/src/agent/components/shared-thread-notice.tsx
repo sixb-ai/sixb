@@ -1,6 +1,6 @@
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import type { ThreadSharing } from "../hooks/use-thread-sharing"
 import { useAgentMessages } from "../i18n"
-import { PersonAvatar } from "./person-avatar"
 import { ContinueButton } from "./thread-people"
 
 /**

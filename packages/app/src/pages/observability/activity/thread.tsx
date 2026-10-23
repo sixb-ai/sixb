@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Bot } from "lucide-react"
 import { useCallback, useMemo } from "react"
 import { useLocation, useParams, useSearchParams } from "react-router-dom"
+import { ThreadArtifactsMenu } from "../../../agent/components/thread-artifacts-menu"
 import {
   ObservedConversation,
   observedThreadPollMs,
@@ -111,10 +112,19 @@ export function ObservabilityAgentThreadPage() {
           </>
         }
         actions={
-          // On a phone the title needs the room; the notice under the conversation says it too.
-          <span className="max-sm:hidden">
-            <Pill tone="muted">{messages.thread.readOnly}</Pill>
-          </span>
+          <>
+            {/* The conversation's artifacts, which an observer reads too. */}
+            <ThreadArtifactsMenu
+              threadId={thread.id}
+              onOpen={onArtifactTargetChange}
+              withGallery={false}
+            />
+
+            {/* On a phone the title needs the room; the notice under the conversation says it too. */}
+            <span className="max-sm:hidden">
+              <Pill tone="muted">{messages.thread.readOnly}</Pill>
+            </span>
+          </>
         }
       />
       {/* The workspace's height is a minimum, which a chat's scroller cannot fill by percentage. */}

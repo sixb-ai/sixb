@@ -13,15 +13,27 @@ import { ArrowUpRight, Layers } from "lucide-react"
 import { Link } from "react-router-dom"
 import { ArtifactKindIcon } from "../../artifacts/kind-icon"
 import { useArtifactMessages } from "../../artifacts/messages"
+import type { ArtifactTarget } from "../../artifacts/target"
 import { ARTIFACTS_HREF } from "../../pages/routes"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
 
 /**
  * The artifacts the Agent published in this conversation, each one opening in the panel, and the
- * way to every artifact in the gallery.
+ * way to every artifact in the gallery. Everyone who reads the conversation lists them: its owner,
+ * its participants, and an observer.
  */
-export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string }) {
+export function ThreadArtifactsMenu({
+  threadId,
+  onOpen,
+  withGallery = true,
+}: {
+  readonly threadId: string
+  /** Opens one, where the menu is outside the conversation's panel, as an observer's header is. */
+  readonly onOpen?: (target: ArtifactTarget) => void
+  /** Link to the reader's gallery; off for an observer, whose gallery holds none of these. */
+  readonly withGallery?: boolean
+}) {
   const panel = useArtifactPanel()
   const messages = useAgentMessages().artifacts
   const artifactMessages = useArtifactMessages()
@@ -30,7 +42,8 @@ export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string })
     retry: false,
   })
   const artifacts = data?.artifacts ?? []
-  if (!panel || artifacts.length === 0) return null
+  const open = onOpen ?? panel?.open
+  if (!open || artifacts.length === 0) return null
 
   return (
     <DropdownMenu>
@@ -52,7 +65,7 @@ export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string })
         {artifacts.map((artifact) => (
           <DropdownMenuItem
             key={artifact.id}
-            onSelect={() => panel.open({ type: "artifact", artifactId: artifact.id })}
+            onSelect={() => open({ type: "artifact", artifactId: artifact.id })}
             className="gap-2.5"
           >
             <ArtifactKindIcon kind={artifact.kind} className="size-4 text-muted-foreground" />
@@ -63,14 +76,18 @@ export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string })
             </span>
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="gap-2.5 text-muted-foreground">
-          <Link to={ARTIFACTS_HREF}>
-            <Layers className="size-4" />
-            <span className="flex-1">{messages.all}</span>
-            <ArrowUpRight className="size-3.5" />
-          </Link>
-        </DropdownMenuItem>
+        {withGallery ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild className="gap-2.5 text-muted-foreground">
+              <Link to={ARTIFACTS_HREF}>
+                <Layers className="size-4" />
+                <span className="flex-1">{messages.all}</span>
+                <ArrowUpRight className="size-3.5" />
+              </Link>
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
