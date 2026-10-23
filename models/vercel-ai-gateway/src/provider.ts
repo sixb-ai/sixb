@@ -749,6 +749,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
   readonly defaultReasoning?: ModelReasoningLevel
+  readonly maxOutputTokens?: number
 
   constructor(
     private readonly transport: GatewayTransport,
@@ -807,6 +808,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     ) {
       throw new TypeError("[SixbVercelGateway] maxOutputTokens must not exceed the model maximum.")
     }
+    if (options.maxOutputTokens !== undefined) this.maxOutputTokens = options.maxOutputTokens
   }
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {

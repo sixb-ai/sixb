@@ -20,6 +20,7 @@ import { type AuthorLabel, useMessageAuthors } from "../message-authors"
 import { useObservedThread } from "../observed-thread"
 import { normalizeDurableParts } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
+import { isContinuableDiagnostic } from "../run-presentation"
 import type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -34,16 +35,23 @@ import { AssistantBody } from "./message-parts"
 /**
  * Render a single durable message. System messages are not shown in the reading transcript.
  * `continued`: the previous user message has the same author, so this one does not name them.
+ * `onContinue` offers to finish an answer whose diagnostic says it stopped short.
  */
 export const MessageView = memo(function MessageView({
   message,
   continued = false,
+  onContinue,
+  continuing = false,
 }: {
   readonly message: AgentMessage
   readonly continued?: boolean
+  readonly onContinue?: () => void
+  readonly continuing?: boolean
 }) {
   if (message.role === "user") return <UserMessage message={message} continued={continued} />
-  if (message.role === "assistant") return <AssistantMessage message={message} />
+  if (message.role === "assistant") {
+    return <AssistantMessage message={message} onContinue={onContinue} continuing={continuing} />
+  }
   return null
 })
 
@@ -90,7 +98,15 @@ function UserMessage({
   )
 }
 
-function AssistantMessage({ message }: { message: AgentMessage }) {
+function AssistantMessage({
+  message,
+  onContinue,
+  continuing,
+}: {
+  message: AgentMessage
+  onContinue?: () => void
+  continuing: boolean
+}) {
   const messages = useAgentMessages()
   const observed = useObservedThread()
   return (
@@ -102,26 +118,39 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
         })}
       />
       {message.annotations.map((annotation, index) => (
-        <Marker
+        // Laid out like the timeout and interrupted markers: notice, then its action.
+        <div
           key={`${annotation.code}:${index}`}
-          className={
-            annotation.severity === "error"
-              ? "text-destructive"
-              : "text-amber-700 dark:text-amber-400"
-          }
+          className="flex flex-wrap items-center gap-2"
           role="status"
         >
-          <MarkerIcon>
-            <AlertTriangle
-              className={
-                annotation.severity === "error"
-                  ? "text-destructive"
-                  : "text-amber-600 dark:text-amber-400"
-              }
-            />
-          </MarkerIcon>
-          <MarkerContent>{diagnosticMessage(annotation.code, messages.diagnostics)}</MarkerContent>
-        </Marker>
+          <Marker
+            className={
+              annotation.severity === "error"
+                ? "text-destructive"
+                : "text-amber-700 dark:text-amber-400"
+            }
+          >
+            <MarkerIcon>
+              <AlertTriangle
+                className={
+                  annotation.severity === "error"
+                    ? "text-destructive"
+                    : "text-amber-600 dark:text-amber-400"
+                }
+              />
+            </MarkerIcon>
+            <MarkerContent>
+              {diagnosticMessage(annotation.code, messages.diagnostics)}
+            </MarkerContent>
+          </Marker>
+          {onContinue && isContinuableDiagnostic(annotation.code) ? (
+            <Button size="sm" onClick={onContinue} disabled={continuing}>
+              <ArrowRight aria-hidden="true" />
+              {continuing ? messages.transcript.continuing : messages.transcript.continue}
+            </Button>
+          ) : null}
+        </div>
       ))}
     </div>
   )

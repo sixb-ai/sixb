@@ -138,12 +138,16 @@ export function Transcript({
             aria-busy={live.active || showThinking}
             className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
           >
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <TranscriptMessage
                 key={message.id}
                 message={message}
                 continued={continuedIds.has(message.id)}
                 scrollAnchor={message.id === anchoredUserMessageId}
+                // Only the newest answer can be continued; older ones keep their notice alone.
+                {...(index === messages.length - 1 && onContinue
+                  ? { onContinue, continuing: Boolean(continuing) }
+                  : {})}
               />
             ))}
             {pendingUserText ||
@@ -238,14 +242,23 @@ const TranscriptMessage = memo(function TranscriptMessage({
   message,
   continued,
   scrollAnchor,
+  onContinue,
+  continuing,
 }: {
   readonly message: AgentMessage
   readonly continued: boolean
   readonly scrollAnchor: boolean
+  readonly onContinue?: () => void
+  readonly continuing?: boolean
 }) {
   return (
     <MessageScrollerItem messageId={message.id} scrollAnchor={scrollAnchor}>
-      <MessageView message={message} continued={continued} />
+      <MessageView
+        message={message}
+        continued={continued}
+        onContinue={onContinue}
+        continuing={continuing}
+      />
     </MessageScrollerItem>
   )
 })

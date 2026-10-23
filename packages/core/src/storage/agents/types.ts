@@ -221,7 +221,7 @@ export function coerceAgentRunFinishReason(
 }
 
 /** Stable, user-facing diagnostics emitted by the platform while executing a run. */
-export const AGENT_RUN_DIAGNOSTIC_CODES = ["step_limit_reached"] as const
+export const AGENT_RUN_DIAGNOSTIC_CODES = ["step_limit_reached", "output_limit_reached"] as const
 
 /**
  * Closed on purpose, and the wire is closed with it.

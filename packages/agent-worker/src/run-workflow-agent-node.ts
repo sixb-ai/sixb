@@ -1,6 +1,6 @@
 import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
-import { createSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -160,6 +160,18 @@ export async function runWorkflowAgentNode(
 
     const researchText = research.output
     finishReason = coerceAgentRunFinishReason(research.finishReason) ?? "unknown"
+    // A cut-short answer would be structured as if it were complete; its text is never passed on.
+    if (finishReason === "length") {
+      const remedy = "Raise maxOutputTokens on the model binding or lower the step's reasoning."
+      throw withFailureMessage(
+        createSixbError(
+          "agent.execution_failed",
+          `[SixbAgentWorker] Workflow agent step '${input.agentStepId}' reached the model's output limit before finishing its answer. ${remedy}`,
+          { details: traceDetails }
+        ),
+        `The model reached its output limit before finishing its answer. ${remedy}`
+      )
+    }
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",

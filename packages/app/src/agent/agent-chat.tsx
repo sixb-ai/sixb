@@ -19,6 +19,7 @@ import {
   principalKey,
   useConversationAuthors,
 } from "./message-authors"
+import { offersContinue } from "./run-presentation"
 import { personName, threadOwner, threadParticipants } from "./sharing"
 import type { AgentContextInput, AgentThread } from "./types"
 
@@ -195,9 +196,12 @@ export function AgentChat({
         }
         onRetry={canRetry ? () => conversation.retry(presentation.run) : undefined}
         onContinue={
-          !conversation.sandboxRecovery &&
-          (presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-          presentation.hasProgress
+          offersContinue({
+            presentation,
+            isRunning: conversation.isRunning,
+            sandboxRecovery: Boolean(conversation.sandboxRecovery),
+            messages: conversation.messages,
+          })
             ? conversation.continueAfterTimeout
             : undefined
         }
