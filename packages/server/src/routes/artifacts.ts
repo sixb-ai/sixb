@@ -1,4 +1,5 @@
 import {
+  type ArtifactAccess,
   type ArtifactContentInput,
   type ArtifactRecord,
   ArtifactRequestError,
@@ -115,9 +116,12 @@ function notFound(set: RouteSet) {
  * the caller cannot read, so a page can say it is not shared in this conversation.
  */
 async function refusal(context: unknown, artifactId: string, set: RouteSet) {
-  if ((await requireRequestSixb(context).artifacts.access(artifactId)) !== "none") {
-    return notFound(set)
-  }
+  return refusalFor(await requireRequestSixb(context).artifacts.access(artifactId), set)
+}
+
+/** The refusal for what the caller may do with an artifact, once that is known. */
+function refusalFor(access: ArtifactAccess | null, set: RouteSet) {
+  if (access !== "none") return notFound(set)
 
   set.status = 403
   return {
@@ -286,16 +290,21 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       "/api/artifacts/:artifactId",
       async (context) => {
         try {
-          const artifacts = requireRequestSixb(context).artifacts
           const { artifactId } = context.params
-          const [artifact, versions, access] = await Promise.all([
-            artifacts.get(artifactId),
-            artifacts.listVersions(artifactId),
-            artifacts.access(artifactId),
-          ])
-          if (!artifact || !versions || !access || access === "none") {
-            return await refusal(context, artifactId, context.set)
+          // What the caller may do is decided once; the reads after it need no second decision.
+          const access = await requireRequestSixb(context).artifacts.access(artifactId)
+          const storage = host.storage.artifacts
+          if (!storage || access === null || access === "none") {
+            return refusalFor(access, context.set)
           }
+
+          const at = { projectId: host.id, id: artifactId }
+          const [artifact, versions] = await Promise.all([
+            storage.get(at),
+            storage.listVersions({ projectId: host.id, artifactId }),
+          ])
+          // Deleted since the decision.
+          if (!artifact) return notFound(context.set)
 
           return ArtifactResponseSchema.parse({
             artifact: artifactBody(artifact),
