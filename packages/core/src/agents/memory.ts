@@ -34,8 +34,9 @@ export interface AgentMemoryLinkWarning {
 const encoder = new TextEncoder()
 
 /**
- * The storage id of a repo: `user:<userId>` or `project`. A caller with no user of its own, which
- * is the case only when a project runs without auth, keeps its memory as `system:<id>`.
+ * The storage id of a repo: `user:<userId>` or `project`. A caller with no user of its own keeps
+ * its memory as `system:<id>`: a project without auth, or app code running as the system, which
+ * then reads a repo no signed-in user's conversation does.
  */
 export function agentMemoryRepoId(repo: AgentMemoryRepoName, owner: Principal | null): string {
   if (repo === "project") return "project"
