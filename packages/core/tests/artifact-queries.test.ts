@@ -415,3 +415,68 @@ describe("reading a version's query", () => {
     expect(await sixb.artifacts.query("art_0000000000", "open")).toBeNull()
   })
 })
+
+describe("publishing queries from query builders", () => {
+  test("stores each one as its query file, which each reader runs", async () => {
+    const { host, as, put } = setup()
+    await seedInvoices(host, 2)
+    const alice = as("alice", { cleared: true })
+    const invoices = alice.objects(Invoice).query()
+
+    const { artifact, version } = await alice.artifacts.create({
+      kind: "page",
+      title: "Open",
+      files: [await put("index.html", "<!doctype html><title>Open</title><p>Open</p>")],
+      queries: {
+        largest: invoices
+          .where((invoice) => invoice.p.status.eq("open"))
+          .orderBy(Invoice.p.amount, "desc")
+          .limit(50),
+        statuses: { query: invoices, facets: [{ property: Invoice.p.status, limit: 10 }] },
+      },
+    })
+
+    expect(version.files.map((file) => file.path)).toEqual([
+      "index.html",
+      "queries/largest.json",
+      "queries/statuses.json",
+    ])
+    expect(await alice.artifacts.query(artifact.id, "largest")).toMatchObject({
+      kind: "objects",
+      total: 2,
+    })
+    expect(await alice.artifacts.query(artifact.id, "statuses")).toMatchObject({
+      kind: "facets",
+      facets: [{ propertyId: "status", buckets: [{ value: "open", count: 2 }] }],
+    })
+  })
+
+  // Guard proof: skip the `files.some` check in contentFiles; the version then holds the file the
+  // caller gave and the query, at one path, and is refused for that instead.
+  test("checks them as query files, and refuses a name that is also a file", async () => {
+    const { as, put } = setup()
+    const alice = as("alice")
+    const invoices = alice.objects(Invoice).query()
+    const files = [await put("index.html", "<!doctype html><title>Open</title><p>Open</p>")]
+
+    await expectRefused(
+      alice.artifacts.create({
+        kind: "page",
+        title: "Open",
+        files,
+        queries: { paged: invoices.page({ pageSize: 10 }) },
+      }),
+      '[Sixb] queries/paged.json: $.kind: "page" is not allowed in an artifact\'s query: Sixb pages the result for each reader; bound the query with "limit" instead.'
+    )
+
+    await expectRefused(
+      alice.artifacts.create({
+        kind: "page",
+        title: "Open",
+        files: [...files, await put("queries/open.json", JSON.stringify(start))],
+        queries: { open: invoices },
+      }),
+      "[Sixb] 'queries/open.json' is both a file and a query; give it once."
+    )
+  })
+})
