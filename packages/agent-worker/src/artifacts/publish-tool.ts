@@ -15,6 +15,7 @@ import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   artifactAccessRule,
+  artifactQueryChecker,
   artifactVersionWarnings,
   isArtifactId,
   prepareArtifactVersion,
@@ -259,6 +260,8 @@ async function publish(
         author: input.author,
         owner: input.owner,
         readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
+        // As the requester, so a query never reads what they cannot.
+        checkQuery: artifactQueryChecker(input.reader),
         origin: { threadId: input.run.threadId, runId: input.run.id },
       }
     )

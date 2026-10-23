@@ -23,6 +23,7 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
+import { type ArtifactQueryChecker, checkArtifactQueries } from "./queries"
 import {
   brokenDependents,
   type FoundReference,
@@ -57,6 +58,11 @@ export interface PublishArtifactInput {
    * the author's own artifacts.
    */
   readonly readable?: (artifact: ArtifactRecord) => Promise<boolean>
+  /**
+   * Checks each of the version's queries as the author, so none reads what they cannot. Without
+   * it, a version that holds a query is refused.
+   */
+  readonly checkQuery?: ArtifactQueryChecker
   readonly origin?: ArtifactOrigin
   /** The version this one was made from: publishing fails with `artifact_moved` past it. */
   readonly baseVersion?: number
@@ -106,8 +112,9 @@ export async function publishArtifact(
 
 /**
  * Everything publishing checks before it stores: the title, the files, the theme, the kind's own
- * format, and every address, resolved against what the author can read. It reads the files back
- * and parses them, so a caller that stores inside a transaction prepares outside it.
+ * format, every address, resolved against what the author can read, and every query, run once as
+ * the author. It reads the files back and parses them, so a caller that stores inside a
+ * transaction prepares outside it.
  */
 export async function prepareArtifactVersion(
   context: PublishArtifactContext,
@@ -122,6 +129,8 @@ export async function prepareArtifactVersion(
     referenceContext(context, { readable, artifactId: input.artifactId }),
     validated.references ?? []
   )
+  await checkArtifactQueries(context.blobStorage, input.kind, input.files, input.checkQuery)
+
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
     ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
