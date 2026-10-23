@@ -17,6 +17,7 @@ import type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -32,7 +33,6 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
-  ShareArtifactInThreadInput,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -265,14 +265,57 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return rows.map((row) => row.threadId)
   }
 
-  async shareInThread(input: ShareArtifactInThreadInput): Promise<void> {
-    runImmediateTransaction(this.db, () => {
-      const artifact = this.db
+  async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const source = this.db
         .query("SELECT id FROM artifacts WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.artifactId)
-      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+        .get(input.projectId, input.sourceId)
+      if (!source) throw artifactStorageErrors.notFound(input.sourceId)
 
-      this.linkThread(input.projectId, input.artifactId, input.threadId, input.sharedAt)
+      const artifact = this.db
+        .query(
+          `INSERT INTO artifacts (
+            project_id, id, kind, title, owner_principal_type, owner_principal_id,
+            latest_version, next_version, created_at, updated_at
+          )
+          SELECT project_id, ?, kind, title, ?, ?, latest_version, next_version, created_at,
+                 updated_at
+          FROM artifacts WHERE project_id = ? AND id = ?
+          ON CONFLICT (project_id, id) DO NOTHING
+          RETURNING ${ARTIFACT_COLUMNS}`
+        )
+        .get(
+          input.id,
+          input.owner.type,
+          input.owner.id,
+          input.projectId,
+          input.sourceId
+        ) as Row | null
+      if (!artifact) throw artifactStorageErrors.exists(input.id)
+
+      this.db
+        .query(
+          `INSERT INTO artifact_versions (
+            project_id, artifact_id, version, title, entry, files, outline, refs,
+            author_principal_type, author_principal_id, created_at
+          )
+          SELECT project_id, ?, version, title, entry, files, outline, refs,
+                 author_principal_type, author_principal_id, created_at
+          FROM artifact_versions WHERE project_id = ? AND artifact_id = ?`
+        )
+        .run(input.id, input.projectId, input.sourceId)
+      this.db
+        .query(
+          `INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, copied)
+           VALUES (?, ?, ?, ?, 1)`
+        )
+        .run(
+          input.projectId,
+          input.id,
+          input.threadId,
+          (input.copiedAt ?? new Date()).toISOString()
+        )
+      return parseArtifactRow(artifact)
     })
   }
 
@@ -399,12 +442,35 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         )
         .all(input.projectId, input.runId) as { readonly artifactId: string }[]
       const deleted = this.db
-        .query("DELETE FROM artifact_versions WHERE project_id = ? AND origin_run_id = ?")
-        .run(input.projectId, input.runId).changes
+        .query(
+          `DELETE FROM artifact_versions WHERE project_id = ? AND origin_run_id = ?
+           RETURNING origin_thread_id AS threadId`
+        )
+        .all(input.projectId, input.runId) as { readonly threadId: string }[]
+      // A run publishes from one thread: its artifacts stay shared there only while a version
+      // from it remains, or when they were copied for it.
+      const threadId = deleted[0]?.threadId
       for (const { artifactId } of affected) {
+        this.db
+          .query(
+            `DELETE FROM artifact_threads
+             WHERE project_id = ? AND artifact_id = ? AND thread_id = ? AND copied = 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM artifact_versions
+                 WHERE project_id = ? AND artifact_id = ? AND origin_thread_id = ?
+               )`
+          )
+          .run(
+            input.projectId,
+            artifactId,
+            threadId ?? null,
+            input.projectId,
+            artifactId,
+            threadId ?? null
+          )
         this.repointLatest(input.projectId, artifactId)
       }
-      return deleted
+      return deleted.length
     })
   }
 
@@ -474,7 +540,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     projectId: string,
     artifactId: string,
     threadId: string,
-    sharedAt: Date = new Date()
+    sharedAt: Date
   ): void {
     this.db
       .query(
