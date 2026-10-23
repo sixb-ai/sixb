@@ -440,6 +440,49 @@ describe("agent API gateway", () => {
     ).toBe(1)
   })
 
+  test("gives a shared conversation the project's memory alone", async () => {
+    // Reproduce by dropping the shared-conversation check in handleAgentApiGatewayRequest: the
+    // run then reads and saves its requester's own memory.
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+    await storage.agents.threads.addParticipants({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      principals: [{ type: "user", id: "usr_bob" }],
+      addedBy: { type: "user", id: "usr_requester" },
+      maxParticipants: 50,
+    })
+    const save = (repo: string) =>
+      app.fetch(
+        new Request(`${gatewayBaseUrl}/api/agent-memory/${repo}/revisions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            baseRevision: 0,
+            message: "Prefers a weekly summary",
+            changes: [{ path: "MEMORY.md", contents: "# Memory\n" }],
+          }),
+        })
+      )
+
+    const refused = { error: expect.stringContaining("only the project's memory") }
+    for (const response of [
+      await save("user"),
+      // A route parameter is percent-decoded: this one names the user's repo too.
+      await save("%75ser"),
+      await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`)),
+    ]) {
+      expect(response.status).toBe(403)
+      await expect(response.json()).resolves.toEqual(refused)
+    }
+    expect(
+      (await storage.agents.memory.get({ projectId: PROJECT_ID, repoId: "user:usr_requester" }))
+        .revision
+    ).toBe(0)
+
+    // The project's repo passes through, to the runtime's own check of can.run(agent).
+    await expect((await save("project")).json()).resolves.toMatchObject({ code: "not_allowed" })
+  })
+
   test("gives workflow agent nodes no memory", async () => {
     // Reproduce by dropping the Agent memory check in handleAgentApiGatewayRequest: the node's
     // service account then reaches the project's memory through can.run(agent).

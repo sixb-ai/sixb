@@ -99,6 +99,8 @@ interface PreparedConversationTurn {
   readonly thread: AgentThreadRecord | null
   /** The thread and who can read it now, as the model is told; absent without a thread. */
   readonly conversation?: ConversationReaders
+  /** Others were added to the thread, even ones who cannot read it now. */
+  readonly shared: boolean
   readonly plan: ResolvedAgentExecutionPlan
   readonly execution: ExecutionRecord
   readonly executionContext: AgentExecutionContext
@@ -323,6 +325,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       environment = await createConversationAgentEnvironment({
         thread: prepared.thread,
         ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
+        shared: prepared.shared,
         sandboxDefinition: this.host.sandboxDefinition,
         preflight: { budget: prepared.model.budget, runtime },
         context: prepared.executionContext,
@@ -488,6 +491,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     return {
       thread,
       ...(conversation === undefined ? {} : { conversation }),
+      // The rule the agent API gateway applies to memory: someone who loses access may regain it,
+      // and read back whatever memory the thread held meanwhile.
+      shared: participants.length > 0,
       plan,
       execution,
       executionContext,

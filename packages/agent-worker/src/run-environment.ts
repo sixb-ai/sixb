@@ -94,6 +94,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly thread?: AgentThreadRecord | null
   /** Who can read the thread now: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
+  /** Others were added to the thread, so it reaches the project's memory alone. */
+  readonly shared?: boolean
   readonly sandboxDefinition?: SandboxDefinition
   /** Run preflight only after current sandbox access has been resolved. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
@@ -148,7 +150,11 @@ export async function createConversationAgentEnvironment(
   // loadConversationMemory).
   const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
   const loadMemory: LoadConversationMemory = (checkpoint) =>
-    loadConversationMemory({ sixb: context.sixb, asOf: checkpoint?.createdAt ?? threadCreatedAt })
+    loadConversationMemory({
+      sixb: context.sixb,
+      asOf: checkpoint?.createdAt ?? threadCreatedAt,
+      shared: input.shared ?? false,
+    })
   try {
     const ontologyDocs = renderRunOntologyDocs(context)
     // Resolve application access before any compaction model call. Once acquired, this
