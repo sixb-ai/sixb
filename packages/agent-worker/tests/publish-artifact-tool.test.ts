@@ -21,8 +21,9 @@ import {
   type Principal,
   SixbHost,
 } from "@sixb/core"
-import { emptyGrantIndex } from "@sixb/core/internal/authorization"
-import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
+import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { AgentExecutionLostError } from "../src/errors"
@@ -40,16 +41,46 @@ let storage: InMemoryStorage
 let blobStorage: InMemoryBlobStorage
 let host: SixbHost
 
-/** What a turn asked for by this user reads of artifacts, by the project's one rule. */
-function readerFor(user: Principal) {
-  return createTestSixb(host, {
+/**
+ * What a turn asked for by this user reads of artifacts, by the project's one rule: signed in
+ * with a session, as a person asking in the app is.
+ */
+function readerFor(user: Principal, grants: Partial<GrantIndex> = {}) {
+  return bindRequestExecution(host, {
+    request: new Request("http://localhost/test"),
     authorization: {
-      principal: user,
-      groupIds: [],
-      roleIds: [],
-      grants: { ...emptyGrantIndex(), "run:agent": true },
+      type: "principal",
+      credential: { type: "session", id: `session-${user.id}` },
+      context: {
+        principal: user,
+        sessionId: `session-${user.id}`,
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), "run:agent": true, ...grants },
+      },
     },
   }).artifacts
+}
+
+/** A thread with a turn running in it, as `run` is in thr_1. */
+async function startRun(threadId: string, threadOwner: Principal) {
+  await storage.agents.threads.create({ id: threadId, projectId, ownerPrincipal: threadOwner })
+  const started = { id: `run_${threadId}`, threadId, executionToken: `exec_${threadId}` }
+  const executionId = await createTestAgentExecution(storage, { projectId, runId: started.id })
+  await storage.agents.runs.create({
+    id: started.id,
+    projectId,
+    threadId,
+    triggerMessageId: `msg_${threadId}`,
+    executionId,
+    spec: { model: { provider: "test", modelId: "model" } },
+  })
+  await storage.agents.runs.start({
+    projectId,
+    id: started.id,
+    execution: { token: started.executionToken, queueLeaseExpiresAt: new Date("2099-01-01") },
+  })
+  return started
 }
 
 beforeEach(async () => {
@@ -97,6 +128,8 @@ type ToolOptions = {
   readonly installed?: Promise<InstalledArtifacts>
   /** Who asked for the turn; the thread's owner when omitted. */
   readonly author?: Principal
+  /** The turn that publishes; `run`, in thr_1, when omitted. */
+  readonly run?: typeof run
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -135,7 +168,10 @@ function tools(options: ToolOptions = {}) {
     artifacts: storage.artifacts,
     reader: readerFor(options.author ?? owner),
     blobStorage,
-    run: { ...run, executionToken: options.executionToken ?? run.executionToken },
+    run: {
+      ...(options.run ?? run),
+      executionToken: options.executionToken ?? (options.run ?? run).executionToken,
+    },
     owner,
     author: options.author ?? owner,
     budget: options.budget ?? new AgentFileBudget(),
@@ -350,6 +386,119 @@ describe("publish_artifact", () => {
     ).toBe(
       "[SixbAgentWorker] publish_artifact_version refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
     )
+  })
+
+  // Guard proof: return `accessTo(artifact)` from `publishAccess` in core's artifacts/access.ts
+  // whatever the thread; Bob's turn in his own thread then publishes Alice's report and shares it
+  // there, so he keeps updating it once Alice removes him.
+  test("refuses a participant's turn elsewhere the artifacts their conversation shares", async () => {
+    const bob = { type: "user", id: "usr_bob" } as const
+    write("work/review/document.md", "# Q3 review\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/review",
+      kind: "document",
+      title: "Q3 review",
+    })) as { artifactId: string }
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: run.threadId,
+      principals: [bob],
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+    const bobsThread = await startRun("thr_bob", bob)
+
+    const elsewhere = await publishVersion(
+      { id: artifactId, path: "work/review", title: "Bob's" },
+      { author: bob, run: bobsThread }
+    ).catch((error: unknown) => error)
+    expect(tools().version.errorText(elsewhere)).toBe(
+      `[SixbAgentWorker] publish_artifact_version refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
+    )
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
+      run.threadId,
+    ])
+
+    // In the conversation that shares it, Bob's turn revises it.
+    expect(
+      await publishVersion({ id: artifactId, path: "work/review", title: "Bob's" }, { author: bob })
+    ).toMatchObject({ version: 2 })
+
+    // Removed, Bob reaches it no more: nothing else shares it with him.
+    await storage.agents.threads.removeParticipant({
+      projectId,
+      threadId: run.threadId,
+      principal: bob,
+    })
+    expect(await readerFor(bob).access(artifactId)).toBe("none")
+    await expect(
+      publishVersion(
+        { id: artifactId, path: "work/review", title: "After" },
+        { author: bob, run: bobsThread }
+      )
+    ).rejects.toBeInstanceOf(AgentToolPublicError)
+    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
+  })
+
+  test("shares the owner's own artifact in the conversation their turn revises it in", async () => {
+    const bob = { type: "user", id: "usr_bob" } as const
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: run.threadId,
+      principals: [bob],
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+    const ownersThread = await startRun("thr_owner", owner)
+    write("work/notes/document.md", "# Notes\n\nPrivate.\n")
+    const { artifactId } = (await publish(
+      { path: "work/notes", kind: "document", title: "Notes" },
+      { run: ownersThread }
+    )) as { artifactId: string }
+    expect(await readerFor(bob).access(artifactId)).toBe("none")
+
+    // Revising it in a conversation Bob takes part in shows it to him, with its history: that is
+    // how a conversation starts sharing an artifact.
+    await publishVersion({ id: artifactId, path: "work/notes", title: "Notes" })
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
+      run.threadId,
+      ownersThread.threadId,
+    ])
+    expect(await readerFor(bob).access(artifactId)).toBe("update")
+  })
+
+  // Guard proof: let `updatableArtifact` accept "read"; the observer's turn then reads the sandbox
+  // before the transaction refuses it, and is told the path is missing instead.
+  test("refuses an observer's turn before reading anything", async () => {
+    const olivia: Principal = { type: "user", id: "usr_olivia" }
+    write("work/review/document.md", "# Q3 review\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/review",
+      kind: "document",
+      title: "Q3 review",
+    })) as { artifactId: string }
+
+    const [, version] = createPublishArtifactTools({
+      projectId,
+      storage,
+      artifacts: storage.artifacts,
+      reader: readerFor(olivia, { "observe:agentThreads": true }),
+      blobStorage,
+      run,
+      owner,
+      author: olivia,
+      budget: new AgentFileBudget(),
+      installed: install({ requester: olivia }),
+      resolveSandbox: async () => ({ sandbox: sandbox() }),
+    })
+    expect(await readerFor(olivia, { "observe:agentThreads": true }).access(artifactId)).toBe(
+      "read"
+    )
+
+    const refused = await version
+      .execute(version.parseInput({ id: artifactId, path: "missing", title: "Hers" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(refused)).toContain(`there is no artifact '${artifactId}'`)
   })
 
   test("says what to fix and stores nothing when the version is invalid", async () => {

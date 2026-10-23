@@ -14,6 +14,7 @@ import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/c
 import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
+  artifactAccessRule,
   artifactVersionWarnings,
   isArtifactId,
   prepareArtifactVersion,
@@ -245,7 +246,8 @@ async function publish(
     signal.throwIfAborted()
 
     // Validation reads the files back and parses them, so it runs before the transaction, which
-    // only checks the run still owns its conversation and stores.
+    // checks the run still owns its conversation and the requester may still publish, and stores.
+    const reading = artifactAccessRule(input.reader, input.storage)
     prepared = await prepareArtifactVersion(
       { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
       {
@@ -256,10 +258,7 @@ async function publish(
         files,
         author: input.author,
         owner: input.owner,
-        readable: async (artifact) => {
-          const access = await input.reader.access(artifact.id)
-          return access !== null && access !== "none"
-        },
+        readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
         origin: { threadId: input.run.threadId, runId: input.run.id },
       }
     )
@@ -267,16 +266,13 @@ async function publish(
       await assertRunExecutionOwned(tx, ownership)
       const stored = tx.artifacts
       if (!stored) throw new Error("[SixbAgentWorker] Storage transactions hold no artifacts.")
-      // The owner may have deleted it since the check above.
-      if (
-        "artifactId" in request.target &&
-        !(await stored.get({ projectId: input.projectId, id: request.target.artifactId }))
-      ) {
-        throw noArtifact(tool, request.target.artifactId)
-      }
+      // Checks again what the requester may do: the owner may have deleted it since the check
+      // above, or removed the requester from the conversation.
       return storeArtifactVersion(
         { projectId: input.projectId, storage: stored, blobStorage: input.blobStorage },
-        prepared
+        prepared,
+        (artifact) =>
+          artifactAccessRule(input.reader, tx).publishAccess(artifact, input.run.threadId)
       )
     })
   } catch (error) {
@@ -295,6 +291,14 @@ async function publish(
         { artifactId: request.target.artifactId, baseVersion },
         signal
       )
+    }
+
+    if (
+      error instanceof ArtifactRequestError &&
+      UNREACHABLE.has(error.code) &&
+      "artifactId" in request.target
+    ) {
+      throw noArtifact(tool, request.target.artifactId)
     }
 
     throw toPublishError(error, tool)
@@ -378,19 +382,29 @@ async function publish(
   }
 }
 
+/** How storing refuses an artifact the requester may not publish to: as if it did not exist. */
+const UNREACHABLE: ReadonlySet<string> = new Set(["artifact_not_found", "not_shared", "read_only"])
+
 /**
- * The artifact to publish a version of: one the requester may update, as its owner or as someone
- * reading a conversation that shares it. Another is refused as if it did not exist.
+ * The artifact to publish a version of: one the requester owns, or one this conversation shares
+ * that they take part in. Another is refused as if it did not exist, even one they could update
+ * from another conversation: publishing here would share it in this one.
  */
 async function updatableArtifact(
   input: PublishToolsInput,
   artifactId: string,
   tool: PublishToolName
 ): Promise<ArtifactRecord> {
-  const access = await input.reader.access(artifactId)
-  const artifact =
-    access === "owner" || access === "update" ? await input.reader.get(artifactId) : null
-  if (!artifact) throw noArtifact(tool, artifactId)
+  const artifact = await input.artifacts.get({ projectId: input.projectId, id: artifactId })
+  const access = artifact
+    ? await artifactAccessRule(input.reader, input.storage).publishAccess(
+        artifact,
+        input.run.threadId
+      )
+    : "none"
+  if (!artifact || (access !== "owner" && access !== "update")) {
+    throw noArtifact(tool, artifactId)
+  }
   return artifact
 }
 

@@ -420,11 +420,15 @@ reads the conversation reads the artifact, at its latest version, whatever publi
 
 - A version saved by anyone who can update it is seen by every reader of every conversation that
   shares the artifact. Its author is whoever saved it; the artifact stays its owner's.
+- The agent revises someone else's artifact only in a conversation that already shares it. When
+  it revises one of yours in a conversation, that conversation shares it from then on, with its
+  history.
 - The owner's other artifacts stay private. An embed or link to one is refused with 403
   `not_shared` for whoever cannot read it, so a page can say it is not shared in this
-  conversation; an unknown id is a 404.
+  conversation; an unknown id is a 404. The difference tells anyone whether an id exists, never
+  what it holds.
 - An observer's page runs, but keeps nothing: its `sixb.state` values last as long as the tab.
-- An access token reaches only its own artifacts, never shared ones.
+- Only a signed-in session reaches shared artifacts: an access token reaches only its own.
 - `sixb.artifacts.access(id)` says what the caller may do: `owner`, `update`, `read`, or `none`.
 
 ## Theme an artifact
