@@ -407,7 +407,7 @@ sixb models text "Summarize this week's incidents in one line"
 
 `--output` takes a file, numbered when a call returns several, or a directory ending in `/`. The
 extension follows the file's type, so `files` lists the paths actually written. `--image` uploads
-a reference image; repeat it for several. `sixb models calls get <call-id> --output <path>`
+a reference image; repeat it for several. `sixb models calls files <call-id> --output <path>`
 downloads a call's files again.
 
 A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that

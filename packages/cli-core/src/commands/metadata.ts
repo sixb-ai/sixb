@@ -287,7 +287,7 @@ Options:
                      [--format mp3|wav|ogg|aac|flac|opus] [--instructions <text>]
                      [--speed <n>] [--language <code>]
   sixb models transcribe <file> [--model <model>]
-  sixb models calls get <call-id> [--output <path>]
+  sixb models calls files <call-id> [--output <path>]
 
 <model> is a model id, or provider:model-id when two providers share one; without --model, the
 kind's default answers. \`list\` shows each model's kind, default, description and price; \`get\`
@@ -295,7 +295,8 @@ adds the sizes, voices and other options a request can use. Prices are in USD.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
-reference image; repeat it for several. \`calls get\` downloads a past call's files again.`,
+reference image; repeat it for several. \`calls files\` lists a past call's files, or downloads
+them again.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>

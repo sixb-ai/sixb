@@ -264,15 +264,16 @@ async function transcribe(api: ApiClient, args: readonly string[]): Promise<void
 
 async function calls(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
-  if (sub !== "get") fail(`Unknown models calls command '${sub ?? ""}'. Use 'models calls get'.`)
+  if (sub !== "files")
+    fail(`Unknown models calls command '${sub ?? ""}'. Use 'models calls files'.`)
   const { positionals, options } = parseCommandArgs(
     rest,
     { "--output": "string" },
-    "models calls get",
+    "models calls files",
     1
   )
   const callId = positionals[0] ?? ""
-  const call = (await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}`)) as {
+  const call = (await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}/files`)) as {
     readonly callId: string
     readonly files: readonly FileRef[]
   }
