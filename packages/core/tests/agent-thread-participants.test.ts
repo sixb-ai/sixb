@@ -473,6 +473,32 @@ describe("artifacts a shared conversation shares", () => {
     expect(await owner.artifacts.get(artifact.id)).not.toBeNull()
   })
 
+  // Guard proof: check only before validating in ArtifactsRuntime.publish (answer "update" from
+  // the access passed to storeArtifactVersion); Bob's version then lands after his removal.
+  test("a participant's save shares nothing more, and lands only while they take part", async () => {
+    const { host } = setup()
+    const { owner, participant, thread, artifact, content } = await sharedArtifact(host)
+
+    // A save in the app has no conversation: it links the artifact nowhere new.
+    await participant.artifacts.publish(artifact.id, { ...content, title: "Bob's edit" })
+    expect(await host.storage.artifacts?.listThreadIds({ projectId, id: artifact.id })).toEqual([
+      thread.id,
+    ])
+
+    // Removed while his next version's files are read, Bob publishes nothing.
+    const blobs = host.blobStorage
+    const open = blobs.open.bind(blobs)
+    blobs.open = async (...args) => {
+      blobs.open = open
+      await owner.agent.threads.participants.remove(thread.id, bob)
+      return open(...args)
+    }
+    await expect(
+      participant.artifacts.publish(artifact.id, { ...content, title: "Too late" })
+    ).rejects.toMatchObject({ code: "not_shared" })
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+  })
+
   test("nobody else reaches them, nor the owner's artifacts the conversation does not share", async () => {
     const { host } = setup()
     const { participant, other, thread, artifact, notes, content } = await sharedArtifact(host)
@@ -505,9 +531,10 @@ describe("artifacts a shared conversation shares", () => {
     expect(await participant.artifacts.get(artifact.id)).toBeNull()
   })
 
-  // Guard proof: drop the access-token check from `sharing` in createArtifactsRuntime; Bob's token
-  // then reads Alice's artifact.
-  test("an access token reaches only its own artifacts", async () => {
+  // Guard proof: let `sharing` in createRuntimeArtifactAccessRule allow any credential but an
+  // access token; Bob without a credential then reads Alice's artifact. Drop the check entirely,
+  // and his token reads it too.
+  test("only a session reaches what is shared: an access token or no credential reach their own", async () => {
     const { host } = setup()
     const { artifact } = await sharedArtifact(host)
     const token = bindRequestExecution(host, {
@@ -526,6 +553,16 @@ describe("artifacts a shared conversation shares", () => {
 
     expect(await token.artifacts.access(artifact.id)).toBe("none")
     expect(await token.artifacts.get(artifact.id)).toBeNull()
+
+    const withoutCredential = createTestSixb(host, {
+      authorization: {
+        principal: bob,
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), "run:agent": true },
+      },
+    })
+    expect(await withoutCredential.artifacts.access(artifact.id)).toBe("none")
   })
 
   // Guard proof: return no copies from copySharedArtifacts; the fork's message then names Alice's

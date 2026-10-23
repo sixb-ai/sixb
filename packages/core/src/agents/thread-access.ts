@@ -2,7 +2,7 @@ import { type Principal, principalsEqual, SYSTEM_PRINCIPAL, type UserPrincipal }
 import { isRuntimeAllowed } from "../authorization"
 import type { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { AgentThreadRecord } from "../storage/agents"
+import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
 
 /** How the caller takes part in a conversation: its owner, or a user its owner added. */
 export type AgentThreadAccess = "owner" | "participant"
@@ -44,7 +44,9 @@ export interface AgentThreadAccessRule {
 
 export function createAgentThreadAccessRule(
   runtime: SixbRuntimeContext,
-  authority: RuntimeAuthority
+  authority: RuntimeAuthority,
+  /** Where threads are read, the project's storage when omitted: a transaction's decides in it. */
+  agents?: AgentStorage
 ): AgentThreadAccessRule {
   const caller = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
   const blocked = authority.type === "denied" || authority.type === "delegated"
@@ -62,13 +64,11 @@ export function createAgentThreadAccessRule(
   const read = async (threadId: string): Promise<ReadableAgentThread | null> => {
     if (blocked) return null
 
-    const stored = await runtime.storage.agents?.threads.getById({
-      projectId: runtime.projectId,
-      id: threadId,
-    })
+    const storage = agents ?? runtime.storage.agents
+    const stored = await storage?.threads.getById({ projectId: runtime.projectId, id: threadId })
     if (!stored) return null
 
-    const [thread] = await agentThreadViews(runtime, [stored])
+    const [thread] = await agentThreadViews(runtime, [stored], storage)
     const access = thread ? accessIn(thread) : null
     return thread && access ? { thread, access } : null
   }
@@ -79,12 +79,13 @@ export function createAgentThreadAccessRule(
 /** Stored threads as the runtime returns them, with their participants and no execution tokens. */
 export async function agentThreadViews(
   runtime: SixbRuntimeContext,
-  threads: readonly AgentThreadRecord[]
+  threads: readonly AgentThreadRecord[],
+  agents: AgentStorage | undefined = runtime.storage.agents
 ): Promise<readonly AgentThreadView[]> {
   const participants =
     threads.length === 0
       ? []
-      : ((await runtime.storage.agents?.threads.listParticipants({
+      : ((await agents?.threads.listParticipants({
           projectId: runtime.projectId,
           threadIds: threads.map((thread) => thread.id),
         })) ?? [])
