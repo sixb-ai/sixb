@@ -61,9 +61,9 @@ context limit is available, a 128,000-token fallback with a warning. Malformed m
 
 `maxOutputTokens` is optional. Anthropic requires `max_tokens` on every Messages request, so the
 adapter resolves an omitted value to the selected Claude model's provider-owned output limit (128K,
-64K, or the appropriate legacy limit). An explicit value lowers that ceiling, and agents use it as
-their output allowance instead of Sixb's 16,384-token default. Unknown non-Claude
-models require an explicit value; inference never fetches the catalog to discover one.
+64K, or the appropriate legacy limit). An explicit value lowers that ceiling, for agents too.
+Unknown non-Claude models require an explicit value; inference never fetches the catalog to
+discover one.
 
 Structured output uses Anthropic's native `output_config.format` when the model catalog confirms
 support and the schema fits the native decoder. Otherwise the adapter throws

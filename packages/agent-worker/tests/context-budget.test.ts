@@ -2,7 +2,10 @@ import { describe, expect, spyOn, test } from "bun:test"
 import {
   defineLanguageModel,
   type LanguageModelDefinition,
+  type LanguageModelRequest,
   ModelCatalogUnavailableError,
+  type ModelFilePart,
+  type ModelTextPart,
 } from "@sixb/core/models"
 import { prepareAgentModel, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
@@ -22,28 +25,57 @@ function selection(limits: Partial<LanguageModelDefinition> = {}, maxOutputToken
   }
 }
 
+function recordOutputs(model: WorkerTestModel): (number | undefined)[] {
+  const outputs: (number | undefined)[] = []
+  model.stream = async (request) => {
+    outputs.push(request.maxOutputTokens)
+    return { events: (async function* () {})() }
+  }
+  return outputs
+}
+
+function request(content: readonly (ModelTextPart | ModelFilePart)[] = []): LanguageModelRequest {
+  return {
+    callId: "call",
+    tools: [],
+    messages: [{ role: "user", content }],
+    signal: new AbortController().signal,
+  }
+}
+
+const text = (bytes: number): ModelTextPart => ({ type: "text", text: "a".repeat(bytes) })
+
 describe("agent context budget resolution", () => {
-  test("uses each agent's output reserve as its execution ceiling", async () => {
-    // Removal proof: store the unbounded model in prepareAgentModel; requests exceed the reserve.
-    const base = selection({ contextWindow: 32_768, maxOutputTokens: 16_384 })
-    const outputs: (number | undefined)[] = []
-    base.model.stream = async (request) => {
-      outputs.push(request.maxOutputTokens)
-      return { events: (async function* () {})() }
+  test("gives each call what its input leaves of the window, never less than the reserve", async () => {
+    // Removal proof: return capTokens from outputCeilingTokens; calls whose input fills the window
+    // still ask for 64,000 tokens.
+    const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
+    const outputs = recordOutputs(base.model)
+    const { model, budget } = await prepareAgentModel(base)
+    for (const bytes of [0, 300_000, 600_000]) await model.stream(request([text(bytes)]))
+
+    expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
+    expect(model.definition.maxOutputTokens).toBe(64_000)
+    expect(outputs[0]).toBe(64_000)
+    // 300,000 bytes count as 150,000 tokens, plus the request's own JSON.
+    expect(outputs[1]).toBeGreaterThan(49_900)
+    expect(outputs[1]).toBeLessThan(50_000)
+    expect(outputs[2]).toBe(16_384)
+  })
+
+  test("keeps a reasoning budget's reserve and rejects one the model cannot exceed", async () => {
+    // Removal proof: drop the reasoning budget from the reserve; a full window leaves 8,192 tokens,
+    // less than the reasoning alone.
+    const base = {
+      ...selection({ contextWindow: 32_768, maxOutputTokens: 16_384 }),
+      reasoning: { budgetTokens: 10_000 },
     }
-    const prepared = await Promise.all(
-      [base, { ...base, reasoning: { budgetTokens: 10_000 } }].map(prepareAgentModel)
-    )
-    for (const { model, budget } of prepared) {
-      await model.stream({
-        callId: "call",
-        tools: [],
-        messages: [],
-        signal: new AbortController().signal,
-      })
-      expect(outputs.at(-1)! + budget.inputBudgetTokens).toBeLessThanOrEqual(32_768)
-    }
-    expect(outputs).toEqual([8_192, 10_001])
+    const outputs = recordOutputs(base.model)
+    const { model, budget } = await prepareAgentModel(base)
+    await model.stream(request([text(60_000)]))
+
+    expect(budget).toMatchObject({ reserveTokens: 10_001, inputBudgetTokens: 22_767 })
+    expect(outputs).toEqual([10_001])
     await expect(
       prepareAgentModel({
         ...selection({ contextWindow: 32_768, maxOutputTokens: 8_192 }),
@@ -51,6 +83,22 @@ describe("agent context budget resolution", () => {
       })
     ).rejects.toThrow("reasoning")
   })
+
+  test("gives a call with an attached file only the reserve", async () => {
+    // Removal proof: estimate the file by its serialized URL; the call asks for 64,000 tokens an
+    // image or document may not leave.
+    const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
+    const outputs = recordOutputs(base.model)
+    const { model } = await prepareAgentModel(base)
+    await model.stream(
+      request([
+        { type: "file", data: new URL("https://example.com/a.png"), mediaType: "image/png" },
+      ])
+    )
+
+    expect(outputs).toEqual([16_384])
+  })
+
   test("pins custom metadata and clamps execution to its resolved output ceiling", async () => {
     // Regression proof: store the original model instead of the bounded prepared model.
     const base = selection()
@@ -92,30 +140,24 @@ describe("agent context budget resolution", () => {
     expect(outputs).toEqual([400, 100, 400])
     expect(model.definition.contextWindow).toBeUndefined()
   })
-  test("uses the binding's output limit as the allowance, beyond the default", async () => {
-    // Removal proof: ignore `selection.model.maxOutputTokens` in resolveAgentContextBudget; the
-    // allowance falls back to 16,384 and requests stay below the binding's limit.
+  test("uses the binding's output limit as a cap that leaves the input budget alone", async () => {
+    // Removal proof: reserve the binding's limit; the input budget drops to 168,000 tokens and the
+    // 32,000-token window has none left.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 }, 32_000)
-    const outputs: (number | undefined)[] = []
-    base.model.stream = async (request) => {
-      outputs.push(request.maxOutputTokens)
-      return { events: (async function* () {})() }
-    }
+    const outputs = recordOutputs(base.model)
     const { model, budget } = await prepareAgentModel(base)
-    await model.stream({
-      callId: "call",
-      tools: [],
-      messages: [],
-      signal: AbortSignal.timeout(1_000),
-    })
-    expect(budget).toMatchObject({ reserveTokens: 32_000, inputBudgetTokens: 168_000 })
+    await model.stream(request())
+
+    expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
     expect(model.definition.maxOutputTokens).toBe(32_000)
     expect(outputs).toEqual([32_000])
+    const fills = await prepareAgentModel(selection({ contextWindow: 32_000 }, 32_000))
+    expect(fills.budget).toMatchObject({ reserveTokens: 8_000, inputBudgetTokens: 24_000 })
   })
 
   test("caps the binding's output limit at the resolved model maximum", async () => {
-    // Removal proof: drop the `definition.maxOutputTokens` cap on the binding's limit; the
-    // reserve keeps 32,000 tokens the model can never produce.
+    // Removal proof: drop the `definition.maxOutputTokens` cap on the binding's limit; calls ask for
+    // 32,000 tokens the model can never produce.
     const base = selection({}, 32_000)
     const model = Object.assign(base.model, {
       resolve: async () =>
@@ -128,19 +170,9 @@ describe("agent context budget resolution", () => {
           maxOutputTokens: 32_000,
         }),
     })
-    const { budget } = await prepareAgentModel({ model })
-    expect(budget).toMatchObject({ reserveTokens: 20_000, inputBudgetTokens: 108_000 })
-  })
-
-  test("names the binding whose output limit leaves no input budget", async () => {
-    // Removal proof: throw the generic reserve message; the binding and the fix go unnamed.
-    const error = await prepareAgentModel(selection({ contextWindow: 32_000 }, 32_000)).catch(
-      (error) => error
-    )
-
-    expect(String(error)).toContain(
-      "'mock/model' sets maxOutputTokens to 32,000 in a 32,000-token window. Lower maxOutputTokens on the model binding."
-    )
+    const prepared = await prepareAgentModel({ model })
+    expect(prepared.budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 111_616 })
+    expect(prepared.model.definition.maxOutputTokens).toBe(20_000)
   })
 
   // Regression proof: remove maxInputTokens from the budget calculation (first row), or the

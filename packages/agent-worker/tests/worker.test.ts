@@ -5726,7 +5726,7 @@ describe("AgentWorker", () => {
         error: {
           code: "agent.execution_failed",
           message:
-            "Agent execution failed. The model reached its output limit before finishing its answer. Raise maxOutputTokens on the model binding or lower the step's reasoning.",
+            "Agent execution failed. The model reached its output limit before finishing its answer. Lower the step's reasoning, or raise maxOutputTokens on the model binding if it sets one.",
         },
       })
       expect(calls).toEqual(["research"])

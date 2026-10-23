@@ -42,9 +42,11 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   Catalog transport/access failures use an offline snapshot; invalid definitions and model identity
   mismatches fail preparation of the selected execution.
   Separate input limits are respected; input-only metadata is treated as a conservative window
-  with the same output reserve, which also bounds generation. The reserve is the binding's
-  `maxOutputTokens` when it sets one (capped at the model maximum), else 16,384 tokens or a quarter
-  of the window; a larger reserve leaves a smaller input budget.
+  with the same output reserve. The reserve is the least output every call keeps: 16,384 tokens or a
+  quarter of the window, or more for a reasoning token budget. A call's ceiling is what its estimated
+  input leaves of the window, never below the reserve and never above the cap: the binding's
+  `maxOutputTokens`, else the model maximum, else the reserve. A call with an attached file gets
+  the reserve, since files have no byte-to-token rate.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with

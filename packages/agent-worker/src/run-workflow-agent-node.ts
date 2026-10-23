@@ -162,7 +162,8 @@ export async function runWorkflowAgentNode(
     finishReason = coerceAgentRunFinishReason(research.finishReason) ?? "unknown"
     // A cut-short answer would be structured as if it were complete; its text is never passed on.
     if (finishReason === "length") {
-      const remedy = "Raise maxOutputTokens on the model binding or lower the step's reasoning."
+      const remedy =
+        "Lower the step's reasoning, or raise maxOutputTokens on the model binding if it sets one."
       throw withFailureMessage(
         createSixbError(
           "agent.execution_failed",
