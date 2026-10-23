@@ -1,12 +1,7 @@
 import { posix } from "node:path"
-import type { BlobStorage, Principal, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type { ArtifactsRuntime, BlobStorage, Sandbox, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
-import type {
-  ArtifactOutline,
-  ArtifactRecord,
-  ArtifactStorage,
-  ArtifactVersionRecord,
-} from "@sixb/core/storage"
+import type { ArtifactOutline, ArtifactRecord, ArtifactVersionRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
 
 /** How many of the thread's artifacts are installed, newest first, and how many bytes in all. */
@@ -157,17 +152,19 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   }
 }
 
+/** What a turn reads of artifacts: the requester's own view of them, by the one access rule. */
+export type TurnArtifacts = Pick<ArtifactsRuntime, "access" | "get" | "getVersion" | "list">
+
 /**
- * The latest version of each artifact the conversation published, installed under
- * `<directory>/<id>/` and listed in a manifest, so the Agent edits what was published rather than
- * whatever an older workspace still holds. Newest first; artifacts past the byte budget, or whose
- * files cannot be read, are listed without their files.
+ * The latest version of each artifact the conversation shares, installed under `<directory>/<id>/`
+ * and listed in a manifest, so the Agent edits what was published rather than whatever an older
+ * workspace still holds. Read as the turn's requester, it holds nothing they cannot read. Newest
+ * first; artifacts past the byte budget, or whose files cannot be read, are listed without their
+ * files.
  */
 export async function materializeThreadArtifacts(input: {
-  readonly projectId: string
   readonly threadId: string
-  readonly owner: Principal
-  readonly storage: ArtifactStorage
+  readonly artifacts: TurnArtifacts
   readonly blobStorage: BlobStorage
   /** Relative to the working directory. */
   readonly directory: string
@@ -183,20 +180,14 @@ export async function materializeThreadArtifacts(input: {
   const entries: ManifestEntry[] = []
   const files: SandboxFileRecord[] = []
   const installed = new Map<string, number>()
-  const { artifacts } = await input.storage.list({
-    projectId: input.projectId,
-    owner: input.owner,
-    originThreadId: input.threadId,
+  const { artifacts } = await input.artifacts.list({
+    threadId: input.threadId,
     limit: MATERIALIZE_MAX_ARTIFACTS,
   })
   let installedBytes = 0
   for (const artifact of artifacts) {
     signal.throwIfAborted()
-    const version = await input.storage.getVersion({
-      projectId: input.projectId,
-      artifactId: artifact.id,
-      version: artifact.latestVersion,
-    })
+    const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
     if (!version) continue
     const sizeBytes = version.files.reduce((sum, file) => sum + file.file.sizeBytes, 0)
     const directory = posix.join(input.directory, artifact.id)

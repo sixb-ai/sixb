@@ -13,10 +13,16 @@ import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
   InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
   InMemoryStorage,
   type JsonValue,
   type Principal,
+  SixbHost,
 } from "@sixb/core"
+import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
@@ -33,12 +39,64 @@ const context = { signal: new AbortController().signal, callId: "call", toolCall
 let root: string
 let storage: InMemoryStorage
 let blobStorage: InMemoryBlobStorage
+let host: SixbHost
+
+/**
+ * What a turn asked for by this user reads of artifacts, by the project's one rule: signed in
+ * with a session, as a person asking in the app is.
+ */
+function readerFor(user: Principal, grants: Partial<GrantIndex> = {}) {
+  return bindRequestExecution(host, {
+    request: new Request("http://localhost/test"),
+    authorization: {
+      type: "principal",
+      credential: { type: "session", id: `session-${user.id}` },
+      context: {
+        principal: user,
+        sessionId: `session-${user.id}`,
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), "run:agent": true, ...grants },
+      },
+    },
+  }).artifacts
+}
+
+/** A thread with a turn running in it, as `run` is in thr_1. */
+async function startRun(threadId: string, threadOwner: Principal) {
+  await storage.agents.threads.create({ id: threadId, projectId, ownerPrincipal: threadOwner })
+  const started = { id: `run_${threadId}`, threadId, executionToken: `exec_${threadId}` }
+  const executionId = await createTestAgentExecution(storage, { projectId, runId: started.id })
+  await storage.agents.runs.create({
+    id: started.id,
+    projectId,
+    threadId,
+    triggerMessageId: `msg_${threadId}`,
+    executionId,
+    spec: { model: { provider: "test", modelId: "model" } },
+  })
+  await storage.agents.runs.start({
+    projectId,
+    id: started.id,
+    execution: { token: started.executionToken, queueLeaseExpiresAt: new Date("2099-01-01") },
+  })
+  return started
+}
 
 beforeEach(async () => {
   // realpath: on macOS the temporary directory sits behind the /var → /private/var symlink.
   root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-publish-")))
   storage = new InMemoryStorage()
   blobStorage = new InMemoryBlobStorage()
+  host = new SixbHost({
+    id: projectId,
+    ontology: [],
+    storage,
+    blobStorage,
+    broker: new InMemoryBroker(),
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+  })
   await storage.agents.threads.create({ id: run.threadId, projectId, ownerPrincipal: owner })
   const executionId = await createTestAgentExecution(storage, { projectId, runId: run.id })
   await storage.agents.runs.create({
@@ -68,19 +126,24 @@ type ToolOptions = {
   readonly executionToken?: string
   /** The run's install; each call is a run of its own without one. */
   readonly installed?: Promise<InstalledArtifacts>
+  /** Who asked for the turn; the thread's owner when omitted. */
+  readonly author?: Principal
+  /** The turn that publishes; `run`, in thr_1, when omitted. */
+  readonly run?: typeof run
 }
 
 /** What a run installs in its sandbox before it publishes. */
-function install(options: { readonly maxBytes?: number } = {}): Promise<InstalledArtifacts> {
+function install(
+  options: { readonly maxBytes?: number; readonly requester?: Principal } = {}
+): Promise<InstalledArtifacts> {
+  const { requester, ...rest } = options
   return materializeThreadArtifacts({
-    projectId,
     threadId: run.threadId,
-    owner,
-    storage: storage.artifacts,
+    artifacts: readerFor(requester ?? owner),
     blobStorage,
     directory: ".sixb/agent/artifacts",
     manifestPath: ".sixb/agent/context/artifacts.json",
-    ...options,
+    ...rest,
   })
 }
 
@@ -103,12 +166,17 @@ function tools(options: ToolOptions = {}) {
     projectId,
     storage,
     artifacts: storage.artifacts,
+    reader: readerFor(options.author ?? owner),
     blobStorage,
-    run: { ...run, executionToken: options.executionToken ?? run.executionToken },
+    run: {
+      ...(options.run ?? run),
+      executionToken: options.executionToken ?? (options.run ?? run).executionToken,
+    },
     owner,
+    author: options.author ?? owner,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({ sandbox: sandbox() }),
-    installed: options.installed ?? install(),
+    installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
   return { create, version }
 }
@@ -320,6 +388,119 @@ describe("publish_artifact", () => {
     )
   })
 
+  // Guard proof: return `accessTo(artifact)` from `publishAccess` in core's artifacts/access.ts
+  // whatever the thread; Bob's turn in his own thread then publishes Alice's report and shares it
+  // there, so he keeps updating it once Alice removes him.
+  test("refuses a participant's turn elsewhere the artifacts their conversation shares", async () => {
+    const bob = { type: "user", id: "usr_bob" } as const
+    write("work/review/document.md", "# Q3 review\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/review",
+      kind: "document",
+      title: "Q3 review",
+    })) as { artifactId: string }
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: run.threadId,
+      principals: [bob],
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+    const bobsThread = await startRun("thr_bob", bob)
+
+    const elsewhere = await publishVersion(
+      { id: artifactId, path: "work/review", title: "Bob's" },
+      { author: bob, run: bobsThread }
+    ).catch((error: unknown) => error)
+    expect(tools().version.errorText(elsewhere)).toBe(
+      `[SixbAgentWorker] publish_artifact_version refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
+    )
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
+      run.threadId,
+    ])
+
+    // In the conversation that shares it, Bob's turn revises it.
+    expect(
+      await publishVersion({ id: artifactId, path: "work/review", title: "Bob's" }, { author: bob })
+    ).toMatchObject({ version: 2 })
+
+    // Removed, Bob reaches it no more: nothing else shares it with him.
+    await storage.agents.threads.removeParticipant({
+      projectId,
+      threadId: run.threadId,
+      principal: bob,
+    })
+    expect(await readerFor(bob).access(artifactId)).toBe("none")
+    await expect(
+      publishVersion(
+        { id: artifactId, path: "work/review", title: "After" },
+        { author: bob, run: bobsThread }
+      )
+    ).rejects.toBeInstanceOf(AgentToolPublicError)
+    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
+  })
+
+  test("shares the owner's own artifact in the conversation their turn revises it in", async () => {
+    const bob = { type: "user", id: "usr_bob" } as const
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: run.threadId,
+      principals: [bob],
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+    const ownersThread = await startRun("thr_owner", owner)
+    write("work/notes/document.md", "# Notes\n\nPrivate.\n")
+    const { artifactId } = (await publish(
+      { path: "work/notes", kind: "document", title: "Notes" },
+      { run: ownersThread }
+    )) as { artifactId: string }
+    expect(await readerFor(bob).access(artifactId)).toBe("none")
+
+    // Revising it in a conversation Bob takes part in shows it to him, with its history: that is
+    // how a conversation starts sharing an artifact.
+    await publishVersion({ id: artifactId, path: "work/notes", title: "Notes" })
+    expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
+      run.threadId,
+      ownersThread.threadId,
+    ])
+    expect(await readerFor(bob).access(artifactId)).toBe("update")
+  })
+
+  // Guard proof: let `updatableArtifact` accept "read"; the observer's turn then reads the sandbox
+  // before the transaction refuses it, and is told the path is missing instead.
+  test("refuses an observer's turn before reading anything", async () => {
+    const olivia: Principal = { type: "user", id: "usr_olivia" }
+    write("work/review/document.md", "# Q3 review\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/review",
+      kind: "document",
+      title: "Q3 review",
+    })) as { artifactId: string }
+
+    const [, version] = createPublishArtifactTools({
+      projectId,
+      storage,
+      artifacts: storage.artifacts,
+      reader: readerFor(olivia, { "observe:agentThreads": true }),
+      blobStorage,
+      run,
+      owner,
+      author: olivia,
+      budget: new AgentFileBudget(),
+      installed: install({ requester: olivia }),
+      resolveSandbox: async () => ({ sandbox: sandbox() }),
+    })
+    expect(await readerFor(olivia, { "observe:agentThreads": true }).access(artifactId)).toBe(
+      "read"
+    )
+
+    const refused = await version
+      .execute(version.parseInput({ id: artifactId, path: "missing", title: "Hers" }), context)
+      .catch((error: unknown) => error)
+    expect(version.errorText(refused)).toContain(`there is no artifact '${artifactId}'`)
+  })
+
   test("says what to fix and stores nothing when the version is invalid", async () => {
     write("work/review/document.md", "# Q3 review\n\n![Chart](figures/missing.svg)\n")
     write("empty/.keep", "")
@@ -409,9 +590,11 @@ describe("publish_artifact", () => {
       projectId,
       storage,
       artifacts: storage.artifacts,
+      reader: readerFor(owner),
       blobStorage,
       run,
       owner,
+      author: owner,
       budget: new AgentFileBudget(),
       installed: install(),
       resolveSandbox: async () => {
@@ -671,10 +854,8 @@ describe("materializeThreadArtifacts", () => {
     expect(bounded.files).toHaveLength(1)
 
     const elsewhere = await materializeThreadArtifacts({
-      projectId,
       threadId: "thr_other",
-      owner,
-      storage: storage.artifacts,
+      artifacts: readerFor(owner),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",
@@ -827,10 +1008,8 @@ describe("materializeThreadArtifacts", () => {
       return stalled
     }
     const installing = materializeThreadArtifacts({
-      projectId,
       threadId: run.threadId,
-      owner,
-      storage: storage.artifacts,
+      artifacts: readerFor(owner),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",

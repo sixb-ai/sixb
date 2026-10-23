@@ -28,7 +28,10 @@ export interface ArtifactFile {
   readonly file: FileRef
 }
 
-/** Where a version was published from. Provenance only: reading never depends on it. */
+/**
+ * Where a version was published from: an Agent turn in a thread. Publishing one shares the artifact
+ * in that thread.
+ */
 export interface ArtifactOrigin {
   readonly threadId: string
   readonly runId: string
@@ -92,8 +95,8 @@ export interface GetArtifactInput {
 export interface ListArtifactsInput {
   readonly projectId: string
   readonly owner?: Principal
-  /** Only artifacts with a version published from this thread. */
-  readonly originThreadId?: string
+  /** Only artifacts shared in this thread. */
+  readonly threadId?: string
   /** Only artifacts of this kind. */
   readonly kind?: ArtifactKind
   readonly limit?: number
@@ -128,6 +131,19 @@ export interface ListArtifactVersionsResult {
 export interface DeleteArtifactInput {
   readonly projectId: string
   readonly id: string
+}
+
+export interface CopyArtifactInput {
+  readonly projectId: string
+  /** The artifact copied. */
+  readonly sourceId: string
+  /** The copy's id. */
+  readonly id: string
+  /** Owns the copy. */
+  readonly owner: Principal
+  /** The thread the copy is shared in, as long as it lasts: a fork's. */
+  readonly threadId: string
+  readonly copiedAt?: Date
 }
 
 export interface ListReferencingVersionsInput {
@@ -207,11 +223,14 @@ export interface ArtifactStateEntry {
  * before a call reaches storage.
  */
 export interface ArtifactStorage {
-  /** Creates the artifact with its first version. Throws `artifact_exists` when the id is taken. */
+  /**
+   * Creates the artifact with its first version, shared in its origin's thread. Throws
+   * `artifact_exists` when the id is taken.
+   */
   create(input: CreateArtifactInput): Promise<PublishedArtifactVersion>
   /**
-   * Stores the next version and makes it the latest. Throws `artifact_not_found`,
-   * `artifact_kind_mismatch`, or `artifact_moved` with the latest version and its author when
+   * Stores the next version and makes it the latest, sharing the artifact in its origin's thread.
+   * Throws `artifact_not_found`, `artifact_kind_mismatch`, or `artifact_moved` with the latest version and its author when
    * `baseVersion` is not the latest, checked in the same transaction as the write, so of two
    * publishes from one base only the first is stored. A version number is never reused, even
    * after its version is deleted.
@@ -223,6 +242,18 @@ export interface ArtifactStorage {
   getVersion(input: GetArtifactVersionInput): Promise<ArtifactVersionRecord | null>
   /** Newest first. */
   listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult>
+  /**
+   * The threads the artifact is shared in, by id: each one a version it keeps was published from,
+   * and the one it was copied for.
+   */
+  listThreadIds(input: GetArtifactInput): Promise<string[]>
+  /**
+   * Copies an artifact with every version under its number, each without its origin, as a new
+   * artifact shared in `threadId` for as long as it lasts: a fork's copy, whose `@N` addresses
+   * still resolve. The files are reused, not copied. Throws `artifact_not_found` without the
+   * source and `artifact_exists` when the id is taken.
+   */
+  copy(input: CopyArtifactInput): Promise<ArtifactRecord>
   /**
    * The latest version of each artifact whose latest version has an address to this artifact, so
    * a new version can tell which artifacts it breaks. Ordered by artifact id.
@@ -255,7 +286,8 @@ export interface ArtifactStorage {
   delete(input: DeleteArtifactInput): Promise<boolean>
   /**
    * Deletes the versions a run published and returns how many. An artifact left without versions
-   * is deleted; one that lost its latest version points at its newest remaining one.
+   * is deleted; one that lost its latest version points at its newest remaining one. One left
+   * without a version from the run's thread is no longer shared there, unless it was copied for it.
    */
   deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number>
 }

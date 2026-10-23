@@ -323,7 +323,9 @@ function forkInput(overrides: Partial<ForkAgentThreadInput> = {}): ForkAgentThre
  */
 async function prepareForkSource(
   storage: AgentStorage,
-  fixture: AgentStorageContractStorage
+  fixture: AgentStorageContractStorage,
+  /** The summary of the checkpoint the third turn writes. */
+  summary = "Three deals slipped; Acme waits on legal review."
 ): Promise<void> {
   await storage.threads.create(threadInput({ title: "Slipped deals" }))
   await storage.messages.append({
@@ -423,7 +425,7 @@ async function prepareForkSource(
       expectedPreviousCheckpointId: "checkpoint_1",
       expectedHeadSeq: 5,
       executionToken: "exec_3",
-      summary: "Three deals slipped; Acme waits on legal review.",
+      summary,
       summarizedThroughSeq: 4,
       observedHeadSeq: 5,
       createdAt: at("2026-06-23T10:05:00.000Z"),
@@ -2282,6 +2284,63 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           storage.threads.fork(forkInput({ id: "thr_other", projectId: otherProjectId })),
           "thread_not_found"
         )
+      })
+    })
+
+    // Regression proof: drop the remap from a provider's fork; the copy then names the source's
+    // artifact, which the fork's readers may not reach.
+    test("names the fork's copies of the source's artifacts in the messages it copies", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        const text = "See ![Revenue](artifact:art_0000000001#chart=revenue) and art_0000000009."
+        await storage.messages.append({
+          id: "msg_shown",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text }],
+        })
+
+        await storage.threads.fork(
+          forkInput({ artifactCopies: { art_0000000001: "art_000000copy1" } })
+        )
+
+        const [copy] = (await storage.messages.list({ projectId, threadId: "thr_fork" })).messages
+        expect(copy?.parts).toEqual([
+          {
+            type: "text",
+            text: "See ![Revenue](artifact:art_000000copy1#chart=revenue) and art_0000000009.",
+          },
+        ])
+        const [source] = (await storage.messages.list({ projectId, threadId: "thr_1" })).messages
+        expect(source?.parts).toEqual([{ type: "text", text }])
+      })
+    })
+
+    // Regression proof: drop the summary's remap in planAgentThreadFork; the copied checkpoint
+    // then names the source's artifact.
+    test("names the fork's copies in the checkpoint summary it copies", async () => {
+      await withStorage(async (storage, fixture) => {
+        const summary = "Drafted art_0000000001 for Acme; art_0000000009 is the source data."
+        await prepareForkSource(storage, fixture, summary)
+        await storage.runs.finish({
+          id: "run_3",
+          projectId,
+          executionToken: "exec_3",
+          status: "failed",
+        })
+
+        await storage.threads.fork(
+          forkInput({ artifactCopies: { art_0000000001: "art_000000copy1" } })
+        )
+
+        expect(
+          (await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" }))?.summary
+        ).toBe("Drafted art_000000copy1 for Acme; art_0000000009 is the source data.")
+        expect(
+          (await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" }))?.summary
+        ).toBe(summary)
       })
     })
 

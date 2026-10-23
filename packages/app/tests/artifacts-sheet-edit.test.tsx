@@ -778,6 +778,7 @@ describe("saving an edited sheet", () => {
           createdAt: "2026-10-01T12:00:00.000Z",
         },
       ],
+      access: "owner",
     } satisfies GetArtifactResponse)
     queries.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
       artifactId,
@@ -946,6 +947,7 @@ describe("saving an edited sheet", () => {
           },
           ...detail.versions,
         ],
+        access: "owner",
       } satisfies GetArtifactResponse)
     })
 

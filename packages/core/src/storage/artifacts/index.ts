@@ -16,6 +16,7 @@ export type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,

@@ -322,6 +322,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       environment = await createConversationAgentEnvironment({
         thread: prepared.thread,
+        ...(prepared.execution.requestedBy === undefined
+          ? {}
+          : { requestedBy: prepared.execution.requestedBy }),
         ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
         sandboxDefinition: this.host.sandboxDefinition,
         preflight: { budget: prepared.model.budget, runtime },

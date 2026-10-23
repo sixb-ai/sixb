@@ -9,6 +9,7 @@ import type {
   ArtifactVersionRecord,
   PublishedArtifactVersion,
 } from "../../storage/artifacts/types"
+import { type ArtifactAccess, assertUpdatable } from "../access"
 import { ArtifactRequestError } from "../errors"
 import { createArtifactId } from "../ids"
 import type { ArtifactKind } from "../kinds"
@@ -22,7 +23,12 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
-import { brokenDependents, type FoundReference, resolveReferences } from "./references"
+import {
+  brokenDependents,
+  type FoundReference,
+  ownArtifacts,
+  resolveReferences,
+} from "./references"
 import { validateCanvas } from "./validate/canvas"
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
@@ -42,12 +48,26 @@ export interface PublishArtifactInput {
   readonly kind: ArtifactKind
   readonly title: string
   readonly files: readonly ArtifactFile[]
-  /** Publishes the version, and owns the artifact when this creates it. */
+  /** Publishes the version, and owns the artifact when this creates it unless `owner` says. */
   readonly author: Principal
+  /** Owns the artifact when this creates it: a conversation's owner, for an Agent turn in it. */
+  readonly owner?: Principal
+  /**
+   * Whether an address in the version may name this artifact: one the author can read. Defaults to
+   * the author's own artifacts.
+   */
+  readonly readable?: (artifact: ArtifactRecord) => Promise<boolean>
   readonly origin?: ArtifactOrigin
   /** The version this one was made from: publishing fails with `artifact_moved` past it. */
   readonly baseVersion?: number
 }
+
+/**
+ * What the author may do with the artifact a version is published to, as the access rule's
+ * `publishAccess` answers it from where the version is stored: a transaction's storage, for a
+ * caller that stores in one. Storing refuses `none` with `not_shared` and `read` with `read_only`.
+ */
+export type PublishAccess = (artifact: ArtifactRecord) => Promise<ArtifactAccess>
 
 export interface PublishedArtifact {
   readonly artifact: ArtifactRecord
@@ -62,7 +82,9 @@ export interface PreparedArtifactVersion {
   readonly artifactId?: string
   readonly baseVersion?: number
   readonly kind: ArtifactKind
-  readonly author: Principal
+  /** Owns the artifact when this version creates it. */
+  readonly owner: Principal
+  readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
   readonly version: ArtifactVersionInput
   /** What its kind's check found worth fixing in a version it accepts. */
   readonly warnings: readonly ArtifactWarning[]
@@ -74,10 +96,11 @@ export interface PreparedArtifactVersion {
  */
 export async function publishArtifact(
   context: PublishArtifactContext,
-  input: PublishArtifactInput
+  input: PublishArtifactInput,
+  access: PublishAccess
 ): Promise<PublishedArtifact> {
   const prepared = await prepareArtifactVersion(context, input)
-  const stored = await storeArtifactVersion(context, prepared)
+  const stored = await storeArtifactVersion(context, prepared, access)
   return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
 }
 
@@ -94,15 +117,17 @@ export async function prepareArtifactVersion(
   await checkArtifactFiles(context.blobStorage, input.files)
   if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
   const validated = await validateKind(context.blobStorage, input.kind, input.files)
+  const readable = input.readable ?? ownArtifacts(input.author)
   const references = await resolveReferences(
-    referenceContext(context, input),
+    referenceContext(context, { readable, artifactId: input.artifactId }),
     validated.references ?? []
   )
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
     ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
     kind: input.kind,
-    author: input.author,
+    owner: input.owner ?? input.author,
+    readable,
     warnings: validated.warnings ?? [],
     version: {
       title,
@@ -117,14 +142,26 @@ export async function prepareArtifactVersion(
   }
 }
 
-/** Stores a prepared version: the next one of its artifact, or the first of a new one. */
+/**
+ * Stores a prepared version: the next one of its artifact, or the first of a new one. The next
+ * version is refused unless `access` says its author may update the artifact: a caller that stores
+ * inside a transaction answers it from there, so the check and the write see the same artifact.
+ */
 export async function storeArtifactVersion(
   context: PublishArtifactContext,
-  prepared: PreparedArtifactVersion
+  prepared: PreparedArtifactVersion,
+  access: PublishAccess
 ): Promise<PublishedArtifactVersion> {
-  return prepared.artifactId
-    ? publishVersion(context, prepared.artifactId, prepared)
-    : createArtifact(context, prepared.kind, prepared.author, prepared.version)
+  const { artifactId } = prepared
+  if (!artifactId) {
+    return createArtifact(context, prepared.kind, prepared.owner, prepared.version)
+  }
+
+  const artifact = await context.storage.get({ projectId: context.projectId, id: artifactId })
+  if (!artifact) throw notFound(artifactId)
+  assertUpdatable(artifactId, await access(artifact))
+
+  return publishVersion(context, artifactId, prepared)
 }
 
 /**
@@ -158,12 +195,15 @@ export async function artifactVersionWarnings(
 
 function referenceContext(
   context: PublishArtifactContext,
-  input: { readonly author: Principal; readonly artifactId?: string }
+  input: {
+    readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
+    readonly artifactId?: string
+  }
 ) {
   return {
     projectId: context.projectId,
     storage: context.storage,
-    author: input.author,
+    readable: input.readable,
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
   }
 }
@@ -245,6 +285,13 @@ async function publishVersion(
     }
     throw error
   }
+}
+
+function notFound(artifactId: string): ArtifactRequestError {
+  return new ArtifactRequestError(
+    "artifact_not_found",
+    `[Sixb] Artifact '${artifactId}' was not found.`
+  )
 }
 
 async function createArtifact(

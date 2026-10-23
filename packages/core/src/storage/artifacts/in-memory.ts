@@ -10,6 +10,7 @@ import type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -33,6 +34,15 @@ interface StoredArtifact {
   readonly versions: readonly ArtifactVersionRecord[]
   /** The number the next version gets; it only grows, so a deleted number is never reused. */
   readonly nextVersion: number
+  /** The threads it is shared in, by id. */
+  readonly threads: ReadonlyMap<string, ThreadLink>
+}
+
+interface ThreadLink {
+  /** When it was first shared there. */
+  readonly sharedAt: Date
+  /** Copied for the thread: shared there whatever versions it keeps. */
+  readonly copied: boolean
 }
 
 interface InMemoryArtifactSnapshot {
@@ -61,7 +71,12 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       createdAt: new Date(version.createdAt),
       updatedAt: new Date(version.createdAt),
     }
-    this.artifacts.set(key, { record, versions: [version], nextVersion: 2 })
+    this.artifacts.set(key, {
+      record,
+      versions: [version],
+      nextVersion: 2,
+      threads: sharedIn(new Map(), version),
+    })
     return published(record, version)
   }
 
@@ -97,6 +112,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       record,
       versions: [...stored.versions, version],
       nextVersion: stored.nextVersion + 1,
+      threads: sharedIn(stored.threads, version),
     })
     return published(record, version)
   }
@@ -109,12 +125,11 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   async list(input: ListArtifactsInput): Promise<ListArtifactsResult> {
     const matching = [...this.artifacts.values()]
       .filter(
-        ({ record, versions }) =>
+        ({ record, threads }) =>
           record.projectId === input.projectId &&
           (!input.owner || principalsEqual(record.owner, input.owner)) &&
           (input.kind === undefined || record.kind === input.kind) &&
-          (input.originThreadId === undefined ||
-            versions.some((version) => version.origin?.threadId === input.originThreadId))
+          (input.threadId === undefined || threads.has(input.threadId))
       )
       .map(({ record }) => record)
       .sort(
@@ -136,6 +151,33 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     const newestFirst = [...(stored?.versions ?? [])].reverse()
     const { page, hasMore, total } = paginate(newestFirst, input)
     return { versions: structuredClone(page), hasMore, total }
+  }
+
+  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+    const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
+    // Code-unit order, as SQLite compares text.
+    return [...(stored?.threads.keys() ?? [])].sort((left, right) => (left < right ? -1 : 1))
+  }
+
+  async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {
+    const source = this.artifacts.get(artifactKey(input.projectId, input.sourceId))
+    if (!source) throw artifactStorageErrors.notFound(input.sourceId)
+
+    const key = artifactKey(input.projectId, input.id)
+    if (this.artifacts.has(key)) throw artifactStorageErrors.exists(input.id)
+
+    const record: ArtifactRecord = { ...source.record, id: input.id, owner: { ...input.owner } }
+    const versions = source.versions.map(({ origin: _origin, ...version }) =>
+      structuredClone({ ...version, artifactId: input.id })
+    )
+    const sharedAt = new Date(input.copiedAt ?? new Date())
+    this.artifacts.set(key, {
+      record,
+      versions,
+      nextVersion: source.nextVersion,
+      threads: new Map([[input.threadId, { sharedAt, copied: true }]]),
+    })
+    return structuredClone(record)
   }
 
   async listReferencingVersions(
@@ -242,6 +284,19 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         this.deleteArtifact(key)
         continue
       }
+
+      // A run publishes from one thread: the link stays only if a version from it remains.
+      const threadId = stored.versions.find((version) => version.origin?.runId === input.runId)
+        ?.origin?.threadId
+      const threads = new Map(stored.threads)
+      if (
+        threadId &&
+        !threads.get(threadId)?.copied &&
+        !remaining.some((version) => version.origin?.threadId === threadId)
+      ) {
+        threads.delete(threadId)
+      }
+
       this.artifacts.set(key, {
         ...stored,
         record: {
@@ -251,6 +306,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
           updatedAt: new Date(latest.createdAt),
         },
         versions: remaining,
+        threads,
       })
     }
     return deleted
@@ -293,6 +349,17 @@ function versionRecord(
   input: ArtifactVersionInput
 ): ArtifactVersionRecord {
   return structuredClone({ ...input, projectId, artifactId, version })
+}
+
+/** The links an artifact has once this version is stored: its origin's thread among them. */
+function sharedIn(
+  threads: ReadonlyMap<string, ThreadLink>,
+  version: ArtifactVersionRecord
+): ReadonlyMap<string, ThreadLink> {
+  const threadId = version.origin?.threadId
+  if (!threadId || threads.has(threadId)) return threads
+
+  return new Map(threads).set(threadId, { sharedAt: new Date(version.createdAt), copied: false })
 }
 
 function published(

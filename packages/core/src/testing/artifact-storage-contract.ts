@@ -332,7 +332,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    test("lists by owner, by the thread a version came from, and only within the project", async () => {
+    test("lists by owner, by the thread it is shared in, and only within the project", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_mine" }))
         await artifacts.create(
@@ -361,10 +361,170 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
         expect(await ids({ projectId, owner })).toEqual(["art_api", "art_mine"])
         expect(await ids({ projectId, owner: otherOwner })).toEqual(["art_theirs"])
-        expect(await ids({ projectId, originThreadId: "thr_1" })).toEqual(["art_mine"])
-        expect(await ids({ projectId, originThreadId: "thr_3" })).toEqual(["art_api"])
-        expect(await ids({ projectId, owner, originThreadId: "thr_2" })).toEqual([])
+        expect(await ids({ projectId, threadId: "thr_1" })).toEqual(["art_mine"])
+        expect(await ids({ projectId, threadId: "thr_3" })).toEqual(["art_api"])
+        expect(await ids({ projectId, owner, threadId: "thr_2" })).toEqual([])
         expect(await ids({ projectId: otherProjectId })).toEqual(["art_elsewhere"])
+      })
+    })
+
+    // Regression proof: drop `sharedIn` from the in-memory publish, or the link insert from a SQL
+    // provider's; the revised artifact is then not shared in thr_2.
+    test("shares an artifact in each thread a version came from", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_mine" }))
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
+            "art_mine"
+          )
+        )
+        await artifacts.publish(publishInput({ origin: undefined, createdAt: at(2) }, "art_mine"))
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_2",
+        ])
+        expect(
+          (await artifacts.list({ projectId, threadId: "thr_2" })).artifacts.map(
+            (artifact) => artifact.id
+          )
+        ).toEqual(["art_mine"])
+
+        await artifacts.delete({ projectId, id: "art_mine" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([])
+        await artifacts.create(
+          createInput({ id: "art_mine", version: versionInput({ origin: undefined }) })
+        )
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([])
+      })
+    })
+
+    // Regression proof: keep every link in a provider's `deleteVersionsByOrigin`; thr_2 then keeps
+    // sharing art_mine with nothing from it left.
+    test("unshares an artifact from a retried run's thread once nothing from there remains", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_mine" }))
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
+            "art_mine"
+          )
+        )
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_3", runId: "run_3" }, createdAt: at(2) },
+            "art_mine"
+          )
+        )
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_3", runId: "run_4" }, createdAt: at(3) },
+            "art_mine"
+          )
+        )
+
+        // A retried turn takes back what it published, and the link it alone made.
+        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_2" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_3",
+        ])
+        expect((await artifacts.list({ projectId, threadId: "thr_2" })).total).toBe(0)
+
+        // Another turn's version from thr_3 keeps it shared there.
+        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_3" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_3",
+        ])
+      })
+    })
+
+    // Regression proof: copy only the latest version in a provider's `copy`; the copy then has no
+    // version 1, and its next version is 2.
+    test("copies an artifact with every version under its number, shared in one thread", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        await artifacts.publish(
+          publishInput({ title: "Second", author: otherOwner, createdAt: at(1) })
+        )
+        await artifacts.publish(publishInput({ title: "Third", createdAt: at(2) }))
+        // Version 4 was a retried turn's: the copy numbers its next version 5, as the source does.
+        await artifacts.publish(
+          publishInput({
+            title: "Retried",
+            origin: { threadId: "thr_1", runId: "run_9" },
+            createdAt: at(3),
+          })
+        )
+        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_9" })
+
+        const copy = await artifacts.copy({
+          projectId,
+          sourceId: "art_report",
+          id: "art_copy",
+          owner: otherOwner,
+          threadId: "thr_fork",
+          copiedAt: at(5),
+        })
+        expect(copy).toEqual({
+          projectId,
+          id: "art_copy",
+          kind: "document",
+          title: "Third",
+          owner: otherOwner,
+          latestVersion: 3,
+          createdAt: t0,
+          updatedAt: at(2),
+        })
+
+        const { versions } = await artifacts.listVersions({ projectId, artifactId: "art_copy" })
+        expect(versions.map(({ version, title, author }) => ({ version, title, author }))).toEqual([
+          { version: 3, title: "Third", author: owner },
+          { version: 2, title: "Second", author: otherOwner },
+          { version: 1, title: "Q3 report", author: owner },
+        ])
+        // Without an origin, a retry of the source's turns never takes the copy's versions.
+        expect(versions.every((version) => version.origin === undefined)).toBe(true)
+        const source = await artifacts.getVersion({
+          projectId,
+          artifactId: "art_report",
+          version: 3,
+        })
+        expect(versions[0]?.files).toEqual(source?.files ?? [])
+
+        expect(await artifacts.listThreadIds({ projectId, id: "art_copy" })).toEqual(["thr_fork"])
+        expect(await artifacts.listThreadIds({ projectId, id: "art_report" })).toEqual(["thr_1"])
+
+        // A turn in the fork revises the copy, and a retry of it keeps the copy shared there.
+        const revised = await artifacts.publish(
+          publishInput({ origin: { threadId: "thr_fork", runId: "run_fork" } }, "art_copy")
+        )
+        expect(revised.version.version).toBe(5)
+        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_fork" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_copy" })).toEqual(["thr_fork"])
+
+        await expectArtifactError(
+          artifacts.copy({
+            projectId,
+            sourceId: "art_report",
+            id: "art_copy",
+            owner,
+            threadId: "thr_fork",
+          }),
+          "artifact_exists"
+        )
+        await expectArtifactError(
+          artifacts.copy({
+            projectId,
+            sourceId: "art_nope",
+            id: "art_x",
+            owner,
+            threadId: "thr_x",
+          }),
+          "artifact_not_found"
+        )
+        expect(await artifacts.get({ projectId, id: "art_x" })).toBeNull()
       })
     })
 

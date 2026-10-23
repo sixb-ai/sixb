@@ -16,6 +16,7 @@ import type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -147,15 +148,15 @@ export class PgArtifactStorage implements ArtifactStorage {
       where.push(`a.owner_principal_id = $${params.length + 1}`)
       params.push(input.owner.id)
     }
-    if (input.originThreadId !== undefined) {
+    if (input.threadId !== undefined) {
       where.push(
         `EXISTS (
-          SELECT 1 FROM artifact_versions v
-          WHERE v.project_id = a.project_id AND v.artifact_id = a.id
-            AND v.origin_thread_id = $${params.length + 1}
+          SELECT 1 FROM artifact_threads t
+          WHERE t.project_id = a.project_id AND t.artifact_id = a.id
+            AND t.thread_id = $${params.length + 1}
         )`
       )
-      params.push(input.originThreadId)
+      params.push(input.threadId)
     }
     if (input.kind !== undefined) {
       where.push(`a.kind = $${params.length + 1}`)
@@ -184,6 +185,58 @@ export class PgArtifactStorage implements ArtifactStorage {
         AND version = ${input.version}
     `
     return row ? parseArtifactVersionRow(row) : null
+  }
+
+  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+    const rows = await this.sql<{ thread_id: string }[]>`
+      SELECT thread_id FROM artifact_threads
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+      ORDER BY thread_id COLLATE "C"
+    `
+    return rows.map((row) => row.thread_id)
+  }
+
+  async copy(input: CopyArtifactInput): Promise<ArtifactRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      // The share lock keeps the source from being deleted or published to while it is copied, so
+      // the copy holds every version it has.
+      const [source] = await tx<PgRow[]>`
+        SELECT id FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
+        FOR SHARE
+      `
+      if (!source) throw artifactStorageErrors.notFound(input.sourceId)
+
+      const [artifact] = await tx<PgRow[]>`
+        INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id,
+          latest_version, next_version, created_at, updated_at
+        )
+        SELECT project_id, ${input.id}, kind, title, ${input.owner.type}, ${input.owner.id},
+               latest_version, next_version, created_at, updated_at
+        FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.sourceId}
+        ON CONFLICT (project_id, id) DO NOTHING
+        RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
+      `
+      if (!artifact) throw artifactStorageErrors.exists(input.id)
+
+      await tx`
+        INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, created_at
+        )
+        SELECT project_id, ${input.id}, version, title, entry, files, outline, refs,
+               author_principal_type, author_principal_id, created_at
+        FROM artifact_versions
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.sourceId}
+      `
+      await tx`
+        INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at, copied)
+        VALUES (
+          ${input.projectId}, ${input.id}, ${input.threadId}, ${input.copiedAt ?? new Date()}, TRUE
+        )
+      `
+      return parseArtifactRow(artifact)
+    })
   }
 
   async listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult> {
@@ -381,11 +434,24 @@ export class PgArtifactStorage implements ArtifactStorage {
       `
       const affected = locked.map((row) => row.id)
       if (affected.length === 0) return 0
-      const deleted = await tx`
+      const deleted = await tx<{ origin_thread_id: string }[]>`
         DELETE FROM artifact_versions
         WHERE project_id = ${input.projectId} AND origin_run_id = ${input.runId}
           AND artifact_id IN ${tx(affected)}
-        RETURNING version
+        RETURNING origin_thread_id
+      `
+      // A run publishes from one thread: its artifacts stay shared there only while a version
+      // from it remains, or when they were copied for it.
+      const threadId = deleted[0]?.origin_thread_id
+      await tx`
+        DELETE FROM artifact_threads t
+        WHERE t.project_id = ${input.projectId} AND t.artifact_id IN ${tx(affected)}
+          AND t.thread_id = ${threadId ?? null} AND NOT t.copied
+          AND NOT EXISTS (
+            SELECT 1 FROM artifact_versions v
+            WHERE v.project_id = t.project_id AND v.artifact_id = t.artifact_id
+              AND v.origin_thread_id = t.thread_id
+          )
       `
       // An artifact left without versions goes; the rest point at their newest remaining one.
       await tx`
@@ -433,5 +499,23 @@ async function insertVersion(
     )
     RETURNING ${sql.unsafe(VERSION_COLUMNS)}
   `
+  if (input.origin) {
+    await linkThread(sql, projectId, artifactId, input.origin.threadId, input.createdAt)
+  }
   return parseArtifactVersionRow(row)
+}
+
+/** Shares an artifact in a thread, keeping when it was first shared there. */
+async function linkThread(
+  sql: SQLClient,
+  projectId: string,
+  artifactId: string,
+  threadId: string,
+  sharedAt: Date
+): Promise<void> {
+  await sql`
+    INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at)
+    VALUES (${projectId}, ${artifactId}, ${threadId}, ${sharedAt})
+    ON CONFLICT (project_id, artifact_id, thread_id) DO NOTHING
+  `
 }

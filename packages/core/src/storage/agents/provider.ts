@@ -169,6 +169,20 @@ export function compareAgentThreadParticipants(
   )
 }
 
+const ARTIFACT_ID_TOKEN = /art_[0-9a-z]{10}/g
+
+/**
+ * Text with each artifact id the copies map replaced by its copy's: a copied message's parts, as
+ * JSON, or a summary. Ids are fixed-length tokens, so one never matches inside another.
+ */
+export function remapArtifactIds(
+  text: string,
+  copies: Readonly<Record<string, string>> | undefined
+): string {
+  if (!copies || Object.keys(copies).length === 0) return text
+  return text.replace(ARTIFACT_ID_TOKEN, (id) => copies[id] ?? id)
+}
+
 /** What a fork reads from its source thread, inside the provider's transaction. */
 export interface AgentThreadForkSource {
   /** The active run's trigger message, when a turn is running. */
@@ -235,7 +249,14 @@ export function planAgentThreadFork(
   return {
     thread,
     messages: copied.map((message) => ({ sourceId: message.id, id: createAgentMessageId() })),
-    ...(checkpoint === undefined ? {} : { checkpoint: copyCheckpoint(checkpoint, input.id) }),
+    ...(checkpoint === undefined
+      ? {}
+      : {
+          checkpoint: {
+            ...copyCheckpoint(checkpoint, input.id),
+            summary: remapArtifactIds(checkpoint.summary, input.artifactCopies),
+          },
+        }),
   }
 }
 

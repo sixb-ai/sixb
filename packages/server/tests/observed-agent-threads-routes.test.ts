@@ -342,7 +342,9 @@ describe("observed agent thread routes", () => {
 
   // Guard proofs: drop the `orObserved` fallback from artifactReader's `get`, and the observer gets
   // 404 for what its conversation published; drop the session check, and the access token reads it.
-  test("/api/artifacts reads fall back to what a conversation published, for a session alone", async () => {
+  // Guard proof: return "update" for an observer in createArtifactsRuntime's conversation rule;
+  // the observer's publish and page data then go through.
+  test("an observer reads every version of what a conversation shares, read-only, from a session", async () => {
     const fixture = createFixture()
     await fixture.browser("marie", [runners.id])
     const observer = await fixture.browser("olivia", [threadObservers.id])
@@ -350,19 +352,16 @@ describe("observed agent thread routes", () => {
     const token = await fixture.accessToken("tess", [threadObservers.id])
     const file = await fixture.seedArtifact()
 
-    // The record is the conversation's: version 2 came from code and does not exist here.
+    // Shared whole: version 2, from code, is its latest for the observer too.
     const read = await fixture.request("/api/artifacts/art_0000000001", observer)
     expect(read.status).toBe(200)
     const body = await read.json()
-    expect(body.artifact).toMatchObject({ latestVersion: 1, title: "Late invoices" })
-    expect(body.versions.map((version: { version: number }) => version.version)).toEqual([1])
-    expect(JSON.stringify(body)).not.toContain("Edited from code")
+    expect(body).toMatchObject({
+      artifact: { latestVersion: 2, title: "Edited from code" },
+      access: "read",
+    })
+    expect(body.versions.map((version: { version: number }) => version.version)).toEqual([2, 1])
 
-    const latest = await fixture.request("/api/artifacts/art_0000000001/versions/latest", observer)
-    expect(await latest.json()).toMatchObject({ version: 1 })
-    expect(
-      (await fixture.request("/api/artifacts/art_0000000001/versions/2", observer)).status
-    ).toBe(404)
     const content = await fixture.request(
       "/api/artifacts/art_0000000001/versions/1/content?path=document.md",
       observer
@@ -372,33 +371,33 @@ describe("observed agent thread routes", () => {
     const frame = await fixture.request(
       "/api/artifacts/art_0000000001/versions/1/frame",
       observer,
-      {
-        method: "POST",
-      }
+      { method: "POST" }
     )
     expect(frame.status).toBe(409)
 
-    // Writes and the list stay the owner's.
+    // An observer only reads: no version, no page data, no delete.
     const publish = await fixture.request("/api/artifacts/art_0000000001/versions", observer, {
       method: "POST",
       body: { kind: "document", title: "Mine now", files: [{ path: "document.md", file }] },
     })
-    expect(publish.status).toBe(404)
+    expect(publish.status).toBe(403)
+    expect(await publish.json()).toMatchObject({ code: "read_only" })
+    const state = await fixture.request("/api/artifacts/art_0000000001/state", observer)
+    expect(state.status).toBe(403)
+    expect(await state.json()).toMatchObject({ code: "read_only" })
     const removed = await fixture.request("/api/artifacts/art_0000000001", observer, {
       method: "DELETE",
     })
-    expect(removed.status).toBe(404)
-    expect((await (await fixture.request("/api/artifacts", observer)).json()).total).toBe(0)
+    expect(removed.status).toBe(403)
     expect(
       (await fixture.storage.artifacts.get({ projectId, id: "art_0000000001" }))?.latestVersion
     ).toBe(2)
 
     // Neither activity alone nor an access token reads it.
     for (const headers of [activity, token]) {
-      expect((await fixture.request("/api/artifacts/art_0000000001", headers)).status).toBe(404)
-      expect(
-        (await fixture.request("/api/artifacts/art_0000000001/versions/1", headers)).status
-      ).toBe(404)
+      const refused = await fixture.request("/api/artifacts/art_0000000001", headers)
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "not_shared" })
     }
   })
 })

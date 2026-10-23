@@ -17,8 +17,8 @@ export type FoundReference = Omit<ArtifactReference, "resolvedVersion">
 interface ReferenceContext {
   readonly projectId: string
   readonly storage: ArtifactStorage
-  /** Who publishes: an address resolves only to artifacts they can read. */
-  readonly author: Principal
+  /** Whether an address may name this artifact: one whoever publishes can read. */
+  readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
   /** The artifact being published, which an address may not name. */
   readonly artifactId?: string
 }
@@ -59,7 +59,7 @@ export async function resolveReferences(
     if (!artifact) {
       artifact = context.storage
         .get({ projectId: context.projectId, id: address.artifactId })
-        .then((record) => (record && readable(context.author, record) ? record : null))
+        .then(async (record) => (record && (await context.readable(record)) ? record : null))
       artifacts.set(address.artifactId, artifact)
     }
     const record = await artifact
@@ -90,7 +90,8 @@ export async function resolveReferences(
 
 /**
  * The artifacts a new version breaks: each one whose latest version follows this artifact's latest
- * and names something this version no longer has. Only artifacts the author can read are named.
+ * and names something this version no longer has. Only artifacts the author can read are named,
+ * and only those the version breaks are checked: most dependents cost no read.
  */
 export async function brokenDependents(
   context: ReferenceContext,
@@ -104,27 +105,31 @@ export async function brokenDependents(
   const warnings: ArtifactWarning[] = []
   for (const dependent of dependents) {
     if (dependent.artifactId === artifact.id) continue
-    const owner = await context.storage.get({
-      projectId: context.projectId,
-      id: dependent.artifactId,
-    })
-    if (!owner || !readable(context.author, owner)) continue
+
+    const broken: ArtifactWarning[] = []
     for (const reference of dependent.references) {
       const address = parseArtifactAddress(reference.address)
       // A pinned address keeps showing the version it names.
       if (address?.artifactId !== artifact.id || address.version !== undefined) continue
       const result = resolveArtifactAddress(address, { kind: artifact.kind, ...version })
       if (!("problem" in result)) continue
-      warnings.push({
+      broken.push({
         code: "reference_broken",
         message: `“${dependent.title}” (${dependent.artifactId}) ${reference.as === "embed" ? "shows" : "links to"} ${reference.address}, but version ${version.version} ${result.problem}. Publish its next version with an address that resolves, or restore what it names.`,
       })
     }
+    if (broken.length === 0) continue
+
+    const owner = await context.storage.get({
+      projectId: context.projectId,
+      id: dependent.artifactId,
+    })
+    if (owner && (await context.readable(owner))) warnings.push(...broken)
   }
   return warnings
 }
 
-/** Owner-only, as reading is: system code reads every artifact in the project. */
-function readable(reader: Principal, artifact: ArtifactRecord): boolean {
-  return reader.type === "system" || principalsEqual(reader, artifact.owner)
+/** What its author reads when nothing else is said: their own artifacts, or all for system code. */
+export function ownArtifacts(author: Principal): (artifact: ArtifactRecord) => Promise<boolean> {
+  return async (artifact) => author.type === "system" || principalsEqual(author, artifact.owner)
 }

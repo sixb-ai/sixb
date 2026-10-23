@@ -5297,7 +5297,7 @@ export const listArtifactsQueryKey = (options?: Options<ListArtifactsData>) =>
 /**
  * List artifacts
  *
- * The caller's artifacts, most recently updated first.
+ * The caller's artifacts, most recently updated first. With thread, every artifact the conversation shares, for whoever reads it.
  */
 export const listArtifactsOptions = (options?: Options<ListArtifactsData>) =>
   queryOptions<
@@ -5325,7 +5325,7 @@ export const listArtifactsInfiniteQueryKey = (
 /**
  * List artifacts
  *
- * The caller's artifacts, most recently updated first.
+ * The caller's artifacts, most recently updated first. With thread, every artifact the conversation shares, for whoever reads it.
  */
 export const listArtifactsInfiniteOptions = (options?: Options<ListArtifactsData>) =>
   infiniteQueryOptions<
@@ -5391,7 +5391,7 @@ export const createArtifactMutation = (
 /**
  * Delete an artifact
  *
- * Deletes the artifact with every version.
+ * Deletes the artifact with every version, from every conversation that shares it. Only its owner can.
  */
 export const deleteArtifactMutation = (
   options?: Partial<Options<DeleteArtifactData>>

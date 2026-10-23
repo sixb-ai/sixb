@@ -409,3 +409,262 @@ describe("a shared thread's sandbox", () => {
     ).rejects.toMatchObject({ code: "not_thread_owner" })
   })
 })
+
+describe("artifacts a shared conversation shares", () => {
+  async function sharedArtifact(host: Host) {
+    const shared = await sharedThread(host)
+    const file = await host.blobStorage.put({
+      body: new TextEncoder().encode("# Late deals"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const content = {
+      kind: "document" as const,
+      title: "Late deals",
+      files: [{ path: "document.md", file }],
+    }
+
+    // Alice's report, which the Agent then showed in the thread, and her private notes.
+    const { artifact, version: first } = await shared.owner.artifacts.create(content)
+    const { projectId: _p, artifactId: _a, version: _v, ...input } = first
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "document",
+      version: { ...input, origin: { threadId: shared.thread.id, runId: shared.run.id } },
+    })
+    const { artifact: notes } = await shared.owner.artifacts.create({ ...content, title: "Notes" })
+
+    return { ...shared, artifact, notes, content }
+  }
+
+  // Guard proof: return null for "participant" in createAgentThreadAccessRule; Bob then reaches
+  // none of them.
+  test("a participant reads and updates them at their latest, and keeps their own page data", async () => {
+    const { host } = setup()
+    const { owner, participant, thread, artifact, content } = await sharedArtifact(host)
+
+    // The owner's edit from outside the conversation is shared too: the artifact is, whole.
+    await owner.artifacts.publish(artifact.id, { ...content, title: "Edited in the app" })
+    expect(await participant.artifacts.access(artifact.id)).toBe("update")
+    expect(await participant.artifacts.get(artifact.id)).toMatchObject({
+      latestVersion: 3,
+      title: "Edited in the app",
+      owner: alice,
+    })
+
+    const saved = await participant.artifacts.publish(artifact.id, {
+      ...content,
+      title: "Bob's edit",
+    })
+    expect(saved.version).toMatchObject({ version: 4, author: bob })
+    expect(saved.artifact.owner).toEqual(alice)
+
+    await participant.artifacts.state(artifact.id).set("filters", { region: "EMEA" })
+    expect(await owner.artifacts.state(artifact.id).get("filters")).toBeUndefined()
+    expect(await participant.artifacts.state(artifact.id).get("filters")).toEqual({
+      region: "EMEA",
+    })
+
+    expect(
+      (await participant.artifacts.list({ threadId: thread.id })).artifacts.map((each) => each.id)
+    ).toEqual([artifact.id])
+    expect(await participant.artifacts.delete(artifact.id)).toBe(false)
+    expect(await owner.artifacts.get(artifact.id)).not.toBeNull()
+  })
+
+  // Guard proof: check only before validating in ArtifactsRuntime.publish (answer "update" from
+  // the access passed to storeArtifactVersion); Bob's version then lands after his removal.
+  test("a participant's save shares nothing more, and lands only while they take part", async () => {
+    const { host } = setup()
+    const { owner, participant, thread, artifact, content } = await sharedArtifact(host)
+
+    // A save in the app has no conversation: it links the artifact nowhere new.
+    await participant.artifacts.publish(artifact.id, { ...content, title: "Bob's edit" })
+    expect(await host.storage.artifacts?.listThreadIds({ projectId, id: artifact.id })).toEqual([
+      thread.id,
+    ])
+
+    // Removed while his next version's files are read, Bob publishes nothing.
+    const blobs = host.blobStorage
+    const open = blobs.open.bind(blobs)
+    blobs.open = async (...args) => {
+      blobs.open = open
+      await owner.agent.threads.participants.remove(thread.id, bob)
+      return open(...args)
+    }
+    await expect(
+      participant.artifacts.publish(artifact.id, { ...content, title: "Too late" })
+    ).rejects.toMatchObject({ code: "not_shared" })
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+  })
+
+  test("nobody else reaches them, nor the owner's artifacts the conversation does not share", async () => {
+    const { host } = setup()
+    const { participant, other, thread, artifact, notes, content } = await sharedArtifact(host)
+
+    expect(await participant.artifacts.access(notes.id)).toBe("none")
+    expect(await participant.artifacts.get(notes.id)).toBeNull()
+    await expect(participant.artifacts.publish(notes.id, content)).rejects.toMatchObject({
+      code: "not_shared",
+    })
+
+    // Guard proof: let `readable` accept any artifact in publish; Bob's version then embeds
+    // Alice's notes.
+    const embedding = await host.blobStorage.put({
+      body: new TextEncoder().encode(`# Late deals\n\n![Notes](artifact:${notes.id})\n`),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    await expect(
+      participant.artifacts.publish(artifact.id, {
+        ...content,
+        files: [{ path: "document.md", file: embedding }],
+      })
+    ).rejects.toThrow("names no artifact you can read")
+
+    expect(await other.artifacts.access(artifact.id)).toBe("none")
+    expect((await other.artifacts.list({ threadId: thread.id })).total).toBe(0)
+
+    // Removed, Bob reaches none of it any more.
+    await participant.agent.threads.participants.remove(thread.id, bob)
+    expect(await participant.artifacts.get(artifact.id)).toBeNull()
+  })
+
+  // Guard proof: let `sharing` in createRuntimeArtifactAccessRule allow any credential but an
+  // access token; Bob without a credential then reads Alice's artifact. Drop the check entirely,
+  // and his token reads it too.
+  test("only a session reaches what is shared: an access token or no credential reach their own", async () => {
+    const { host } = setup()
+    const { artifact } = await sharedArtifact(host)
+    const token = bindRequestExecution(host, {
+      request: new Request("http://localhost/test"),
+      authorization: {
+        type: "principal",
+        credential: { type: "accessToken", id: "pat_bob" },
+        context: {
+          principal: bob,
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true },
+        },
+      },
+    })
+
+    expect(await token.artifacts.access(artifact.id)).toBe("none")
+    expect(await token.artifacts.get(artifact.id)).toBeNull()
+
+    const withoutCredential = createTestSixb(host, {
+      authorization: {
+        principal: bob,
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), "run:agent": true },
+      },
+    })
+    expect(await withoutCredential.artifacts.access(artifact.id)).toBe("none")
+  })
+
+  // Guard proofs: return no copies from copySharedArtifacts, and the fork's messages name Alice's
+  // artifact, which Bob loses once removed from her thread; copy only the latest version, and the
+  // copy has no version 2 for the card nor 1 for the pinned embed.
+  test("a fork gets its own copies, with their history, and its messages name them", async () => {
+    const { host } = setup()
+    const { owner, participant, thread, run, artifact, content } = await sharedArtifact(host)
+    await owner.artifacts.publish(artifact.id, { ...content, title: "Latest" })
+    // A card for version 2, as publish_artifact_version leaves one, and an embed pinned to @1.
+    await host.storage.agents?.messages.append({
+      projectId,
+      id: "msg_shown",
+      threadId: thread.id,
+      runId: run.id,
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_publish",
+          toolName: "publish_artifact_version",
+          input: { id: artifact.id },
+          state: "output-available",
+          output: { artifactId: artifact.id, version: 2 },
+        },
+        { type: "text", text: `As it was: ![Deals](artifact:${artifact.id}@1)` },
+      ],
+    })
+
+    const fork = await participant.agent.threads.fork(thread.id)
+    const copies = await participant.artifacts.list({ threadId: fork.id })
+    expect(copies.artifacts).toHaveLength(1)
+    const [copy] = copies.artifacts
+    if (!copy) throw new Error("Expected the fork's copy.")
+    expect(copy).toMatchObject({ owner: bob, title: "Latest", latestVersion: 3 })
+    expect(copy.id).not.toBe(artifact.id)
+
+    const { messages } = (await host.storage.agents?.messages.list({
+      projectId,
+      threadId: fork.id,
+    })) ?? { messages: [] }
+    const copied = JSON.stringify(messages)
+    expect(copied).toContain(`"artifactId":"${copy.id}","version":2`)
+    expect(copied).toContain(`artifact:${copy.id}@1`)
+    expect(copied).not.toContain(artifact.id)
+
+    // What they name is there, as it was.
+    const original = await owner.artifacts.listVersions(artifact.id)
+    const history = await participant.artifacts.listVersions(copy.id)
+    expect(
+      history?.versions.map(({ version, title, author }) => ({ version, title, author }))
+    ).toEqual(original?.versions.map(({ version, title, author }) => ({ version, title, author })))
+    expect(await participant.artifacts.getVersion(copy.id, 2)).toMatchObject({
+      title: "Late deals",
+    })
+
+    // The copy is Bob's: it stays when he leaves Alice's thread, and the original stays hers.
+    await participant.agent.threads.participants.remove(thread.id, bob)
+    expect(await participant.artifacts.access(copy.id)).toBe("owner")
+    expect(await owner.artifacts.get(artifact.id)).toMatchObject({ latestVersion: 3 })
+  })
+
+  // Guard proof: copy every artifact the source shares in copySharedArtifacts, whatever the
+  // caller reaches; Bob's token then copies Alice's artifact into his own.
+  test("a fork through an access token copies only the caller's own artifacts", async () => {
+    const { host } = setup()
+    const { thread } = await sharedArtifact(host)
+    const token = bindRequestExecution(host, {
+      request: new Request("http://localhost/test"),
+      authorization: {
+        type: "principal",
+        credential: { type: "accessToken", id: "pat_bob" },
+        context: {
+          principal: bob,
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true },
+        },
+      },
+    })
+
+    const fork = await token.agent.threads.fork(thread.id)
+    expect((await host.storage.artifacts?.list({ projectId, threadId: fork.id }))?.total).toBe(0)
+  })
+
+  test("a fork that fails leaves no copy behind", async () => {
+    const { host } = setup()
+    const { participant, thread, artifact } = await sharedArtifact(host)
+    const agents = host.storage.agents
+    if (!agents) throw new Error("Expected agent storage.")
+    const fork = agents.threads.fork.bind(agents.threads)
+    agents.threads.fork = async () => {
+      throw new Error("storage went away")
+    }
+
+    try {
+      await expect(participant.agent.threads.fork(thread.id)).rejects.toThrow("storage went away")
+    } finally {
+      agents.threads.fork = fork
+    }
+    // Alice's report and notes, and no copy.
+    expect((await host.storage.artifacts?.list({ projectId }))?.total).toBe(2)
+    expect(await participant.artifacts.get(artifact.id)).not.toBeNull()
+  })
+})
