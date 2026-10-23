@@ -343,15 +343,15 @@ describe("models generation", () => {
     expect(received.find((request) => request.path === "/api/files")?.type).toBe("audio/mpeg")
   })
 
-  test("calls get shows a call's files, or downloads them again", async () => {
+  test("calls files shows a call's files, or downloads them again", async () => {
     const directory = await temporary()
     const files = [{ blobId: "blob_1", mediaType: "image/png", sizeBytes: 4 }]
-    routes["GET /api/ai/model-calls/call_1"] = () =>
+    routes["GET /api/ai/model-calls/call_1/files"] = () =>
       Response.json({ callId: "call_1", files, recordedAt: "2026-10-22T12:00:00.000Z" })
     serveFiles([PNG])
 
-    expect(await run(["calls", "get", "call_1"])).toMatchObject({ callId: "call_1", files })
-    expect(await run(["calls", "get", "call_1", "--output", join(directory, "again")])).toEqual({
+    expect(await run(["calls", "files", "call_1"])).toMatchObject({ callId: "call_1", files })
+    expect(await run(["calls", "files", "call_1", "--output", join(directory, "again")])).toEqual({
       callId: "call_1",
       files: [join(directory, "again.png")],
     })
