@@ -1,6 +1,8 @@
 import type { ElysiaOpenAPIConfig } from "@elysiajs/openapi"
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { z } from "zod"
 import { zodToJsonSchema } from "zod-to-json-schema"
+import { ArtifactErrorResponseSchema } from "./artifacts"
 import { UserProfileSchema } from "./auth"
 import {
   AiUsageLimitErrorResponseSchema,
@@ -394,6 +396,21 @@ const objectRefSchemaRef = { $ref: "#/components/schemas/ObjectRef" }
  * OpenAPI config inlines refs. Keep the HTTP validator above in Zod, and provide
  * the recursive request contract directly for generated clients and docs.
  */
+/** What every artifact query result names: the types it returns, and every type it reads. */
+const artifactQueryShape = {
+  resultObjectTypeIds: {
+    type: "array",
+    items: { type: "string" },
+    description: "The object types the query returns",
+  },
+  readObjectTypeIds: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "Every object type the query reads: where it starts, and what it traverses or expands",
+  },
+} satisfies Record<string, OpenApi3Schema>
+
 export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
   ErrorResponse: {
     type: "object",
@@ -568,6 +585,53 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
       },
       plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
     },
+  },
+  ArtifactErrorResponse: zodToJsonSchema(ArtifactErrorResponseSchema, {
+    target: "openApi3",
+    $refStrategy: "none",
+  }) as OpenApi3Schema,
+  // A query an artifact version holds, run as the caller: its rows, typed as the query route
+  // types them, or its facets.
+  ArtifactQueryResponse: {
+    oneOf: [
+      {
+        type: "object",
+        required: [
+          "kind",
+          "objects",
+          "total",
+          "truncated",
+          "resultObjectTypeIds",
+          "readObjectTypeIds",
+        ],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["objects"] },
+          objects: {
+            type: "array",
+            items: { $ref: "#/components/schemas/ObjectQueryObject" },
+            description: `The rows as the caller reads them, at most ${ARTIFACT_LIMITS.maxQueryRows}: a marked property they are not cleared for is left out and listed in redactions`,
+          },
+          total: { type: "number", description: "Every row the query matches for the caller" },
+          truncated: { type: "boolean", description: "Whether rows past the cap are left out" },
+          ...artifactQueryShape,
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "total", "facets", "resultObjectTypeIds", "readObjectTypeIds"],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["facets"] },
+          total: { type: "number", description: "Every row the query matches for the caller" },
+          facets: {
+            type: "array",
+            items: { $ref: "#/components/schemas/ObjectQueryFacetResult" },
+          },
+          ...artifactQueryShape,
+        },
+      },
+    ],
   },
   ObjectQueryLink: {
     type: "object",

@@ -129,7 +129,7 @@ type SerializedExpandedObject = SerializedObject & {
  * an expanded child. Only the query route hydrates links, so the plain list and
  * identity routes keep using `serializeObject`.
  */
-function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObject {
+export function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObject {
   const serialized: SerializedExpandedObject = serializeObject(row)
   if (row.links) serialized.links = serializeLinks(row.links)
   if (row.linkProperties !== undefined) serialized.linkProperties = row.linkProperties
@@ -169,7 +169,7 @@ function serializePlan(plan: {
   }
 }
 
-function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
+export function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
   if (error instanceof AuthorizationError) {
     set.status = 403
     return { error: error.message }
