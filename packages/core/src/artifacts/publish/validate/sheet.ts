@@ -4,7 +4,9 @@ import { isArtifactAddress } from "../../address"
 import { CsvParseError, type CsvTable, parseCsv } from "../../csv"
 import { evaluateComputedColumns } from "../../formula"
 import { ARTIFACT_LIMITS } from "../../limits"
+import { liveSheetColumns } from "../../live-sheet"
 import type { SheetOutline } from "../../outline"
+import { artifactQueryPath, type CheckedArtifactQuery } from "../../queries"
 import { sheetChartsProblem, sheetColumnsProblem, sheetFormulasProblem } from "../../sheet-rules"
 import type { ArtifactWarning } from "../../warnings"
 import {
@@ -14,6 +16,7 @@ import {
   type SheetColumnFormat,
   sheetFilePath,
   WORKBOOK_FILE,
+  type Workbook,
   type WorkbookSheet,
 } from "../../workbook"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
@@ -24,10 +27,15 @@ import type { FoundReference } from "../references"
  * must read as its type, every formula must compute its column, and every chart must name columns
  * its sheet has, so the grid formats and the charts draw the same wherever the sheet is opened.
  * Rows a formula computes to an error are warnings: the version publishes, and the grid shows them.
+ *
+ * A live sheet is checked against `queries`, what checking the version's queries as its author
+ * learned: its query returns rows, and its columns show properties those rows hold, so its rules
+ * hold as a CSV sheet's do. Its rows are each reader's, so no cell is checked.
  */
 export async function validateSheet(
   blobStorage: ArtifactBlobStorage,
-  files: readonly ArtifactFile[]
+  files: readonly ArtifactFile[],
+  queries: ReadonlyMap<string, CheckedArtifactQuery>
 ): Promise<{
   readonly entry: string
   readonly outline: SheetOutline
@@ -58,12 +66,24 @@ export async function validateSheet(
   const tables = new Map<string, CsvTable>()
   const references: FoundReference[] = []
   const warnings: ArtifactWarning[] = []
+  const sheets: WorkbookSheet[] = []
   for (const sheet of workbook.sheets) {
+    if (sheet.live) {
+      const live = liveSheet(byPath, sheet, queries.get(sheet.live.query))
+      sheets.push(live.sheet)
+      tables.set(sheet.name, live.table)
+      continue
+    }
+
     const table = await readSheet(blobStorage, byPath, sheet, references)
+    sheets.push(sheet)
     tables.set(sheet.name, table)
     warnings.push(...computeSheet(sheet, table))
   }
-  const charts = sheetChartsProblem(workbook, tables)
+
+  // A live sheet's charts plot the columns it lays out, typed as its query's rows are.
+  const laidOut: Workbook = { ...workbook, sheets }
+  const charts = sheetChartsProblem(laidOut, tables)
   if (charts) throw invalidArtifact(charts)
 
   return {
@@ -76,6 +96,7 @@ export async function validateSheet(
           name: sheet.name,
           rows: table?.rows.length ?? 0,
           columns: [...(table?.header ?? [])],
+          ...(sheet.live ? { query: sheet.live.query } : {}),
         }
       }),
       charts: workbook.charts.map((chart) => chart.name),
@@ -83,6 +104,45 @@ export async function validateSheet(
     references,
     warnings,
   }
+}
+
+/**
+ * A live sheet laid out against its query as the author reads it, and its header as the table a
+ * CSV would hold, with no rows: the rules a CSV sheet keeps are checked on it.
+ */
+function liveSheet(
+  byPath: ReadonlyMap<string, ArtifactFile>,
+  sheet: WorkbookSheet,
+  checked: CheckedArtifactQuery | undefined
+): { readonly sheet: WorkbookSheet; readonly table: CsvTable } {
+  const query = sheet.live?.query
+  const csv = sheetFilePath(sheet.name)
+  if (byPath.has(csv)) {
+    throw invalidArtifact(
+      `Sheet '${sheet.name}' reads its rows from query '${query}', so it has no '${csv}': remove the CSV, or "query" to show it.`
+    )
+  }
+
+  if (!checked || query === undefined) {
+    throw invalidArtifact(
+      `Sheet '${sheet.name}' reads query '${query}', which the version does not have: add '${artifactQueryPath(query ?? "")}'.`
+    )
+  }
+  if (checked.kind === "facets") {
+    throw invalidArtifact(
+      `Sheet '${sheet.name}' reads query '${query}', which counts facets: a sheet shows rows. A page shows facets; give the sheet a query of rows.`
+    )
+  }
+
+  const layout = liveSheetColumns(sheet, checked.schema)
+  if (layout.problem) throw invalidArtifact(layout.problem)
+
+  const table = { header: layout.columns.map((column) => column.name), rows: [] }
+  const problem =
+    sheetColumnsProblem(layout.sheet, table) ?? sheetFormulasProblem(layout.sheet, table)
+  if (problem) throw invalidArtifact(problem)
+
+  return { sheet: layout.sheet, table }
 }
 
 async function readSheet(

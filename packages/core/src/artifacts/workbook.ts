@@ -1,12 +1,14 @@
 import { FormulaSyntaxError, parseFormula } from "./formula/parser"
 import { ARTIFACT_LIMITS } from "./limits"
+import { isArtifactQueryName } from "./queries"
 import { ARTIFACT_TONES, type ArtifactTone, isArtifactTone } from "./tones"
 
 /**
  * A sheet artifact is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds the
  * values; the workbook holds what CSV can't: sheet order, column types and formats, frozen rows
  * and columns, widths, descriptions and totals, computed columns' formulas, and charts drawn from
- * the sheets.
+ * the sheets. A live sheet has no CSV: its rows are one of the version's queries', as each reader
+ * reads them.
  */
 export const WORKBOOK_FILE = "workbook.json"
 
@@ -76,6 +78,31 @@ export interface WorkbookSheet {
   readonly descriptions: Readonly<Record<string, string>>
   /** A totals row pinned under the rows: what each named column totals to. */
   readonly totals: Readonly<Record<string, SheetTotal>>
+  /** Where a live sheet's rows and columns come from; a sheet without it holds its CSV's. */
+  readonly live?: LiveSheetSource
+}
+
+/**
+ * A live sheet's query and columns. Its columns are exactly those its workbook lists, in order,
+ * each showing a property of the rows or computed by a formula. A column whose type is its
+ * property's has no format in `columns` until the property's type is known: `liveSheetColumns`
+ * reads it then.
+ */
+export interface LiveSheetSource {
+  /** The query whose rows the sheet shows: `queries/<name>.json` in the version. */
+  readonly query: string
+  readonly columns: readonly LiveSheetColumnSource[]
+}
+
+export interface LiveSheetColumnSource {
+  readonly name: string
+  /**
+   * The property the column shows: a property id of the rows, or `<linkId>.<propertyId>` of a
+   * link the query expands. A computed column has none.
+   */
+  readonly from?: string
+  /** The column's format as written, when it gives no type: its property's type is its type. */
+  readonly untyped?: Readonly<Record<string, unknown>>
 }
 
 export interface WorkbookChart {
@@ -112,7 +139,8 @@ export function sheetFilePath(sheetName: string): string {
 /**
  * Reads `workbook.json` into its full form: `"Revenue": "currency"` becomes
  * `{ type: "currency" }`, a single `y` becomes a list, and defaults are filled. Returns what is
- * wrong in words the author can act on. Whether the columns exist is checked against the CSVs.
+ * wrong in words the author can act on. Whether the columns exist is checked against the CSVs, and
+ * a live sheet's against its query.
  */
 export function parseWorkbook(
   text: string
@@ -204,6 +232,7 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
     "widths",
     "descriptions",
     "totals",
+    "query",
   ])
   const name = typeof input.name === "string" ? input.name.trim() : ""
   if (
@@ -219,11 +248,22 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
     )
   }
   const sheetAt = `sheet '${name}'`
+  const live = input.query === undefined ? undefined : readLiveSheet(input, sheetAt)
   const columns: Record<string, SheetColumnFormat> = {}
   for (const [column, format] of Object.entries(
     record(input.columns ?? {}, `${sheetAt} "columns"`, null)
   )) {
-    columns[column] = readColumnFormat(format, `${sheetAt} column '${column}'`)
+    const at = `${sheetAt} column '${column}'`
+    if (!live) {
+      columns[column] = readColumnFormat(format, at)
+      continue
+    }
+
+    // A live column's `from` is its source, not its format; without a type, its property's is.
+    const { from: _from, ...written } = format as Record<string, unknown>
+    if (written.type !== undefined || written.formula !== undefined) {
+      columns[column] = readColumnFormat(written, at)
+    }
   }
   const computed = Object.values(columns).filter((format) => format.formula).length
   if (computed > COMPUTED_MAX) {
@@ -266,12 +306,13 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
         `${sheetAt} totals column '${column}' with ${JSON.stringify(total)}; use one of ${SHEET_TOTALS.join(", ")}.`
       )
     }
-    const type = columns[column]?.type ?? "text"
-    if (total !== "count" && !NUMERIC_COLUMN_TYPES.includes(type)) {
-      throw new WorkbookError(
-        `${sheetAt} totals column '${column}' with "${String(total)}", but it is ${type}; only a number, currency, or percent column has a ${String(total)}. Use "count", or give it a numeric type in "columns".`
-      )
-    }
+    // A live column typed by its property is checked once its property's type is known, and one
+    // the sheet does not list once its columns are.
+    const deferred = live !== undefined && columns[column] === undefined
+    const problem = deferred
+      ? null
+      : sheetTotalProblem(sheetAt, column, total as SheetTotal, columns[column]?.type ?? "text")
+    if (problem) throw new WorkbookError(problem)
     totals[column] = total as SheetTotal
   }
   return {
@@ -282,6 +323,112 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
     widths,
     descriptions,
     totals,
+    ...(live ? { live } : {}),
+  }
+}
+
+/** Why a column can't have its total, or null: only a numeric column has more than a count. */
+export function sheetTotalProblem(
+  sheetAt: string,
+  column: string,
+  total: SheetTotal,
+  type: SheetColumnType
+): string | null {
+  if (total === "count" || NUMERIC_COLUMN_TYPES.includes(type)) return null
+  return `${sheetAt} totals column '${column}' with "${total}", but it is ${type}; only a number, currency, or percent column has a ${total}. Use "count", or give it a numeric type in "columns".`
+}
+
+/** A JSON object puts a name such as `2024` before the others, whatever order it was written in. */
+const INDEX_NAME = /^(0|[1-9]\d{0,8})$/
+
+/**
+ * A live sheet's query and columns. Each column shows a property, `from`, or is computed, in the
+ * order `columns` lists them, so a name JSON would move is refused.
+ */
+function readLiveSheet(input: Record<string, unknown>, sheetAt: string): LiveSheetSource {
+  if (typeof input.query !== "string" || !isArtifactQueryName(input.query)) {
+    throw new WorkbookError(
+      `${sheetAt} "query" must name one of the version's queries, as queries/<name>.json names it: lowercase letters, digits and hyphens.`
+    )
+  }
+
+  const entries = Object.entries(record(input.columns ?? {}, `${sheetAt} "columns"`, null))
+  if (entries.length === 0) {
+    throw new WorkbookError(
+      `${sheetAt} reads query '${input.query}': list its columns in "columns", each with the property it shows in "from".`
+    )
+  }
+
+  const columns = entries.map(([name, value]): LiveSheetColumnSource => {
+    const at = `${sheetAt} column '${name}'`
+    if (INDEX_NAME.test(name)) {
+      throw new WorkbookError(
+        `${at}: a live sheet's columns come in the order "columns" lists them, and JSON puts a name of digits first. Name it with a letter, such as "FY${name}".`
+      )
+    }
+
+    if (typeof value === "string") {
+      throw new WorkbookError(
+        `${at} is ${JSON.stringify(value)}; a live sheet's column is an object, such as { "from": "amount", "type": "${value}" }.`
+      )
+    }
+    const column = record(value, at, [
+      "from",
+      "type",
+      "currency",
+      "decimals",
+      "compact",
+      "signed",
+      "tones",
+      "highlight",
+      "formula",
+    ])
+    if (column.from === undefined && column.formula === undefined) {
+      throw new WorkbookError(
+        `${at} shows nothing: give it "from", the property it shows, or a "formula".`
+      )
+    }
+    if (column.from !== undefined && column.formula !== undefined) {
+      throw new WorkbookError(
+        `${at} has both "from" and "formula": a column shows a property or computes, not both.`
+      )
+    }
+    if (column.from === undefined) return { name }
+
+    const from = column.from
+    const segments = typeof from === "string" ? from.split(".") : []
+    if (segments.length === 0 || segments.some((segment) => !segment)) {
+      throw new WorkbookError(
+        `${at} "from" must name a property of the rows, such as "amount", or of a link the query expands, such as "customer.name".`
+      )
+    }
+    if (segments.length > 2) {
+      throw new WorkbookError(
+        `${at} "from" is ${JSON.stringify(from)}; a column reads a property of the rows or of one link the query expands, such as "customer.name".`
+      )
+    }
+
+    const { from: _from, ...untyped } = column
+    return { name, from: from as string, ...(column.type === undefined ? { untyped } : {}) }
+  })
+
+  return { query: input.query, columns }
+}
+
+/**
+ * A column's format as `columns` writes it, for a column whose type `type` gives when the format
+ * names none: a live column's property's. Returns what is wrong in the words parsing uses.
+ */
+export function readSheetColumnFormat(
+  value: Readonly<Record<string, unknown>>,
+  at: string,
+  type: SheetColumnType
+): { readonly format: SheetColumnFormat } | { readonly error: string } {
+  try {
+    return { format: readColumnFormat({ type, ...value }, at) }
+  } catch (error) {
+    if (error instanceof WorkbookError) return { error: `${WORKBOOK_FILE}: ${error.message}` }
+    throw error
   }
 }
 

@@ -959,7 +959,10 @@ export type { PublishedArtifact } from "./artifacts/publish/publish"
 export type {
   ArtifactFacetsQueryResult,
   ArtifactObjectsQueryResult,
+  ArtifactQueryProperty,
+  ArtifactQueryPropertyType,
   ArtifactQueryResult,
+  ArtifactQuerySchema,
 } from "./artifacts/queries"
 export type { ArtifactReference } from "./artifacts/references"
 export type { ArtifactWarning } from "./artifacts/warnings"

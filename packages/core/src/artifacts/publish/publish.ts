@@ -15,6 +15,7 @@ import { createArtifactId } from "../ids"
 import type { ArtifactKind } from "../kinds"
 import { ARTIFACT_LIMITS } from "../limits"
 import type { ArtifactOutline } from "../outline"
+import type { CheckedArtifactQuery } from "../queries"
 import { ARTIFACT_THEME_FILE, parseArtifactTheme } from "../theme"
 import type { ArtifactWarning } from "../warnings"
 import {
@@ -111,9 +112,9 @@ export async function publishArtifact(
 }
 
 /**
- * Everything publishing checks before it stores: the title, the files, the theme, the kind's own
- * format, every address, resolved against what the author can read, and every query, run once as
- * the author. It reads the files back and parses them, so a caller that stores inside a
+ * Everything publishing checks before it stores: the title, the files, the theme, every query, run
+ * once as the author, the kind's own format, and every address, resolved against what the author
+ * can read. It reads the files back and parses them, so a caller that stores inside a
  * transaction prepares outside it.
  */
 export async function prepareArtifactVersion(
@@ -123,13 +124,21 @@ export async function prepareArtifactVersion(
   const title = checkTitle(input.title)
   await checkArtifactFiles(context.blobStorage, input.files)
   if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
-  const validated = await validateKind(context.blobStorage, input.kind, input.files)
+
+  // The queries first: a live sheet's columns are checked against what its query returns.
+  const queries = await checkArtifactQueries(
+    context.blobStorage,
+    input.kind,
+    input.files,
+    input.checkQuery
+  )
+  const validated = await validateKind(context.blobStorage, input.kind, input.files, queries)
+
   const readable = input.readable ?? ownArtifacts(input.author)
   const references = await resolveReferences(
     referenceContext(context, { readable, artifactId: input.artifactId }),
     validated.references ?? []
   )
-  await checkArtifactQueries(context.blobStorage, input.kind, input.files, input.checkQuery)
 
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
@@ -220,7 +229,8 @@ function referenceContext(
 async function validateKind(
   blobStorage: ArtifactBlobStorage,
   kind: ArtifactKind,
-  files: readonly ArtifactFile[]
+  files: readonly ArtifactFile[],
+  queries: ReadonlyMap<string, CheckedArtifactQuery>
 ): Promise<{
   readonly entry: string
   readonly outline: ArtifactOutline
@@ -233,7 +243,7 @@ async function validateKind(
     case "file":
       return validateFileArtifact(files)
     case "sheet":
-      return validateSheet(blobStorage, files)
+      return validateSheet(blobStorage, files, queries)
     case "slides":
       return validateSlides(blobStorage, files)
     case "page":

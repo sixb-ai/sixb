@@ -411,6 +411,12 @@ const artifactQueryShape = {
   },
 } satisfies Record<string, OpenApi3Schema>
 
+/** By property id: what each property holds. */
+const artifactQueryProperties = {
+  type: "object",
+  additionalProperties: { $ref: "#/components/schemas/ArtifactQueryProperty" },
+} satisfies OpenApi3Schema
+
 export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
   ErrorResponse: {
     type: "object",
@@ -603,6 +609,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
           "truncated",
           "resultObjectTypeIds",
           "readObjectTypeIds",
+          "schema",
         ],
         additionalProperties: false,
         properties: {
@@ -615,11 +622,12 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
           total: { type: "number", description: "Every row the query matches for the caller" },
           truncated: { type: "boolean", description: "Whether rows past the cap are left out" },
           ...artifactQueryShape,
+          schema: { $ref: "#/components/schemas/ArtifactQuerySchema" },
         },
       },
       {
         type: "object",
-        required: ["kind", "total", "facets", "resultObjectTypeIds", "readObjectTypeIds"],
+        required: ["kind", "total", "facets", "resultObjectTypeIds", "readObjectTypeIds", "schema"],
         additionalProperties: false,
         properties: {
           kind: { type: "string", enum: ["facets"] },
@@ -629,9 +637,67 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
             items: { $ref: "#/components/schemas/ObjectQueryFacetResult" },
           },
           ...artifactQueryShape,
+          schema: { $ref: "#/components/schemas/ArtifactQuerySchema" },
         },
       },
     ],
+  },
+  ArtifactQuerySchema: {
+    type: "object",
+    description:
+      "What each value of a row holds, from the ontology as the caller may view it: a property their view leaves out is absent",
+    required: ["properties", "links"],
+    additionalProperties: false,
+    properties: {
+      properties: {
+        ...artifactQueryProperties,
+        description:
+          "The properties of the types the query returns, by id; the first type's when two disagree",
+      },
+      links: {
+        type: "object",
+        description:
+          "By link id, for each link the query expands on its rows: the properties of what it reaches",
+        additionalProperties: {
+          type: "object",
+          required: ["properties"],
+          additionalProperties: false,
+          properties: { properties: artifactQueryProperties },
+        },
+      },
+    },
+  },
+  ArtifactQueryProperty: {
+    type: "object",
+    required: ["type"],
+    additionalProperties: false,
+    properties: {
+      type: {
+        type: "string",
+        enum: [
+          "string",
+          "integer",
+          "double",
+          "decimal",
+          "boolean",
+          "date",
+          "timestamp",
+          "uuid",
+          "fileRef",
+          "userRef",
+          "enum",
+          "array",
+          "object",
+          "map",
+        ],
+        description: "The property's type, a value type resolved to the schema it names",
+      },
+      valueType: {
+        type: "string",
+        enum: ["string", "integer"],
+        description: "What an enum's values are",
+      },
+    },
   },
   ObjectQueryLink: {
     type: "object",

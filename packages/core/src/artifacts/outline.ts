@@ -31,8 +31,11 @@ export interface SheetOutline {
 
 export interface SheetSummary {
   readonly name: string
+  /** The rows of its CSV; none for a live sheet, whose rows are each reader's. */
   readonly rows: number
   readonly columns: readonly string[]
+  /** A live sheet's query, whose rows it shows. */
+  readonly query?: string
 }
 
 export interface SlidesOutline {
