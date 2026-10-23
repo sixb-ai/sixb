@@ -16,6 +16,7 @@ export type {
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
+  CopyArtifactInput,
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
@@ -31,5 +32,4 @@ export type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
-  ShareArtifactInThreadInput,
 } from "./types"

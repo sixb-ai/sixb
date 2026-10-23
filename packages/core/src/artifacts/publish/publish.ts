@@ -9,6 +9,7 @@ import type {
   ArtifactVersionRecord,
   PublishedArtifactVersion,
 } from "../../storage/artifacts/types"
+import { type ArtifactAccess, assertUpdatable } from "../access"
 import { ArtifactRequestError } from "../errors"
 import { createArtifactId } from "../ids"
 import type { ArtifactKind } from "../kinds"
@@ -61,6 +62,13 @@ export interface PublishArtifactInput {
   readonly baseVersion?: number
 }
 
+/**
+ * What the author may do with the artifact a version is published to, as the access rule's
+ * `publishAccess` answers it from where the version is stored: a transaction's storage, for a
+ * caller that stores in one. Storing refuses `none` with `not_shared` and `read` with `read_only`.
+ */
+export type PublishAccess = (artifact: ArtifactRecord) => Promise<ArtifactAccess>
+
 export interface PublishedArtifact {
   readonly artifact: ArtifactRecord
   readonly version: ArtifactVersionRecord
@@ -88,10 +96,11 @@ export interface PreparedArtifactVersion {
  */
 export async function publishArtifact(
   context: PublishArtifactContext,
-  input: PublishArtifactInput
+  input: PublishArtifactInput,
+  access: PublishAccess
 ): Promise<PublishedArtifact> {
   const prepared = await prepareArtifactVersion(context, input)
-  const stored = await storeArtifactVersion(context, prepared)
+  const stored = await storeArtifactVersion(context, prepared, access)
   return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
 }
 
@@ -133,14 +142,26 @@ export async function prepareArtifactVersion(
   }
 }
 
-/** Stores a prepared version: the next one of its artifact, or the first of a new one. */
+/**
+ * Stores a prepared version: the next one of its artifact, or the first of a new one. The next
+ * version is refused unless `access` says its author may update the artifact: a caller that stores
+ * inside a transaction answers it from there, so the check and the write see the same artifact.
+ */
 export async function storeArtifactVersion(
   context: PublishArtifactContext,
-  prepared: PreparedArtifactVersion
+  prepared: PreparedArtifactVersion,
+  access: PublishAccess
 ): Promise<PublishedArtifactVersion> {
-  return prepared.artifactId
-    ? publishVersion(context, prepared.artifactId, prepared)
-    : createArtifact(context, prepared.kind, prepared.owner, prepared.version)
+  const { artifactId } = prepared
+  if (!artifactId) {
+    return createArtifact(context, prepared.kind, prepared.owner, prepared.version)
+  }
+
+  const artifact = await context.storage.get({ projectId: context.projectId, id: artifactId })
+  if (!artifact) throw notFound(artifactId)
+  assertUpdatable(artifactId, await access(artifact))
+
+  return publishVersion(context, artifactId, prepared)
 }
 
 /**
@@ -264,6 +285,13 @@ async function publishVersion(
     }
     throw error
   }
+}
+
+function notFound(artifactId: string): ArtifactRequestError {
+  return new ArtifactRequestError(
+    "artifact_not_found",
+    `[Sixb] Artifact '${artifactId}' was not found.`
+  )
 }
 
 async function createArtifact(

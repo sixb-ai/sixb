@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { AgentRequestError, AuthorizationError, SixbHost } from "../src"
 import { emptyGrantIndex, type GrantIndex } from "../src/authorization/types"
-import { createTestAgentExecution, createTestSixb } from "../src/testing"
+import { bindRequestExecution } from "../src/execution/request"
+import { createTestAgentExecution } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -16,13 +17,20 @@ function setup() {
     ...deps,
   })
 
+  // Signed in with a session, the only credential a conversation shares artifacts with.
   const as = (id: string, grants: Partial<GrantIndex> = {}) =>
-    createTestSixb(host, {
+    bindRequestExecution(host, {
+      request: new Request("http://localhost/test"),
       authorization: {
-        principal: { type: "user", id },
-        groupIds: [],
-        roleIds: [],
-        grants: { ...emptyGrantIndex(), "run:agent": true, ...grants },
+        type: "principal",
+        credential: { type: "session", id: `session-${id}` },
+        context: {
+          principal: { type: "user", id },
+          sessionId: `session-${id}`,
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true, ...grants },
+        },
       },
     })
 

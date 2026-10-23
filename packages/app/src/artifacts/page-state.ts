@@ -1,10 +1,12 @@
 import {
   clearArtifactState,
   deleteArtifactStateValue,
+  type GetAuthSessionResponse,
   getArtifactState,
   isSixbApiError,
   setArtifactState,
 } from "@sixb/client"
+import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import type { FrameCall } from "@sixb/core/artifacts"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 
@@ -17,10 +19,26 @@ const stateKey = (artifactId: string) => ["artifact-state", artifactId] as const
 const STATE_STALE_MS = 30_000
 
 /**
- * The pages the reader only observes, through a conversation that shares them: the API keeps
- * nothing for an observer, so the page runs on values kept in this tab, as one opened alone does.
+ * The pages the signed-in reader only observes, through a conversation that shares them, with the
+ * values each keeps: the API keeps nothing for an observer, so the page runs on values kept in this
+ * tab, as one opened alone does. They are one reader's: another signing in starts with none, and
+ * their writes go to the API.
  */
-const readOnly = new Set<string>()
+const observed: { viewer: string | null; pages: Map<string, Map<string, unknown>> } = {
+  viewer: null,
+  pages: new Map(),
+}
+
+/** The signed-in reader's observed pages, by artifact id. */
+function observedPages(queries: QueryClient): Map<string, Map<string, unknown>> {
+  const session = queries.getQueryData<GetAuthSessionResponse>(getAuthSessionQueryKey())
+  const viewer = session?.authenticated ? session.user.id : null
+  if (observed.viewer !== viewer) {
+    observed.viewer = viewer
+    observed.pages = new Map()
+  }
+  return observed.pages
+}
 
 /**
  * Each artifact's calls, one after another: a slider that writes as it moves writes its values in
@@ -92,7 +110,8 @@ async function runCall(
     })
   try {
     const kept = await keptValues(queries, artifactId)
-    if (readOnly.has(artifactId)) return answerInTab(kept, call, update)
+    const inTab = observedPages(queries).get(artifactId)
+    if (inTab) return answerInTab(inTab, call, update)
 
     switch (call.method) {
       case "state.get":
@@ -125,9 +144,8 @@ async function runCall(
 
 async function keptValues(queries: QueryClient, artifactId: string): Promise<KeptValues> {
   // Read once: an observer's values live in this tab only, so a later read must not drop them.
-  if (readOnly.has(artifactId)) {
-    return queries.getQueryData<KeptValues>(stateKey(artifactId)) ?? new Map()
-  }
+  const inTab = observedPages(queries).get(artifactId)
+  if (inTab) return inTab
 
   return queries.fetchQuery({
     queryKey: stateKey(artifactId),
@@ -138,7 +156,7 @@ async function keptValues(queries: QueryClient, artifactId: string): Promise<Kep
       } catch (error) {
         if (!isReadOnly(error)) throw error
 
-        readOnly.add(artifactId)
+        observedPages(queries).set(artifactId, new Map())
         return new Map() as KeptValues
       }
     },
@@ -146,9 +164,12 @@ async function keptValues(queries: QueryClient, artifactId: string): Promise<Kep
   })
 }
 
-/** A call answered from this tab's values, which the API never sees. */
+/**
+ * A call answered from this tab's values, which the API never sees. The query follows them, for
+ * the count the viewer shows, but may be collected: the tab's values are the ones read.
+ */
 function answerInTab(
-  kept: KeptValues,
+  kept: Map<string, unknown>,
   call: FrameCall,
   update: (change: (values: Map<string, unknown>) => void) => void
 ): unknown {
@@ -158,11 +179,14 @@ function answerInTab(
     case "state.keys":
       return [...kept.keys()].sort((left, right) => (left < right ? -1 : 1))
     case "state.set":
+      kept.set(call.params.key, call.params.value)
       update((values) => values.set(call.params.key, call.params.value))
       return undefined
-    case "state.delete":
+    case "state.delete": {
+      const had = kept.delete(call.params.key)
       update((values) => values.delete(call.params.key))
-      return kept.has(call.params.key)
+      return had
+    }
   }
 }
 

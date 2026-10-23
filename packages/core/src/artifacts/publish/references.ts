@@ -90,7 +90,8 @@ export async function resolveReferences(
 
 /**
  * The artifacts a new version breaks: each one whose latest version follows this artifact's latest
- * and names something this version no longer has. Only artifacts the author can read are named.
+ * and names something this version no longer has. Only artifacts the author can read are named,
+ * and only those the version breaks are checked: most dependents cost no read.
  */
 export async function brokenDependents(
   context: ReferenceContext,
@@ -104,22 +105,26 @@ export async function brokenDependents(
   const warnings: ArtifactWarning[] = []
   for (const dependent of dependents) {
     if (dependent.artifactId === artifact.id) continue
-    const owner = await context.storage.get({
-      projectId: context.projectId,
-      id: dependent.artifactId,
-    })
-    if (!owner || !(await context.readable(owner))) continue
+
+    const broken: ArtifactWarning[] = []
     for (const reference of dependent.references) {
       const address = parseArtifactAddress(reference.address)
       // A pinned address keeps showing the version it names.
       if (address?.artifactId !== artifact.id || address.version !== undefined) continue
       const result = resolveArtifactAddress(address, { kind: artifact.kind, ...version })
       if (!("problem" in result)) continue
-      warnings.push({
+      broken.push({
         code: "reference_broken",
         message: `“${dependent.title}” (${dependent.artifactId}) ${reference.as === "embed" ? "shows" : "links to"} ${reference.address}, but version ${version.version} ${result.problem}. Publish its next version with an address that resolves, or restore what it names.`,
       })
     }
+    if (broken.length === 0) continue
+
+    const owner = await context.storage.get({
+      projectId: context.projectId,
+      id: dependent.artifactId,
+    })
+    if (owner && (await context.readable(owner))) warnings.push(...broken)
   }
   return warnings
 }
