@@ -223,6 +223,8 @@ so each reader sees the project's objects as they are when they open it:
   more.
 - A live sheet is read-only in the app. A document, deck, or canvas that shows its range or chart
   shows each reader their rows.
+- Its rows follow the objects: when one the query reads is created, changed, deleted, or linked,
+  the open sheet reads them again, about a second later.
 
 ## Write slides
 
@@ -330,6 +332,15 @@ fleet-planner/
     `redactions`. Show it as locked, as a live sheet does, and lock any total that reads it.
   - A query takes no parameters: the page filters and sorts its rows. Decks and canvas boards read
     queries the same way.
+  - When the objects a query reads change, the app reads it again and fires `sixb:query` on the
+    window, with the query's name in `detail.name`, for each query the page read. Read it again
+    and draw:
+
+    ```js
+    addEventListener("sixb:query", (event) => {
+      if (event.detail.name === "overdue") load()
+    })
+    ```
 - `window.sixb.state` keeps JSON values for each reader, across the page's versions, so a
   planner opens where they left it: `await sixb.state.set("inputs", { rate: 450 })`, then
   `get`, `delete`, and `keys`. Each reader gets 100 keys, 64 KB a value, and 1 MB in all. A
@@ -426,7 +437,8 @@ File: `queries/overdue.json`
 - A version holds up to 20 queries of 64 KB each. A query returns up to 10,000 rows, and
   `truncated` says when there were more.
 - A sheet shows a query's rows as its [live rows](#live-rows), and a page, a deck, or a canvas
-  board reads one with `sixb.query("overdue")` (see [Write a page](#write-a-page)).
+  board reads one with `sixb.query("overdue")` (see [Write a page](#write-a-page)). What an open
+  artifact shows is read again when the objects its queries read change.
 - `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does
   `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. Its `schema` gives the type
   of each property its rows and the links it expands hold, as the caller may view them. A query the

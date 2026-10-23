@@ -4,8 +4,9 @@ import {
   getArtifactQuery,
   isSixbApiError,
 } from "@sixb/client"
+import { events, useEvents } from "@sixb/client/hooks"
 import { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "@sixb/core/artifacts"
-import { type QueryClient, useQuery } from "@tanstack/react-query"
+import { type QueryClient, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { artifactFileSource, type FileSource } from "./file-source"
 import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./file-view"
@@ -79,14 +80,34 @@ export function versionFileSource(version: ArtifactVersion, path: string): FileS
 
 /** Where a version's query result is cached: every view of the version that shows it reads it once. */
 export function artifactQueryKey(artifactId: string, version: number, name: string) {
-  return ["artifact-query", artifactId, version, name] as const
+  return [...versionQueriesKey({ artifactId, version }), name] as const
 }
 
+/** Where every query result of a version is cached, one key under it each. */
+function versionQueriesKey(version: QueriedVersion) {
+  return [ARTIFACT_QUERIES, version.artifactId, version.version] as const
+}
+
+const ARTIFACT_QUERIES = "artifact-query"
+
 /** The version a query runs at: the one the view or the frame shows. */
-type QueriedVersion = Pick<ArtifactVersion, "artifactId" | "version">
+export type QueriedVersion = Pick<ArtifactVersion, "artifactId" | "version">
 
 /** Read once a view shows it, and again when one opens after half a minute, as page state is. */
 const QUERY_STALE_MS = 30_000
+
+/**
+ * How one of a version's queries is read and cached, by every view that reads it: a live sheet, a
+ * page's frame, a download.
+ */
+export function artifactQueryOptions(version: QueriedVersion, name: string) {
+  return queryOptions({
+    queryKey: artifactQueryKey(version.artifactId, version.version, name),
+    staleTime: QUERY_STALE_MS,
+    retry: false,
+    queryFn: ({ signal }) => readQuery(version, name, signal),
+  })
+}
 
 /**
  * Why a query's rows could not be read: the reader cannot view what it reads, the project's data
@@ -109,13 +130,8 @@ export function useArtifactQuery(
   readonly loading: boolean
   readonly error: ArtifactQueryError | null
 } {
-  const query = useQuery({
-    queryKey: artifactQueryKey(version.artifactId, version.version, name ?? ""),
-    enabled: name !== null,
-    staleTime: QUERY_STALE_MS,
-    retry: false,
-    queryFn: ({ signal }) => readQuery(version, name ?? "", signal),
-  })
+  const query = useQuery({ ...artifactQueryOptions(version, name ?? ""), enabled: name !== null })
+  useArtifactQueryLiveUpdates(name !== null)
 
   return {
     result: query.data,
@@ -133,12 +149,7 @@ export function fetchArtifactQuery(
   version: QueriedVersion,
   name: string
 ): Promise<GetArtifactQueryResponse> {
-  return client.fetchQuery({
-    queryKey: artifactQueryKey(version.artifactId, version.version, name),
-    staleTime: QUERY_STALE_MS,
-    retry: false,
-    queryFn: ({ signal }) => readQuery(version, name, signal),
-  })
+  return client.fetchQuery(artifactQueryOptions(version, name))
 }
 
 async function readQuery(
@@ -152,6 +163,64 @@ async function readQuery(
     throwOnError: true,
   })
   return data
+}
+
+/** A sync writes in bursts: what changes within a second reads each query again once. */
+export const LIVE_QUERY_DEBOUNCE_MS = 1_000
+
+/**
+ * Reads the cached queries again when the objects they read change, while `enabled`: every view
+ * that observes one mounts it, a live sheet or a frame whose page read one, so a reader with no
+ * live artifact open subscribes to nothing. The app's event provider puts every view's
+ * subscription on one socket.
+ *
+ * Object events name their type, link events their source's and target's. A query is read again
+ * when its result's `readObjectTypeIds` holds one of them: every type it reads, filtered on,
+ * expanded or counted. The views that show it refetch it; one no view shows is only marked stale.
+ */
+export function useArtifactQueryLiveUpdates(enabled: boolean): void {
+  const queries = useQueryClient()
+
+  useEvents(events.objects(), (event) => changed(queries, [event.payload.objectTypeId]), {
+    enabled,
+  })
+  useEvents(
+    events.links(),
+    (event) => changed(queries, [event.payload.sourceTypeId, event.payload.targetTypeId]),
+    { enabled }
+  )
+}
+
+/**
+ * The types changed since the first event of the second, for each cache. Kept here, not in each
+ * view: every view that observes a query hears the same event, and a query read again once per
+ * view would cancel the read before it each time.
+ */
+const changes = new WeakMap<QueryClient, Set<string>>()
+
+function changed(queries: QueryClient, types: readonly string[]): void {
+  let pending = changes.get(queries)
+  if (!pending) {
+    pending = new Set()
+    changes.set(queries, pending)
+    setTimeout(() => readAgain(queries), LIVE_QUERY_DEBOUNCE_MS)
+  }
+
+  for (const type of types) pending.add(type)
+}
+
+function readAgain(queries: QueryClient): void {
+  const types = changes.get(queries)
+  changes.delete(queries)
+  if (!types) return
+
+  void queries.invalidateQueries({
+    queryKey: [ARTIFACT_QUERIES],
+    predicate: (query) => {
+      const result = query.state.data as GetArtifactQueryResponse | undefined
+      return result?.readObjectTypeIds.some((type) => types.has(type)) ?? false
+    },
+  })
 }
 
 function artifactQueryError(error: unknown): ArtifactQueryError {

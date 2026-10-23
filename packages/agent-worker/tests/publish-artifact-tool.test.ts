@@ -888,6 +888,7 @@ function fakePage() {
     readonly classes = new Set<string>()
     readonly classList = {
       add: (name: string) => this.classes.add(name),
+      remove: (name: string) => this.classes.delete(name),
       contains: (name: string) => this.classes.has(name),
       toggle: (name: string, on: boolean) =>
         on ? this.classes.add(name) : this.classes.delete(name),
