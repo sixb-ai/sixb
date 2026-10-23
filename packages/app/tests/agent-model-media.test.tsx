@@ -13,7 +13,10 @@ const file = (mediaType: string) => ({
   mediaType,
 })
 
-function bash(command: string, result?: { readonly stdout: object; readonly exitCode?: number }) {
+function bash(
+  command: string,
+  result?: { readonly stdout: object | string; readonly exitCode?: number }
+) {
   const part: NormalizedPart = {
     kind: "tool",
     tool: result
@@ -22,7 +25,8 @@ function bash(command: string, result?: { readonly stdout: object; readonly exit
           state: "output-available",
           input: { command },
           output: {
-            stdout: JSON.stringify(result.stdout),
+            stdout:
+              typeof result.stdout === "string" ? result.stdout : JSON.stringify(result.stdout),
             stderr: "",
             exitCode: result.exitCode ?? 0,
             durationMs: 9000,
@@ -79,6 +83,28 @@ describe("what the agent's models made", () => {
     ])
     expect(failed).not.toContain("sixb-media-developing")
     expect(failed).not.toContain("<img")
+  })
+
+  test("a finished step whose output names no call shows nothing", () => {
+    // Its stdout is not one JSON object: two calls in one step, or the output piped elsewhere.
+    // Reproduce by dropping the callId check from generatedMedia: each holds a frame forever.
+    const twoCalls = [
+      { callId: "call_van", files: ["out/van.jpg"] },
+      { callId: "call_blue", files: ["out/blue.jpg"] },
+    ]
+      .map((output) => JSON.stringify(output))
+      .join("\n")
+
+    for (const step of [
+      bash(`${IMAGE} && sixb models image "A blue van" --output out/blue.png`, {
+        stdout: twoCalls,
+      }),
+      bash(`${IMAGE} | jq -r '.files[0]'`, { stdout: "out/van.jpg\n" }),
+    ]) {
+      const html = render([step, { kind: "text", text: "Here they are." }])
+      expect(html).not.toContain("sixb-media-developing")
+      expect(html).not.toContain("<img")
+    }
   })
 
   test("a voice clip shows as a player, with its words as the caption", () => {

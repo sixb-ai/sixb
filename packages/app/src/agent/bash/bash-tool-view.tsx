@@ -183,7 +183,9 @@ export function BashToolView({ tool }: { tool: BashTool }) {
 
 /**
  * The image or voice clip a bash step made or is making, which the work group shows under its
- * closed line: what the user asked for, not how it was made. A failed call shows nothing.
+ * closed line: what the user asked for, not how it was made. A failed call shows nothing, and so
+ * does a finished one whose output does not name its call (several calls in one step, or output
+ * piped elsewhere): there is nothing to fetch, so nothing to hold a place for.
  */
 export function generatedMedia(tool: BashTool): {
   readonly media: Extract<ModelMedia, { kind: "image" | "speech" }>
@@ -195,7 +197,10 @@ export function generatedMedia(tool: BashTool): {
   if (parsed && !parsed.ok) return null
   const media = modelMedia(classifyCommand(command), parsed)
   if (media?.kind !== "image" && media?.kind !== "speech") return null
-  return { media, running: tool.state === "input-available" }
+
+  const running = tool.state === "input-available"
+  if (!running && !media.callId) return null
+  return { media, running }
 }
 
 /** A quiet, non-interactive marker row matching the reasoning label style. */
