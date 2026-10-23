@@ -11,6 +11,7 @@ import {
 } from "@sixb/core"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import { Elysia } from "elysia"
 import { registerModelCallRoutes } from "../src/routes/model-calls"
 
@@ -38,6 +39,32 @@ async function setup() {
     files: [file],
     recordedAt: new Date("2026-10-22T12:00:00.000Z"),
   })
+
+  // A call made by an Agent run in alice's thread.
+  await storage.agents.threads.create({
+    id: "thread_alice",
+    projectId,
+    ownerPrincipal: { type: "user", id: "alice" },
+  })
+  const agentExecutionId = await createTestAgentExecution(storage, {
+    projectId,
+    runId: "run_alice",
+  })
+  await storage.agents.runs.create({
+    id: "run_alice",
+    projectId,
+    threadId: "thread_alice",
+    triggerMessageId: "message_alice",
+    executionId: agentExecutionId,
+    spec: { model: { provider: "test", modelId: "test-model" } },
+  })
+  await storage.aiUsage.recordModelCallFiles({
+    projectId,
+    executionId: agentExecutionId,
+    callId: "call_agent",
+    files: [file],
+    recordedAt: new Date("2026-10-22T12:00:00.000Z"),
+  })
   const host = new SixbHost({
     id: projectId,
     ontology: [] as const,
@@ -53,7 +80,8 @@ async function setup() {
       principal: { type: "user", id: userId },
       groupIds: [],
       roleIds: [],
-      grants: emptyGrantIndex(),
+      // Both may use the Agent; only alice owns the thread.
+      grants: { ...emptyGrantIndex(), "run:agent": true },
     }
     const app = new Elysia()
     app.derive(({ request }) => ({
@@ -93,6 +121,17 @@ describe("model call routes", () => {
     expect((await bob("/api/ai/model-calls/call_1/files")).status).toBe(404)
     expect((await bob("/api/ai/model-calls/call_1/files/content?path=/files/0")).status).toBe(404)
     expect((await alice("/api/ai/model-calls/call_missing/files")).status).toBe(404)
+  })
+
+  test("an Agent run's files follow its thread's readers", async () => {
+    const { alice, bob } = await setup()
+
+    // Proven by replacing `canViewAgentRun` in runtime/sixb.ts with `async () => true`: bob reads.
+    expect((await alice("/api/ai/model-calls/call_agent/files")).status).toBe(200)
+    expect((await bob("/api/ai/model-calls/call_agent/files")).status).toBe(404)
+    expect((await bob("/api/ai/model-calls/call_agent/files/content?path=/files/0")).status).toBe(
+      404
+    )
   })
 
   test("content paths stay inside the call's files", async () => {
