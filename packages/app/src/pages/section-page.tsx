@@ -236,6 +236,26 @@ function SectionTabs({ section }: { readonly section: AppSectionId }) {
   )
 }
 
+/** `/settings` opens the first Settings page this person may see. */
+export function SettingsIndexPage() {
+  return <SectionIndex section="settings" />
+}
+
+/** `/data` opens the first Data page this person may see. */
+export function DataIndexPage() {
+  return <SectionIndex section="data" />
+}
+
+/** `/observability` opens the first Observability page this person may see. */
+export function ObservabilityIndexPage() {
+  return <SectionIndex section="observability" />
+}
+
+/** `/ontology` opens the first Ontology page this person may see. */
+export function OntologyIndexPage() {
+  return <SectionIndex section="ontology" />
+}
+
 /**
  * A detail page while its subject loads, or once it could not be: "Not found" for a 404 alone, so
  * a refusal or an outage says what it is.

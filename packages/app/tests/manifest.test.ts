@@ -195,6 +195,38 @@ describe("custom app metadata and manifest generation", () => {
     )
   })
 
+  // Regression proof: remove the agentToolViews call in metadata.ts and the three rejections fail;
+  // the app would then generate and fail only in the browser.
+  test("rejects a toolViews export that is not a list of views, one per tool", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const view = (toolName: string) =>
+      `{ kind: "agentToolView", toolName: "${toolName}", placement: "work", render: () => null }`
+    const writeToolViews = (source: string) =>
+      writeFile(
+        join(fixture.appDir, "layout.tsx"),
+        `export const toolViews = ${source}\nexport default function Layout() { return null }\n`
+      )
+
+    await writeToolViews(`[${view("quote_shipping")}, ${view("count_rows")}]`)
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+
+    await writeToolViews(view("quote_shipping"))
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "[SixbCustomApp] Invalid toolViews in"
+    )
+
+    await writeToolViews(`[${view("quote_shipping")}, "count_rows"]`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "toolViews[1] is not a view from defineAgentToolView."
+    )
+
+    await writeToolViews(`[${view("quote_shipping")}, ${view("quote_shipping")}]`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "two views for the tool 'quote_shipping'. Keep one view per tool."
+    )
+  })
+
   test("builds a stable manifest and cannot be shadowed by a public manifest", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

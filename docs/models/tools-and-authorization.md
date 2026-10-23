@@ -93,6 +93,47 @@ Project tools are available to the conversational agent. To use a tool in an
 Data read through `sixb` is already limited to the requester's permissions; also limit what the
 tool returns from connectors and other sources to what its users should see.
 
+## Show a tool in the chat
+
+The chat shows a tool's calls as a generic row in its work. To show them your way, define a view
+in `app/`, typed with the tool's definition. Import the tool as a type, so it stays on the server:
+
+File: `app/_agent/search-results-view.tsx`
+
+```tsx
+import { defineAgentToolView } from "@sixb/app"
+import type { searchKnowledge } from "../../agent-tools/search-knowledge"
+
+export const searchResultsView = defineAgentToolView<typeof searchKnowledge>("search_knowledge", {
+  placement: "answer",
+}).render(({ state, input, output }) => {
+  if (state === "output-error") return null
+  if (state === "output-available") return <Results results={output} />
+  return <Searching query={input?.query} />
+})
+```
+
+Then export your views from `app/layout.tsx`, the way `sixb.config.ts` lists the tools:
+
+File: `app/layout.tsx`
+
+```tsx
+export const toolViews = [searchResultsView]
+```
+
+| `placement` | Where the view shows |
+| --- | --- |
+| `"work"` (default) | In place of the tool's row, inside the reply's work. |
+| `"answer"` | After the reply's text, in call order. The work keeps the tool's row. |
+
+- `state` is `"input-streaming"`, `"input-available"`, `"output-available"` or `"output-error"`.
+  `input` is typed from the tool's input once it is complete, and `output` once the call
+  succeeded. A failed call has `errorText`, and its `input` is `unknown`: when the input is why it
+  failed, it is what the model sent.
+- The view renders as a React component, so it can use hooks. If it throws, the chat shows the
+  tool's own row instead.
+- A tool name the definition does not have is a type error. Views apply to every chat in the app.
+
 ## Add a skill
 
 Create a folder under `skills/` with a `SKILL.md` file. Use its name and description to explain

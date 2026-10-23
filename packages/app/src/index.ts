@@ -48,6 +48,12 @@ export {
 } from "./agent/hooks/use-agent-conversation"
 export type { LiveRunState } from "./agent/live-run"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
+export {
+  type AgentToolView,
+  type AgentToolViewPlacement,
+  type AgentToolViewProps,
+  defineAgentToolView,
+} from "./agent/tool-views/define"
 export type {
   AgentFileRef,
   AgentMessage,

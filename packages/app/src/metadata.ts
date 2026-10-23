@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { extname, join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { agentToolViews } from "./agent/tool-views/define"
 import { sectionIds } from "./sections/catalog"
 
 export interface AppMetadata {
@@ -128,9 +129,15 @@ async function loadConfiguredMetadata(layoutPath: string): Promise<AppMetadata> 
     const layoutModule = (await import(url.href)) as {
       readonly metadata?: unknown
       readonly visibility?: unknown
+      readonly toolViews?: unknown
     }
-    // The browser reads `visibility` itself; checking it here makes a mistake fail the build.
+    // The browser reads `visibility` and `toolViews` itself; checking them here makes a mistake
+    // fail the build.
     validateVisibility(layoutModule.visibility, layoutPath)
+    agentToolViews(
+      layoutModule.toolViews,
+      (detail) => new Error(`[SixbCustomApp] Invalid toolViews in ${layoutPath}: ${detail}`)
+    )
 
     if (layoutModule.metadata === undefined) {
       return {}
