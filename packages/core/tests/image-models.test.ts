@@ -124,7 +124,7 @@ describe("image generation", () => {
 
     const result = await scoped.models.image.generate({ prompt: "a fox" })
     expect(result.files).toHaveLength(2)
-    expect(await scoped.models.calls.get(result.callId)).toMatchObject({ files: result.files })
+    expect(await scoped.models.calls.files(result.callId)).toMatchObject({ files: result.files })
   })
 
   // Removal proof: omit onModelCallEnd in image/runtime.ts; the durable-usage assertion fails.
