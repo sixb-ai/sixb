@@ -108,6 +108,8 @@ export function modelCallFileSource(input: {
   readonly callId: string
   readonly index: number
   readonly fileRef: ViewerFileRef
+  /** The name the file was saved under, for a file the call stored without one. */
+  readonly fileName?: string
   readonly baseUrl?: string
 }): FileSource {
   const routePath = `/api/ai/model-calls/${encodeURIComponent(input.callId)}/files/content`
@@ -117,7 +119,7 @@ export function modelCallFileSource(input: {
   return {
     id: `model-call:${input.callId}${path}`,
     fileRef: input.fileRef,
-    name: input.fileRef.fileName?.trim() ?? "",
+    name: input.fileRef.fileName?.trim() || input.fileName?.trim() || "",
     inlineUrl: url("inline"),
     downloadUrl: url("attachment"),
     queryKey: ["model-call-file", input.callId, input.index, input.fileRef.digest],

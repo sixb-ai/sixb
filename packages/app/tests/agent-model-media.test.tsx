@@ -1,9 +1,30 @@
 import { describe, expect, test } from "bun:test"
 import { getAiModelCallFilesOptions } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, fireEvent, render as mount } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router-dom"
+import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { AssistantBody } from "../src/agent/components/message-parts"
 import type { NormalizedPart } from "../src/agent/parts"
+import { installDom } from "./helpers/dom"
+
+installDom([
+  "document",
+  "navigator",
+  "Node",
+  "Element",
+  "HTMLElement",
+  "Event",
+  "EventTarget",
+  "MouseEvent",
+  "MutationObserver",
+  "ResizeObserver",
+  "DOMRect",
+  "getComputedStyle",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+])
 
 const IMAGE = 'sixb models image "A red delivery van" --model bfl/flux --output out/van.png'
 const file = (mediaType: string) => ({
@@ -37,8 +58,8 @@ function bash(
   return part
 }
 
-/** A finished turn, with the calls' files as the call route would return them. */
-function render(parts: NormalizedPart[], live = false): string {
+/** The calls' files, stored without a name, as the call route would return them. */
+function callFiles(): QueryClient {
   const queryClient = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
   for (const [callId, mediaType] of [
     ["call_van", "image/jpeg"],
@@ -50,8 +71,13 @@ function render(parts: NormalizedPart[], live = false): string {
       recordedAt: "2026-10-22T12:00:00.000Z",
     })
   }
+  return queryClient
+}
+
+/** A finished turn, with its calls' files. */
+function render(parts: NormalizedPart[], live = false): string {
   return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={callFiles()}>
       <AssistantBody parts={parts} live={live} />
     </QueryClientProvider>
   )
@@ -105,6 +131,32 @@ describe("what the agent's models made", () => {
       expect(html).not.toContain("sixb-media-developing")
       expect(html).not.toContain("<img")
     }
+  })
+
+  test("an image opens in the viewer under the name the command saved it as", async () => {
+    // Reproduce by dropping the fileName passed to modelCallFileSource: the viewer says "File".
+    function OpenFile() {
+      const target = useArtifactPanel()?.openTarget
+      return <output data-testid="open">{target?.type === "file" ? target.source.name : ""}</output>
+    }
+
+    const view = mount(
+      <QueryClientProvider client={callFiles()}>
+        <MemoryRouter>
+          <ArtifactPanelRoot scopeKey="thread">
+            <AssistantBody
+              parts={[bash(IMAGE, { stdout: { callId: "call_van", files: ["out/van.jpg"] } })]}
+            />
+            <OpenFile />
+          </ArtifactPanelRoot>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await act(async () => {
+      fireEvent.click(view.getByLabelText("Open image"))
+    })
+
+    expect(view.getByTestId("open").textContent).toBe("van.jpg")
   })
 
   test("a voice clip shows as a player, with its words as the caption", () => {

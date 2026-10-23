@@ -375,6 +375,7 @@ describe("model calls", () => {
       count: 1,
       aspect: 16 / 9,
       callId: "call_1",
+      files: ["blue.jpg"],
     })
     expect(
       modelMedia(classifyCommand('sixb models image "tall" --size 1024x1536 --output a.png'), null)
