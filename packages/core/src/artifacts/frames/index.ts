@@ -4,6 +4,11 @@
  */
 
 export { HTML_ENTRY } from "../publish/validate/html"
+// What a frame's `sixb.query` reads: the route serves it, and the layout check serves it too.
+export {
+  type SerializedArtifactQueryResult,
+  serializeArtifactQueryResult,
+} from "../serialize-query"
 export {
   FRAME_ASSETS,
   FRAME_REFERENCE_PREFIX,

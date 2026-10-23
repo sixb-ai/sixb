@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
-import { checkLayout } from "../src/artifacts/layout-check/layout-check"
+import { type CheckedQuery, checkLayout } from "../src/artifacts/layout-check/layout-check"
 import { LocalBashSandbox } from "./helpers"
 
 // The layout check in a real headless Chromium, through Playwright for Node as the agent image
@@ -143,7 +143,8 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
     files: readonly string[],
     name: string,
     theme?: ArtifactTheme,
-    layout: "deck" | "page" = "deck"
+    layout: "deck" | "page" = "deck",
+    queries?: Readonly<Record<string, CheckedQuery>>
   ) =>
     checkLayout({
       layout,
@@ -159,6 +160,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       entry: new TextEncoder().encode(deck),
       name,
       ...(theme ? { theme } : {}),
+      ...(queries ? { queries } : {}),
       signal: AbortSignal.timeout(90_000),
     })
 
@@ -310,6 +312,47 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         result.warnings.some((warning) => warning.message.includes("Kept 450 under inputs"))
       ).toBe(true)
       expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "runs a page on its queries' rows, as they answered the requester",
+    async () => {
+      // Opened alone, a page reads its queries beside the runtime, where the check serves what
+      // they returned for the requester, and what one that failed for them refused with. The page
+      // draws both in fine print, which the check reports. Reproduce by leaving the queries out of
+      // check.cjs's server: neither is drawn as read, and the page reads only "No query".
+      const reading = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Overdue</title></head>
+<body>
+  <main><h1>Overdue invoices</h1></main>
+  <script>
+    const note = (text) =>
+      document.querySelector("main").insertAdjacentHTML("beforeend", '<p style="font-size: 9px">' + text + "</p>")
+    sixb.query("overdue").then(({ objects, total }) =>
+      note("Read " + total + ": " + objects.map((row) => row.primaryId).join())
+    )
+    sixb.query("blocked").catch((error) => note("Refused: " + error.message))
+  </script>
+</body>
+</html>`
+      const result = await check(reading, ["index.html"], "reading", undefined, "page", {
+        overdue: {
+          result: {
+            kind: "objects",
+            objects: [{ primaryId: "inv_1" }, { primaryId: "inv_2" }],
+            total: 2,
+            truncated: false,
+          },
+        },
+        blocked: { error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'." },
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      const messages = result.warnings.map((warning) => warning.message).join("\n")
+      expect(messages).toContain("Read 2: inv_1,inv_2")
+      expect(messages).toContain("Refused: Principal 'usr_owner' is not allowed to view")
     },
     { timeout: 120_000 }
   )

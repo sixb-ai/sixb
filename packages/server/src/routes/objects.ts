@@ -8,14 +8,8 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type {
-  ExpandedLinkValue,
-  ExpandedObjectRow,
-  ObjectRow,
-  ObjectRowLinks,
-  ObjectRowUsers,
-  Redactions,
-} from "@sixb/core/storage"
+import { serializeExpandedObject, serializeObject } from "@sixb/core/internal/objects"
+import type { ObjectRow } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -69,26 +63,6 @@ function noHolderError() {
   return createSixbError("object.not_found", "Object not found")
 }
 
-function serializeObject(row: {
-  score?: number
-  primaryId: string
-  objectTypeId: string
-  properties: Record<string, unknown>
-  redactions?: Redactions
-  createdAt: Date
-  updatedAt: Date
-}) {
-  return {
-    ...(row.score === undefined ? {} : { score: row.score }),
-    primaryId: row.primaryId,
-    objectTypeId: row.objectTypeId,
-    properties: row.properties,
-    ...(row.redactions === undefined ? {} : { redactions: row.redactions }),
-    createdAt: toIsoString(row.createdAt),
-    updatedAt: toIsoString(row.updatedAt),
-  }
-}
-
 function serializeObjectLink(link: {
   sourceTypeId: string
   sourceId: string
@@ -113,44 +87,6 @@ function serializeObjectLink(link: {
     createdAt: toIsoString(link.createdAt),
     updatedAt: toIsoString(link.updatedAt),
   }
-}
-
-type SerializedObject = ReturnType<typeof serializeObject>
-type SerializedLinkValue = SerializedExpandedObject | SerializedExpandedObject[] | null
-type SerializedExpandedObject = SerializedObject & {
-  links?: Record<string, SerializedLinkValue>
-  linkProperties?: Record<string, unknown>
-  users?: ObjectRowUsers
-}
-
-/**
- * Serialize a query row together with any `links` attached by an `expand` node.
- * Recurses through nested expansions; `linkProperties` carries edge metadata on
- * an expanded child. Only the query route hydrates links, so the plain list and
- * identity routes keep using `serializeObject`.
- */
-export function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObject {
-  const serialized: SerializedExpandedObject = serializeObject(row)
-  if (row.links) serialized.links = serializeLinks(row.links)
-  if (row.linkProperties !== undefined) serialized.linkProperties = row.linkProperties
-  // Profiles are plain JSON: no dates to convert.
-  if (row.users) serialized.users = row.users
-  return serialized
-}
-
-function serializeLinks(links: ObjectRowLinks): Record<string, SerializedLinkValue> {
-  const result: Record<string, SerializedLinkValue> = {}
-  for (const [linkId, value] of Object.entries(links)) {
-    result[linkId] = serializeLinkValue(value)
-  }
-  return result
-}
-
-function serializeLinkValue(value: ExpandedLinkValue): SerializedLinkValue {
-  if (value === null) return null
-  if (Array.isArray(value)) return value.map(serializeExpandedObject)
-  // Array.isArray does not narrow a readonly[] away, so assert the scalar case.
-  return serializeExpandedObject(value as ExpandedObjectRow)
 }
 
 function serializePlan(plan: {

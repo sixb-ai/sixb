@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
+  AuthorizationError,
   defineMarking,
   defineObjectType,
   InMemoryBlobStorage,
@@ -27,7 +28,7 @@ import {
 } from "@sixb/core"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
-import { createTestAgentExecution } from "@sixb/core/testing"
+import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { AgentExecutionLostError } from "../src/errors"
@@ -170,6 +171,8 @@ type ToolOptions = {
   readonly grants?: Partial<GrantIndex>
   /** The markings the requester is cleared for. */
   readonly clearances?: ReadonlySet<string>
+  /** Changes the requester's view of artifacts, as their rights changing mid-turn would. */
+  readonly reader?: (reader: ReturnType<typeof readerFor>) => void
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -201,12 +204,19 @@ function sandbox(): LocalBashSandbox {
   return local
 }
 
+/** The requester's view of artifacts, the one runtime its access rule is kept for. */
+function requester(options: ToolOptions) {
+  const reader = readerFor(options.author ?? owner, options.grants, options.clearances)
+  options.reader?.(reader)
+  return reader
+}
+
 function tools(options: ToolOptions = {}) {
   const [create, version] = createPublishArtifactTools({
     projectId,
     storage,
     artifacts: storage.artifacts,
-    reader: readerFor(options.author ?? owner, options.grants, options.clearances),
+    reader: requester(options),
     blobStorage,
     run: {
       ...(options.run ?? run),
@@ -1159,5 +1169,89 @@ describe("a version's queries", () => {
     expect(entry.parts[0].name).toBe(
       "Sheet Overdue: live rows of query overdue; columns Invoice, Customer"
     )
+  })
+
+  test("are run as the requester for the layout check, served as the API answers them", async () => {
+    // The page reads the query route's JSON in the app, so the check serves that: rows with their
+    // dates as ISO text. Reproduce by serving the rows as the reader returns them: each carries
+    // what storage keeps beside it, its projectId and lastCommitId, which the route never sends.
+    await createTestSixb(host).objects.upsert(Invoice.id, { id: "inv_1" })
+    write("work/overdue/index.html", "<!doctype html><title>Overdue</title><p>Overdue</p>")
+    write("work/overdue/queries/invoices.json", '{"kind":"start","objectTypeId":"Invoice"}')
+    const grants = { "view:object": new Set(["Invoice"]) }
+
+    // Cleared for the amounts the query returns, which publishing refuses otherwise.
+    const published = (await publish(
+      { path: "work/overdue", kind: "page", title: "Overdue" },
+      { grants, clearances: new Set([financial.id]) }
+    )) as { artifactId: string }
+
+    const checks = `.sixb/agent/checks/${published.artifactId}-v1`
+    expect(JSON.parse(read(`${checks}/queries.json`))).toEqual({ invoices: 200 })
+    expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
+      kind: "objects",
+      objects: [
+        {
+          primaryId: "inv_1",
+          objectTypeId: "Invoice",
+          properties: { id: "inv_1" },
+          createdAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/),
+          updatedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/),
+        },
+      ],
+      total: 1,
+      truncated: false,
+      resultObjectTypeIds: ["Invoice"],
+      readObjectTypeIds: ["Invoice"],
+      // What a live view types its columns by, as the requester may view the ontology.
+      schema: {
+        properties: {
+          id: { type: "string" },
+          number: { type: "string" },
+          status: { type: "string" },
+          dueDate: { type: "date" },
+          amount: { type: "double" },
+          paid: { type: "double" },
+        },
+        links: {},
+      },
+    })
+  })
+
+  test("that fail for the requester are a warning, and the version stays published", async () => {
+    // Publishing checked the query as the requester, but their rights can change before the
+    // check runs it. Reproduce by letting the query's error out of checkedQueries: the publish
+    // fails, though the version exists, and the Agent publishes it again.
+    write("work/overdue/index.html", "<!doctype html><title>Overdue</title><p>Overdue</p>")
+    write("work/overdue/queries/invoices.json", invoiceIds)
+    const revoked = new AuthorizationError(
+      "view:object:Invoice",
+      "Principal 'usr_owner' is not allowed to view object type 'Invoice'."
+    )
+
+    const published = (await publish(
+      { path: "work/overdue", kind: "page", title: "Overdue" },
+      {
+        grants: { "view:object": new Set(["Invoice"]) },
+        reader: (reader) => {
+          spyOn(reader, "query").mockRejectedValue(revoked)
+        },
+      }
+    )) as { artifactId: string; version: number; warnings: unknown[] }
+
+    expect(published.version).toBe(1)
+    expect(published.warnings).toEqual([
+      {
+        code: "query_failed",
+        message:
+          "Query 'invoices' failed when the check ran it as you: Principal 'usr_owner' is not allowed to view object type 'Invoice'. The page was checked with sixb.query(\"invoices\") rejecting, as it does for every reader it fails for.",
+      },
+    ])
+
+    const checks = `.sixb/agent/checks/${published.artifactId}-v1`
+    expect(JSON.parse(read(`${checks}/queries.json`))).toEqual({ invoices: 409 })
+    expect(JSON.parse(read(`${checks}/queries/invoices.json`))).toEqual({
+      error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'.",
+    })
   })
 })
