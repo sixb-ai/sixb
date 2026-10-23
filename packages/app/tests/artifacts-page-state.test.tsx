@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { client, type GetArtifactVersionResponse } from "@sixb/client"
+import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { FRAME_PROTOCOL } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
@@ -242,5 +243,28 @@ describe("a page's data", () => {
       { protocol: FRAME_PROTOCOL, result: 4, value: ["inputs"] },
     ])
     expect(requests).toEqual([`GET /api/artifacts/art_0bserved01/state`])
+  })
+
+  // Guard proof: keep the observed pages whoever signs in, as one set for the tab; Marc's write,
+  // once he signs in where Olivia observed, then stays in the tab and never reaches the API.
+  test("forgets what an observer kept once another reader signs in, whose writes are kept", async () => {
+    observing = true
+    const { cache, call, results } = mount("art_0bserved02")
+    const signIn = (id: string) =>
+      act(() => {
+        cache.setQueryData(getAuthSessionQueryKey(), {
+          authenticated: true,
+          user: { id },
+        } as never)
+      })
+    signIn("usr_olivia")
+    await call({ call: 1, method: "state.set", params: { key: "inputs", value: { rate: 450 } } })
+    expect(requests).toEqual(["GET /api/artifacts/art_0bserved02/state"])
+
+    observing = false
+    signIn("usr_marc")
+    await call({ call: 2, method: "state.set", params: { key: "inputs", value: { rate: 476 } } })
+    expect(results().at(-1)).toEqual({ protocol: FRAME_PROTOCOL, result: 2 })
+    expect(requests.at(-1)).toBe("PUT /api/artifacts/art_0bserved02/state/inputs")
   })
 })
