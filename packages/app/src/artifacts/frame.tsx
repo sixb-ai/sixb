@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { answerQueryCall } from "./page-queries"
 import { answerStateCall, onPageStateReset } from "./page-state"
 import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
@@ -48,8 +49,9 @@ const READY_TIMEOUT_MS = 20_000
  * The frame stays hidden until its theme is applied, then fades in over `fallback`: until the
  * tokens arrive, a deck paints in the kit's light defaults, which flash on a dark page.
  *
- * A page in it keeps data with `sixb.state`: the frame's calls are answered here, for the artifact
- * it shows and the signed-in reader, however many frames of it are open.
+ * A page in it keeps data with `sixb.state`, and reads its version's queries with `sixb.query`: the
+ * frame's calls are answered here, for the artifact and the version it shows and the signed-in
+ * reader, however many frames of it are open.
  */
 export function ArtifactFrame({
   version,
@@ -102,8 +104,9 @@ export function ArtifactFrame({
   const [timedOut, setTimedOut] = useState<string | null>(null)
   const reportsFailure = failure !== undefined
   const queries = useQueryClient()
-  const artifactId = useRef(version.artifactId)
-  artifactId.current = version.artifactId
+  // What the frame shows when it calls: a pinned version runs that version's queries.
+  const shows = useRef(version)
+  shows.current = version
 
   const frame = useQuery(frameLink(version))
 
@@ -175,11 +178,17 @@ export function ArtifactFrame({
           if (!call) {
             // A call the protocol can't take still settles, so the page's promise never hangs.
             if (Number.isSafeInteger(data.call)) {
-              answer({ result: Number(data.call), error: "[SixbApp] sixb.state refused the call." })
+              const api = String(data.method).startsWith("query.") ? "sixb.query" : "sixb.state"
+              answer({ result: Number(data.call), error: `[SixbApp] ${api} refused the call.` })
             }
             return
           }
-          answerStateCall(queries, artifactId.current, call).then(
+
+          const answered =
+            call.method === "query.run"
+              ? answerQueryCall(queries, shows.current, call)
+              : answerStateCall(queries, shows.current.artifactId, call)
+          answered.then(
             (value) => answer({ result: call.call, ...(value === undefined ? {} : { value }) }),
             (error: unknown) =>
               answer({
@@ -222,7 +231,7 @@ export function ArtifactFrame({
   useEffect(
     () =>
       onPageStateReset((reset) => {
-        if (reset !== artifactId.current) return
+        if (reset !== shows.current.artifactId) return
 
         reload().catch(() => send("reload", {}).catch(() => {}))
       }),

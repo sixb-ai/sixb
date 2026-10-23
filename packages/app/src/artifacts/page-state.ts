@@ -10,6 +10,9 @@ import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import type { FrameCall } from "@sixb/core/artifacts"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 
+/** A `sixb.state` call: a page's values, which the app keeps for the artifact. */
+type StateCall = Exclude<FrameCall, { readonly method: "query.run" }>
+
 /** The reader's values for one artifact, by key, as the app last read or wrote them. */
 type KeptValues = ReadonlyMap<string, unknown>
 
@@ -53,7 +56,7 @@ const queues = new Map<string, Promise<unknown>>()
 export function answerStateCall(
   queries: QueryClient,
   artifactId: string,
-  call: FrameCall
+  call: StateCall
 ): Promise<unknown> {
   const previous = queues.get(artifactId) ?? Promise.resolve()
   const next = previous.then(
@@ -100,7 +103,7 @@ export function usePageStateCount(artifactId: string): number {
 async function runCall(
   queries: QueryClient,
   artifactId: string,
-  call: FrameCall
+  call: StateCall
 ): Promise<unknown> {
   const update = (change: (values: Map<string, unknown>) => void) =>
     queries.setQueryData<KeptValues>(stateKey(artifactId), (current) => {
@@ -170,7 +173,7 @@ async function keptValues(queries: QueryClient, artifactId: string): Promise<Kep
  */
 function answerInTab(
   kept: Map<string, unknown>,
-  call: FrameCall,
+  call: StateCall,
   update: (change: (values: Map<string, unknown>) => void) => void
 ): unknown {
   switch (call.method) {
