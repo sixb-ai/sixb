@@ -365,11 +365,11 @@ Every image and speech result carries a `callId`. The files a call produced stay
 it, by whoever can see the run that made the call:
 
 ```ts
-const call = await sixb.models.calls.get(callId) // { callId, files, recordedAt } or null
+const call = await sixb.models.calls.files(callId) // { callId, files, recordedAt } or null
 ```
 
 ```text
-GET /api/ai/model-calls/:callId                              the call's files
+GET /api/ai/model-calls/:callId/files                        the call's files
 GET /api/ai/model-calls/:callId/files/content?path=/files/0  one file's bytes
 ```
 

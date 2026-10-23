@@ -13,7 +13,7 @@ import {
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
-import { ModelCallParamsSchema, ModelCallSchema } from "../schemas/models"
+import { ModelCallFilesSchema, ModelCallParamsSchema } from "../schemas/models"
 import { handleRouteError } from "../utils/http"
 
 const ModelCallFileContentQuerySchema = FileContentQuerySchema.extend({
@@ -23,8 +23,8 @@ const ModelCallFileContentQuerySchema = FileContentQuerySchema.extend({
     .regex(/^\/files(?:\/|$)/, "Model call file content paths must start with /files/"),
 })
 
-function serializeModelCall(call: ModelCallFiles) {
-  return ModelCallSchema.parse({
+function serializeModelCallFiles(call: ModelCallFiles) {
+  return ModelCallFilesSchema.parse({
     callId: call.callId,
     files: call.files,
     recordedAt: call.recordedAt.toISOString(),
@@ -50,8 +50,8 @@ async function modelCallFileContentResponse(
     set: context.set,
     head: options.head,
     resolveRoot: async () => {
-      const call = await sixb.models.calls.get(context.params.callId)
-      return call ? serializeModelCall(call) : null
+      const call = await sixb.models.calls.files(context.params.callId)
+      return call ? serializeModelCallFiles(call) : null
     },
   })
 }
@@ -60,28 +60,28 @@ async function modelCallFileContentResponse(
 export function registerModelCallRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
-      "/api/ai/model-calls/:callId",
+      "/api/ai/model-calls/:callId/files",
       async (context) => {
         const { params, set } = context
         try {
-          const call = await requireRequestSixb(context).models.calls.get(params.callId)
+          const call = await requireRequestSixb(context).models.calls.files(params.callId)
           if (!call) {
             set.status = 404
             return { error: "Model call not found" }
           }
-          return serializeModelCall(call)
+          return serializeModelCallFiles(call)
         } catch (error) {
           return handleRouteError(error, set)
         }
       },
       {
         params: ModelCallParamsSchema,
-        response: { 200: ModelCallSchema, 404: ErrorResponseSchema },
+        response: { 200: ModelCallFilesSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get the files a model call produced",
           tags: [OPENAPI_TAGS.models.name],
-          operationId: "getAiModelCall",
-          security: accessTokenSecurityRequirement("getAiModelCall"),
+          operationId: "getAiModelCallFiles",
+          security: accessTokenSecurityRequirement("getAiModelCallFiles"),
         },
       }
     )

@@ -161,7 +161,7 @@ describe("model call files", () => {
           runtimeAuthorization: createTestingScope({ projectId, context }).authorization,
         },
         visibility([])
-      ).get("call_request")
+      ).files("call_request")
 
     expect(await read(principal(alice))).toEqual({
       callId: "call_request",
@@ -186,9 +186,9 @@ describe("model call files", () => {
     )
 
     for (const callId of ["call_action", "call_thread", "call_subagent", "call_step"]) {
-      expect((await calls.get(callId))?.files).toEqual([file])
+      expect((await calls.files(callId))?.files).toEqual([file])
     }
-    expect(await calls.get("call_workflow")).toBeNull()
+    expect(await calls.files("call_workflow")).toBeNull()
 
     const hidden = createModelCallsRuntime(
       {
@@ -200,7 +200,7 @@ describe("model call files", () => {
       visibility([])
     )
     for (const callId of ["call_action", "call_thread", "call_subagent", "call_step"]) {
-      expect(await hidden.get(callId)).toBeNull()
+      expect(await hidden.files(callId)).toBeNull()
     }
     // A subagent's files follow its parent's thread; a workflow step's, its workflow run.
     expect(runs.asked).toEqual([
@@ -218,8 +218,8 @@ describe("model call files", () => {
       { projectId, storage, runtimeAuthorization: createTestingScope({ projectId }).authorization },
       visibility([])
     )
-    expect((await unrestricted.get("call_thread"))?.files).toEqual([file])
-    expect(await unrestricted.get("call_missing")).toBeNull()
+    expect((await unrestricted.files("call_thread"))?.files).toEqual([file])
+    expect(await unrestricted.files("call_missing")).toBeNull()
 
     const shared = createModelCallsRuntime(
       {
@@ -237,7 +237,7 @@ describe("model call files", () => {
       },
       visibility(["agent:parent"])
     )
-    expect(await shared.get("call_thread")).toBeNull()
-    await expect(unrestricted.get(" ")).rejects.toThrow("nonblank")
+    expect(await shared.files("call_thread")).toBeNull()
+    await expect(unrestricted.files(" ")).rejects.toThrow("nonblank")
   })
 })
