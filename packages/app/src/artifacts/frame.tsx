@@ -21,7 +21,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { answerQueryCall } from "./page-queries"
+import { answerQueryCall, useQueryChanges } from "./page-queries"
 import { answerStateCall, onPageStateReset } from "./page-state"
 import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
@@ -51,7 +51,8 @@ const READY_TIMEOUT_MS = 20_000
  *
  * A page in it keeps data with `sixb.state`, and reads its version's queries with `sixb.query`: the
  * frame's calls are answered here, for the artifact and the version it shows and the signed-in
- * reader, however many frames of it are open.
+ * reader, however many frames of it are open. When the rows of a query the page read change, the
+ * frame tells it with `query.changed`, and the page reads them again.
  *
  * The frame opens no window, and the app's policy lets it navigate only on the frames' origin, so a
  * page's code cannot send what it reads to another site by loading an address: a web link the
@@ -114,6 +115,13 @@ export function ArtifactFrame({
 
   const frame = useQuery(frameLink(version))
 
+  // The queries the page in the frame read, for the source it read them in: a page that loads
+  // again reads its own.
+  const [read, setRead] = useState<{
+    readonly source: string | undefined
+    readonly names: readonly string[]
+  }>({ source: undefined, names: [] })
+
   // Each frame keeps the link it loaded until it loads again: every frame of a version shares the
   // query, and a link minted for a later mount would otherwise load every mounted frame again, at
   // its start.
@@ -128,6 +136,8 @@ export function ArtifactFrame({
   sourceRef.current = source
   const pathRef = useRef(path)
   pathRef.current = path
+
+  const readNames = read.source === source ? read.names : NO_QUERIES
 
   const send = useCallback<ArtifactFrameHandle["send"]>((method, params) => {
     const target = iframe.current?.contentWindow
@@ -188,6 +198,16 @@ export function ArtifactFrame({
             return
           }
 
+          if (call.method === "query.run") {
+            const { name } = call.params
+            setRead((current) => {
+              const names = current.source === sourceRef.current ? current.names : NO_QUERIES
+              return names.includes(name)
+                ? current
+                : { source: sourceRef.current, names: [...names, name] }
+            })
+          }
+
           const answered =
             call.method === "query.run"
               ? answerQueryCall(queries, shows.current, call)
@@ -234,6 +254,10 @@ export function ArtifactFrame({
 
     setKept({ identity: `${version.artifactId}@${version.version}`, path: link.path })
   }, [queries, send, version])
+
+  useQueryChanges(version, readNames, (name) => {
+    send("query.changed", { name }).catch(() => {})
+  })
 
   // A page whose data was reset starts over, wherever it is open.
   useEffect(
@@ -329,6 +353,8 @@ function openWebLink(frame: HTMLIFrameElement, url: string): void {
 
   window.open(url, "_blank", "noopener,noreferrer")
 }
+
+const NO_QUERIES: readonly string[] = []
 
 /** A version's frame link, shared by its frames and reused while it has most of its hour left. */
 function frameLink(version: ArtifactVersion) {

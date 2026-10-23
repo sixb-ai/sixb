@@ -289,6 +289,48 @@ describe("the frame runtime", () => {
     }
   })
 
+  test("tells the page a query it read has new rows, by name", () => {
+    // Reproduce by dropping the runtime's "query.changed" case: the app's request is answered
+    // with an error, and the page never hears that its rows moved.
+    const listeners = new Map<string, (event: unknown) => void>()
+    const posted: Record<string, unknown>[] = []
+    const dispatched: { type: string; detail: unknown }[] = []
+    const parent = { postMessage: (message: Record<string, unknown>) => posted.push(message) }
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      parent,
+      addEventListener: (name: string, listener: (event: unknown) => void) =>
+        listeners.set(name, listener),
+      dispatchEvent: (event: CustomEvent) =>
+        dispatched.push({ type: event.type, detail: event.detail }),
+    }
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "loading",
+      body: null,
+      addEventListener: () => {},
+      querySelectorAll: () => [],
+    }
+    new Function("window", "document", `(${frameRuntime.toString()})()`)(window, document)
+
+    const request = (id: number, params: Record<string, unknown>) =>
+      listeners.get("message")?.({
+        source: parent,
+        data: { protocol: FRAME_PROTOCOL, id, method: "query.changed", params },
+      })
+    request(1, { name: "overdue" })
+    request(2, { name: "../state" })
+
+    expect(dispatched).toEqual([{ type: "sixb:query", detail: { name: "overdue" } }])
+    expect(posted).toEqual([
+      { protocol: FRAME_PROTOCOL, id: 1 },
+      { protocol: FRAME_PROTOCOL, id: 2, error: "Unknown query '../state'." },
+    ])
+  })
+
   test("gives each embed of a page one id, the same as the page scrolls", () => {
     // Reproduce by giving an embed its rank among those reported: once the first scrolls out of
     // reach, the next takes its id, and the app mounts what it draws there again.
