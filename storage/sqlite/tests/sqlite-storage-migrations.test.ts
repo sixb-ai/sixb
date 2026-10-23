@@ -192,6 +192,7 @@ const shippedMigrationIds = [
   "071-unique-values",
   "072-generated-media-usage",
   "073-model-call-files",
+  "074-agent-memory",
 ]
 
 afterEach(async () => {

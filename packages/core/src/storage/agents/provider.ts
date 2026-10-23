@@ -10,6 +10,7 @@ import { AgentStorageError } from "./errors"
 import type {
   AddAgentThreadParticipantsInput,
   AgentContextCheckpointRecord,
+  AgentMemoryChange,
   AgentMessageRecord,
   AgentRunRecord,
   AgentThreadParticipantRecord,
@@ -20,10 +21,12 @@ import type {
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   ForkAgentThreadInput,
+  SaveAgentMemoryInput,
   SubagentRunRecord,
   SubagentRunResult,
   TransitionAgentThreadSandboxInput,
 } from "./types"
+import { AGENT_MEMORY_HISTORY_DAYS } from "./types"
 
 const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9-]{1,80}$/
 
@@ -653,4 +656,62 @@ export function agentContextCheckpointMatchesCreateInput(
     record.estimatedInputTokensAfter === input.estimatedInputTokensAfter &&
     record.summaryModelId === input.summaryModelId
   )
+}
+
+/** Validate the fields of a save that storage relies on, before entering its transaction. */
+export function assertSaveAgentMemoryInput(input: SaveAgentMemoryInput, prefix = "Sixb"): void {
+  const fail = (message: string): never => {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent memory ${message}`)
+  }
+  if (input.projectId.trim().length === 0) fail("project id must not be empty.")
+  if (input.repoId.trim().length === 0) fail("repo id must not be empty.")
+  if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0) {
+    fail("base revision must be a non-negative integer.")
+  }
+  if (input.message.trim().length === 0) fail("save message must not be empty.")
+  if (input.changes.length === 0) fail("save must change at least one file.")
+  const paths = new Set<string>()
+  for (const change of input.changes) {
+    if (change.path.length === 0) fail("paths must not be empty.")
+    if (paths.has(change.path)) fail(`save changes '${change.path}' more than once.`)
+    paths.add(change.path)
+  }
+  if (input.createdAt && !Number.isFinite(input.createdAt.getTime())) {
+    fail("save time must be a valid date.")
+  }
+}
+
+/** A path's highest-revision version; `contents: null` when that revision deleted it. */
+export interface LatestAgentMemoryFile {
+  readonly revision: number
+  readonly contents: string | null
+}
+
+/**
+ * The changes of a save that would overwrite another save's work, as their files are now: every
+ * change when the repo is behind the base revision (it was deleted since), otherwise each change
+ * whose path was written after the base revision. Ordered by path.
+ */
+export function agentMemoryConflicts(
+  input: SaveAgentMemoryInput,
+  head: number,
+  latest: ReadonlyMap<string, LatestAgentMemoryFile>
+): AgentMemoryChange[] {
+  return input.changes
+    .filter(
+      (change) =>
+        input.baseRevision > head || (latest.get(change.path)?.revision ?? 0) > input.baseRevision
+    )
+    .map((change) => ({ path: change.path, contents: latest.get(change.path)?.contents ?? null }))
+    .sort((left, right) => compareAgentMemoryPaths(left.path, right.path))
+}
+
+/** Code-unit order, as SQLite and Postgres (with `COLLATE "C"`) compare paths. */
+export function compareAgentMemoryPaths(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+/** File versions written before this time leave the history once a newer version exists. */
+export function agentMemoryHistoryCutoff(savedAt: Date): Date {
+  return new Date(savedAt.getTime() - AGENT_MEMORY_HISTORY_DAYS * 24 * 60 * 60 * 1000)
 }
