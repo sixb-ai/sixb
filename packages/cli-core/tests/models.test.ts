@@ -374,7 +374,12 @@ describe("models generation", () => {
       `'${notes}' is not an image file. Use .png, .jpg, .jpeg, .webp, .gif.`
     )
     expect(await failure(["speech", "Hi.", "--output", "x.mp3", "--format", "midi"])).toBe(
-      "--format must be mp3, wav, ogg, aac, flac, or opus."
+      "--format must be mp3, wav, ogg, aac, or flac."
+    )
+
+    // The gateway makes Opus inside Ogg: `ogg` asks for it, and audio/opus is never served.
+    expect(await failure(["speech", "Hi.", "--output", "x.ogg", "--format", "opus"])).toBe(
+      "--format must be mp3, wav, ogg, aac, or flac."
     )
     expect(received.filter((request) => request.method === "POST")).toEqual([])
   })

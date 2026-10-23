@@ -114,7 +114,6 @@ const SPEECH_FORMATS = {
   ogg: "audio/ogg",
   aac: "audio/aac",
   flac: "audio/flac",
-  opus: "audio/opus",
 } as const
 const SPEECH_FORMAT_NAMES = Object.keys(SPEECH_FORMATS) as (keyof typeof SPEECH_FORMATS)[]
 

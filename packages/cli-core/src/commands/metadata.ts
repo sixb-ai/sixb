@@ -284,7 +284,7 @@ Options:
                     [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
                     [--seed <n>] [--image <file>]...
   sixb models speech "<text>" --output <path> [--model <model>] [--voice <voice>]
-                     [--format mp3|wav|ogg|aac|flac|opus] [--instructions <text>]
+                     [--format mp3|wav|ogg|aac|flac] [--instructions <text>]
                      [--speed <n>] [--language <code>]
   sixb models transcribe <file> [--model <model>]
   sixb models calls files <call-id> [--output <path>]
