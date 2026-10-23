@@ -90,7 +90,9 @@ export default function RootLayout({ children }: PropsWithChildren) {
 ```
 
 The root layout is also loaded during app generation. Avoid accessing `window` or `document` at
-module scope. Set the page title and app icons through [Customization](customization.md).
+module scope. Set the page title and app icons through [Customization](customization.md). Its
+`toolViews` export shows your agent tools in the chat; see
+[Show a tool in the chat](../models/tools-and-authorization.md#show-a-tool-in-the-chat).
 
 ## Add a sidebar
 

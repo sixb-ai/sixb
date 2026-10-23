@@ -624,6 +624,40 @@ describe("createCustomApp.dev", () => {
     expect(runtime).toContain("function NotFoundView()")
   })
 
+  // Reproduce: drop the provider from `layoutWrapperStart` in generateAppEntry; chats show only
+  // the framework's views. Built-in pages off is the case that used to import the layout's default
+  // export alone.
+  test("hands the layout's toolViews to every chat, shared links included", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const { runtimePath } = await generateAppEntry(tempRoot, generatedDir)
+    // No layout, no export to read: chats keep the framework's views.
+    expect(await readFile(runtimePath, "utf-8")).not.toContain("AgentToolViewsProvider")
+
+    await writeFile(
+      join(tempRoot, "app", "layout.tsx"),
+      "export default function RootLayout({ children }) { return children }\n"
+    )
+    for (const sections of [false, true]) {
+      await generateAppEntry(tempRoot, generatedDir, { sections })
+      const runtime = await readFile(runtimePath, "utf-8")
+
+      // Read without naming it, so a layout without the export still bundles without a warning.
+      expect(runtime).toContain(
+        'import RootLayout, * as rootLayoutModule from "../../app/layout.tsx"'
+      )
+      expect(runtime).toContain('import { AgentToolViewsProvider } from "@sixb/app/pages"')
+      expect(runtime).toContain('const toolViews = Reflect.get(rootLayoutModule, "toolViews")')
+      // Inside the error boundary, around the layout: its own chats, every page's, and a shared
+      // link's, which renders the same RoutedApp under a basename.
+      expect(runtime).toContain(
+        "<RoutedErrorBoundary hideErrorDetails={hideErrorDetails}>\n      <AgentToolViewsProvider views={toolViews}><RootLayout>"
+      )
+      expect(runtime).toContain(
+        "</RootLayout></AgentToolViewsProvider>\n    </RoutedErrorBoundary>"
+      )
+    }
+  })
+
   // Reproduce: drop the `recordsActivity` filter in generateRouteManifest; tooling is recorded.
   test("route manifest lists the pages whose views are activity", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")

@@ -195,7 +195,9 @@ describe("generated shared application bootstrap", () => {
     expect(runtime).toContain("return useRoutes(appRoutes)")
     expect(runtime).toContain("matchPath(path, appPath)")
     expect(runtime).toContain('import "../../app/globals.css"')
-    expect(runtime).toContain('import RootLayout from "../../app/layout.tsx"')
+    expect(runtime).toContain(
+      'import RootLayout, * as rootLayoutModule from "../../app/layout.tsx"'
+    )
     expect(runtime).toContain("<QueryClientProvider client={queryClient}>")
     expect(runtime).toContain("<BrowserRouter basename={basename}>")
     expect(runtime).toContain("startApp(options: StartAppOptions = {})")

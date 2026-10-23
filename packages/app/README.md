@@ -103,6 +103,8 @@ Settings comes the same way: `/settings` and its pages (`personal`, `developers`
 
 The built-in agent pages and the agent components both live in `@sixb/app` (`src/agent/`). A framework-owned `framework.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way. With a Tailwind `app/globals.css`, the framework's sources and `src/agent/agent.css` join the app's own build instead.
 
+A tool call in a reply renders through one registry (`src/agent/tool-views/`): the project's view of that tool if there is one, else the framework's own view (`bash`, `read`, web results…), else the generic row. The project's views come from the layout's `toolViews` export, read through the same namespace import and handed to every chat by `AgentToolViewsProvider` around the root layout, shared links included.
+
 The routed page uses the same conversation header, history dialog, and new-thread flow as an
 embedded agent panel. Applications that want a conversation to move between a full page and an
 in-app dock should mount one `AgentSurface` in their shell and derive its `fullPage` presentation

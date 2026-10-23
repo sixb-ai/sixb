@@ -1,12 +1,14 @@
 /**
- * Pages the framework serves until a project adds its own at the same path, and the provider that
- * carries the project's `visibility` to them. Imported only by the generated app; app code never
- * imports them.
+ * Pages the framework serves until a project adds its own at the same path, and the providers that
+ * carry the project's `visibility` to them and its `toolViews` to every chat. Imported only by the
+ * generated app; app code never imports them.
+ *
+ * Keep this module to re-exports. The build resolves relative imports through a plugin, and Bun
+ * then keeps the whole graph of a module imported here for its own code: every app with a layout
+ * would bundle every page.
  */
-import { createElement } from "react"
-import { SectionIndex } from "./pages/section-page"
-
 export { AgentsPage } from "./agent/agents-page"
+export { AgentToolViewsProvider } from "./agent/tool-views/registry"
 export { ArtifactPage } from "./artifacts/artifact-page"
 export { ArtifactsPage } from "./artifacts/gallery"
 export {
@@ -33,28 +35,14 @@ export { OntologyObjectsPage } from "./pages/ontology/objects"
 export { OntologyRulePage, OntologyRulesPage } from "./pages/ontology/rules"
 export { OntologyWorkflowPage } from "./pages/ontology/workflow"
 export { OntologyWorkflowsPage } from "./pages/ontology/workflows"
+export {
+  DataIndexPage,
+  ObservabilityIndexPage,
+  OntologyIndexPage,
+  SettingsIndexPage,
+} from "./pages/section-page"
 export { SettingsDevelopersPage } from "./pages/settings/developers"
 export { SettingsMembersPage } from "./pages/settings/members"
 export { SettingsPersonalPage } from "./pages/settings/personal"
 export { SettingsServiceAccountsPage } from "./pages/settings/service-accounts"
 export { SectionsProvider } from "./sections/sections"
-
-/** `/settings` opens the first Settings page this person may see. */
-export function SettingsIndexPage() {
-  return createElement(SectionIndex, { section: "settings" })
-}
-
-/** `/data` opens the first Data page this person may see. */
-export function DataIndexPage() {
-  return createElement(SectionIndex, { section: "data" })
-}
-
-/** `/observability` opens the first Observability page this person may see. */
-export function ObservabilityIndexPage() {
-  return createElement(SectionIndex, { section: "observability" })
-}
-
-/** `/ontology` opens the first Ontology page this person may see. */
-export function OntologyIndexPage() {
-  return createElement(SectionIndex, { section: "ontology" })
-}

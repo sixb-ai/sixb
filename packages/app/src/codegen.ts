@@ -499,13 +499,19 @@ export async function generateAppEntry(
     .map((path) => `import ${JSON.stringify(relativeTo(generatedDir, path))}`)
     .join("\n")
   const sections = options.sections ?? false
-  // The namespace import reads the optional `visibility` export without naming it, so a layout
-  // that leaves it out still bundles without a missing-export warning.
-  const layoutImport = !hasLayout
-    ? ""
-    : sections
-      ? `import RootLayout, * as rootLayoutModule from ${JSON.stringify(layoutRel)}\n`
-      : `import RootLayout from ${JSON.stringify(layoutRel)}\n`
+  // The namespace import reads the optional `visibility` and `toolViews` exports without naming
+  // them, so a layout that leaves them out still bundles without a missing-export warning.
+  const layoutImport = hasLayout
+    ? `import RootLayout, * as rootLayoutModule from ${JSON.stringify(layoutRel)}\n`
+    : ""
+  // How every chat in the app shows the project's tools, from the same layout. Shared links too:
+  // they render the same layout, and any chat in it.
+  const toolViewsImport = hasLayout
+    ? `import { AgentToolViewsProvider } from "@sixb/app/pages"\n`
+    : ""
+  const toolViewsSetup = hasLayout
+    ? `const toolViews = Reflect.get(rootLayoutModule, "toolViews")`
+    : ""
   // A project with no `app/` of its own gets the default shell: its user menu is the way into every
   // section. Pages without a layout keep rendering bare, as they did before the built-in pages.
   const defaultShell = sections && !hasLayout && !options.projectPages
@@ -522,8 +528,16 @@ export async function generateAppEntry(
     ? `<SectionsProvider visibility={visibility} enabled={!basename}>`
     : ""
   const sectionsEnd = sections ? "</SectionsProvider>" : ""
-  const layoutWrapperStart = hasLayout ? "<RootLayout>" : defaultShell ? "<AppShell>" : "<>"
-  const layoutWrapperEnd = hasLayout ? "</RootLayout>" : defaultShell ? "</AppShell>" : "</>"
+  const layoutWrapperStart = hasLayout
+    ? "<AgentToolViewsProvider views={toolViews}><RootLayout>"
+    : defaultShell
+      ? "<AppShell>"
+      : "<>"
+  const layoutWrapperEnd = hasLayout
+    ? "</RootLayout></AgentToolViewsProvider>"
+    : defaultShell
+      ? "</AppShell>"
+      : "</>"
   const runtimeConfigScript = options.apiBaseUrl
     ? renderCustomAppRuntimeScript({
         api: { baseUrl: options.apiBaseUrl },
@@ -552,7 +566,7 @@ import {
   SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
-${sectionsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
+${sectionsImport}${toolViewsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
@@ -907,6 +921,7 @@ function RoutedErrorBoundary({
 
 const appRoutes = [...routes, { path: "*", element: <NotFoundView /> }]
 ${sectionsSetup}
+${toolViewsSetup}
 
 const routePatterns = routePaths.map((path) => ({ path }))
 const recordedRoutePaths = new Set(activityRoutePaths)
