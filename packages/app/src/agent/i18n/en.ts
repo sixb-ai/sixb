@@ -298,6 +298,14 @@ export const en = {
       running: (name: string) => `Reading the ${name} guide`,
       failed: (name: string) => `Couldn't read the ${name} guide`,
     },
+    /** A file of the user's memory, or of the project's when `project`. */
+    memory: {
+      title: (project: boolean): string => (project ? "Read project memory" : "Read memory"),
+      running: (project: boolean): string =>
+        project ? "Reading project memory" : "Reading memory",
+      failed: (project: boolean): string =>
+        project ? "Couldn't read project memory" : "Couldn't read memory",
+    },
     error: "The file could not be read.",
     emptyFile: "This file is empty.",
     noContent: "No file content was returned.",
@@ -444,6 +452,36 @@ export const en = {
     project: { title: "Read project info", running: "Reading project info" },
     api: { title: "Called the Sixb API", running: "Calling the Sixb API" },
     sixbCommand: { title: "Ran a Sixb command", running: "Running a Sixb command" },
+    /** Steps on the user's memory, or on the project's when `project`. */
+    memorySave: {
+      title: (project: boolean): string =>
+        project ? "Saved to project memory" : "Saved to memory",
+      running: (project: boolean): string =>
+        project ? "Saving to project memory" : "Saving to memory",
+    },
+    memorySaveFailed: {
+      title: (project: boolean): string =>
+        project ? "Couldn't save to project memory" : "Couldn't save to memory",
+      running: (project: boolean): string =>
+        project ? "Saving to project memory" : "Saving to memory",
+    },
+    memoryConflict: {
+      title: (project: boolean): string =>
+        project ? "Found newer project memory to merge" : "Found newer memory to merge",
+      running: (project: boolean): string =>
+        project ? "Saving to project memory" : "Saving to memory",
+    },
+    memoryRead: {
+      title: (project: boolean): string => (project ? "Read project memory" : "Read memory"),
+      running: (project: boolean): string =>
+        project ? "Reading project memory" : "Reading memory",
+    },
+    memoryEdit: {
+      title: (project: boolean): string => (project ? "Updated project memory" : "Updated memory"),
+      running: (project: boolean): string =>
+        project ? "Updating project memory" : "Updating memory",
+    },
+    memoryPull: { title: "Checked memory", running: "Checking memory" },
     counts: {
       objectTypes: (types: number) => count(types, "object type"),
       objects: (objects: number) => count(objects, "object"),
@@ -519,6 +557,10 @@ export const en = {
     open: (title: string) => `Open ${title}`,
     /** Labels the cards of what one response published. */
     cards: "Published in this response",
+  },
+  memory: {
+    /** Closes a turn once per save, before what the save says the agent remembered. */
+    saved: (project: boolean): string => (project ? "Saved to project memory" : "Saved to memory"),
   },
   sandbox: {
     title: "Sandbox recovery required",

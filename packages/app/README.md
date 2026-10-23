@@ -185,6 +185,10 @@ should occupy the main application canvas. Connect `onRequestFullPage` and `onRe
 navigation; leaving that route returns the session to its dock without changing the selected
 thread.
 
+For a chat with its own layout, build it from the parts these use: `useAgentConversation`,
+`Transcript`, `Composer` and the rest are listed in
+[Build your own chat](../../docs/models/overview.md#build-your-own-chat).
+
 ### Styling and Tailwind
 
 `app/globals.css` is treated as source:

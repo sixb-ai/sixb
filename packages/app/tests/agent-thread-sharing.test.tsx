@@ -649,7 +649,8 @@ describe("sharing", () => {
 })
 
 describe("who acts on a turn", () => {
-  // Removal proof: keep composerDisabled on every running turn in AgentChat; the field is disabled.
+  // Removal proof: disable the composer on every running turn in useAgentConversation; the field
+  // is disabled.
   test("while someone else's answer streams, the reader keeps typing but cannot send yet", async () => {
     const { view } = renderChat("bob", {
       thread: thread({ activeRunId: "run_2" }),
@@ -666,7 +667,7 @@ describe("who acts on a turn", () => {
     )
   })
 
-  // Removal proof: pass conversation.stop unconditionally as onStop in AgentChat.
+  // Removal proof: pass stop unconditionally as composerProps.onStop in useAgentConversation.
   test("a participant cannot stop someone else's answer, but stops their own", async () => {
     const running = (requestedBy: typeof alice | typeof bob) => ({
       thread: thread({ activeRunId: "run_2" }),
@@ -686,7 +687,7 @@ describe("who acts on a turn", () => {
     expect(await owner.view.findByRole("button", { name: "Stop generating" })).toBeDefined()
   })
 
-  // Removal proof: drop the canRetry check from AgentChat's onRetry.
+  // Removal proof: drop the canRetry check from transcriptProps.onRetry in useAgentConversation.
   test("only whoever asked for a failed turn retries it", async () => {
     const failed = { runs: [run({ id: "run_2", status: "failed", requestedBy: alice })] }
 
@@ -720,7 +721,7 @@ describe("who acts on a turn", () => {
     expect(view.queryByRole("button", { name: /Retry|Try again/ })).toBeNull()
   })
 
-  // Removal proof: pass canRecreate={true} to SandboxRecovery in AgentChat; Bob gets the button.
+  // Removal proof: set sandboxRecoveryProps.canRecreate to true in useAgentConversation.
   test("only the owner starts a stuck conversation with a fresh sandbox", async () => {
     const stuck = {
       thread: thread({ sandboxState: { name: "sbx_1", status: "blocked", initialized: true } }),

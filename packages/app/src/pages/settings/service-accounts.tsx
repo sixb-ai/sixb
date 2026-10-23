@@ -413,7 +413,7 @@ export function SettingsServiceAccountsPage() {
                         <AlertDialogFooter>
                           <AlertDialogCancel>{allMessages.common.cancel}</AlertDialogCancel>
                           <AlertDialogAction
-                            className="bg-destructive text-white hover:bg-destructive/90"
+                            variant="destructive"
                             onClick={() =>
                               disableAccount.mutate({ path: { serviceAccountId: selected.id } })
                             }

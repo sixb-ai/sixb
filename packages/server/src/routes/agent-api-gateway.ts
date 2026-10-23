@@ -99,6 +99,11 @@ async function handleAgentApiGatewayRequest(input: {
         : "Child agents cannot start a workflow run."
     )
   }
+  // A workflow step is a fixed assignment: what it does must not change because a conversation
+  // saved a note.
+  if (authState.agentExecution.kind === "workflow" && matchesAgentMemory(upstreamPath)) {
+    return jsonError(403, "Workflow agent nodes have no Agent memory.")
+  }
 
   let body: Uint8Array<ArrayBuffer> | undefined
   try {
@@ -354,6 +359,11 @@ async function readGatewayRequestBody(
 
 function isSimpleFileUpload(method: string, pathname: string): boolean {
   return method === "POST" && normalizeRoutePath(pathname) === "/api/files"
+}
+
+function matchesAgentMemory(pathname: string): boolean {
+  const segments = pathSegmentsFor(pathname)
+  return segments[0] === "api" && segments[1] === "agent-memory"
 }
 
 function matchesWorkflowRunStart(pathname: string): boolean {

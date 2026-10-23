@@ -35,6 +35,7 @@ function context(grants: {
   activity?: boolean
   agentThreads?: boolean
   users?: boolean
+  memory?: boolean
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -54,6 +55,7 @@ function context(grants: {
       "observe:activity": grants.activity ?? false,
       "observe:agentThreads": grants.agentThreads ?? false,
       "view:users": grants.users ?? false,
+      "manage:agentMemory": grants.memory ?? false,
     },
   }
 }
@@ -169,6 +171,13 @@ describe("evaluate", () => {
     ],
     ["agent.run", { kind: "agent.run" }, { agent: true }, {}, "run:agent"],
     ["users.view", { kind: "users.view" }, { users: true }, { view: ["quote"] }, "view:users"],
+    [
+      "agentMemory.manage",
+      { kind: "agentMemory.manage" },
+      { memory: true },
+      { agent: true },
+      "manage:agentMemory",
+    ],
   ] as const)("%s requires its grant and reports the requirement", (_kind, request, held, other, requirement) => {
     expect(evaluate(context(held), request)).toEqual({
       allowed: true,

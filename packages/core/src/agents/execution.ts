@@ -21,6 +21,7 @@ import { cancelAgentRun } from "./cancel"
 import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
+import { type AgentMemoryRuntime, createAgentMemoryRuntime } from "./memory-execution"
 import {
   type AgentThreadParticipantInput,
   addAgentThreadParticipants,
@@ -157,6 +158,7 @@ export type AgentRuntime<TParams extends Record<string, unknown> = Record<string
   readonly runs: AgentRunsRuntime
   /** Other users' conversations, read-only, with `can.observe(agent.threads)`. */
   readonly observed: ObservedAgentThreadsRuntime
+  readonly memory: AgentMemoryRuntime
 }
 
 export function createAgentRuntime<
@@ -240,6 +242,7 @@ export function createAgentRuntime<
 
   return {
     get: getAgent,
+    memory: createAgentMemoryRuntime(runtime),
     threads: {
       recreateSandbox: async (threadId, input) => {
         const readable = await rule.read(threadId)

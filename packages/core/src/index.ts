@@ -916,6 +916,8 @@ export type {
   ActivityVisitTimeline,
   ActivityWorkflowEntry,
 } from "./activity/timeline"
+export type { AgentMemoryErrorCode } from "./agents/errors"
+export { AgentMemoryError } from "./agents/errors"
 export type {
   AgentRunListResult,
   AgentRunsRuntime,
@@ -928,6 +930,13 @@ export type {
   ListExecutionAgentThreadsInput,
   ObservedAgentThreadsRuntime,
 } from "./agents/execution"
+export type { AgentMemoryLinkWarning, AgentMemoryRepoName } from "./agents/memory"
+export type {
+  AgentMemoryRepoView,
+  AgentMemoryRuntime,
+  SaveAgentMemoryRuntimeInput,
+  SaveAgentMemoryRuntimeResult,
+} from "./agents/memory-execution"
 export type { AgentThreadParticipantInput } from "./agents/participants"
 export type { AgentThreadParticipant, AgentThreadView } from "./agents/thread-access"
 export type { ArtifactAccess } from "./artifacts/access"
@@ -1113,6 +1122,7 @@ export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
   AgentFilePart,
+  AgentMemoryReference,
   AgentMessage,
   AgentMessagePart,
   AgentMessagePartType,

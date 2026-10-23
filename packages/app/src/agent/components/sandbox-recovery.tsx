@@ -12,13 +12,7 @@ import {
 } from "@sixb/ui/components"
 import { useAgentMessages } from "../i18n"
 
-export function SandboxRecovery({
-  pending,
-  error,
-  onRecreate,
-  canRecreate,
-  owner,
-}: {
+export interface SandboxRecoveryProps {
   readonly pending: boolean
   readonly error: boolean
   readonly onRecreate: () => void
@@ -26,7 +20,16 @@ export function SandboxRecovery({
   readonly canRecreate: boolean
   /** The thread's owner, by name. */
   readonly owner: string
-}) {
+}
+
+/** Offers a fresh sandbox when the thread's one stops responding; the composer waits for it. */
+export function SandboxRecovery({
+  pending,
+  error,
+  onRecreate,
+  canRecreate,
+  owner,
+}: SandboxRecoveryProps) {
   const messages = useAgentMessages().sandbox
 
   if (!canRecreate) {

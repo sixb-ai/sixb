@@ -13,15 +13,9 @@ import { ThreadPeople } from "./components/thread-people"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
 import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
-import {
-  type MessageAuthor,
-  MessageAuthorsContext,
-  principalKey,
-  useConversationAuthors,
-} from "./message-authors"
-import { offersContinue } from "./run-presentation"
-import { personName, threadOwner, threadParticipants } from "./sharing"
-import type { AgentContextInput, AgentThread } from "./types"
+import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
+import { personName, threadOwner } from "./sharing"
+import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -79,37 +73,12 @@ export function AgentChat({
     user: conversation.user,
     you: messages.sharing.you,
   })
-  const pendingUser = conversation.pendingUser
-  const presentation = conversation.presentation
   const currentThread = conversation.currentThread
   const owner = currentThread ? personName(threadOwner(currentThread)) : ""
-
-  // Someone else's answer holds a shared thread: the reader keeps typing, and sends once it ends.
-  const answeringFor = conversation.answeringFor
-  const answeringName = answeringFor
-    ? personNameOf(answeringFor, currentThread, conversation.authors)
-    : null
 
   // Sharing needs someone signed in: without auth, the project owns every conversation.
   const sharingThread = conversation.user ? currentThread : null
   const participant = sharingThread !== null && conversation.access === "participant"
-
-  // A turn that never answered can run again, by whoever asked for it, once the sandbox works.
-  const canRetry =
-    !conversation.sandboxRecovery &&
-    (presentation.kind === "failed" ||
-      ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-        !presentation.hasProgress)) &&
-    conversation.canRetry(presentation.run)
-
-  const listedThreads = [...conversation.threads, ...conversation.sharedThreads]
-  const runningThreadCount =
-    listedThreads.filter((entry) => entry.activeRunId !== null).length +
-    (threadId &&
-    conversation.isRunning &&
-    !listedThreads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
-      ? 1
-      : 0)
 
   const conversationHeaderActions =
     threadId || hostHeaderActions ? (
@@ -166,51 +135,12 @@ export function AgentChat({
     content = (
       <ConversationPanel
         agent={conversation.currentAgent}
-        threadId={threadId}
-        messages={conversation.messages}
-        live={conversation.live}
+        transcript={conversation.transcriptProps}
+        composer={conversation.composerProps}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError}
-        pendingUserText={pendingUser?.text ?? null}
-        pendingUserAttachments={pendingUser?.attachments ?? []}
-        pendingUserContext={pendingUser?.context ?? []}
-        anchorCurrentTurn={conversation.anchorCurrentTurn}
-        awaitingResponse={conversation.isRunning}
-        waitingLonger={conversation.waitingLonger}
-        failedBeforeResponse={presentation.kind === "failed"}
-        cancelledBeforeResponse={presentation.kind === "cancelled"}
-        timeout={
-          presentation.kind === "timeout"
-            ? {
-                hasProgress: presentation.hasProgress,
-                ...(presentation.timeoutMs === undefined
-                  ? {}
-                  : { timeoutMs: presentation.timeoutMs }),
-              }
-            : undefined
-        }
-        interrupted={
-          presentation.kind === "interrupted"
-            ? { hasProgress: presentation.hasProgress }
-            : undefined
-        }
-        onRetry={canRetry ? () => conversation.retry(presentation.run) : undefined}
-        onContinue={
-          offersContinue({
-            presentation,
-            isRunning: conversation.isRunning,
-            sandboxRecovery: Boolean(conversation.sandboxRecovery),
-            messages: conversation.messages,
-          })
-            ? conversation.continueAfterTimeout
-            : undefined
-        }
-        retrying={conversation.retrying}
-        continuing={conversation.composerPending}
-        reconnecting={conversation.reconnecting}
-        sendError={conversation.sendError}
         currentThread={conversation.currentThread}
-        runningThreadCount={runningThreadCount}
+        runningThreadCount={conversation.runningThreadCount}
         threadsError={conversation.threadsError ? messages.chat.threadsLoadFailed : null}
         hasMoreThreads={conversation.threadsHasMore}
         loadingMoreThreads={conversation.threadsLoadingMore}
@@ -232,44 +162,14 @@ export function AgentChat({
               }
             : undefined
         }
-        onSend={conversation.send}
         onNewChat={onNavigateHome}
         onSelectThread={onNavigateThread}
         sandboxRecovery={
-          conversation.sandboxRecovery ? (
-            <SandboxRecovery
-              pending={conversation.recreatingSandbox}
-              error={conversation.sandboxRecoveryError}
-              onRecreate={conversation.recreateSandbox}
-              canRecreate={conversation.canRecreateSandbox}
-              owner={owner}
-            />
+          conversation.sandboxRecoveryProps ? (
+            <SandboxRecovery {...conversation.sandboxRecoveryProps} />
           ) : undefined
         }
-        composerDisabled={
-          (conversation.isRunning && answeringName === null) ||
-          Boolean(conversation.sandboxRecovery)
-        }
-        composerHint={answeringName ? messages.sharing.answering(answeringName) : undefined}
-        composerPending={conversation.composerPending}
-        composerRunning={conversation.isRunning}
-        composerStopping={conversation.stopping}
-        onStop={conversation.canStop ? conversation.stop : undefined}
-        models={conversation.models}
-        selectedModel={conversation.selectedModel}
-        selectedReasoning={conversation.selectedReasoning}
-        modelsLoading={conversation.modelsLoading}
-        modelsError={conversation.modelsError}
-        onSelectModel={conversation.selectModel}
-        onSelectReasoning={conversation.selectReasoning}
-        onResetReasoning={conversation.resetReasoning}
-        usingDefaultModel={conversation.usingDefaultModel}
-        onResetModelSelection={conversation.resetModelSelection}
         composerPlaceholder={composerPlaceholder ?? messages.chat.placeholder}
-        composerDraft={conversation.draftReseed.text}
-        composerDraftAttachments={conversation.draftReseed.attachments}
-        composerDraftContext={conversation.draftReseed.context}
-        composerDraftNonce={conversation.draftReseed.nonce}
         ambientContext={ambientContext}
         compact={compact}
         welcomeContent={welcomeContent}
@@ -312,29 +212,6 @@ export function AgentChat({
       </ArtifactPanelRoot>
     </ArtifactPeopleContext.Provider>
   )
-}
-
-/** Someone's name, from the thread's people or else the page's authors, or else their id. */
-function personNameOf(
-  principal: { readonly type: string; readonly id: string },
-  thread: AgentThread | null,
-  authors: readonly MessageAuthor[] | undefined
-): string {
-  return knownName(principal, thread, authors) ?? principal.id
-}
-
-/** Someone's name when the thread's people or the page's authors give one. */
-function knownName(
-  principal: { readonly type: string; readonly id: string },
-  thread: AgentThread | null,
-  authors: readonly MessageAuthor[] | undefined
-): string | undefined {
-  const key = principalKey(principal)
-  const people = thread ? [threadOwner(thread), ...threadParticipants(thread)] : []
-  const person = people.find((entry) => principalKey(entry.principal) === key)
-  if (person?.displayName) return person.displayName
-
-  return authors?.find((entry) => principalKey(entry) === key)?.displayName
 }
 
 function ErrorState({

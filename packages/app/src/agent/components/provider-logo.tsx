@@ -2,7 +2,12 @@ import { cn } from "@sixb/ui/lib/utils"
 import type { LanguageModel } from "../types"
 import { providerLogoPath } from "./provider-logos"
 
-export function ProviderLogo({ model, className }: { model: LanguageModel; className?: string }) {
+export interface ProviderLogoProps {
+  readonly model: LanguageModel
+  readonly className?: string
+}
+
+export function ProviderLogo({ model, className }: ProviderLogoProps) {
   const path = providerLogoPath(model.publisher.id)
   if (path) {
     return (

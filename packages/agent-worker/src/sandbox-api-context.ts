@@ -1,6 +1,19 @@
 import { join } from "node:path"
-import type { AgentProjectFile, AgentSkillDefinition, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type {
+  AgentMemoryRepoView,
+  AgentProjectFile,
+  AgentSkillDefinition,
+  Sandbox,
+  SandboxFileRecord,
+} from "@sixb/core"
 import { loadAgentCliAssets } from "./agent-cli-assets"
+import {
+  AGENT_MEMORY_ENTRY,
+  AGENT_MEMORY_MANIFEST,
+  AGENT_MEMORY_STARTER,
+  type AgentMemoryManifest,
+  agentMemoryFileHash,
+} from "./agent-runtime/memory"
 import { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -31,6 +44,8 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly ontologyFiles: readonly AgentProjectFile[]
   /** A conversation's published artifacts, under {@link AGENT_ARTIFACTS_DIRECTORY}. */
   readonly artifacts?: MaterializedArtifacts
+  /** A conversation's memory repos, under `$SIXB_MEMORY_DIR/<repo>/`. */
+  readonly memory?: readonly AgentMemoryRepoView[]
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -48,6 +63,7 @@ export async function prepareAgentSandboxApiContext(
   const attachmentsDir = join(contextDir, "attachments")
   const artifactsDir = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_DIRECTORY)
   const artifactsManifestPath = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_MANIFEST)
+  const memoryDir = join(contextDir, "memory")
   const cli = await loadAgentCliAssets()
 
   // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
@@ -124,6 +140,9 @@ export async function prepareAgentSandboxApiContext(
           })),
         ]
       : []),
+    ...(input.memory
+      ? memoryFiles(memoryDir, join(contextDir, AGENT_MEMORY_MANIFEST), input.memory)
+      : []),
   ])
 
   return {
@@ -142,6 +161,7 @@ export async function prepareAgentSandboxApiContext(
       ...(input.artifacts
         ? { SIXB_ARTIFACTS: artifactsManifestPath, SIXB_ARTIFACTS_DIR: artifactsDir }
         : {}),
+      ...(input.memory ? { SIXB_MEMORY_DIR: memoryDir } : {}),
       SIXB_PROJECT_ID: input.projectId,
       ...(input.actorId === undefined ? {} : { SIXB_ACTOR_ID: input.actorId }),
       ...(input.threadId ? { SIXB_THREAD_ID: input.threadId } : {}),
@@ -157,6 +177,42 @@ function installFiles(dir: string, files: readonly AgentProjectFile[]): SandboxF
     contents: file.contents,
     ...(file.mode === undefined ? {} : { mode: file.mode }),
   }))
+}
+
+/**
+ * Each repo's files, a starter MEMORY.md for a repo without one, and the manifest `sixb memory`
+ * saves against. The starter is not in the manifest, so the first save stores it.
+ */
+function memoryFiles(
+  dir: string,
+  manifestPath: string,
+  repos: readonly AgentMemoryRepoView[]
+): SandboxFileRecord[] {
+  const manifest: AgentMemoryManifest = {
+    repos: Object.fromEntries(
+      repos.map((repo) => [
+        repo.repo,
+        {
+          revision: repo.revision,
+          files: Object.fromEntries(
+            repo.files.map((file) => [file.path, agentMemoryFileHash(file.contents)])
+          ),
+        },
+      ])
+    ),
+  }
+  return [
+    ...repos.flatMap((repo) => [
+      ...repo.files.map((file) => ({
+        path: join(dir, repo.repo, ...file.path.split("/")),
+        contents: file.contents,
+      })),
+      ...(repo.files.some((file) => file.path === AGENT_MEMORY_ENTRY)
+        ? []
+        : [{ path: join(dir, repo.repo, AGENT_MEMORY_ENTRY), contents: AGENT_MEMORY_STARTER }]),
+    ]),
+    { path: manifestPath, contents: `${JSON.stringify(manifest, null, 2)}\n` },
+  ]
 }
 
 function emptyManifestJson(): string {

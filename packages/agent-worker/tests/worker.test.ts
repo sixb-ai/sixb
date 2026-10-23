@@ -83,6 +83,7 @@ import {
   sandboxConfig,
 } from "@sixb/core/sandboxes"
 import {
+  type AgentMemoryChange,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
@@ -103,6 +104,7 @@ import {
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { renderAgentSystemPrompt, renderCurrentTime } from "../src/agent-prompt"
+import { agentMemoryFileHash } from "../src/agent-runtime/memory"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
@@ -2003,6 +2005,51 @@ async function listRunStreamRecords(broker: Broker, runId: string) {
     .then((page) => page.records)
 }
 
+/**
+ * A thread the requester started a minute ago, with a memory save before it started (`# Before`)
+ * and one since (`# After`).
+ */
+async function seedMemoryAroundThreadStart(sixb: TestSixb, threadId: string): Promise<void> {
+  const startedAt = Date.now() - 60_000
+  await agentStorageOf(sixb).threads.create({
+    id: threadId,
+    projectId: PROJECT_ID,
+    ownerPrincipal: REQUESTER,
+    createdAt: new Date(startedAt),
+  })
+  const save = (baseRevision: number, at: number, changes: AgentMemoryChange[]) =>
+    agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: `user:${REQUESTER.id}`,
+      baseRevision,
+      message: "Remember",
+      author: REQUESTER,
+      changes,
+      createdAt: new Date(at),
+    })
+  await save(0, startedAt - 60_000, [{ path: "MEMORY.md", contents: "# Before\n" }])
+  await save(1, startedAt + 30_000, [
+    { path: "MEMORY.md", contents: "# After\n" },
+    { path: "topics/payments.md", contents: "- Excluding VAT\n" },
+  ])
+}
+
+function systemPromptOf(messages: LanguageModelRequest["messages"] | undefined): string {
+  const system = messages?.find((message) => message.role === "system")
+  if (typeof system?.content !== "string") throw new Error("Expected a system prompt.")
+  return system.content
+}
+
+async function waitForSettledRun(sixb: TestSixb, runId: string): Promise<AgentRunRecord> {
+  return waitFor(
+    async () => {
+      const record = await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: runId })
+      return record && record.status !== "queued" && record.status !== "running" ? record : null
+    },
+    { label: `settled run ${runId}` }
+  )
+}
+
 async function seedCompletedConversationTurn(input: {
   readonly sixb: TestSixb
   readonly threadId: string
@@ -2098,6 +2145,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     threads: agents.threads,
     messages: agents.messages,
     checkpoints: agents.checkpoints,
+    memory: agents.memory,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2140,6 +2188,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     threads: agents.threads,
     messages: agents.messages,
     checkpoints: agents.checkpoints,
+    memory: agents.memory,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2179,6 +2228,7 @@ function withObservedAgentMessageAppendStorage(
     threads: agents.threads,
     runs: agents.runs,
     checkpoints: agents.checkpoints,
+    memory: agents.memory,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -4003,6 +4053,159 @@ describe("AgentWorker", () => {
       expect(answerPrompts).toHaveLength(2)
       expect(answerReasoning).toEqual(["high", undefined])
       expect(await listMessages(storage, threadId)).toHaveLength(16)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("installs the requester's memory and shows MEMORY.md as of the thread's start", async () => {
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const sandboxes = new RecordingSandboxFactory()
+    const assistants = defineGroup("assistants")
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        captureSummaryPrompt: () => {},
+        captureAnswerPrompt: (prompt) => {
+          answerPrompts.push(prompt)
+        },
+      }),
+      new InMemoryBroker(),
+      sandboxes,
+      {
+        security: {
+          ontology: [],
+          groups: [AGENT_RUNTIME_GROUP, assistants],
+          roles: [
+            defineRole("assistant.user", { grantedTo: [assistants], grants: [can.run(agent)] }),
+          ],
+        },
+      }
+    )
+    await authStorageOf(sixb).users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: `${REQUESTER.id}@example.com`,
+    })
+    await authStorageOf(sixb).groupMemberships.upsert({
+      projectId: PROJECT_ID,
+      userId: REQUESTER.id,
+      groupId: assistants.id,
+      source: "manual",
+    })
+    const threadId = "memory_thread"
+    await seedMemoryAroundThreadStart(sixb, threadId)
+    await agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: "project",
+      baseRevision: 0,
+      message: "Share",
+      author: { type: "user", id: "usr_keeper" },
+      changes: [{ path: "MEMORY.md", contents: "# Shared\n" }],
+      createdAt: new Date(Date.now() - 600_000),
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        threadId,
+        text: "What do you remember?",
+      })
+      expect((await waitForSettledRun(sixb, request.run.id)).status).toBe("succeeded")
+
+      // A save after the thread started reaches the files but not the prompt, so it stays cached.
+      // Regression proof: drop `asOf` in loadConversationMemory and the prompt shows "# After".
+      const system = systemPromptOf(answerPrompts[0])
+      expect(system).toContain(
+        '<memory repo="user">\n# Before\n</memory>\n\n<memory repo="project">\n# Shared\n</memory>\n</sixb_memory>'
+      )
+      // Everyone who can run the agent reads and adds to the project's memory.
+      expect(system).toContain("- project/: what everyone in this project should know")
+      expect(system).not.toContain("# After")
+      expect(system).toContain(
+        "To organize entries into topic files or merge a conflict, read .sixb/agent/skills/sixb-memory/SKILL.md."
+      )
+
+      const sandbox = await waitFor(
+        () =>
+          sandboxes.sandboxes.find((candidate) =>
+            candidate.writtenFiles.some((file) => file.path.endsWith("/memory.json"))
+          ),
+        { label: "installed memory" }
+      )
+      const agentDir = `${sandbox.workingDirectory}/.sixb/agent`
+      expect(sandbox.readFileContents(`${agentDir}/memory/user/MEMORY.md`)).toBe("# After\n")
+      expect(sandbox.readFileContents(`${agentDir}/memory/user/topics/payments.md`)).toBe(
+        "- Excluding VAT\n"
+      )
+      expect(JSON.parse(sandbox.readFileContents(`${agentDir}/context/memory.json`))).toEqual({
+        repos: {
+          user: {
+            revision: 2,
+            files: {
+              "MEMORY.md": agentMemoryFileHash("# After\n"),
+              "topics/payments.md": agentMemoryFileHash("- Excluding VAT\n"),
+            },
+          },
+          project: {
+            revision: 1,
+            files: { "MEMORY.md": agentMemoryFileHash("# Shared\n") },
+          },
+        },
+      })
+      expect(sandbox.readFileContents(`${agentDir}/memory/project/MEMORY.md`)).toBe("# Shared\n")
+      expect(
+        sandbox.commands.find((command) => command.options.env?.SIXB_MEMORY_DIR)?.options.env
+      ).toMatchObject({
+        SIXB_MEMORY_DIR: `${agentDir}/memory`,
+      })
+      // The memory section names the memory skill, installed with the memory.
+      expect(sandbox.readFileContents(`${agentDir}/skills/sixb-memory/SKILL.md`)).toContain(
+        "sixb memory save user"
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("shows the latest MEMORY.md once the thread is compacted", async () => {
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        captureSummaryPrompt: () => {},
+        captureAnswerPrompt: (prompt) => {
+          answerPrompts.push(prompt)
+        },
+      })
+    )
+    const threadId = "compacted_memory_thread"
+    await seedMemoryAroundThreadStart(sixb, threadId)
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        threadId,
+        text: "Continue from the latest completed turn.",
+      })
+      expect((await waitForSettledRun(sixb, request.run.id)).status).toBe("succeeded")
+
+      // Regression proof: load memory for the continuation as of the old checkpoint, and this
+      // prompt keeps "# Before".
+      expect(
+        await agentStorageOf(sixb).checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).toMatchObject({ createdByRunId: request.run.id })
+      const system = systemPromptOf(answerPrompts[0])
+      expect(system).toContain('<memory repo="user">\n# After\n</memory>')
+      expect(system).not.toContain("# Before")
     } finally {
       await worker.stop()
     }
@@ -9308,12 +9511,15 @@ describe("AgentWorker", () => {
         id: bob.id,
         email: "usr_bob@example.com",
       })
-      await authStorageOf(sixb).groupMemberships.upsert({
-        projectId: PROJECT_ID,
-        userId: bob.id,
-        groupId: chatters.id,
-        source: "manual",
-      })
+      // Both run the agent through the role, so each turn reads the project's memory alike.
+      for (const member of [alice, bob]) {
+        await authStorageOf(sixb).groupMemberships.upsert({
+          projectId: PROJECT_ID,
+          userId: member.id,
+          groupId: chatters.id,
+          source: "manual",
+        })
+      }
       await storage.threads.addParticipants({
         projectId: PROJECT_ID,
         threadId,
@@ -9453,7 +9659,11 @@ describe("AgentWorker", () => {
         sandbox.writtenFiles
           .filter((file) => file.path.endsWith("/SKILL.md"))
           .map((file) => file.path.slice(file.path.indexOf("/.sixb/")))
-      ).toEqual(["/.sixb/agent/skills/sixb-artifacts/SKILL.md"])
+      ).toEqual([
+        "/.sixb/agent/skills/sixb-artifacts/SKILL.md",
+        // Installed with the conversation's memory.
+        "/.sixb/agent/skills/sixb-memory/SKILL.md",
+      ])
 
       const sixbCli = sandbox.readFileContents(join(env.SIXB_BIN_DIR, "sixb"))
       expect(sixbCli).toContain("../lib/sixb.mjs")

@@ -833,6 +833,7 @@ describe("createCustomApp.dev", () => {
       for (const page of [
         "SettingsIndexPage",
         "SettingsPersonalPage",
+        "SettingsMemoryPage",
         "SettingsServiceAccountsPage",
       ]) {
         expect(manifest).toContain(`import { ${page} as BuiltInPage`)

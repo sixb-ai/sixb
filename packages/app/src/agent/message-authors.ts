@@ -48,6 +48,20 @@ export function principalKey(principal: { readonly type: string; readonly id: st
   return `${principal.type}:${principal.id}`
 }
 
+/** Someone's name when the thread's people or the page's authors give one. */
+export function knownName(
+  principal: { readonly type: string; readonly id: string },
+  thread: AgentThread | null,
+  authors: readonly MessageAuthor[] | undefined
+): string | undefined {
+  const key = principalKey(principal)
+  const people = thread ? [threadOwner(thread), ...threadParticipants(thread)] : []
+  const person = people.find((entry) => principalKey(entry.principal) === key)
+  if (person?.displayName) return person.displayName
+
+  return authors?.find((entry) => principalKey(entry) === key)?.displayName
+}
+
 /** Who wrote a message, by `type:id`, to tell when the next one comes from someone else. */
 export function authorKey(message: AgentMessage): string | null {
   return message.authorPrincipal ? principalKey(message.authorPrincipal) : null
