@@ -1,3 +1,4 @@
+import { isSixbApiError } from "@sixb/client"
 import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
 import {
   type ArtifactAddress,
@@ -11,7 +12,7 @@ import { Markdown, type MarkdownProps } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUpRight, FileX } from "lucide-react"
+import { ArrowUpRight, FileX, Lock } from "lucide-react"
 import {
   type ComponentProps,
   type ComponentType,
@@ -261,6 +262,8 @@ function LoadedEmbed({
     retry: false,
   })
   const version = query.data
+  // An artifact that exists but is not shared where the reader reads this one says so, calmly.
+  const notShared = isSixbApiError(query.error) && query.error.code === "not_shared"
   const resolved = version
     ? resolveArtifactAddress(address, {
         kind: version.outline.kind,
@@ -272,7 +275,7 @@ function LoadedEmbed({
     return (
       <FilledFigure {...(version ? { address: written } : {})}>
         {!version || !resolved ? (
-          <Pending loading={query.isLoading} fill />
+          <Pending loading={query.isLoading} notShared={notShared} fill />
         ) : "problem" in resolved ? (
           <Unavailable
             title={messages.unavailable}
@@ -293,7 +296,7 @@ function LoadedEmbed({
   if (!version || !resolved) {
     return (
       <Figure caption={caption}>
-        <Pending loading={query.isLoading} />
+        <Pending loading={query.isLoading} notShared={notShared} />
       </Figure>
     )
   }
@@ -759,13 +762,18 @@ function Source({
 function Unavailable({
   title,
   description,
+  icon: Icon = FileX,
+  fill = false,
 }: {
   readonly title: string
   readonly description: string
+  readonly icon?: typeof FileX
+  /** Centered in the box it fills, as a deck's or a page's embed is. */
+  readonly fill?: boolean
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-5 text-sm">
-      <FileX className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <div className={cn("flex items-center gap-3 px-4 py-5 text-sm", fill && "justify-center")}>
+      <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="flex flex-col">
         <span className="font-medium text-foreground">{title}</span>
         <span className="text-muted-foreground">{description}</span>
@@ -776,19 +784,37 @@ function Unavailable({
 
 function Pending({
   loading,
+  notShared = false,
   fill = false,
 }: {
   readonly loading: boolean
+  /** It exists, but is not shared in the conversation the reader reads. */
+  readonly notShared?: boolean
   readonly fill?: boolean
 }) {
   const messages = useArtifactMessages().references
-  return loading ? (
-    <div
-      className={cn("animate-pulse bg-muted/50", fill ? "h-full" : "h-32")}
-      aria-label={messages.loading}
+  if (loading) {
+    return (
+      <div
+        className={cn("animate-pulse bg-muted/50", fill ? "h-full" : "h-32")}
+        aria-label={messages.loading}
+      />
+    )
+  }
+
+  return notShared ? (
+    <Unavailable
+      icon={Lock}
+      title={messages.notShared}
+      description={messages.notSharedDescription}
+      fill={fill}
     />
   ) : (
-    <Unavailable title={messages.unavailable} description={messages.unavailableDescription} />
+    <Unavailable
+      title={messages.unavailable}
+      description={messages.unavailableDescription}
+      fill={fill}
+    />
   )
 }
 

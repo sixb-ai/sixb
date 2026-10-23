@@ -122,7 +122,7 @@ interface Scenario {
 function threadApi(scenario: Scenario, requests: string[]) {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(new Request(input, init).url)
-    requests.push(`${init?.method ?? "GET"} ${url.pathname}`)
+    requests.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`)
     if (scenario.status !== 200) {
       return Response.json({ error: "[Sixb] not allowed" }, { status: scenario.status })
     }
@@ -139,6 +139,25 @@ function threadApi(scenario: Scenario, requests: string[]) {
         })
       case "/api/observed-agent-threads/thr_1/runs":
         return Response.json({ runs: scenario.runs, hasMore: false, total: scenario.runs.length })
+      case "/api/artifacts":
+        return Response.json({
+          artifacts:
+            url.searchParams.get("thread") === "thr_1"
+              ? [
+                  {
+                    id: "art_0000000001",
+                    projectId: "proj",
+                    kind: "document",
+                    title: "Late invoices",
+                    owner: { type: "user", id: "usr_1" },
+                    latestVersion: 1,
+                    createdAt: version.createdAt,
+                    updatedAt: version.createdAt,
+                  },
+                ]
+              : [],
+          hasMore: false,
+        })
       case "/api/artifacts/art_0000000001":
         return Response.json({
           artifact: {
@@ -152,6 +171,7 @@ function threadApi(scenario: Scenario, requests: string[]) {
             updatedAt: version.createdAt,
           },
           versions: [version],
+          access: "read",
         })
       case "/api/artifacts/art_0000000001/versions/1":
         return Response.json(version)
@@ -215,10 +235,20 @@ describe("an observed conversation", () => {
     expect(view.getByText("Which invoices are late?")).toBeDefined()
     expect(view.getByText(/^Read-only\. You see everything the agent showed/)).toBeDefined()
 
+    // The conversation's artifacts are listed for the observer too. Reproduce by dropping the
+    // menu from the page's header: the button never shows.
+    expect(
+      await view.findByRole("button", { name: "1 artifact in this conversation" })
+    ).toBeDefined()
+
     // No composer, no thread list: only the observer's reads.
     expect(view.queryByRole("textbox")).toBeNull()
     expect(
-      requests.every((request) => request.startsWith("GET /api/observed-agent-threads/"))
+      requests.every(
+        (request) =>
+          request.startsWith("GET /api/observed-agent-threads/") ||
+          request === "GET /api/artifacts?thread=thr_1"
+      )
     ).toBe(true)
     view.unmount()
     queryClient.clear()

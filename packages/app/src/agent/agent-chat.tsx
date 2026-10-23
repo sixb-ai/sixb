@@ -2,6 +2,7 @@ import { Button, EmptyState, Toaster } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
 import { type ReactNode, useId } from "react"
+import { ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { ConversationPanel } from "./components/conversation-panel"
@@ -12,7 +13,7 @@ import { ThreadPeople } from "./components/thread-people"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
 import { useThreadSharing } from "./hooks/use-thread-sharing"
 import { useAgentMessages } from "./i18n"
-import { MessageAuthorsContext, useConversationAuthors } from "./message-authors"
+import { knownName, MessageAuthorsContext, useConversationAuthors } from "./message-authors"
 import { personName, threadOwner } from "./sharing"
 import type { AgentContextInput } from "./types"
 
@@ -180,30 +181,36 @@ export function AgentChat({
     )
   }
 
+  // An artifact opened from here names who published each version, from this conversation's people.
+  const artifactPeople = (author: { readonly type: string; readonly id: string }) =>
+    knownName(author, currentThread, conversation.authors)
+
   return (
-    <ArtifactPanelRoot
-      compact={compact}
-      split={splitArtifacts}
-      overlayHost={artifactHost}
-      scopeKey={threadId ?? "draft"}
-      routeTarget={artifactTarget}
-      onRouteTargetChange={onArtifactTargetChange}
-    >
-      <div
-        data-agent-panel={compact ? "" : undefined}
-        className={cn("relative flex h-full min-h-0 flex-col", className)}
+    <ArtifactPeopleContext.Provider value={artifactPeople}>
+      <ArtifactPanelRoot
+        compact={compact}
+        split={splitArtifacts}
+        overlayHost={artifactHost}
+        scopeKey={threadId ?? "draft"}
+        routeTarget={artifactTarget}
+        onRouteTargetChange={onArtifactTargetChange}
       >
-        {!controlsInConversationHeader && conversationHeaderActions ? (
-          <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
-            {conversationHeaderActions}
-          </div>
-        ) : null}
-        <MessageAuthorsContext.Provider value={authors}>
-          <main className="min-h-0 min-w-0 flex-1">{content}</main>
-        </MessageAuthorsContext.Provider>
-        <Toaster id={toasterId} position="top-center" />
-      </div>
-    </ArtifactPanelRoot>
+        <div
+          data-agent-panel={compact ? "" : undefined}
+          className={cn("relative flex h-full min-h-0 flex-col", className)}
+        >
+          {!controlsInConversationHeader && conversationHeaderActions ? (
+            <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
+              {conversationHeaderActions}
+            </div>
+          ) : null}
+          <MessageAuthorsContext.Provider value={authors}>
+            <main className="min-h-0 min-w-0 flex-1">{content}</main>
+          </MessageAuthorsContext.Provider>
+          <Toaster id={toasterId} position="top-center" />
+        </div>
+      </ArtifactPanelRoot>
+    </ArtifactPeopleContext.Provider>
   )
 }
 
