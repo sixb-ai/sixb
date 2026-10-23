@@ -311,10 +311,22 @@ fleet-planner/
   The page's own CSS overrides the kit and the theme.
 - The page's `<title>`, else its first `<h1>`, names it in cards and lists.
 - A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
-  call the API as the reader, and it loads only its own files and a few public CDNs (jsDelivr,
-  cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
-  A chart drawn on a canvas redraws on the window's `sixb:theme` event, which fires when the app
-  sends its theme, light or dark.
+  call the API itself, and it loads only its own files and a few public CDNs (jsDelivr, cdnjs,
+  unpkg, and Google Fonts). Data that isn't your project's, such as figures you were given, goes
+  in JSON files published beside it, read with `fetch`. A chart drawn on a canvas redraws on the
+  window's `sixb:theme` event, which fires when the app sends its theme, light or dark.
+- `window.sixb.query(name)` reads one of the version's [queries](#declare-a-query) as the reader,
+  with their rights, so the page shows your objects as they are when it opens:
+
+  ```js
+  const { objects, total, truncated } = await sixb.query("overdue")
+  ```
+
+  - It resolves to what `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`
+    returns: rows as `POST /api/objects/query` returns them, or `{ kind: "facets", total, facets }`.
+    A query the reader can't run, or one the version doesn't hold, rejects with the API's error.
+  - A query takes no parameters: the page filters and sorts its rows. Decks and canvas boards read
+    queries the same way.
 - `window.sixb.state` keeps JSON values for each reader, across the page's versions, so a
   planner opens where they left it: `await sixb.state.set("inputs", { rate: 450 })`, then
   `get`, `delete`, and `keys`. Each reader gets 100 keys, 64 KB a value, and 1 MB in all. A
@@ -326,7 +338,8 @@ fleet-planner/
 - When the Agent publishes a page, its sandbox's headless browser loads it at 1280px and at a
   phone's 390px, as it checks a deck, and warns about content past the screen's right edge,
   overlapping or cut off text, text under 12px, a control under 24px, low contrast, a broken image,
-  or a script error, with a screenshot at each width to look at before it revises.
+  or a script error, with a screenshot at each width to look at before it revises. The page's
+  queries run as whoever asked the Agent, so the check draws their rows.
 
 ## Write a canvas
 
@@ -409,10 +422,12 @@ File: `queries/overdue.json`
   may not view, is refused. Use a `project` node to leave those properties out.
 - A version holds up to 20 queries of 64 KB each. A query returns up to 10,000 rows, and
   `truncated` says when there were more.
+- A sheet shows a query's rows as its [live rows](#live-rows), and a page, a deck, or a canvas
+  board reads one with `sixb.query("overdue")` (see [Write a page](#write-a-page)).
 - `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does
   `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. Its `schema` gives the type
-  of each property its rows and the links it expands hold, as the caller may view them. A query the ontology no
-  longer admits fails with `query_invalid` (409 over HTTP).
+  of each property its rows and the links it expands hold, as the caller may view them. A query the
+  ontology no longer admits fails with `query_invalid` (409 over HTTP).
 
 From server code, pass query builders as `queries`; each is stored as its file:
 

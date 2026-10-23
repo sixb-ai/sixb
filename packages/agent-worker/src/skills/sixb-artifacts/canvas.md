@@ -80,6 +80,8 @@ picture; the reader opens it to scroll and click.
 - Link a stylesheet the boards share, `<link rel="stylesheet" href="shared.css">`, beside them, so
   every screen of an app looks like one app.
 - Show what the screen would hold: real labels, names, and numbers, not lorem ipsum or gray boxes.
+  A board reads the project's objects live with `sixb.query`, as a page does; for a chart a live
+  sheet already draws, embed it.
 - Boards don't link to each other; arrows show the flow.
 
 ## Check
