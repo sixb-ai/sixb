@@ -1,0 +1,30 @@
+{
+  "sheets": [
+    {
+      "name": "Overdue",
+      "query": "overdue",
+      "frozenColumns": 1,
+      "columns": {
+        "Invoice": { "from": "number" },
+        "Customer": { "from": "customer.name" },
+        "Due": { "from": "dueDate" },
+        "Amount": { "from": "amount", "type": "currency" },
+        "Paid": { "from": "paid", "type": "currency" },
+        "Balance": { "type": "currency", "formula": "[@Amount]-[@Paid]", "highlight": "bars" }
+      },
+      "descriptions": { "Balance": "What the customer still owes on the invoice." },
+      "totals": { "Invoice": "count", "Amount": "sum", "Balance": "sum" }
+    }
+  ],
+  "charts": [
+    {
+      "name": "balance-by-customer",
+      "type": "bar",
+      "sheet": "Overdue",
+      "x": "Customer",
+      "y": "Balance",
+      "aggregate": "sum",
+      "title": "Balance owed by customer"
+    }
+  ]
+}

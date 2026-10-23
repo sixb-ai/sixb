@@ -40,7 +40,8 @@ In a Markdown link, write a space as `%20`: `artifact:art_k3m9q2x7tp#Q3%20number
 - Show a chart or a range when the reader needs to see it there. Link when they only need to know
   where it is.
 - When the numbers are in a published sheet, show its range instead of retyping them in a Markdown
-  table: the range cannot drift from the sheet. Asked for "the first three regions as a table",
+  table: the range cannot drift from the sheet. A live sheet's chart or range shows each reader
+  their own rows, so a document that shows it stays current too. Asked for "the first three regions as a table",
   show `artifact:…@2#Regions!A1:D4`, the header row and three rows.
 - The text in `![…]` is the caption under what it shows. Say what the figure shows, not "Chart".
 - In a reply, show at most one chart or a range of about a dozen rows. Publish anything larger and

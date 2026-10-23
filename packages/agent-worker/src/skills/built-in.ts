@@ -45,6 +45,12 @@ import serviceExplorerData from "./sixb-artifacts/examples/page/service-explorer
 import serviceExplorerPage from "./sixb-artifacts/examples/page/service-explorer/index.html" with {
   type: "text",
 }
+import overdueQuery from "./sixb-artifacts/examples/sheet/overdue-invoices/queries/overdue.json" with {
+  type: "text",
+}
+import overdueWorkbook from "./sixb-artifacts/examples/sheet/overdue-invoices/workbook.json" with {
+  type: "text",
+}
 import partsInventory from "./sixb-artifacts/examples/sheet/parts-inventory/sheets/Inventory.csv" with {
   type: "text",
 }
@@ -71,6 +77,7 @@ import q3ReviewDeck from "./sixb-artifacts/examples/slides/q3-review/index.html"
 }
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
 import pageGuide from "./sixb-artifacts/page.md" with { type: "text" }
+import queriesGuide from "./sixb-artifacts/queries.md" with { type: "text" }
 import referencesGuide from "./sixb-artifacts/references.md" with { type: "text" }
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
@@ -100,6 +107,9 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/sheet/parts-inventory/workbook.json": text(partsWorkbook),
     "examples/sheet/parts-inventory/sheets/Inventory.csv": partsInventory,
     "examples/sheet/parts-inventory/sheets/Spend.csv": partsSpend,
+    "examples/sheet/overdue-invoices/workbook.json": text(overdueWorkbook),
+    "examples/sheet/overdue-invoices/queries/overdue.json": text(overdueQuery),
+    "queries.md": queriesGuide,
     "page.md": pageGuide,
     "examples/page/fleet-planner/index.html": text(fleetPlannerPage),
     "examples/page/fleet-planner/data/plan.json": text(fleetPlannerData),

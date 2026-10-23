@@ -9,6 +9,7 @@ an `.xlsx`, or needs formulas across cells rather than columns, publish a `file`
 ## Layout
 
 A sheet is a directory: `workbook.json`, and one CSV per sheet under `sheets/`, named for the sheet.
+A sheet of the project's data reads its rows from a query instead, and has no CSV (Live rows).
 
 ```text
 work/service-metrics/
@@ -167,6 +168,43 @@ most five columns.
 { "name": "cost-visits", "type": "scatter", "sheet": "Regions", "x": "Visits", "y": "Parts cost" }
 ```
 
+## Live rows
+
+A sheet of the project's objects reads its rows from one of the artifact's queries
+(`queries.md`), each time it is opened, as whoever opens it. Make a sheet of project data live
+unless the user asked for a snapshot. A live sheet has no `sheets/<name>.csv`: it names its query in
+`"query"`, and each column the property it shows in `"from"`.
+
+```json
+{
+  "name": "Overdue",
+  "query": "overdue",
+  "columns": {
+    "Invoice": { "from": "number" },
+    "Customer": { "from": "customer.name" },
+    "Amount": { "from": "amount", "type": "currency" },
+    "Paid": { "from": "paid", "type": "currency" },
+    "Due": { "from": "dueDate" },
+    "Outstanding": { "type": "currency", "formula": "[@Amount]-[@Paid]" }
+  },
+  "totals": { "Amount": "sum" }
+}
+```
+
+- The columns are those `columns` lists, in its order. Each has `from`, a property of the rows, or
+  `<link>.<property>` of a link the query expands, or a `formula`; not both. Name columns with a
+  letter first: JSON puts a name of digits, such as `2024`, before the others.
+- Without `type`, a column takes its property's: numbers, dates, true or false, an enum as a tag,
+  anything else as text. Give `type` for what the property doesn't say, such as `currency` or
+  `percent`, and any format key a CSV sheet's column takes.
+- Totals, charts, highlights, and formulas work as on any sheet. A link that reaches several objects
+  shows their values joined by commas.
+- A value the reader is not cleared for shows locked, as does a total over it. A live sheet is not
+  edited in the app: change its query or columns, and publish its next version.
+- The sheet shows up to 10,000 rows, and says when there were more: filter or limit the query.
+- Publishing refuses a `from` its query's rows don't hold, such as a link the query doesn't
+  expand, and a facets query: a sheet shows rows.
+
 ## Check before publishing
 
 Open each CSV and check its header and a few rows. A refusal names the file, row, and column to fix:
@@ -177,8 +215,9 @@ Open each CSV and check its header and a few rows. A refusal names the file, row
 
 ## Examples
 
-`examples/sheet/` holds two finished workbooks to start from: service metrics with two sheets,
+`examples/sheet/` holds three finished workbooks to start from: service metrics with two sheets,
 totals, descriptions, compact and signed numbers, a computed margin, and line, bar, bar-and-line,
-and scatter charts; and a parts
+and scatter charts; a parts
 inventory with a frozen first column, a status tag, bars, a checkbox, dates, links, a pie, and a
-chart that counts rows by category.
+chart that counts rows by category; and overdue invoices, a live sheet of the project's invoices
+with their customer, a computed balance, and a chart that sums it by customer.
