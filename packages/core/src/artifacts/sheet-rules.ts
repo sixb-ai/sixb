@@ -39,20 +39,25 @@ export function checkSheet(
   return sheetChartsProblem(workbook, tables)
 }
 
-/** A table's header and size against its sheet: named, unique, and holding what the sheet names. */
+/**
+ * A table's header and size against its sheet: named, unique, and holding what the sheet names. A
+ * live sheet's header is the columns its workbook lists.
+ */
 export function sheetColumnsProblem(sheet: WorkbookSheet, table: CsvTable): string | null {
   const path = sheetFilePath(sheet.name)
+  const source = sheet.live ? `${WORKBOOK_FILE} sheet '${sheet.name}' "columns"` : `'${path}'`
   const { header, rows } = table
 
   if (header.length === 0) return `'${path}' is empty: its first line names the columns.`
   if (header.length > ARTIFACT_LIMITS.maxSheetColumns) {
-    return `'${path}' has ${header.length} columns; a sheet holds at most ${ARTIFACT_LIMITS.maxSheetColumns}.`
+    return `${source} has ${header.length} columns; a sheet holds at most ${ARTIFACT_LIMITS.maxSheetColumns}.`
   }
 
   const seen = new Set<string>()
   for (const [index, name] of header.entries()) {
-    if (!name.trim()) return `'${path}' column ${index + 1} has no name in the header row.`
-    if (seen.has(name)) return `'${path}' has two columns named '${name}'.`
+    if (!name.trim())
+      return `${source} column ${index + 1} has no name${sheet.live ? "" : " in the header row"}.`
+    if (seen.has(name)) return `${source} has two columns named '${name}'.`
     seen.add(name)
   }
 
@@ -72,7 +77,7 @@ export function sheetColumnsProblem(sheet: WorkbookSheet, table: CsvTable): stri
     ...Object.keys(sheet.totals),
   ]) {
     if (!seen.has(column)) {
-      return `${WORKBOOK_FILE} sheet '${sheet.name}' names column '${column}', which '${path}' does not have.`
+      return `${WORKBOOK_FILE} sheet '${sheet.name}' names column '${column}', which ${sheet.live ? 'its "columns" does not list' : `'${path}' does not have`}.`
     }
   }
 

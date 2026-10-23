@@ -4,6 +4,7 @@ import type {
   ObjectQueryPredicate,
   ObjectQuerySortField,
 } from "../objects/query/ir"
+import type { PrimitiveSchema } from "../ontology/types"
 import type { ObjectFacetRequest, ObjectFacetResult, ObjectRow } from "../storage/objects/types"
 import type { ArtifactKind } from "./kinds"
 
@@ -29,11 +30,41 @@ export type ArtifactQuery =
 /** What a query read for its reader: the rows they may see, or the facets of those rows. */
 export type ArtifactQueryResult = ArtifactObjectsQueryResult | ArtifactFacetsQueryResult
 
-interface ArtifactQueryShape {
+/** What a query returns and reads, as whoever runs it may see it. */
+export interface ArtifactQueryShape {
   /** The object types the query returns. */
   readonly resultObjectTypeIds: readonly string[]
   /** Every object type the query reads: where it starts, and each type it traverses or expands. */
   readonly readObjectTypeIds: readonly string[]
+  /** What each value of a row holds, from the ontology as whoever runs the query may view it. */
+  readonly schema: ArtifactQuerySchema
+}
+
+/**
+ * The properties a query's rows hold, and those of the objects it expands on them: what a live
+ * view types its columns by. A property the reader's view of the ontology leaves out is absent.
+ */
+export interface ArtifactQuerySchema {
+  /** By property id, over the types the query returns; the first type's when two disagree. */
+  readonly properties: Readonly<Record<string, ArtifactQueryProperty>>
+  /** By link id, for each link the query expands on its rows: the properties of what it reaches. */
+  readonly links: Readonly<
+    Record<string, { readonly properties: Readonly<Record<string, ArtifactQueryProperty>> }>
+  >
+}
+
+/** A property's type, with a value type resolved to the schema it names. */
+export interface ArtifactQueryProperty {
+  readonly type: ArtifactQueryPropertyType
+  /** What an enum's values are. */
+  readonly valueType?: "string" | "integer"
+}
+
+export type ArtifactQueryPropertyType = PrimitiveSchema | "enum" | "array" | "object" | "map"
+
+/** What checking a query as its author learned: what it returns, reads, and holds. */
+export interface CheckedArtifactQuery extends ArtifactQueryShape {
+  readonly kind: ArtifactQuery["kind"]
 }
 
 export interface ArtifactObjectsQueryResult extends ArtifactQueryShape {

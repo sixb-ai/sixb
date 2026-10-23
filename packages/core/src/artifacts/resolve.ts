@@ -59,11 +59,10 @@ export function resolveArtifactAddress(
           )}`,
         }
       }
-      // Row 1 is the header row, so the last row is one past the data rows.
-      if (
-        part.range &&
-        (part.range.bottom > sheet.rows || part.range.right >= sheet.columns.length)
-      ) {
+      // Row 1 is the header row, so the last row is one past the data rows. A live sheet's rows
+      // are each reader's: a range is as deep as they have rows.
+      const rows = sheet.query === undefined ? sheet.rows : Number.POSITIVE_INFINITY
+      if (part.range && (part.range.bottom > rows || part.range.right >= sheet.columns.length)) {
         return {
           problem: `has no range ${address.part.slice(address.part.lastIndexOf("!") + 1)} in sheet '${sheet.name}', which has ${sheet.rows + 1} rows and ${sheet.columns.length} columns`,
         }
