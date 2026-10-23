@@ -76,6 +76,8 @@ export interface RenderAgentSystemPromptInput {
 
 /** The Agent's memory as the prompt shows it. */
 export interface AgentMemoryPromptContext {
+  /** Others read the conversation: the project's memory alone is loaded, whoever sends the turn. */
+  readonly shared?: boolean
   readonly repos: readonly {
     readonly repo: "user" | "project"
     /** The repo's MEMORY.md. */
@@ -417,6 +419,11 @@ function renderMemory(memory: AgentMemoryPromptContext): string {
               : "Everyone in the project reads project/, including people who cannot see what this user sees, so never put in it anything about a particular person.",
           ]
         : []),
+      ...(memory.shared
+        ? [
+            "This conversation is shared, so no one's own memory is loaded in it: save nothing that is about one person, such as their own preference, and tell them to ask you in a conversation of their own instead.",
+          ]
+        : []),
     ].join(" "),
     "",
     "Each save is one bash command that edits the file and then saves it, chained with &&. To add an entry:",
@@ -425,7 +432,9 @@ function renderMemory(memory: AgentMemoryPromptContext): string {
     "",
     "To change or remove one, edit its line in place:",
     "",
-    `sed -i 's/^- Prefers a weekly summary.*/- Prefers a monthly summary (added YYYY-MM-DD)/' "$SIXB_MEMORY_DIR/${changeRepo}/MEMORY.md" && sixb memory save ${changeRepo} -m "Monthly summary instead of weekly"`,
+    changeRepo === "user"
+      ? `sed -i 's/^- Prefers a weekly summary.*/- Prefers a monthly summary (added YYYY-MM-DD)/' "$SIXB_MEMORY_DIR/user/MEMORY.md" && sixb memory save user -m "Monthly summary instead of weekly"`
+      : `sed -i 's/^- Revenue is reported excluding VAT.*/- Revenue is reported including VAT (added YYYY-MM-DD)/' "$SIXB_MEMORY_DIR/project/MEMORY.md" && sixb memory save project -m "Revenue now includes VAT"`,
     "",
     "The line in the file is what is remembered; -m only labels the save in the chat. Nothing is remembered until the save succeeds, so never say you will remember something unless it did.",
     "",

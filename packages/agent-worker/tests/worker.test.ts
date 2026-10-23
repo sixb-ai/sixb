@@ -9335,7 +9335,8 @@ describe("AgentWorker", () => {
     })
     // Bob reads the thread through a role, so the model is told he takes part.
     const chatters = defineGroup("chatters")
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes, {
       security: {
         ontology: [],
         groups: [AGENT_RUNTIME_GROUP, chatters],
@@ -9345,6 +9346,22 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const alice = { type: "user", id: "usr_alice" } as const
     const bob = { type: "user", id: "usr_bob" } as const
+    // Each remembers something of their own, saved before the thread starts.
+    for (const [repoId, author, contents] of [
+      [`user:${alice.id}`, alice, "# Memory\n- Alice prefers tables\n"],
+      [`user:${bob.id}`, bob, "# Memory\n- Bob prefers charts\n"],
+      ["project", alice, "# Memory\n- Churn is 60 days without renewal\n"],
+    ] as const) {
+      await storage.memory.save({
+        projectId: PROJECT_ID,
+        repoId,
+        baseRevision: 0,
+        message: "Remember",
+        author,
+        changes: [{ path: "MEMORY.md", contents }],
+        createdAt: new Date(Date.now() - 60_000),
+      })
+    }
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -9392,6 +9409,8 @@ describe("AgentWorker", () => {
       const text = (request: LanguageModelRequest) => JSON.stringify(request.messages)
       expect(text(alone)).not.toContain("sixb_author")
       expect(text(alone)).not.toContain("sixb_conversation")
+      // Alone in the thread, Alice's own memory is shown next to the project's.
+      expect(systemPromptOf(alone.messages)).toContain("- Alice prefers tables")
 
       // Names are data: a shared thread's system prompt is the same whoever sends the turn.
       // Guard proof: drop `shared` from createAgentExecutionContext; each prompt names its sender.
@@ -9399,6 +9418,22 @@ describe("AgentWorker", () => {
       await terminal(third.run.id)
       expect(requests.at(-1)?.messages[0]).toEqual(shared.messages[0])
       expect(JSON.stringify(shared.messages[0])).not.toContain("usr_bob")
+
+      // So is its memory: the project's alone, never the sender's own.
+      // Guard proof: pass `shared: false` to loadConversationMemory; Bob's turn shows his memory.
+      const system = systemPromptOf(shared.messages)
+      expect(system).toContain("- Churn is 60 days without renewal")
+      expect(system).not.toContain("prefers")
+      expect(system).not.toContain("user/")
+      expect(system).toContain("This conversation is shared, so no one's own memory is loaded")
+      // Nor is it installed for the turn to read. Alice's first turn, alone and before the role
+      // lets her run the agent, installs her own memory alone.
+      const manifests = sandboxes.sandboxes.flatMap((sandbox) =>
+        sandbox.writtenFiles
+          .filter((file) => file.path.endsWith("/context/memory.json"))
+          .map((file) => Object.keys(JSON.parse(sandbox.readFileContents(file.path)).repos))
+      )
+      expect(manifests).toEqual([["user"], ["project"], ["project"]])
 
       const closings = shared.messages
         .filter((message) => message.role === "user")

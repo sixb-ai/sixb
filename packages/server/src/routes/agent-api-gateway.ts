@@ -105,6 +105,20 @@ async function handleAgentApiGatewayRequest(input: {
     return jsonError(403, "Workflow agent nodes have no Agent memory.")
   }
 
+  // Others read a shared conversation: whoever sends the turn, their own memory stays out of it.
+  // Anything but the project's exact path is refused, as a route parameter is percent-decoded.
+  if (
+    authState.agentRun &&
+    matchesAgentMemory(upstreamPath) &&
+    pathSegmentsFor(upstreamPath)[2] !== "project" &&
+    (await hasParticipants(input.host, authState.agentRun))
+  ) {
+    return jsonError(
+      403,
+      "A shared conversation reaches only the project's memory. Save nothing about one person here."
+    )
+  }
+
   let body: Uint8Array<ArrayBuffer> | undefined
   try {
     body = await readGatewayRequestBody(input.request, upstreamPath)
@@ -364,6 +378,18 @@ function isSimpleFileUpload(method: string, pathname: string): boolean {
 function matchesAgentMemory(pathname: string): boolean {
   const segments = pathSegmentsFor(pathname)
   return segments[0] === "api" && segments[1] === "agent-memory"
+}
+
+/** Anyone added to the run's thread, even one who cannot read it now, as the worker counts them. */
+async function hasParticipants(
+  host: SixbHostView,
+  run: ConversationAgentRunRecord
+): Promise<boolean> {
+  const participants = await host.storage.agents?.threads.listParticipants({
+    projectId: run.projectId,
+    threadIds: [run.threadId],
+  })
+  return (participants?.length ?? 0) > 0
 }
 
 function matchesWorkflowRunStart(pathname: string): boolean {
