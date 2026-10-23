@@ -82,7 +82,8 @@ should know: your team's vocabulary, conventions, and how things are measured. T
 what goes there and what stays in the user's own memory, and the chat says which it saved to.
 Everyone who can use the agent reads and adds to it. Because people who cannot see the same data
 read it, the agent only puts there what users told it, never records, data, or anything about a
-particular person. Each save is recorded with who made it and in which conversation.
+particular person. Each save is recorded with who made it and in which conversation. A conversation
+shared with others reads and saves the project's memory only, never the memory of whoever writes.
 
 Deleting the project's memory requires `can.manage(agent.memory)`:
 

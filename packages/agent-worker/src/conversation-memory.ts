@@ -9,6 +9,9 @@ import {
 /** The repos a conversation installs and shows, in the order the prompt lists them. */
 const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user", "project"]
 
+/** Others read a shared conversation, so whoever sends the turn, it reaches no one's own memory. */
+const SHARED_CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["project"]
+
 /** The Agent's memory for one conversational run. */
 export interface ConversationMemory {
   /** Installed under `$SIXB_MEMORY_DIR` at their latest revision, for the Agent to read and save. */
@@ -21,16 +24,20 @@ export interface ConversationMemory {
  * Load the repos the run's requester can read. The prompt shows each `MEMORY.md` as it was at
  * `asOf`, the start of the thread or its latest compaction, so a save leaves the prompt and its
  * cache as they are until the context is next compacted; the installed files are the latest.
- * A requester without a repo of its own, such as a service account, gets the project's alone.
+ * A requester without a repo of its own, such as a service account, and a shared conversation get
+ * the project's alone.
  */
 export async function loadConversationMemory(input: {
   readonly sixb: Sixb
   readonly asOf: Date
+  /** Others were added to the thread. */
+  readonly shared?: boolean
 }): Promise<ConversationMemory | undefined> {
-  const { sixb, asOf } = input
+  const { sixb, asOf, shared = false } = input
+  const repos = shared ? SHARED_CONVERSATION_MEMORY_REPOS : CONVERSATION_MEMORY_REPOS
   const loaded = (
     await Promise.all(
-      CONVERSATION_MEMORY_REPOS.map(async (repo) => {
+      repos.map(async (repo) => {
         try {
           const [latest, then] = await Promise.all([
             sixb.agent.memory.get(repo),
@@ -49,6 +56,7 @@ export async function loadConversationMemory(input: {
   return {
     repos: loaded.map(({ latest }) => latest),
     prompt: {
+      ...(shared ? { shared } : {}),
       repos: loaded.map(({ latest, then }) => ({
         repo: latest.repo,
         // A version pruned from the history since is shown as it is now.
