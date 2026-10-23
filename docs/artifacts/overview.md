@@ -423,6 +423,8 @@ reads the conversation reads the artifact, at its latest version, whatever publi
 - The agent revises someone else's artifact only in a conversation that already shares it. When
   it revises one of yours in a conversation, that conversation shares it from then on, with its
   history.
+- Retrying a turn takes back what it published: an artifact only that turn shared in the
+  conversation is no longer shared there.
 - The owner's other artifacts stay private. An embed or link to one is refused with 403
   `not_shared` for whoever cannot read it, so a page can say it is not shared in this
   conversation; an unknown id is a 404. The difference tells anyone whether an id exists, never

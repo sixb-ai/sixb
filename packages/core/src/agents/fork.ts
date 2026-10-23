@@ -1,10 +1,12 @@
+import { createRuntimeArtifactAccessRule } from "../artifacts/execution"
 import { createArtifactId } from "../artifacts/ids"
 import type { Principal } from "../auth"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { AgentStorageError, type AgentThreadRecord } from "../storage/agents"
 import { ArtifactStorageError } from "../storage/artifacts/errors"
-import type { ArtifactStorage, CreateArtifactInput } from "../storage/artifacts/types"
+import type { ArtifactStorage, CopyArtifactInput } from "../storage/artifacts/types"
+import type { Storage } from "../storage/types"
 import { AgentRequestError } from "./errors"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
 import { normalizeSandboxBinding } from "./sandbox"
@@ -53,7 +55,7 @@ export async function forkAgentThread(
         )
       }
 
-      const artifactCopies = await copySharedArtifacts(runtime, tx.artifacts, {
+      const artifactCopies = await copySharedArtifacts(runtime, tx, {
         sourceThreadId: source.id,
         forkId: id,
         owner: input.ownerPrincipal,
@@ -87,14 +89,16 @@ export async function forkAgentThread(
 }
 
 /**
- * The fork's own copies of the artifacts the source shares: each at its latest version, owned by
- * whoever forks, shared in the fork alone. A copy reuses the version's files, which blob storage
- * keeps by content, and keeps its addresses: one naming another artifact still names the original.
+ * The fork's own copies of the artifacts the source shares that the caller reads, by the artifact
+ * access rule: every one for a signed-in session, only its own for an access token. Each copy has
+ * every version under its number, so a copied card or an `@N` address still resolves; it reuses
+ * the files, which blob storage keeps by content, is owned by whoever forks, and is shared in the
+ * fork alone. A copy keeps its addresses: one naming another artifact still names the original.
  * Returns each source id with its copy's.
  */
 async function copySharedArtifacts(
   runtime: SixbRuntimeContext,
-  artifacts: ArtifactStorage | undefined,
+  tx: Storage,
   input: {
     readonly sourceThreadId: string
     readonly forkId: string
@@ -102,6 +106,7 @@ async function copySharedArtifacts(
   }
 ): Promise<Record<string, string>> {
   const { projectId } = runtime
+  const artifacts = tx.artifacts
   if (!artifacts) {
     const shared = await runtime.storage.artifacts?.list({
       projectId,
@@ -117,44 +122,31 @@ async function copySharedArtifacts(
     return {}
   }
 
+  const access = createRuntimeArtifactAccessRule(runtime, tx)
   const copies: Record<string, string> = {}
   const { artifacts: shared } = await artifacts.list({ projectId, threadId: input.sourceThreadId })
   for (const artifact of shared) {
-    const latest = await artifacts.getVersion({
-      projectId,
-      artifactId: artifact.id,
-      version: artifact.latestVersion,
-    })
-    if (!latest) continue
+    if ((await access.accessTo(artifact)) === "none") continue
 
-    const {
-      projectId: _project,
-      artifactId: _artifact,
-      version: _number,
-      origin: _origin,
-      ...content
-    } = latest
-    const copy = await createCopy(artifacts, {
+    copies[artifact.id] = await createCopy(artifacts, {
       projectId,
-      kind: artifact.kind,
+      sourceId: artifact.id,
       owner: input.owner,
-      version: { ...content, createdAt: new Date() },
+      threadId: input.forkId,
     })
-    await artifacts.shareInThread({ projectId, artifactId: copy, threadId: input.forkId })
-    copies[artifact.id] = copy
   }
   return copies
 }
 
-/** A new artifact with the copied version as its first, under a fresh id. */
+/** A copy of the artifact under a fresh id. */
 async function createCopy(
   artifacts: ArtifactStorage,
-  input: Omit<CreateArtifactInput, "id">
+  input: Omit<CopyArtifactInput, "id">
 ): Promise<string> {
   for (let attempt = 1; ; attempt += 1) {
     const id = createArtifactId()
     try {
-      await artifacts.create({ ...input, id })
+      await artifacts.copy({ ...input, id })
       return id
     } catch (error) {
       const collided = error instanceof ArtifactStorageError && error.code === "artifact_exists"

@@ -323,7 +323,9 @@ function forkInput(overrides: Partial<ForkAgentThreadInput> = {}): ForkAgentThre
  */
 async function prepareForkSource(
   storage: AgentStorage,
-  fixture: AgentStorageContractStorage
+  fixture: AgentStorageContractStorage,
+  /** The summary of the checkpoint the third turn writes. */
+  summary = "Three deals slipped; Acme waits on legal review."
 ): Promise<void> {
   await storage.threads.create(threadInput({ title: "Slipped deals" }))
   await storage.messages.append({
@@ -423,7 +425,7 @@ async function prepareForkSource(
       expectedPreviousCheckpointId: "checkpoint_1",
       expectedHeadSeq: 5,
       executionToken: "exec_3",
-      summary: "Three deals slipped; Acme waits on legal review.",
+      summary,
       summarizedThroughSeq: 4,
       observedHeadSeq: 5,
       createdAt: at("2026-06-23T10:05:00.000Z"),
@@ -2313,6 +2315,32 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         ])
         const [source] = (await storage.messages.list({ projectId, threadId: "thr_1" })).messages
         expect(source?.parts).toEqual([{ type: "text", text }])
+      })
+    })
+
+    // Regression proof: drop the summary's remap in planAgentThreadFork; the copied checkpoint
+    // then names the source's artifact.
+    test("names the fork's copies in the checkpoint summary it copies", async () => {
+      await withStorage(async (storage, fixture) => {
+        const summary = "Drafted art_0000000001 for Acme; art_0000000009 is the source data."
+        await prepareForkSource(storage, fixture, summary)
+        await storage.runs.finish({
+          id: "run_3",
+          projectId,
+          executionToken: "exec_3",
+          status: "failed",
+        })
+
+        await storage.threads.fork(
+          forkInput({ artifactCopies: { art_0000000001: "art_000000copy1" } })
+        )
+
+        expect(
+          (await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" }))?.summary
+        ).toBe("Drafted art_000000copy1 for Acme; art_0000000009 is the source data.")
+        expect(
+          (await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" }))?.summary
+        ).toBe(summary)
       })
     })
 
