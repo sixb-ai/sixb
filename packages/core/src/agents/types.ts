@@ -178,14 +178,14 @@ export interface AgentToolRunContext<
 }
 
 /** Agent tool handlers may return only values safe to persist in agent messages. */
-export type AgentToolHandlerResult =
-  | ReadonlyJsonValue
-  | AgentToolResult
-  | Promise<ReadonlyJsonValue | AgentToolResult>
+export type AgentToolHandlerResult<
+  TOutput extends ReadonlyJsonValue | AgentToolResult = ReadonlyJsonValue | AgentToolResult,
+> = TOutput | Promise<TOutput>
 
-export type AgentToolHandler<TInput extends Readonly<Record<string, unknown>>> = (
-  context: AgentToolRunContext<TInput>
-) => AgentToolHandlerResult
+export type AgentToolHandler<
+  TInput extends Readonly<Record<string, unknown>>,
+  TOutput extends ReadonlyJsonValue | AgentToolResult = ReadonlyJsonValue | AgentToolResult,
+> = (context: AgentToolRunContext<TInput>) => AgentToolHandlerResult<TOutput>
 
 /**
  * Runtime definitions are stored heterogeneously. Keep variance erasure at this
@@ -195,16 +195,20 @@ type StoredAgentToolHandler<TInput extends Readonly<Record<string, unknown>>> = 
   bivarianceHack(context: AgentToolRunContext<TInput>): JsonValue | Promise<JsonValue>
 }["bivarianceHack"]
 
+declare const agentToolOutputValueType: unique symbol
+
 /** A reusable, inert model tool definition selected explicitly by an agent. */
 export interface AgentToolDefinition<
   TName extends string = string,
   TInput extends AgentToolInputSchema = AgentToolInputSchema,
+  TOutput extends ReadonlyJsonValue | AgentToolResult = ReadonlyJsonValue | AgentToolResult,
 > {
   readonly kind: "agentTool"
   readonly name: TName
   readonly description: string
   readonly input: TInput
   readonly handler: StoredAgentToolHandler<InferAgentToolInputSchema<TInput>>
+  readonly [agentToolOutputValueType]?: TOutput
 }
 
 /** Infer the input received by a tool definition's handler. */
@@ -212,10 +216,17 @@ export type InferAgentToolInput<TTool extends AgentToolDefinition> = InferAgentT
   TTool["input"]
 >
 
+/**
+ * Infer the output a chat receives from a tool: its handler's return value, saved on the message
+ * and streamed live as is. A file-aware tool's output is its `AgentToolResult` envelope.
+ */
+export type InferAgentToolOutput<TTool extends AgentToolDefinition> =
+  TTool extends AgentToolDefinition<string, AgentToolInputSchema, infer TOutput> ? TOutput : never
+
 export interface AgentToolRunBuilder<TName extends string, TInput extends AgentToolInputSchema> {
-  run(
-    handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
-  ): AgentToolDefinition<TName, TInput>
+  run<TOutput extends ReadonlyJsonValue | AgentToolResult>(
+    handler: AgentToolHandler<InferAgentToolInputSchema<TInput>, TOutput>
+  ): AgentToolDefinition<TName, TInput, TOutput>
 }
 
 export interface AgentToolInputBuilder<TName extends string> {

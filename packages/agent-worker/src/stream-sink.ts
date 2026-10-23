@@ -1,5 +1,9 @@
 import type { Broker, JsonValue } from "@sixb/core"
-import type { AgentCompactionFailureCode, AgentRunStreamEvent } from "@sixb/core/agents/streams"
+import type {
+  AgentCompactionFailureCode,
+  AgentRunStreamEvent,
+  ModelUiChunk,
+} from "@sixb/core/agents/streams"
 import {
   agentRunFinishedEvent,
   agentRunStreamDefinition,
@@ -41,7 +45,7 @@ export interface StreamSink {
   publishUiChunk(input: {
     readonly run: AgentRunRecord
     readonly chunkIndex: number
-    readonly chunk: unknown
+    readonly chunk: ModelUiChunk
   }): Promise<void>
   publishMessageFinalized(input: {
     readonly run: ConversationAgentRunRecord
@@ -173,13 +177,14 @@ class BrokerStreamSink implements StreamSink {
   async publishUiChunk(input: {
     readonly run: AgentRunRecord
     readonly chunkIndex: number
-    readonly chunk: unknown
+    readonly chunk: ModelUiChunk
   }): Promise<void> {
-    let chunk: JsonValue
+    let chunk: ModelUiChunk
     try {
+      // The round-trip keeps the chunk's shape: every field of a chunk is JSON by type.
       chunk = toBrokerJson(input.chunk, "Agent stream chunk", {
         runId: input.run.id,
-      })
+      }) as ModelUiChunk
     } catch (error) {
       console.error("[SixbAgentWorker] Agent run stream chunk encoding failed:", error)
       return

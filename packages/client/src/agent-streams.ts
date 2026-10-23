@@ -16,6 +16,7 @@ export type {
   AgentRunActivityEvent,
   AgentRunFailure,
   AgentRunStreamEvent,
+  ModelUiChunk,
 } from "@sixb/core/agents/streams"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 

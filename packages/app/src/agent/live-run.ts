@@ -1,4 +1,4 @@
-import type { AgentRunFailure, AgentRunStreamEvent } from "@sixb/client"
+import type { AgentRunFailure, AgentRunStreamEvent, ModelUiChunk } from "@sixb/client"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import type { AgentRunStatus } from "./types"
 
@@ -103,11 +103,15 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
   }
 }
 
-// Reduce a Sixb model UI chunk (typed as opaque JSON on the wire). Unknown shapes are ignored
-// so the stream stays alive even if the SDK emits chunk variants this UI does not model yet.
-function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
-  if (!isRecord(chunk) || typeof chunk.type !== "string") return state
+type TextChunk = Extract<ModelUiChunk, { readonly type: "text-start" | "text-delta" | "text-end" }>
+type ReasoningChunk = Extract<
+  ModelUiChunk,
+  { readonly type: "reasoning-start" | "reasoning-delta" | "reasoning-end" }
+>
+type ToolChunk = Extract<ModelUiChunk, { readonly toolCallId: string }>
 
+// The client drops chunk types it does not know, so they never reach this reducer.
+function applyChunk(state: LiveRunState, chunk: ModelUiChunk): LiveRunState {
   switch (chunk.type) {
     case "text-start":
     case "text-delta":
@@ -127,18 +131,15 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
     case "tool-output-error":
       return reduceTool(state, chunk)
     case "error":
-      return typeof chunk.errorText === "string"
-        ? { ...state, streamError: chunk.errorText }
-        : state
+      return { ...state, streamError: chunk.errorText }
     default:
       return state
   }
 }
 
-function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
-  const id = typeof chunk.id === "string" ? chunk.id : "text"
-  const delta = typeof chunk.delta === "string" ? chunk.delta : ""
-  const key = spanKey("text", id, state.stepIndex)
+function reduceText(state: LiveRunState, chunk: TextChunk): LiveRunState {
+  const delta = chunk.type === "text-delta" ? chunk.delta : ""
+  const key = spanKey("text", chunk.id, state.stepIndex)
   const existingIndex = state.partKeys.indexOf(key)
 
   // Start/end lifecycle chunks carry no content. Likewise, do not let leading whitespace create a
@@ -154,13 +155,12 @@ function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
   )
 }
 
-function reduceReasoning(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
-  const id = typeof chunk.id === "string" ? chunk.id : "reasoning"
-  const delta = typeof chunk.delta === "string" ? chunk.delta : ""
+function reduceReasoning(state: LiveRunState, chunk: ReasoningChunk): LiveRunState {
+  const delta = chunk.type === "reasoning-delta" ? chunk.delta : ""
   const done = chunk.type === "reasoning-end"
   return upsertPart(
     state,
-    spanKey("reasoning", id, state.stepIndex),
+    spanKey("reasoning", chunk.id, state.stepIndex),
     () => ({ kind: "reasoning", text: delta, streaming: !done }),
     (part) =>
       part.kind === "reasoning"
@@ -169,10 +169,9 @@ function reduceReasoning(state: LiveRunState, chunk: Record<string, unknown>): L
   )
 }
 
-function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
-  const toolCallId = typeof chunk.toolCallId === "string" ? chunk.toolCallId : null
+function reduceTool(state: LiveRunState, chunk: ToolChunk): LiveRunState {
+  const { toolCallId, toolName } = chunk
   if (!toolCallId) return state
-  const toolName = typeof chunk.toolName === "string" ? chunk.toolName : undefined
 
   return upsertPart(
     state,
@@ -180,10 +179,7 @@ function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
     `tool#${toolCallId}`,
     () => ({
       kind: "tool",
-      tool: applyToolChunk(
-        { toolName: toolName ?? "tool", state: "input-streaming", inputText: "" },
-        chunk
-      ),
+      tool: applyToolChunk({ toolName, state: "input-streaming", inputText: "" }, chunk),
     }),
     (part) =>
       part.kind === "tool"
@@ -195,16 +191,14 @@ function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
   )
 }
 
-function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): NormalizedTool {
+function applyToolChunk(tool: NormalizedTool, chunk: ToolChunk): NormalizedTool {
   switch (chunk.type) {
     case "tool-input-start":
       return { ...tool, state: "input-streaming" }
     case "tool-input-delta":
       return {
         ...tool,
-        inputText:
-          (tool.inputText ?? "") +
-          (typeof chunk.inputTextDelta === "string" ? chunk.inputTextDelta : ""),
+        inputText: (tool.inputText ?? "") + chunk.inputTextDelta,
         state: "input-streaming",
       }
     case "tool-input-available":
@@ -214,19 +208,12 @@ function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): N
         ...tool,
         state: "output-error",
         input: chunk.input,
-        // Views say in the reader's language that the call failed when the stream gives no text.
-        ...(typeof chunk.errorText === "string" ? { errorText: chunk.errorText } : {}),
+        errorText: chunk.errorText,
       }
     case "tool-output-available":
       return { ...tool, state: "output-available", output: chunk.output }
     case "tool-output-error":
-      return {
-        ...tool,
-        state: "output-error",
-        ...(typeof chunk.errorText === "string" ? { errorText: chunk.errorText } : {}),
-      }
-    default:
-      return tool
+      return { ...tool, state: "output-error", errorText: chunk.errorText }
   }
 }
 
@@ -250,8 +237,4 @@ function upsertPart(
 // The identity a text/reasoning span merges on: the same id reused in a later step is a new part.
 function spanKey(kind: "text" | "reasoning", id: string, stepIndex: number): string {
   return `${kind}#${stepIndex}#${id}`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }

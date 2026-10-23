@@ -596,7 +596,7 @@ function agentStreamPayload(
         ...base,
         type: "agent.ui.chunk",
         chunkIndex: input.chunkIndex,
-        chunk: { type: "text-delta", textDelta: "hello" },
+        chunk: { type: "text-delta", id: "text", delta: "hello" },
       }
     case "agent.run.finished":
       return { ...base, type: "agent.run.finished", status: "succeeded", finishReason: "stop" }

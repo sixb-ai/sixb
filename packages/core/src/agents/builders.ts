@@ -1,3 +1,4 @@
+import type { ReadonlyJsonValue } from "../json"
 import { createAgentToolDefinition } from "./tool-definition"
 import type {
   AgentToolDefinition,
@@ -5,6 +6,7 @@ import type {
   AgentToolHandler,
   AgentToolInputBuilder,
   AgentToolInputSchema,
+  AgentToolResult,
   AgentToolRunBuilder,
   InferAgentToolInputSchema,
 } from "./types"
@@ -36,9 +38,9 @@ export function defineAgentTool<const TName extends string>(
           assertValidAgentToolInput(name, input)
 
           return {
-            run(
-              handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
-            ): AgentToolDefinition<TName, TInput> {
+            run<TOutput extends ReadonlyJsonValue | AgentToolResult>(
+              handler: AgentToolHandler<InferAgentToolInputSchema<TInput>, TOutput>
+            ): AgentToolDefinition<TName, TInput, TOutput> {
               return createAgentToolDefinition({ name, description, input, handler })
             },
           }

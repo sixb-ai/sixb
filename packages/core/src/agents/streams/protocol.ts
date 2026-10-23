@@ -1,7 +1,8 @@
 import type { Broker, BrokerStreamDefinition } from "../../broker"
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
-import { isJsonValue, isPlainRecord, type JsonValue } from "../../json"
+import { isPlainRecord, type JsonValue } from "../../json"
+import { isModelUiChunk, type ModelUiChunk } from "../../models/events"
 import {
   AGENT_RUN_FAILURE_CODES,
   type AgentContextCheckpointReason,
@@ -235,7 +236,7 @@ export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.ui.chunk"
       readonly chunkIndex: number
-      readonly chunk: JsonValue
+      readonly chunk: ModelUiChunk
     })
   | (AgentRunStreamEventBase & {
       readonly type: "agent.message.finalized"
@@ -332,11 +333,8 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
         AGENT_COMPACTION_FAILURE_CODES.includes(value.errorCode as AgentCompactionFailureCode)
       )
     case "agent.ui.chunk":
-      return (
-        Number.isInteger(value.chunkIndex) &&
-        Object.hasOwn(value, "chunk") &&
-        isJsonValue(value.chunk)
-      )
+      // A chunk type this reader does not know fails here, so a newer producer's chunk is skipped.
+      return Number.isInteger(value.chunkIndex) && isModelUiChunk(value.chunk)
     case "agent.message.finalized":
       return typeof value.messageId === "string"
     case "agent.run.finished":
