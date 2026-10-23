@@ -102,14 +102,17 @@ Settings › Memory shows both memories, as the agent reads them. A person can c
 see every change with who made it, restore a file as an earlier change left it, or delete their
 memory. Their edits are saves like the agent's, and the next conversation reads them.
 
-Read or delete the signed-in user's memory, or the project's, from your code:
+Read or delete the project's memory from your code:
 
 ```ts
-const { revision, files } = await sixb.agent.memory.get("user")
-await sixb.agent.memory.delete("user")
-const shared = await sixb.agent.memory.get("project")
-const before = await sixb.agent.memory.get("user", { revision: 3 })
+const { revision, files } = await sixb.agent.memory.get("project")
+const before = await sixb.agent.memory.get("project", { revision: 3 })
+await sixb.agent.memory.delete("project")
 ```
+
+A user's memory is reachable only as that user: in their conversations, in Settings › Memory, or
+through `/api/agent-memory/user` with their session. Your code runs as the system, so
+`get("user")` there reads the system's own memory, not a person's.
 
 Each save is a revision with the agent's own description of what it learned. `MEMORY.md` holds at
 most 16 KB, any other file 256 KB, and each memory 4 MB in all. Earlier versions of a file are
