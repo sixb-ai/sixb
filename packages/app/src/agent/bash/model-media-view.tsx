@@ -1,4 +1,4 @@
-import { getAiModelCallOptions } from "@sixb/client/hooks"
+import { getAiModelCallFilesOptions } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { ImagePlus, Maximize2, Pause, Play } from "lucide-react"
@@ -32,7 +32,7 @@ function useCallFiles(callId: string | undefined): {
   readonly missing: boolean
 } {
   const { data, isError } = useQuery({
-    ...getAiModelCallOptions({ path: { callId: callId ?? "" } }),
+    ...getAiModelCallFilesOptions({ path: { callId: callId ?? "" } }),
     enabled: callId !== undefined,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,

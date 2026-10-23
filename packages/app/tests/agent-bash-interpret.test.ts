@@ -57,7 +57,7 @@ describe("classifyCommand", () => {
       'sixb models image "a van" --output out/van.png': "models.image",
       'sixb models speech "Hello." --output out/hello.mp3': "models.speech",
       "sixb models transcribe call.m4a": "models.transcribe",
-      "sixb models calls get call_1": "models.calls",
+      "sixb models calls files call_1": "models.calls",
       "sixb api get /api/project": "api.get",
       "sixb api post /api/custom --file body.json": "api.post",
     } as const
