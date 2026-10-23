@@ -22,6 +22,7 @@ the question, answer in the chat.
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
 To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
+Data from the project's objects goes in a query, so the artifact stays live: read `queries.md`.
 
 Prefer a `document` to a DOCX or PDF, a `sheet` to an XLSX or CSV file, and `slides` to a PPTX,
 unless the user asked for that format: they render in the app, and their versions stay readable side by side. A report
@@ -86,4 +87,6 @@ deliverable.
 - A title is plain text of at most 200 characters that names the deliverable ("Q3 operations
   review"), not the request.
 - Files and folders whose names start with a dot are not published.
+- A sheet of the project's data is live, its rows read by a query, unless the user asked for a
+  snapshot (`queries.md`).
 - An artifact holds no secrets, credentials, or internal URLs.

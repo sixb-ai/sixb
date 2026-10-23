@@ -272,7 +272,8 @@ function partsOf(
             ...outline.sheets.map((sheet) =>
               part(
                 sheet.name,
-                `Sheet ${sheet.name}: ${sheet.rows} rows; columns ${sheet.columns.join(", ")}`
+                // A live sheet's rows are each reader's, read by its query: it has no count.
+                `Sheet ${sheet.name}: ${sheet.query === undefined ? `${sheet.rows} rows` : `live rows of query ${sheet.query}`}; columns ${sheet.columns.join(", ")}`
               )
             ),
             ...outline.charts.map((chart) => part(`chart=${chart}`, `Chart ${chart}`)),
