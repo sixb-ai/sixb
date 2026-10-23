@@ -1,4 +1,5 @@
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "../limits"
+import { isArtifactQueryName } from "../queries"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
 /**
@@ -105,13 +106,16 @@ interface FrameEventOf<Event extends string, Params> {
 
 /**
  * What the frame asks of the app, numbered so the app's `result` answers it: a page keeping data
- * with `sixb.state`. The app answers only its own frame, for the artifact it shows.
+ * with `sixb.state`, or reading one of its version's queries with `sixb.query`. The app answers
+ * only its own frame, for the artifact and the version it shows.
  */
 export type FrameCall =
   | FrameCallOf<"state.get", { readonly key: string }>
   | FrameCallOf<"state.set", { readonly key: string; readonly value: unknown }>
   | FrameCallOf<"state.delete", { readonly key: string }>
   | FrameCallOf<"state.keys", Record<string, never>>
+  /** Runs `queries/<name>.json` as the reader; the value is the query route's JSON. */
+  | FrameCallOf<"query.run", { readonly name: string }>
 
 interface FrameCallOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -159,6 +163,13 @@ export function parseFrameCall(data: unknown): FrameCall | null {
     }
     case "state.keys":
       return { protocol: FRAME_PROTOCOL, call, method: "state.keys", params: {} }
+    case "query.run": {
+      // The client puts the name in the URL's path, as it does a key.
+      const { name } = params
+      if (typeof name !== "string" || !isArtifactQueryName(name)) return null
+
+      return { protocol: FRAME_PROTOCOL, call, method: "query.run", params: { name } }
+    }
     default:
       return null
   }

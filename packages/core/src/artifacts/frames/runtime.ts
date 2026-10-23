@@ -16,6 +16,11 @@
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
  * around it, as the layout check opens a page, the values live in memory until it closes.
+ *
+ * And `window.sixb.query(name)`, which reads one of the version's queries as the reader: the app
+ * runs it and answers with the query route's JSON. Opened on its own, it reads
+ * `__sixb/queries/<name>.json` beside the runtime instead, where the layout check serves what the
+ * query returned for the Agent's requester.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -36,8 +41,12 @@ export function frameRuntime(): void {
   /** What a page may keep, as `ARTIFACT_STATE_LIMITS` says: refused here before it is sent. */
   const MAX_KEY_LENGTH = 128
   const MAX_VALUE_BYTES = 65536
+  /** A query's name, as `isArtifactQueryName` says: refused here before it is sent. */
+  const QUERY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
   const root = document.documentElement
-  const deck = document.currentScript?.getAttribute("data-sixb-layout") !== "page"
+  // Only set while the runtime itself runs, so kept for what reads it later.
+  const script = document.currentScript as HTMLScriptElement | null
+  const deck = script?.getAttribute("data-sixb-layout") !== "page"
   const start = new URLSearchParams(window.location.hash.slice(1))
   if (deck) {
     root.classList.add("sixb-deck")
@@ -223,8 +232,8 @@ export function frameRuntime(): void {
   }
 
   /**
-   * `sixb.state`, promise-based: each call posted numbered, and settled by the app's result with
-   * that number.
+   * `sixb.state` and `sixb.query`, promise-based: each call posted numbered, and settled by the
+   * app's result with that number.
    */
   const calls = new Map<
     number,
@@ -291,8 +300,36 @@ export function frameRuntime(): void {
       Promise.resolve().then(() => call("state.delete", { key: checkKey(key) })),
     keys: () => call("state.keys", {}),
   }
+
+  /**
+   * A query's result as the check serves it beside the runtime, `__sixb/queries/<name>.json`:
+   * resolved from the runtime's own address, so a canvas's board in its folder finds it too.
+   */
+  const readQueryFile = async (name: string): Promise<unknown> => {
+    const base = script?.src || new URL("__sixb/runtime.js", window.location.href).href
+    const response = await fetch(new URL(`queries/${name}.json`, base))
+    if (response.ok) return response.json()
+
+    if (response.status === 404) {
+      throw new Error(`[Sixb] No query '${name}' in this page's version.`)
+    }
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+    throw new Error(
+      typeof body?.error === "string" ? body.error : `[Sixb] Query '${name}' could not be read.`
+    )
+  }
+  const query = (name: string): Promise<unknown> =>
+    Promise.resolve().then(() => {
+      if (typeof name !== "string" || !QUERY_NAME.test(name)) {
+        throw new TypeError(
+          "sixb.query: a query's name is that of its file, queries/<name>.json: lowercase letters, digits and hyphens."
+        )
+      }
+      return alone ? readQueryFile(name) : call("query.run", { name })
+    })
+
   Object.defineProperty(window, "sixb", {
-    value: Object.freeze({ state: Object.freeze(state) }),
+    value: Object.freeze({ state: Object.freeze(state), query }),
     enumerable: true,
   })
 

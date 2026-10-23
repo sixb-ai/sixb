@@ -82,6 +82,9 @@ export function artifactQueryKey(artifactId: string, version: number, name: stri
   return ["artifact-query", artifactId, version, name] as const
 }
 
+/** The version a query runs at: the one the view or the frame shows. */
+type QueriedVersion = Pick<ArtifactVersion, "artifactId" | "version">
+
 /** Read once a view shows it, and again when one opens after half a minute, as page state is. */
 const QUERY_STALE_MS = 30_000
 
@@ -123,11 +126,11 @@ export function useArtifactQuery(
 
 /**
  * A query's rows through the cache {@link useArtifactQuery} fills, for work done outside a render,
- * such as a download of sheets the reader has not opened.
+ * such as a download of sheets the reader has not opened, or a page's `sixb.query` call.
  */
 export function fetchArtifactQuery(
   client: QueryClient,
-  version: ArtifactVersion,
+  version: QueriedVersion,
   name: string
 ): Promise<GetArtifactQueryResponse> {
   return client.fetchQuery({
@@ -139,7 +142,7 @@ export function fetchArtifactQuery(
 }
 
 async function readQuery(
-  version: ArtifactVersion,
+  version: QueriedVersion,
   name: string,
   signal: AbortSignal
 ): Promise<GetArtifactQueryResponse> {
