@@ -35,7 +35,8 @@ import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
 import { usePageEvents } from "../renderers/page"
 import { cellFormatter } from "../renderers/sheet/format"
-import { useSheetModel, useWorkbook } from "../renderers/sheet/workbook"
+import { isLocked } from "../renderers/sheet/model"
+import { liveSheetErrorText, useSheetModel, useWorkbook } from "../renderers/sheet/workbook"
 import { type ArtifactTarget, artifactTargetHref } from "../target"
 import { artifactThemeAttributes } from "../theme"
 import {
@@ -423,13 +424,15 @@ function SheetEmbed({
   readonly range?: CellRange
 }) {
   const locale = useLocale()
-  const messages = useArtifactMessages().references
+  const all = useArtifactMessages()
+  const messages = all.references
   const { workbook, loading } = useWorkbook(version)
   const csv = useSheetModel(
     version,
     workbook?.sheets.find((entry) => entry.name === sheet)
   )
   const { model } = csv
+  if (csv.error) return <Unavailable {...liveSheetErrorText(csv.error, all.sheet)} />
   if (!model) return <Pending loading={loading || csv.loading} />
   const left = range?.left ?? 0
   const right = range ? range.right : Math.min(model.columns.length, EMBED_COLUMNS) - 1
@@ -461,13 +464,26 @@ function SheetEmbed({
             <tr key={`${first + rowIndex}`}>
               {columns.map((column, index) => {
                 const cell = formatters[index]?.(row[left + index] ?? "") ?? { text: "" }
+                const locked = isLocked(model, first + rowIndex, left + index)
                 return (
                   <td
                     key={column.name}
                     data-numeric={column.numeric ? "" : undefined}
                     className={cn(cell.negative && "text-destructive")}
                   >
-                    {cell.text}
+                    {locked ? (
+                      <span
+                        role="img"
+                        aria-label={all.sheet.locked}
+                        title={all.sheet.locked}
+                        data-locked=""
+                        className="inline-flex text-muted-foreground/70"
+                      >
+                        <Lock className="size-3" aria-hidden="true" />
+                      </span>
+                    ) : (
+                      cell.text
+                    )}
                   </td>
                 )
               })}
@@ -501,6 +517,8 @@ function ChartEmbed({
     workbook?.sheets.find((entry) => entry.name === declared?.sheet)
   )
   const { model } = csv
+  const messages = useArtifactMessages().sheet
+  if (csv.error) return <Unavailable {...liveSheetErrorText(csv.error, messages)} />
   if (!declared || !model) return <Pending loading={loading || csv.loading} />
   return (
     <div className={cn("px-3 pt-3 pb-2", fill ? "h-full" : "h-64")}>
@@ -766,7 +784,7 @@ function Unavailable({
   fill = false,
 }: {
   readonly title: string
-  readonly description: string
+  readonly description?: string
   readonly icon?: typeof FileX
   /** Centered in the box it fills, as a deck's or a page's embed is. */
   readonly fill?: boolean
@@ -774,9 +792,11 @@ function Unavailable({
   return (
     <div className={cn("flex items-center gap-3 px-4 py-5 text-sm", fill && "justify-center")}>
       <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="flex flex-col">
+      <span className="flex min-w-0 flex-col">
         <span className="font-medium text-foreground">{title}</span>
-        <span className="text-muted-foreground">{description}</span>
+        {description ? (
+          <span className="break-words text-muted-foreground">{description}</span>
+        ) : null}
       </span>
     </div>
   )

@@ -6,6 +6,7 @@ import {
   Check,
   Image,
   Link2,
+  Lock,
   SquareCheck,
   Tag,
 } from "lucide-react"
@@ -283,6 +284,7 @@ export function TotalCell({
   text,
   label,
   title,
+  locked,
   fixed,
   lastFixed,
   scrolled,
@@ -292,6 +294,8 @@ export function TotalCell({
   /** It names the row rather than totaling a column. */
   readonly label: boolean
   readonly title?: string
+  /** The total reads a value the reader may not see: it shows a lock, and `locked` says why. */
+  readonly locked?: string
   readonly fixed: boolean
   readonly lastFixed: boolean
   readonly scrolled: boolean
@@ -312,8 +316,39 @@ export function TotalCell({
       )}
       style={style}
     >
-      <span className="min-w-0 overflow-hidden text-ellipsis">{text}</span>
+      {locked ? (
+        <LockedContent label={locked} numeric />
+      ) : (
+        <span className="min-w-0 overflow-hidden text-ellipsis">{text}</span>
+      )}
     </div>
+  )
+}
+
+/**
+ * A value the reader may not see, in a live sheet: a quiet lock where it would be, which says so
+ * on hover and to assistive technology. It is not an empty cell.
+ */
+export function LockedContent({
+  label,
+  numeric,
+}: {
+  readonly label: string
+  readonly numeric: boolean
+}) {
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-locked=""
+      className={cn(
+        "flex min-w-0 flex-1 items-center text-muted-foreground/70",
+        numeric && "justify-end"
+      )}
+    >
+      <Lock className="size-3 shrink-0" aria-hidden="true" />
+    </span>
   )
 }
 

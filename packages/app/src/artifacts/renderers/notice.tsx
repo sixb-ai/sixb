@@ -19,7 +19,9 @@ export function ViewerNotice({
       <div className="flex max-w-sm flex-col items-center gap-2">
         {icon ?? <FileWarning className="size-8 text-muted-foreground" aria-hidden="true" />}
         <p className="text-sm font-medium text-foreground">{title}</p>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+        {description ? (
+          <p className="text-sm break-words text-muted-foreground">{description}</p>
+        ) : null}
         {action ? <div className="pt-2">{action}</div> : null}
       </div>
     </div>
