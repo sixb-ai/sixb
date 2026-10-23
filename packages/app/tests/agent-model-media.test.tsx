@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { getAiModelCallOptions } from "@sixb/client/hooks"
+import { getAiModelCallFilesOptions } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { AssistantBody } from "../src/agent/components/message-parts"
@@ -40,7 +40,7 @@ function render(parts: NormalizedPart[], live = false): string {
     ["call_van", "image/jpeg"],
     ["call_voice", "audio/mpeg"],
   ] as const) {
-    queryClient.setQueryData(getAiModelCallOptions({ path: { callId } }).queryKey, {
+    queryClient.setQueryData(getAiModelCallFilesOptions({ path: { callId } }).queryKey, {
       callId,
       files: [file(mediaType)],
       recordedAt: "2026-10-22T12:00:00.000Z",

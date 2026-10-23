@@ -107,7 +107,7 @@ const CLI_API_ROUTES = [
   "POST /api/models/image/generations",
   "POST /api/models/audio/speech",
   "POST /api/models/audio/transcriptions",
-  "GET /api/ai/model-calls/:callId",
+  "GET /api/ai/model-calls/:callId/files",
   "GET /api/ai/model-calls/:callId/files/content",
 ] as const
 
