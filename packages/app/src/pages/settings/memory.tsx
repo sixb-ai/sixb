@@ -665,12 +665,14 @@ function FileView({
         <TextEditor
           name={name}
           contents={file.contents}
+          revision={view.revision}
           pending={pending}
           onCancel={() => setMode("read")}
-          onSave={async (contents, noteText) => {
+          onSave={async (contents, noteText, baseRevision) => {
             const saved = await save(
               [{ path: file.path, contents }],
-              noteText || messages.editedMessage(name)
+              noteText || messages.editedMessage(name),
+              baseRevision
             )
             if (saved !== null) {
               setMode("read")
@@ -811,28 +813,44 @@ function EntryForm({
   )
 }
 
-/** A whole file as text, for what the list of memories cannot change, such as its headings. */
-function TextEditor({
+/**
+ * A whole file as text, for what the list of memories cannot change, such as its headings.
+ *
+ * The draft saves from the revision it was opened at. When the file changes meanwhile, the draft
+ * stays as typed and saving waits until the person starts again from the latest version.
+ */
+export function TextEditor({
   name,
   contents,
+  revision,
   pending,
   onSave,
   onCancel,
 }: {
   readonly name: string
   readonly contents: string
+  readonly revision: number
   readonly pending: boolean
-  readonly onSave: (contents: string, note: string) => void | Promise<void>
+  readonly onSave: (contents: string, note: string, baseRevision: number) => void | Promise<void>
   readonly onCancel: () => void
 }) {
   const allMessages = useSettingsMessages()
   const messages = allMessages.memory
+  const [base, setBase] = useState({ revision, contents })
   const [draft, setDraft] = useState(contents)
   const [note, setNote] = useState("")
   const changed = draft !== contents
+  const stale = base.contents !== contents
+
   const submit = () => {
-    if (changed && !pending) void onSave(draft, note.trim())
+    if (changed && !stale && !pending) void onSave(draft, note.trim(), base.revision)
   }
+
+  const startFromLatest = () => {
+    setBase({ revision, contents })
+    setDraft(contents)
+  }
+
   return (
     <form
       className="flex flex-col gap-4 border-t border-border p-5"
@@ -841,6 +859,18 @@ function TextEditor({
         submit()
       }}
     >
+      {stale ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 py-1.5 pr-1.5 pl-3 text-[0.8125rem]"
+        >
+          <span className="mr-auto">{messages.changedSinceOpened(name)}</span>
+          <Button type="button" variant="outline" size="sm" onClick={startFromLatest}>
+            {messages.startFromLatest}
+          </Button>
+        </div>
+      ) : null}
+
       <Textarea
         aria-label={messages.editing(name)}
         value={draft}
@@ -875,7 +905,7 @@ function TextEditor({
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           {allMessages.common.cancel}
         </Button>
-        <Button type="submit" size="sm" disabled={pending || !changed}>
+        <Button type="submit" size="sm" disabled={pending || !changed || stale}>
           {pending ? <Loader2 className="animate-spin" /> : null}
           {pending ? messages.saving : messages.save}
         </Button>

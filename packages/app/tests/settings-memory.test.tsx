@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SectionsProvider, SettingsMemoryPage } from "../src/pages"
+import { TextEditor } from "../src/pages/settings/memory"
 import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
 
@@ -282,5 +283,50 @@ describe("the Memory page", () => {
         )
       }
     )
+  })
+})
+
+describe("Edit as text", () => {
+  test("keeps a draft the file changed under, and saves it only from the latest version", () => {
+    // Reproduce by having TextEditor's submit save from the `revision` prop, with no `stale` check:
+    // the Save after a 409 goes out from revision 3 and replaces the line saved there meanwhile.
+    const opened = mine.files[0]?.contents ?? ""
+    const saves: number[] = []
+    const editor = (contents: string, revision: number) => (
+      <TextEditor
+        name="Main memory"
+        contents={contents}
+        revision={revision}
+        pending={false}
+        onSave={(_draft, _note, baseRevision) => {
+          saves.push(baseRevision)
+        }}
+        onCancel={() => {}}
+      />
+    )
+    const view = render(editor(opened, 2))
+    const field = view.getByRole("textbox", { name: "Editing Main memory" })
+    const type = (value: string) => {
+      fireEvent.input(field, { target: { value } })
+      fireEvent.keyUp(field, { key: "s" })
+    }
+    const submit = () => fireEvent.submit(field.closest("form") as HTMLFormElement)
+
+    type("# Memory\n\n- Prefers tables\n")
+    submit()
+    expect(saves).toEqual([2])
+
+    // The save was refused and the page reloaded the file another conversation saved.
+    view.rerender(editor(`${opened}- Prefers euros (added 2026-10-20)\n`, 3))
+    view.getByText("Main memory changed since you opened it.")
+    expect((field as HTMLTextAreaElement).value).toBe("# Memory\n\n- Prefers tables\n")
+    submit()
+    expect(saves).toEqual([2])
+
+    fireEvent.click(view.getByRole("button", { name: "Start from the latest version" }))
+    expect((field as HTMLTextAreaElement).value).toContain("- Prefers euros")
+    type("# Memory\n\n- Prefers euros, in tables\n")
+    submit()
+    expect(saves).toEqual([2, 3])
   })
 })
