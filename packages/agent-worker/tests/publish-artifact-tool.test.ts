@@ -20,6 +20,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type JsonValue,
+  link,
   type Principal,
   prop,
   SixbHost,
@@ -40,14 +41,30 @@ const run = { id: "run_1", threadId: "thr_1", executionToken: "exec_1" }
 const context = { signal: new AbortController().signal, callId: "call", toolCallId: "call" }
 
 const financial = defineMarking("financial")
+
+const Customer = defineObjectType({
+  id: "Customer",
+  name: "Customer",
+  properties: [prop("id", "string", { primary: true, required: true }), prop("name", "string")],
+})
+
+/** The invoices the skill's live sheet example reads. */
 const Invoice = defineObjectType({
   id: "Invoice",
   name: "Invoice",
   properties: [
     prop("id", "string", { primary: true, required: true }),
+    prop("number", "string"),
+    prop("status", "string", { query: { searchable: true, filterable: true } }),
+    prop("dueDate", "date", { query: { searchable: true, sortable: true } }),
     prop("amount", "double", { markings: [financial] }),
+    prop("paid", "double"),
   ],
+  links: [link("customer", Customer, { cardinality: "one" })],
 })
+
+/** What reading the invoices takes. */
+const invoiceReader = { "view:object": new Set(["Invoice", "Customer"]) }
 
 let root: string
 let storage: InMemoryStorage
@@ -58,7 +75,11 @@ let host: SixbHost
  * What a turn asked for by this user reads of artifacts, by the project's one rule: signed in
  * with a session, as a person asking in the app is.
  */
-function readerFor(user: Principal, grants: Partial<GrantIndex> = {}) {
+function readerFor(
+  user: Principal,
+  grants: Partial<GrantIndex> = {},
+  clearances?: ReadonlySet<string>
+) {
   return bindRequestExecution(host, {
     request: new Request("http://localhost/test"),
     authorization: {
@@ -70,6 +91,7 @@ function readerFor(user: Principal, grants: Partial<GrantIndex> = {}) {
         groupIds: [],
         roleIds: [],
         grants: { ...emptyGrantIndex(), "run:agent": true, ...grants },
+        ...(clearances ? { clearances } : {}),
       },
     },
   }).artifacts
@@ -103,7 +125,7 @@ beforeEach(async () => {
   blobStorage = new InMemoryBlobStorage()
   host = new SixbHost({
     id: projectId,
-    ontology: [Invoice],
+    ontology: [Customer, Invoice],
     markings: [financial],
     storage,
     blobStorage,
@@ -146,6 +168,8 @@ type ToolOptions = {
   readonly run?: typeof run
   /** What the requester may do besides running the Agent. */
   readonly grants?: Partial<GrantIndex>
+  /** The markings the requester is cleared for. */
+  readonly clearances?: ReadonlySet<string>
 }
 
 /** What a run installs in its sandbox before it publishes. */
@@ -182,7 +206,7 @@ function tools(options: ToolOptions = {}) {
     projectId,
     storage,
     artifacts: storage.artifacts,
-    reader: readerFor(options.author ?? owner, options.grants),
+    reader: readerFor(options.author ?? owner, options.grants, options.clearances),
     blobStorage,
     run: {
       ...(options.run ?? run),
@@ -760,6 +784,7 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/slides/launch-plan",
       "examples/sheet/service-metrics",
       "examples/sheet/parts-inventory",
+      "examples/sheet/overdue-invoices",
       "examples/page/fleet-planner",
       "examples/page/service-explorer",
       "examples/page/dispatch-board",
@@ -776,7 +801,13 @@ describe("the sixb-artifacts skill's examples", () => {
     }
     for (const directory of directories) {
       const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page" | "canvas"
-      expect(await publish({ path: directory, kind, title: directory })).toMatchObject({
+      // A live sheet's query is run as the requester, who reads the invoices and their amounts.
+      expect(
+        await publish(
+          { path: directory, kind, title: directory },
+          { grants: invoiceReader, clearances: new Set([financial.id]) }
+        )
+      ).toMatchObject({
         version: 1,
         kind,
         warnings: [],
@@ -1079,5 +1110,54 @@ describe("a version's queries", () => {
 
     write("work/overdue/queries/invoices.json", invoiceIds)
     expect(await publish(request, { grants })).toMatchObject({ version: 1 })
+  })
+
+  // Guard proof: leave `queries/` out of listSources' files; the sheet is then refused, as its
+  // query is not in the version.
+  test("publish with the live sheet that reads one, which the manifest names", async () => {
+    write(
+      "work/overdue/workbook.json",
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Overdue",
+            query: "overdue",
+            columns: { Invoice: { from: "number" }, Customer: { from: "customer.name" } },
+          },
+        ],
+      })
+    )
+    write(
+      "work/overdue/queries/overdue.json",
+      JSON.stringify({
+        kind: "expand",
+        // Only what the requester can read: the invoices' amounts are marked.
+        input: {
+          kind: "project",
+          input: { kind: "start", objectTypeId: "Invoice" },
+          properties: ["number"],
+        },
+        expansions: [{ linkId: "customer", direction: "outgoing" }],
+      })
+    )
+
+    const published = (await publish(
+      { path: "work/overdue", kind: "sheet", title: "Overdue" },
+      { grants: invoiceReader }
+    )) as { artifactId: string }
+    const version = await storage.artifacts.getVersion({
+      projectId,
+      artifactId: published.artifactId,
+      version: 1,
+    })
+    expect(version?.files.map((file) => file.path).sort()).toEqual([
+      "queries/overdue.json",
+      "workbook.json",
+    ])
+
+    const [entry] = JSON.parse((await install()).manifestJson).artifacts
+    expect(entry.parts[0].name).toBe(
+      "Sheet Overdue: live rows of query overdue; columns Invoice, Customer"
+    )
   })
 })
