@@ -85,11 +85,12 @@ function createRuntime(
     messages,
     sixb,
     storage,
+    strategy,
   }
 }
 
 function customAuthBootstrap(html: string): {
-  readonly state: { readonly kind: string; readonly email?: string }
+  readonly state: { readonly kind: string; readonly email?: string; readonly firstSignIn?: true }
   readonly signInUrl: string
   readonly submission?: {
     readonly kind: string
@@ -179,6 +180,27 @@ async function signIn(
   )
   const body = (await sessionResponse.json()) as { readonly session: { readonly id: string } }
   return { sessionCookie, csrfCookie, sessionId: body.session.id }
+}
+
+// Submits the confirmation page the way its form does, with the name the person typed.
+async function confirmWithName(
+  app: ReturnType<typeof createSixbApi>,
+  link: URL,
+  displayName: string
+): Promise<Response> {
+  const body = new URLSearchParams({
+    magicLinkId: link.searchParams.get("magicLinkId") ?? "",
+    token: link.searchParams.get("token") ?? "",
+    displayName,
+  })
+  return app.fetch(
+    new Request(new URL("/auth/callback", link).toString(), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: link.origin },
+      body,
+      redirect: "manual",
+    })
+  )
 }
 
 async function founderUserId(storage: InMemoryStorage): Promise<string> {
@@ -283,7 +305,11 @@ describe("magic-link auth routes", () => {
         expect(confirmation.headers.get("content-security-policy")).toContain(
           "form-action 'self' http://app.localhost"
         )
-        expect(bootstrap.state).toEqual({ kind: "confirm", email: "founder@acme.com" })
+        expect(bootstrap.state).toEqual({
+          kind: "confirm",
+          email: "founder@acme.com",
+          firstSignIn: true,
+        })
         expect(bootstrap.submission).toMatchObject({
           kind: "confirmSignIn",
           fields: {
@@ -436,6 +462,74 @@ describe("magic-link auth routes", () => {
     for (const cookie of authCookies) {
       expect(cookie).toContain(`Expires=${storedSession.expiresAt.toUTCString()}`)
     }
+  })
+
+  // To see this fail, drop `displayName` from the POST /auth/callback body.
+  test("asks a new member for their name at their first sign-in, and only then", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const nameField = 'name="displayName"'
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const first = linkFromLatestMessage(messages)
+    const firstPage = await app.fetch(new Request(first.toString(), { redirect: "manual" }))
+    expect(await firstPage.text()).toContain(nameField)
+    expect((await confirmWithName(app, first, " Ada Founder ")).status).toBe(303)
+    await expect(
+      storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+    ).resolves.toMatchObject({ displayName: "Ada Founder" })
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const second = linkFromLatestMessage(messages)
+    const secondPage = await app.fetch(new Request(second.toString(), { redirect: "manual" }))
+    expect(await secondPage.text()).not.toContain(nameField)
+    expect((await confirmWithName(app, second, "Someone Else")).status).toBe(303)
+    await expect(
+      storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+    ).resolves.toMatchObject({ displayName: "Ada Founder" })
+  })
+
+  // Invitees always reach the confirmation page: their link has no requesting browser. To see this
+  // fail, replace `return invitation !== null` with `return false` in the strategy's wouldCreateUser.
+  test("asks an invitee for their name when they accept the invitation", async () => {
+    const { app, messages, storage, strategy } = createRuntime()
+    const invitation = await storage.auth.invitations.createOrUpdateActive({
+      id: "inv_ava",
+      projectId,
+      email: "ava@acme.com",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    await strategy.deliverInvitation({
+      projectId,
+      authStorage: storage.auth,
+      invitation,
+      returnTo: "http://app.localhost/",
+      requestOrigin: "http://api.localhost",
+    })
+    const link = linkFromLatestMessage(messages)
+
+    const page = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+    expect(await page.text()).toContain('name="displayName"')
+    expect((await confirmWithName(app, link, "Ava Lovelace")).status).toBe(303)
+
+    await expect(
+      storage.auth.users.getByEmail({ projectId, email: "ava@acme.com" })
+    ).resolves.toMatchObject({ displayName: "Ava Lovelace" })
+    await expect(
+      storage.auth.invitations.getById({ projectId, id: "inv_ava" })
+    ).resolves.toMatchObject({ status: "accepted" })
+  })
+
+  // To see this fail, pass the name to the strategy as given in AuthRuntime.completeMagicLinkSignIn.
+  test("a name that breaks the profile rules never blocks the first sign-in", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const link = linkFromLatestMessage(messages)
+
+    expect((await confirmWithName(app, link, "Ada \u202Erednuof")).status).toBe(303)
+    const user = await storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+    expect(user?.displayName).toBeUndefined()
   })
 
   test("GET with a wrong token is rejected without disclosing the email", async () => {

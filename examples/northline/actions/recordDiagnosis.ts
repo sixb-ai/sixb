@@ -20,11 +20,9 @@ export const recordDiagnosis = defineAction("record-diagnosis", {
   })
   .validate(({ params, target }) => {
     if (target.properties.status !== "in_progress") {
-      throw new Error(
-        `[Northline] Cannot record diagnosis: ${target.properties.number} is not active.`
-      )
+      return { error: `Cannot record diagnosis: ${target.properties.number} is not active.` }
     }
-    if (!params.finding.trim()) throw new Error("[Northline] A diagnostic finding is required.")
+    if (!params.finding.trim()) return { error: "A diagnostic finding is required." }
   })
   .writeback(async ({ params, run, sixb, target }) => {
     const fieldService = await sixb.connector(fieldServiceConnector)

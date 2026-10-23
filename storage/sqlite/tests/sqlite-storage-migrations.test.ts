@@ -189,7 +189,8 @@ const shippedMigrationIds = [
   "068-artifact-state",
   "069-agent-thread-participants",
   "070-forked-context-checkpoints",
-  "071-artifact-threads",
+  "071-unique-values",
+  "072-artifact-threads",
 ]
 
 afterEach(async () => {
@@ -2636,8 +2637,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("shares each existing artifact in the threads its versions came from", () => {
-    // Removal proof: drop the INSERT from migration 071; the artifact is then shared nowhere.
-    const db = replayedDatabase("071-artifact-threads")
+    // Removal proof: drop the INSERT from migration 072; the artifact is then shared nowhere.
+    const db = replayedDatabase("072-artifact-threads")
     try {
       db.run(`
         INSERT INTO artifacts (
@@ -2676,7 +2677,7 @@ describe("SQLite storage migrations", () => {
         )
       `)
 
-      const applied = migration("071-artifact-threads").up(db)
+      const applied = migration("072-artifact-threads").up(db)
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
 
       expect(

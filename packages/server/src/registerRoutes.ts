@@ -35,6 +35,7 @@ import { registerSharedAccessRoutes } from "./routes/shared-access"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
+import { registerUserRoutes } from "./routes/users"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
@@ -76,6 +77,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerEventRoutes(app, host)
   registerLogRoutes(app, host)
   registerActivityRoutes(app, host)
+  registerUserRoutes(app, host)
   registerProjectionRoutes(app, host)
   registerWebhookRunRoutes(app, host)
 

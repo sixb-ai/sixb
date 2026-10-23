@@ -472,7 +472,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         })
       : undefined
 
-    const executionContext = createAgentExecutionContext({
+    const executionContext = await createAgentExecutionContext({
       context,
       host: this.host,
       execution,
@@ -483,6 +483,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         authorizationRef: execution.authorizationRef,
         security: this.host.definitions.security,
       }),
+      shared: (conversation?.participants.length ?? 0) > 0,
     })
     const model = await prepareAgentModel(plan)
     return {
@@ -624,7 +625,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         authorizationRef: durableExecution.authorizationRef,
         security: this.host.definitions.security,
       })
-      const executionContext = createAgentExecutionContext({
+      const executionContext = await createAgentExecutionContext({
         context,
         host: this.host,
         execution: durableExecution,

@@ -159,9 +159,17 @@ export function PersonAvatar({
   readonly size?: "md" | "lg"
 }) {
   const className = size === "lg" ? "size-12 text-base" : "size-9 text-[0.8125rem]"
-  if (avatarUrl) {
+  // A picture that does not load, such as one the app's content policy blocks, shows the initials.
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
+
+  if (avatarUrl && avatarUrl !== brokenUrl) {
     return (
-      <img src={avatarUrl} alt="" className={cn("shrink-0 rounded-full object-cover", className)} />
+      <img
+        src={avatarUrl}
+        alt=""
+        onError={() => setBrokenUrl(avatarUrl)}
+        className={cn("shrink-0 rounded-full object-cover", className)}
+      />
     )
   }
   return (

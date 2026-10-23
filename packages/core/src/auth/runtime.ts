@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
+import type { DomainEventLog } from "../events/service"
+import type { EventDraft } from "../events/types"
 import {
   canPerformMembershipOperation,
   type GroupReference,
@@ -23,6 +25,7 @@ import {
   type UserRecord,
 } from "../storage/auth"
 import { paginate } from "../storage/pagination"
+import { toUserProfile } from "../users/execution"
 import {
   createAccessTokenCredential,
   getBearerAccessTokenValue,
@@ -32,6 +35,13 @@ import {
 import { getRequestClientAddress } from "./client-address"
 import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
 import { AuthRuntimeError } from "./errors"
+import {
+  invitedEvents,
+  profileUpdatedEvents,
+  signInEvents,
+  statusChangedEvents,
+} from "./member-events"
+import { normalizeProfileChanges, signInDisplayName } from "./profile"
 import { SessionCache } from "./session-cache"
 import {
   type BearerSessionTokens,
@@ -76,8 +86,14 @@ import type {
   ListServiceAccountAccessTokensInput,
   ListServiceAccountAccessTokensResult,
   ListServiceAccountsResult,
+  MagicLinkCallbackInput,
+  MagicLinkCallbackResult,
   MemberSummary,
   MembershipCapabilities,
+  OidcCallbackInput,
+  OidcCallbackResult,
+  OwnProfile,
+  ProfileField,
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
@@ -93,10 +109,13 @@ import type {
   UnauthenticatedAuthSession,
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
+  UpdateOwnProfileInput,
 } from "./types"
 import {
   assertNonEmpty,
   isInvitationDeliveryAuthStrategy,
+  isMagicLinkAuthStrategy,
+  isOidcAuthStrategy,
   normalizePagination,
   resolveAuthConfig,
   resolveInvitationExpiresAt,
@@ -122,11 +141,15 @@ const BEARER_ACCESS_TOKEN_TTL_MS = 15 * 60_000
 // response was lost can retry. Later, it means a copy is in use and the session is revoked.
 const REFRESH_REUSE_GRACE_MS = 60_000
 
+const PROFILE_FIELDS: readonly ProfileField[] = ["displayName", "avatarUrl"]
+
 export interface AuthRuntimeOptions {
   readonly projectId: string
   readonly storage: Storage
   readonly security: SecurityDefinitionCatalog
   readonly config?: SixbAuthConfig
+  /** Where member events go: joined, suspended, reactivated, invited, profile updated. */
+  readonly events: DomainEventLog
 }
 
 export class AuthRuntime {
@@ -135,11 +158,13 @@ export class AuthRuntime {
   private readonly security: SecurityDefinitionCatalog
   private readonly config: ResolvedAuthConfig
   private readonly sessionCache: SessionCache | null
+  private readonly events: DomainEventLog
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
     this.storage = options.storage
     this.security = options.security
+    this.events = options.events
     this.config = resolveAuthConfig(options.config)
     this.sessionCache =
       this.config.session.cacheTtlMs > 0 ? new SessionCache(this.config.session.cacheTtlMs) : null
@@ -603,6 +628,65 @@ export class AuthRuntime {
     } catch {
       // Touch is non-critical; ignore failures so auth still succeeds.
     }
+  }
+
+  /**
+   * Finish a magic-link sign-in: consume the link and start the session the server minted. Every
+   * sign-in goes through the runtime, so what follows one is decided here and not in each route.
+   * A name that breaks the profile rules is dropped: it never makes the sign-in fail.
+   */
+  async completeMagicLinkSignIn(
+    input: Pick<MagicLinkCallbackInput, "magicLinkId" | "token" | "session" | "displayName">
+  ): Promise<MagicLinkCallbackResult> {
+    const strategy = this.getStrategy()
+    if (!isMagicLinkAuthStrategy(strategy)) {
+      throw new AuthRuntimeError(
+        "invalid_auth_config",
+        "[Sixb] The active auth strategy does not support magic-link sign-in."
+      )
+    }
+
+    const result = await strategy.completeMagicLinkSignIn({
+      projectId: this.projectId,
+      authStorage: this.requireAuthStorage(),
+      magicLinkId: input.magicLinkId,
+      token: input.token,
+      session: input.session,
+      displayName: signInDisplayName(input.displayName),
+    })
+
+    await this.emitMemberEvents(signInEvents(result))
+
+    return result
+  }
+
+  /** Finish an OIDC sign-in from the provider's callback and start the session the server minted. */
+  async completeOidcSignIn(
+    input: Pick<OidcCallbackInput, "requestUrl" | "requestOrigin" | "session">
+  ): Promise<OidcCallbackResult> {
+    const strategy = this.getStrategy()
+    if (!isOidcAuthStrategy(strategy)) {
+      throw new AuthRuntimeError(
+        "invalid_auth_config",
+        "[Sixb] The active auth strategy does not support OIDC sign-in."
+      )
+    }
+
+    const result = await strategy.completeOidcSignIn({
+      projectId: this.projectId,
+      authStorage: this.requireAuthStorage(),
+      requestUrl: input.requestUrl,
+      requestOrigin: input.requestOrigin,
+      session: input.session,
+    })
+
+    // The provider may have changed the person's name, picture or directory groups, which their
+    // other sessions hold in the cache.
+    this.sessionCache?.invalidateUser(result.user.id)
+
+    await this.emitMemberEvents(signInEvents(result))
+
+    return result
   }
 
   /**
@@ -1116,7 +1200,7 @@ export class AuthRuntime {
       )
     }
 
-    const suspended = await storage.suspendUserAndRevokeSessions({
+    const { user: suspended, previousUser } = await storage.suspendUserAndRevokeSessions({
       projectId: this.projectId,
       userId: user.id,
       suspendedAt: new Date(),
@@ -1124,6 +1208,8 @@ export class AuthRuntime {
     // Storage revoked the user's sessions; drop cached copies so the suspended
     // user stops authenticating immediately.
     this.sessionCache?.invalidateUser(user.id)
+
+    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, suspended))
 
     return { user: suspended, groupIds, managedGroupIds }
   }
@@ -1143,14 +1229,98 @@ export class AuthRuntime {
     )
 
     // Reactivation restores access but not sessions; the user signs in again.
-    const reactivated = await storage.users.updateStatus({
+    const { user: reactivated, previousUser } = await storage.users.updateStatus({
       projectId: this.projectId,
       id: user.id,
       status: "active",
       updatedAt: new Date(),
     })
 
+    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, reactivated))
+
     return { user: reactivated, groupIds, managedGroupIds }
+  }
+
+  /** The caller's own profile, and which of its fields their identity provider manages. */
+  async getProfile(caller: AuthenticatedUserRequestSession): Promise<OwnProfile> {
+    const storage = this.requireAuthStorage()
+    const user = await storage.users.getById({ projectId: this.projectId, id: caller.user.id })
+    if (!user) {
+      throw new AuthStorageError(
+        "missing_user",
+        `[Sixb] User '${caller.user.id}' not found for project '${this.projectId}'.`
+      )
+    }
+
+    return {
+      profile: toUserProfile(user),
+      managedFields: await this.managedProfileFields(storage, user.id),
+    }
+  }
+
+  /**
+   * Change the caller's own name or picture. A field their identity provider manages is refused,
+   * because the next sign-in would overwrite it.
+   */
+  async updateProfile(
+    caller: AuthenticatedUserRequestSession,
+    input: UpdateOwnProfileInput
+  ): Promise<OwnProfile> {
+    const changes = normalizeProfileChanges(input)
+    const storage = this.requireAuthStorage()
+    const managedFields = await this.managedProfileFields(storage, caller.user.id)
+
+    const managedChanges = managedFields.filter((field) => changes[field] !== undefined)
+    if (managedChanges.length > 0) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        `[Sixb] Your identity provider manages ${managedChanges.join(" and ")}. ` +
+          `Change ${managedChanges.length > 1 ? "them" : "it"} there.`
+      )
+    }
+
+    const { user, previousUser } = await storage.users.updateProfile({
+      projectId: this.projectId,
+      id: caller.user.id,
+      ...changes,
+      updatedAt: new Date(),
+    })
+
+    // Every session of this person caches their profile; drop them so all show the change.
+    const changed =
+      user.displayName !== previousUser.displayName || user.avatarUrl !== previousUser.avatarUrl
+    if (changed) {
+      this.sessionCache?.invalidateUser(user.id)
+    }
+
+    await this.emitMemberEvents(profileUpdatedEvents(caller, previousUser, user))
+
+    return { profile: toUserProfile(user), managedFields }
+  }
+
+  // The fields the active strategy's provider sets at sign-in, through any of the person's
+  // identities with it. Identities from a strategy the project no longer uses manage nothing.
+  private async managedProfileFields(
+    storage: AuthStorage,
+    userId: string
+  ): Promise<readonly ProfileField[]> {
+    const strategy = this.getStrategy()
+    if (!strategy?.providerProfileFields) {
+      return []
+    }
+
+    const identities = await storage.identities.listForUser({ projectId: this.projectId, userId })
+    const managed = new Set<ProfileField>()
+    for (const identity of identities) {
+      if (identity.strategyId !== strategy.id) {
+        continue
+      }
+      for (const field of strategy.providerProfileFields(identity)) {
+        managed.add(field)
+      }
+    }
+
+    return PROFILE_FIELDS.filter((field) => managed.has(field))
   }
 
   /** The caller's active sessions, most recently active first. */
@@ -1310,14 +1480,12 @@ export class AuthRuntime {
       ...(input.revealLink && delivery.link ? { link: delivery.link } : {}),
     }
 
-    if (delivery.status === "not_supported") {
-      return { invitation, delivery }
-    }
-
-    if (delivery.status !== "sent") {
+    if (delivery.status !== "sent" && delivery.status !== "not_supported") {
       await this.revokeInvitationAfterDeliveryFailure(authStorage, invitation, now)
       throw this.createInvitationDeliveryError(delivery.status)
     }
+
+    await this.emitMemberEvents(invitedEvents(caller, invitation))
 
     return { invitation, delivery }
   }
@@ -1381,6 +1549,17 @@ export class AuthRuntime {
         revokedAt: new Date(),
       }),
     }
+  }
+
+  /**
+   * Member events follow the auth write that caused them, which has already committed. Auth
+   * storage keeps no outbox, so an event the broker refuses is reported through `onError` and lost:
+   * delivery is at most once.
+   */
+  private async emitMemberEvents(events: readonly EventDraft[]): Promise<void> {
+    if (events.length === 0) return
+
+    await this.events.emit({ events }, { source: "Sixb" })
   }
 
   private requireAuthStorage() {

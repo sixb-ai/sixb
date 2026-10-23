@@ -7,6 +7,7 @@ import { SqliteOntologyOutboxStorage } from "./outbox"
 import { SqliteOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { SqliteRootOperation } from "./shared"
 import { SqliteOntologySourceStorage } from "./sources"
+import { SqliteOntologyUniqueValueStorage } from "./unique-values"
 import { SqliteVectorIndexingStorage } from "./vector-indexing"
 import { SqliteOntologyVectorStorage } from "./vectors"
 
@@ -18,6 +19,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
   readonly vectorIndexing: SqliteVectorIndexingStorage
   readonly vectors: SqliteOntologyVectorStorage
   readonly outbox: SqliteOntologyOutboxStorage
+  readonly uniqueValues: SqliteOntologyUniqueValueStorage
 
   constructor(input: {
     readonly db: Database
@@ -46,6 +48,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
         this.materializations.assertVectorSession(session, projectId, commitId)
     )
     this.outbox = new SqliteOntologyOutboxStorage(input.db, input.runRootOperation)
+    this.uniqueValues = new SqliteOntologyUniqueValueStorage(input.db, input.runRootOperation)
   }
 
   deactivateSessions(): void {

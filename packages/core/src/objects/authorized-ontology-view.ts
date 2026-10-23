@@ -377,6 +377,7 @@ function snapshotProperty(property: Property): Property {
     required: property.required,
     nullable: property.nullable,
     primary: property.primary,
+    unique: property.unique,
     mode: property.mode,
     semanticType: property.semanticType,
     query: snapshotPropertyQuery(property.query),

@@ -69,6 +69,9 @@ function eventScheduleRouteKey(
       return scope.syncId ? `event-schedule:${eventType}:${scope.syncId}` : null
     case "pipelines":
       return scope.pipelineId ? `event-schedule:${eventType}:${scope.pipelineId}` : null
+    case "users":
+      // Member events are project-wide: every schedule on one type shares its route.
+      return `event-schedule:${eventType}:users`
     default:
       return null
   }

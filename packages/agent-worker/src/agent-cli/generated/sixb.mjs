@@ -283,6 +283,7 @@ var CLI_LIMITS = {
   vectorSearchText: { maximum: 8000 },
   telemetryHistory: { default: 100, maximum: 1000 },
   linkPage: { default: 100, maximum: 1000 },
+  users: { default: 20, maximum: 200 },
   inspect: {
     depth: { default: 2, maximum: 3 },
     objects: { default: 20, maximum: 100 },
@@ -318,6 +319,8 @@ Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
   sixb objects get <type> <id>...     Exact lookup through opaque object references
+  sixb objects get-by <type> <property> <value>
+                                      The object holding a value of a unique property
   sixb objects search <text>          Search visible objects by id prefix and full text
   sixb objects search <text> --type <type>
                                       Semantic search through the type's vector profile
@@ -340,6 +343,13 @@ Actions and workflows:
 
 Files:
   sixb files upload|download ...
+
+Members:
+  sixb users search <text>            Find members by name or email
+  sixb users list|get ...
+
+A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
+\`sixb users search <name>\`.
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
@@ -365,10 +375,18 @@ var SEARCH_HELP = `Usage:
 profiles.
 
 ${SEARCH_DETAILS}`;
+var GET_BY_HELP = `Usage:
+  sixb objects get-by <object-type> <property> <value> [--json]
+
+Prints the object of exactly <object-type> holding <value> for a property marked unique in its
+ontology doc, or null when no visible object holds it. Values match exactly, case included.
+The value is a string; with --json it is parsed as JSON, for an integer (42) or a user
+reference ({"type":"user","id":"usr_1"}).`;
 var OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
+  sixb objects get-by <object-type> <property> <value> [--json]
   sixb objects search <text> [--type <object-type> [--vector-profile <name>]] [--limit <n>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
@@ -435,7 +453,7 @@ Query nodes compose through input:
   limit     {"kind":"limit","input":<query>,"limit":${CLI_LIMITS.list.default}}
   page      {"kind":"page","input":<query>,"pageSize":${CLI_LIMITS.list.default},"pageToken":"from nextPageToken"}
   project   {"kind":"project","input":<query>,"properties":["name","status"]}
-  expand    {"kind":"expand","input":<query>,"expansions":[{"linkId":"link","direction":"outgoing","limit":5}]}
+  expand    {"kind":"expand","input":<query>,"expansions":[{"linkId":"link","direction":"outgoing","limit":5}],"users":["assignee"]}
   vector    {"kind":"vector","input":<start|filter>,"vector":"text","profile":"name","k":10}
   rerank    {"kind":"rerank","input":<vector>,"model":{"provider":"provider","modelId":"model"}}
 
@@ -446,10 +464,15 @@ Predicates use op, not kind:
   {"op":"in","propertyId":"status","values":["open","blocked"]}
   {"op":"exists","propertyId":"dueDate","value":true}
   {"op":"contains","propertyId":"tags","value":"urgent"}
+  {"op":"eq","propertyId":"assignee","value":{"type":"currentUser"}}  the caller, on a user reference: neq, in, contains too
 
 Every field shown is required except includeSubtypes, fields, pageToken, properties, a sort
-direction, and an expansion's limit. Sort by relevance after text or vector with
+direction, an expansion's limit, and users. Sort by relevance after text or vector with
 {"kind":"relevance"}. Wrap the outermost node in project to return only the properties you need.
+
+An expand's users, or an expansion's, lists user-reference properties: each row then carries the
+members' profiles under users (id, email, displayName, avatarUrl, status). Without access to the
+member directory, users is empty.
 
 Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
@@ -509,6 +532,19 @@ List options:
   sixb workflows start <workflow-id> [--file <path|->]
 
 The JSON file contains the workflow input object. Use - to read standard input.`,
+  users: `Usage:
+  sixb users list [options]
+  sixb users search <text> [options]
+  sixb users get <user-id>
+
+Options:
+  --status active|suspended|all       Defaults to active
+  --limit <1-${CLI_LIMITS.users.maximum}>                     Defaults to ${CLI_LIMITS.users.default}
+  --offset <n>                        Non-negative; defaults to 0
+
+\`users search\` matches part of a display name or email, ignoring case. Each member is
+{"id","email","displayName","avatarUrl","status"}; a user parameter takes
+{"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
@@ -528,9 +564,11 @@ var QUERY_EXAMPLES = {
   not: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"not","item":{"op":"eq","propertyId":"status","value":"churned"}}},"limit":${CLI_LIMITS.list.default}}`,
   in: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"in","propertyId":"status","values":["active","trial"]}},"limit":${CLI_LIMITS.list.default}}`,
   exists: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"exists","propertyId":"accountManager","value":false}},"limit":${CLI_LIMITS.list.default}}`,
+  mine: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Task"},"predicate":{"op":"eq","propertyId":"assignee","value":{"type":"currentUser"}}},"limit":${CLI_LIMITS.list.default}}`,
   project: `{"kind":"project","input":{"kind":"limit","input":{"kind":"start","objectTypeId":"Customer"},"limit":${CLI_LIMITS.list.default}},"properties":["name","status"]}`,
   incoming: '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
   expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
+  users: `{"kind":"expand","input":{"kind":"limit","input":{"kind":"start","objectTypeId":"Task"},"limit":${CLI_LIMITS.list.default}},"expansions":[],"users":["assignee"]}`,
   sort: `{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":${CLI_LIMITS.list.default}}`,
   page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`,
   vector: `{"kind":"vector","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Product"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"vector":"waterproof trail shoes","profile":"content","k":${CLI_LIMITS.search.default}}`
@@ -969,6 +1007,8 @@ async function objects(api, args) {
       return objectsList(api, rest);
     case "get":
       return objectsGet(api, rest);
+    case "get-by":
+      return objectsGetBy(api, rest);
     case "search":
       return objectsSearch(api, rest);
     case "query":
@@ -1058,6 +1098,31 @@ async function objectsGet(api, args) {
     },
     includeTotal: false
   }));
+}
+async function objectsGetBy(api, args) {
+  if (requestsHelp(args))
+    return writeText(GET_BY_HELP);
+  const { positionals, options } = parseCommandArgs(args, { "--json": "boolean" }, "objects get-by", 3);
+  const [objectTypeId = "", propertyId = "", text = ""] = positionals;
+  const value = options["--json"] ? parseJsonValue(text) : text;
+  const path = `/api/objects/${encodeURIComponent(objectTypeId)}/by/${encodeURIComponent(propertyId)}`;
+  try {
+    writeJson(await api.post(path, { value }));
+  } catch (error) {
+    if (!isObjectNotFound(error))
+      throw error;
+    writeJson(null);
+  }
+}
+function parseJsonValue(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    fail(`--json needs the value as JSON, such as 42 or '{"type":"user","id":"usr_1"}'.`);
+  }
+}
+function isObjectNotFound(error) {
+  return error instanceof CliError && error.body.status === 404 && error.body.message === "Object not found";
 }
 async function objectsSearch(api, args) {
   if (requestsHelp(args))
@@ -1380,6 +1445,43 @@ function normalizeTelemetryQueryInput(input) {
   return body;
 }
 
+// ../cli-core/src/commands/users.ts
+var USER_STATUSES = ["active", "suspended", "all"];
+var LIST_FLAGS = {
+  "--status": "string",
+  "--limit": "string",
+  "--offset": "string"
+};
+async function users(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.users);
+  if (sub === "get") {
+    const { positionals } = parseCommandArgs(rest, {}, "users get", 1);
+    return writeJson(await api.get(`/api/users/${encodeURIComponent(positionals[0] ?? "")}`));
+  }
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, LIST_FLAGS, "users list");
+    return writeJson(await api.get("/api/users", listQuery(options)));
+  }
+  if (sub === "search") {
+    const { positionals, options } = parseCommandArgs(rest, LIST_FLAGS, "users search", 1);
+    const search = positionals[0]?.trim();
+    if (!search)
+      fail("users search requires the text to find in a name or email.");
+    return writeJson(await api.get("/api/users", { ...listQuery(options), search }));
+  }
+  fail(`Unknown users command '${sub}'.`);
+}
+function listQuery(options) {
+  const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.users.default), 1, CLI_LIMITS.users.maximum);
+  return {
+    status: enumValue("--status", options["--status"] ?? "active", USER_STATUSES),
+    limit: String(limit),
+    ...options["--offset"] === undefined ? {} : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }
+  };
+}
+
 // ../cli-core/src/commands/workflows.ts
 async function workflows(api, args) {
   const [sub, ...rest] = args;
@@ -1419,7 +1521,8 @@ var INSTANCE_COMMANDS = [
   "action-runs",
   "files",
   "workflows",
-  "workflow-runs"
+  "workflow-runs",
+  "users"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
@@ -1444,6 +1547,8 @@ async function dispatch(api, command, args) {
       return workflows(api, args);
     case "workflow-runs":
       return runs(api, "workflow", args);
+    case "users":
+      return users(api, args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }

@@ -10,8 +10,14 @@ import type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
+  ProfileField,
 } from "@sixb/core/auth/strategy"
-import { SignInRefusedError } from "@sixb/core/auth/strategy"
+import {
+  SignInRefusedError,
+  signInAvatarUrl,
+  signInDisplayName,
+  type UserIdentityRecord,
+} from "@sixb/core/auth/strategy"
 import { type AuthStorage, AuthStorageError } from "@sixb/core/storage"
 import { type OidcClaims, toOidcClaims, verifiedEmail } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
@@ -229,8 +235,8 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
           completedAt: now,
           subject: claims.sub,
           email,
-          displayName: claims.name,
-          avatarUrl: claims.picture,
+          displayName: signInDisplayName(claims.name),
+          avatarUrl: signInAvatarUrl(claims.picture),
           claims: rawClaims,
           allowUserCreationWithoutInvitation: canBootstrap || Boolean(directoryGroupIds?.length),
           manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
@@ -256,6 +262,21 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       })
       throw error
     }
+  }
+
+  // Sign-in sets the name and picture from these claims, so whichever the last sign-in sent, and
+  // sign-in kept, is the provider's to change.
+  providerProfileFields(identity: UserIdentityRecord): readonly ProfileField[] {
+    const claims = identity.claims ?? {}
+    const fields: ProfileField[] = []
+    if (signInDisplayName(claims.name) !== undefined) {
+      fields.push("displayName")
+    }
+    if (signInAvatarUrl(claims.picture) !== undefined) {
+      fields.push("avatarUrl")
+    }
+
+    return fields
   }
 
   async validateInvitationRecipient(

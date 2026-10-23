@@ -7,11 +7,12 @@ import {
   type SelectedObjectQueryAdmission,
 } from "../objects/query/selected-read-admission"
 import type { OntologyRegistry } from "../ontology"
+import type { UserRef } from "../ontology/user-ref"
 import type { AppliedMarkings } from "../security/applied-markings"
 import type { CompiledObjectReadStep, ObjectLinkRow } from "../storage"
 import type { resolveExecutionScopeAuthorization } from "./authorization"
 import { type Clearance, ObjectReaderClearance } from "./object-reader-clearance"
-import type { RuntimeAuthorization } from "./types"
+import type { AuthorizablePrincipal, RuntimeAuthorization } from "./types"
 
 export type ResolvedExecutionAuthority = ReturnType<typeof resolveExecutionScopeAuthorization>
 
@@ -41,6 +42,8 @@ export class ObjectReaderSecurity {
   /** Present for delegated authority only. */
   readonly delegation?: ObjectReaderDelegation
   readonly clearance: ObjectReaderClearance
+  /** The user `currentUser()` stands for in this reader's queries; absent when no user reads. */
+  readonly requestingUser?: UserRef
 
   constructor(input: {
     readonly authorization: RuntimeAuthorization
@@ -48,10 +51,14 @@ export class ObjectReaderSecurity {
     readonly projectId: string
     readonly ontology: OntologyRegistry
     readonly appliedMarkings?: AppliedMarkings
+    readonly requestedBy: AuthorizablePrincipal | undefined
   }) {
     const authority = input.authority
     this.authorization = input.authorization
     this.authority = authority
+    if (input.requestedBy?.type === "user") {
+      this.requestingUser = Object.freeze({ type: "user", id: input.requestedBy.id })
+    }
     this.runtime = Object.freeze({
       projectId: input.projectId,
       runtimeAuthorization: input.authorization,

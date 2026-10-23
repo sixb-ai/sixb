@@ -16,6 +16,10 @@ Your domain definitions give the agent a way to discover what exists and what it
 Before working with a type, the agent reads a reference file that Sixb writes from your ontology
 and [your notes](../ontology/overview.md#explain-it-to-the-agent).
 
+The agent also knows which project member it works for: the one who asked, or who started the
+workflow. A request such as "assign this to me" resolves to that member's
+[user reference](../ontology/properties.md#reference-a-user).
+
 The same agent can work across your application as its domain grows. Add
 [tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
 instructions for a particular task.

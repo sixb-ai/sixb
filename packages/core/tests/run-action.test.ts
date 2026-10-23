@@ -114,8 +114,10 @@ async function createContext(
       actions: execution.sixb.actions,
       connector: execution.sixb.connector,
       blobs: execution.sixb.blobs,
+      users: execution.sixb.users,
     },
     actions: host.definitions.actions,
+    requestedBy: execution.sixb.execution.requestedBy,
   }
 }
 

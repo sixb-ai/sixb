@@ -11,9 +11,9 @@ export const startServiceVisit = defineAction("start-service-visit", {
   .params({ serviceCase: param(ref(ServiceCase)), workOrder: param(ref(WorkOrder)) })
   .validate(({ target }) => {
     if (target.properties.status !== "scheduled") {
-      throw new Error(
-        `[Northline] Cannot start ${target.properties.number}: the visit is '${target.properties.status}'.`
-      )
+      return {
+        error: `Cannot start ${target.properties.number}: the visit is '${target.properties.status}'.`,
+      }
     }
   })
   .writeback(async ({ run, sixb, target }) => {

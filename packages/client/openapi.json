@@ -92,6 +92,12 @@
           "linkProperties": {
             "type": "object",
             "additionalProperties": true
+          },
+          "users": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ObjectQueryUserValue"
+            }
           }
         }
       },
@@ -108,6 +114,43 @@
           }
         ],
         "nullable": true
+      },
+      "ObjectQueryUserValue": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserProfile"
+            }
+          }
+        ],
+        "nullable": true
+      },
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "suspended"]
+          }
+        },
+        "required": ["id", "email", "status"],
+        "additionalProperties": false
       },
       "ObjectQueryIssue": {
         "type": "object",
@@ -766,6 +809,13 @@
                 "items": {
                   "$ref": "#/components/schemas/ObjectExpansion"
                 }
+              },
+              "users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             }
           }
@@ -805,6 +855,13 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ObjectExpansion"
+            }
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }
@@ -1118,8 +1175,16 @@
       "description": "Authentication sessions and sign-out"
     },
     {
+      "name": "Auth Profile",
+      "description": "The signed-in user's own profile"
+    },
+    {
       "name": "Auth Members",
       "description": "User membership administration"
+    },
+    {
+      "name": "Users",
+      "description": "Project member directory"
     },
     {
       "name": "Auth Invitations",
@@ -1832,6 +1897,274 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/profile": {
+      "get": {
+        "summary": "Get the current user's profile",
+        "tags": ["Auth Profile"],
+        "operationId": "getAuthProfile",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "suspended"]
+                        }
+                      },
+                      "required": ["id", "email", "status"],
+                      "additionalProperties": false
+                    },
+                    "managedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["displayName", "avatarUrl"]
+                      }
+                    }
+                  },
+                  "required": ["profile", "managedFields"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update the current user's name or picture",
+        "description": "Fields the identity provider manages, listed in `managedFields`, are refused with 403.",
+        "tags": ["Auth Profile"],
+        "operationId": "updateAuthProfile",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "displayName": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "avatarUrl": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "displayName": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "avatarUrl": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "displayName": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "avatarUrl": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "suspended"]
+                        }
+                      },
+                      "required": ["id", "email", "status"],
+                      "additionalProperties": false
+                    },
+                    "managedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["displayName", "avatarUrl"]
+                      }
+                    }
+                  },
+                  "required": ["profile", "managedFields"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
             "content": {
               "application/json": {
                 "schema": {
@@ -25235,6 +25568,9 @@
                             "primary": {
                               "type": "boolean"
                             },
+                            "unique": {
+                              "type": "boolean"
+                            },
                             "semanticType": {
                               "type": "string"
                             },
@@ -25435,6 +25771,9 @@
                                   "primary": {
                                     "type": "boolean"
                                   },
+                                  "unique": {
+                                    "type": "boolean"
+                                  },
                                   "semanticType": {
                                     "type": "string"
                                   },
@@ -25613,6 +25952,9 @@
                             "type": "boolean"
                           },
                           "primary": {
+                            "type": "boolean"
+                          },
+                          "unique": {
                             "type": "boolean"
                           },
                           "semanticType": {
@@ -25813,6 +26155,9 @@
                                   "type": "boolean"
                                 },
                                 "primary": {
+                                  "type": "boolean"
+                                },
+                                "unique": {
                                   "type": "boolean"
                                 },
                                 "semanticType": {
@@ -27195,6 +27540,209 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["object.unique_violation"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/{objectTypeId}/by/{propertyId}": {
+      "post": {
+        "summary": "Get object by a unique property",
+        "description": "Returns the object of exactly this type that holds the value, compared as writes store it.",
+        "tags": ["Objects"],
+        "operationId": "getObjectByUniqueProperty",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "objectTypeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "propertyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "A value of the unique property, as a write would give it: a date as an ISO string."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "A value of the unique property, as a write would give it: a date as an ISO string."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "A value of the unique property, as a write would give it: a date as an ISO string."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "score": {
+                      "type": "number"
+                    },
+                    "primaryId": {
+                      "type": "string"
+                    },
+                    "objectTypeId": {
+                      "type": "string"
+                    },
+                    "properties": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "redactions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "reason": {
+                            "type": "string",
+                            "enum": ["missing_clearance"]
+                          }
+                        },
+                        "required": ["reason"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -27682,7 +28230,9 @@
                             "runtime.cancelled",
                             "action.phase_failed",
                             "action.read_conflict",
-                            "action.timeout"
+                            "action.rejected",
+                            "action.timeout",
+                            "object.unique_violation"
                           ]
                         },
                         "message": {
@@ -27793,7 +28343,9 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
-                                    "action.timeout"
+                                    "action.rejected",
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -27883,7 +28435,9 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
-                                    "action.timeout"
+                                    "action.rejected",
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -28042,6 +28596,7 @@
                       "enum": [
                         "action.phase_failed",
                         "action.read_conflict",
+                        "action.rejected",
                         "action.run_in_progress",
                         "action.timeout",
                         "agent.execution_failed",
@@ -28066,6 +28621,7 @@
                         "event.delivery_failed",
                         "internal.unexpected",
                         "queue.enqueue_failed",
+                        "object.unique_violation",
                         "pipeline.step_failed",
                         "projection.definition_invalid",
                         "projection.execution_failed",
@@ -29324,7 +29880,9 @@
                                   "runtime.cancelled",
                                   "action.phase_failed",
                                   "action.read_conflict",
-                                  "action.timeout"
+                                  "action.rejected",
+                                  "action.timeout",
+                                  "object.unique_violation"
                                 ]
                               },
                               "message": {
@@ -29544,7 +30102,9 @@
                             "runtime.cancelled",
                             "action.phase_failed",
                             "action.read_conflict",
-                            "action.timeout"
+                            "action.rejected",
+                            "action.timeout",
+                            "object.unique_violation"
                           ]
                         },
                         "message": {
@@ -29655,7 +30215,9 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
-                                    "action.timeout"
+                                    "action.rejected",
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -29745,7 +30307,9 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
-                                    "action.timeout"
+                                    "action.rejected",
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -43228,7 +43792,8 @@
                 "pipelines",
                 "workflows",
                 "datasets",
-                "rules"
+                "rules",
+                "users"
               ]
             }
           },
@@ -43266,7 +43831,12 @@
                 "workflow.intervention.expired",
                 "dataset.version.committed",
                 "rule.triggered",
-                "rule.resolved"
+                "rule.resolved",
+                "user.joined",
+                "user.suspended",
+                "user.reactivated",
+                "user.invited",
+                "user.profile.updated"
               ]
             }
           },
@@ -46761,7 +47331,12 @@
                                   "workflow.intervention.expired",
                                   "dataset.version.committed",
                                   "rule.triggered",
-                                  "rule.resolved"
+                                  "rule.resolved",
+                                  "user.joined",
+                                  "user.suspended",
+                                  "user.reactivated",
+                                  "user.invited",
+                                  "user.profile.updated"
                                 ]
                               },
                               "topic": {
@@ -46775,7 +47350,8 @@
                                   "pipelines",
                                   "workflows",
                                   "datasets",
-                                  "rules"
+                                  "rules",
+                                  "users"
                                 ]
                               },
                               "payload": {
@@ -48882,6 +49458,251 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "List project members",
+        "tags": ["Users"],
+        "operationId": "listUsers",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["active", "suspended", "all"]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "suspended"]
+                          }
+                        },
+                        "required": ["id", "email", "status"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["users", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{userId}": {
+      "get": {
+        "summary": "Get a project member",
+        "tags": ["Users"],
+        "operationId": "getUser",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "avatarUrl": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "suspended"]
+                    }
+                  },
+                  "required": ["id", "email", "status"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
             "content": {
               "application/json": {
                 "schema": {

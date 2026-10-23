@@ -85,6 +85,22 @@ function useRunEventsTypeProof() {
     const status: "failed" = event.payload.status
     void [pipelineId, status]
   })
+  useEvents(events.users().joined(), (event) => {
+    const type: "user.joined" = event.type
+    const email: string = event.payload.user.email
+    void [type, email]
+  })
+  useEvents(events.users().profileUpdated(), (event) => {
+    const before: string | undefined =
+      event.payload.changes.displayName?.operation === "updated"
+        ? event.payload.changes.displayName.before
+        : undefined
+    void before
+  })
+  useEvents(events.users(), (event) => {
+    // @ts-expect-error only some member events name a user
+    event.payload.user
+  })
 }
 
 void useRunEventsTypeProof

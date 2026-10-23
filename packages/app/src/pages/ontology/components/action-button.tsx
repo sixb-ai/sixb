@@ -18,12 +18,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@sixb/ui/components"
+import { defineMessages, type MessageTree, type Translation } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Loader2 } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useSections } from "../../../sections/sections"
 import { actionRunHref } from "../../routes"
+import { notify } from "../../section-page"
 import {
   type ActionParamFormValue,
   type ActionParamFormValues,
@@ -36,6 +38,7 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "./file-ref-upload-field"
+import { UserPicker } from "./user-picker"
 
 type ActionParams = Record<string, unknown>
 
@@ -201,8 +204,16 @@ function ActionParamsDialog({
                     disabled={fieldDisabled}
                     onPendingChange={(pending) => handleFileUploadPendingChange(key, pending)}
                   />
+                ) : def.type === "userRef" ? (
+                  <UserPicker
+                    id={`action-param-${key}`}
+                    value={value}
+                    onChange={(userId) => setParamValue(key, userId)}
+                    required={fieldRequired}
+                    disabled={fieldDisabled}
+                    aria-describedby={errors[key] ? `action-param-${key}-error` : undefined}
+                  />
                 ) : (
-                  // A user reference is entered as a user id until the member picker exists.
                   <Input
                     id={`action-param-${key}`}
                     type={def.type === "number" ? "number" : "text"}
@@ -210,7 +221,7 @@ function ActionParamsDialog({
                     onChange={(event) => setParamValue(key, event.target.value)}
                     required={fieldRequired}
                     disabled={fieldDisabled}
-                    placeholder={def.type === "userRef" ? "User ID" : `Enter ${key}...`}
+                    placeholder={`Enter ${key}...`}
                   />
                 )}
                 {errors[key] ? (
@@ -244,6 +255,18 @@ function ActionParamsDialog({
   )
 }
 
+export const en = {
+  failed: "The action could not run.",
+  invalidObject: (objectId: string) => `This object's id is invalid: ${objectId}`,
+} satisfies MessageTree
+
+export const fr: Translation<typeof en> = {
+  failed: "L’action n’a pas pu s’exécuter.",
+  invalidObject: (objectId: string) => `L’identifiant de cet objet est invalide : ${objectId}`,
+}
+
+const useActionButtonMessages = defineMessages<typeof en>({ en, fr }).useMessages
+
 export function ActionButton({
   objectId,
   actionId,
@@ -255,23 +278,40 @@ export function ActionButton({
   const navigate = useNavigate()
   const runsOpen = useSections().some((section) => section.id === "observability")
   const [showParams, setShowParams] = useState(false)
-  const [result, setResult] = useState<{ success: boolean; message?: string } | null>(null)
+  const messages = useActionButtonMessages()
+  const [result, setResult] = useState<{ success: boolean } | null>(null)
+  const resultTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(resultTimer.current), [])
+
+  // The button shows how the request ended for a few seconds.
+  const flashResult = (next: { success: boolean }) => {
+    setResult(next)
+    clearTimeout(resultTimer.current)
+    resultTimer.current = setTimeout(() => setResult(null), 3000)
+  }
+
+  const showFailure = (message: string) => {
+    notify.error(message)
+    flashResult({ success: false })
+  }
+
   const requestAction = useActionRunMutation({
     invalidateOnCommit: true,
     onSuccess: (run) => {
-      setResult({ success: true })
       setShowParams(false)
       // The run's page is in Observability; without it, the button shows the outcome.
-      if (runsOpen) navigate(actionRunHref(run.id))
-      else setTimeout(() => setResult(null), 3000)
+      if (runsOpen) {
+        setResult({ success: true })
+        navigate(actionRunHref(run.id))
+      } else {
+        flashResult({ success: true })
+      }
     },
     onError: (error) => {
       setShowParams(false)
-      setResult({
-        success: false,
-        message: error instanceof Error ? error.message : "Action failed",
-      })
-      setTimeout(() => setResult(null), 3000)
+      // Shown as is: a rejection's message is the action author's, written for the requester, and
+      // any other failed run or refused request carries its own.
+      showFailure(error instanceof Error && error.message ? error.message : messages.failed)
     },
   })
 
@@ -288,11 +328,7 @@ export function ActionButton({
 
     const parsed = decodeObjectId(objectId)
     if (!parsed) {
-      setResult({
-        success: false,
-        message: `Invalid object id: ${objectId}`,
-      })
-      setTimeout(() => setResult(null), 3000)
+      showFailure(messages.invalidObject(objectId))
       return
     }
 

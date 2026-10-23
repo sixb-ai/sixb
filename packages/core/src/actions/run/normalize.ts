@@ -6,6 +6,8 @@ import {
   toSixbFailure,
 } from "../../errors/internal"
 import { isMaterializationConflictError } from "../../materialization/errors"
+import { ActionValidationError } from "../../objects/action/errors"
+import { uniqueViolationError } from "../../objects/unique-violation"
 import { ACTION_RUN_FAILURE_CODES, type ActionRunFailure, type ActionRunPhase } from "../../storage"
 import { parseActionRunFailure } from "../../storage/action-runs/failure"
 import { isActionTimeout } from "./signals"
@@ -48,7 +50,8 @@ export async function untilAborted<T>(work: () => Promise<T>, signal: AbortSigna
  * with `action.timeout` when its deadline elapsed, and with `runtime.cancelled` when its caller
  * aborted. The handler's own error stays the cause reported to `onError`. Every expectation an
  * Action commit carries comes from the Action's own reads, so an expectation conflict at commit is
- * a read conflict: the run can be requested again against current state.
+ * a read conflict: the run can be requested again against current state. A validator's returned
+ * error is a rejection, not a crash.
  */
 export function translateActionPhaseError(
   error: unknown,
@@ -82,9 +85,14 @@ export function translateActionPhaseError(
   if (isSixbError(error) && error.code === "internal.unexpected") {
     return error
   }
+  if (error instanceof ActionValidationError) {
+    return createSixbError("action.rejected", error.message, { cause: error, details })
+  }
   if (phase === "commit" && isMaterializationConflictError(error) && error.kind === "expectation") {
     return createSixbError("action.read_conflict", error.message, { cause: error, details })
   }
+  const uniqueViolation = phase === "commit" ? uniqueViolationError(error, details) : undefined
+  if (uniqueViolation) return uniqueViolation
 
   return createSixbError(
     "action.phase_failed",
@@ -97,7 +105,9 @@ export function translateActionPhaseError(
 export function isActionPhaseFailure(error: unknown): error is SixbCodedError {
   return (
     isSixbError(error) &&
-    (error.code === "action.phase_failed" || error.code === "action.read_conflict")
+    (error.code === "action.phase_failed" ||
+      error.code === "action.read_conflict" ||
+      error.code === "action.rejected")
   )
 }
 

@@ -30,9 +30,22 @@ export type ObjectQueryObject = {
   linkProperties?: {
     [key: string]: unknown
   }
+  users?: {
+    [key: string]: ObjectQueryUserValue
+  }
 }
 
 export type ObjectQueryLinkValue = ObjectQueryObject | Array<ObjectQueryObject> | null
+
+export type ObjectQueryUserValue = UserProfile | Array<UserProfile> | null
+
+export type UserProfile = {
+  id: string
+  email: string
+  displayName?: string
+  avatarUrl?: string
+  status: "active" | "suspended"
+}
 
 export type ObjectQueryIssue = {
   path: string
@@ -253,6 +266,7 @@ export type ObjectQuery =
       kind: "expand"
       input: ObjectQuery
       expansions: Array<ObjectExpansion>
+      users?: Array<string>
     }
 
 export type ObjectExpansion = {
@@ -262,6 +276,7 @@ export type ObjectExpansion = {
   limit?: number
   orderBy?: Array<ObjectQuerySortField>
   expand?: Array<ObjectExpansion>
+  users?: Array<string>
 }
 
 export type ObjectQueryPredicate =
@@ -591,6 +606,105 @@ export type SignOutAllResponses = {
 }
 
 export type SignOutAllResponse = SignOutAllResponses[keyof SignOutAllResponses]
+
+export type GetAuthProfileData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/profile"
+}
+
+export type GetAuthProfileErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAuthProfileError = GetAuthProfileErrors[keyof GetAuthProfileErrors]
+
+export type GetAuthProfileResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    profile: {
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }
+    managedFields: Array<"displayName" | "avatarUrl">
+  }
+}
+
+export type GetAuthProfileResponse = GetAuthProfileResponses[keyof GetAuthProfileResponses]
+
+export type UpdateAuthProfileData = {
+  body: {
+    displayName?: string | null
+    avatarUrl?: string | null
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/profile"
+}
+
+export type UpdateAuthProfileErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type UpdateAuthProfileError = UpdateAuthProfileErrors[keyof UpdateAuthProfileErrors]
+
+export type UpdateAuthProfileResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    profile: {
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }
+    managedFields: Array<"displayName" | "avatarUrl">
+  }
+}
+
+export type UpdateAuthProfileResponse = UpdateAuthProfileResponses[keyof UpdateAuthProfileResponses]
 
 export type GetAuthAccessManagementOptionsData = {
   body?: never
@@ -8407,6 +8521,7 @@ export type ListObjectTypesResponses = {
       required?: boolean
       nullable?: boolean
       primary?: boolean
+      unique?: boolean
       semanticType?: string
       schema?: unknown
       query?: {
@@ -8462,6 +8577,7 @@ export type ListObjectTypesResponses = {
         required?: boolean
         nullable?: boolean
         primary?: boolean
+        unique?: boolean
         semanticType?: string
         schema?: unknown
         query?: {
@@ -8532,6 +8648,7 @@ export type GetObjectTypeResponses = {
       required?: boolean
       nullable?: boolean
       primary?: boolean
+      unique?: boolean
       semanticType?: string
       schema?: unknown
       query?: {
@@ -8587,6 +8704,7 @@ export type GetObjectTypeResponses = {
         required?: boolean
         nullable?: boolean
         primary?: boolean
+        unique?: boolean
         semanticType?: string
         schema?: unknown
         query?: {
@@ -9082,6 +9200,16 @@ export type UpsertObjectErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "object.unique_violation"
+  }
 }
 
 export type UpsertObjectError = UpsertObjectErrors[keyof UpsertObjectErrors]
@@ -9108,6 +9236,69 @@ export type UpsertObjectResponses = {
 }
 
 export type UpsertObjectResponse = UpsertObjectResponses[keyof UpsertObjectResponses]
+
+export type GetObjectByUniquePropertyData = {
+  body: {
+    /**
+     * A value of the unique property, as a write would give it: a date as an ISO string.
+     */
+    value?: unknown
+  }
+  path: {
+    objectTypeId: string
+    propertyId: string
+  }
+  query?: never
+  url: "/api/objects/{objectTypeId}/by/{propertyId}"
+}
+
+export type GetObjectByUniquePropertyErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetObjectByUniquePropertyError =
+  GetObjectByUniquePropertyErrors[keyof GetObjectByUniquePropertyErrors]
+
+export type GetObjectByUniquePropertyResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    score?: number
+    primaryId: string
+    objectTypeId: string
+    properties: {
+      [key: string]: unknown
+    }
+    redactions?: {
+      [key: string]: {
+        reason: "missing_clearance"
+      }
+    }
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type GetObjectByUniquePropertyResponse =
+  GetObjectByUniquePropertyResponses[keyof GetObjectByUniquePropertyResponses]
 
 export type ListActionsData = {
   body?: never
@@ -9260,6 +9451,7 @@ export type RequestActionErrors = {
     code:
       | "action.phase_failed"
       | "action.read_conflict"
+      | "action.rejected"
       | "action.run_in_progress"
       | "action.timeout"
       | "agent.execution_failed"
@@ -9284,6 +9476,7 @@ export type RequestActionErrors = {
       | "event.delivery_failed"
       | "internal.unexpected"
       | "queue.enqueue_failed"
+      | "object.unique_violation"
       | "pipeline.step_failed"
       | "projection.definition_invalid"
       | "projection.execution_failed"
@@ -9342,7 +9535,9 @@ export type RequestActionResponses = {
         | "runtime.cancelled"
         | "action.phase_failed"
         | "action.read_conflict"
+        | "action.rejected"
         | "action.timeout"
+        | "object.unique_violation"
       message: string
       retryable: boolean
       at: string
@@ -9384,7 +9579,9 @@ export type RequestActionResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -9412,7 +9609,9 @@ export type RequestActionResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -9846,7 +10045,9 @@ export type ListActionRunsResponses = {
           | "runtime.cancelled"
           | "action.phase_failed"
           | "action.read_conflict"
+          | "action.rejected"
           | "action.timeout"
+          | "object.unique_violation"
         message: string
         retryable: boolean
         at: string
@@ -9926,7 +10127,9 @@ export type GetActionRunResponses = {
         | "runtime.cancelled"
         | "action.phase_failed"
         | "action.read_conflict"
+        | "action.rejected"
         | "action.timeout"
+        | "object.unique_violation"
       message: string
       retryable: boolean
       at: string
@@ -9968,7 +10171,9 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -9996,7 +10201,9 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -14620,6 +14827,7 @@ export type ListEventsData = {
       | "workflows"
       | "datasets"
       | "rules"
+      | "users"
     type?:
       | "object.created"
       | "object.updated"
@@ -14649,6 +14857,11 @@ export type ListEventsData = {
       | "dataset.version.committed"
       | "rule.triggered"
       | "rule.resolved"
+      | "user.joined"
+      | "user.suspended"
+      | "user.reactivated"
+      | "user.invited"
+      | "user.profile.updated"
     afterCursor?: string
     limit?: string
   }
@@ -15834,6 +16047,11 @@ export type ListEventsResponses = {
             | "dataset.version.committed"
             | "rule.triggered"
             | "rule.resolved"
+            | "user.joined"
+            | "user.suspended"
+            | "user.reactivated"
+            | "user.invited"
+            | "user.profile.updated"
           topic:
             | "objects"
             | "telemetry"
@@ -15844,6 +16062,7 @@ export type ListEventsResponses = {
             | "workflows"
             | "datasets"
             | "rules"
+            | "users"
           payload: {
             [key: string]: unknown
           }
@@ -16460,6 +16679,101 @@ export type ListActivityConnectionsResponses = {
 
 export type ListActivityConnectionsResponse =
   ListActivityConnectionsResponses[keyof ListActivityConnectionsResponses]
+
+export type ListUsersData = {
+  body?: never
+  path?: never
+  query?: {
+    status?: "active" | "suspended" | "all"
+    search?: string
+    limit?: number
+    offset?: number
+  }
+  url: "/api/users"
+}
+
+export type ListUsersErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListUsersError = ListUsersErrors[keyof ListUsersErrors]
+
+export type ListUsersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    users: Array<{
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses]
+
+export type GetUserData = {
+  body?: never
+  path: {
+    userId: string
+  }
+  query?: never
+  url: "/api/users/{userId}"
+}
+
+export type GetUserErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetUserError = GetUserErrors[keyof GetUserErrors]
+
+export type GetUserResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    email: string
+    displayName?: string
+    avatarUrl?: string
+    status: "active" | "suspended"
+  }
+}
+
+export type GetUserResponse = GetUserResponses[keyof GetUserResponses]
 
 export type ListProjectionsData = {
   body?: never

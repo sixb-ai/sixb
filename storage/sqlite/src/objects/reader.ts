@@ -160,6 +160,36 @@ export class SqliteObjectReader {
     return row ? rowToObject(row) : null
   }
 
+  /** On a selected source, the holder must be in scope and selected for the property. */
+  getByUniqueValue(params: Parameters<ObjectReadStorage["getByUniqueValue"]>[0]): ObjectRow | null {
+    const source = this.source
+    const selected = "objectPropertyPermissionsTable" in source
+    const permitted = selected
+      ? `AND EXISTS (
+           SELECT 1 FROM ${source.objectPropertyPermissionsTable} AS permitted
+           WHERE permitted.project_id = objects.project_id
+             AND permitted.object_type_id = objects.object_type_id
+             AND permitted.primary_id = objects.primary_id
+             AND permitted.property_id = held.property_id
+         )`
+      : ""
+    const statement = source.wrapStatement(
+      `SELECT objects.*
+       FROM object_unique_values AS held
+       JOIN ${source.objectsTable} AS objects
+         ON objects.project_id = held.project_id
+        AND objects.object_type_id = held.object_type_id
+        AND objects.primary_id = held.primary_id
+       WHERE held.project_id = ? AND held.object_type_id = ? AND held.property_id = ?
+         AND held.value_key = ?
+         ${permitted}`,
+      [params.projectId, params.objectTypeId, params.propertyId, params.valueKey]
+    )
+    const row = this.db.query(statement.sql).get(...statement.args) as DatabaseRow | null
+
+    return row ? rowToObject(row) : null
+  }
+
   selectsObjectProperties(
     params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
   ): readonly boolean[] {

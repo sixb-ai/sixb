@@ -11,6 +11,11 @@ import {
 } from "@sixb/core/internal/ontology-storage-provider"
 import type { ExactEffectiveLinkWrite, ExactEffectiveObjectWrite } from "@sixb/core/storage"
 import { assertTimestamp, canonicalJson, isSqliteConstraintError, requireChanges } from "./shared"
+import {
+  assertSqliteUniquePrepared,
+  claimSqliteUniqueValue,
+  releaseSqliteUniqueValue,
+} from "./unique-values"
 
 function linkOverrideConflictMessage(identityKind: "edge" | "slot"): string {
   return identityKind === "edge"
@@ -30,7 +35,16 @@ export class SqliteMaterializationWriter {
     this.applyOverrides(projectId, chunk)
     this.applyEffective(projectId, chunk)
     this.applyTimeseries(projectId, chunk)
+    this.applyUniqueValues(projectId, chunk)
     this.applyOutbox(projectId, commitId, chunk)
+  }
+
+  /** A chunk holds one phase: the commit's releases all apply before its first claim. */
+  private applyUniqueValues(projectId: string, chunk: MaterializationPlanChunk): void {
+    for (const item of chunk.unique.releases) releaseSqliteUniqueValue(this.db, projectId, item)
+
+    assertSqliteUniquePrepared(this.db, projectId, chunk.unique.claims)
+    for (const item of chunk.unique.claims) claimSqliteUniqueValue(this.db, projectId, item)
   }
 
   private applyOverrides(projectId: string, chunk: MaterializationPlanChunk): void {

@@ -3,6 +3,7 @@ import type { OntologyMaterializationStorage } from "./materializations"
 import type { OntologyOutboxStorage } from "./outbox"
 import type { OntologyReplacementPlanStorage } from "./replacement-plans"
 import type { OntologySourceStorage } from "./sources"
+import type { OntologyUniqueValueStorage } from "./unique-values"
 import type { OntologyVectorIndexingStorage } from "./vector-indexing"
 import type { OntologyVectorStorage } from "./vectors"
 
@@ -37,6 +38,8 @@ export type {
   ExactObjectOverrideDelete,
   ExactObjectOverrideWrite,
   ExactTimeseriesPointWrite,
+  ExactUniqueValueClaim,
+  ExactUniqueValueWrite,
   ExpectedSourceRevision,
   ExpectedTimeseriesPointRevision,
   FinalizeMaterializationInput,
@@ -74,6 +77,7 @@ export type {
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
+  UniqueValueRef,
 } from "./materializations"
 export type {
   ClaimedOntologyOutboxRow,
@@ -130,6 +134,11 @@ export type {
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
 } from "./sources"
+export type {
+  OntologyUniqueValueStorage,
+  PreparedUniqueProperty,
+  UniqueValueEntry,
+} from "./unique-values"
 
 export type { ObjectVectorState, OntologyVectorStorage, StoredObjectVector } from "./vectors"
 
@@ -141,6 +150,7 @@ export interface OntologyStorage {
   readonly materializations: OntologyMaterializationStorage
   readonly replacementPlans: OntologyReplacementPlanStorage
   readonly outbox: OntologyOutboxStorage
+  readonly uniqueValues: OntologyUniqueValueStorage
 }
 
 export type {

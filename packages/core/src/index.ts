@@ -3,6 +3,7 @@
 export type {
   ArraySchema,
   ComplexSchema,
+  CurrentUserRef,
   DirectLinkResult,
   DirectLinkTarget,
   EnumSchema,
@@ -49,6 +50,7 @@ export type {
   ValueTypeRefSchema,
 } from "./ontology"
 export {
+  currentUser,
   defineInterface,
   defineObjectType,
   defineOntology,
@@ -302,6 +304,16 @@ export type {
   TelemetryEvent,
   TelemetryEventOrigin,
   TelemetryEventSource,
+  UserEvent,
+  UserEventSelectorBuilder,
+  UserEventSelectorContext,
+  UserEventSelectorEvent,
+  UserEventSelectorOperation,
+  UserInvitedEvent,
+  UserJoinedEvent,
+  UserProfileUpdatedEvent,
+  UserReactivatedEvent,
+  UserSuspendedEvent,
   WorkflowEvent,
   WorkflowRunFinishedEvent,
   WorkflowRunNodeFinishedEvent,
@@ -397,10 +409,12 @@ export type {
   MembershipCapabilities,
   MembershipOperationCapabilities,
   Principal,
+  ProfileField,
   SixbAuthConfig,
   UserPrincipal,
 } from "./auth"
 export { principalsEqual, SYSTEM_PRINCIPAL } from "./auth"
+export type { UserIdentityRecord } from "./storage/auth"
 
 // ── Authorization ──────────────────────────────────────────
 
@@ -428,6 +442,11 @@ export type {
   UpdateAiUsageLimitPolicyInput,
 } from "./ai-usage"
 
+// ── Member directory ──────────────────────────────────────
+
+export type { UserStatus } from "./storage"
+export type { ListUsersInput, UserProfile, UsersPage, UsersRuntime } from "./users"
+
 // ── Security Definitions ───────────────────────────────────
 
 export type {
@@ -453,7 +472,6 @@ export type {
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,
-  ProjectSurfaceReference,
   RedactionReason,
   Redactions,
   RegisteredSecurityDefinitions,
@@ -463,6 +481,7 @@ export type {
   SecurityDefinitionCatalog,
   Selection,
   ShareGrant,
+  UsersViewGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"
@@ -1022,6 +1041,8 @@ export type {
   TelemetryHistoryInput,
   TelemetryPropertyToken,
   TwinObject,
+  UniquePropertyToken,
+  UniquePropertyValue,
 } from "./runtime"
 export {
   ConnectorError,

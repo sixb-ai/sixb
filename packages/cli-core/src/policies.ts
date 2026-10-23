@@ -6,6 +6,8 @@ export const CLI_LIMITS = {
   vectorSearchText: { maximum: 8_000 },
   telemetryHistory: { default: 100, maximum: 1_000 },
   linkPage: { default: 100, maximum: 1_000 },
+  /** The server lists at most 200 members per page. */
+  users: { default: 20, maximum: 200 },
   inspect: {
     depth: { default: 2, maximum: 3 },
     objects: { default: 20, maximum: 100 },

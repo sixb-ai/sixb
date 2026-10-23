@@ -118,7 +118,9 @@ export type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
+  OwnProfile,
   Principal,
+  ProfileField,
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
@@ -136,6 +138,7 @@ export type {
   UnauthenticatedAuthSession,
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
+  UpdateOwnProfileInput,
   UserPrincipal,
 } from "./types"
 export { principalsEqual, SYSTEM_PRINCIPAL } from "./types"

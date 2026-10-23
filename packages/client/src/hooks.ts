@@ -36,6 +36,14 @@ export {
   type UseAgentRunStreamResult,
   useAgentRunStream,
 } from "./useAgentRunStream"
+export {
+  type UseUserOptions,
+  type UseUsersOptions,
+  userQueryOptions,
+  usersQueryOptions,
+  useUser,
+  useUsers,
+} from "./users-hooks"
 
 type QueryKey = readonly [
   {

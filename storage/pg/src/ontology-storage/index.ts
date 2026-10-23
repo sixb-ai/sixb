@@ -7,6 +7,7 @@ import { PgOntologyOutboxStorage } from "./outbox"
 import { PgOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { PgRootOperation } from "./shared"
 import { PgOntologySourceStorage } from "./sources"
+import { PgOntologyUniqueValueStorage } from "./unique-values"
 import { PgVectorIndexingStorage } from "./vector-indexing"
 import { PgOntologyVectorStorage } from "./vectors"
 
@@ -18,6 +19,7 @@ export class PgOntologyStorage implements OntologyStorage {
   readonly outbox: PgOntologyOutboxStorage
   readonly vectorIndexing: PgVectorIndexingStorage
   readonly vectors: PgOntologyVectorStorage
+  readonly uniqueValues: PgOntologyUniqueValueStorage
 
   constructor(input: {
     readonly sql: SQLClient
@@ -32,6 +34,7 @@ export class PgOntologyStorage implements OntologyStorage {
     )
     this.replacementPlans = new PgOntologyReplacementPlanStorage(input.sql)
     this.outbox = new PgOntologyOutboxStorage(input.runRootOperation)
+    this.uniqueValues = new PgOntologyUniqueValueStorage(input.runRootOperation)
     this.vectorIndexing = new PgVectorIndexingStorage(
       input.sql,
       input.runRootOperation,

@@ -110,6 +110,31 @@ export function bindDurableAgentExecution(
 }
 
 /**
+ * Bind one agent API gateway request to the run's own execution, the way the run's in-process
+ * tools are bound: what the request starts is a child of the run, with the run's requester and
+ * correlation. Model calls behind it count toward the attempt the request was admitted under, with
+ * a recorder of their own: the worker's in-memory failure state and cancellation do not reach them.
+ */
+export function bindAgentGatewayRequestExecution(
+  host: AgentExecutionHost,
+  input: {
+    /** Aborting it cancels the request's model calls. */
+    readonly signal: AbortSignal
+    readonly execution: ExecutionRecord
+    readonly actorId?: string
+    readonly runId: string
+    readonly attempt: number
+    readonly authorization: AgentExecutionAuthorization
+  }
+): Sixb {
+  const { signal, attempt, ...execution } = input
+  const sixb = bindDurableAgentExecution(host, execution)
+
+  bindModelExecutionAttempt(sixb.models, { attempt, signal })
+  return sixb
+}
+
+/**
  * Account model calls made through a run's bound SDK — by its tools, or embeddings behind their
  * searches — like the run's own: same execution attempt, limits, failure state and cancellation.
  * The attempt is the recorder's, so the two cannot diverge.

@@ -10,6 +10,7 @@ export const PropertyDefinitionSchema = z.object({
   required: z.boolean().optional(),
   nullable: z.boolean().optional(),
   primary: z.boolean().optional(),
+  unique: z.boolean().optional(),
   semanticType: z.string().optional(),
   schema: z.unknown(),
   query: z

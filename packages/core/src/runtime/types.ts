@@ -43,8 +43,10 @@ import type {
   ObjectTypeWithPropertyTokens,
   PropertyToken,
 } from "../ontology/tokens"
+import type { CurrentUserRef, UserRef } from "../ontology/user-ref"
 import type { Queues } from "../queues"
 import type { ActionRunRecord, ObjectLinkRow, Redactions, Storage } from "../storage"
+import type { UserProfile } from "../users"
 // ── Shared runtime context ──────────────────────────────────
 
 /**
@@ -168,6 +170,17 @@ type PropertyWhereValue<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = InferPropertyValue<PropertyById<TObjectType, TPropertyId>>
 
+/** A value a predicate compares with a user reference may be `currentUser()` instead. */
+type WithCurrentUser<TValue> = [Extract<NonNullable<TValue>, UserRef>] extends [never]
+  ? TValue
+  : TValue | CurrentUserRef
+
+/** The value `eq`, `neq` and `in` compare: the property's, or the reading user's. */
+type PropertyWhereEqualityValue<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+> = WithCurrentUser<PropertyWhereValue<TObjectType, TPropertyId>>
+
 type PropertyWhereContainsValue<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
@@ -175,15 +188,25 @@ type PropertyWhereContainsValue<
   NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends string
     ? string
     : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends readonly (infer TItem)[]
-      ? TItem
+      ? WithCurrentUser<TItem>
       : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends Record<string, unknown>
         ? string
         : never
 
+type PropertyWhereEqualityClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+> = Omit<ObjectQueryPredicateComparison, "op" | "propertyId" | "value"> & {
+  op: "eq" | "neq"
+  propertyId: TPropertyId
+  value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+}
+
 type PropertyWhereComparisonClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-> = Omit<ObjectQueryPredicateComparison, "propertyId" | "value"> & {
+> = Omit<ObjectQueryPredicateComparison, "op" | "propertyId" | "value"> & {
+  op: "lt" | "lte" | "gt" | "gte"
   propertyId: TPropertyId
   value: PropertyWhereValue<TObjectType, TPropertyId>
 }
@@ -193,7 +216,7 @@ type PropertyWhereInClause<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = Omit<ObjectQueryPredicateIn, "propertyId" | "values"> & {
   propertyId: TPropertyId
-  values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
+  values: readonly PropertyWhereEqualityValue<TObjectType, TPropertyId>[]
 }
 
 type PropertyWhereExistsClause<
@@ -217,11 +240,11 @@ type PropertyPredicate<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = {
   eq(
-    value: PropertyWhereValue<TObjectType, TPropertyId>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "eq" }
+    value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+  ): PropertyWhereEqualityClause<TObjectType, TPropertyId> & { op: "eq" }
   neq(
-    value: PropertyWhereValue<TObjectType, TPropertyId>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "neq" }
+    value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+  ): PropertyWhereEqualityClause<TObjectType, TPropertyId> & { op: "neq" }
   lt(
     value: PropertyWhereValue<TObjectType, TPropertyId>
   ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "lt" }
@@ -235,7 +258,7 @@ type PropertyPredicate<
     value: PropertyWhereValue<TObjectType, TPropertyId>
   ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "gte" }
   in(
-    values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
+    values: readonly PropertyWhereEqualityValue<TObjectType, TPropertyId>[]
   ): PropertyWhereInClause<TObjectType, TPropertyId>
   exists(value?: boolean): PropertyWhereExistsClause<TObjectType, TPropertyId>
   contains(
@@ -252,6 +275,7 @@ type PropertyWhereClause<TObjectType extends ObjectTypeWithPropertyTokens> =
         | ObjectQueryPredicateContains
     : {
         [TPropertyId in TObjectType["properties"][number]["id"]]:
+          | PropertyWhereEqualityClause<TObjectType, TPropertyId>
           | PropertyWhereComparisonClause<TObjectType, TPropertyId>
           | PropertyWhereInClause<TObjectType, TPropertyId>
           | PropertyWhereExistsClause<TObjectType, TPropertyId>
@@ -628,6 +652,32 @@ type WithExpansion<
     : TRow
   : TRow
 
+/** A `ref.user()` property, or an array of them: the properties `.expand()` resolves to profiles. */
+type UserPropertyToken<TObjectTypeId extends string> = PropertyToken<
+  TObjectTypeId,
+  string,
+  Property & {
+    readonly schema: "userRef" | { readonly type: "array"; readonly items: "userRef" }
+  }
+>
+
+/** One profile, or `null` when empty or no member has the id; the members found for an array. */
+type UserExpansionValue<TToken extends UserPropertyToken<string>> =
+  TToken["property"]["schema"] extends "userRef" ? UserProfile | null : UserProfile[]
+
+/**
+ * Add the `users` entry of one expanded user property to `TRow`, distributing over a polymorphic
+ * row like {@link WithExpansion}. The entry is optional: it is absent when the reader may not view
+ * the member directory or cannot read the property.
+ */
+type WithUserExpansion<TRow, TToken extends UserPropertyToken<string>> = TRow extends {
+  objectTypeId: infer TObjectTypeId
+}
+  ? TToken["objectTypeId"] extends TObjectTypeId
+    ? TRow & { users: { [K in TToken["id"]]?: UserExpansionValue<TToken> } }
+    : TRow
+  : TRow
+
 /**
  * The nested-expansion callback for a link token's resolved target type. `TChildRow`
  * is inferred from the returned builder, recovering the nested `.links` shape.
@@ -652,6 +702,10 @@ export interface ObjectExpandBuilder<
   in out TObjectType extends ObjectTypeWithPropertyTokens,
   out TRow = ExpandedTargetRow<TObjectType>,
 > {
+  /** Attach the profiles of the members a `ref.user()` property names, under `users`. */
+  expand<TToken extends UserPropertyToken<TObjectType["id"]>>(
+    property: TToken
+  ): ObjectExpandBuilder<TObjectType, WithUserExpansion<TRow, TToken>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
     TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
@@ -727,7 +781,15 @@ export interface ObjectQueryBuilder<
    * optional `linkProperties` and its own nested `.links`). Targets are precise
    * when they are registered or linked directly, and otherwise degrade to the
    * loose base.
+   *
+   * Given a `ref.user()` property, or an array of them, it attaches the members' profiles
+   * under `users` instead (`row.users.assignee`): a profile or `null` for one reference, the
+   * members found for an array. The entry is absent unless the reader has
+   * `can.view(project.users)`, and for a value the reader cannot read.
    */
+  expand<TToken extends UserPropertyToken<TObjectType["id"]>>(
+    property: TToken
+  ): ObjectQueryBuilder<TObjectType, WithUserExpansion<TRow, TToken>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
     TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
@@ -807,12 +869,39 @@ export interface ObjectReadByIdHandle<out TObjectType extends ObjectTypeWithProp
 }
 
 /**
+ * The token of a property declared `unique: true`. A type whose id is only `string` accepts any of
+ * its tokens: the property is then checked when the lookup runs.
+ */
+export type UniquePropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
+  string extends TObjectType["id"]
+    ? TObjectType["p"][keyof TObjectType["p"]]
+    : Extract<
+        TObjectType["p"][keyof TObjectType["p"]],
+        { readonly property: { readonly unique: true } }
+      >
+
+/** The value `getBy` takes for a unique property: the value a write gives it, never `null`. */
+export type UniquePropertyValue<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TToken extends UniquePropertyToken<TObjectType>,
+> = NonNullable<ObjectTypeProperties<TObjectType>[TToken["id"]]>
+
+/**
  * The reads of an object set, declared once: `sixb.objects(Type)`, a Workflow step's
  * `sixb.objects(Type)` and an Action's `read.objects(Type)` add only their own writes on top.
  */
 export interface ObjectReadSet<in out TObjectType extends ObjectTypeWithPropertyTokens> {
   /** Get an object by id, or null if it doesn't exist. */
   get(id: string): Promise<TwinObject<TObjectType> | null>
+
+  /**
+   * Get the object of exactly this type holding a value of a unique property, or null. Values
+   * compare as writes store them, exactly; `null` belongs to no object.
+   */
+  getBy<TToken extends UniquePropertyToken<TObjectType>>(
+    property: TToken,
+    value: UniquePropertyValue<TObjectType, TToken>
+  ): Promise<TwinObject<TObjectType> | null>
 
   /** Build an executable provider-neutral object query rooted at this object type. */
   query(): ObjectQueryBuilder<TObjectType>

@@ -835,6 +835,87 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
+    // Guard: the `bindCurrentUser` call in the executor's `validateExecutableQuery`. Without it,
+    // the provider receives the placeholder and these assertions fail.
+    test("binds currentUser() to the reading user before the provider sees the query", async () => {
+      await withStorage(async ({ storage: complete, objects: storage, fixture }) => {
+        const auth = complete.auth
+        if (!auth) throw new Error("The object query contract requires auth storage.")
+        for (const id of ["usr_alice", "usr_bob"]) {
+          await auth.users.create({ projectId, id, email: `${id}@example.com` })
+        }
+        const alice = { type: "user" as const, id: "usr_alice" }
+        const bob = { type: "user" as const, id: "usr_bob" }
+        await fixture.seed({
+          objects: [
+            objectSeed(Task.id, "t1", { assignee: alice, reviewers: [bob] }),
+            objectSeed(Task.id, "t2", { assignee: bob, reviewers: [alice] }),
+            objectSeed(Task.id, "t3", { assignee: null }),
+            objectSeed(Task.id, "t4", { reviewers: [alice, bob] }),
+          ],
+        })
+
+        const received: string[] = []
+        const spy = recordingCalls(storage, received)
+        const ids = async (predicate: ObjectQueryPredicate, user?: typeof alice) => {
+          const result = await executeObjectQuery(
+            {
+              projectId,
+              query: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id" }],
+                input: {
+                  kind: "filter",
+                  predicate,
+                  input: { kind: "start", objectTypeId: Task.id },
+                },
+              },
+            },
+            { ontology: objectQueryContractOntology, storage: spy, requestingUser: user }
+          )
+          expect(result.plan.mode).toBe("pushdown")
+          return result.objects.map((object) => object.primaryId)
+        }
+
+        const me = { type: "currentUser" }
+        const eq: ObjectQueryPredicate = { op: "eq", propertyId: "assignee", value: me }
+        const neq: ObjectQueryPredicate = { op: "neq", propertyId: "assignee", value: me }
+        const inMeOrBob: ObjectQueryPredicate = {
+          op: "in",
+          propertyId: "assignee",
+          values: [me, bob],
+        }
+        const inMe: ObjectQueryPredicate = { op: "in", propertyId: "assignee", values: [me] }
+        const reviewing: ObjectQueryPredicate = {
+          op: "contains",
+          propertyId: "reviewers",
+          value: me,
+        }
+        const notMine: ObjectQueryPredicate = { op: "not", item: eq }
+        const notReviewing: ObjectQueryPredicate = { op: "not", item: reviewing }
+
+        expect(await ids(eq, alice)).toEqual(["t1"])
+        expect(await ids(neq, alice)).toEqual(["t2", "t3", "t4"])
+        expect(await ids(inMeOrBob, alice)).toEqual(["t1", "t2"])
+        expect(await ids(inMe, alice)).toEqual(["t1"])
+        expect(await ids(reviewing, alice)).toEqual(["t2", "t4"])
+        expect(await ids(notMine, alice)).toEqual(["t2", "t3", "t4"])
+        expect(await ids(notReviewing, alice)).toEqual(["t1", "t3"])
+
+        // A reader that is not a user matches no one, and `neq` stays the complement of `eq`.
+        expect(await ids(eq)).toEqual([])
+        expect(await ids(neq)).toEqual(["t1", "t2", "t3", "t4"])
+        expect(await ids(inMeOrBob)).toEqual(["t2"])
+        expect(await ids(inMe)).toEqual([])
+        expect(await ids(reviewing)).toEqual([])
+        expect(await ids(notMine)).toEqual(["t1", "t2", "t3", "t4"])
+        expect(await ids(notReviewing)).toEqual(["t1", "t2", "t3", "t4"])
+
+        expect(received.length).toBeGreaterThan(0)
+        expect(received.filter((call) => call.includes('"currentUser"'))).toEqual([])
+      })
+    })
+
     test("counts matching objects by facetable properties without returning rows", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)
@@ -1327,6 +1408,21 @@ async function seedObjectQueryContractData(fixture: MaterializerTestFixture): Pr
       linkSeed(Room.id, "room-beta", "hasDevice", Device.id, "device-sensor"),
       linkSeed(Zone.id, "zone-one", "hasDevice", Device.id, "device-projector"),
     ],
+  })
+}
+
+/** Wrap storage so every call's arguments are recorded as JSON before it runs. */
+function recordingCalls<TStorage extends object>(storage: TStorage, received: string[]): TStorage {
+  return new Proxy(storage, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target)
+      if (typeof value !== "function") return value
+
+      return (...args: unknown[]) => {
+        received.push(JSON.stringify(args))
+        return value.apply(target, args)
+      }
+    },
   })
 }
 

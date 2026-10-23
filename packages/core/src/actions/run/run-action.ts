@@ -108,8 +108,17 @@ function runFailure(
 }
 
 /**
- * Record a failed run, and report its failure to `onError` once this request recorded it. A run its
- * caller cancelled is not reported: it did not fail on its own.
+ * Failures that are not the run's own: its caller cancelled it, or a validator rejected the request,
+ * which is a business outcome the caller reads on the run.
+ */
+const UNREPORTED_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "runtime.cancelled",
+  "action.rejected",
+])
+
+/**
+ * Record a failed run, and report its failure to `onError` once this request recorded it, unless
+ * it is one of the {@link UNREPORTED_FAILURE_CODES}.
  */
 async function recordFailure(
   runtime: ActionRunContext,
@@ -117,7 +126,7 @@ async function recordFailure(
   error: unknown
 ): Promise<ActionRunOutcome> {
   const outcome = await recordRun(runtime, record)
-  if (outcome.recorded && record.error.code !== "runtime.cancelled") {
+  if (outcome.recorded && !UNREPORTED_FAILURE_CODES.has(record.error.code)) {
     reportRunFailure(runtime.errorReporterHost, unwrapActionPhaseError(error), {
       projectId: runtime.id,
       runKind: "action",

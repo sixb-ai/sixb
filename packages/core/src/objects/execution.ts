@@ -51,6 +51,8 @@ export interface ExecutionObjectOperations {
   listSubTypes(objectTypeId: string): string[]
   isValidLinkTarget(expected: string | string[], actual: string): boolean
   get(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
+  /** The object of exactly `objectTypeId` holding a unique property's value, or null. */
+  getBy(objectTypeId: string, propertyId: string, value: unknown): Promise<ObjectRow | null>
   list(params: ListObjectsParams): Promise<ListResult<ObjectRow>>
   upsert(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
   upsertBatch(
@@ -257,6 +259,8 @@ export function createObjectsRuntime(
       list: (params: ListObjectsParams) => objectService.listObjects(capturedRuntime, params),
       get: (objectTypeId: string, primaryId: string) =>
         objectReader.getByPrimaryId({ objectTypeId, primaryId }),
+      getBy: (objectTypeId: string, propertyId: string, value: unknown) =>
+        objectReader.getByUniqueValue({ objectTypeId, propertyId, value }),
       getPrimaryPropertyId: (objectTypeId: string) => {
         return ontologyView().getPrimaryPropertyId(objectTypeId)
       },

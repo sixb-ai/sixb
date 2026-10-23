@@ -568,7 +568,7 @@ type BuiltRow<TBuilt> = TBuilt extends { first(): Promise<infer TRow | null> } ?
  * `placeholderData`, ...), compose the `objectQuery*Options` factories with
  * `useQuery` directly.
  */
-type QueryHookExtras = {
+export type QueryHookExtras = {
   enabled?: boolean
   staleTime?: number
   gcTime?: number

@@ -2,6 +2,7 @@ import { type AuthorizationContext, assertAuthorized } from "../../authorization
 import type { RuntimeAuthorization } from "../../execution/types"
 import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../../models/catalog"
 import type { OntologyRegistry } from "../../ontology"
+import type { UserRef } from "../../ontology/user-ref"
 import type {
   CountObjectsResult,
   ExistsObjectsResult,
@@ -19,6 +20,7 @@ import type {
 } from "../../storage"
 import { linkBatchKey, MAX_OBJECT_READ_FACETS, objectBatchKey } from "../../storage"
 import { resolveVectorSearchText } from "../vectors/resolve-query"
+import { bindCurrentUser } from "./current-user"
 import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -38,6 +40,7 @@ import { usePrimaryIdLookups } from "./primary-id"
 import { rerankObjectCandidates } from "./reranking-executor"
 import { findQueryReranking } from "./reranking-query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
+import { withoutUserExpansions } from "./user-expansions"
 import {
   type AdmittedObjectQuery,
   type ObjectQuerySemanticAdmission,
@@ -78,6 +81,8 @@ export interface QueryExecutorOptions
   runtimeAuthorization?: RuntimeAuthorization
   /** Reader-specific admission applied after grants, such as marking clearances. */
   admission?: ObjectQuerySemanticAdmission
+  /** The user `currentUser()` stands for; absent when the reader is not a user. */
+  requestingUser?: UserRef
 }
 
 export interface ExecuteObjectQueryInput {
@@ -413,11 +418,13 @@ export async function facetObjects(
 }
 
 /**
- * Validate, authorize the touched types, then admit the query for the reader.
+ * Validate, authorize the touched types, admit the query for the reader, then bind
+ * `currentUser()` to the reader's user.
  *
  * Grants are checked first so a denial never describes properties of a type the caller cannot
  * view. The admitted query is the one executed: an admission may narrow it, as markings narrow
- * default text fields.
+ * default text fields. Its user expansions are removed: storage never resolves profiles. Binding
+ * comes last, so storage and the fallback never see the placeholder.
  */
 function validateExecutableQuery(
   input: { readonly projectId: string; readonly query: ObjectQuery },
@@ -433,8 +440,13 @@ function validateExecutableQuery(
   const normalized = normalizeObjectQuery(input.query)
   const validated = validateObjectQuery(normalized, validationOptions)
   assertQueryViewable(input.projectId, validated, options)
-  if (!options.admission) return { ...validated, admissionState: {} }
-  return validateObjectQueryWithAdmission(normalized, validationOptions, options.admission)
+
+  const admitted = options.admission
+    ? validateObjectQueryWithAdmission(normalized, validationOptions, options.admission)
+    : { ...validated, admissionState: {} }
+
+  const executable = withoutUserExpansions(admitted.query)
+  return { ...admitted, query: bindCurrentUser(executable, options.requestingUser) }
 }
 
 // Authorization happens at planning time: a scoped query must hold a view

@@ -80,6 +80,9 @@ export function canViewEvent(
         kind: "dataset.view",
         datasetId: event.payload.datasetId,
       })
+    case "users":
+      // Member events carry profiles and invitee emails: the member directory's grant.
+      return isAllowed(authorization, { kind: "users.view" })
     default:
       // Fail closed: an unmodeled topic may carry a subject we don't yet gate.
       return false

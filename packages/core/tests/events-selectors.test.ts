@@ -158,6 +158,18 @@ describe("events selector builder", () => {
       runStatus: "failed",
     })
   })
+
+  test("builds project-wide member selectors", () => {
+    expect(eventSelectorSpec(events.users())).toEqual({ topic: "users" })
+    expect(eventSelectorSpec(events.users().joined())).toEqual({
+      topic: "users",
+      types: ["user.joined"],
+    })
+    expect(eventSelectorSpec(events.users().profileUpdated())).toEqual({
+      topic: "users",
+      types: ["user.profile.updated"],
+    })
+  })
 })
 
 describe("buildEventSelectorPredicate", () => {

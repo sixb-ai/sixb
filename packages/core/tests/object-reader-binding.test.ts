@@ -923,6 +923,10 @@ function createReadStorage(options?: {
       record("getByPrimaryId", input)
       return findRow(allRows, input.objectTypeId, input.primaryId)
     },
+    async getByUniqueValue(input) {
+      record("getByUniqueValue", input)
+      return null
+    },
     async getByPrimaryIdBatch(input) {
       record("getByPrimaryIdBatch", input)
       const result = new Map()
@@ -1053,6 +1057,10 @@ function createSelectedReader(
     async getByPrimaryId(input) {
       record("getByPrimaryId", input)
       return findRow(rows, input.objectTypeId, input.primaryId)
+    },
+    async getByUniqueValue(input) {
+      record("getByUniqueValue", input)
+      return null
     },
     async getByPrimaryIdBatch(input) {
       record("getByPrimaryIdBatch", input)

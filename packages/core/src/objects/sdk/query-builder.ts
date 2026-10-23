@@ -164,14 +164,19 @@ class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
   }
 
   expand(
-    link: LinkToken<string, string, string | readonly string[]>,
+    token: ExpandToken,
     optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
     build?: NestedExpandBuild
   ): ObjectQueryBuilder<TObjectType> {
+    if (isPropertyToken(token)) {
+      assertNoUserExpansionOptions(optionsOrBuild, build)
+      return this.withQuery({ kind: "expand", input: this.ir, expansions: [], users: [token.id] })
+    }
+
     return this.withQuery({
       kind: "expand",
       input: this.ir,
-      expansions: [buildExpansion(link, optionsOrBuild, build)],
+      expansions: [buildExpansion(token, optionsOrBuild, build)],
     })
   }
 
@@ -309,24 +314,47 @@ class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
 type AnyExpandBuilder = ObjectExpandBuilder<ObjectTypeWithPropertyTokens>
 type NestedExpandBuild = (nested: AnyExpandBuilder) => AnyExpandBuilder
 
+/** A link to hydrate, or a `ref.user()` property whose members' profiles to attach. */
+type ExpandToken = LinkToken<string, string, string | readonly string[]> | PropertyToken
+
 /**
  * Runtime backing for the nested `.expand(..., (e) => …)` callback. Immutable,
  * mirroring the query builder: each `expand` returns a new instance so the
  * accumulated expansions are never shared between branches.
  */
 class ObjectExpandBuilderImpl {
-  constructor(readonly expansions: readonly ObjectExpansion[] = []) {}
+  constructor(
+    readonly expansions: readonly ObjectExpansion[] = [],
+    readonly users: readonly string[] = []
+  ) {}
 
   expand(
-    link: LinkToken<string, string, string | readonly string[]>,
+    token: ExpandToken,
     optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
     build?: NestedExpandBuild
   ): ObjectExpandBuilderImpl {
-    return new ObjectExpandBuilderImpl([
-      ...this.expansions,
-      buildExpansion(link, optionsOrBuild, build),
-    ])
+    if (isPropertyToken(token)) {
+      assertNoUserExpansionOptions(optionsOrBuild, build)
+      return new ObjectExpandBuilderImpl(this.expansions, [...this.users, token.id])
+    }
+
+    return new ObjectExpandBuilderImpl(
+      [...this.expansions, buildExpansion(token, optionsOrBuild, build)],
+      this.users
+    )
   }
+}
+
+// A link token carries `link`, a property token `property`.
+function isPropertyToken(token: ExpandToken): token is PropertyToken {
+  return "property" in token
+}
+
+function assertNoUserExpansionOptions(optionsOrBuild: unknown, build: unknown): void {
+  if (optionsOrBuild === undefined && build === undefined) return
+  throw new OntologyValidationError(
+    "[Sixb] expand() of a user property takes no options or nested expansions."
+  )
 }
 
 function buildExpansion(
@@ -340,9 +368,11 @@ function buildExpansion(
   const nestedBuild = typeof optionsOrBuild === "function" ? optionsOrBuild : build
 
   let nested: readonly ObjectExpansion[] = []
+  let users: readonly string[] = []
   if (nestedBuild) {
     const result = nestedBuild(new ObjectExpandBuilderImpl() as unknown as AnyExpandBuilder)
     nested = (result as unknown as ObjectExpandBuilderImpl).expansions
+    users = (result as unknown as ObjectExpandBuilderImpl).users
   }
 
   return {
@@ -351,6 +381,7 @@ function buildExpansion(
     ...(options?.limit !== undefined ? { limit: options.limit } : {}),
     ...(options?.orderBy ? { orderBy: options.orderBy.map(expansionSortToField) } : {}),
     ...(nested.length > 0 ? { expand: nested } : {}),
+    ...(users.length > 0 ? { users } : {}),
   }
 }
 

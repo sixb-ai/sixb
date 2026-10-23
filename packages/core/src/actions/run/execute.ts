@@ -96,6 +96,7 @@ function buildActionContext(
     actions: execution.sixb.actions,
     connector: execution.sixb.connector,
     blobs: execution.sixb.blobs,
+    users: execution.sixb.users,
   }
   return {
     id: host.id,
@@ -106,5 +107,6 @@ function buildActionContext(
     ontologyMutations: execution.ontologyMutations,
     sixb,
     actions: host.definitions.actions,
+    requestedBy: execution.sixb.execution.requestedBy,
   }
 }

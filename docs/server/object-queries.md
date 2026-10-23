@@ -59,7 +59,7 @@ Most nodes wrap another node through `input`. `start` and `refs` select the init
 | `text` | `input`, `query`, `fields?` | Search default or explicit text fields. |
 | `vector` | `input`, `vector`, `profile`, `k` | Search by meaning using a named profile. |
 | `traverse` | `input`, `linkId`, `direction`, `sourceObjectTypeId?` | Follow a relationship. |
-| `expand` | `input`, `expansions` | Include related objects. |
+| `expand` | `input`, `expansions`, `users?` | Include related objects and member profiles. |
 | `set` | `op`, `inputs` | Combine with `union`, `intersect`, or `subtract`. |
 | `sort` | `input`, `fields` | Order results. |
 | `limit` | `input`, `limit` | Cap the result count. |
@@ -154,6 +154,18 @@ Each `links.customer` contains one object or `null` for a `"one"` link, or an ar
 link. Related objects may include `linkProperties`. Expansion entries also accept
 `sourceObjectTypeId`, `limit`, `orderBy`, and nested `expand` entries. Use `limit` and `orderBy` to
 bound a many-valued relationship per parent.
+
+`users` on an `expand` node, or on an expansion entry for the related objects, lists
+[`ref.user()` properties](../ontology/properties.md#reference-a-user). Each object then carries the
+members' profiles under `users`, keyed by property:
+
+```json
+{ "kind": "expand", "input": { "kind": "start", "objectTypeId": "Task" }, "expansions": [], "users": ["assignee"] }
+```
+
+A reference gives a profile or `null`, an array of references gives the members found. A property
+is absent from `users` when the caller lacks `can.view(project.users)` or cannot read its value; see
+[Include the members a property names](../objects/querying.md#include-the-members-a-property-names).
 
 ### Read link records
 

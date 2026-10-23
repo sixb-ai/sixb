@@ -12,7 +12,8 @@ import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
 import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
 import { OntologyValidationError } from "../../ontology/errors"
-import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
+import { assertPropertyTokenBelongsToObjectType } from "../../ontology/validation"
 import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type {
   ObjectSet,
@@ -93,6 +94,16 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
       const row = await objectReader.getByPrimaryId({
         objectTypeId: objectType.id,
         primaryId: id,
+      })
+      return row ? (row as unknown as TwinObject<TObjectType>) : null
+    },
+
+    getBy: async (property: PropertyToken, value: unknown) => {
+      assertPropertyTokenBelongsToObjectType(objectType, property)
+      const row = await objectReader.getByUniqueValue({
+        objectTypeId: objectType.id,
+        propertyId: property.id,
+        value,
       })
       return row ? (row as unknown as TwinObject<TObjectType>) : null
     },

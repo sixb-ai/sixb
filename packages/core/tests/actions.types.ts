@@ -1,5 +1,6 @@
 import {
   type ActionDefinition,
+  type AuthorizablePrincipal,
   type DecimalValue,
   decimal,
   defineAction,
@@ -14,6 +15,7 @@ import {
   prop,
   ref,
   stringEnum,
+  type UserRef,
 } from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -151,6 +153,67 @@ const runtimeFacade = defineAction("runtimeFacade")
     void temperature
     void temperatureUnit
     void occupied
+  })
+
+const Ticket = defineObjectType({
+  id: "Ticket",
+  name: "Ticket",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("title", "string"),
+    prop("assignee", ref.user(), { nullable: true }),
+    prop("owner", ref.user()),
+    prop("watchers", { type: "array", items: ref.user() }),
+  ],
+})
+
+defineAction("closeTicket")
+  .on(Ticket)
+  .params({})
+  .validate(({ target, requestedBy }) => {
+    type _requestedBy = Expect<Equal<typeof requestedBy, AuthorizablePrincipal | undefined>>
+    type _assignee = Expect<Equal<typeof target.properties.assignee, UserRef | null>>
+    type _owner = Expect<Equal<typeof target.properties.owner, UserRef>>
+    type _watchers = Expect<Equal<typeof target.properties.watchers, readonly UserRef[]>>
+
+    if (requestedBy?.type === "user") {
+      const watching: boolean = target.properties.watchers.some(
+        (watcher) => watcher.id === requestedBy.id
+      )
+      void watching
+    }
+  })
+  .writeback(({ requestedBy }) => {
+    type _requestedBy = Expect<Equal<typeof requestedBy, AuthorizablePrincipal | undefined>>
+  })
+  .edits(({ objects, subject, requestedBy }) => {
+    if (requestedBy) {
+      // @ts-expect-error a service account is not a user reference: check requestedBy.type first
+      objects(Ticket).byId(subject.primaryId).update({ assignee: requestedBy })
+    }
+
+    if (requestedBy?.type === "user") {
+      type _user = Expect<Equal<typeof requestedBy, UserRef>>
+      objects(Ticket).byId(subject.primaryId).update({ assignee: requestedBy })
+    }
+  })
+  .effects(({ requestedBy }) => {
+    type _requestedBy = Expect<Equal<typeof requestedBy, AuthorizablePrincipal | undefined>>
+  })
+
+defineAction("createTicket")
+  .params({ title: param("string") })
+  .validate(({ requestedBy }) => {
+    type _requestedBy = Expect<Equal<typeof requestedBy, AuthorizablePrincipal | undefined>>
+  })
+  .edits(({ objects, params, requestedBy }) => {
+    if (requestedBy) {
+      // @ts-expect-error a service account is not a user reference: check requestedBy.type first
+      objects(Ticket).create({ id: params.title, owner: requestedBy })
+    }
+
+    if (requestedBy?.type !== "user") throw new Error("Only a project member can open a ticket.")
+    objects(Ticket).create({ id: params.title, title: params.title, owner: requestedBy })
   })
 
 defineAction("targetAlias")

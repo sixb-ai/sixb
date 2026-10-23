@@ -32,6 +32,12 @@ describe("selected object reader guards", () => {
       objectTypeId: "GuardedObject",
       primaryId: "root",
     })
+    await reader.getByUniqueValue({
+      projectId: "guard-project",
+      objectTypeId: "GuardedObject",
+      propertyId: "email",
+      valueKey: "root@example.com",
+    })
     await reader.selectsObjectProperties({ projectId: "guard-project", items: [] })
     await reader.listLinks({
       projectId: "guard-project",
@@ -51,7 +57,7 @@ describe("selected object reader guards", () => {
     expect(Object.isFrozen(provider)).toBe(true)
     expect(Object.isFrozen(reader)).toBe(true)
     expect(availabilityChecks).toBe(1)
-    expect(guardedRuns).toBe(11)
+    expect(guardedRuns).toBe(12)
   })
 
   test("does not invent optional query terminals", () => {
@@ -83,6 +89,7 @@ function requiredReader(): ObjectReadStorage {
   return Object.freeze({
     queryCapabilities: () => ({ queryObjects: false }),
     getByPrimaryId: async () => null,
+    getByUniqueValue: async () => null,
     selectsObjectProperties: async () => [],
     listLinks: async () => [],
     getByPrimaryIdBatch: async () => new Map(),

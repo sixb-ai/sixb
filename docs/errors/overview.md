@@ -34,6 +34,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
 | `action.read_conflict` | Yes | Data the Action read changed before each of its three commit attempts, so nothing was committed. | Request a new run; if the Action has a writeback, check the external system first. |
+| `action.rejected` | No | A validator returned `{ error }`: `message` is that error, as the Action wrote it. | Show the message to the requester; change the request before trying again. |
 | `action.run_in_progress` | Yes | A request reused the `runId` of a run that the same process is still executing. | Retry with the same `runId` once it finishes to get its outcome. |
 | `action.timeout` | No | Validation, writeback, or edits did not finish within 30 seconds, so nothing was committed. On a run's `effects`, the effects did not finish within 30 seconds of the commit. | If the Action has a writeback, check the external system before requesting a new run. Move longer work into a workflow. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
@@ -57,6 +58,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `dataset.version_read_inconsistent` | Yes | Read results conflict with immutable version metadata. | Retry, then inspect lake storage integrity. |
 | `event.delivery_failed` | Yes | A persisted event could not reach the event stream. | Let the outbox retry; inspect the broker if it persists. |
 | `internal.unexpected` | No | The exception has no specific code yet. | Inspect its `onError` report and correlation details. |
+| `object.unique_violation` | No | A write would give a [unique property](../ontology/properties.md#unique-values)'s value to a second object of the type, so nothing was committed. | Write another value, or first take it from the object that holds it. |
 | `pipeline.step_failed` | No | A step failed before committing its output. | Fix the cause and request a new pipeline run. |
 | `projection.definition_invalid` | No | Projection definition is invalid for its ontology or dataset. | Fix the definition and request a new run. |
 | `projection.execution_failed` | No | Projection materialization failed permanently. | Inspect the projection, pinned dataset version, and `onError` report. |

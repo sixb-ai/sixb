@@ -464,6 +464,63 @@ describe("oidc auth strategy", () => {
     expect(second.user.email).toBe("ava@acme.com")
   })
 
+  test("refreshes the name and picture the provider sends, and reports them as its own", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    const strategy = oidc({
+      id: "okta",
+      issuer: "https://idp.example",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    })
+    const managedFields = (result: Awaited<ReturnType<typeof signIn>>) =>
+      result.identity && strategy.providerProfileFields(result.identity)
+
+    const first = await signIn({ authStorage, client, bootstrapUsers: ["ava@acme.com"] })
+    expect(managedFields(first)).toEqual(["displayName", "avatarUrl"])
+
+    // Microsoft Entra, for one, sends no picture.
+    const { picture: _picture, ...withoutPicture } = client.tokenClaims
+    client.tokenClaims = { ...withoutPicture, name: "Ava King" }
+    const second = await signIn({ authStorage, client, sessionId: "ses_2" })
+    expect(second.user).toMatchObject({
+      displayName: "Ava King",
+      avatarUrl: "https://idp.example/avatar.png",
+    })
+    expect(managedFields(second)).toEqual(["displayName"])
+
+    client.tokenClaims = { ...withoutPicture, name: " " }
+    const third = await signIn({ authStorage, client, sessionId: "ses_3" })
+    expect(third.user.displayName).toBe("Ava King")
+    expect(managedFields(third)).toEqual([])
+  })
+
+  // To see this fail, pass `claims.name` and `claims.picture` to storage as they came.
+  test("treats a name or picture a person could not set as not sent", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    const strategy = oidc({
+      id: "okta",
+      issuer: "https://idp.example",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+    })
+    await signIn({ authStorage, client, bootstrapUsers: ["ava@acme.com"] })
+
+    client.tokenClaims = {
+      ...client.tokenClaims,
+      name: "Ava \u202Eecalevol",
+      picture: "http://idp.example/avatar.png",
+    }
+    const result = await signIn({ authStorage, client, sessionId: "ses_2" })
+
+    expect(result.user).toMatchObject({
+      displayName: "Ava Chen",
+      avatarUrl: "https://idp.example/avatar.png",
+    })
+    expect(result.identity && strategy.providerProfileFields(result.identity)).toEqual([])
+  })
+
   test("admits an uninvited user the provider maps to a group", async () => {
     const authStorage = new InMemoryAuthStorage()
     const client = new FakeOidcClient()

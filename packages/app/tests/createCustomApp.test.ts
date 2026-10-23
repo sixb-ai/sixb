@@ -581,7 +581,9 @@ describe("createCustomApp.dev", () => {
     const html = await readFile(entry.htmlPath, "utf-8")
     expect(main).toContain('import AuthExperience from "../../app/auth.tsx"')
     expect(main).toContain("requestMagicLink(email)")
-    expect(main).toContain("confirmSignIn()")
+    expect(main).toContain("confirmSignIn(input)")
+    // `onClick={actions.confirmSignIn}` hands over the click event, which must not become a name.
+    expect(main).toContain('typeof input?.displayName === "string"')
     expect(main).toContain("form.submit()")
     expect(html).toContain('data-sixb-auth="__SIXB_AUTH_BOOTSTRAP__"')
     expect(html).toContain('src="./auth-main.tsx"')

@@ -77,4 +77,8 @@ export type {
   ObjectWhereBuilder,
   ObjectWhereClause,
   TwinObject,
+  UniquePropertyToken,
+  UniquePropertyValue,
 } from "./runtime/types"
+export type { RedactionReason, Redactions } from "./security/types"
+export type { UserProfile } from "./users"

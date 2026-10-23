@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core"
+import { defineObjectType, link, prop, ref, stringEnum } from "@sixb/core"
 import { createClient, createConfig } from "../src/generated/client"
-import { objects, SixbQueryError } from "../src/query"
+import { currentUser, objects, SixbQueryError } from "../src/query"
 
 const Customer = defineObjectType({
   id: "Customer",
@@ -136,6 +136,31 @@ describe("objects().query()", () => {
     expect(JSON.stringify(calls[2]?.body)).not.toContain("definition")
   })
 
+  test("sends currentUser() as { type: 'currentUser' } for the server to bind", async () => {
+    const Task = defineObjectType({
+      id: "Task",
+      name: "Task",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("assignee", ref.user(), { query: { searchable: true, filterable: true } }),
+      ],
+    })
+    const { client, calls } = createTestClient(() => Response.json({ count: 0, plan: emptyPlan }))
+
+    await objects(Task, { client })
+      .query()
+      .where((task) => task.p.assignee.eq(currentUser()))
+      .count()
+
+    expect(calls[0]?.body).toEqual({
+      query: {
+        kind: "filter",
+        predicate: { op: "eq", propertyId: "assignee", value: { type: "currentUser" } },
+        input: { kind: "start", objectTypeId: "Task" },
+      },
+    })
+  })
+
   test("list() posts the normalized IR and revives row dates", async () => {
     const { client, calls } = createTestClient(() =>
       Response.json({ objects: [row], hasMore: false, total: 1, plan: emptyPlan })
@@ -177,6 +202,98 @@ describe("objects().query()", () => {
     expect(result.objects[0]?.properties.name).toBe("Dashboard")
     expect(result.objects[0]?.createdAt).toEqual(new Date("2026-01-02T03:04:05.000Z"))
     expect(result.objects[0]?.updatedAt).toEqual(new Date("2026-02-03T04:05:06.000Z"))
+  })
+
+  // Remove the `redactions` copy in `reviveQueryRow` and this test fails: a reader without a
+  // clearance could not tell an omitted value from an absent one.
+  test("list() keeps the redactions of rows and expanded rows", async () => {
+    const redactions = { budget: { reason: "missing_clearance" as const } }
+    const customer = {
+      primaryId: "cust-001",
+      objectTypeId: "Customer",
+      properties: { id: "cust-001" },
+      redactions: { name: { reason: "missing_clearance" as const } },
+      createdAt: "2026-01-02T03:04:05.000Z",
+      updatedAt: "2026-01-02T03:04:05.000Z",
+    }
+    const { client } = createTestClient(() =>
+      Response.json({
+        objects: [{ ...row, redactions, links: { customer } }],
+        hasMore: false,
+        total: 1,
+        plan: emptyPlan,
+      })
+    )
+
+    const result = await objects(Project, { client }).query().expand(Project.l.customer).list()
+
+    const project = result.objects[0]
+    expect(project?.redactions).toEqual(redactions)
+    expect(project?.links.customer?.redactions).toEqual(customer.redactions)
+  })
+
+  test("expand() of user properties posts them and keeps the profiles of every row", async () => {
+    const Account = defineObjectType({
+      id: "Account",
+      name: "Account",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("owner", ref.user(), { nullable: true }),
+      ],
+    })
+    const Task = defineObjectType({
+      id: "Task",
+      name: "Task",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("assignee", ref.user(), { nullable: true }),
+      ],
+      links: [link("account", Account, { cardinality: "one" })],
+    })
+    const ava = { id: "usr_ava", email: "ava@acme.com", status: "active" as const }
+    const dates = { createdAt: "2026-01-02T03:04:05.000Z", updatedAt: "2026-01-02T03:04:05.000Z" }
+    const { client, calls } = createTestClient(() =>
+      Response.json({
+        objects: [
+          {
+            ...dates,
+            primaryId: "t1",
+            objectTypeId: "Task",
+            properties: { id: "t1", assignee: { type: "user", id: ava.id } },
+            users: { assignee: ava },
+            links: {
+              account: {
+                ...dates,
+                primaryId: "a1",
+                objectTypeId: "Account",
+                properties: { id: "a1" },
+                users: { owner: null },
+              },
+            },
+          },
+        ],
+        hasMore: false,
+        total: 1,
+        plan: emptyPlan,
+      })
+    )
+
+    const result = await objects(Task, { client })
+      .query()
+      .expand(Task.p.assignee)
+      .expand(Task.l.account, (account) => account.expand(Account.p.owner))
+      .list()
+
+    expect(calls[0]?.body).toEqual({
+      query: {
+        kind: "expand",
+        input: { kind: "start", objectTypeId: "Task" },
+        expansions: [{ linkId: "account", direction: "outgoing", users: ["owner"] }],
+        users: ["assignee"],
+      },
+    })
+    expect(result.objects[0]?.users.assignee).toEqual(ava)
+    expect(result.objects[0]?.links.account?.users.owner).toBeNull()
   })
 
   test("first() wraps the query with limit 1", async () => {

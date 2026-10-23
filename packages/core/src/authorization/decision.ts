@@ -24,6 +24,7 @@ import type { AuthorizationContext, GrantIndex } from "./types"
 export type AuthzRequest =
   | { readonly kind: "object.view"; readonly objectTypeId: string }
   | { readonly kind: "dataset.view"; readonly datasetId: string }
+  | { readonly kind: "users.view" }
   | { readonly kind: "object.edit"; readonly objectTypeId: string }
   | { readonly kind: "telemetry.append"; readonly objectTypeId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
@@ -68,6 +69,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "view:object", id: request.objectTypeId }]
     case "dataset.view":
       return [{ kind: "view:dataset", id: request.datasetId }]
+    case "users.view":
+      return [{ kind: "view:users" }]
     case "object.edit":
       return [{ kind: "edit:object", id: request.objectTypeId }]
     case "telemetry.append":
@@ -264,6 +267,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
     case "dataset.view":
       return `[Sixb] Principal '${principalId}' is not allowed to view dataset '${request.datasetId}'.`
+    case "users.view":
+      return `[Sixb] Principal '${principalId}' is not allowed to view the member directory.`
     case "object.edit":
       return `[Sixb] Principal '${principalId}' is not allowed to write object type '${request.objectTypeId}'.`
     case "telemetry.append":

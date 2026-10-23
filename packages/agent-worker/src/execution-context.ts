@@ -4,9 +4,10 @@ import {
   resolveAgentPropertyClearance,
 } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
+import { resolveAgentRequester } from "./requester"
 import type { AgentExecutionContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
-export function createAgentExecutionContext(input: {
+export async function createAgentExecutionContext(input: {
   readonly context: AgentWorkerContext
   readonly host: AgentWorkerHost
   readonly execution: ExecutionRecord
@@ -14,7 +15,9 @@ export function createAgentExecutionContext(input: {
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
   readonly authorPrincipal?: AgentExecutionContext["authorPrincipal"]
-}): AgentExecutionContext {
+  /** Others take part in the run's thread, so each user message names its author instead. */
+  readonly shared?: boolean
+}): Promise<AgentExecutionContext> {
   const sixb = bindDurableAgentExecution(input.host, {
     execution: input.execution,
     ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
@@ -26,11 +29,21 @@ export function createAgentExecutionContext(input: {
     input.host.definitions.ontology,
     input.authorization
   )
+  // A shared thread's system prompt names nobody, so it stays the same whoever sends the turn.
+  const requester = input.shared
+    ? undefined
+    : await resolveAgentRequester({
+        auth: input.context.storage.auth,
+        projectId: input.context.id,
+        requestedBy: input.execution.requestedBy,
+      })
+
   return {
     ...input.context,
     sixb,
     ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
+    ...(requester === undefined ? {} : { requester }),
     blobStorage: sixb.blobs,
   }
 }

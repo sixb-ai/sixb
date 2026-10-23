@@ -1,11 +1,13 @@
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors/execution"
+import type { AuthorizablePrincipal } from "../../execution/types"
 import type { LoggingService } from "../../logging/service"
 import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectsRuntime } from "../../objects/execution"
 import type { SixbDefinitions } from "../../runtime/definitions"
 import type { OntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type { ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { UsersRuntime } from "../../users"
 import type { ActionsRuntime } from "../execution"
 import type { ActionRunSignals } from "./signals"
 
@@ -16,6 +18,7 @@ export interface ActionExecutionFacade {
   readonly actions: ActionsRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
+  readonly users: UsersRuntime
 }
 
 export interface ActionRunContext {
@@ -27,6 +30,8 @@ export interface ActionRunContext {
   readonly ontologyMutations: OntologyMutationRuntime
   readonly sixb: ActionExecutionFacade
   readonly actions: Pick<SixbDefinitions["actions"], "getById">
+  /** Who started the chain of executions the run belongs to, when a principal did. */
+  readonly requestedBy: AuthorizablePrincipal | undefined
 }
 
 /**

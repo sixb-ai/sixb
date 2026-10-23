@@ -4,6 +4,7 @@ import type { PropertyChange, PropertyChangeMap } from "../events/property-chang
 import type { JsonValue } from "../json"
 import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
 import type { RecordActionRunInput } from "../storage/action-runs/types"
+import type { UniqueValueRef } from "../storage/ontology/materializations"
 import type { ObjectVectorWrite } from "./vectors"
 
 export type { ProjectionProtocolIdentity } from "../projections/types"
@@ -127,6 +128,11 @@ interface AtomicOntologyEditCommit extends BaseOntologyEditCommit {
   readonly expectedObjects: readonly ExpectedObjectRevision[]
   readonly expectedLinks: readonly ExpectedLinkRevision[]
   readonly expectedLinkScopes: readonly ExpectedLinkScopeRevision[]
+  /**
+   * Unique values no object held when the commit's author read them: a commit that lands after
+   * and gives one to an object makes this commit fail with an `expectation` conflict.
+   */
+  readonly expectedUnclaimedValues?: readonly UniqueValueRef[]
 }
 
 export type OntologyEditCommit =

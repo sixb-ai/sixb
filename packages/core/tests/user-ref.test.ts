@@ -84,6 +84,7 @@ describe("userRef values", () => {
     expect(output.properties).toEqual({
       assignee: {
         type: "object",
+        description: 'A Sixb user, written {"type":"user","id":"<user-id>"}.',
         properties: {
           type: { type: "string", enum: ["user"] },
           id: { type: "string", minLength: 1 },

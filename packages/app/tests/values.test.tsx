@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test"
+import { client, type GetUserResponse } from "@sixb/client"
 import type { FileRef } from "@sixb/core/blob-storage"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import { fieldRecordSchema, runFileLinks, ValuePanel, valueSchema } from "../src/pages/values"
+import {
+  fieldRecordSchema,
+  runFileLinks,
+  userRefProfileQuery,
+  ValuePanel,
+  valueSchema,
+} from "../src/pages/values"
 
 const fileRef: FileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -18,8 +26,14 @@ const fileMarker = "lucide-file"
 const objectMarker = "lucide-box"
 const userMarker = "lucide-user-round"
 
-// An object reference links to its object's page, so the panel needs a router.
-const markup = (node: ReactNode) => renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>)
+// An object reference links to its object's page, so the panel needs a router. A user reference
+// reads the member directory, so it needs a query client too.
+const markup = (node: ReactNode, queryClient = new QueryClient()) =>
+  renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{node}</MemoryRouter>
+    </QueryClientProvider>
+  )
 
 const render = (value: unknown, schema?: unknown, valueTypes?: ReadonlyMap<string, unknown>) =>
   markup(
@@ -95,6 +109,42 @@ describe("a recorded value", () => {
     expect(markup).toContain("room-1")
   })
 
+  test("names a user from the member directory, and shows the id until it can", () => {
+    const schema = valueSchema(fieldRecordSchema({ assignee: "userRef", reviewer: "userRef" }))
+    const value = {
+      assignee: { type: "user", id: "usr_1" },
+      reviewer: { type: "user", id: "usr_2" },
+    }
+    const queryClient = new QueryClient()
+    const ava: GetUserResponse = {
+      id: "usr_1",
+      email: "ava@acme.com",
+      displayName: "Ava Martin",
+      status: "active",
+    }
+    const ben: GetUserResponse = { id: "usr_2", email: "ben@acme.com", status: "suspended" }
+    queryClient.setQueryData(userRefProfileQuery(ava.id).queryKey, ava)
+    queryClient.setQueryData(userRefProfileQuery(ben.id).queryKey, ben)
+
+    const named = markup(<ValuePanel title="Value" value={value} schema={schema} />, queryClient)
+    expect(named).toContain("Ava Martin")
+    expect(named).toContain('title="ava@acme.com · usr_1"')
+    expect(named).toContain("ben@acme.com")
+    expect(named).toContain("Suspended")
+
+    // Refused or unknown: cached as no one, so the chip keeps the id without asking again.
+    const refused = new QueryClient()
+    refused.setQueryData(userRefProfileQuery("usr_1").queryKey, null)
+    expect(markup(<ValuePanel title="Value" value={value} schema={schema} />, refused)).toContain(
+      ">usr_1<"
+    )
+
+    // Not loaded, denied or unknown: the chip it always was.
+    const unnamed = markup(<ValuePanel title="Value" value={value} schema={schema} />)
+    expect(unnamed).toContain(">usr_1<")
+    expect(unnamed).not.toContain("Ava Martin")
+  })
+
   test("says it is empty in the panel's words when nothing was recorded", () => {
     for (const value of [null, {}, []]) {
       expect(markup(<ValuePanel title="Input" value={value} emptyLabel="No input" />)).toContain(
@@ -133,4 +183,30 @@ test("keeps an integer's digits as written, and groups a decimal's", () => {
   )
   expect(html).toContain(">2026<")
   expect(html).toContain("1,234,567.5")
+})
+
+test("caches a refused or unknown user as no one, and fails on anything else", async () => {
+  // Removal proof: drop the 403 mapping in userRefProfileQuery and the first lookup rejects, so each
+  // chip that mounts asks again.
+  const original = client.getConfig()
+  const lookup = async (status: number) => {
+    client.setConfig({
+      baseUrl: "https://api.sixb.test",
+      fetch: (async (_request: Request) =>
+        Response.json({ error: "[Sixb] No." }, { status })) as typeof fetch,
+    })
+    const query = userRefProfileQuery("usr_1")
+    const queryFn = query.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<unknown>
+    return queryFn({ signal: new AbortController().signal })
+  }
+
+  try {
+    expect(await lookup(403)).toBeNull()
+    expect(await lookup(404)).toBeNull()
+    await expect(lookup(503)).rejects.toBeDefined()
+  } finally {
+    client.setConfig({ baseUrl: original.baseUrl, fetch: original.fetch })
+  }
 })

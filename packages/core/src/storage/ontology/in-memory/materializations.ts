@@ -31,6 +31,7 @@ import type {
   AppliedMaterialization,
   ApplyMaterializationInput,
   ApplyMaterializationResult,
+  ExactUniqueValueWrite,
   ExpectedSourceRevision,
   ExpectedTimeseriesPointRevision,
   FinalizeMaterializationInput,
@@ -52,6 +53,7 @@ import type {
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
+  UniqueValueRef,
 } from "../materializations"
 import {
   assertExpectedLinkRevision,
@@ -286,6 +288,18 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         yield { objects: [], links: [], linkScopes: [value], points: [] }
       }
 
+      const uniqueHolders = this.uniqueHolders(session, request.uniqueValues ?? [])
+      for (let offset = 0; offset < uniqueHolders.length; offset += input.pageRows) {
+        this.requireSession(input.session)
+        yield {
+          objects: [],
+          links: [],
+          linkScopes: [],
+          points: [],
+          uniqueHolders: uniqueHolders.slice(offset, offset + input.pageRows),
+        }
+      }
+
       const requestedPoints = uniqueSorted(
         request.points,
         (point) => telemetryPointKey(point.series, point.at),
@@ -502,6 +516,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       write("effective.link.upsert", () => {
         this.assertLinkSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).applyExactLink(item.row, projectId)
+      })
+    for (const item of chunk.unique.releases)
+      write("unique.release", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).releaseUniqueValue(projectId, item)
+      })
+    for (const item of chunk.unique.claims)
+      write("unique.claim", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).claimUniqueValue(projectId, item)
       })
     for (const item of chunk.timeseries.pointUpserts)
       write("timeseries.point.upsert", () => {
@@ -777,6 +799,19 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         `Telemetry point ${telemetryPointKey(expected.series, expected.at)} changed.`
       )
     }
+  }
+
+  private uniqueHolders(
+    session: SessionState,
+    values: readonly UniqueValueRef[]
+  ): ExactUniqueValueWrite[] {
+    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
+    const holders: ExactUniqueValueWrite[] = []
+    for (const value of values) {
+      const primaryId = adapter.getUniqueHolder(session.header.commit.projectId, value)
+      if (primaryId !== null) holders.push({ ...value, primaryId })
+    }
+    return holders
   }
 
   private linkSlotState(

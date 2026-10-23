@@ -119,6 +119,7 @@ function applyObjectOperation(
     context,
     state,
     working,
+    currentEffective,
     transition.next,
     transition.editedAt,
     journal,
@@ -171,6 +172,7 @@ function applyObjectTransition(
   context: MaterializerContext,
   state: EditWorkingState,
   working: WorkingObject,
+  before: ResolvedObjectValue | null,
   next: WorkingObject["override"],
   nextEditedAt: Readonly<Record<string, string>>,
   journal?: EditUndoJournal,
@@ -180,6 +182,8 @@ function applyObjectTransition(
   const previousEditedAt = working.editedAt
   working.override = next
   working.editedAt = { ...nextEditedAt }
+
+  let undoUniqueValues: () => void
   try {
     const resolved = resolveObject(context.ontology, working)
     if (resolved) {
@@ -187,15 +191,23 @@ function applyObjectTransition(
       validateResolved?.(resolved)
     }
     validateWorkingCardinality(state.links.slots)
+    // Last, so an operation refused above leaves the index as it was.
+    undoUniqueValues = state.uniqueValues.transition(
+      working.ref,
+      before?.properties,
+      resolved?.properties
+    )
   } catch (error) {
     working.override = previous
     working.editedAt = previousEditedAt
     throw error
   }
+
   journal?.push({
     restore: () => {
       working.override = previous
       working.editedAt = previousEditedAt
+      undoUniqueValues()
     },
   })
 }

@@ -1,4 +1,4 @@
-import { defineObjectType, link, prop } from "@sixb/core/ontology"
+import { defineObjectType, link, prop, ref } from "@sixb/core/ontology"
 
 export const StressDepartment = defineObjectType({
   id: "StressDepartment",
@@ -38,6 +38,7 @@ export const StressTeam = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("slug", "string", { required: true }),
+    prop("lead", ref.user(), { nullable: true }),
   ],
   links: [link("members", StressUser, { cardinality: "many" })],
 })
@@ -48,6 +49,7 @@ export const StressProject = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
+    prop("watchers", { type: "array", items: ref.user() }),
   ],
   links: [link.ref("owner", ["StressUser", "StressTeam"], { cardinality: "one" })],
 })
