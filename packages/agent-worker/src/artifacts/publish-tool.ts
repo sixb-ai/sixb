@@ -4,18 +4,22 @@ import {
   AgentToolPublicError,
   type ArtifactKind,
   ArtifactRequestError,
+  type ArtifactsRuntime,
+  AuthorizationError,
   type BlobStorage,
   type JsonValue,
+  ObjectQueryExecutionError,
   type Principal,
   principalsEqual,
   type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { frameLayout } from "@sixb/core/internal/artifacts/frames"
+import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   artifactAccessRule,
   artifactQueryChecker,
+  artifactQueryName,
   artifactVersionWarnings,
   isArtifactId,
   prepareArtifactVersion,
@@ -34,7 +38,12 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
-import { checkLayout, type LayoutCheck } from "./layout-check/layout-check"
+import {
+  type CheckedQuery,
+  checkLayout,
+  type LayoutCheck,
+  type LayoutWarning,
+} from "./layout-check/layout-check"
 import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
@@ -119,8 +128,11 @@ interface PublishToolsInput {
   /** For the transaction that publishes. */
   readonly storage: Storage
   readonly artifacts: ArtifactStorage
-  /** The requester's view of artifacts: what the turn may read, revise, and refer to. */
-  readonly reader: TurnArtifacts
+  /**
+   * The requester's view of artifacts: what the turn may read, revise, and refer to, and what a
+   * version's queries return when the check opens it.
+   */
+  readonly reader: TurnArtifacts & Pick<ArtifactsRuntime, "query">
   readonly blobStorage: BlobStorage
   readonly run: PublishingRun
   /** The thread's owner, who owns what the Agent creates in it. */
@@ -349,7 +361,10 @@ async function publish(
         ? { layout, entry: bytesOf(entry) as Uint8Array }
         : null
   let check: LayoutCheck | undefined
+  let queries: CheckedQueries = { answers: {}, warnings: [] }
   if (root && pages && (pages.layout !== "canvas" || pages.boards.length > 0)) {
+    queries = await checkedQueries(input.reader, published)
+    signal.throwIfAborted()
     try {
       check = await checkLayout({
         handle,
@@ -358,6 +373,7 @@ async function publish(
         files: contents.map((file) => file.path),
         name: `${published.artifact.id}-v${published.version.version}`,
         ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
+        queries: queries.answers,
         signal,
       })
     } catch (error) {
@@ -371,9 +387,15 @@ async function publish(
     version: published.version.version,
     kind: published.artifact.kind,
     title: published.version.title,
-    warnings: [...warnings, ...(check?.status === "checked" ? check.warnings : [])].map(
-      ({ code, message, part }) => ({ code, message, ...(part === undefined ? {} : { part }) })
-    ),
+    warnings: [
+      ...warnings,
+      ...queries.warnings,
+      ...(check?.status === "checked" ? check.warnings : []),
+    ].map(({ code, message, part }) => ({
+      code,
+      message,
+      ...(part === undefined ? {} : { part }),
+    })),
     ...(check === undefined
       ? {}
       : {
@@ -383,6 +405,69 @@ async function publish(
               : { skipped: check.reason },
         }),
   }
+}
+
+interface CheckedQueries {
+  readonly answers: Readonly<Record<string, CheckedQuery>>
+  readonly warnings: readonly LayoutWarning[]
+}
+
+/**
+ * The version's queries, run as the requester, for the check to open the page with the rows a
+ * reader like them gets: each as the API serializes it, since the page reads that JSON in the app.
+ * Publishing checked each one as the requester, but what they may read can change before it runs,
+ * and running can fail where checking could not: such a query is a warning, as the version exists.
+ */
+async function checkedQueries(
+  reader: Pick<ArtifactsRuntime, "query">,
+  published: Awaited<ReturnType<typeof storeArtifactVersion>>
+): Promise<CheckedQueries> {
+  const { artifact, version } = published
+  const names = version.files.flatMap((file) => {
+    const name = artifactQueryName(file.path)
+    return name === undefined ? [] : [name]
+  })
+
+  const answers = await Promise.all(
+    names.map(async (name): Promise<readonly [string, CheckedQuery]> => {
+      try {
+        const result = await reader.query(artifact.id, name, { version: version.version })
+        if (!result) throw new Error(`[SixbAgentWorker] Version ${version.version} is missing.`)
+
+        return [name, { result: serializeArtifactQueryResult(result) }]
+      } catch (error) {
+        return [name, { error: queryErrorText(error) }]
+      }
+    })
+  )
+
+  return {
+    answers: Object.fromEntries(answers),
+    warnings: answers.flatMap(([name, answer]) =>
+      "error" in answer
+        ? [
+            {
+              code: "query_failed",
+              message: `Query '${name}' failed when the check ran it as you: ${answer.error.replace(/^\[Sixb\] /, "")} The page was checked with sixb.query("${name}") rejecting, as it does for every reader it fails for.`,
+            },
+          ]
+        : []
+    ),
+  }
+}
+
+/** A refusal in the words the API gives a reader; anything else stays internal. */
+function queryErrorText(error: unknown): string {
+  if (
+    error instanceof ArtifactRequestError ||
+    error instanceof AuthorizationError ||
+    error instanceof ObjectQueryExecutionError
+  ) {
+    return /[.!?]$/.test(error.message) ? error.message : `${error.message}.`
+  }
+
+  console.warn("[SixbAgentWorker] A query of the published version did not run:", error)
+  return "[Sixb] The query could not be read."
 }
 
 /** How storing refuses an artifact the requester may not publish to: as if it did not exist. */

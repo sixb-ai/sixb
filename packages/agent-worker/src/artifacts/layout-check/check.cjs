@@ -14,7 +14,9 @@
 // the kit and runtime in it; boards.json, a canvas's boards and their sizes; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
 // themes.json, the themes the reader sees it in: Sixb's light and dark, or the mode its
-// theme.json pins, with its tokens.
+// theme.json pins, with its tokens; and queries.json, the version's queries by name with the
+// status each is served with, its answer in queries/<name>.json: the page reads them at
+// __sixb/queries/<name>.json, as the runtime does with no app around it.
 //
 // A deck or a page can stop answering, with a script that never yields or a font that never
 // loads, and a browser outlives a node that is killed. So every wait on the page is bounded, and
@@ -33,6 +35,8 @@ const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
 /** The frame's own files, served from the library as the API serves them beside a version's. */
 const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/page.css", "/__sixb/runtime.js"])
+/** Where the runtime reads a query when it is opened on its own. */
+const QUERY_PATH = /^\/__sixb\/queries\/([a-z0-9][a-z0-9-]{0,63})\.json$/
 /** The widths a page is checked at: a laptop's, and a phone's. */
 const VIEWS = [
   { name: "desktop", width: 1280, height: 800 },
@@ -103,19 +107,27 @@ function serve() {
   // Each page the check opens, with the kit and the runtime in it, by its path in the version.
   const entries = JSON.parse(fs.readFileSync(path.join(out, "entries.json"), "utf8"))
   const published = new Set(JSON.parse(fs.readFileSync(path.join(out, "files.json"), "utf8")))
+  const queries = fs.existsSync(path.join(out, "queries.json"))
+    ? JSON.parse(fs.readFileSync(path.join(out, "queries.json"), "utf8"))
+    : {}
   const root = path.resolve(deck)
   const server = http.createServer((request, response) => {
     const pathname = decodeURIComponent(new URL(request.url, "http://deck").pathname)
     let body = null
     let file = null
+    let status = 200
     if (pathname === "/favicon.ico") {
       response.writeHead(204).end()
       return
     }
     const entry = entries[pathname === "/" ? "index.html" : pathname.slice(1)]
+    const query = QUERY_PATH.exec(pathname)?.[1]
     if (entry) file = path.join(out, entry)
     else if (FRAME_FILES.has(pathname)) file = path.join(lib, pathname.slice("/__sixb/".length))
-    else if (published.has(pathname.slice(1))) file = path.join(root, pathname.slice(1))
+    else if (query && Object.hasOwn(queries, query)) {
+      file = path.join(out, "queries", `${query}.json`)
+      status = queries[query]
+    } else if (published.has(pathname.slice(1))) file = path.join(root, pathname.slice(1))
     try {
       if (file) body = fs.readFileSync(file)
     } catch {
@@ -126,7 +138,7 @@ function serve() {
       return
     }
     const type = TYPES[path.extname(file).toLowerCase()]
-    response.writeHead(200, type ? { "content-type": type } : {}).end(body)
+    response.writeHead(status, type ? { "content-type": type } : {}).end(body)
   })
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)))
 }
