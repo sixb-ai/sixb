@@ -91,18 +91,11 @@ function prepareTelemetryAppend(
   })
   const inputPointCount = telemetryInputPointCount(input, rawInputPointCount)
 
-  const ontologyRevision = context.projectionRegistry.ontologyRevision
   const execution = prepareMaterializerExecution(context.projectId, raw.scope)
   if (input.source.kind === "runtime") {
-    return {
-      ...prepareRuntimeTelemetry(context, input, input.source, inputPointCount, ontologyRevision),
-      execution,
-    }
+    return { ...prepareRuntimeTelemetry(context, input, input.source, inputPointCount), execution }
   }
-  return {
-    ...prepareProjectionTelemetry(context, input, input.source, inputPointCount, ontologyRevision),
-    execution,
-  }
+  return { ...prepareProjectionTelemetry(context, input, input.source, inputPointCount), execution }
 }
 
 function telemetryInputPointCount(
@@ -114,11 +107,10 @@ function telemetryInputPointCount(
 }
 
 function prepareRuntimeTelemetry(
-  context: Pick<MaterializerContext, "projectId" | "clock">,
+  context: Pick<MaterializerContext, "projectId" | "projectionRegistry" | "clock">,
   input: NormalizedTelemetryAppend,
   source: RuntimeTelemetrySource,
-  inputPointCount: number,
-  ontologyRevision: string
+  inputPointCount: number
 ): Omit<PreparedRuntimeTelemetry, "execution"> {
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
@@ -126,15 +118,21 @@ function prepareRuntimeTelemetry(
     normalizedCallerIntent: input,
     now: context.clock(),
   })
-  return { kind: "runtime", input, source, inputPointCount, ontologyRevision, identity }
+  return {
+    kind: "runtime",
+    input,
+    source,
+    inputPointCount,
+    ontologyRevision: context.projectionRegistry.ontologyRevision,
+    identity,
+  }
 }
 
 function prepareProjectionTelemetry(
   context: Pick<MaterializerContext, "projectId" | "projectionRegistry" | "clock">,
   input: NormalizedTelemetryAppend,
   source: ProjectionTelemetrySource,
-  inputPointCount: number,
-  ontologyRevision: string
+  inputPointCount: number
 ): Omit<PreparedProjectionTelemetry, "execution"> {
   const resolvedProjection = context.projectionRegistry.resolveTelemetry(
     source.projection.projectionId
@@ -146,7 +144,6 @@ function prepareProjectionTelemetry(
   const runIdentity = createProjectionRunMaterializationIdentity({
     resolved: resolvedProjection,
     datasetVersion: source.datasetVersion,
-    ontologyRevision,
   })
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
@@ -160,7 +157,7 @@ function prepareProjectionTelemetry(
     input,
     source,
     inputPointCount,
-    ontologyRevision,
+    ontologyRevision: runIdentity.ontologyRevision,
     identity,
     resolvedProjection,
     runIdentity,

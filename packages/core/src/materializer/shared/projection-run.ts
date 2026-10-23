@@ -25,7 +25,6 @@ interface ProjectionRunIdentityInput<
 > {
   readonly resolved: ResolvedProjection<TDefinition>
   readonly datasetVersion: PinnedDatasetVersion
-  readonly ontologyRevision: string
 }
 
 export function createProjectionRunMaterializationIdentity(
@@ -43,7 +42,7 @@ export function createProjectionRunMaterializationIdentity(
   const base = {
     projectionId: input.resolved.projectionId,
     datasetVersion: input.datasetVersion,
-    ontologyRevision: input.ontologyRevision,
+    ontologyRevision: input.resolved.ontologyRevision,
     projectionRevision: input.resolved.projectionRevision,
     ownershipHash: input.resolved.ownershipHash,
   }

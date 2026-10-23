@@ -182,6 +182,8 @@ interface ProjectionDispatchDescriptorBase {
 export interface ResolvedProjection<TDefinition extends ProjectionDefinition> {
   readonly projectionId: string
   readonly datasetId: string
+  /** The part of the ontology this projection reads; see `computeProjectionOntologyRevision`. */
+  readonly ontologyRevision: string
   readonly projectionRevision: string
   readonly ownershipHash: string
   readonly ownership: ProjectionOwnership

@@ -121,7 +121,6 @@ function prepareProjectionReplacement(
   const runIdentity = createProjectionRunMaterializationIdentity({
     resolved,
     datasetVersion,
-    ontologyRevision: context.projectionRegistry.ontologyRevision,
   })
   const identity = createCommitIdentity({
     projectId: context.projectId,
@@ -306,6 +305,7 @@ async function stageOrReuseCandidate(
     execution: command.execution,
     projectionKind: command.projectionKind,
     datasetVersion: command.datasetVersion,
+    ontologyRevision: command.resolved.ontologyRevision,
     projectionRevision: command.resolved.projectionRevision,
     ownershipHash: command.resolved.ownershipHash,
     createdAt: candidate.createdAt,

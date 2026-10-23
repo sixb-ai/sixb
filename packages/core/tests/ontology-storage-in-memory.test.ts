@@ -403,7 +403,7 @@ describe("in-memory ontology storage", () => {
       datasetVersion,
       projectionRevision: resolved.projectionRevision,
       ownershipHash: resolved.ownershipHash,
-      ontologyRevision: projections.ontologyRevision,
+      ontologyRevision: resolved.ontologyRevision,
       createdAt: "2026-01-01T00:00:00.000Z",
     })
     let release!: () => void
@@ -2120,7 +2120,7 @@ function replacementIdentity(
       ...datasetVersion,
       createdAt: new Date(datasetVersion.createdAt).toISOString(),
     },
-    ontologyRevision: projections.ontologyRevision,
+    ontologyRevision: resolved.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }

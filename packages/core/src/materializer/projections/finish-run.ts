@@ -95,7 +95,6 @@ function resolveDeployedProjection(
   const identity = createProjectionRunMaterializationIdentity({
     resolved,
     datasetVersion: input.datasetVersion,
-    ontologyRevision: context.projectionRegistry.ontologyRevision,
   })
   return { identity, resolved }
 }

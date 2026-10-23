@@ -45,6 +45,7 @@ export interface PinnedDatasetVersion {
 interface ProjectionMaterializationIdentityBase {
   readonly projectionId: string
   readonly datasetVersion: PinnedDatasetVersion
+  /** The part of the ontology the projection reads, not the whole ontology. */
   readonly ontologyRevision: string
   readonly projectionRevision: string
   readonly ownershipHash: string
