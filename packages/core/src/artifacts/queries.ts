@@ -4,7 +4,7 @@ import type {
   ObjectQueryPredicate,
   ObjectQuerySortField,
 } from "../objects/query/ir"
-import type { ObjectFacetRequest } from "../storage/objects/types"
+import type { ObjectFacetRequest, ObjectFacetResult, ObjectRow } from "../storage/objects/types"
 import type { ArtifactKind } from "./kinds"
 
 /**
@@ -25,6 +25,36 @@ export type ArtifactQuery =
       readonly query: ObjectQuery
       readonly facets: readonly ObjectFacetRequest[]
     }
+
+/** What a query read for its reader: the rows they may see, or the facets of those rows. */
+export type ArtifactQueryResult = ArtifactObjectsQueryResult | ArtifactFacetsQueryResult
+
+interface ArtifactQueryShape {
+  /** The object types the query returns. */
+  readonly resultObjectTypeIds: readonly string[]
+  /** Every object type the query reads: where it starts, and each type it traverses or expands. */
+  readonly readObjectTypeIds: readonly string[]
+}
+
+export interface ArtifactObjectsQueryResult extends ArtifactQueryShape {
+  readonly kind: "objects"
+  /**
+   * At most `ARTIFACT_LIMITS.maxQueryRows`, as the reader reads them: a marked property they are
+   * not cleared for is left out and listed in the row's `redactions`.
+   */
+  readonly objects: readonly ObjectRow[]
+  /** Every row the query matches for the reader, those past the cap included. */
+  readonly total: number
+  /** Whether rows are left out because of the cap. A query's own `limit` leaves none out. */
+  readonly truncated: boolean
+}
+
+export interface ArtifactFacetsQueryResult extends ArtifactQueryShape {
+  readonly kind: "facets"
+  /** Every row the query matches for the reader. */
+  readonly total: number
+  readonly facets: readonly ObjectFacetResult[]
+}
 
 /** Lowercase letters, digits and hyphens, as a canvas item's id. */
 const QUERY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile, ArtifactRequestErrorCode, AuthorizationContext } from "../src"
-import { ArtifactRequestError, defineMarking, defineObjectType, prop, SixbHost } from "../src"
+import {
+  ArtifactRequestError,
+  AuthorizationError,
+  defineMarking,
+  defineObjectType,
+  prop,
+  SixbHost,
+} from "../src"
+import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
 import { prepareArtifactVersion } from "../src/artifacts/publish"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -23,9 +31,10 @@ const Invoice = defineObjectType({
   ],
 })
 
-function setup() {
-  const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ id: projectId, ontology: [Invoice], markings: [financial], ...deps })
+type Ontology = ConstructorParameters<typeof SixbHost>[0]["ontology"]
+
+function setup(deps = createTestRuntimeDeps(), ontology: Ontology = [Invoice]) {
+  const host = new SixbHost({ id: projectId, ontology, markings: [financial], ...deps })
 
   const as = (
     id: string,
@@ -261,5 +270,148 @@ describe("publishing a version that holds queries", () => {
       ),
       "[Sixb] 'queries/open.json' is a query, and this publish has no way to check it as its author."
     )
+  })
+})
+
+/** `count` invoices, open, numbered from 1 in primary-id order. */
+async function seedInvoices(host: SixbHost, count: number) {
+  const items = Array.from({ length: count }, (_, index) => ({
+    properties: { id: `inv_${String(index + 1).padStart(5, "0")}`, status: "open", amount: 100 },
+  }))
+
+  const sixb = createTestSixb(host)
+  for (let index = 0; index < items.length; index += 1_000) {
+    await sixb.objects.upsertBatch(Invoice.id, items.slice(index, index + 1_000))
+  }
+}
+
+describe("reading a version's query", () => {
+  test("runs it as the reader, and says what it returns and reads", async () => {
+    const { host, as, page } = setup()
+    await seedInvoices(host, 3)
+    const alice = as("alice", { cleared: true })
+    const { artifact } = await alice.artifacts.create(
+      await page({
+        open,
+        statuses: { query: start, facets: [{ propertyId: "status", limit: 10 }] },
+      })
+    )
+
+    const rows = await alice.artifacts.query(artifact.id, "open")
+    expect(rows).toMatchObject({
+      kind: "objects",
+      total: 3,
+      truncated: false,
+      resultObjectTypeIds: ["Invoice"],
+      readObjectTypeIds: ["Invoice"],
+    })
+    expect(rows?.kind === "objects" && rows.objects[0]?.properties).toEqual({
+      id: "inv_00001",
+      status: "open",
+      amount: 100,
+    })
+
+    expect(await alice.artifacts.query(artifact.id, "statuses", { version: 1 })).toEqual({
+      kind: "facets",
+      total: 3,
+      facets: [{ propertyId: "status", buckets: [{ value: "open", count: 3 }] }],
+      resultObjectTypeIds: ["Invoice"],
+      readObjectTypeIds: ["Invoice"],
+    })
+  })
+
+  test("leaves out what the reader is not cleared for, and refuses what they cannot view", async () => {
+    const { host, as, page } = setup()
+    await seedInvoices(host, 1)
+    const { artifact } = await as("bob").artifacts.create(await page({ open }))
+
+    const uncleared = await as("bob").artifacts.query(artifact.id, "open")
+    expect(uncleared?.kind === "objects" && uncleared.objects[0]).toMatchObject({
+      properties: { id: "inv_00001", status: "open" },
+      redactions: { amount: { reason: "missing_clearance" } },
+    })
+    expect(uncleared?.kind === "objects" && uncleared.objects[0]?.properties).not.toHaveProperty(
+      "amount"
+    )
+
+    // Bob no longer views invoices: his own artifact's query is refused as his read would be.
+    const refused = await as("bob", { views: [] })
+      .artifacts.query(artifact.id, "open")
+      .catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(AuthorizationError)
+  })
+
+  // Guard proof: return `truncated: false` once the cap is reached in readRows; the capped read
+  // then says nothing is left out.
+  test("reads past one page, and up to the cap, within the query's own limit", async () => {
+    const { host, page } = setup()
+    await seedInvoices(host, ARTIFACT_LIMITS.maxQueryRows + 1)
+    const sixb = createTestSixb(host)
+    const { artifact } = await sixb.artifacts.create(
+      await page({
+        // Just past the first page.
+        first: { kind: "limit", input: start, limit: 1_000 },
+        all: start,
+        five: { kind: "limit", input: start, limit: 5 },
+      })
+    )
+
+    const capped = await sixb.artifacts.query(artifact.id, "all")
+    expect(capped?.kind === "objects" && capped.objects.length).toBe(ARTIFACT_LIMITS.maxQueryRows)
+    expect(capped).toMatchObject({ total: ARTIFACT_LIMITS.maxQueryRows + 1, truncated: true })
+    const ids = capped?.kind === "objects" ? capped.objects.map((row) => row.primaryId) : []
+    expect(new Set(ids).size).toBe(ARTIFACT_LIMITS.maxQueryRows)
+    expect(ids.at(1_000)).toBe("inv_01001")
+
+    expect(await sixb.artifacts.query(artifact.id, "five")).toMatchObject({
+      total: 5,
+      truncated: false,
+      objects: { length: 5 },
+    })
+    expect(await sixb.artifacts.query(artifact.id, "first")).toMatchObject({
+      total: 1_000,
+      truncated: false,
+      objects: { length: 1_000 },
+    })
+  })
+
+  test("crosses a page boundary", async () => {
+    const { host, page } = setup()
+    await seedInvoices(host, 1_001)
+    const sixb = createTestSixb(host)
+    const { artifact } = await sixb.artifacts.create(await page({ all: start }))
+
+    const rows = await sixb.artifacts.query(artifact.id, "all")
+    expect(rows).toMatchObject({ total: 1_001, truncated: false, objects: { length: 1_001 } })
+    expect(rows?.kind === "objects" && rows.objects.at(-1)?.primaryId).toBe("inv_01001")
+  })
+
+  test("refuses a query the ontology no longer admits, and one the version does not hold", async () => {
+    const { deps, page } = setup()
+    const before = setup(deps)
+    const { artifact } = await createTestSixb(before.host).artifacts.create(await page({ open }))
+
+    // The same project, its status no longer filterable.
+    const Unfiltered = defineObjectType({
+      ...Invoice,
+      properties: Invoice.properties.map((property) =>
+        property.id === "status" ? { ...property, query: undefined } : property
+      ),
+    })
+    const after = setup(deps, [Unfiltered])
+    const sixb = createTestSixb(after.host)
+
+    await expectRefused(
+      sixb.artifacts.query(artifact.id, "open"),
+      "[Sixb] Query 'open' no longer matches the ontology: $.predicate: Property 'status' on 'Invoice' must set query.searchable: true and query.filterable: true before it can be used in predicates",
+      "query_invalid"
+    )
+    await expectRefused(
+      sixb.artifacts.query(artifact.id, "closed"),
+      `[Sixb] Version 1 of artifact '${artifact.id}' has no query 'closed'.`,
+      "query_not_found"
+    )
+    expect(await sixb.artifacts.query(artifact.id, "open", { version: 2 })).toBeNull()
+    expect(await sixb.artifacts.query("art_0000000000", "open")).toBeNull()
   })
 })

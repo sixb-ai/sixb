@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
+import {
+  agent,
+  can,
+  defineGroup,
+  defineMarking,
+  defineObjectType,
+  defineRole,
+  prop,
+  SixbHost,
+} from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestSixb } from "../src/testing"
@@ -9,6 +18,16 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const projectId = "agent-thread-participants"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
+
+const financial = defineMarking("financial")
+const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("amount", "double", { markings: [financial] }),
+  ],
+})
 
 const agentUsers = defineGroup("agent-users")
 const agentRunner = defineRole("agent.runner", {
@@ -20,7 +39,8 @@ function setup() {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: projectId,
-    ontology: [],
+    ontology: [Invoice],
+    markings: [financial],
     models: { language: [testLanguageModel()] },
     groups: [agentUsers],
     roles: [agentRunner],
@@ -35,7 +55,8 @@ type Host = ReturnType<typeof setup>["host"]
 async function signedIn(
   host: Host,
   id: string,
-  grants: Partial<ReturnType<typeof emptyGrantIndex>> = { "run:agent": true }
+  grants: Partial<ReturnType<typeof emptyGrantIndex>> = { "run:agent": true },
+  clearances?: readonly string[]
 ) {
   await host.storage.auth?.users.create({
     projectId,
@@ -75,15 +96,29 @@ async function signedIn(
         groupIds: [],
         roleIds: [],
         grants: { ...emptyGrantIndex(), ...grants },
+        ...(clearances ? { clearances: new Set(clearances) } : {}),
       },
     },
   })
 }
 
-/** Alice's thread with one finished turn, shared with Bob through storage. */
-async function sharedThread(host: Host) {
-  const owner = await signedIn(host, alice.id)
-  const participant = await signedIn(host, bob.id)
+type Grants = Partial<ReturnType<typeof emptyGrantIndex>>
+
+/**
+ * Alice's thread with one finished turn, shared with Bob through storage. Each may read objects
+ * with more than the Agent's grant.
+ */
+async function sharedThread(
+  host: Host,
+  reads: { readonly owner?: Grants; readonly participant?: Grants; readonly cleared?: true } = {}
+) {
+  const owner = await signedIn(
+    host,
+    alice.id,
+    { "run:agent": true, ...reads.owner },
+    reads.cleared ? [financial.id] : undefined
+  )
+  const participant = await signedIn(host, bob.id, { "run:agent": true, ...reads.participant })
   const other = await signedIn(host, "usr_cleo")
 
   const thread = await owner.agent.threads.create({ title: "Late deals" })
@@ -666,5 +701,67 @@ describe("artifacts a shared conversation shares", () => {
     // Alice's report and notes, and no copy.
     expect((await host.storage.artifacts?.list({ projectId }))?.total).toBe(2)
     expect(await participant.artifacts.get(artifact.id)).not.toBeNull()
+  })
+})
+
+describe("queries in the artifacts a conversation shares", () => {
+  // Guard proof: read the artifact from storage in `readVersion`, not through `getReadable`; Cleo
+  // then runs Alice's query.
+  test("each reader runs them with their own rights", async () => {
+    const { host } = setup()
+    const invoices: Grants = { "view:object": new Set([Invoice.id]) }
+    const { owner, participant, other, thread, run } = await sharedThread(host, {
+      owner: invoices,
+      participant: invoices,
+      cleared: true,
+    })
+    const observer = await signedIn(host, "usr_olivia", {
+      ...invoices,
+      "observe:agentThreads": true,
+    })
+    await createTestSixb(host)
+      .objects(Invoice)
+      .upsert({ properties: { id: "inv_1", amount: 1200 } })
+
+    const put = async (path: string, text: string) => ({
+      path,
+      file: await host.blobStorage.put({ body: new TextEncoder().encode(text), fileName: path }),
+    })
+    const { artifact, version } = await owner.artifacts.create({
+      kind: "page",
+      title: "Invoices",
+      files: [
+        await put("index.html", "<!doctype html><title>Invoices</title><p>Invoices</p>"),
+        await put("queries/invoices.json", '{"kind":"start","objectTypeId":"Invoice"}'),
+      ],
+    })
+    // As the Agent shows it in the thread.
+    const { projectId: _p, artifactId: _a, version: _v, ...input } = version
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "page",
+      version: { ...input, origin: { threadId: thread.id, runId: run.id } },
+    })
+
+    const rowOf = async (reader: typeof owner) => {
+      const result = await reader.artifacts.query(artifact.id, "invoices")
+      if (result?.kind !== "objects") throw new Error("Expected the query's rows.")
+      return result.objects[0]
+    }
+
+    expect(await rowOf(owner)).toMatchObject({ properties: { id: "inv_1", amount: 1200 } })
+    expect(await rowOf(owner)).not.toHaveProperty("redactions")
+
+    // Bob takes part without the clearance: the row, without its amount.
+    const bobs = await rowOf(participant)
+    expect(bobs).toMatchObject({
+      properties: { id: "inv_1" },
+      redactions: { amount: { reason: "missing_clearance" } },
+    })
+    expect(bobs?.properties).not.toHaveProperty("amount")
+
+    expect(await rowOf(observer)).toMatchObject({ properties: { id: "inv_1" } })
+    expect(await other.artifacts.query(artifact.id, "invoices")).toBeNull()
   })
 })

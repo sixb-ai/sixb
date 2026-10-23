@@ -9,6 +9,8 @@ export type ArtifactRequestErrorCode =
   | "state_full"
   | "not_allowed"
   | "not_shared"
+  | "query_invalid"
+  | "query_not_found"
   | "read_only"
   | "storage_unavailable"
 
