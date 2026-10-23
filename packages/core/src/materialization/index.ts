@@ -16,6 +16,7 @@ export {
   MaterializationConflictError,
   MaterializationObjectNotFoundError,
   MaterializationValidationError,
+  UniqueValueViolationError,
 } from "./errors"
 export type { OntologyMaterializationEventSequence } from "./event-envelopes"
 export { eventAttribution, materializationEvent } from "./event-envelopes"

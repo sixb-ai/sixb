@@ -7,6 +7,7 @@ import { ontology } from "./ontology"
 import { project } from "./project"
 import { runs } from "./runs"
 import { telemetry } from "./telemetry"
+import { users } from "./users"
 import { workflows } from "./workflows"
 
 export const INSTANCE_COMMANDS = [
@@ -19,6 +20,7 @@ export const INSTANCE_COMMANDS = [
   "files",
   "workflows",
   "workflow-runs",
+  "users",
 ] as const
 
 export type InstanceCommand = (typeof INSTANCE_COMMANDS)[number]
@@ -51,6 +53,8 @@ export async function dispatch(
       return workflows(api, args)
     case "workflow-runs":
       return runs(api, "workflow", args)
+    case "users":
+      return users(api, args)
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`)
   }

@@ -7,6 +7,8 @@ import type {
   QueryScalarKind,
 } from "../../objects/query"
 import type { Redactions } from "../../security/types"
+import type { UserProfile } from "../../users"
+import type { UniqueValueRef } from "../ontology/materializations"
 import type { ObjectReadExecutionLimits } from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
@@ -40,10 +42,24 @@ export interface ObjectRow {
    * Populated by the authorized object reader; storage providers never read or write it.
    */
   redactions?: Redactions
+  /**
+   * Profiles of the members an `expand` query node names, keyed by `ref.user()` property id.
+   *
+   * Populated by the authorized object reader from the member directory; storage providers never
+   * read or write it.
+   */
+  users?: ObjectRowUsers
 }
 
 /** Per-link expansion result keyed by link id (see {@link ObjectQueryExpand}). */
 export type ObjectRowLinks = Record<string, ExpandedLinkValue>
+
+/**
+ * Expanded profiles keyed by property id: one profile (or `null` when the property is empty or
+ * names no member) for a `ref.user()` property, the members found in order for an array of them.
+ * A property is absent when the reader may not view the member directory or cannot read its value.
+ */
+export type ObjectRowUsers = Record<string, UserProfile | readonly UserProfile[] | null>
 
 /**
  * The value attached under one expanded link.
@@ -287,6 +303,12 @@ export interface ObjectReadStorage {
     objectTypeId: string
     primaryId: string
   }): Promise<ObjectRow | null>
+
+  /**
+   * The object holding a value of a unique property, by the key core computes for it, or null. A
+   * selected reader answers null unless that object is in its scope and selects the property.
+   */
+  getByUniqueValue(params: { projectId: string } & UniqueValueRef): Promise<ObjectRow | null>
 
   /**
    * Check whether each requested property belongs to the reader's selection.

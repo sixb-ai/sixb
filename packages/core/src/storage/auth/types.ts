@@ -190,12 +190,19 @@ export interface CreateAuthUserInput {
   readonly updatedAt?: Date
 }
 
+/** Omitted fields stay unchanged, and `null` clears one. */
 export interface UpdateAuthUserProfileInput {
   readonly projectId: string
   readonly id: string
-  readonly displayName?: string
-  readonly avatarUrl?: string
+  readonly displayName?: string | null
+  readonly avatarUrl?: string | null
   readonly updatedAt?: Date
+}
+
+/** A change to one user, with the user as the change found them, read in the same atomic step. */
+export interface UpdateAuthUserResult {
+  readonly user: UserRecord
+  readonly previousUser: UserRecord
 }
 
 export interface UpdateAuthUserStatusInput {
@@ -208,6 +215,12 @@ export interface UpdateAuthUserStatusInput {
 export interface ListAuthUsersInput {
   readonly projectId: string
   readonly statuses?: readonly UserStatus[]
+  /**
+   * Keep users whose display name or email contains this text, ignoring case. Matched literally:
+   * `%` and `_` are plain characters. `total` and `hasMore` count only the matches. SQLite ignores
+   * case for ASCII letters only.
+   */
+  readonly search?: string
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
@@ -460,6 +473,10 @@ export interface CompleteOidcSignInInput {
    * links the user who has this email, or claims this email's invitation for a new user.
    */
   readonly email: string
+  /**
+   * The name and picture the provider sends. Every sign-in sets them on the user, and one left out
+   * keeps the stored value. `updatedAt` moves only when one of them changes.
+   */
   readonly displayName?: string
   readonly avatarUrl?: string
   readonly claims?: Readonly<Record<string, unknown>>
@@ -481,6 +498,11 @@ export interface CompleteSignInResult {
   readonly identity?: UserIdentityRecord
   readonly invitation?: InvitationRecord
   readonly groupMemberships: readonly GroupMembershipRecord[]
+  /**
+   * The user as this sign-in found them, before it changed their profile, or `null` when this
+   * sign-in created them.
+   */
+  readonly previousUser: UserRecord | null
 }
 
 export interface SuspendUserAndRevokeSessionsInput {
@@ -492,12 +514,21 @@ export interface SuspendUserAndRevokeSessionsInput {
 export interface AuthUserStore {
   create(input: CreateAuthUserInput): Promise<UserRecord>
   getById(params: { readonly projectId: string; readonly id: string }): Promise<UserRecord | null>
+  /** The users of the project with these ids, in any order. Ids no user has are skipped. */
+  getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]>
   getByEmail(params: {
     readonly projectId: string
     readonly email: string
   }): Promise<UserRecord | null>
-  updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord>
-  updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord>
+  /**
+   * Update only the provided fields; omitted fields must remain unchanged atomically. When no
+   * value changes, nothing is written, so `updatedAt` stays as it was.
+   */
+  updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult>
+  updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult>
   list(input: ListAuthUsersInput): Promise<ListAuthUsersResult>
 }
 
@@ -766,5 +797,7 @@ export interface AuthStorage {
   completeDeviceAuthorization(
     input: CompleteDeviceAuthorizationInput
   ): Promise<CompleteDeviceAuthorizationResult>
-  suspendUserAndRevokeSessions(input: SuspendUserAndRevokeSessionsInput): Promise<UserRecord>
+  suspendUserAndRevokeSessions(
+    input: SuspendUserAndRevokeSessionsInput
+  ): Promise<UpdateAuthUserResult>
 }

@@ -65,6 +65,7 @@ import {
   type SqliteOntologySourceRow,
 } from "./shared"
 import { activateSourceRoots } from "./source-roots"
+import { sqliteUniqueHolder } from "./unique-values"
 
 /** Rows the provider reads and writes at once while it applies a staged plan. */
 const APPLY_PAGE_ROWS = 1_000
@@ -111,7 +112,9 @@ function touchAppliedWorkStatement(workTable: string): string {
       END AS ref
     FROM ${workTable}
     WHERE work_id = $workId AND lane = 'apply'
-  )`
+  )
+  -- Unique values are no plan input: a stale claim fails when it applies.
+  WHERE kind IS NOT NULL`
 }
 
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {
@@ -224,6 +227,18 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       for (let offset = 0; offset < points.length; offset += input.pageRows) {
         const page = reader.exactPoints(points.slice(offset, offset + input.pageRows))
         if (page.length > 0) yield { objects: [], links: [], linkScopes: [], points: page }
+      }
+      const uniqueValues = request.uniqueValues ?? []
+      for (let offset = 0; offset < uniqueValues.length; offset += input.pageRows) {
+        const uniqueHolders = uniqueValues
+          .slice(offset, offset + input.pageRows)
+          .flatMap((value) => {
+            const primaryId = sqliteUniqueHolder(this.db, session.header.commit.projectId, value)
+            return primaryId === null ? [] : [{ ...value, primaryId }]
+          })
+        if (uniqueHolders.length > 0) {
+          yield { objects: [], links: [], linkScopes: [], points: [], uniqueHolders }
+        }
       }
     }
   }

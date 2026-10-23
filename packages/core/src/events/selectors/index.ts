@@ -7,6 +7,7 @@ export type {
   PipelineEventSelectorBuilder,
   RuleEventSelectorBuilder,
   SyncEventSelectorBuilder,
+  UserEventSelectorBuilder,
 } from "./builder"
 export { events } from "./builder"
 export { buildEventSelectorPredicate, eventSelectorSpec } from "./predicate"
@@ -33,4 +34,7 @@ export type {
   SyncEventSelectorContext,
   SyncEventSelectorEvent,
   SyncEventToken,
+  UserEventSelectorContext,
+  UserEventSelectorEvent,
+  UserEventSelectorOperation,
 } from "./types"

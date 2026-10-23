@@ -163,6 +163,9 @@ import type {
   GetAuthMembershipOptionsData,
   GetAuthMembershipOptionsErrors,
   GetAuthMembershipOptionsResponses,
+  GetAuthProfileData,
+  GetAuthProfileErrors,
+  GetAuthProfileResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
   GetBulkTelemetryHistoryData,
@@ -183,6 +186,9 @@ import type {
   GetLatestTelemetryData,
   GetLatestTelemetryErrors,
   GetLatestTelemetryResponses,
+  GetObjectByUniquePropertyData,
+  GetObjectByUniquePropertyErrors,
+  GetObjectByUniquePropertyResponses,
   GetObjectData,
   GetObjectErrors,
   GetObjectFileContentData,
@@ -226,6 +232,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryErrors,
   GetTelemetryHistoryResponses,
+  GetUserData,
+  GetUserErrors,
+  GetUserResponses,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionErrors,
   GetWorkflowAgentNodeExecutionResponses,
@@ -377,6 +386,9 @@ import type {
   ListSyncRunsResponses,
   ListSyncsData,
   ListSyncsResponses,
+  ListUsersData,
+  ListUsersErrors,
+  ListUsersResponses,
   ListWebhookRunsData,
   ListWebhookRunsErrors,
   ListWebhookRunsResponses,
@@ -487,6 +499,9 @@ import type {
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsErrors,
   UpdateAuthMemberGroupsResponses,
+  UpdateAuthProfileData,
+  UpdateAuthProfileErrors,
+  UpdateAuthProfileResponses,
   UploadFileContentData,
   UploadFileContentErrors,
   UploadFileContentResponses,
@@ -642,6 +657,43 @@ export const signOutAll = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/auth/sign-out-all",
     ...options,
+  })
+
+/**
+ * Get the current user's profile
+ */
+export const getAuthProfile = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAuthProfileData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetAuthProfileResponses, GetAuthProfileErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/profile",
+    ...options,
+  })
+
+/**
+ * Update the current user's name or picture
+ *
+ * Fields the identity provider manages, listed in `managedFields`, are refused with 403.
+ */
+export const updateAuthProfile = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAuthProfileData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateAuthProfileResponses,
+    UpdateAuthProfileErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/auth/profile",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**
@@ -2279,6 +2331,33 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Get object by a unique property
+ *
+ * Returns the object of exactly this type that holds the value, compared as writes store it.
+ */
+export const getObjectByUniqueProperty = <ThrowOnError extends boolean = false>(
+  options: Options<GetObjectByUniquePropertyData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    GetObjectByUniquePropertyResponses,
+    GetObjectByUniquePropertyErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/objects/{objectTypeId}/by/{propertyId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
  * List registered actions
  */
 export const listActions = <ThrowOnError extends boolean = false>(
@@ -3462,6 +3541,36 @@ export const listActivityConnections = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/activity/connections",
+    ...options,
+  })
+
+/**
+ * List project members
+ */
+export const listUsers = <ThrowOnError extends boolean = false>(
+  options?: Options<ListUsersData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListUsersResponses, ListUsersErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/users",
+    ...options,
+  })
+
+/**
+ * Get a project member
+ */
+export const getUser = <ThrowOnError extends boolean = false>(
+  options: Options<GetUserData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetUserResponses, GetUserErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/users/{userId}",
     ...options,
   })
 

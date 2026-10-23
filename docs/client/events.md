@@ -34,6 +34,7 @@ The hook manages subscription cleanup and reconnects. In a Sixb app, every subsc
 | `events.object(Device).telemetry(Device.p.temperature)` | Changes to one telemetry property. |
 | `events.object(Invoice).link(Invoice.l.customer).created()` | New customer relationships. |
 | `events.workflows().run(runId)` | Events for one workflow run. |
+| `events.users().joined()` | New [members](../auth/members.md#react-to-member-changes). Requires `can.view(project.users)`. |
 
 Use topic builders such as `events.datasets()`, `events.rules()`, and `events.schedules()` for broader subscriptions. `events.all()` selects all visible events.
 

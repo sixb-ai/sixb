@@ -18,6 +18,7 @@ import {
   type MagicLinkAuthStrategy,
   type MemberSummary,
   type OidcStartSignInResult,
+  type OwnProfile,
   SignInRefusedError,
   shouldUseSecureCookies,
   verifyCsrfToken,
@@ -58,6 +59,7 @@ import {
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AuthMemberParamsSchema,
+  AuthProfileResponseSchema,
   AuthServiceAccountParamsSchema,
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
@@ -101,6 +103,7 @@ import {
   SuspendAuthMemberResponseSchema,
   UpdateAuthMemberGroupsBodySchema,
   UpdateAuthMemberGroupsResponseSchema,
+  UpdateAuthProfileBodySchema,
 } from "../schemas/auth"
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
@@ -731,6 +734,70 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Sign out the current user everywhere (all devices and apps)",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOutAll",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/profile",
+      async (context) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
+        }
+
+        try {
+          return jsonResponse(serializeOwnProfile(await host.auth.getProfile(session)), 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        response: {
+          200: AuthProfileResponseSchema,
+          401: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get the current user's profile",
+          tags: [OPENAPI_TAGS.authProfile.name],
+          operationId: "getAuthProfile",
+        },
+      }
+    )
+    .patch(
+      "/api/auth/profile",
+      async ({ body, ...context }) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
+        }
+
+        try {
+          const changes = UpdateAuthProfileBodySchema.parse(body)
+          return jsonResponse(
+            serializeOwnProfile(await host.auth.updateProfile(session, changes)),
+            200
+          )
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        body: UpdateAuthProfileBodySchema,
+        response: {
+          200: AuthProfileResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Update the current user's name or picture",
+          description:
+            "Fields the identity provider manages, listed in `managedFields`, are refused with 403.",
+          tags: [OPENAPI_TAGS.authProfile.name],
+          operationId: "updateAuthProfile",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
@@ -1566,6 +1633,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           // owns the validity rules (including token verification, so a bare
           // magicLinkId cannot disclose the account email).
           let email: string | undefined
+          let firstSignIn = false
           if (strategy.peekMagicLink) {
             try {
               const peeked = await strategy.peekMagicLink({
@@ -1578,6 +1646,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 return await invalidMagicLinkResponse(options, authRedirectHint)
               }
               email = peeked.email
+              firstSignIn = peeked.firstSignIn === true
             } catch (error) {
               logAuthCallbackError("Magic-link", error)
               return await authExperienceErrorResponse(options, authRedirectHint)
@@ -1597,7 +1666,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           ) {
             return completeMagicLinkCallback({
               host,
-              strategy,
               options,
               request,
               magicLinkId,
@@ -1611,6 +1679,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             magicLinkId,
             token,
             email,
+            firstSignIn,
             authRedirect: authRedirectHint,
           })
         }
@@ -1628,9 +1697,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 "[SixbServer] OIDC callback reached a browser that did not start this sign-in."
               )
             }
-            const result = await strategy.completeOidcSignIn({
-              projectId: host.id,
-              authStorage: requireAuthStorage(host),
+            const result = await host.auth.completeOidcSignIn({
               requestUrl: request.url,
               requestOrigin: options.resolveAuthRequestOrigin(request),
               session: {
@@ -1695,11 +1762,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 
         return completeMagicLinkCallback({
           host,
-          strategy,
           options,
           request,
           magicLinkId,
           token,
+          displayName: body.displayName,
           authRedirectHint,
         })
       },
@@ -1707,6 +1774,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         body: t.Object({
           magicLinkId: t.Optional(t.String()),
           token: t.Optional(t.String()),
+          // Asked on the confirmation page when the link creates an account.
+          displayName: t.Optional(t.String()),
         }),
         parse: "urlencoded",
         detail: { hide: true },
@@ -1873,11 +1942,11 @@ function callbackCookieHeader(params: {
 // path on GET. Consumes the single-use token and mints the session cookies.
 async function completeMagicLinkCallback(input: {
   readonly host: SixbHostView
-  readonly strategy: MagicLinkAuthStrategy
   readonly options: AuthRoutesOptions
   readonly request: Request
   readonly magicLinkId: string
   readonly token: string
+  readonly displayName?: string
   readonly clearPendingCookie?: boolean
   readonly authRedirectHint?: AuthRedirectContext
 }): Promise<Response> {
@@ -1886,11 +1955,10 @@ async function completeMagicLinkCallback(input: {
   const device = resolveSessionDevice(input.request)
 
   try {
-    const result = await input.strategy.completeMagicLinkSignIn({
-      projectId: input.host.id,
-      authStorage: requireAuthStorage(input.host),
+    const result = await input.host.auth.completeMagicLinkSignIn({
       magicLinkId: input.magicLinkId,
       token: input.token,
+      displayName: input.displayName,
       session: {
         id: sessionCredential.sessionId,
         tokenHash: sessionCredential.tokenHash,
@@ -2257,7 +2325,8 @@ a {
   text-underline-offset: 0.2em;
 }
 form { margin: 1.75rem 0 0; }
-input[type="email"] {
+input[type="email"],
+input[type="text"] {
   width: 100%;
   height: 2.5rem;
   padding: 0 0.875rem;
@@ -2268,8 +2337,10 @@ input[type="email"] {
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
 }
-input[type="email"]::placeholder { color: var(--muted-foreground); }
-input[type="email"]:focus {
+input[type="email"]::placeholder,
+input[type="text"]::placeholder { color: var(--muted-foreground); }
+input[type="email"]:focus,
+input[type="text"]:focus {
   outline: none;
   border-color: var(--ring);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 18%, transparent);
@@ -2448,12 +2519,18 @@ async function magicLinkConfirmResponse(
     readonly token: string
     // Absent when the strategy doesn't support the read-only peek.
     readonly email?: string
+    // The link creates an account, so the page asks for the person's name.
+    readonly firstSignIn: boolean
     readonly authRedirect?: AuthRedirectContext
   }
 ): Promise<Response> {
   if (input.authRedirect) {
     const custom = await customAuthExperienceResponse(options.authExperience, {
-      state: { kind: "confirm", ...(input.email ? { email: input.email } : {}) },
+      state: {
+        kind: "confirm",
+        ...(input.email ? { email: input.email } : {}),
+        ...(input.firstSignIn ? { firstSignIn: true } : {}),
+      },
       signInUrl: authExperienceSignInUrl(input.authRedirect),
       submission: {
         kind: "confirmSignIn",
@@ -2481,6 +2558,11 @@ async function magicLinkConfirmResponse(
       '<form method="post" action="/auth/callback" id="confirm">',
       `<input type="hidden" name="magicLinkId" value="${escapeHtml(input.magicLinkId)}">`,
       `<input type="hidden" name="token" value="${escapeHtml(input.token)}">`,
+      // The server drops a name it refuses here without a word, so the field stops at the limit.
+      // Settings › Personal shows the server's error instead, so its field has no cap.
+      input.firstSignIn
+        ? '<input name="displayName" type="text" autocomplete="name" maxlength="100" placeholder="Your name (optional)" aria-label="Your name (optional)" autofocus>'
+        : "",
       '<button type="submit" id="confirm-button">Continue</button>',
       "</form>",
       "<script>",
@@ -2674,6 +2756,10 @@ function serializeManagedMember(member: Omit<MemberSummary, "capabilities">) {
     groupIds: [...member.groupIds],
     managedGroupIds: [...member.managedGroupIds],
   }
+}
+
+function serializeOwnProfile(own: OwnProfile) {
+  return { profile: own.profile, managedFields: [...own.managedFields] }
 }
 
 function serializeMemberUser(user: UserRecord) {

@@ -93,7 +93,11 @@ export async function prepareAgentConversationContext(input: {
         instructions: plan.instructions,
         skills: plan.skills,
         ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
-        facts: agentRuntimeFacts(plan, context),
+        facts: agentRuntimeFacts({
+          settings: plan,
+          project: context,
+          requester: context.requester,
+        }),
       }),
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),

@@ -1336,6 +1336,7 @@ describe("bound Sixb surface", () => {
         "schedules",
         "shares",
         "syncs",
+        "users",
         "workflows",
       ].sort()
     )
@@ -1347,6 +1348,7 @@ describe("bound Sixb surface", () => {
         "exists",
         "facet",
         "get",
+        "getBy",
         "getLatestTelemetry",
         "getPrimaryPropertyId",
         "getTelemetryHistory",

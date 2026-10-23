@@ -27,9 +27,9 @@ export const addFieldNote = defineAction("add-field-note", {
   })
   .validate(({ params, target }) => {
     if (target.properties.status !== "in_progress") {
-      throw new Error(`[Northline] Cannot add a note: ${target.properties.number} is not active.`)
+      return { error: `Cannot add a note: ${target.properties.number} is not active.` }
     }
-    if (!params.body.trim()) throw new Error("[Northline] Field note text is required.")
+    if (!params.body.trim()) return { error: "Field note text is required." }
   })
   .writeback(async ({ params, run, sixb, target }) => {
     const fieldService = await sixb.connector(fieldServiceConnector)

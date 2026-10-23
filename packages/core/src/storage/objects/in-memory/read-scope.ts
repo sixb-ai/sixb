@@ -173,6 +173,15 @@ function createReadUniverse(
     outgoingLinks: (objectTypeId, primaryId) =>
       linksBySource.get(sourceLinkBucketKey(projectId, objectTypeId, primaryId)) ?? [],
     allLinks: () => links.values(),
+    // A holder outside the selection, or whose value it does not select, holds nothing here.
+    uniqueHolder: (value) => {
+      const holder = source.uniqueHolder(value)
+      if (holder === undefined) return undefined
+      const key = rowIdentityKeyParts(value.objectTypeId, holder)
+      return objects.has(key) && objectProperties.get(key)?.has(value.propertyId)
+        ? holder
+        : undefined
+    },
   }
 }
 

@@ -10,7 +10,6 @@ import {
   resolveInheritedAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
-import type { RequestExecutionAuthorization } from "@sixb/core/internal/request-execution"
 import type {
   AgentRunRecord,
   AuthStorage,
@@ -111,10 +110,13 @@ async function handleAgentApiGatewayRequest(input: {
     throw error
   }
   const internalUrl = new URL(`${upstreamPath}${sourceUrl.search}`, input.request.url)
+  // The caller's signal travels with the request: a sandbox client that gives up cancels the
+  // forwarded work, model calls included.
   const internalRequest = new Request(internalUrl, {
     method: input.request.method,
     headers: forwardedRequestHeaders(input.request.headers),
     body,
+    signal: input.request.signal,
   })
 
   registerInternalRequestAuthState(internalRequest, authState)
@@ -165,18 +167,6 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent API gateway capability is not valid for this run.")
   }
 
-  if (!host.auth.isEnabled()) {
-    return {
-      authorization: { type: "disabled" as const },
-      agentExecution: runState.agentExecution,
-      ...(runState.agentRun === undefined ? {} : { agentRun: runState.agentRun }),
-    }
-  }
-
-  const auth = host.storage.auth
-  if (!auth) {
-    return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
-  }
   const execution = await host.storage.executions.getById({
     projectId: host.id,
     id: runState.run.executionId,
@@ -185,15 +175,35 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent run execution is not available.")
   }
 
-  let authorization: RequestExecutionAuthorization
+  // Authority comes from the record whether auth is enabled or not: an auth-disabled record is
+  // unrestricted, and a workflow AI task has its groups, as for its in-process tools. Only a record
+  // naming a principal needs auth storage.
+  const auth = host.storage.auth
+  if (!auth && execution.authorizationRef.type !== "disabled") {
+    return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
+  }
+
+  let authorization: AgentExecutionAuthorization
   try {
     authorization = await resolveGatewayRunAuthorization({ host, auth, runState, execution })
   } catch {
     return jsonError(403, "Agent run execution authority is not valid.")
   }
 
+  // The request runs inside the run's own execution, restored from server-side records only
+  // (run, then its execution record): what it starts is a child of the run and keeps the run's
+  // requester and correlation, whatever the request's headers say. Authority is the record's
+  // current grants, resolved on every request when it is admitted; a request admitted before the
+  // run ends finishes under it, like an in-process tool call. An agent execution also gets
+  // provider access (blobs, models, connectors), and so does any route added to the allowlist.
   return {
-    authorization,
+    runExecution: {
+      execution,
+      ...(runState.authority === "managed" ? { actorId: runState.actorId } : {}),
+      runId: runState.runId,
+      attempt: runState.run.attempt,
+      authorization,
+    },
     agentExecution: runState.agentExecution,
     ...(runState.agentRun === undefined ? {} : { agentRun: runState.agentRun }),
   }
@@ -247,18 +257,17 @@ function toGatewayRunState(
 
 async function resolveGatewayRunAuthorization(input: {
   readonly host: SixbHostView
-  readonly auth: AuthStorage
+  readonly auth: AuthStorage | undefined
   readonly runState: GatewayRunState
   readonly execution: ExecutionRecord
-}): Promise<RequestExecutionAuthorization> {
+}): Promise<AgentExecutionAuthorization> {
   if (input.runState.authority === "inherited") {
-    const resolved = await resolveInheritedAgentExecutionAuthorization({
+    const authorization = await resolveInheritedAgentExecutionAuthorization({
       auth: input.auth,
       projectId: input.host.id,
       authorizationRef: input.execution.authorizationRef,
       security: input.host.definitions.security,
     })
-    const authorization = inheritedRequestAuthorization(resolved, input.execution.authorizationRef)
     assertAgentExecutionRecord({
       execution: input.execution,
       runId: input.runState.runId,
@@ -282,24 +291,6 @@ async function resolveGatewayRunAuthorization(input: {
     authorization,
   })
   return authorization
-}
-
-function inheritedRequestAuthorization(
-  resolved: AgentExecutionAuthorization,
-  authorizationRef: ExecutionRecord["authorizationRef"]
-): Extract<RequestExecutionAuthorization, { readonly type: "principal" | "disabled" }> {
-  if (
-    resolved.type !== "principal" ||
-    authorizationRef.type !== "principal" ||
-    authorizationRef.credential === undefined
-  ) {
-    return resolved
-  }
-  return {
-    type: "principal",
-    context: resolved.context,
-    credential: authorizationRef.credential,
-  }
 }
 
 function gatewayUpstreamPath(pathname: string): string {

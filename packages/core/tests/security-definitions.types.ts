@@ -18,6 +18,15 @@ can.observe("logs")
 // @ts-expect-error observe takes one of project's surfaces, not the project itself.
 can.observe(project)
 can.manage(agent.usage)
+can.view(project.users)
+// @ts-expect-error the member directory is read with can.view, not observed.
+can.observe(project.users)
+// @ts-expect-error logs are observed, not viewed.
+can.view(project.logs)
+// @ts-expect-error activity is observed, not viewed.
+can.view(project.activity)
+// @ts-expect-error view takes one of project's surfaces, not the project itself.
+can.view(project)
 // @ts-expect-error AI usage permissions use the typed project capability reference.
 can.observe("aiUsage")
 // @ts-expect-error AI usage permissions use the typed project capability reference.

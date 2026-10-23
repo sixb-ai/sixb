@@ -13,6 +13,8 @@ import type {
   RunEventSelectorOperation,
   SyncEventSelectorContext,
   SyncEventToken,
+  UserEventSelectorContext,
+  UserEventSelectorOperation,
 } from "./types"
 
 type EventPropertySelectorMap<TTokens, TContext> = {
@@ -92,6 +94,17 @@ export interface PipelineEventSelectorBuilder<TPipeline extends PipelineEventTok
   succeeded(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "succeeded">>
   failed(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "failed">>
   cancelled(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "cancelled">>
+}
+
+/** Member events, project-wide: there is one member directory per project. */
+export interface UserEventSelectorBuilder extends EventSelectorSpec<UserEventSelectorContext> {
+  /** A person signed in for the first time, which created their account. */
+  joined(): EventSelectorSpec<UserEventSelectorContext<"joined">>
+  suspended(): EventSelectorSpec<UserEventSelectorContext<"suspended">>
+  reactivated(): EventSelectorSpec<UserEventSelectorContext<"reactivated">>
+  invited(): EventSelectorSpec<UserEventSelectorContext<"invited">>
+  /** A member's name or picture changed, by their own edit or their identity provider. */
+  profileUpdated(): EventSelectorSpec<UserEventSelectorContext<"profileUpdated">>
 }
 
 abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TContext> {
@@ -392,6 +405,39 @@ class PipelineEventSelectorBuilderImpl<TPipeline extends PipelineEventToken>
   }
 }
 
+class UserEventSelectorBuilderImpl
+  extends EventSelectorSpecView<UserEventSelectorContext>
+  implements UserEventSelectorBuilder
+{
+  joined(): EventSelectorSpec<UserEventSelectorContext<"joined">> {
+    return this.withType("user.joined")
+  }
+
+  suspended(): EventSelectorSpec<UserEventSelectorContext<"suspended">> {
+    return this.withType("user.suspended")
+  }
+
+  reactivated(): EventSelectorSpec<UserEventSelectorContext<"reactivated">> {
+    return this.withType("user.reactivated")
+  }
+
+  invited(): EventSelectorSpec<UserEventSelectorContext<"invited">> {
+    return this.withType("user.invited")
+  }
+
+  profileUpdated(): EventSelectorSpec<UserEventSelectorContext<"profileUpdated">> {
+    return this.withType("user.profile.updated")
+  }
+
+  private withType<TOperation extends UserEventSelectorOperation>(
+    type: Extract<DomainEvent["type"], `user.${string}`>
+  ): EventSelectorSpec<UserEventSelectorContext<TOperation>> {
+    return { ...this.spec, types: [type] } as EventSelectorSpec<
+      UserEventSelectorContext<TOperation>
+    >
+  }
+}
+
 export interface EventSelectors {
   object<TObjectType extends ObjectTypeWithTokens>(
     objectType: TObjectType
@@ -404,6 +450,7 @@ export interface EventSelectors {
   pipeline<TPipeline extends PipelineEventToken>(
     pipeline: TPipeline
   ): PipelineEventSelectorBuilder<TPipeline>
+  users(): UserEventSelectorBuilder
 }
 
 export const events: EventSelectors = {
@@ -439,6 +486,9 @@ export const events: EventSelectors = {
       topic: "pipelines",
       pipelineId: pipeline.id,
     } as EventSelectorSpec<PipelineEventSelectorContext<TPipeline>>)
+  },
+  users(): UserEventSelectorBuilder {
+    return new UserEventSelectorBuilderImpl({ topic: "users" })
   },
 }
 

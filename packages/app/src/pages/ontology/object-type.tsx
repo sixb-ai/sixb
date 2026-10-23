@@ -534,6 +534,7 @@ function PropertiesSection({
     required?: boolean
     nullable?: boolean
     primary?: boolean
+    unique?: boolean
     schema?: unknown
   }[]
 }) {
@@ -564,6 +565,11 @@ function PropertiesSection({
                     {prop.primary ? (
                       <Badge variant="secondary" className="text-[9px]">
                         primary
+                      </Badge>
+                    ) : null}
+                    {prop.unique ? (
+                      <Badge variant="secondary" className="text-[9px]">
+                        unique
                       </Badge>
                     ) : null}
                   </div>

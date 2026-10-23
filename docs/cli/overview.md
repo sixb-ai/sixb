@@ -23,7 +23,7 @@ Run these from your project root:
 | `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
-| `sixb db migrate` | Apply storage migrations and prepare declared query indexes on supported providers. |
+| `sixb db migrate` | Apply storage migrations, prepare declared query indexes on supported providers, and collect the values of newly unique properties. |
 | `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
 | `sixb lake cleanup --dry-run` | Preview supported lake maintenance. |
@@ -128,15 +128,17 @@ Remote commands use the selected API and its permissions:
 sixb project show
 sixb ontology list
 sixb objects inspect Invoice inv-1
+sixb objects get-by Customer email ada@example.com
 ```
 
 | Command group | Purpose |
 | --- | --- |
-| `objects` | Read, search, and query objects. |
+| `objects` | Read, search, and query objects, or find one by a [unique property](../ontology/properties.md#unique-values). |
 | `telemetry` | Read current and historical values. |
 | `actions`, `action-runs` | Request actions and inspect runs. |
 | `workflows`, `workflow-runs` | Start workflows and inspect runs. |
 | `files` | Upload and download files. |
+| `users` | List and search the [member directory](../auth/members.md#read-the-member-directory), for example `sixb users search ava`. |
 
 These commands return JSON. Use scoped help for the operation you need, such as `sixb objects --help`.
 

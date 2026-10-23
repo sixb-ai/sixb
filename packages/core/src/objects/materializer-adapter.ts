@@ -35,6 +35,7 @@ import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
+import { uniqueViolationError } from "./unique-violation"
 
 /** The runtime pieces one commit needs. */
 export type RuntimeMaterializerContext = Pick<SixbRuntimeContext, "projectId" | "storage">
@@ -63,15 +64,18 @@ export async function commitRuntimeOperations(
   operations: readonly OntologyEditOperation[]
 ): Promise<EditCommitResult> {
   const mutations = getOntologyMutationRuntime(ctx)
-  const commit = await mutations.commitEdits({
-    mode: "atomic",
-    source: { kind: "runtime", requestId: randomUUID() },
-    operations,
-    expectedObjects: [],
-    expectedLinks: [],
-    expectedLinkScopes: [],
-  })
-  return commit
+  try {
+    return await mutations.commitEdits({
+      mode: "atomic",
+      source: { kind: "runtime", requestId: randomUUID() },
+      operations,
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+  } catch (error) {
+    throw uniqueViolationError(error) ?? error
+  }
 }
 
 /**
@@ -96,13 +100,20 @@ export async function commitRuntimeBatch(
     .filter((group) => group.operations.length > 1)
     .map((group) => group.operations.map((operation) => operation.id))
 
+  // Items that collide fail alone; a duplicate storage still finds, claimed by a commit that
+  // landed meanwhile, fails the whole batch.
   const mutations = getOntologyMutationRuntime(ctx)
-  const commit = await mutations.commitEdits({
-    mode: "continue",
-    source: { kind: "runtime", requestId: randomUUID() },
-    operations,
-    ...(operationGroups.length > 0 ? { operationGroups } : {}),
-  })
+  let commit: EditCommitResult
+  try {
+    commit = await mutations.commitEdits({
+      mode: "continue",
+      source: { kind: "runtime", requestId: randomUUID() },
+      operations,
+      ...(operationGroups.length > 0 ? { operationGroups } : {}),
+    })
+  } catch (error) {
+    throw uniqueViolationError(error) ?? error
+  }
 
   const byId = new Map(commit.outcomes.map((outcome) => [outcome.id, outcome]))
   const outcomes = new Map<number, readonly OntologyOperationOutcome[]>()

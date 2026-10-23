@@ -135,6 +135,7 @@ function renderProperties(
         code(property.id),
         withFlags(schemaLabel(property.schema, valueTypesById), [
           ...(property.primary ? ["primary key"] : []),
+          ...(property.unique ? ["unique"] : []),
           ...(property.required && !property.primary ? ["required"] : []),
           ...(property.nullable ? ["nullable"] : []),
           ...(property.mode === "telemetry" ? ["telemetry"] : []),

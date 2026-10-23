@@ -8,6 +8,7 @@ import type { RuleEvent } from "./types/rules"
 import type { ScheduleEvent } from "./types/schedules"
 import type { SyncEvent } from "./types/syncs"
 import type { TelemetryEvent } from "./types/telemetry"
+import type { UserEvent } from "./types/users"
 import type { WorkflowEvent } from "./types/workflows"
 
 export type EventDefinition<Event extends DomainEvent = DomainEvent> = {
@@ -170,6 +171,30 @@ export const DATASET_EVENT_DEFINITIONS = defineEventGroup<DatasetEvent>({
   },
 })
 
+// One stream per member, so their events stay in order. An invitation has no member yet.
+export const USER_EVENT_DEFINITIONS = defineEventGroup<UserEvent>({
+  "user.joined": {
+    topic: "users",
+    partitionKey: (payload) => payload.user.id,
+  },
+  "user.suspended": {
+    topic: "users",
+    partitionKey: (payload) => payload.user.id,
+  },
+  "user.reactivated": {
+    topic: "users",
+    partitionKey: (payload) => payload.user.id,
+  },
+  "user.invited": {
+    topic: "users",
+    partitionKey: (payload) => `invitation:${payload.email}`,
+  },
+  "user.profile.updated": {
+    topic: "users",
+    partitionKey: (payload) => payload.user.id,
+  },
+})
+
 export const EVENT_DEFINITIONS = {
   ...OBJECT_EVENT_DEFINITIONS,
   ...TELEMETRY_EVENT_DEFINITIONS,
@@ -180,6 +205,7 @@ export const EVENT_DEFINITIONS = {
   ...WORKFLOW_EVENT_DEFINITIONS,
   ...DATASET_EVENT_DEFINITIONS,
   ...RULE_EVENT_DEFINITIONS,
+  ...USER_EVENT_DEFINITIONS,
 } as const satisfies EventDefinitionMap
 
 export const EVENT_TYPES = Object.keys(EVENT_DEFINITIONS) as readonly DomainEvent["type"][]

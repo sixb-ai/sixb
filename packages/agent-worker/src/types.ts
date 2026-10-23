@@ -25,6 +25,7 @@ import type {
   AuthStorage,
 } from "@sixb/core/storage"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+import type { AgentRequester } from "./requester"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { StreamSink } from "./stream-sink"
 
@@ -88,6 +89,11 @@ export interface AgentExecutionContext extends AgentWorkerContext {
   /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
   readonly propertyClearance?: PropertyClearance
   readonly authorPrincipal?: AuthorizablePrincipal
+  /**
+   * Who the run works for; absent when no principal started its chain of executions, or in a
+   * shared thread, where each user message names its author instead.
+   */
+  readonly requester?: AgentRequester
   readonly blobStorage: BlobStorage
 }
 

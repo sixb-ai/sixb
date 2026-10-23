@@ -56,6 +56,16 @@ export interface ViewGrant<TTarget extends ViewGrantTarget = ViewGrantTarget> {
 }
 
 /**
+ * Read the project's member directory: names, emails, avatars and status. The directory is one
+ * surface, so there is nothing to select. Kept apart from {@link ViewGrant}, which always selects.
+ */
+export interface UsersViewGrant {
+  readonly kind: "grant"
+  readonly capability: "view"
+  readonly target: "users"
+}
+
+/**
  * Write objects of the selected types: properties, links, delete, and restore.
  *
  * Carries no `target` — like {@link ApplyGrant}, the capability names its one target family, so
@@ -128,10 +138,9 @@ export interface ProjectReference {
   readonly logs: { readonly kind: "logs" }
   /** Visits and page views recorded in the project's app. */
   readonly activity: { readonly kind: "activity" }
+  /** The project's member directory: names, emails, avatars and status. */
+  readonly users: { readonly kind: "users" }
 }
-
-/** Any member of `project`, such as `project.logs`. */
-export type ProjectSurfaceReference = ProjectReference[Exclude<keyof ProjectReference, "kind">]
 
 /**
  * Read the project's logs, its AI usage, its app activity or every user's Agent conversations. Each
@@ -165,6 +174,7 @@ export type ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> =
 
 export type GrantDefinition =
   | ViewGrant
+  | UsersViewGrant
   | EditGrant
   | AppendGrant
   | ApplyGrant

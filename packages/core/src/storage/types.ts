@@ -157,6 +157,7 @@ export type {
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UpsertAuthGroupMembershipInput,
   UpsertAuthUserIdentityInput,

@@ -116,6 +116,11 @@ transient reason, such as a lost database connection, is retried. While it retri
 `running` and its `error` says why the last attempt failed. The error is cleared if the run
 succeeds.
 
+A run that would give one [unique value](../ontology/properties.md#unique-values) to two of its
+objects, or to an object while another holds it, fails without writing anything: objects keep their
+previous values. With the default conflict strategy, a value an app edit set stays with its object
+until the edit is reset.
+
 If a newer dataset version is committed before an older run starts or retries, the older run ends
 `superseded` without writing anything, because its output would be stale. This applies to object
 and link projections only: telemetry runs append readings, so every version is projected. The

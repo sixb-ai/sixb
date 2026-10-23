@@ -202,6 +202,15 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
     sharedSession: true,
   },
+  // A read: POST only so the value, an email say, stays out of URLs and their logs.
+  {
+    operationId: "getObjectByUniqueProperty",
+    method: "POST",
+    path: "/api/objects/:objectTypeId/by/:propertyId",
+    accessToken: true,
+    agentApi: true,
+    sharedSession: true,
+  },
   // The four write routes. Bearer-capable because their execution facade enforces authorization
   // (`edit:object` / `append:telemetry`), which is exactly the precondition this table requires.
   // NOT agent-proxied: letting an agent turn write objects on its own is a separate decision, and
@@ -604,6 +613,20 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/activity/connections",
     accessToken: true,
     agentApi: false,
+  },
+  {
+    operationId: "listUsers",
+    method: "GET",
+    path: "/api/users",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "getUser",
+    method: "GET",
+    path: "/api/users/:userId",
+    accessToken: true,
+    agentApi: true,
   },
   {
     operationId: "getAiAccountingOverview",

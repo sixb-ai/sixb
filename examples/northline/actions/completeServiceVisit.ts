@@ -20,10 +20,10 @@ export const completeServiceVisit = defineAction("complete-service-visit", {
   })
   .validate(({ params, target }) => {
     if (!target.properties.diagnosisDisposition) {
-      throw new Error("[Northline] Cannot complete visit: a diagnostic disposition is required.")
+      return { error: "Cannot complete visit: a diagnostic disposition is required." }
     }
     if (!params.workPerformed.trim()) {
-      throw new Error("[Northline] Cannot complete visit: work performed is required.")
+      return { error: "Cannot complete visit: work performed is required." }
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {

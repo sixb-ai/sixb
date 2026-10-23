@@ -6,6 +6,7 @@ import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
 import { recordEdits } from "../src/edits/recorder"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
+import { uniqueLookupKeyOf } from "../src/execution/unique-lookup"
 import { createLinkScopeFingerprint } from "../src/materializer"
 import type { ObjectRow, Storage, TimeseriesHistoryBatchResult } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
@@ -481,6 +482,13 @@ describe("Action read dependency capture", () => {
         host.definitions.ontology
           .resolveObjectType(objectTypeId)
           .links.map((definition) => definition.id),
+      uniqueValueKey: (objectTypeId, propertyId, value) =>
+        uniqueLookupKeyOf(
+          host.definitions.ontology.resolveObjectType(objectTypeId),
+          propertyId,
+          value,
+          host.definitions.ontology.getValueTypesById()
+        ),
       telemetry: {
         resolveObjectType: (objectTypeId) => sixb.objects.resolveType(objectTypeId),
         getHistoryBatch: (input) => sixb.objects.getTelemetryHistoryBatch(input),
@@ -540,7 +548,12 @@ describe("Action read dependency capture", () => {
       [20],
       [20],
     ])
-    expect(reads.dependencies()).toEqual({ objects: [], links: [], linkScopes: [] })
+    expect(reads.dependencies()).toEqual({
+      objects: [],
+      links: [],
+      linkScopes: [],
+      unclaimedValues: [],
+    })
 
     await expect(
       facade.telemetry.historyBatch({
@@ -566,6 +579,9 @@ describe("Action read dependency capture", () => {
       {
         recorder: reads,
         resolveLinkIds: () => [],
+        uniqueValueKey: () => {
+          throw new Error("Object reads are not expected in this test.")
+        },
         telemetry: {
           resolveObjectType: () => Invoice,
           getHistoryBatch: async () => providerResults,

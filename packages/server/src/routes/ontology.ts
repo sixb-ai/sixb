@@ -21,6 +21,7 @@ function serializeProperty(
     required: property.required,
     nullable: property.nullable,
     primary: property.primary,
+    unique: property.unique,
     semanticType: property.semanticType,
     schema: property.schema,
     query: property.query ? { ...property.query } : undefined,

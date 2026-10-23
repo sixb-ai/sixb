@@ -67,7 +67,9 @@ Use `ref.user()` for an input that names a project member:
 
 Callers pass `{ type: "user", id: "usr_1" }`. Sixb rejects the request when the user does not exist
 or is suspended. Store the value in a [user reference property](../ontology/properties.md#reference-a-user)
-or compare it with one.
+or compare it with one. In the app, the action form lets you pick the member by name when you can
+read the [member directory](../auth/members.md#read-the-member-directory), and asks for the user ID
+otherwise.
 
 Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
 enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
@@ -75,17 +77,67 @@ enums and structured values. Date and timestamp inputs arrive in handlers as `Da
 ## Validate a request
 
 Add `.validate()` after `.params()` to check the request before any external call or edit. For an
-object action, `target` contains the current object. Throw an error to reject the request:
+object action, `target` contains the current object. Return an error to reject the request:
 
 ```ts
 .validate(({ target }) => {
   if (target.properties.status === "paid") {
-    throw new Error("This invoice is already paid.")
+    return { error: "This invoice is already paid." }
   }
 })
 ```
 
+The run fails with `run.error.code` set to `"action.rejected"`, and the caller reads
+`"This invoice is already paid."` in `run.error.message`. A rejection is a business outcome, so it is
+not reported to [`onError`](../logging/overview.md#report-failures). An error thrown by a handler
+fails the run as `action.phase_failed`, without its message: the caller gets
+`"Action execution failed."`, and the error goes to `onError`.
+
 Validation checks are read-only. You can attach more than one validator.
+
+## Know who requested the run
+
+Every handler receives `requestedBy`, the principal behind the run: `{ type: "user", id }` or
+`{ type: "serviceAccount", id }`, or `undefined` when no one requested it.
+
+| The run was requested by | `requestedBy` |
+| --- | --- |
+| A signed-in user, from the app or the API | That user |
+| A [service account or its token](../auth/members.md#service-accounts-and-tokens) | That service account |
+| A workflow step or the agent | Whoever started the workflow or the agent conversation |
+| A schedule, an event, a [shared link](../auth/shared-access.md), or a project without `auth` | `undefined` |
+
+`requestedBy` says on whose behalf the run happens, not that this person approved this exact
+request: when the agent requests an action, in a conversation or a workflow AI task, it is still
+the person who started that conversation or workflow.
+
+Once you check `requestedBy?.type === "user"`, the value is a
+[user reference](../ontology/properties.md#reference-a-user): compare it with one, or store it.
+For example, let only the assignee close a ticket:
+
+```ts
+.validate(({ target, requestedBy }) => {
+  const assignee = target.properties.assignee
+  if (requestedBy?.type !== "user" || assignee?.id !== requestedBy.id) {
+    return { error: "Only the assignee can close this ticket." }
+  }
+})
+```
+
+Or record who created a note:
+
+```ts
+.validate(({ requestedBy }) => {
+  if (requestedBy?.type !== "user") {
+    return { error: "Only a project member can create a note." }
+  }
+})
+.edits(({ objects, params, requestedBy }) => {
+  // The validator rejected every other requester.
+  if (requestedBy?.type !== "user") return
+  objects(Note).create({ title: params.title, owner: requestedBy })
+})
+```
 
 ## Call external systems
 
@@ -202,8 +254,11 @@ Request a new run; if the action has a `.writeback()`, its external call already
 | The target object and `get()`, even for a missing object | Objects that start matching a query later |
 | `list()`, `query()`, and expanded objects | `count()`, `exists()`, and `facets()` |
 | `listLinks()` | Telemetry history and file content |
+| `getBy()`, even when no object holds the value | |
 
-To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
+To depend on an object not existing yet, give it a deterministic ID and read it with `get()`, or
+look it up by a [unique property](../ontology/properties.md#unique-values) with `getBy()`: when two
+runs create the same customer by email, the second runs again and finds the first one's object.
 A condition on an unchecked read, such as a limit on `count()`, does not hold across runs that
 execute at the same time: both can pass it and commit.
 

@@ -77,6 +77,7 @@ const CLI_API_ROUTES = [
   "GET /api/object-types/:objectTypeId",
   "GET /api/objects",
   "POST /api/objects/query",
+  "POST /api/objects/:objectTypeId/by/:propertyId",
   "POST /api/objects/query/links",
   "POST /api/objects/query/count",
   "POST /api/objects/query/exists",
@@ -99,6 +100,8 @@ const CLI_API_ROUTES = [
   "GET /api/workflow-runs/:runId",
   "GET /api/workflow-runs/:runId/files/content",
   "GET /api/objects/search",
+  "GET /api/users",
+  "GET /api/users/:userId",
 ] as const
 
 const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([

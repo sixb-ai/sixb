@@ -12,6 +12,7 @@ import type {
   ExpandedObjectRow,
   ObjectRow,
   ObjectRowLinks,
+  ObjectRowUsers,
   Redactions,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -27,6 +28,7 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
+  GetObjectByUniquePropertyBodySchema,
   ObjectListResponseSchema,
   ObjectParamsSchema,
   ObjectQueryCountRequestSchema,
@@ -38,6 +40,8 @@ import {
   ObjectSearchResponseSchema,
   ObjectsQuerySchema,
   TwinObjectSchema,
+  UniquePropertyParamsSchema,
+  UniqueViolationErrorResponseSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
@@ -109,6 +113,7 @@ type SerializedLinkValue = SerializedExpandedObject | SerializedExpandedObject[]
 type SerializedExpandedObject = SerializedObject & {
   links?: Record<string, SerializedLinkValue>
   linkProperties?: Record<string, unknown>
+  users?: ObjectRowUsers
 }
 
 /**
@@ -121,6 +126,8 @@ function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObje
   const serialized: SerializedExpandedObject = serializeObject(row)
   if (row.links) serialized.links = serializeLinks(row.links)
   if (row.linkProperties !== undefined) serialized.linkProperties = row.linkProperties
+  // Profiles are plain JSON: no dates to convert.
+  if (row.users) serialized.users = row.users
   return serialized
 }
 
@@ -900,6 +907,53 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+    .post(
+      "/api/objects/:objectTypeId/by/:propertyId",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+
+        try {
+          const row = await sixb.objects.getBy(params.objectTypeId, params.propertyId, body.value)
+          if (!row) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          return serializeObject(row)
+        } catch (error) {
+          if (!(error instanceof AuthorizationError)) return handleRouteError(error, set)
+
+          // A type the caller cannot view looks missing, like `getObject`. On a type it views, the
+          // refusal depends only on the request, as for a filter on a marked property.
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          set.status = 403
+          return { error: error.message }
+        }
+      },
+      {
+        params: UniquePropertyParamsSchema,
+        body: GetObjectByUniquePropertyBodySchema,
+        response: {
+          200: TwinObjectSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get object by a unique property",
+          description:
+            "Returns the object of exactly this type that holds the value, compared as writes store it.",
+          tags: [OPENAPI_TAGS.objects.name],
+          operationId: "getObjectByUniqueProperty",
+          security: accessTokenSecurityRequirement("getObjectByUniqueProperty"),
+        },
+      }
+    )
     .put(
       "/api/objects/:objectTypeId/:objectId",
       async (context) => {
@@ -930,6 +984,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: UniqueViolationErrorResponseSchema,
         },
         detail: {
           summary: "Create or update object",

@@ -35,6 +35,83 @@ Administrators can manage an existing user only when all of that user's current 
 
 Suspending a user revokes their sessions. Reactivating them requires a new sign-in. Role grants do not give member-management permissions; membership policies do.
 
+## Read the member directory
+
+The member directory lists the project's members with their name, email, avatar, and status. Use it to show who a [user reference](../ontology/properties.md#reference-a-user) points at, or to let someone pick a colleague.
+
+Reading it requires `can.view(project.users)`. `every.object()` and other grants do not include it.
+
+```ts
+// security/roles/team.ts
+import { can, defineRole, project } from "@sixb/core"
+import { team } from "../groups/team"
+
+export const teamRole = defineRole("team", {
+  grantedTo: [team],
+  grants: [can.view(project.users)],
+})
+```
+
+In server code, `sixb.users` reads the directory:
+
+```ts
+import { userRef } from "@sixb/core"
+
+const { users } = await sixb.users.list({ search: "ava" })
+const assignee = await sixb.users.get(userRef("usr_1"))
+```
+
+| Method | Returns |
+| --- | --- |
+| `list({ status, search, limit, offset })` | `{ users, hasMore, total }`, oldest member first. `status` is `"active"` (the default), `"suspended"`, or `"all"`. `search` matches part of a name or email, ignoring case, and has at most 200 characters. `limit` is 1 to 200, 50 by default. |
+| `get(userRef(id))` | `{ id, email, displayName?, avatarUrl?, status }`, or `null` when no member has this id. |
+
+Over HTTP, `GET /api/users?search=ava&status=all` takes the same options as query parameters, and `GET /api/users/:userId` returns one member or `404`. Both accept [access tokens](#service-accounts-and-tokens). In React, use [`useUsers`](../client/overview.md#list-members). From a terminal or the agent's sandbox, use `sixb users list`, `sixb users search <text>`, and `sixb users get <user-id>`.
+
+An object query can include the profiles of the members a property names, with [`expand(Task.p.assignee)`](../objects/querying.md#include-the-members-a-property-names). It reads the same directory and needs the same grant.
+
+Trusted code, such as workflows and actions, can always read the directory. An action or a workflow can therefore return directory data to a caller who lacks the grant, so return only what that caller should see. The agent and its tools read it with the permissions they run with: in a conversation, those of the person who asked. Shared links never read it.
+
+## React to member changes
+
+Sixb publishes an event when membership changes. Use them to onboard new members, sync a directory, or audit changes:
+
+| Event | When | Payload |
+| --- | --- | --- |
+| `user.joined` | A person signs in for the first time, which creates their account. | `user`, `invitationId` when they accepted an invitation |
+| `user.invited` | An invitation is created, and sent when your sign-in method sends invitations. Inviting the same person again publishes it again. | `invitationId`, `email`, `expiresAt`, `requestedBy` |
+| `user.suspended`, `user.reactivated` | An administrator changes the member's status. | `user`, `requestedBy` |
+| `user.profile.updated` | The member's name or picture changes. | `user`, `changes`, and `requestedBy` when the member edited it. Without `requestedBy`, their identity provider changed it at sign-in. |
+
+`user` is the member's profile, as [`sixb.users.get`](#read-the-member-directory) returns it. `changes` holds only the fields that changed, each with its operation (`created`, `updated` or `cleared`) and values. Saving the values a member already has, such as the same name, publishes nothing.
+
+Select them with `events.users()` in a schedule, and start a workflow from it:
+
+```ts
+// schedules/member-joined.ts
+import { defineSchedule, events } from "@sixb/core"
+
+export const memberJoined = defineSchedule("member-joined").on(events.users().joined())
+```
+
+```ts
+// workflows/welcome-member.ts
+import { defineWorkflow } from "@sixb/core"
+import { memberJoined } from "../schedules/member-joined"
+import { sendWelcome } from "./steps/send-welcome"
+
+export const welcomeMember = defineWorkflow("welcome-member")
+  .input({ email: "string" })
+  .when(memberJoined, ({ event }) => ({ email: event.user.email }))
+  .then(sendWelcome)
+```
+
+The other selectors are `.invited()`, `.suspended()`, `.reactivated()`, and `.profileUpdated()`.
+
+Reading these events requires `can.view(project.users)`, like the directory. Workflows and other trusted code always receive them.
+
+An event is published after the change is saved. If the event stream is unavailable at that moment, the change is kept, the event is lost, and the failure is reported to [`onError`](../logging/overview.md#report-failures) as `event.delivery.failed`. Do not rely on these events as the only record of membership: read the directory for the current state.
+
 ## Service accounts and tokens
 
 Choose the credential that matches the caller:

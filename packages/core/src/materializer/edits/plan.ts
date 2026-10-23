@@ -29,6 +29,7 @@ import {
   appendLinkEdgeOverrideWork,
   appendLinkSlotOverrideWork,
   appendObjectOverrideWork,
+  appendUniqueValueWork,
   classificationWork,
   eventWork,
   planWork,
@@ -158,6 +159,7 @@ async function stageObject(
     ...items.map((item) => planWork(item, sortKey)),
   ]
   if (change) {
+    appendUniqueValueWork(work, change, context.ontology)
     work.push(eventWork(buildObjectMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)

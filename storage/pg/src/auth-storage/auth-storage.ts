@@ -11,6 +11,7 @@ import type {
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
+  UpdateAuthUserResult,
   UserIdentityRecord,
   UserRecord,
 } from "@sixb/core/storage"
@@ -256,16 +257,17 @@ export class PgAuthStorage implements AuthStorage {
           consumedAt: completedAt,
         })
 
-        const user = existingUserRow
-          ? rowToUserRecord(existingUserRow)
-          : await this.insertUser(tx, {
-              id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
-              projectId,
-              email,
-              displayName: input.newUserDisplayName,
-              avatarUrl: input.newUserAvatarUrl,
-              createdAt: completedAt,
-            })
+        const previousUser = existingUserRow ? rowToUserRecord(existingUserRow) : null
+        const user =
+          previousUser ??
+          (await this.insertUser(tx, {
+            id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
+            projectId,
+            email,
+            displayName: input.newUserDisplayName,
+            avatarUrl: input.newUserAvatarUrl,
+            createdAt: completedAt,
+          }))
 
         const invitation = await this.acceptInvitationAndApplyGroups(tx, {
           activeInvitation,
@@ -293,6 +295,7 @@ export class PgAuthStorage implements AuthStorage {
           session,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -410,6 +413,7 @@ export class PgAuthStorage implements AuthStorage {
         ])
         await this.consumeOidcAttempt(input, completedAt, projectId, tx)
 
+        const previousUser = userRow ? rowToUserRecord(userRow) : null
         let user: UserRecord
         if (!userRow) {
           user = await this.insertUser(tx, {
@@ -431,7 +435,7 @@ export class PgAuthStorage implements AuthStorage {
             updated_at: user.updatedAt,
           }
         } else {
-          user = rowToUserRecord(userRow)
+          user = await this.refreshProviderProfile(tx, userRow, input, completedAt)
         }
 
         const invitation = await this.acceptInvitationAndApplyGroups(tx, {
@@ -476,6 +480,7 @@ export class PgAuthStorage implements AuthStorage {
           identity: nextIdentity,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -489,7 +494,7 @@ export class PgAuthStorage implements AuthStorage {
 
   async suspendUserAndRevokeSessions(
     input: SuspendUserAndRevokeSessionsInput
-  ): Promise<UserRecord> {
+  ): Promise<UpdateAuthUserResult> {
     return runPgTransaction(this.sql, async (tx) => {
       await lockAdvisoryKeys(tx, [authLockKey("sessions", input.projectId, input.userId)])
       const existing = await getUserRowById(
@@ -523,7 +528,7 @@ export class PgAuthStorage implements AuthStorage {
         revokedAt: input.suspendedAt,
       })
 
-      return rowToUserRecord(updated)
+      return { user: rowToUserRecord(updated), previousUser: rowToUserRecord(existing) }
     })
   }
 
@@ -731,6 +736,33 @@ export class PgAuthStorage implements AuthStorage {
       userAgent: input.session.userAgent,
       ipAddress: input.session.ipAddress,
     })
+  }
+
+  // The identity provider owns the name and picture it sends: every sign-in overwrites them, and
+  // one it leaves out keeps the stored value.
+  private async refreshProviderProfile(
+    sql: SQLClient,
+    row: PgAuthUserRow,
+    input: CompleteOidcSignInInput,
+    updatedAt: Date
+  ): Promise<UserRecord> {
+    const displayName = input.displayName ?? row.display_name
+    const avatarUrl = input.avatarUrl ?? row.avatar_url
+    if (displayName === row.display_name && avatarUrl === row.avatar_url) {
+      return rowToUserRecord(row)
+    }
+
+    const [updated] = await sql<PgAuthUserRow[]>`
+      UPDATE auth_users
+      SET display_name = ${displayName},
+          avatar_url = ${avatarUrl},
+          updated_at = ${updatedAt}
+      WHERE project_id = ${row.project_id}
+        AND id = ${row.id}
+      RETURNING *
+    `
+
+    return rowToUserRecord(updated)
   }
 
   private async consumeOidcAttempt(

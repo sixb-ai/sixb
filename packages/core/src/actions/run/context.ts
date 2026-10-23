@@ -1,4 +1,5 @@
 import { createSixbError } from "../../errors/internal"
+import { uniqueLookupKeyOf } from "../../execution/unique-lookup"
 import type { Logger } from "../../logging"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { ObjectNotFoundError } from "../../storage"
@@ -38,6 +39,7 @@ export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeF
     },
     connector: runtime.sixb.connector,
     models: runtime.sixb.models,
+    users: runtime.sixb.users,
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {
@@ -56,6 +58,13 @@ export function toActionReadFacade(
     recorder,
     resolveLinkIds: (objectTypeId) =>
       runtime.sixb.objects.resolveType(objectTypeId).links.map((definition) => definition.id),
+    uniqueValueKey: (objectTypeId, propertyId, value) =>
+      uniqueLookupKeyOf(
+        runtime.sixb.objects.resolveType(objectTypeId),
+        propertyId,
+        value,
+        runtime.sixb.objects.getValueTypesById()
+      ),
     telemetry: {
       resolveObjectType: (objectTypeId) => runtime.sixb.objects.resolveType(objectTypeId),
       getHistoryBatch: (input) => runtime.sixb.objects.getTelemetryHistoryBatch(input),
@@ -105,6 +114,7 @@ export function createBasePhaseContext(input: {
       input.runtime.sixb.objects.getValueTypesById()
     ),
     subject: run.subject,
+    requestedBy: input.runtime.requestedBy,
   }
 }
 

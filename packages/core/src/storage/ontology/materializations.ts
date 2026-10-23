@@ -19,6 +19,7 @@ import type {
   TelemetryCommitResult,
   TelemetrySeriesRef,
 } from "../../materialization/model"
+import type { UniqueValueKind } from "../../ontology/unique-values"
 import type { OntologyCommitRecord, OntologyCommitWrite } from "./commits"
 import type { OntologyMaterializationEventDraft } from "./outbox"
 import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./sources"
@@ -61,6 +62,27 @@ export interface ExpectedTimeseriesPointRevision {
   readonly lastCommitId: string | null
 }
 
+/** One value of a unique property, as the key core computes for it. */
+export interface UniqueValueRef {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly valueKey: string
+}
+
+/** A unique value and the object that gives it up or takes it. */
+export interface ExactUniqueValueWrite extends UniqueValueRef {
+  readonly primaryId: string
+}
+
+/**
+ * A unique value an object takes, with how its key was computed. Storage refuses it unless the
+ * property's stored values were prepared with that same key kind and version.
+ */
+export interface ExactUniqueValueClaim extends ExactUniqueValueWrite {
+  readonly keyKind: UniqueValueKind
+  readonly keyVersion: number
+}
+
 export interface MaterializationObjectState {
   readonly ref: OntologyObjectRef
   readonly source: StoredSourceObjectAssertion | null
@@ -100,6 +122,8 @@ export interface MaterializationStatePage {
   readonly links: readonly MaterializationLinkState[]
   readonly linkScopes: readonly MaterializationLinkScopeState[]
   readonly points: readonly StoredTelemetryPoint[]
+  /** The objects holding requested unique values; a value no object holds is left out. */
+  readonly uniqueHolders?: readonly ExactUniqueValueWrite[]
 }
 
 export interface SourceReplacementObjectState extends Omit<MaterializationObjectState, "source"> {
@@ -125,6 +149,8 @@ export interface MaterializationStateRequestChunk {
     readonly series: TelemetrySeriesRef
     readonly at: string
   }[]
+  /** Unique values whose holders to read. */
+  readonly uniqueValues?: readonly UniqueValueRef[]
 }
 
 /**
@@ -314,12 +340,16 @@ export type MaterializationPlanWorkItem =
   | { readonly kind: "link-upsert"; readonly value: ExactEffectiveLinkWrite }
   | { readonly kind: "link-delete"; readonly value: ExactEffectiveLinkDelete }
   | { readonly kind: "point-upsert"; readonly value: ExactTimeseriesPointWrite }
+  /** Drops the value's holder row if it still names this object; a missing row is no conflict. */
+  | { readonly kind: "unique-value-release"; readonly value: ExactUniqueValueWrite }
+  /** Rejects a value another object holds once every release of the commit has applied. */
+  | { readonly kind: "unique-value-claim"; readonly value: ExactUniqueValueClaim }
 
 /**
  * Safe physical phases shared by the core planner and provider validation through
  * {@link materializationApplyPhase}.
  */
-export type MaterializationApplyPhase = 0 | 1 | 2 | 3 | 4 | 5
+export type MaterializationApplyPhase = 0 | 1 | 2 | 3 | 4 | 5 | 6
 
 export interface MaterializationPlanWorkRecord {
   readonly kind: "plan"
@@ -344,6 +374,7 @@ export function materializationApplyPhase(
     case "link-override-delete":
     case "link-slot-override-upsert":
     case "link-slot-override-delete":
+    case "unique-value-release":
       return 0
     case "point-upsert":
       return 1
@@ -355,6 +386,9 @@ export function materializationApplyPhase(
       return 4
     case "link-upsert":
       return 5
+    // Last, after every release of the commit in any chunk: values can move between objects.
+    case "unique-value-claim":
+      return 6
   }
 }
 

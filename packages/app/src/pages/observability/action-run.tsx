@@ -145,7 +145,11 @@ export function ObservabilityActionRunPage() {
 
       {run.error ? (
         <PageSection
-          title={messages.action.failedIn(messages.action.phases[run.error.details.phase])}
+          title={
+            run.error.code === "action.rejected"
+              ? messages.action.rejected
+              : messages.action.failedIn(messages.action.phases[run.error.details.phase])
+          }
         >
           <Panel>
             <div className="px-5 py-4">

@@ -95,7 +95,7 @@ function header(id: string): MaterializationPlanHeader {
 }
 
 function plan(item: MaterializationPlanWorkItem, sortKey = "61"): MaterializationWorkRecord {
-  const phase: Record<MaterializationPlanWorkItem["kind"], 0 | 1 | 2 | 3 | 4 | 5> = {
+  const phase: Record<MaterializationPlanWorkItem["kind"], 0 | 1 | 2 | 3 | 4 | 5 | 6> = {
     "object-override-upsert": 0,
     "object-override-delete": 0,
     "link-override-upsert": 0,
@@ -107,6 +107,8 @@ function plan(item: MaterializationPlanWorkItem, sortKey = "61"): Materializatio
     "object-delete": 3,
     "object-upsert": 4,
     "link-upsert": 5,
+    "unique-value-release": 0,
+    "unique-value-claim": 6,
   }
   return {
     kind: "plan",

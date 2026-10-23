@@ -15,7 +15,7 @@ export interface ProjectAuthExperience extends SixbAuthExperienceOptions {
 export type AuthExperiencePageState =
   | { readonly kind: "signIn" }
   | { readonly kind: "checkEmail" }
-  | { readonly kind: "confirm"; readonly email?: string }
+  | { readonly kind: "confirm"; readonly email?: string; readonly firstSignIn?: true }
   | { readonly kind: "invalidLink" }
   | { readonly kind: "error" }
 

@@ -40,7 +40,8 @@ or `null` instead.
 
 Primary-ID comparisons with `eq` or `in` do not need query metadata. To match a
 [user reference](../ontology/properties.md#reference-a-user), pass `userRef(id)`, for example
-`task.p.assignee.eq(userRef("usr_1"))`.
+`task.p.assignee.eq(userRef("usr_1"))`, or `currentUser()` to match
+[the user reading](#match-the-reading-user).
 
 Return an array to require all conditions. Use `or(...)` for alternatives and `not(...)` to negate
 one condition:
@@ -56,6 +57,36 @@ one condition:
 A present `null` differs from a missing property: `exists()` includes `null`, while `eq(null)`
 matches only explicit nulls. `neq(...)` also matches missing properties. Ordered comparisons
 exclude both null and missing values.
+
+### Match the reading user
+
+`currentUser()` stands for the user who runs the query. Compare it with a `ref.user()` property
+using `eq`, `neq`, or `in`, or find it in a list of user references with `contains`:
+
+```ts
+import { currentUser } from "@sixb/core"
+
+const { objects: myTasks } = await sixb
+  .objects(Task)
+  .query()
+  .where((task) =>
+    task.or(task.p.assignee.eq(currentUser()), task.p.reviewers.contains(currentUser()))
+  )
+  .list()
+```
+
+Sixb resolves it on the server when the query runs:
+
+| The query runs for | `currentUser()` matches |
+| --- | --- |
+| A signed-in user: HTTP requests, React apps, the agent in their conversations | That user. |
+| An action or a workflow | The user who requested it, if a user did. |
+| A service account, a schedule, an event, or a shared link | No one. |
+| Any caller while auth is disabled | No one. |
+
+When it matches no one, `eq`, `in`, and `contains` match no objects, and `neq` matches every
+object. Over HTTP and in `sixb objects query`, write it `{ "type": "currentUser" }`. It only
+exists in queries: a write cannot store it.
 
 ## Search text
 
@@ -260,6 +291,35 @@ For a `"many"` link, limit and sort the related objects returned for each parent
 ```
 
 Relationship properties, when present, are available as `linkProperties` on the related object.
+
+### Include the members a property names
+
+Pass a [`ref.user()` property](../ontology/properties.md#reference-a-user) to `expand()` to
+include each member's profile under `.users`: their `id`, `email`, `displayName`, `avatarUrl`,
+and `status`. The property value itself stays `{ type: "user", id }`:
+
+```ts
+const { objects: tasks } = await sixb
+  .objects(Task)
+  .query()
+  .expand(Task.p.assignee)
+  .expand(Task.p.reviewers)
+  .expand(Task.l.team, (team) => team.expand(Team.p.lead))
+  .limit(25)
+  .list()
+
+console.log(tasks[0]?.users.assignee?.displayName)
+console.log(tasks[0]?.links.team?.users.lead?.email)
+```
+
+- A single reference gives a profile, or `null` when the property is empty or no member has
+  that ID. Suspended members are included, with their status.
+- An array of references gives the members found, in order.
+- A query that projects its properties must also project the expanded user properties.
+- Profiles come from the [member directory](../auth/members.md#read-the-member-directory), so
+  they require `can.view(project.users)`. Without it, or when the reader cannot read the property,
+  its entry is absent from `.users` and the query still succeeds. Shared links never include
+  profiles.
 
 ## Pass queries around
 

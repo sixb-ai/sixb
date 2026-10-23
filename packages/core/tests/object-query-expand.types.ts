@@ -13,7 +13,14 @@
  * one. Id-only refs resolve through the registry, covered in
  * `packages/client/tests/type-programs/ontology-registry`.
  */
-import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
+import {
+  defineObjectType,
+  link,
+  type ObjectQueryBuilder,
+  prop,
+  ref,
+  type UserProfile,
+} from "../src"
 
 const Company = defineObjectType({
   id: "Company",
@@ -223,3 +230,83 @@ function directClientRowAssertions(row: DirectClientRow): void {
   void _id
 }
 void directClientRowAssertions
+
+// ── Row `.users` typing ──────────────────────────────────────────
+//
+// Expanding a `ref.user()` property attaches its member's profile under `users`; an array of
+// them attaches the members found. Entries are optional: the reader may lack the directory grant.
+
+type Expect<T extends true> = T
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
+
+const Owner = defineObjectType({
+  id: "Owner",
+  name: "Owner",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("manager", ref.user(), { nullable: true }),
+  ],
+})
+
+const Task = defineObjectType({
+  id: "Task",
+  name: "Task",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("title", "string", { required: true }),
+    prop("assignee", ref.user(), { nullable: true }),
+    prop("reviewers", { type: "array", items: ref.user() }),
+  ],
+  links: [link("owner", Owner, { cardinality: "one" })],
+})
+
+declare const tasks: ObjectQueryBuilder<typeof Task>
+
+const builtTasks = tasks
+  .expand(Task.p.assignee)
+  .expand(Task.p.reviewers)
+  .expand(Task.l.owner, (owner) => owner.expand(Owner.p.manager))
+type TaskRow = RowOf<typeof builtTasks>
+
+export type UserExpansionRows = [
+  Expect<Equal<TaskRow["users"]["assignee"], UserProfile | null | undefined>>,
+  Expect<Equal<TaskRow["users"]["reviewers"], UserProfile[] | undefined>>,
+  Expect<
+    Equal<
+      NonNullable<TaskRow["links"]["owner"]>["users"]["manager"],
+      UserProfile | null | undefined
+    >
+  >,
+]
+
+function userExpansionAssertions(row: TaskRow, plain: RowOf<typeof tasks>): void {
+  const _name: string | undefined = row.users.assignee?.displayName
+
+  // @ts-expect-error — `title` was not expanded.
+  void row.users.title
+  // @ts-expect-error — without a user expansion the row has no `users`.
+  void plain.users
+
+  void _name
+}
+void userExpansionAssertions
+
+function userExpansionAuthoring(): void {
+  // @ts-expect-error — `title` is not a ref.user() property.
+  tasks.expand(Task.p.title)
+
+  // @ts-expect-error — `manager` is an Owner property, not a Task one.
+  tasks.expand(Owner.p.manager)
+
+  // @ts-expect-error — a user property takes no options.
+  tasks.expand(Task.p.assignee, { limit: 1 })
+
+  tasks.expand(Task.l.owner, (owner) =>
+    owner.expand(
+      // @ts-expect-error — `assignee` is a Task property, not on the Owner target.
+      Task.p.assignee
+    )
+  )
+}
+void userExpansionAuthoring

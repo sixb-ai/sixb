@@ -188,6 +188,17 @@ describe("compileRoutes", () => {
     expect(routes.has("event-schedule:pipeline.run.finished:upstream-pipeline")).toBe(true)
   })
 
+  test("member event schedules start workflows", () => {
+    const memberJoined = defineSchedule("member-joined").on(events.users().joined())
+
+    const routes = compile({
+      schedules: [memberJoined],
+      workflows: [makeWorkflow("welcome-member", memberJoined)],
+    })
+
+    expect(routes.has("event-schedule:user.joined:users")).toBe(true)
+  })
+
   test("unknown schedule references produce one consumer-aware diagnostic", () => {
     const unknown = defineSchedule("missing").cron("0 * * * *")
     const result = compileRoutesWithDiagnostics({

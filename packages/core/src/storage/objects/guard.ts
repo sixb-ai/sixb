@@ -32,6 +32,7 @@ export function createGuardedObjectReadStorage(
       return reader.queryCapabilities()
     },
     getByPrimaryId: (input) => guard.run(() => reader.getByPrimaryId(input)),
+    getByUniqueValue: (input) => guard.run(() => reader.getByUniqueValue(input)),
     selectsObjectProperties: (input) => guard.run(() => reader.selectsObjectProperties(input)),
     listLinks: (input) => guard.run(() => reader.listLinks(input)),
     getByPrimaryIdBatch: (input) => guard.run(() => reader.getByPrimaryIdBatch(input)),

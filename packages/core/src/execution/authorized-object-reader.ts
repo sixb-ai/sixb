@@ -1,4 +1,6 @@
 import { assertNever } from "../assert-never"
+import { isRuntimeAllowed } from "../authorization"
+import { AuthorizationError } from "../authorization/errors"
 import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../models/catalog"
 import type { AuthorizedOntologyView } from "../objects/authorized-ontology-view"
 import {
@@ -30,6 +32,8 @@ import { validateObjectFacetRequests } from "../objects/query/executor"
 import type { ObjectQuery } from "../objects/query/ir"
 import { assertLinkQueryReadable } from "../objects/query/link-query-clearance"
 import { preflightObjectQueryLinks } from "../objects/query/links"
+import { normalizeObjectQuery } from "../objects/query/normalize"
+import { userExpansionPlan } from "../objects/query/user-expansions"
 import {
   type AdmittedObjectQuery,
   composeObjectQueryAdmissions,
@@ -45,6 +49,7 @@ import {
 import type { OntologyRegistry } from "../ontology"
 import type { AppliedMarkings } from "../security/applied-markings"
 import type {
+  AuthUserStore,
   LinkBatchKey,
   ObjectFacetRequest,
   ObjectLinkRow,
@@ -57,10 +62,18 @@ import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./aut
 import type { Clearance, EventSources } from "./object-reader-clearance"
 import { ObjectReaderOntology } from "./object-reader-ontology"
 import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
+import { attachUserProfiles } from "./object-reader-users"
 import type { ExecutionScope } from "./types"
+import { uniqueLookupKey } from "./unique-lookup"
 
 type GetObjectInput = Omit<Parameters<ObjectReadStorage["getByPrimaryId"]>[0], "projectId">
 type GetObjectsInput = Omit<Parameters<ObjectReadStorage["getByPrimaryIdBatch"]>[0], "projectId">
+/** A caller's value, validated and keyed against the property's schema. */
+interface GetByUniqueValueInput {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly value: unknown
+}
 type SelectObjectPropertiesInput = Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
 type CanReadObjectPropertyInput = SelectObjectPropertiesInput["items"][number]
 type CanReadObjectPropertiesBatchInput = Omit<SelectObjectPropertiesInput, "projectId">
@@ -85,13 +98,15 @@ const readerConstructionKey = Object.freeze({})
  *
  * Its state is grouped as a project is: the ontology it resolves against, the security of the
  * authority (its delegation and clearance included), the model catalogs search uses, and the
- * storage it reads. Each group decides what belongs to it; the reader composes them.
+ * storage it reads, with the member directory that expanded user properties resolve against.
+ * Each group decides what belongs to it; the reader composes them.
  */
 class AuthorizedObjectReaderImpl {
   readonly #ontology: ObjectReaderOntology
   readonly #security: ObjectReaderSecurity
   readonly #models: ObjectReaderModels
   readonly #storage: ObjectReadStorage
+  readonly #users: AuthUserStore | undefined
 
   constructor(
     key: typeof readerConstructionKey,
@@ -100,6 +115,7 @@ class AuthorizedObjectReaderImpl {
       readonly security: ObjectReaderSecurity
       readonly models: ObjectReaderModels
       readonly storage: ObjectReadStorage
+      readonly users?: AuthUserStore
     }
   ) {
     if (key !== readerConstructionKey) {
@@ -109,6 +125,7 @@ class AuthorizedObjectReaderImpl {
     this.#security = input.security
     this.#models = input.models
     this.#storage = input.storage
+    this.#users = input.users
   }
 
   static assertBound(reader: AuthorizedObjectReaderImpl, scope: ExecutionScope): void {
@@ -152,6 +169,41 @@ class AuthorizedObjectReaderImpl {
     this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
     const row = await this.#storage.getByPrimaryId({
       ...request,
+      projectId: this.#security.runtime.projectId,
+    })
+    return this.#detachRows(
+      row && this.#omitHidden(row, clearance),
+      (detached) => [detached],
+      clearance
+    )
+  }
+
+  /**
+   * The object of exactly `objectTypeId` holding a unique property's value, or null. A lookup by a
+   * marked property would reveal its value, so it needs the clearance a query predicate needs.
+   */
+  async getByUniqueValue(input: GetByUniqueValueInput): Promise<ObjectRow | null> {
+    const request = snapshotReadValue({
+      objectTypeId: input.objectTypeId,
+      propertyId: input.propertyId,
+      value: input.value,
+    })
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
+
+    const valueKey = uniqueLookupKey(this.#ontology.registry, request)
+    const marking = clearance?.missingMarking(request.objectTypeId, request.propertyId)
+    if (marking !== undefined) {
+      throw new AuthorizationError(
+        `clearance:marking:${marking}`,
+        `[Sixb] Cannot look up '${request.objectTypeId}.${request.propertyId}' by value: it requires clearance for marking '${marking}'.`
+      )
+    }
+
+    const row = await this.#storage.getByUniqueValue({
+      objectTypeId: request.objectTypeId,
+      propertyId: request.propertyId,
+      valueKey,
       projectId: this.#security.runtime.projectId,
     })
     return this.#detachRows(
@@ -337,11 +389,14 @@ class AuthorizedObjectReaderImpl {
       },
       this.#queryExecutorOptions(clearance)
     )
-    return this.#detachRows(
+    const detached = this.#detachRows(
       { ...result, objects: result.objects.map((row) => this.#omitHidden(row, clearance)) },
       (detached) => detached.objects,
       clearance
     )
+
+    await this.#attachUsers(detached.objects, query)
+    return detached
   }
 
   async queryLinks(
@@ -533,6 +588,7 @@ class AuthorizedObjectReaderImpl {
         embeddingModels: this.#models.embedding,
         rerankingModels: this.#models.reranking,
         ...(admission === undefined ? {} : { admission }),
+        requestingUser: this.#security.requestingUser,
       }
     }
     return {
@@ -545,6 +601,7 @@ class AuthorizedObjectReaderImpl {
         ? {}
         : { authorization: this.#security.runtime.authorization }),
       ...(admission === undefined ? {} : { admission }),
+      requestingUser: this.#security.requestingUser,
     }
   }
 
@@ -558,6 +615,24 @@ class AuthorizedObjectReaderImpl {
 
     if (selected && admission) return composeObjectQueryAdmissions(selected, admission)
     return selected ?? admission
+  }
+
+  /**
+   * Resolve the user properties the query expands on rows already detached and redacted. Only an
+   * authority that may view the directory reads profiles; a delegated one never does.
+   */
+  async #attachUsers(rows: readonly ObjectRow[], query: ObjectQuery): Promise<void> {
+    const plan = userExpansionPlan(normalizeObjectQuery(query))
+    if (!plan) return
+
+    await attachUserProfiles({
+      rows,
+      plan,
+      ontology: this.#ontology.registry,
+      projectId: this.#security.runtime.projectId,
+      canViewUsers: isRuntimeAllowed(this.#security.runtime, { kind: "users.view" }),
+      users: this.#users,
+    })
   }
 
   #omitHidden<TRow extends ObjectRow>(row: TRow, clearance: Clearance): TRow {
@@ -622,6 +697,8 @@ export function createAuthorizedObjectReader(input: {
   readonly objectStorage: ObjectStorage
   /** Markings of the dataset versions projections applied; the code's markings alone without. */
   readonly appliedMarkings?: AppliedMarkings
+  /** The member directory expanded user properties resolve against. */
+  readonly users?: AuthUserStore
 }): AuthorizedObjectReader {
   const scope = captureExecutionScope(input.scope)
   const projectId = scope.execution.projectId
@@ -635,12 +712,14 @@ export function createAuthorizedObjectReader(input: {
       projectId,
       ontology: input.ontology,
       ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
+      requestedBy: scope.execution.requestedBy,
     }),
     models: Object.freeze({
       ...(input.embeddingModels === undefined ? {} : { embedding: input.embeddingModels }),
       ...(input.rerankingModels === undefined ? {} : { reranking: input.rerankingModels }),
     }),
     storage,
+    ...(input.users === undefined ? {} : { users: input.users }),
   })
   Object.freeze(reader)
   return reader

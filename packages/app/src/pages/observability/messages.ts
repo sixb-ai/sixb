@@ -82,6 +82,8 @@ export const en = {
     subject: "Subject",
     phase: "Phase",
     failedIn: (phase: string) => `Failed during ${phase}`,
+    /** A validator declined the request; its message follows. */
+    rejected: "Request rejected",
     /** As a label, such as the Phase figure. */
     phaseNames: {
       validation: "Validation",
@@ -251,6 +253,7 @@ export const fr: Translation<ObservabilityMessages> = {
     subject: "Sujet",
     phase: "Phase",
     failedIn: (phase: string) => `Échec pendant ${phase}`,
+    rejected: "Demande refusée",
     phaseNames: {
       validation: "Validation",
       writeback: "Écriture en retour",

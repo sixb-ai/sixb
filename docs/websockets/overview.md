@@ -59,8 +59,9 @@ This abbreviated example shows common fields. The event also carries its subject
 | `schedules` | `schedule.triggered` |
 | `datasets` | `dataset.version.committed` |
 | `syncs`, `pipelines` | Run lifecycle events. |
+| `users` | `user.joined`, `user.invited`, `user.suspended`, `user.reactivated`, `user.profile.updated` |
 
-Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. There is no separate grant to read all domain events.
+Visibility follows the subject's permissions. For example, invoice events require view access to invoices, and link events require view access to both endpoint types. Member events require `can.view(project.users)`, like the [member directory](../auth/members.md#read-the-member-directory). There is no separate grant to read all domain events.
 
 ## Replay events
 

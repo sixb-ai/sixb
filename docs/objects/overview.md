@@ -25,6 +25,17 @@ if (invoice) {
 The returned object also includes `primaryId`, `objectTypeId`, and `createdAt` and `updatedAt`
 as `Date` values.
 
+To find an object by a [unique property](../ontology/properties.md#unique-values) instead, pass its
+token and a value to `getBy()`:
+
+```ts
+const invoice = await invoices.getBy(Invoice.p.number, "INV-2026-001")
+```
+
+`getBy()` only accepts tokens of unique properties. It returns the object of exactly that type,
+not of a subtype, or `null`. The value matches exactly, as a write stores it. A lookup by a
+[marked](../auth/markings.md) property needs a clearance for its markings.
+
 ## Create or update an object
 
 `upsert()` creates an object or updates the one with the same primary ID. Include the primary

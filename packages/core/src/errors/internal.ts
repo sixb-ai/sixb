@@ -1,6 +1,6 @@
 import { cloneJsonValue, isJsonValue, isPlainRecord, type ReadonlyJsonValue } from "../json"
 import { ActionRunFailedError } from "../objects/action/errors"
-import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS } from "./catalog"
+import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS, type SixbErrorDefinition } from "./catalog"
 import { failureMessage } from "./failure-message"
 import { createFailureRedactor } from "./redaction"
 import type { SixbErrorCode, SixbFailure } from "./types"
@@ -139,14 +139,8 @@ export function toSixbFailure(
   const redactor = createFailureRedactor()
   const details = error.details === undefined ? undefined : redactor.context(error.details)
   const { detail, truncated, redacted } = findFailureDetail(error, code)
-  const summary = SIXB_ERROR_DEFINITIONS[code].publicMessage
-  const explanation = detail?.message ?? summary
   const message = truncateUtf8(
-    redactor.text(
-      explanation === summary || explanation.startsWith(`${summary} `)
-        ? explanation
-        : `${summary} ${explanation}`
-    ),
+    redactor.text(durableFailureMessage(code, detail?.message)),
     SIXB_FAILURE_MAX_MESSAGE_BYTES
   )
   const failure: SixbFailure = {
@@ -171,6 +165,21 @@ export function toSixbFailure(
     ...(failure.redacted ? { redacted: true } : {}),
     truncated: true,
   }
+}
+
+/**
+ * The code's public message, followed by the failure's explanation when it has one. A code whose
+ * explanation is written for the caller, such as an Action's rejection, states it alone.
+ */
+function durableFailureMessage(code: SixbErrorCode, explanation: string | undefined): string {
+  const definition: SixbErrorDefinition = SIXB_ERROR_DEFINITIONS[code]
+  const summary = definition.publicMessage
+  if (explanation === undefined) return summary
+  if (definition.explanationIsMessage) return explanation
+
+  return explanation === summary || explanation.startsWith(`${summary} `)
+    ? explanation
+    : `${summary} ${explanation}`
 }
 
 const NETWORK_MESSAGES: Readonly<Record<string, string>> = {

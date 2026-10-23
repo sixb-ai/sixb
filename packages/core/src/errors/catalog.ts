@@ -1,6 +1,11 @@
-interface SixbErrorDefinition {
+export interface SixbErrorDefinition {
   readonly publicMessage: string
   readonly retryable: boolean
+  /**
+   * A failure's explanation, when it has one, is its whole durable message instead of following
+   * `publicMessage`. Only for codes whose explanation is written for the caller on purpose.
+   */
+  readonly explanationIsMessage?: true
 }
 
 /**
@@ -17,6 +22,12 @@ export const SIXB_ERROR_DEFINITIONS = {
   "action.read_conflict": {
     publicMessage: "Data the Action read changed before its commit.",
     retryable: true,
+  },
+  // Not a crash: a validator declined the request, with a message written for the caller.
+  "action.rejected": {
+    publicMessage: "The Action rejected the request.",
+    retryable: false,
+    explanationIsMessage: true,
   },
   "action.run_in_progress": {
     publicMessage: "The Action run is already in progress.",
@@ -114,6 +125,10 @@ export const SIXB_ERROR_DEFINITIONS = {
   "queue.enqueue_failed": {
     publicMessage: "The job could not be enqueued.",
     retryable: true,
+  },
+  "object.unique_violation": {
+    publicMessage: "Another object already has this unique value.",
+    retryable: false,
   },
   "pipeline.step_failed": {
     publicMessage: "Pipeline step execution failed.",

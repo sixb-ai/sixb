@@ -27,6 +27,7 @@ import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedule
 import type { SchedulesRuntime } from "../schedules/execution"
 import type { GroupDefinition } from "../security"
 import type { SyncsRuntime } from "../syncs/execution"
+import type { UsersRuntime } from "../users"
 import type { WorkflowsRuntime } from "./execution"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -75,6 +76,7 @@ export interface WorkflowRuntimeFacade {
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
   readonly schedules: SchedulesRuntime
+  readonly users: UsersRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
 }

@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react"
 
 export default function AuthExperience({ state, actions }: AuthExperienceProps) {
   const [email, setEmail] = useState("")
+  const [displayName, setDisplayName] = useState("")
   const [pending, setPending] = useState(false)
 
   function requestLink(event: FormEvent<HTMLFormElement>) {
@@ -12,10 +13,11 @@ export default function AuthExperience({ state, actions }: AuthExperienceProps) 
     actions.requestMagicLink(email)
   }
 
-  function confirmSignIn() {
+  function confirmSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (pending) return
     setPending(true)
-    actions.confirmSignIn()
+    actions.confirmSignIn({ displayName })
   }
 
   return (
@@ -83,9 +85,26 @@ export default function AuthExperience({ state, actions }: AuthExperienceProps) 
                   ? `Confirm sign-in as ${state.email}.`
                   : "Confirm this sign-in request."}
               </p>
-              <button type="button" onClick={confirmSignIn} disabled={pending}>
-                {pending ? "Signing in…" : "Continue"}
-              </button>
+              <form onSubmit={confirmSignIn}>
+                {state.firstSignIn ? (
+                  <>
+                    <label htmlFor="auth-name">Your name (optional)</label>
+                    <input
+                      id="auth-name"
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      autoComplete="name"
+                      // Sixb drops a name it refuses at sign-in without a word, so stop at the limit.
+                      maxLength={100}
+                      placeholder="Ada Lovelace"
+                      autoFocus
+                    />
+                  </>
+                ) : null}
+                <button type="submit" disabled={pending}>
+                  {pending ? "Signing in…" : "Continue"}
+                </button>
+              </form>
             </>
           ) : (
             <>

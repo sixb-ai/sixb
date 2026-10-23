@@ -1,5 +1,6 @@
 import type { QueryScalarKind } from "../objects/query/ir"
 import type { PrimitiveSchema } from "./types"
+import type { UniqueValueKind } from "./unique-values"
 
 /**
  * Yes/no decisions a primitive schema makes for rules that several modules share.
@@ -28,6 +29,8 @@ export interface PrimitiveTraits {
   readonly telemetry: boolean
   /** Allowed anywhere inside a shared Action parameter's schema. */
   readonly shareableParam: boolean
+  /** How `unique: true` values compare; `undefined` when the primitive cannot be unique. */
+  readonly unique: UniqueValueKind | undefined
 }
 
 const comparable = {
@@ -42,14 +45,22 @@ const comparable = {
 } as const
 
 const PRIMITIVE_TRAITS = {
-  string: { ...comparable, queryScalarKind: "string", text: true, contains: true },
-  uuid: { ...comparable, queryScalarKind: "uuid", contains: true },
-  integer: { ...comparable, queryScalarKind: "integer" },
-  double: { ...comparable, queryScalarKind: "double" },
-  decimal: { ...comparable, queryScalarKind: "decimal" },
-  date: { ...comparable, queryScalarKind: "date" },
-  timestamp: { ...comparable, queryScalarKind: "timestamp" },
-  boolean: { ...comparable, queryScalarKind: "boolean", sortable: false },
+  string: {
+    ...comparable,
+    queryScalarKind: "string",
+    text: true,
+    contains: true,
+    unique: "string",
+  },
+  uuid: { ...comparable, queryScalarKind: "uuid", contains: true, unique: "string" },
+  integer: { ...comparable, queryScalarKind: "integer", unique: "integer" },
+  // Unique values compare as exact keys: floating-point values are no identity, and decimals and
+  // instants stay out until one stored spelling per value is guaranteed.
+  double: { ...comparable, queryScalarKind: "double", unique: undefined },
+  decimal: { ...comparable, queryScalarKind: "decimal", unique: undefined },
+  date: { ...comparable, queryScalarKind: "date", unique: "string" },
+  timestamp: { ...comparable, queryScalarKind: "timestamp", unique: undefined },
+  boolean: { ...comparable, queryScalarKind: "boolean", sortable: false, unique: undefined },
   // Blob references are resolved through the object that holds them, never compared.
   fileRef: {
     queryScalarKind: undefined,
@@ -61,6 +72,7 @@ const PRIMITIVE_TRAITS = {
     facet: false,
     telemetry: false,
     shareableParam: false,
+    unique: undefined,
   },
   // User references match by identity, never against typed search input. They are not text, carry
   // no order, and stay out of telemetry and shared sessions, which cannot disclose who they point to.
@@ -74,6 +86,7 @@ const PRIMITIVE_TRAITS = {
     facet: true,
     telemetry: false,
     shareableParam: false,
+    unique: "userRef",
   },
 } as const satisfies Record<PrimitiveSchema, PrimitiveTraits>
 

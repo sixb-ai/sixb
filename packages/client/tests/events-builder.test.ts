@@ -165,6 +165,15 @@ describe("events builder filter spec", () => {
       runStatus: "cancelled",
     })
   })
+
+  test("project-wide member builders", () => {
+    expect(events.users().ir).toEqual({ topic: "users" })
+    expect(events.users().joined().ir).toEqual({ topic: "users", types: ["user.joined"] })
+    expect(events.users().profileUpdated().ir).toEqual({
+      topic: "users",
+      types: ["user.profile.updated"],
+    })
+  })
 })
 
 describe("buildEventPredicate", () => {

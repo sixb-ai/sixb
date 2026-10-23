@@ -3,6 +3,9 @@ import { OntologyValidationError } from "./errors"
 import type { SchemaOrRef } from "./refs"
 import type { Schema, ValueType } from "./types"
 
+// A user reference carries no name, so whoever reads the schema is told how one is written.
+const USER_REF_DESCRIPTION = 'A Sixb user, written {"type":"user","id":"<user-id>"}.'
+
 type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T
 
 export interface SchemaJsonField {
@@ -104,6 +107,7 @@ function schemaJsonSchema(
       case "userRef":
         return {
           type: "object",
+          description: USER_REF_DESCRIPTION,
           properties: {
             type: { type: "string", enum: ["user"] },
             id: { type: "string", minLength: 1 },

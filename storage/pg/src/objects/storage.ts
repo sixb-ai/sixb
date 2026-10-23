@@ -175,6 +175,12 @@ export class PgObjectStorage implements ObjectStorage {
     return this.reader.getByPrimaryId(params)
   }
 
+  async getByUniqueValue(
+    params: Parameters<ObjectReadStorage["getByUniqueValue"]>[0]
+  ): Promise<ObjectRow | null> {
+    return this.reader.getByUniqueValue(params)
+  }
+
   async selectsObjectProperties(
     params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
   ): Promise<readonly boolean[]> {

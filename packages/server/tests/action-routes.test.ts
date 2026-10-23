@@ -146,7 +146,31 @@ describe("POST /api/actions/:actionId", () => {
         phase: "writeback",
         error: {
           code: "action.phase_failed",
+          message: "Action execution failed.",
           details: { actionId: "failing", runId: "act_failed", phase: "writeback" },
+        },
+      })
+    })
+  })
+
+  test("answers a validator's rejection with its message", async () => {
+    const guarded = defineAction("guarded")
+      .params({})
+      .validate(() => ({ error: "Only the assignee can close this ticket." }))
+      .writeback(() => {})
+
+    await withActionServer([guarded], async ({ baseUrl }) => {
+      const response = await requestAction(baseUrl, "guarded", { runId: "act_rejected" })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        id: "act_rejected",
+        status: "failed",
+        phase: "validation",
+        error: {
+          code: "action.rejected",
+          message: "Only the assignee can close this ticket.",
+          retryable: false,
         },
       })
     })

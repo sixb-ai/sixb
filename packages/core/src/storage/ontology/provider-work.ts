@@ -1,6 +1,8 @@
 import {
   MaterializationConflictError,
   MaterializationValidationError,
+  UniquePropertyNotPreparedError,
+  UniqueValueViolationError,
 } from "../../materialization/errors"
 import { eventAttribution, materializationEvent } from "../../materialization/event-envelopes"
 import type {
@@ -34,6 +36,8 @@ import {
   type ExactObjectOverrideDelete,
   type ExactObjectOverrideWrite,
   type ExactTimeseriesPointWrite,
+  type ExactUniqueValueClaim,
+  type ExactUniqueValueWrite,
   type MaterializationCardinalityOccupantWorkRecord,
   type MaterializationEventWorkRecord,
   type MaterializationPlanHeader,
@@ -41,6 +45,7 @@ import {
   type MaterializationPlanWorkRecord,
   type MaterializationWorkRecord,
   materializationApplyPhase,
+  type UniqueValueRef,
 } from "./materializations"
 import type { ClaimedOntologyOutboxRow, OntologyMaterializationEventDraft } from "./outbox"
 import { assertMaterializationHeader } from "./provider-header-validation"
@@ -67,6 +72,8 @@ export function materializationChunkRows(chunk: MaterializationPlanChunk): numbe
     chunk.effective.linkUpserts.length +
     chunk.effective.linkDeletes.length +
     chunk.timeseries.pointUpserts.length +
+    chunk.unique.releases.length +
+    chunk.unique.claims.length +
     chunk.outbox.length
   )
 }
@@ -99,11 +106,18 @@ export interface ExactTimeseriesWrites {
   readonly pointUpserts: readonly ExactTimeseriesPointWrite[]
 }
 
+/** A chunk holds one phase, so releases and claims never share one. */
+export interface ExactUniqueValueWrites {
+  readonly releases: readonly ExactUniqueValueWrite[]
+  readonly claims: readonly ExactUniqueValueClaim[]
+}
+
 /** Plan items and outbox writes of one bounded provider write, grouped by table. */
 export interface MaterializationPlanChunk {
   readonly overrides: ExactOverrideWrites
   readonly effective: ExactEffectiveWrites
   readonly timeseries: ExactTimeseriesWrites
+  readonly unique: ExactUniqueValueWrites
   readonly outbox: readonly OntologyOutboxWrite[]
 }
 
@@ -136,6 +150,10 @@ export function materializationPlanChunk(
       linkDeletes: [] as ExactEffectiveLinkDelete[],
     },
     timeseries: { pointUpserts: [] as ExactTimeseriesPointWrite[] },
+    unique: {
+      releases: [] as ExactUniqueValueWrite[],
+      claims: [] as ExactUniqueValueClaim[],
+    },
     outbox,
   }
   for (const item of items) {
@@ -172,6 +190,12 @@ export function materializationPlanChunk(
         break
       case "point-upsert":
         chunk.timeseries.pointUpserts.push(item.value)
+        break
+      case "unique-value-release":
+        chunk.unique.releases.push(item.value)
+        break
+      case "unique-value-claim":
+        chunk.unique.claims.push(item.value)
         break
     }
   }
@@ -422,6 +446,30 @@ export function cardinalityViolation(
   )
 }
 
+/**
+ * The error for a unique value `claimant` takes while `holder` keeps it. Two claimants of one value
+ * in the same commit report each other.
+ */
+export function uniqueValueViolation(
+  value: Pick<UniqueValueRef, "objectTypeId" | "propertyId">,
+  holderPrimaryId: string,
+  claimantPrimaryId: string
+): UniqueValueViolationError {
+  return new UniqueValueViolationError(
+    value.objectTypeId,
+    value.propertyId,
+    holderPrimaryId,
+    claimantPrimaryId
+  )
+}
+
+/** The error for a claim on a property whose stored values were not prepared with its key. */
+export function uniquePropertyNotPrepared(
+  value: Pick<UniqueValueRef, "objectTypeId" | "propertyId">
+): UniquePropertyNotPreparedError {
+  return new UniquePropertyNotPreparedError(value.objectTypeId, value.propertyId)
+}
+
 export function assertWorkRecord(
   record: MaterializationWorkRecord,
   header: MaterializationPlanHeader
@@ -517,6 +565,10 @@ export function materializationPlanKindRank(kind: MaterializationPlanWorkItem["k
       return 9
     case "link-upsert":
       return 10
+    case "unique-value-release":
+      return 11
+    case "unique-value-claim":
+      return 12
   }
 }
 
@@ -605,7 +657,31 @@ function assertPlanItemCorrelation(
     case "point-upsert":
       assertPointWriteCorrelation(item.value, commit)
       return
+    case "unique-value-release":
+      assertUniqueValueWrite(item.value)
+      return
+    case "unique-value-claim":
+      assertUniqueValueWrite(item.value)
+      if (!Number.isSafeInteger(item.value.keyVersion) || !isNonblank(item.value.keyKind)) {
+        invalidCorrelation("Unique value claim must name how its key was computed.")
+      }
+      return
   }
+}
+
+function assertUniqueValueWrite(value: ExactUniqueValueWrite): void {
+  if (
+    !isNonblank(value.objectTypeId) ||
+    !isNonblank(value.propertyId) ||
+    !isNonblank(value.primaryId) ||
+    typeof value.valueKey !== "string"
+  ) {
+    invalidCorrelation("Unique value write must name its type, property, value and object.")
+  }
+}
+
+function isNonblank(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function assertPointWriteCorrelation(

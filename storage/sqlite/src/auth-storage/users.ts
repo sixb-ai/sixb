@@ -5,10 +5,12 @@ import type {
   ListAuthUsersInput,
   ListAuthUsersResult,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
+import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -103,6 +105,22 @@ export class SqliteAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) return []
+
+    const rows = this.db
+      .query(
+        `SELECT * FROM auth_users WHERE project_id = ? AND id IN (${ids.map(() => "?").join(", ")})`
+      )
+      .all(params.projectId, ...ids) as SqliteAuthUserRow[]
+
+    return rows.map(rowToUserRecord)
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string
@@ -111,77 +129,87 @@ export class SqliteAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
-  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord> {
-    const existing = getUserRowById(this.db, {
-      projectId: input.projectId,
-      id: input.id,
-    })
+  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult> {
+    // One transaction, so the user it returns as previous is the one it changed.
+    return runImmediateTransaction(this.db, () => {
+      const existing = getUserRowById(this.db, {
+        projectId: input.projectId,
+        id: input.id,
+      })
 
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    const updatedAt = dateOrNow(input.updatedAt)
-    this.db
-      .query(
+      const previousUser = rowToUserRecord(existing)
+      if (!changesProfile(previousUser, input)) {
+        return { user: previousUser, previousUser }
+      }
+
+      const updatedAt = dateOrNow(input.updatedAt)
+      const row = this.db
+        .query(
+          `
+          UPDATE auth_users
+          SET display_name = CASE WHEN ? THEN ? ELSE display_name END,
+              avatar_url = CASE WHEN ? THEN ? ELSE avatar_url END,
+              updated_at = ?
+          WHERE project_id = ?
+            AND id = ?
+          RETURNING *
         `
-        UPDATE auth_users
-        SET display_name = ?,
-            avatar_url = ?,
-            updated_at = ?
-        WHERE project_id = ?
-          AND id = ?
-      `
-      )
-      .run(
-        input.displayName ?? null,
-        input.avatarUrl ?? null,
-        toIso(updatedAt),
-        input.projectId,
-        input.id
-      )
+        )
+        .get(
+          input.displayName === undefined ? 0 : 1,
+          input.displayName ?? null,
+          input.avatarUrl === undefined ? 0 : 1,
+          input.avatarUrl ?? null,
+          toIso(updatedAt),
+          input.projectId,
+          input.id
+        ) as SqliteAuthUserRow
 
-    return rowToUserRecord({
-      ...existing,
-      display_name: input.displayName ?? null,
-      avatar_url: input.avatarUrl ?? null,
-      updated_at: toIso(updatedAt),
+      return { user: rowToUserRecord(row), previousUser }
     })
   }
 
-  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {
-    const existing = getUserRowById(this.db, {
-      projectId: input.projectId,
-      id: input.id,
-    })
+  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult> {
+    // One transaction, so two status changes cannot both report the same previous one.
+    return runImmediateTransaction(this.db, () => {
+      const existing = getUserRowById(this.db, {
+        projectId: input.projectId,
+        id: input.id,
+      })
 
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    const updatedAt = dateOrNow(input.updatedAt)
-    this.db
-      .query(
+      const updatedAt = dateOrNow(input.updatedAt)
+      this.db
+        .query(
+          `
+          UPDATE auth_users
+          SET status = ?,
+              updated_at = ?
+          WHERE project_id = ?
+            AND id = ?
         `
-        UPDATE auth_users
-        SET status = ?,
-            updated_at = ?
-        WHERE project_id = ?
-          AND id = ?
-      `
-      )
-      .run(input.status, toIso(updatedAt), input.projectId, input.id)
+        )
+        .run(input.status, toIso(updatedAt), input.projectId, input.id)
 
-    return rowToUserRecord({
-      ...existing,
-      status: input.status,
-      updated_at: toIso(updatedAt),
+      const user = rowToUserRecord({
+        ...existing,
+        status: input.status,
+        updated_at: toIso(updatedAt),
+      })
+      return { user, previousUser: rowToUserRecord(existing) }
     })
   }
 
@@ -196,6 +224,15 @@ export class SqliteAuthUserStore implements AuthUserStore {
     if (input.statuses) {
       whereClauses.push(`status IN (${input.statuses.map(() => "?").join(", ")})`)
       args.push(...input.statuses)
+    }
+
+    // `instr` matches literally, so `%` and `_` need no escaping. Both sides fold through the same
+    // `lower()`, which ignores case for ASCII letters only: "émilie" does not find "Émilie" here.
+    if (input.search !== undefined) {
+      whereClauses.push(
+        "(instr(lower(coalesce(display_name, '')), lower(?)) > 0 OR instr(lower(email), lower(?)) > 0)"
+      )
+      args.push(input.search, input.search)
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
@@ -223,4 +260,13 @@ export class SqliteAuthUserStore implements AuthUserStore {
       total: totalRow.count,
     }
   }
+}
+
+// Omitted keeps the stored value, and `null` clears it.
+function changesProfile(user: UserRecord, input: UpdateAuthUserProfileInput): boolean {
+  const displayName =
+    input.displayName === undefined ? user.displayName : (input.displayName ?? undefined)
+  const avatarUrl = input.avatarUrl === undefined ? user.avatarUrl : (input.avatarUrl ?? undefined)
+
+  return displayName !== user.displayName || avatarUrl !== user.avatarUrl
 }

@@ -62,6 +62,7 @@ import {
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
+  getAuthProfile,
   getAuthSession,
   getBulkTelemetryHistory,
   getConnector,
@@ -70,6 +71,7 @@ import {
   getDatasetVersion,
   getLatestTelemetry,
   getObject,
+  getObjectByUniqueProperty,
   getObjectFileContent,
   getObjectType,
   getObservedAgentMessageFileContent,
@@ -84,6 +86,7 @@ import {
   getStatus,
   getSync,
   getTelemetryHistory,
+  getUser,
   getWorkflow,
   getWorkflowAgentNodeExecution,
   getWorkflowIntervention,
@@ -131,6 +134,7 @@ import {
   listSharedAccessGrants,
   listSyncRuns,
   listSyncs,
+  listUsers,
   listWebhookRuns,
   listWorkflowInterventions,
   listWorkflowRuns,
@@ -169,6 +173,7 @@ import {
   suspendAuthMember,
   updateAiLimitPolicy,
   updateAuthMemberGroups,
+  updateAuthProfile,
   uploadFileContent,
   uploadFileRaw,
   upsertObject,
@@ -330,6 +335,9 @@ import type {
   GetAuthMembershipOptionsData,
   GetAuthMembershipOptionsError,
   GetAuthMembershipOptionsResponse,
+  GetAuthProfileData,
+  GetAuthProfileError,
+  GetAuthProfileResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
   GetBulkTelemetryHistoryData,
@@ -350,6 +358,9 @@ import type {
   GetLatestTelemetryData,
   GetLatestTelemetryError,
   GetLatestTelemetryResponse,
+  GetObjectByUniquePropertyData,
+  GetObjectByUniquePropertyError,
+  GetObjectByUniquePropertyResponse,
   GetObjectData,
   GetObjectError,
   GetObjectFileContentData,
@@ -393,6 +404,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryError,
   GetTelemetryHistoryResponse,
+  GetUserData,
+  GetUserError,
+  GetUserResponse,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionError,
   GetWorkflowAgentNodeExecutionResponse,
@@ -526,6 +540,9 @@ import type {
   ListSyncRunsResponse,
   ListSyncsData,
   ListSyncsResponse,
+  ListUsersData,
+  ListUsersError,
+  ListUsersResponse,
   ListWebhookRunsData,
   ListWebhookRunsError,
   ListWebhookRunsResponse,
@@ -635,6 +652,9 @@ import type {
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsError,
   UpdateAuthMemberGroupsResponse,
+  UpdateAuthProfileData,
+  UpdateAuthProfileError,
+  UpdateAuthProfileResponse,
   UploadFileContentData,
   UploadFileContentError,
   UploadFileContentResponse,
@@ -878,6 +898,60 @@ export const signOutAllMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await signOutAll({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAuthProfileQueryKey = (options?: Options<GetAuthProfileData>) =>
+  createQueryKey("getAuthProfile", options)
+
+/**
+ * Get the current user's profile
+ */
+export const getAuthProfileOptions = (options?: Options<GetAuthProfileData>) =>
+  queryOptions<
+    GetAuthProfileResponse,
+    GetAuthProfileError,
+    GetAuthProfileResponse,
+    ReturnType<typeof getAuthProfileQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAuthProfile({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAuthProfileQueryKey(options),
+  })
+
+/**
+ * Update the current user's name or picture
+ *
+ * Fields the identity provider manages, listed in `managedFields`, are refused with 403.
+ */
+export const updateAuthProfileMutation = (
+  options?: Partial<Options<UpdateAuthProfileData>>
+): UseMutationOptions<
+  UpdateAuthProfileResponse,
+  UpdateAuthProfileError,
+  Options<UpdateAuthProfileData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAuthProfileResponse,
+    UpdateAuthProfileError,
+    Options<UpdateAuthProfileData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAuthProfile({
         ...options,
         ...fnOptions,
         throwOnError: true,
@@ -3736,6 +3810,35 @@ export const upsertObjectMutation = (
   return mutationOptions
 }
 
+/**
+ * Get object by a unique property
+ *
+ * Returns the object of exactly this type that holds the value, compared as writes store it.
+ */
+export const getObjectByUniquePropertyMutation = (
+  options?: Partial<Options<GetObjectByUniquePropertyData>>
+): UseMutationOptions<
+  GetObjectByUniquePropertyResponse,
+  GetObjectByUniquePropertyError,
+  Options<GetObjectByUniquePropertyData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    GetObjectByUniquePropertyResponse,
+    GetObjectByUniquePropertyError,
+    Options<GetObjectByUniquePropertyData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await getObjectByUniqueProperty({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
 export const listActionsQueryKey = (options?: Options<ListActionsData>) =>
   createQueryKey("listActions", options)
 
@@ -5697,6 +5800,93 @@ export const listActivityConnectionsInfiniteOptions = (
       queryKey: listActivityConnectionsInfiniteQueryKey(options),
     }
   )
+
+export const listUsersQueryKey = (options?: Options<ListUsersData>) =>
+  createQueryKey("listUsers", options)
+
+/**
+ * List project members
+ */
+export const listUsersOptions = (options?: Options<ListUsersData>) =>
+  queryOptions<
+    ListUsersResponse,
+    ListUsersError,
+    ListUsersResponse,
+    ReturnType<typeof listUsersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listUsers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listUsersQueryKey(options),
+  })
+
+export const listUsersInfiniteQueryKey = (
+  options?: Options<ListUsersData>
+): QueryKey<Options<ListUsersData>> => createQueryKey("listUsers", options, true)
+
+/**
+ * List project members
+ */
+export const listUsersInfiniteOptions = (options?: Options<ListUsersData>) =>
+  infiniteQueryOptions<
+    ListUsersResponse,
+    ListUsersError,
+    InfiniteData<ListUsersResponse>,
+    QueryKey<Options<ListUsersData>>,
+    number | Pick<QueryKey<Options<ListUsersData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListUsersData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listUsers({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listUsersInfiniteQueryKey(options),
+    }
+  )
+
+export const getUserQueryKey = (options: Options<GetUserData>) => createQueryKey("getUser", options)
+
+/**
+ * Get a project member
+ */
+export const getUserOptions = (options: Options<GetUserData>) =>
+  queryOptions<GetUserResponse, GetUserError, GetUserResponse, ReturnType<typeof getUserQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getUser({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getUserQueryKey(options),
+  })
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>
   createQueryKey("listProjections", options)

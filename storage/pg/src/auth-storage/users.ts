@@ -4,11 +4,12 @@ import type {
   ListAuthUsersInput,
   ListAuthUsersResult,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
-import type { PgStoreClient } from "../transactions"
+import { type PgStoreClient, runPgTransaction } from "../transactions"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -90,6 +91,23 @@ export class PgAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) return []
+
+    const rows = await this.sql<PgAuthUserRow[]>`
+      SELECT *
+      FROM auth_users
+      WHERE project_id = ${params.projectId}
+        AND id IN ${this.sql(ids)}
+    `
+
+    return rows.map(rowToUserRecord)
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string
@@ -98,57 +116,83 @@ export class PgAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
-  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord> {
-    const existing = await getUserRowById(this.sql, {
-      projectId: input.projectId,
-      id: input.id,
-    })
-
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult> {
+    // The row stays locked until the update, so the user it returns as previous is the one it
+    // changed, and an omitted field keeps whatever a concurrent update wrote to it.
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await getUserRowById(
+        tx,
+        {
+          projectId: input.projectId,
+          id: input.id,
+        },
+        { forUpdate: true }
       )
-    }
 
-    const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = await this.sql<PgAuthUserRow[]>`
-      UPDATE auth_users
-      SET display_name = ${input.displayName ?? null},
-          avatar_url = ${input.avatarUrl ?? null},
-          updated_at = ${updatedAt}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-      RETURNING *
-    `
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    return rowToUserRecord(row)
+      const previousUser = rowToUserRecord(existing)
+      if (!changesProfile(previousUser, input)) {
+        return { user: previousUser, previousUser }
+      }
+
+      const updatedAt = dateOrNow(input.updatedAt)
+      const [row] = await tx<PgAuthUserRow[]>`
+        UPDATE auth_users
+        SET display_name = CASE
+              WHEN ${input.displayName !== undefined}::boolean THEN ${input.displayName ?? null}::text
+              ELSE display_name
+            END,
+            avatar_url = CASE
+              WHEN ${input.avatarUrl !== undefined}::boolean THEN ${input.avatarUrl ?? null}::text
+              ELSE avatar_url
+            END,
+            updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+        RETURNING *
+      `
+
+      return { user: rowToUserRecord(row), previousUser }
+    })
   }
 
-  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {
-    const existing = await getUserRowById(this.sql, {
-      projectId: input.projectId,
-      id: input.id,
-    })
-
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult> {
+    // Locked like a profile update, so two status changes cannot both report the same previous one.
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await getUserRowById(
+        tx,
+        {
+          projectId: input.projectId,
+          id: input.id,
+        },
+        { forUpdate: true }
       )
-    }
 
-    const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = await this.sql<PgAuthUserRow[]>`
-      UPDATE auth_users
-      SET status = ${input.status},
-          updated_at = ${updatedAt}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-      RETURNING *
-    `
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    return rowToUserRecord(row)
+      const updatedAt = dateOrNow(input.updatedAt)
+      const [row] = await tx<PgAuthUserRow[]>`
+        UPDATE auth_users
+        SET status = ${input.status},
+            updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+        RETURNING *
+      `
+
+      return { user: rowToUserRecord(row), previousUser: rowToUserRecord(existing) }
+    })
   }
 
   async list(input: ListAuthUsersInput): Promise<ListAuthUsersResult> {
@@ -163,6 +207,15 @@ export class PgAuthUserStore implements AuthUserStore {
     if (input.statuses) {
       whereClauses.push(`status IN (${input.statuses.map(() => `$${nextIndex++}`).join(", ")})`)
       params.push(...input.statuses)
+    }
+
+    // `strpos` matches literally, so `%` and `_` need no escaping. Both sides fold through `lower()`.
+    if (input.search !== undefined) {
+      const index = nextIndex++
+      whereClauses.push(
+        `(strpos(lower(coalesce(display_name, '')), lower($${index})) > 0 OR strpos(lower(email), lower($${index})) > 0)`
+      )
+      params.push(input.search)
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
@@ -193,4 +246,13 @@ export class PgAuthUserStore implements AuthUserStore {
       total,
     }
   }
+}
+
+// Omitted keeps the stored value, and `null` clears it.
+function changesProfile(user: UserRecord, input: UpdateAuthUserProfileInput): boolean {
+  const displayName =
+    input.displayName === undefined ? user.displayName : (input.displayName ?? undefined)
+  const avatarUrl = input.avatarUrl === undefined ? user.avatarUrl : (input.avatarUrl ?? undefined)
+
+  return displayName !== user.displayName || avatarUrl !== user.avatarUrl
 }

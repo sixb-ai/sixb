@@ -443,7 +443,8 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("070-artifact-state", artifactStateSql),
     pgSql("071-agent-thread-participants", agentThreadParticipantsSql),
     pgSql("072-forked-context-checkpoints", forkedContextCheckpointsSql),
-    pgSql("073-artifact-threads", artifactThreadsSql),
+    pgSql("073-unique-values", uniqueValuesSql),
+    pgSql("074-artifact-threads", artifactThreadsSql),
   ],
 })
 
@@ -494,4 +495,5 @@ import agentThreadParticipantsSql from "./migrations/071-agent-thread-participan
 import forkedContextCheckpointsSql from "./migrations/072-forked-context-checkpoints.sql" with {
   type: "text",
 }
-import artifactThreadsSql from "./migrations/073-artifact-threads.sql" with { type: "text" }
+import uniqueValuesSql from "./migrations/073-unique-values.sql" with { type: "text" }
+import artifactThreadsSql from "./migrations/074-artifact-threads.sql" with { type: "text" }

@@ -36,6 +36,45 @@ export function isUserRef(value: unknown): value is UserRef {
 }
 
 /**
+ * A `ref.user()` schema, or an array of them: the property schemas whose members a query can
+ * expand into profiles.
+ */
+export function isUserRefPropertySchema(schema: Schema): boolean {
+  if (schema === "userRef") return true
+  return typeof schema === "object" && schema.type === "array" && schema.items === "userRef"
+}
+
+/**
+ * The user reading, in a query predicate. The server binds it to the requester when the query runs:
+ * a query never stores or returns it.
+ */
+export type CurrentUserRef = { readonly type: "currentUser" }
+
+const CURRENT_USER: CurrentUserRef = Object.freeze({ type: "currentUser" })
+
+/**
+ * Match the user reading: `where(({ p }) => p.assignee.eq(currentUser()))`.
+ *
+ * Only query predicates on a `ref.user()` property accept it: `eq`, `neq`, `in`, and `contains`
+ * on a list of user references. It cannot be stored.
+ */
+export function currentUser(): CurrentUserRef {
+  return CURRENT_USER
+}
+
+/** Exactly `{ type: "currentUser" }`, the form `currentUser()` takes on the wire too. */
+export function isCurrentUser(value: unknown): value is CurrentUserRef {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return Object.keys(record).length === 1 && record.type === "currentUser"
+}
+
+/** Why `subject` refuses `currentUser()`: it stands for the reader of a query, never for a value. */
+export function currentUserNotStorableMessage(subject: string): string {
+  return `${subject} cannot store currentUser(): it only stands for the user reading, in a query predicate. Store a user reference { type: "user", id } instead.`
+}
+
+/**
  * Collect the user ids a value holds at `userRef` positions of its schema, however deeply nested.
  *
  * Positions whose value does not match the schema are skipped: shape validation reports them.

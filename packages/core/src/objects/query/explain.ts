@@ -199,20 +199,31 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
       return {
         path,
         kind: query.kind,
-        summary: `expand ${query.expansions.map(summarizeExpansion).join(", ")}`,
-        details: { expansions: query.expansions },
+        summary: `expand ${summarizeExpanded(query.expansions, query.users).join(", ")}`,
+        details: {
+          expansions: query.expansions,
+          ...(query.users === undefined ? {} : { users: query.users }),
+        },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
   }
 }
 
+// Links by id, then user properties as `@property`.
+function summarizeExpanded(
+  expansions: readonly ObjectExpansion[],
+  users: readonly string[] | undefined
+): string[] {
+  return [
+    ...expansions.map(summarizeExpansion),
+    ...(users ?? []).map((propertyId) => `@${propertyId}`),
+  ]
+}
+
 function summarizeExpansion(expansion: ObjectExpansion): string {
   const head = expansion.direction === "incoming" ? `<-${expansion.linkId}` : expansion.linkId
-  const nested =
-    expansion.expand && expansion.expand.length > 0
-      ? `(${expansion.expand.map(summarizeExpansion).join(", ")})`
-      : ""
-  return `${head}${nested}`
+  const nested = summarizeExpanded(expansion.expand ?? [], expansion.users)
+  return nested.length > 0 ? `${head}(${nested.join(", ")})` : head
 }
 
 function summarizePredicate(predicate: ObjectQueryPredicate): string {

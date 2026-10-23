@@ -6,6 +6,7 @@ import type {
   ListAuthUsersInput,
   ListAuthUsersResult,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "../types"
@@ -69,6 +70,16 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     return cloneOptionalRecord(record)
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    return [...new Set(params.ids)].flatMap((id) => {
+      const record = this.state.users.get(userKey(params.projectId, id))
+      return record ? [cloneRecord(record)] : []
+    })
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string
@@ -76,7 +87,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     return cloneOptionalRecord(getUserByEmail(this.state, params.projectId, params.email))
   }
 
-  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord> {
+  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult> {
     const key = userKey(input.projectId, input.id)
     const existing = this.state.users.get(key)
 
@@ -87,17 +98,23 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       )
     }
 
+    const displayName = profileValue(input.displayName, existing.displayName)
+    const avatarUrl = profileValue(input.avatarUrl, existing.avatarUrl)
+    if (displayName === existing.displayName && avatarUrl === existing.avatarUrl) {
+      return { user: cloneRecord(existing), previousUser: cloneRecord(existing) }
+    }
+
     const next: UserRecord = {
       ...existing,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
+      displayName,
+      avatarUrl,
       updatedAt: dateOrNow(input.updatedAt),
     }
     this.state.users.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }
 
-  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {
+  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult> {
     const key = userKey(input.projectId, input.id)
     const existing = this.state.users.get(key)
 
@@ -114,7 +131,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       updatedAt: dateOrNow(input.updatedAt),
     }
     this.state.users.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }
 
   async list(input: ListAuthUsersInput): Promise<ListAuthUsersResult> {
@@ -123,10 +140,12 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     }
 
     const statuses = input.statuses ? new Set(input.statuses) : null
+    const search = input.search?.toLowerCase()
     const order = input.order ?? "desc"
     const rows = [...this.state.users.values()]
       .filter((user) => user.projectId === input.projectId)
       .filter((user) => (statuses ? statuses.has(user.status) : true))
+      .filter((user) => (search === undefined ? true : userMatches(user, search)))
       .sort((a, b) => compareByCreatedAt(a, b, order))
 
     const page = paginate(rows, input)
@@ -136,4 +155,19 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       total: page.total,
     }
   }
+}
+
+// Omitted keeps the current value, and `null` clears it.
+function profileValue(
+  value: string | null | undefined,
+  current: string | undefined
+): string | undefined {
+  return value === undefined ? current : (value ?? undefined)
+}
+
+function userMatches(user: UserRecord, search: string): boolean {
+  return (
+    (user.displayName?.toLowerCase().includes(search) ?? false) ||
+    user.email.toLowerCase().includes(search)
+  )
 }

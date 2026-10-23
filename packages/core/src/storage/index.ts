@@ -21,6 +21,7 @@ export type {
 } from "../materialization/model"
 export type { ModelProviderIds } from "../models/events"
 export type { ObjectRef } from "../ontology"
+export type { UniqueValueKind } from "../ontology/unique-values"
 export type { RedactionReason, Redactions } from "../security/types"
 export type {
   ShareAccessPlan,
@@ -28,6 +29,7 @@ export type {
   ShareScopedGrant,
   ShareScopedViewGrant,
 } from "../shares/access-plan"
+export type { UserProfile } from "../users"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -316,6 +318,7 @@ export type {
   SuspendUserAndRevokeSessionsInput,
   UpdateAuthServiceAccountInput,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UpsertAuthGroupMembershipInput,
   UpsertAuthServiceAccountGroupMembershipInput,
@@ -504,6 +507,7 @@ export type {
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
+  ObjectRowUsers,
   ObjectStorage,
   QueryObjectLinksInput,
   QueryObjectLinksResult,
@@ -558,6 +562,8 @@ export type {
   ExactObjectOverrideDelete,
   ExactObjectOverrideWrite,
   ExactTimeseriesPointWrite,
+  ExactUniqueValueClaim,
+  ExactUniqueValueWrite,
   ExpectedSourceRevision,
   ExpectedTimeseriesPointRevision,
   FinalizeMaterializationInput,
@@ -611,10 +617,12 @@ export type {
   OntologySourceRecord,
   OntologySourceStorage,
   OntologyStorage,
+  OntologyUniqueValueStorage,
   OntologyVectorStorage,
   OpenedReplacementPlan,
   OpenReplacementPlanInput,
   PlannedReplacementIdentity,
+  PreparedUniqueProperty,
   ProjectionOntologyCommitIntent,
   PurgeAbandonedSourceMaterializationsInput,
   PurgePublishedOntologyOutboxInput,
@@ -645,6 +653,8 @@ export type {
   StreamReplacementPlanStateInput,
   SummarizeOntologyOutboxInput,
   TelemetryOntologyCommitIntent,
+  UniqueValueEntry,
+  UniqueValueRef,
 } from "./ontology"
 export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./ontology"
 export type {

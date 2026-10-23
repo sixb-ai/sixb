@@ -275,6 +275,44 @@ export class PgObjectReader {
     return row ? rowToObject(row) : null
   }
 
+  /** On a selected source, the holder must be in scope and selected for the property. */
+  async getByUniqueValue(
+    params: Parameters<ObjectReadStorage["getByUniqueValue"]>[0]
+  ): Promise<ObjectRow | null> {
+    const source = this.source
+    const selected = "objectPropertyPermissionsTable" in source
+    const permitted = selected
+      ? `AND EXISTS (
+           SELECT 1 FROM ${source.objectPropertyPermissionsTable} AS permitted
+           WHERE permitted.project_id = objects.project_id
+             AND permitted.object_type_id = objects.object_type_id
+             AND permitted.primary_id = objects.primary_id
+             AND permitted.property_id = held.property_id
+         )`
+      : ""
+    const statement = compilePgObjectStatement(
+      `
+        SELECT objects.*
+        FROM object_unique_values AS held
+        JOIN ${source.objectsTable} AS objects
+          ON objects.project_id = held.project_id
+         AND objects.object_type_id = held.object_type_id
+         AND objects.primary_id = held.primary_id
+        WHERE held.project_id = ? AND held.object_type_id = ? AND held.property_id = ?
+          AND held.value_hash = sha256(convert_to(?, 'UTF8')) AND held.value_key = ?
+          ${permitted}
+      `,
+      [params.projectId, params.objectTypeId, params.propertyId, params.valueKey, params.valueKey],
+      source
+    )
+    const [row] = await this.sql.unsafe<ObjectDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
+
+    return row ? rowToObject(row) : null
+  }
+
   async selectsObjectProperties(
     params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
   ): Promise<readonly boolean[]> {

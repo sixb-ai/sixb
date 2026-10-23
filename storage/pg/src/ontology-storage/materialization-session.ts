@@ -35,6 +35,9 @@ export class PgMaterializationSessionState extends ProviderMaterializationSessio
   stagedWorkCount = 0
   changedObjects = 0
   changedLinks = 0
+  changedUniqueValues = 0
+  /** What unique value items this session staged, known without reading its work back. */
+  readonly uniqueWork = { releases: false, claims: false }
   workAnalyzed = false
   /** Work staged on the session lives in a temp table; a plan-bound session reads its plan's. */
   readonly workTable: string
@@ -156,6 +159,11 @@ export class PgMaterializationSessions {
       throw error
     }
     session.stagedWorkCount += records.length
+    for (const { record } of records) {
+      if (record.kind !== "plan") continue
+      if (record.item.kind === "unique-value-release") session.uniqueWork.releases = true
+      if (record.item.kind === "unique-value-claim") session.uniqueWork.claims = true
+    }
   }
 
   /**
