@@ -798,6 +798,7 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/page/fleet-planner",
       "examples/page/service-explorer",
       "examples/page/dispatch-board",
+      "examples/page/collections-desk",
       "examples/canvas/onboarding-flow",
       "examples/canvas/retro",
     ])

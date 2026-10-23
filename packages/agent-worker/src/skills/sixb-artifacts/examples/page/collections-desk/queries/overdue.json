@@ -1,0 +1,13 @@
+{
+  "kind": "expand",
+  "expansions": [{ "linkId": "customer", "direction": "outgoing" }],
+  "input": {
+    "kind": "sort",
+    "fields": [{ "kind": "property", "propertyId": "dueDate", "direction": "asc" }],
+    "input": {
+      "kind": "filter",
+      "input": { "kind": "start", "objectTypeId": "Invoice" },
+      "predicate": { "op": "eq", "propertyId": "status", "value": "overdue" }
+    }
+  }
+}
