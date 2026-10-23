@@ -81,9 +81,10 @@ function outputCeilingTokens(
 }
 
 /**
- * Serialized bytes at three per token, which dense scripts approach: an overestimate only costs
- * room, an underestimate overflows providers that reject input plus output beyond the window.
- * Attached files have no byte-to-token rate.
+ * Serialized bytes at two per token. Gateway tokenizers measured from 2.8 (Hindi on GLM) to 12
+ * bytes per token, and an underestimate is the costly side: whenever the window bounds the ceiling,
+ * any input it misses overflows providers that reject input plus output beyond the window. Attached
+ * files have no byte-to-token rate.
  */
 function estimateRequestInputTokens(request: LanguageModelRequest): number | undefined {
   const hasFile = request.messages.some(
@@ -91,7 +92,7 @@ function estimateRequestInputTokens(request: LanguageModelRequest): number | und
   )
   if (hasFile) return undefined
   const serialized = JSON.stringify([request.messages, request.tools, request.responseFormat])
-  return Math.ceil(new TextEncoder().encode(serialized).byteLength / 3)
+  return Math.ceil(new TextEncoder().encode(serialized).byteLength / 2)
 }
 
 /** The most one call may write: the binding's limit, capped at the model maximum. */

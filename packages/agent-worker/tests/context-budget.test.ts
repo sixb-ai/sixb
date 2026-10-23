@@ -52,12 +52,12 @@ describe("agent context budget resolution", () => {
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
     const { model, budget } = await prepareAgentModel(base)
-    for (const bytes of [0, 450_000, 900_000]) await model.stream(request([text(bytes)]))
+    for (const bytes of [0, 300_000, 600_000]) await model.stream(request([text(bytes)]))
 
     expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
     expect(model.definition.maxOutputTokens).toBe(64_000)
     expect(outputs[0]).toBe(64_000)
-    // 450,000 bytes count as 150,000 tokens, plus the request's own JSON.
+    // 300,000 bytes count as 150,000 tokens, plus the request's own JSON.
     expect(outputs[1]).toBeGreaterThan(49_900)
     expect(outputs[1]).toBeLessThan(50_000)
     expect(outputs[2]).toBe(16_384)
@@ -72,7 +72,7 @@ describe("agent context budget resolution", () => {
     }
     const outputs = recordOutputs(base.model)
     const { model, budget } = await prepareAgentModel(base)
-    await model.stream(request([text(90_000)]))
+    await model.stream(request([text(60_000)]))
 
     expect(budget).toMatchObject({ reserveTokens: 10_001, inputBudgetTokens: 22_767 })
     expect(outputs).toEqual([10_001])
