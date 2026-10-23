@@ -8,7 +8,7 @@ import {
 import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { Download, ListFilter, Search } from "lucide-react"
+import { Download, ListFilter, Lock, Search } from "lucide-react"
 import {
   lazy,
   type ReactNode,
@@ -62,7 +62,7 @@ import { cellInputText, parseCellInput } from "./input"
 import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
 import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
-import { useSheetModel, useWorkbook } from "./workbook"
+import { liveSheetErrorText, useSheetModel, useWorkbook } from "./workbook"
 
 const SheetChart = lazy(() => import("./chart"))
 
@@ -133,7 +133,7 @@ function WorkbookView({
     version,
     published.sheets.find((entry) => entry.name === sheetName)
   )
-  const { source, loading, tooLarge } = read
+  const { source, loading, tooLarge, error } = read
   const edit = useWorkbookEdit(version, published, sheetName, read.table, read.model, locale)
   // What is shown is the draft's, while there is one: its charts follow a column renamed.
   const workbook = edit.workbook
@@ -228,6 +228,13 @@ function WorkbookView({
         {!model ? (
           loading ? (
             <ViewerLoading label={messages.viewer.loading} />
+          ) : error ? (
+            <ViewerNotice
+              {...liveSheetErrorText(error, messages.sheet)}
+              {...(error.kind === "forbidden"
+                ? { icon: <Lock className="size-8 text-muted-foreground" aria-hidden="true" /> }
+                : {})}
+            />
           ) : tooLarge && source ? (
             <ViewerNotice
               title={messages.sheet.tooLarge}

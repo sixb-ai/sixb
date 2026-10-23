@@ -309,6 +309,8 @@ function totalsRow(sheet: SheetModel, styles: StyleSheet): string {
         ? `<c r="${ref}" s="${HEADER_STYLE}" t="inlineStr"><is><t>Total</t></is></c>`
         : ""
     }
+    // Excel would total the cells written empty: a total over what the reader may not see is left out.
+    if (entry.locked) return ""
     const style = styles.numberFormat(
       entry.total === "count" ? "#,##0" : numberFormatCode(column),
       true

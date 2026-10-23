@@ -1,4 +1,9 @@
-import type { GetArtifactVersionResponse } from "@sixb/client"
+import {
+  type GetArtifactQueryResponse,
+  type GetArtifactVersionResponse,
+  getArtifactQuery,
+  isSixbApiError,
+} from "@sixb/client"
 import { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "@sixb/core/artifacts"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
@@ -70,6 +75,95 @@ export function versionFileSource(version: ArtifactVersion, path: string): FileS
         fileRef: file.file,
       })
     : null
+}
+
+/** Where a version's query result is cached: every view of the version that shows it reads it once. */
+export function artifactQueryKey(artifactId: string, version: number, name: string) {
+  return ["artifact-query", artifactId, version, name] as const
+}
+
+/** Read once a view shows it, and again when one opens after half a minute, as page state is. */
+const QUERY_STALE_MS = 30_000
+
+/**
+ * Why a query's rows could not be read: the reader cannot view what it reads, the project's data
+ * no longer matches it, in the words the API gives, or the read failed.
+ */
+export type ArtifactQueryError =
+  | { readonly kind: "forbidden" }
+  | { readonly kind: "invalid"; readonly reason: string }
+  | { readonly kind: "failed" }
+
+/**
+ * One of the version's queries, run as the signed-in reader: their rows, or why there are none to
+ * show. `name` null reads nothing.
+ */
+export function useArtifactQuery(
+  version: ArtifactVersion,
+  name: string | null
+): {
+  readonly result: GetArtifactQueryResponse | undefined
+  readonly loading: boolean
+  readonly error: ArtifactQueryError | null
+} {
+  const query = useQuery({
+    queryKey: artifactQueryKey(version.artifactId, version.version, name ?? ""),
+    enabled: name !== null,
+    staleTime: QUERY_STALE_MS,
+    retry: false,
+    queryFn: ({ signal }) => readQuery(version, name ?? "", signal),
+  })
+
+  return {
+    result: query.data,
+    loading: query.isLoading,
+    error: query.error ? artifactQueryError(query.error) : null,
+  }
+}
+
+/**
+ * A query's rows through the cache {@link useArtifactQuery} fills, for work done outside a render,
+ * such as a download of sheets the reader has not opened.
+ */
+export function fetchArtifactQuery(
+  client: QueryClient,
+  version: ArtifactVersion,
+  name: string
+): Promise<GetArtifactQueryResponse> {
+  return client.fetchQuery({
+    queryKey: artifactQueryKey(version.artifactId, version.version, name),
+    staleTime: QUERY_STALE_MS,
+    retry: false,
+    queryFn: ({ signal }) => readQuery(version, name, signal),
+  })
+}
+
+async function readQuery(
+  version: ArtifactVersion,
+  name: string,
+  signal: AbortSignal
+): Promise<GetArtifactQueryResponse> {
+  const { data } = await getArtifactQuery({
+    path: { artifactId: version.artifactId, version: String(version.version), name },
+    signal,
+    throwOnError: true,
+  })
+  return data
+}
+
+function artifactQueryError(error: unknown): ArtifactQueryError {
+  if (!isSixbApiError(error)) return { kind: "failed" }
+  if (error.status === 403) return { kind: "forbidden" }
+
+  const body = error.body as { readonly code?: unknown; readonly error?: unknown } | undefined
+  if (error.status !== 409 || body?.code !== "query_invalid") return { kind: "failed" }
+
+  // "[Sixb] Query 'overdue' no longer matches the ontology: $.predicate: …" says what changed.
+  const message = typeof body.error === "string" ? body.error : ""
+  return {
+    kind: "invalid",
+    reason: message.replace(/^\[Sixb\]\s*/, "").replace(/^Query '[^']*' [^:]*:\s*/, ""),
+  }
 }
 
 /** The version's `theme.json`, when it has one that still reads. */

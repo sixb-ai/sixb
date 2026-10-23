@@ -1,18 +1,31 @@
 import { parseSheetNumber, type SheetTotal } from "@sixb/core/artifacts"
-import type { SheetModel } from "./model"
+import { isLocked, type SheetModel } from "./model"
+
+/** A column's total, or `locked` when a cell it would read is one the reader may not see. */
+export interface ColumnTotal {
+  readonly total: SheetTotal
+  readonly value: number | undefined
+  readonly locked?: true
+}
 
 /**
  * What the totals row shows under each column that has a total, over the rows the reader sees:
  * sorted or not, without the ones the filters hide. `count` counts values that are not empty; the
- * others read only numbers, and are undefined for a column with none.
+ * others read only numbers, and are undefined for a column with none. Over a locked cell a total
+ * is locked: never what it comes to without it.
  */
 export function columnTotals(
   model: SheetModel,
   order: readonly number[]
-): ReadonlyMap<number, { readonly total: SheetTotal; readonly value: number | undefined }> {
-  const totals = new Map<number, { total: SheetTotal; value: number | undefined }>()
+): ReadonlyMap<number, ColumnTotal> {
+  const totals = new Map<number, ColumnTotal>()
   model.columns.forEach((column, index) => {
     if (!column.total) return
+    if (model.locked && order.some((row) => isLocked(model, row, index))) {
+      totals.set(index, { total: column.total, value: undefined, locked: true })
+      return
+    }
+
     let count = 0
     let numbers = 0
     let sum = 0
