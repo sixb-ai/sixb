@@ -25,6 +25,7 @@ import {
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
+  ArtifactQueryParamsSchema,
   ArtifactResponseSchema,
   ArtifactStateParamsSchema,
   ArtifactStateResponseSchema,
@@ -41,6 +42,7 @@ import {
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { handleObjectQueryError, serializeExpandedObject } from "./objects"
 
 type RouteSet = { status?: number | string }
 
@@ -134,10 +136,12 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
   if (error instanceof ArtifactRequestError) {
     switch (error.code) {
       case "artifact_not_found":
+      case "query_not_found":
         set.status = 404
         break
       case "artifact_kind_mismatch":
       case "artifact_moved":
+      case "query_invalid":
         set.status = 409
         break
       case "invalid_artifact":
@@ -167,6 +171,16 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
     return { error: "Invalid artifact request" }
   }
   return handleRouteError(error, set)
+}
+
+/** The artifact error body, for a route that declares its responses in OpenAPI. */
+function artifactErrorResponse(status: number) {
+  return {
+    description: `Response for status ${status}`,
+    content: {
+      "application/json": { schema: { $ref: "#/components/schemas/ArtifactErrorResponse" } },
+    },
+  }
 }
 
 const publishResponses = {
@@ -611,6 +625,61 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "getArtifactVersion",
           security: accessTokenSecurityRequirement("getArtifactVersion"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/versions/:version/queries/:name",
+      async (context) => {
+        try {
+          const { artifactId, version, name } = context.params
+          const result = await requireRequestSixb(context).artifacts.query(artifactId, name, {
+            version: versionParam(version),
+          })
+          if (!result) return await refusal(context, artifactId, context.set)
+
+          // Typed by the ArtifactQueryResponse component, as the query route types its rows.
+          return result.kind === "objects"
+            ? { ...result, objects: result.objects.map(serializeExpandedObject) }
+            : result
+        } catch (error) {
+          // What the query itself runs into answers as the objects API answers it.
+          return error instanceof ArtifactRequestError || error instanceof ZodError
+            ? handleArtifactRouteError(error, context.set)
+            : handleObjectQueryError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactQueryParamsSchema,
+        detail: {
+          summary: "Run an artifact's query",
+          description:
+            'Runs the version\'s queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.',
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactQuery",
+          security: accessTokenSecurityRequirement("getArtifactQuery"),
+          // Declared in OpenAPI, not zod, as the query route declares its own: the rows take the
+          // ObjectQueryObject component, so they are typed as that route's rows.
+          responses: {
+            200: {
+              description: "Response for status 200",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ArtifactQueryResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            403: artifactErrorResponse(403),
+            404: artifactErrorResponse(404),
+            409: artifactErrorResponse(409),
+            501: artifactErrorResponse(501),
+          },
         },
       }
     )
