@@ -22,7 +22,8 @@ import {
 } from "./access"
 import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
-import { ARTIFACT_STATE_LIMITS } from "./limits"
+import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { readArtifactText } from "./publish/files"
 import {
   artifactVersionWarnings,
   type PreparedArtifactVersion,
@@ -32,6 +33,14 @@ import {
   storeArtifactVersion,
 } from "./publish/publish"
 import { type ArtifactQueryChecker, createArtifactQueryChecker } from "./publish/queries"
+import {
+  ARTIFACT_QUERY_KINDS,
+  type ArtifactQueryResult,
+  artifactQueryPath,
+  isArtifactQueryName,
+  parseArtifactQuery,
+} from "./queries"
+import { runArtifactQuery } from "./run-query"
 
 /** A version's content: what its kind renders from, and what it is called. */
 export interface ArtifactContentInput {
@@ -81,6 +90,18 @@ export interface ArtifactsRuntime {
   /** Most recently updated first. */
   list(input?: ListArtifactsRuntimeInput): Promise<ListArtifactsResult>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
+  /**
+   * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
+   * cannot view refuses it, and a marked property they are not cleared for is left out of each
+   * row. Whoever reads the artifact runs its queries, an observer too. `null` when the caller
+   * cannot read the artifact or it has no such version. Throws `query_not_found`, and
+   * `query_invalid` for a query the ontology no longer admits.
+   */
+  query(
+    artifactId: string,
+    name: string,
+    options?: { readonly version?: number | "latest" }
+  ): Promise<ArtifactQueryResult | null>
   /** Newest first; `null` when the caller cannot read the artifact. */
   listVersions(
     artifactId: string,
@@ -239,6 +260,19 @@ export function createArtifactsRuntime(
     return reached && reached.access !== "none" ? reached.artifact : null
   }
 
+  /** The version with its artifact; `null` when the caller cannot read it or there is none. */
+  const readVersion = async (artifactId: string, number: number | "latest") => {
+    const artifact = await getReadable(artifactId)
+    if (!artifact) return null
+
+    const version = await requireStorage().getVersion({
+      projectId: runtime.projectId,
+      artifactId,
+      version: number === "latest" ? artifact.latestVersion : number,
+    })
+    return version ? { artifact, version } : null
+  }
+
   /** What an address in a version may name: one artifact the caller reads, by one rule. */
   const readableBy = (access: ArtifactAccessRule) => async (artifact: ArtifactRecord) =>
     (await access.accessTo(artifact)) !== "none"
@@ -319,13 +353,33 @@ export function createArtifactsRuntime(
     },
 
     async getVersion(artifactId, version) {
-      const artifact = await getReadable(artifactId)
-      if (!artifact) return null
-      return requireStorage().getVersion({
-        projectId: runtime.projectId,
-        artifactId,
-        version: version === "latest" ? artifact.latestVersion : version,
-      })
+      return (await readVersion(artifactId, version))?.version ?? null
+    },
+
+    async query(artifactId, name, options = {}) {
+      const read = await readVersion(artifactId, options.version ?? "latest")
+      if (!read) return null
+
+      // A file artifact is delivered as it is: its one file is never run.
+      const { artifact, version } = read
+      const file =
+        ARTIFACT_QUERY_KINDS.includes(artifact.kind) && isArtifactQueryName(name)
+          ? version.files.find((candidate) => candidate.path === artifactQueryPath(name))
+          : undefined
+      if (!file) {
+        throw new ArtifactRequestError(
+          "query_not_found",
+          `[Sixb] Version ${version.version} of artifact '${artifactId}' has no query '${name}'.`
+        )
+      }
+
+      const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
+      const parsed = parseArtifactQuery(file.path, text)
+      if ("error" in parsed) {
+        throw new ArtifactRequestError("query_invalid", `[Sixb] ${parsed.error}`)
+      }
+
+      return runArtifactQuery(runtime, name, parsed.query)
     },
 
     async listVersions(artifactId, input = {}) {
