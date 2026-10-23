@@ -105,6 +105,8 @@ redrawing or retyping them: it is the same chart the sheet draws, and it cannot 
 - `<img src="artifact:…/figures/map.png">` shows an image file of another artifact, laid out like
   any image.
 - `<a href="artifact:…">the Q3 numbers</a>` opens the artifact beside the conversation.
+- A deck reads the project's objects live with `sixb.query`, as a page does (`page.md`); for a
+  chart a live sheet already draws, embed the sheet's chart instead.
 - The layout check sees what a slide shows from another artifact as an empty box of its size, and
   the screenshots show it so: it is drawn when the reader opens the deck.
 
