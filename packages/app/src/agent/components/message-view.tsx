@@ -12,9 +12,11 @@ import {
 import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
 import { memo } from "react"
 import { type FileSource, messageFileSource } from "../../artifacts/file-source"
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
+import { type AuthorLabel, useMessageAuthors } from "../message-authors"
 import { useObservedThread } from "../observed-thread"
 import { normalizeDurableParts } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
@@ -32,35 +34,44 @@ import { AssistantBody } from "./message-parts"
 
 /**
  * Render a single durable message. System messages are not shown in the reading transcript.
+ * `continued`: the previous user message has the same author, so this one does not name them.
  * `onContinue` offers to finish an answer whose diagnostic says it stopped short.
  */
 export const MessageView = memo(function MessageView({
   message,
+  continued = false,
   onContinue,
   continuing = false,
 }: {
-  message: AgentMessage
-  onContinue?: () => void
-  continuing?: boolean
+  readonly message: AgentMessage
+  readonly continued?: boolean
+  readonly onContinue?: () => void
+  readonly continuing?: boolean
 }) {
-  if (message.role === "user") return <UserMessage message={message} />
+  if (message.role === "user") return <UserMessage message={message} continued={continued} />
   if (message.role === "assistant") {
     return <AssistantMessage message={message} onContinue={onContinue} continuing={continuing} />
   }
   return null
 })
 
-function UserMessage({ message }: { message: AgentMessage }) {
+function UserMessage({
+  message,
+  continued,
+}: {
+  readonly message: AgentMessage
+  readonly continued: boolean
+}) {
   const observed = useObservedThread()
+  const authors = useMessageAuthors()
   const text = textOf(message)
   const files = filePartsOf(message)
   const context = contextPartsOf(message)
   if (!text && files.length === 0 && context.length === 0) return null
 
-  const author = observed?.authorOf(message)
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {author ? <p className="px-1 text-xs text-muted-foreground">{author}</p> : null}
+      {continued ? null : <AuthorLine author={authors?.authorOf(message)} />}
       <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
@@ -72,7 +83,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
                 message,
                 part.fileRef,
                 `/parts/${index}/fileRef`,
-                observed !== null
+                observed
               )}
             />
           ))}
@@ -97,7 +108,7 @@ function AssistantMessage({
   continuing: boolean
 }) {
   const messages = useAgentMessages()
-  const observed = useObservedThread() !== null
+  const observed = useObservedThread()
   return (
     <div className="flex flex-col gap-2">
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
@@ -142,6 +153,18 @@ function AssistantMessage({
         </div>
       ))}
     </div>
+  )
+}
+
+/** Who wrote a user message, where messages name their author. */
+export function AuthorLine({ author }: { readonly author: AuthorLabel | undefined }) {
+  if (!author) return null
+
+  return (
+    <p className="mt-2 flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+      <PersonAvatar name={author.name} size="xs" />
+      <span>{author.label}</span>
+    </p>
   )
 }
 

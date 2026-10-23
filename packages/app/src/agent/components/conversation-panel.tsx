@@ -5,12 +5,14 @@ import type { ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
-import { AgentThreadSwitcher } from "./agent-thread-switcher"
+import { AgentThreadSwitcher, type SharedThreadList } from "./agent-thread-switcher"
 import { Composer } from "./composer"
 import { Transcript, type TranscriptProps } from "./transcript"
 
 export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
+  /** A line above the composer, such as whose shared conversation this is. */
+  readonly composerNotice?: ReactNode
   readonly agent: Agent | undefined
   readonly transcript: TranscriptProps
   readonly composer: ConversationComposerProps
@@ -20,6 +22,8 @@ export interface ConversationPanelProps {
   readonly currentThread: AgentThread | null
   /** Other chats with this agent, for the header history menu. */
   readonly agentThreads: readonly AgentThread[]
+  /** Chats other people shared with the reader. */
+  readonly sharedThreads?: SharedThreadList
   /** Runs active across the threads visible to this agent surface. */
   readonly runningThreadCount: number
   readonly threadsError?: string | null
@@ -45,6 +49,7 @@ export function ConversationPanel({
   messagesError,
   currentThread,
   agentThreads,
+  sharedThreads,
   runningThreadCount,
   threadsError,
   hasMoreThreads,
@@ -59,6 +64,7 @@ export function ConversationPanel({
   welcomeContent,
   headerActions,
   sandboxRecovery,
+  composerNotice,
 }: ConversationPanelProps) {
   const labels = useAgentMessages()
   const name = agent?.name ?? "Agent"
@@ -87,6 +93,7 @@ export function ConversationPanel({
       agentName={name}
       currentThread={currentThread}
       threads={agentThreads}
+      sharedThreads={sharedThreads}
       runningThreadCount={runningThreadCount}
       threadsError={threadsError}
       hasMoreThreads={hasMoreThreads}
@@ -129,6 +136,7 @@ export function ConversationPanel({
           <Welcome agent={agent} compact={compact} content={welcomeContent} />
           <div className="shrink-0">
             {sandboxRecovery}
+            {composerNotice}
             {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
@@ -150,6 +158,7 @@ export function ConversationPanel({
 
           <div className="shrink-0">
             {sandboxRecovery}
+            {composerNotice}
             {renderComposer()}
           </div>
         </>

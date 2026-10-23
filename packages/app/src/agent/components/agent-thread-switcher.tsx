@@ -11,15 +11,36 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { History, LoaderCircle, Plus, Search, X } from "lucide-react"
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
+import { PersonAvatar } from "../../artifacts/person-avatar"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
 import { useAgentMessages } from "../i18n"
+import { personName, threadOwner } from "../sharing"
 import { agentThreadTitle } from "../thread-navigation"
 import type { AgentThread } from "../types"
+
+/** The conversations other people shared with the reader, paged like their own. */
+export interface SharedThreadList {
+  readonly threads: readonly AgentThread[]
+  /** All of them, beyond the pages read so far. */
+  readonly total: number
+  readonly error?: string | null
+  readonly hasMore?: boolean
+  readonly loadingMore?: boolean
+  readonly loadMoreError?: boolean
+  readonly onLoadMore?: () => void
+}
+
+const NO_SHARED_THREADS: SharedThreadList = { threads: [], total: 0 }
 
 export interface AgentThreadSwitcherProps {
   readonly agentName: string
   readonly currentThread: AgentThread | null
   readonly threads: readonly AgentThread[]
+  /**
+   * Conversations other people shared with the reader, listed apart from their own. Omitted
+   * where nothing can be shared, without a signed-in user.
+   */
+  readonly sharedThreads?: SharedThreadList
   readonly runningThreadCount?: number
   readonly threadsError?: string | null
   readonly hasMoreThreads?: boolean
@@ -34,6 +55,7 @@ export function AgentThreadSwitcher({
   agentName,
   currentThread,
   threads,
+  sharedThreads,
   runningThreadCount = 0,
   threadsError,
   hasMoreThreads,
@@ -44,33 +66,33 @@ export function AgentThreadSwitcher({
   onNewThread,
 }: AgentThreadSwitcherProps) {
   const messages = useAgentMessages().threads
+  const shared = sharedThreads ?? NO_SHARED_THREADS
+  const canShare = sharedThreads !== undefined
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
-  const [filter, setFilter] = useState<"all" | "archived">("all")
-  const [snapshotIds, setSnapshotIds] = useState<readonly string[]>([])
+  const [filter, setFilter] = useState<"all" | "archived" | "shared">("all")
+  const [snapshot, setSnapshot] = useState<{
+    readonly own: readonly string[]
+    readonly shared: readonly string[]
+  }>({ own: [], shared: [] })
   const allThreads = useMemo(() => uniqueThreads(currentThread, threads), [currentThread, threads])
-  const allThreadsById = new Map(allThreads.map((thread) => [thread.id, thread]))
-  const snapshotIdSet = new Set(snapshotIds)
-  const shownThreads = open
-    ? [
-        ...snapshotIds,
-        ...allThreads.filter((thread) => !snapshotIdSet.has(thread.id)).map((thread) => thread.id),
-      ].flatMap((threadId) => {
-        const thread = allThreadsById.get(threadId)
-        return thread ? [thread] : []
-      })
-    : allThreads
+
+  // While open, rows keep the order they had when it opened, whatever activity moves meanwhile.
+  const shownThreads = open ? inSnapshotOrder(allThreads, snapshot.own) : allThreads
+  const shownShared = open ? inSnapshotOrder(shared.threads, snapshot.shared) : shared.threads
   const normalizedSearchTerm = searchTerm.trim().toLowerCase()
   const matchingThreads = useMemo(() => {
     const byState =
       filter === "archived"
         ? shownThreads.filter((thread) => thread.status === "archived")
-        : shownThreads
+        : filter === "shared"
+          ? shownShared
+          : shownThreads
     if (!normalizedSearchTerm) return byState
     return byState.filter((thread) =>
       agentThreadTitle(thread, messages).toLowerCase().includes(normalizedSearchTerm)
     )
-  }, [filter, normalizedSearchTerm, shownThreads, messages])
+  }, [filter, normalizedSearchTerm, shownThreads, shownShared, messages])
   const matchingIds = new Set(matchingThreads.map((thread) => thread.id))
   const currentVisible = currentThread && matchingIds.has(currentThread.id) ? currentThread : null
   const groups = groupThreadsByDate(
@@ -83,10 +105,32 @@ export function AgentThreadSwitcher({
       ? messages.runningHistory(runningThreadCount, currentTitle)
       : messages.historyCurrent(currentTitle)
 
+  // The list shown says its own errors and pages.
+  const list =
+    filter === "shared"
+      ? {
+          error: null,
+          loadMoreError: shared.loadMoreError,
+          hasMore: shared.hasMore,
+          loadingMore: shared.loadingMore,
+          onLoadMore: shared.onLoadMore,
+        }
+      : {
+          error: threadsError,
+          loadMoreError: loadMoreThreadsError,
+          hasMore: hasMoreThreads,
+          loadingMore: loadingMoreThreads,
+          onLoadMore: onLoadMoreThreads,
+        }
+
   function updateOpen(nextOpen: boolean) {
     setOpen(nextOpen)
-    if (nextOpen) setSnapshotIds(allThreads.map((thread) => thread.id))
-    else {
+    if (nextOpen) {
+      setSnapshot({
+        own: allThreads.map((thread) => thread.id),
+        shared: shared.threads.map((thread) => thread.id),
+      })
+    } else {
       setSearchTerm("")
       setFilter("all")
     }
@@ -172,18 +216,27 @@ export function AgentThreadSwitcher({
               className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
-          {archivedCount > 0 ? (
-            <div className="mt-2.5 flex gap-1.5" aria-label={messages.filter}>
+          {archivedCount > 0 || canShare ? (
+            <div className="mt-2.5 flex flex-wrap gap-1.5" aria-label={messages.filter}>
               <FilterButton
                 label={messages.all}
                 active={filter === "all"}
                 onClick={() => setFilter("all")}
               />
-              <FilterButton
-                label={messages.archivedFilter(archivedCount)}
-                active={filter === "archived"}
-                onClick={() => setFilter("archived")}
-              />
+              {canShare ? (
+                <FilterButton
+                  label={messages.sharedFilter(Math.max(shared.total, shared.threads.length))}
+                  active={filter === "shared"}
+                  onClick={() => setFilter("shared")}
+                />
+              ) : null}
+              {archivedCount > 0 ? (
+                <FilterButton
+                  label={messages.archivedFilter(archivedCount)}
+                  active={filter === "archived"}
+                  onClick={() => setFilter("archived")}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -191,7 +244,12 @@ export function AgentThreadSwitcher({
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-h-[min(68dvh,36rem)] sm:flex-none sm:px-4 sm:pb-4">
           {currentVisible ? (
             <ThreadSwitcherSection label={messages.current}>
-              <ThreadSwitcherRow thread={currentVisible} selected onSelect={selectThread} />
+              <ThreadSwitcherRow
+                thread={currentVisible}
+                selected
+                shared={filter === "shared"}
+                onSelect={selectThread}
+              />
             </ThreadSwitcherSection>
           ) : null}
 
@@ -202,34 +260,42 @@ export function AgentThreadSwitcher({
                   key={thread.id}
                   thread={thread}
                   selected={thread.id === currentThread?.id}
+                  shared={filter === "shared"}
                   onSelect={selectThread}
                 />
               ))}
             </ThreadSwitcherSection>
           ))}
 
-          {threadsError ? (
+          {list.error ? (
             <p role="alert" className="px-3 py-2 text-sm text-destructive">
-              {threadsError}
+              {list.error}
             </p>
           ) : null}
-          {loadMoreThreadsError ? (
+          {shared.error && filter !== "archived" ? (
+            <p role="alert" className="px-3 py-2 text-sm text-destructive">
+              {shared.error}
+            </p>
+          ) : null}
+          {list.loadMoreError ? (
             <p role="alert" className="px-3 py-2 text-sm text-destructive">
               {messages.loadMoreFailed}
             </p>
           ) : null}
-          {hasMoreThreads && onLoadMoreThreads ? (
+          {list.hasMore && list.onLoadMore ? (
             <Button
               variant="outline"
               size="sm"
-              disabled={loadingMoreThreads}
-              onClick={onLoadMoreThreads}
+              disabled={list.loadingMore}
+              onClick={list.onLoadMore}
             >
-              {loadingMoreThreads ? messages.loading : messages.loadMore}
+              {list.loadingMore ? messages.loading : messages.loadMore}
             </Button>
           ) : null}
           {matchingThreads.length === 0 ? (
-            <p className="px-3 py-10 text-center text-sm text-muted-foreground">{messages.empty}</p>
+            <p className="px-3 py-10 text-center text-sm text-muted-foreground">
+              {filter === "shared" && !normalizedSearchTerm ? messages.sharedEmpty : messages.empty}
+            </p>
           ) : null}
         </div>
       </DialogContent>
@@ -277,10 +343,13 @@ function ThreadSwitcherSection({ label, children }: { label: string; children: R
 function ThreadSwitcherRow({
   thread,
   selected,
+  shared = false,
   onSelect,
 }: {
   thread: AgentThread
   selected: boolean
+  /** Someone else's conversation: the row names its owner. */
+  shared?: boolean
   onSelect: (threadId: string) => void
 }) {
   const agentMessages = useAgentMessages()
@@ -293,6 +362,7 @@ function ThreadSwitcherRow({
     agentMessages.time
   )
   const meta = thread.status === "archived" ? messages.archived : relativeTime
+  const owner = personName(threadOwner(thread))
 
   return (
     <button
@@ -308,10 +378,13 @@ function ThreadSwitcherRow({
         selected && "bg-muted/70"
       )}
     >
+      {shared ? <PersonAvatar name={owner} className="mr-3" /> : null}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{title}</span>
-        <span className="mt-0.5 block text-[11px] text-muted-foreground">
-          {messages.messages(thread.messageCount)}
+        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+          {shared
+            ? messages.sharedBy(owner, thread.messageCount)
+            : messages.messages(thread.messageCount)}
         </span>
       </span>
       {meta ? (
@@ -321,6 +394,23 @@ function ThreadSwitcherRow({
       ) : null}
     </button>
   )
+}
+
+/** Threads in the order of a snapshot of their ids, with any new ones after it. */
+function inSnapshotOrder(
+  threads: readonly AgentThread[],
+  snapshot: readonly string[]
+): readonly AgentThread[] {
+  const byId = new Map(threads.map((thread) => [thread.id, thread]))
+  const known = new Set(snapshot)
+
+  return [
+    ...snapshot.flatMap((threadId) => {
+      const thread = byId.get(threadId)
+      return thread ? [thread] : []
+    }),
+    ...threads.filter((thread) => !known.has(thread.id)),
+  ]
 }
 
 function uniqueThreads(

@@ -1,4 +1,3 @@
-import type { ListObservedAgentThreadMessagesResponse } from "@sixb/client"
 import {
   listObservedAgentThreadMessagesOptions,
   listObservedAgentThreadRunsOptions,
@@ -7,12 +6,14 @@ import { Spinner } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Eye } from "lucide-react"
 import { useEffect, useMemo, useRef } from "react"
+import { type ArtifactAuthor, ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { Transcript } from "./components/transcript"
 import { useAgentMessages } from "./i18n"
 import { createLiveRunState } from "./live-run"
-import { type ObservedThread, ObservedThreadContext } from "./observed-thread"
+import { authorNames, MessageAuthorsContext, messageAuthors, principalKey } from "./message-authors"
+import { ObservedThreadContext } from "./observed-thread"
 import { presentActiveTurn, selectActiveRunId } from "./run-presentation"
 import type { AgentThread } from "./types"
 
@@ -87,7 +88,20 @@ export function ObservedConversation({
 
   const messages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
-  const observed = useMemo(() => observedThread(messagesQuery.data), [messagesQuery.data])
+  const authors = useMemo(
+    () => messageAuthors(authorNames(messagesQuery.data?.authors)),
+    [messagesQuery.data]
+  )
+
+  // An artifact's versions name whoever of the conversation published them, when they have a name.
+  const artifactPeople = useMemo(() => {
+    const names = new Map(
+      (messagesQuery.data?.authors ?? []).flatMap((author) =>
+        author.displayName ? [[principalKey(author), author.displayName] as const] : []
+      )
+    )
+    return (author: ArtifactAuthor) => names.get(principalKey(author))
+  }, [messagesQuery.data])
 
   const presentation = presentActiveTurn({
     activeRunId: selectActiveRunId({
@@ -139,28 +153,32 @@ export function ObservedConversation({
   }
 
   return (
-    <ObservedThreadContext.Provider value={observed}>
-      <ArtifactPanelRoot
-        scopeKey={thread.id}
-        // An artifact's page is its owner's: an observer reads it here only.
-        pageLinks={false}
-        routeTarget={artifactTarget}
-        onRouteTargetChange={onArtifactTargetChange}
-      >
-        <div className="flex h-full min-h-0 flex-col bg-background">
-          <div className="relative flex min-h-0 flex-1 flex-col">{content}</div>
+    <ObservedThreadContext.Provider value={true}>
+      <MessageAuthorsContext.Provider value={authors}>
+        <ArtifactPeopleContext.Provider value={artifactPeople}>
+          <ArtifactPanelRoot
+            scopeKey={thread.id}
+            // An artifact's page is its owner's: an observer reads it here only.
+            pageLinks={false}
+            routeTarget={artifactTarget}
+            onRouteTargetChange={onArtifactTargetChange}
+          >
+            <div className="flex h-full min-h-0 flex-col bg-background">
+              <div className="relative flex min-h-0 flex-1 flex-col">{content}</div>
 
-          <footer className="shrink-0 border-t border-border px-4 py-3">
-            <p className="mx-auto flex w-full max-w-3xl items-start gap-2 text-xs leading-5 text-muted-foreground">
-              <Eye aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                {labels.readOnly}
-                {answering ? ` ${labels.responding}` : null}
-              </span>
-            </p>
-          </footer>
-        </div>
-      </ArtifactPanelRoot>
+              <footer className="shrink-0 border-t border-border px-4 py-3">
+                <p className="mx-auto flex w-full max-w-3xl items-start gap-2 text-xs leading-5 text-muted-foreground">
+                  <Eye aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    {labels.readOnly}
+                    {answering ? ` ${labels.responding}` : null}
+                  </span>
+                </p>
+              </footer>
+            </div>
+          </ArtifactPanelRoot>
+        </ArtifactPeopleContext.Provider>
+      </MessageAuthorsContext.Provider>
     </ObservedThreadContext.Provider>
   )
 }
@@ -173,30 +191,7 @@ function observedMessagesOptions(threadId: string) {
 /** The conversation's authors by `type:id`, with their name or else their id. */
 export function useObservedAuthors(threadId: string): ReadonlyMap<string, string> {
   const { data } = useQuery(observedMessagesOptions(threadId))
-  return useMemo(() => authorNames(data), [data])
-}
-
-function authorNames(
-  page: ListObservedAgentThreadMessagesResponse | undefined
-): ReadonlyMap<string, string> {
-  return new Map(
-    (page?.authors ?? []).map((author) => [
-      `${author.type}:${author.id}`,
-      author.displayName ?? author.id,
-    ])
-  )
-}
-
-/** Names each message's author from the page's `authors`. */
-function observedThread(page: ListObservedAgentThreadMessagesResponse | undefined): ObservedThread {
-  const names = authorNames(page)
-
-  return {
-    authorOf: (message) => {
-      const principal = message.authorPrincipal
-      return principal ? names.get(`${principal.type}:${principal.id}`) : undefined
-    },
-  }
+  return useMemo(() => authorNames(data?.authors), [data])
 }
 
 function Notice({ text, tone }: { readonly text: string; readonly tone?: "error" }) {
