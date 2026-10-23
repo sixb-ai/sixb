@@ -9,6 +9,7 @@ import { SandboxRecovery } from "./components/sandbox-recovery"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
 import { useAgentMessages } from "./i18n"
+import { offersContinue } from "./run-presentation"
 import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
@@ -145,9 +146,12 @@ export function AgentChat({
             : undefined
         }
         onContinue={
-          !conversation.sandboxRecovery &&
-          (presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-          presentation.hasProgress
+          offersContinue({
+            presentation,
+            isRunning: conversation.isRunning,
+            sandboxRecovery: Boolean(conversation.sandboxRecovery),
+            messages: conversation.messages,
+          })
             ? conversation.continueAfterTimeout
             : undefined
         }

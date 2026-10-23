@@ -90,6 +90,13 @@ export interface LanguageModel {
    */
   readonly defaultReasoning?: ModelReasoningLevel
   /**
+   * Output limit the binding sets for every call; agents use it as their output allowance instead
+   * of Sixb's default. Unlike `definition.maxOutputTokens`, the most the model itself can produce,
+   * this is the developer's choice. Providers set it from their model options; Sixb checks it
+   * against that maximum at startup.
+   */
+  readonly maxOutputTokens?: number
+  /**
    * Return an executable model pinned to operational metadata, preserving model identity.
    * `offline` requires a local snapshot without catalog I/O. Workers retain this model
    * for generation and compaction; later catalog refreshes must not change its capabilities/limits.

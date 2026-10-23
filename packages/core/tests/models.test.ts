@@ -124,6 +124,10 @@ describe("createModelCatalog", () => {
       capabilities: { reasoning: { efforts: ["low", "high"] } },
     }),
   }
+  const outputLimited: LanguageModel = {
+    ...gpt,
+    definition: defineLanguageModel({ ...gpt.definition, maxOutputTokens: 32_000 }),
+  }
   // Both sides carry the bad identity, so only the binding's own identifier check can reject it.
   const identity = (field: "providerId" | "modelId", value: string) => ({
     ...gpt,
@@ -133,7 +137,8 @@ describe("createModelCatalog", () => {
 
   // Proven by removal: drop the `byRef.has(key)` guard in `models/catalog-index.ts` (the second
   // entry replaces the first in the lookup), the `defaultEntry === undefined` guard (`default`
-  // reads as undefined), or `assertDefaultReasoning` from the catalog's validator.
+  // reads as undefined), `assertDefaultReasoning` or `assertMaxOutputTokens` from the catalog's
+  // validator.
   test.each([
     [
       "a duplicate binding",
@@ -168,6 +173,16 @@ describe("createModelCatalog", () => {
       [{ ...reasoningEfforts, defaultReasoning: "max" }],
       "[Sixb] Invalid language model at 'models.language[0]': default reasoning 'max' cannot be used: reasoning effort 'max' is not supported.",
     ],
+    [
+      "an output limit above the model maximum",
+      [{ ...outputLimited, maxOutputTokens: 32_001 }],
+      "[Sixb] Invalid language model at 'models.language[0]': 'maxOutputTokens' (32001) exceeds the model maximum (32000).",
+    ],
+    [
+      "an output limit that is not a positive integer",
+      [{ ...gpt, maxOutputTokens: 1.5 }],
+      /expected 'maxOutputTokens' to be a positive safe integer/,
+    ],
   ] as const)("rejects %s", (_case, language, error) => {
     expect(() =>
       createModelCatalog({ language } as unknown as Parameters<typeof createModelCatalog>[0])
@@ -185,6 +200,14 @@ describe("createModelCatalog", () => {
       createModelCatalog({ language: [{ ...gpt, defaultReasoning: "max" }] }).language.default.model
         .defaultReasoning
     ).toBe("max")
+  })
+
+  test("keeps an output limit up to the model maximum", () => {
+    const catalog = createModelCatalog({
+      language: [{ ...outputLimited, maxOutputTokens: 32_000 }],
+    })
+
+    expect(catalog.language.default.model.maxOutputTokens).toBe(32_000)
   })
 })
 
