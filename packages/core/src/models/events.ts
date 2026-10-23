@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "../json"
+import { isJsonValue, isPlainRecord, type JsonObject, type JsonValue } from "../json"
 import type { ModelReasoning } from "./language-model"
 import type {
   ModelAssistantPart,
@@ -176,6 +176,69 @@ export type ModelUiChunk =
       readonly errorText: string
     }
   | { readonly type: "error"; readonly errorText: string }
+
+export const MODEL_UI_CHUNK_TYPES = [
+  "start-step",
+  "text-start",
+  "text-delta",
+  "text-end",
+  "reasoning-start",
+  "reasoning-delta",
+  "reasoning-end",
+  "tool-input-start",
+  "tool-input-delta",
+  "tool-input-available",
+  "tool-input-error",
+  "tool-output-available",
+  "tool-output-error",
+  "error",
+] as const satisfies readonly ModelUiChunk["type"][]
+
+type ChunkFields = Readonly<Record<string, unknown>>
+
+// Keyed by the union itself, so a chunk variant added without its check does not compile.
+const MODEL_UI_CHUNK_FIELDS_ARE_VALID: {
+  readonly [TType in ModelUiChunk["type"]]: (chunk: ChunkFields) => boolean
+} = {
+  "start-step": () => true,
+  "text-start": hasSpanId,
+  "text-delta": (chunk) => hasSpanId(chunk) && typeof chunk.delta === "string",
+  "text-end": hasSpanId,
+  "reasoning-start": hasSpanId,
+  "reasoning-delta": (chunk) => hasSpanId(chunk) && typeof chunk.delta === "string",
+  "reasoning-end": hasSpanId,
+  "tool-input-start": hasToolCall,
+  "tool-input-delta": (chunk) => hasToolCall(chunk) && typeof chunk.inputTextDelta === "string",
+  "tool-input-available": (chunk) => hasToolCall(chunk) && hasJson(chunk, "input"),
+  "tool-input-error": (chunk) =>
+    hasToolCall(chunk) && hasJson(chunk, "input") && typeof chunk.errorText === "string",
+  "tool-output-available": (chunk) => hasToolCall(chunk) && hasJson(chunk, "output"),
+  "tool-output-error": (chunk) => hasToolCall(chunk) && typeof chunk.errorText === "string",
+  error: (chunk) => typeof chunk.errorText === "string",
+}
+
+/** A known chunk type with every field it requires. Fields a newer producer adds are allowed. */
+export function isModelUiChunk(value: unknown): value is ModelUiChunk {
+  if (!isPlainRecord(value) || !isModelUiChunkType(value.type)) return false
+
+  return MODEL_UI_CHUNK_FIELDS_ARE_VALID[value.type](value)
+}
+
+function isModelUiChunkType(value: unknown): value is ModelUiChunk["type"] {
+  return typeof value === "string" && (MODEL_UI_CHUNK_TYPES as readonly string[]).includes(value)
+}
+
+function hasSpanId(chunk: ChunkFields): boolean {
+  return typeof chunk.id === "string"
+}
+
+function hasToolCall(chunk: ChunkFields): boolean {
+  return typeof chunk.toolCallId === "string" && typeof chunk.toolName === "string"
+}
+
+function hasJson(chunk: ChunkFields, field: string): boolean {
+  return Object.hasOwn(chunk, field) && isJsonValue(chunk[field])
+}
 
 export interface ModelCallEndEvent {
   readonly modelKind?: import("./definitions").ModelKind

@@ -1153,6 +1153,7 @@ export type {
   AgentUsageReference,
   InferAgentToolInput,
   InferAgentToolInputSchema,
+  InferAgentToolOutput,
   RequestAgentRunInput,
   RequestAgentRunResult,
 } from "./agents"

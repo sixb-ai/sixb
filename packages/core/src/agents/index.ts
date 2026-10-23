@@ -184,6 +184,7 @@ export type {
   AgentUsageReference,
   InferAgentToolInput,
   InferAgentToolInputSchema,
+  InferAgentToolOutput,
 } from "./types"
 export { AGENT_REASONING_LEVELS } from "./types"
 export {

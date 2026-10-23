@@ -30,6 +30,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type JsonValue,
   type ModelCatalogInput,
   type ObjectTypeWithPropertyTokens,
   type OntologyDocsInput,
@@ -9796,6 +9797,7 @@ describe("AgentWorker", () => {
 
     const circular: Record<string, unknown> = {}
     circular.self = circular
+    const output = circular as JsonValue
     const originalConsoleError = console.error
     console.error = () => {}
     try {
@@ -9805,7 +9807,7 @@ describe("AgentWorker", () => {
       }).publishUiChunk({
         run,
         chunkIndex: 0,
-        chunk: circular,
+        chunk: { type: "tool-output-available", toolCallId: "call-1", toolName: "echo", output },
       })
     } finally {
       console.error = originalConsoleError
