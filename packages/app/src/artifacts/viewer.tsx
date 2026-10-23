@@ -715,7 +715,7 @@ function VersionPicker({
         {messages.version(version.version)}
         <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="max-h-80 w-64 p-1.5">
+      <DropdownMenuContent align="start" sideOffset={6} className="max-h-80 w-72 p-1.5">
         <DropdownMenuLabel className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           {messages.versions}
         </DropdownMenuLabel>
