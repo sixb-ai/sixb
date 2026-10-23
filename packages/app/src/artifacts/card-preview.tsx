@@ -12,7 +12,7 @@ import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource 
 import { useCanvas } from "./renderers/canvas/renderer"
 import { CanvasThumbnail } from "./renderers/canvas/thumbnail"
 import { PageScreen } from "./renderers/page"
-import { chartData } from "./renderers/sheet/chart-data"
+import { chartData, chartReadsLocked } from "./renderers/sheet/chart-data"
 import { CHART_ICONS } from "./renderers/sheet/chart-icon"
 import { previewFormatter } from "./renderers/sheet/format"
 import { MiniChart } from "./renderers/sheet/mini-chart"
@@ -335,9 +335,13 @@ function WorkbookPreview({ version }: { readonly version: ArtifactVersion }) {
   )
 }
 
-/** A chart's latest value, as its full view labels it: the last row's first series, for a glance. */
+/**
+ * A chart's latest value, as its full view labels it: the last row's first series, for a glance.
+ * None for a chart that reads values the reader may not see.
+ */
 function latestValue(chart: WorkbookChart, model: SheetModel, locale: string): string | undefined {
   if (chart.type === "pie" || chart.type === "scatter") return undefined
+  if (chartReadsLocked(chart, model)) return undefined
   const data = chartData(chart, model)
   const series = data?.series[0]
   const value = series ? data.rows.at(-1)?.[series.key] : undefined

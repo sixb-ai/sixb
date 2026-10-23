@@ -290,11 +290,15 @@ function useArtifactEdit(
   const artifact = detail?.artifact
   // Its owner and the participants of a conversation that shares it publish; an observer reads.
   const canPublish = detail?.access === "owner" || detail?.access === "update"
+  // A live sheet's rows are each reader's, read from its query: there is nothing in it to edit.
+  const live =
+    version?.outline.kind === "sheet" && version.outline.sheets.some((sheet) => sheet.query)
   const available =
     !!artifact &&
     !!version &&
     EDITABLE_KINDS.has(artifact.kind) &&
     version.version === artifact.latestVersion &&
+    !live &&
     canPublish
   const changed = editing && !!draft?.changed
 

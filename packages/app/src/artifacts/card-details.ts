@@ -16,9 +16,12 @@ export function versionSummary(
   switch (outline.kind) {
     case "sheet": {
       const [only] = outline.sheets
+      // A live sheet's rows are each reader's: it has no count of its own.
       details.push(
         outline.sheets.length === 1 && only
-          ? messages.card.rows(only.rows)
+          ? only.query
+            ? messages.card.live
+            : messages.card.rows(only.rows)
           : messages.card.sheets(outline.sheets.length)
       )
       if (outline.charts.length > 0) details.push(messages.card.charts(outline.charts.length))
