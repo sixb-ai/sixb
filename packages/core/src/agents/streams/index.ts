@@ -1,4 +1,5 @@
 /** Browser-safe agent stream reader contract. Producers belong to internal/agents/streams. */
+export type { ModelUiChunk } from "../../models/events"
 export type {
   AgentCompactionFailureCode,
   AgentRunActivityEvent,

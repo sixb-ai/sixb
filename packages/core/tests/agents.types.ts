@@ -3,12 +3,15 @@ import {
   type AgentToolResult,
   type AgentToolRunContext,
   type AgentToolRuntimeFacade,
+  type CreateSixbOptions,
   defineAgentTool,
   defineConnector,
   defineObjectType,
   type InferAgentToolInput,
+  type InferAgentToolOutput,
   type ObjectReadSet,
   prop,
+  type ReadonlyJsonValue,
   type Sixb,
   stringEnum,
 } from "../src"
@@ -150,6 +153,66 @@ defineAgentTool("create_image")
     }
     return result
   })
+
+// ── What the chat receives as a tool's output ─────────────────────────────
+
+const quoteShipping = defineAgentTool("quote_shipping")
+  .description("Quote a shipment for an order.")
+  .input({ orderId: "string" })
+  .run(async ({ input }) => ({ orderId: input.orderId, carrier: "DHL", price: 42 }))
+
+type _asyncObjectOutput = Expect<
+  Equal<
+    InferAgentToolOutput<typeof quoteShipping>,
+    { orderId: string; carrier: string; price: number }
+  >
+>
+
+const countRows = defineAgentTool("count_rows")
+  .description("Count rows.")
+  .input({ table: "string" })
+  .run(({ input }) => input.table.length)
+
+type _syncPrimitiveOutput = Expect<Equal<InferAgentToolOutput<typeof countRows>, number>>
+
+const lookupOrder = defineAgentTool("lookup_order")
+  .description("Look up an order.")
+  .input({ orderId: "string" })
+  .run(async ({ input }) => {
+    if (input.orderId === "") return null
+    return { orderId: input.orderId, tags: readonlyResults }
+  })
+
+type _unionOutput = Expect<
+  Equal<
+    InferAgentToolOutput<typeof lookupOrder>,
+    { orderId: string; tags: readonly string[] } | null
+  >
+>
+
+// The chat receives a file-aware tool's envelope itself; the model sees its projected text.
+const fileTool = defineAgentTool("file_tool")
+  .description("Return a file-aware result.")
+  .input({})
+  .run(async (): Promise<AgentToolResult> => ({ kind: "agentToolResult", content: [] }))
+
+type _richOutput = Expect<Equal<InferAgentToolOutput<typeof fileTool>, AgentToolResult>>
+type _searchKnowledgeOutput = Expect<
+  Equal<InferAgentToolOutput<typeof searchKnowledge>["threadId"], string | null>
+>
+
+// A typed output stays assignable wherever tools are stored together.
+const projectTools: CreateSixbOptions["tools"] = [
+  searchKnowledge,
+  quoteShipping,
+  countRows,
+  lookupOrder,
+  fileTool,
+]
+type _storedOutput = Expect<
+  Equal<InferAgentToolOutput<AgentToolDefinition>, ReadonlyJsonValue | AgentToolResult>
+>
+void projectTools
 
 // ── Reading project data as the requester ─────────────────────────────────
 
