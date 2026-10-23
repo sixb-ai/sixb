@@ -71,9 +71,10 @@ class ApiClient {
       ...options.signal ? { signal: options.signal } : {}
     });
   }
-  async upload(path, source, logicalPath) {
+  async upload(path, source, logicalPath, mediaType) {
     const form = new FormData;
-    form.append("file", new Blob([new Uint8Array(await readFile(source))]), basename(source));
+    const bytes = new Uint8Array(await readFile(source));
+    form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename(source));
     if (logicalPath)
       form.append("logicalPath", logicalPath);
     return this.json(this.url(path), { method: "POST", body: form });
@@ -194,8 +195,9 @@ function parseCommandArgs(args, kinds, command, positionalCount = 0) {
     const flag = equals < 0 ? argument : argument.slice(0, equals);
     if (!Object.hasOwn(kinds, flag))
       fail(`Unknown ${command} option '${flag}'.`);
-    if (Object.hasOwn(options, flag))
+    if (Object.hasOwn(options, flag) && kinds[flag] !== "strings") {
       fail(`${flag} may only be provided once.`);
+    }
     if (kinds[flag] === "boolean") {
       if (equals >= 0)
         fail(`${flag} does not accept a value.`);
@@ -205,7 +207,8 @@ function parseCommandArgs(args, kinds, command, positionalCount = 0) {
       if (!value || equals < 0 && value.startsWith("--")) {
         fail(`${flag} requires a value.`);
       }
-      options[flag] = value;
+      const previous = options[flag];
+      options[flag] = kinds[flag] === "strings" ? [...Array.isArray(previous) ? previous : [], value] : value;
     }
   }
   const [minimum, maximum] = typeof positionalCount === "number" ? [positionalCount, positionalCount] : positionalCount;
@@ -358,7 +361,16 @@ var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance
 `, "").replace(`
 When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
 \`sixb ontology get\` for a type that has no file there.
-`, "");
+`, "").replace(`Files:
+  sixb files upload|download ...
+`, `Files:
+  sixb files upload|download ...
+
+Models:
+  sixb models list [--kind <kind>]    Configured models of every kind, with prices
+  sixb models get <model>             One model's options and rate card
+  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help
+`);
 function renderInstanceHelp(mode) {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
 }
@@ -545,6 +557,28 @@ Options:
 \`users search\` matches part of a display name or email, ignoring case. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  models: `Usage:
+  sixb models list [--kind language|image|speech|transcription]
+  sixb models get <model> [--kind <kind>]
+  sixb models text "<prompt>" [--model <model>] [--instructions <text>]
+                   [--max-output-tokens <n>] [--reasoning <level>]
+  sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
+                    [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
+                    [--seed <n>] [--image <file>]...
+  sixb models speech "<text>" --output <path> [--model <model>] [--voice <voice>]
+                     [--format mp3|wav|ogg|aac|flac] [--instructions <text>]
+                     [--speed <n>] [--language <code>]
+  sixb models transcribe <file> [--model <model>]
+  sixb models calls files <call-id> [--output <path>]
+
+<model> is a model id, or provider:model-id when two providers share one; without --model, the
+kind's default answers. \`list\` shows each model's kind, default, description and price; \`get\`
+adds the sizes, voices and other options a request can use. Prices are in USD.
+
+--output is a file, numbered when a call returns several, or a directory ending in /. The
+extension follows the file's type, and the result lists the paths written. --image uploads a
+reference image; repeat it for several. \`calls files\` lists a past call's files, or downloads
+them again.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
@@ -740,6 +774,318 @@ async function files(api, args) {
     return writeJson({ downloaded: true, output });
   }
   fail(`Unknown files command '${sub}'.`);
+}
+
+// ../cli-core/src/commands/models.ts
+import { access as access2, mkdir, stat } from "node:fs/promises";
+import { dirname as dirname2, extname, join as join2, parse } from "node:path";
+var MODEL_KINDS = ["language", "image", "speech", "transcription"];
+async function models(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.models);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--kind": "string" }, "models list", 0);
+    const kind = options["--kind"] === undefined ? undefined : modelKind(options["--kind"]);
+    const entries = catalogEntries(await api.get("/api/models"));
+    return writeJson(entries.filter((entry) => kind === undefined || entry.kind === kind).map(({ kind, entry }) => ({
+      kind,
+      model: entry.modelId,
+      provider: entry.provider,
+      ...entry.isDefault ? { default: true } : {},
+      ...entry.description ? { description: entry.description } : {},
+      price: describePrice(entry.rateCard)
+    })));
+  }
+  if (sub === "get") {
+    const { positionals, options } = parseCommandArgs(rest, { "--kind": "string" }, "models get", 1);
+    const kind = options["--kind"] === undefined ? undefined : modelKind(options["--kind"]);
+    const entries = catalogEntries(await api.get("/api/models"));
+    const { kind: found, entry } = findModel(entries, positionals[0] ?? "", kind);
+    const { provider, modelId, isDefault, rateCard, ...details } = entry;
+    return writeJson({
+      kind: found,
+      model: modelId,
+      provider,
+      default: isDefault,
+      ...details,
+      price: describePrice(rateCard),
+      ...rateCard ? { rateCard } : {}
+    });
+  }
+  if (sub === "text")
+    return generateText(api, rest);
+  if (sub === "image")
+    return generateImages(api, rest);
+  if (sub === "speech")
+    return generateSpeech(api, rest);
+  if (sub === "transcribe")
+    return transcribe(api, rest);
+  if (sub === "calls")
+    return calls(api, rest);
+  fail(`Unknown models command '${sub}'.`);
+}
+var SPEECH_FORMATS = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  aac: "audio/aac",
+  flac: "audio/flac"
+};
+var SPEECH_FORMAT_NAMES = Object.keys(SPEECH_FORMATS);
+var MEDIA_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".opus": "audio/opus",
+  ".m4a": "audio/mp4",
+  ".webm": "audio/webm"
+};
+var EXTENSIONS = Object.fromEntries(Object.entries(MEDIA_TYPES).filter(([extension]) => extension !== ".jpeg").map(([extension, mediaType]) => [mediaType, extension]));
+async function generateText(api, args) {
+  const { positionals, options } = parseCommandArgs(args, {
+    "--model": "string",
+    "--instructions": "string",
+    "--max-output-tokens": "string",
+    "--reasoning": "string"
+  }, "models text", 1);
+  const maxOutputTokens = options["--max-output-tokens"];
+  const result = await api.post("/api/models/language/generations", {
+    ...await modelRef(api, options["--model"], "language"),
+    prompt: positionals[0],
+    ...options["--instructions"] === undefined ? {} : { instructions: options["--instructions"] },
+    ...maxOutputTokens === undefined ? {} : { maxOutputTokens: integerInRange("--max-output-tokens", maxOutputTokens, 1, 1e6) },
+    ...options["--reasoning"] === undefined ? {} : { reasoning: options["--reasoning"] }
+  });
+  writeJson({
+    callId: result.callId,
+    model: result.model.modelId,
+    text: result.text,
+    finishReason: result.finishReason,
+    cost: describeCost(result.cost)
+  });
+}
+async function generateImages(api, args) {
+  const { positionals, options } = parseCommandArgs(args, {
+    "--output": "string",
+    "--model": "string",
+    "--n": "string",
+    "--size": "string",
+    "--aspect-ratio": "string",
+    "--quality": "string",
+    "--style": "string",
+    "--seed": "string",
+    "--image": "strings"
+  }, "models image", 1);
+  const output = requireOutput(options["--output"], "models image");
+  const seed = options["--seed"];
+  if (seed !== undefined && !/^-?[0-9]+$/.test(seed))
+    fail("--seed must be an integer.");
+  const model = await modelRef(api, options["--model"], "image");
+  const images = [];
+  for (const path of options["--image"] ?? [])
+    images.push(await uploadInput(api, path, "image"));
+  const result = await api.post("/api/models/image/generations", {
+    ...model,
+    prompt: positionals[0],
+    ...options["--n"] === undefined ? {} : { n: integerInRange("--n", options["--n"], 1, 100) },
+    ...optional("size", options["--size"]),
+    ...optional("aspectRatio", options["--aspect-ratio"]),
+    ...optional("quality", options["--quality"]),
+    ...optional("style", options["--style"]),
+    ...seed === undefined ? {} : { seed: Number(seed) },
+    ...images.length > 0 ? { images } : {}
+  });
+  writeJson(await savedResult(api, result, output));
+}
+async function generateSpeech(api, args) {
+  const { positionals, options } = parseCommandArgs(args, {
+    "--output": "string",
+    "--model": "string",
+    "--voice": "string",
+    "--format": "string",
+    "--instructions": "string",
+    "--speed": "string",
+    "--language": "string"
+  }, "models speech", 1);
+  const output = requireOutput(options["--output"], "models speech");
+  const format = options["--format"];
+  const speed = options["--speed"];
+  if (speed !== undefined && !(Number(speed) > 0))
+    fail("--speed must be a positive number.");
+  const result = await api.post("/api/models/audio/speech", {
+    ...await modelRef(api, options["--model"], "speech"),
+    text: positionals[0],
+    ...optional("voice", options["--voice"]),
+    ...format === undefined ? {} : { mediaType: SPEECH_FORMATS[enumValue("--format", format, SPEECH_FORMAT_NAMES)] },
+    ...optional("instructions", options["--instructions"]),
+    ...speed === undefined ? {} : { speed: Number(speed) },
+    ...optional("language", options["--language"])
+  });
+  writeJson(await savedResult(api, result, output));
+}
+async function transcribe(api, args) {
+  const { positionals, options } = parseCommandArgs(args, { "--model": "string" }, "models transcribe", 1);
+  const model = await modelRef(api, options["--model"], "transcription");
+  const audio = await uploadInput(api, positionals[0] ?? "", "audio");
+  const result = await api.post("/api/models/audio/transcriptions", {
+    ...model,
+    audio
+  });
+  writeJson({
+    callId: result.callId,
+    model: result.model.modelId,
+    text: result.text,
+    cost: describeCost(result.cost)
+  });
+}
+async function calls(api, args) {
+  const [sub, ...rest] = args;
+  if (sub !== "files")
+    fail(`Unknown models calls command '${sub ?? ""}'. Use 'models calls files'.`);
+  const { positionals, options } = parseCommandArgs(rest, { "--output": "string" }, "models calls files", 1);
+  const callId = positionals[0] ?? "";
+  const call = await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}/files`);
+  const output = options["--output"];
+  if (output === undefined)
+    return writeJson(call);
+  writeJson({ callId: call.callId, files: await saveFiles(api, call.callId, call.files, output) });
+}
+async function modelRef(api, reference, kind) {
+  if (reference === undefined)
+    return {};
+  const { entry } = findModel(catalogEntries(await api.get("/api/models")), reference, kind);
+  return { model: { provider: entry.provider, modelId: entry.modelId } };
+}
+function requireOutput(output, command) {
+  if (!output)
+    fail(`${command} requires --output <path>: a file, or a directory ending in /.`);
+  return output;
+}
+function optional(field, value) {
+  return value === undefined ? {} : { [field]: value };
+}
+async function uploadInput(api, path, kind) {
+  try {
+    await access2(path);
+  } catch {
+    fail(`Input file '${path}' does not exist.`);
+  }
+  const mediaType = MEDIA_TYPES[extname(path).toLowerCase()];
+  if (!mediaType?.startsWith(`${kind}/`)) {
+    const accepted = Object.entries(MEDIA_TYPES).filter(([, type]) => type.startsWith(`${kind}/`)).map(([extension]) => extension);
+    fail(`'${path}' is not an ${kind} file. Use ${accepted.join(", ")}.`);
+  }
+  return api.upload("/api/files", path, undefined, mediaType);
+}
+async function savedResult(api, result, output) {
+  return {
+    callId: result.callId,
+    model: result.model.modelId,
+    files: await saveFiles(api, result.callId, result.files ?? [], output),
+    ...result.warnings?.length ? { warnings: result.warnings } : {},
+    cost: describeCost(result.cost)
+  };
+}
+async function saveFiles(api, callId, files, output) {
+  const directory = output.endsWith("/") || (await stat(output).catch(() => null))?.isDirectory();
+  const paths = files.map((file, index) => {
+    const number = files.length > 1 ? `-${index + 1}` : "";
+    const extension = (file.mediaType && EXTENSIONS[file.mediaType]) ?? "";
+    if (directory)
+      return join2(output, `${callId}${number}${extension || ".bin"}`);
+    const { dir, name, ext } = parse(output);
+    return join2(dir, `${name}${number}${extension || ext}`);
+  });
+  for (const [index, path] of paths.entries()) {
+    await mkdir(dirname2(path), { recursive: true });
+    await api.download(`/api/ai/model-calls/${encodeURIComponent(callId)}/files/content`, path, {
+      path: `/files/${index}`
+    });
+  }
+  return paths;
+}
+function describeCost(cost) {
+  if (!cost.money)
+    return "unknown";
+  const nanos = BigInt(cost.money.amountNanos);
+  const whole = nanos / 1000000000n;
+  const fraction = (nanos % 1000000000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return `$${whole}${fraction ? `.${fraction}` : ""}`;
+}
+function modelKind(value) {
+  const kind = MODEL_KINDS.find((candidate) => candidate === value);
+  if (!kind)
+    fail(`Unknown model kind '${value}'. Use one of: ${MODEL_KINDS.join(", ")}.`);
+  return kind;
+}
+function catalogEntries(catalog) {
+  return [
+    ...catalog.language.map((entry) => ({ kind: "language", entry })),
+    ...catalog.image.map((entry) => ({ kind: "image", entry })),
+    ...catalog.audio.speech.map((entry) => ({ kind: "speech", entry })),
+    ...catalog.audio.transcription.map((entry) => ({ kind: "transcription", entry }))
+  ];
+}
+function findModel(entries, reference, kind) {
+  const ofKind = entries.filter((candidate) => kind === undefined || candidate.kind === kind);
+  let matches = ofKind.filter((candidate) => candidate.entry.modelId === reference);
+  const separator = reference.indexOf(":");
+  if (matches.length === 0 && separator > 0) {
+    const provider = reference.slice(0, separator);
+    const modelId = reference.slice(separator + 1);
+    matches = ofKind.filter((candidate) => candidate.entry.provider === provider && candidate.entry.modelId === modelId);
+  }
+  const [match] = matches;
+  if (!match) {
+    fail(`No ${kind === undefined ? "" : `${kind} `}model '${reference}' is configured. Run 'sixb models list'.`);
+  }
+  if (matches.length > 1) {
+    const kinds = new Set(matches.map((candidate) => candidate.kind));
+    fail(kinds.size > 1 ? `'${reference}' is configured as ${[...kinds].join(" and ")}. Add --kind <kind>.` : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${reference}.`);
+  }
+  return match;
+}
+function describePrice(card) {
+  if (!card)
+    return "price unknown";
+  const parts = [
+    variantPrice(card.images, "per image", "at"),
+    variantPrice(card.characters, "per 1M characters", "for"),
+    variantPrice(card.audioInputSeconds, "per second of audio", "for"),
+    card.input !== undefined && card.output !== undefined ? `${dollars(tokenPrice(card.input))} input · ${dollars(tokenPrice(card.output))} output per 1M tokens` : undefined,
+    card.audioOutput === undefined ? undefined : `${dollars(tokenPrice(card.audioOutput))} per 1M audio tokens`
+  ].filter((part) => part !== undefined);
+  return parts.length === 0 ? "price unknown" : parts.join(" · ");
+}
+function variantPrice(price, unit, joiner) {
+  if (price === undefined)
+    return;
+  if (typeof price === "string")
+    return `${dollars(price)} ${unit}`;
+  const only = price.default;
+  if (only !== undefined && price.variants.every((variant) => variant.price === only)) {
+    return `${dollars(only)} ${unit}`;
+  }
+  const variants = price.variants.map(({ price: amount, ...dimensions }) => {
+    const label = Object.values(dimensions).join(" ");
+    return `${dollars(amount)} ${joiner} ${label}`;
+  });
+  const otherwise = price.default === undefined ? [] : [`otherwise ${dollars(price.default)}`];
+  return `${unit}: ${[...variants, ...otherwise].join(", ")}`;
+}
+function tokenPrice(price) {
+  return typeof price === "string" ? price : price.default;
+}
+function dollars(amount) {
+  return `$${amount}`;
 }
 
 // ../cli-core/src/graph.ts
@@ -1522,7 +1868,8 @@ var INSTANCE_COMMANDS = [
   "files",
   "workflows",
   "workflow-runs",
-  "users"
+  "users",
+  "models"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
@@ -1549,6 +1896,8 @@ async function dispatch(api, command, args) {
       return runs(api, "workflow", args);
     case "users":
       return users(api, args);
+    case "models":
+      return models(api, args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }

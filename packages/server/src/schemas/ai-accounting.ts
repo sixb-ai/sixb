@@ -39,6 +39,17 @@ export const AiCostSummarySchema = z.object({
   unvaluedCallCount: z.number().int().nonnegative(),
 })
 
+const ModelKindSchema = z.enum([
+  "language",
+  "image",
+  "video",
+  "embedding",
+  "decision",
+  "transcription",
+  "speech",
+  "reranking",
+])
+
 const AiAccountingAggregateSchema = z.object({
   modelCallCount: z.number().int().nonnegative(),
   usage: AiUsageSummarySchema.describe(
@@ -59,6 +70,10 @@ const AiAccountingAggregateSchema = z.object({
       textOutputTokens: z.number().int().nonnegative(),
       reasoningOutputTokens: z.number().int().nonnegative(),
       audioDurationMs: z.number().int().nonnegative(),
+      imageOutputTokens: z.number().int().nonnegative(),
+      audioOutputTokens: z.number().int().nonnegative(),
+      outputImages: z.number().int().nonnegative(),
+      inputCharacters: z.number().int().nonnegative(),
     }),
   }),
   costs: AiCostSummarySchema,
@@ -78,6 +93,13 @@ export const AiAccountingOverviewResponseSchema = z.object({
     AiAccountingAggregateSchema.extend({
       providerId: z.string(),
       modelId: z.string(),
+    })
+  ),
+  kinds: z.array(
+    AiAccountingAggregateSchema.extend({
+      modelKind: ModelKindSchema.optional().describe(
+        "Absent for calls recorded before their kind was captured."
+      ),
     })
   ),
   agents: z.array(
@@ -121,11 +143,19 @@ const AiCostComponentSchema = z.object({
     "tokens.output.total",
     "tokens.output.text",
     "tokens.output.reasoning",
+    "tokens.output.image",
+    "tokens.output.audio",
     "audio.input.milliseconds",
+    "images.output",
+    "characters.input",
   ]),
   quantity: IntegerStringSchema,
   rateAmountNanosPerMillion: IntegerStringSchema,
   chargeAmountNanos: IntegerStringSchema,
+  variant: z
+    .string()
+    .optional()
+    .describe("The price variant that applied, such as an image size. Display only."),
 })
 
 const AiBillingIdentitySchema = z.object({
@@ -194,9 +224,7 @@ const AiModelCallUsageRecordSchema = z.object({
   callId: z.string(),
   providerId: z.string(),
   requestedModelId: z.string(),
-  modelKind: z
-    .enum(["language", "image", "video", "embedding", "decision", "transcription", "reranking"])
-    .optional(),
+  modelKind: ModelKindSchema.optional(),
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),
@@ -256,7 +284,15 @@ const AiModelCallExecutionSummarySchema = z.object({
   executionId: z.string(),
   attribution: AiModelCallAccountingItemSchema.shape.attribution,
   modelCallCount: z.number().int().nonnegative(),
-  totalTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Present when every call that reports tokens did; images and speech don't."),
+  outputImages: z.number().int().nonnegative().optional(),
+  inputCharacters: z.number().int().nonnegative().optional(),
+  audioDurationMs: z.number().int().nonnegative().optional(),
   costs: AiCostSummarySchema,
   firstCallAt: IsoDateSchema,
   lastCallAt: IsoDateSchema,

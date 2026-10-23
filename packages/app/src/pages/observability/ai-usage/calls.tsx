@@ -14,6 +14,7 @@ import { Link } from "react-router-dom"
 import { actionRunHref, workflowRunHref } from "../../routes"
 import { PageSection, Panel, Pill, type Tone } from "../../section-ui"
 import { formatMoney } from "./format"
+import { KindLabel, useUsageFormat } from "./kinds"
 import { type AiUsageMessages, useAiUsageMessages } from "./messages"
 
 type Group = ListAiModelCallGroupsResponse["items"][number]
@@ -365,7 +366,8 @@ export function ModelCallRow({
 }) {
   const messages = useAiUsageMessages().calls
   const format = useCallFormat()
-  const { audioDurationMs, totalTokens } = call.usage.usage
+  const lines = useUsageFormat().lines(call.usage.usage, call.usage.modelKind)
+  const price = pricedAs(call, messages, format.money)
   return (
     <div className={cn(grid, "py-1.5 pr-4 text-xs", nested ? "pl-20" : "pl-14")}>
       <span
@@ -378,9 +380,7 @@ export function ModelCallRow({
         <ModelName
           models={[{ providerId: call.usage.providerId, modelId: call.usage.requestedModelId }]}
         />
-        {call.usage.modelKind === "transcription" ? (
-          <span className="block text-muted-foreground">{messages.transcription}</span>
-        ) : null}
+        <KindLabel kind={call.usage.modelKind} variant={price.variant} />
         {call.usage.requestedReasoning === undefined ? null : (
           <span className="block text-muted-foreground">
             {typeof call.usage.requestedReasoning === "string"
@@ -390,17 +390,14 @@ export function ModelCallRow({
         )}
       </span>
       <span className="hidden text-right font-mono text-muted-foreground md:block">1</span>
-      <span className="hidden text-right font-mono tabular-nums md:block">
-        {audioDurationMs !== undefined ? (
-          <span className="block">{messages.audio(format.number(audioDurationMs / 1000, 3))}</span>
-        ) : null}
-        {totalTokens !== undefined ? (
-          <span className="block">{messages.tokens(format.number(totalTokens))}</span>
-        ) : null}
-        {audioDurationMs === undefined && totalTokens === undefined ? "—" : null}
-      </span>
+      <UsageLines lines={lines} />
       <span className="text-right font-mono whitespace-nowrap tabular-nums">
         {call.cost && call.cost.status !== "unpriceable" ? format.money(call.cost.money) : "—"}
+        {price.each ? (
+          <span className="block truncate text-[0.6875rem] text-muted-foreground">
+            {price.each}
+          </span>
+        ) : null}
       </span>
       <span className="hidden md:block">
         <Valuation call={call} />
@@ -418,6 +415,7 @@ function Summary({
 }) {
   const messages = useAiUsageMessages().calls
   const format = useCallFormat()
+  const usage = useUsageFormat()
   const withoutCost = summary.costs.unvaluedCallCount + summary.costs.unpriceableCallCount
   return (
     <>
@@ -427,11 +425,7 @@ function Summary({
       <span className="hidden text-right font-mono text-xs tabular-nums md:block">
         {format.number(summary.modelCallCount)}
       </span>
-      <span className="hidden text-right font-mono text-xs tabular-nums md:block">
-        {summary.totalTokens === undefined
-          ? "—"
-          : messages.tokens(format.number(summary.totalTokens))}
-      </span>
+      <UsageLines lines={usage.lines(summary)} className="text-xs" />
       <span className="text-right font-mono text-xs whitespace-nowrap tabular-nums">
         {summary.costs.amounts.length
           ? summary.costs.amounts.map((money) => (
@@ -452,6 +446,55 @@ function Summary({
       </span>
     </>
   )
+}
+
+/** What a call or a run used, one meter a line: tokens, images, characters, audio. */
+function UsageLines({
+  lines,
+  className,
+}: {
+  readonly lines: readonly string[]
+  readonly className?: string
+}) {
+  return (
+    <span className={cn("hidden text-right font-mono tabular-nums md:block", className)}>
+      {lines.length === 0
+        ? "—"
+        : lines.map((line) => (
+            <span key={line} className="block whitespace-nowrap">
+              {line}
+            </span>
+          ))}
+    </span>
+  )
+}
+
+/**
+ * How a call was priced, when a unit price says more than its total ("2 × USD 0.048"), and the
+ * price variant it matched ("1024x1024"). A provider-reported cost keeps the local estimate's
+ * breakdown beside it.
+ */
+function pricedAs(
+  call: ModelCall,
+  messages: AiUsageMessages["calls"],
+  money: (value: { readonly currency: string; readonly amountNanos: string }) => string
+): { readonly each?: string; readonly variant?: string } {
+  const cost = call.cost
+  if (cost?.status !== "rated") return {}
+  const components =
+    cost.components.length > 0
+      ? cost.components
+      : cost.estimate?.status === "rated"
+        ? cost.estimate.components
+        : []
+  const variant = components.find((component) => component.variant)?.variant
+  const images = components.find((component) => component.meter === "images.output")
+  if (!images || BigInt(images.quantity) <= 1n) return variant ? { variant } : {}
+  const unit = money({
+    currency: cost.money.currency,
+    amountNanos: (BigInt(images.rateAmountNanosPerMillion) / 1_000_000n).toString(),
+  })
+  return { each: messages.unitPrice(images.quantity, unit), ...(variant ? { variant } : {}) }
 }
 
 function ModelName({ models }: { readonly models: Execution["models"] }) {

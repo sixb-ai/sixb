@@ -115,7 +115,7 @@ describe("AiModelCallRecorder", () => {
       },
       rateModelCall({
         usage: { inputTokens: 1, outputTokens: 1 },
-        rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "1" },
+        rateCard: { currency: "USD", input: "1", output: "1" },
       }),
     ]
     for (const { reported, estimate } of estimates.flatMap((estimate) =>

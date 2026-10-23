@@ -4,9 +4,11 @@ import type {
   AiUsageReportingStatus,
 } from "../ai-usage"
 
-/** Token meters supported by deterministic local rate cards. */
+/** Meters supported by deterministic local rate cards. */
 export type AiBillableMeter =
   | "audio.input.milliseconds"
+  | "characters.input"
+  | "images.output"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"
@@ -16,6 +18,8 @@ export type AiBillableMeter =
   | "tokens.output.total"
   | "tokens.output.text"
   | "tokens.output.reasoning"
+  | "tokens.output.image"
+  | "tokens.output.audio"
 
 /** Exact money in nanounits of a currency's major unit. */
 export interface AiMoney {
@@ -58,6 +62,8 @@ export interface AiCostComponent {
   readonly quantity: string
   readonly rateAmountNanosPerMillion: string
   readonly chargeAmountNanos: string
+  /** The price variant that applied, such as `1024x1024 · high`. Display only. */
+  readonly variant?: string
 }
 
 export type AiUnpriceableReason =
@@ -189,12 +195,18 @@ export interface AiAccountingModelBreakdown extends AiAccountingAggregate {
   readonly modelId: string
 }
 
+export interface AiAccountingKindBreakdown extends AiAccountingAggregate {
+  /** Absent for calls recorded before their kind was captured. */
+  readonly modelKind?: import("../../models/definitions").ModelKind
+}
+
 export interface AiAccountingOverview {
   readonly range: AiAccountingRange
   readonly bucket: AiAccountingBucket
   readonly totals: AiAccountingAggregate
   readonly series: readonly AiAccountingTimeBucket[]
   readonly models: readonly AiAccountingModelBreakdown[]
+  readonly kinds: readonly AiAccountingKindBreakdown[]
   readonly agents: readonly AiAccountingAgentBreakdown[]
   readonly workflows: readonly AiAccountingWorkflowBreakdown[]
 }
@@ -243,7 +255,12 @@ export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "e
 /** Filtered usage; an absent token total means at least one call did not report it. */
 export interface AiModelCallGroupSummary {
   readonly modelCallCount: number
+  /** Present when every call that reports tokens did; tokenless kinds such as images don't. */
   readonly totalTokens?: number
+  /** Sums over the calls that reported them. */
+  readonly outputImages?: number
+  readonly inputCharacters?: number
+  readonly audioDurationMs?: number
   readonly costs: AiCostSummary
 }
 

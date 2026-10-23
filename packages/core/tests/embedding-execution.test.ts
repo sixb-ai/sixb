@@ -76,6 +76,7 @@ describe("embedding execution accounting", () => {
     expect(await f.storage.aiUsage.getLatestForExecution(f.identity)).toMatchObject({
       ...f.identity,
       attempt: 1,
+      modelKind: "embedding",
       providerIds: { requestId: "provider-request" },
     })
     const costs = await f.storage.aiCosts.listModelCalls({

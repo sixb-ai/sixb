@@ -100,6 +100,15 @@ import type {
   ForkAgentThreadData,
   ForkAgentThreadErrors,
   ForkAgentThreadResponses,
+  GenerateImagesData,
+  GenerateImagesErrors,
+  GenerateImagesResponses,
+  GenerateSpeechData,
+  GenerateSpeechErrors,
+  GenerateSpeechResponses,
+  GenerateTextData,
+  GenerateTextErrors,
+  GenerateTextResponses,
   GetActionData,
   GetActionErrors,
   GetActionResponses,
@@ -142,6 +151,12 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsErrors,
   GetAiLimitSubjectOptionsResponses,
+  GetAiModelCallFileContentData,
+  GetAiModelCallFileContentErrors,
+  GetAiModelCallFileContentResponses,
+  GetAiModelCallFilesData,
+  GetAiModelCallFilesErrors,
+  GetAiModelCallFilesResponses,
   GetArtifactData,
   GetArtifactErrors,
   GetArtifactFileContentData,
@@ -259,6 +274,9 @@ import type {
   HeadAgentMessageFileContentData,
   HeadAgentMessageFileContentErrors,
   HeadAgentMessageFileContentResponses,
+  HeadAiModelCallFileContentData,
+  HeadAiModelCallFileContentErrors,
+  HeadAiModelCallFileContentResponses,
   HeadArtifactFileContentData,
   HeadArtifactFileContentErrors,
   HeadArtifactFileContentResponses,
@@ -493,6 +511,9 @@ import type {
   SuspendAuthMemberData,
   SuspendAuthMemberErrors,
   SuspendAuthMemberResponses,
+  TranscribeAudioData,
+  TranscribeAudioErrors,
+  TranscribeAudioResponses,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyErrors,
   UpdateAiLimitPolicyResponses,
@@ -1239,6 +1260,143 @@ export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/ai/model-call-groups",
     ...options,
+  })
+
+/**
+ * Get the files a model call produced
+ */
+export const getAiModelCallFiles = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiModelCallFilesData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAiModelCallFilesResponses,
+    GetAiModelCallFilesErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}/files",
+    ...options,
+  })
+
+/**
+ * Get model call file content
+ */
+export const getAiModelCallFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiModelCallFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAiModelCallFileContentResponses,
+    GetAiModelCallFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}/files/content",
+    ...options,
+  })
+
+/**
+ * Head model call file content
+ */
+export const headAiModelCallFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadAiModelCallFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadAiModelCallFileContentResponses,
+    HeadAiModelCallFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}/files/content",
+    ...options,
+  })
+
+/**
+ * Generate text with a language model
+ */
+export const generateText = <ThrowOnError extends boolean = false>(
+  options: Options<GenerateTextData, ThrowOnError>
+) =>
+  (options.client ?? client).post<GenerateTextResponses, GenerateTextErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/language/generations",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Generate images with an image model
+ */
+export const generateImages = <ThrowOnError extends boolean = false>(
+  options: Options<GenerateImagesData, ThrowOnError>
+) =>
+  (options.client ?? client).post<GenerateImagesResponses, GenerateImagesErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/image/generations",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Generate speech with a speech model
+ */
+export const generateSpeech = <ThrowOnError extends boolean = false>(
+  options: Options<GenerateSpeechData, ThrowOnError>
+) =>
+  (options.client ?? client).post<GenerateSpeechResponses, GenerateSpeechErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/audio/speech",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Transcribe audio with a transcription model
+ */
+export const transcribeAudio = <ThrowOnError extends boolean = false>(
+  options: Options<TranscribeAudioData, ThrowOnError>
+) =>
+  (options.client ?? client).post<TranscribeAudioResponses, TranscribeAudioErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/models/audio/transcriptions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**
@@ -3219,13 +3377,16 @@ export const headArtifactFileContent = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * List the project model catalog
+ * List the project's models of every kind, with their options and prices
  */
 export const listModels = <ThrowOnError extends boolean = false>(
   options?: Options<ListModelsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListModelsResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/models",
     ...options,
   })

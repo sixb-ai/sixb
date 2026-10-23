@@ -4,7 +4,6 @@ import {
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelProvider,
-  type LanguageModelRateCard,
   type LanguageModelRequest,
   type LanguageModelStream,
   type LanguageModelStreamEvent,
@@ -12,13 +11,14 @@ import {
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
+  type ModelRateCard,
   type ModelReasoningLevel,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatEvents } from "@sixb/model-protocols/chat"
 import { messagesEvents } from "@sixb/model-protocols/messages"
 import { responsesEvents } from "@sixb/model-protocols/responses"
-import { foundryEstimator, foundryUsage } from "./accounting"
+import { foundryEstimator, foundryUsage, type PricedEstimator } from "./accounting"
 import {
   type AzureAIFoundryCatalogOptions,
   type CatalogModel,
@@ -86,7 +86,7 @@ export interface AzureAIFoundryModelOptions extends RequestOptions {
   /** Reasoning Sixb applies when this model runs without an explicit choice. */
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: Omit<LanguageModelDefinition, "kind" | "providerId" | "modelId">
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly costEstimator?: ModelCostEstimator
   /** Default: preserve positive reports; trust zero only for OpenAI. "unknown" omits all reasoning counts. */
   readonly reasoningUsage?: "reported" | "unknown"
@@ -95,14 +95,14 @@ export interface AzureAIFoundryModelOptions extends RequestOptions {
 export interface AzureAIFoundryMessagesOptions extends MessagesRequestOptions {
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly costEstimator?: ModelCostEstimator
 }
 
 export interface AzureAIFoundryChatOptions extends ChatRequestOptions {
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly costEstimator?: ModelCostEstimator
   readonly reasoningUsage?: "reported" | "unknown"
 }
@@ -230,7 +230,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
 
 class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryModel<Protocol> {
   private readonly profile: ReturnType<typeof resolveModel>
-  private readonly estimator: ModelCostEstimator
+  private readonly estimator: PricedEstimator
   #execution?: FoundryModel<Protocol>
   #pendingExecution?: Promise<FoundryModel<Protocol>>
   get protocol(): Protocol {
@@ -244,6 +244,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   }
   get costEstimator() {
     return this.#execution?.estimator ?? this.estimator
+  }
+  /** The card the estimator prices by; none with a custom costEstimator or unpriced options. */
+  get rateCard() {
+    return (this.#execution?.estimator ?? this.estimator).rateCard
   }
   private readonly options: AzureAIFoundryModelOptions & MessagesRequestOptions & ChatRequestOptions
   private readonly scope: string

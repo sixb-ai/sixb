@@ -14,7 +14,7 @@ import { AiModelCallRecorder } from "../src/models/execution/model-call-recorder
 
 const projectId = "limits-runtime"
 const executionId = "test_agent_execution:run"
-const rateCard = { currency: "USD", unit: "million-tokens", input: "1", output: "1" } as const
+const rateCard = { currency: "USD", input: "1", output: "1" } as const
 async function setup(events: () => AsyncIterable<LanguageModelStreamEvent>) {
   const storage = new InMemoryStorage()
   await createTestAgentExecution(storage, {

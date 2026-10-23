@@ -266,6 +266,15 @@ export const en = {
     moreSourcesChip: (more: number) => `+${count(more, "source")}`,
   },
   /** The view_file tool, for a file the agent looked at (`name` may be empty). */
+  modelMedia: {
+    from: (names: string) => `From ${names}`,
+    openImage: "Open image",
+    play: "Play",
+    pause: "Pause",
+    expired: "This result is no longer available.",
+    more: "Show more",
+    less: "Show less",
+  },
   viewFile: {
     title: (name: string) => `Viewed ${name || "a file"}`,
     running: (name: string) => `Viewing ${name || "a file"}`,
@@ -416,6 +425,22 @@ export const en = {
     workflowRun: { title: "Checked a workflow run", running: "Checking a workflow run" },
     upload: { title: "Uploaded a file", running: "Uploading a file" },
     download: { title: "Downloaded a file", running: "Downloading a file" },
+    models: { title: "Checked the available models", running: "Checking the available models" },
+    askModel: { title: "Asked another model", running: "Asking another model" },
+    makeImage: {
+      title: (images: number) => (images > 1 ? `Made ${number(images)} images` : "Made an image"),
+      running: (images: number) =>
+        images > 1 ? `Making ${number(images)} images` : "Making an image",
+    },
+    editImage: {
+      title: (images: number) =>
+        images > 1 ? `Made ${number(images)} versions of an image` : "Edited an image",
+      running: (images: number) =>
+        images > 1 ? `Making ${number(images)} versions of an image` : "Editing an image",
+    },
+    makeSpeech: { title: "Created a voice clip", running: "Creating a voice clip" },
+    transcribe: { title: "Transcribed audio", running: "Transcribing audio" },
+    reopenCall: { title: "Opened an earlier result", running: "Opening an earlier result" },
     project: { title: "Read project info", running: "Reading project info" },
     api: { title: "Called the Sixb API", running: "Calling the Sixb API" },
     sixbCommand: { title: "Ran a Sixb command", running: "Running a Sixb command" },

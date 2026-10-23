@@ -2,7 +2,8 @@
 
 Configure the AI models available to your project. Language models power conversations and
 generation. Decision models classify inputs, score them against a rubric, and estimate probabilities.
-Embedding models power semantic search. Audio models transcribe stored files. [Browse providers](#providers) for installation and credentials.
+Embedding models power semantic search. Audio models transcribe stored files and turn text into
+speech, and image models generate images. [Browse providers](#providers) for installation and credentials.
 
 ## Language models
 
@@ -282,6 +283,175 @@ The result contains `output.text`, `usage`, `cost`, and `callId`. Audio-only pro
 neither a language model nor a sandbox. Calls use the same [accounting and limits](./usage-and-limits.md#audio-transcription)
 as other models. Authorize access to the owning object in the application before accepting
 a user-supplied file reference; a `FileRef` is an identifier, not an access grant.
+
+## Image generation
+
+Register image models in `models.image`. The first is the default:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    image: [
+      vercelGateway.image("bfl/flux-3-image", { description: "Fast drafts and thumbnails" }),
+      vercelGateway.image("google/gemini-3.1-flash-lite-image", {
+        description: "Edits a reference image",
+      }),
+    ],
+  },
+})
+```
+
+A `description` says when to pick a model; without one, the provider's own description applies.
+
+Generate images in a workflow step or an action's writeback/effects handler:
+
+```ts
+const { files, cost } = await sixb.models.image.generate({
+  prompt: "Isometric warehouse floor plan, muted palette",
+  size: "1024x1024",
+})
+```
+
+`files` are the generated images as `FileRef`s, already saved to the project's blob storage. Store one on an object
+property or show it in a page like any other file.
+
+| Option | Meaning |
+| --- | --- |
+| `n` | How many images to generate. Defaults to 1; some models return one per call. |
+| `size`, `aspectRatio` | Such as `1024x1024` or `16:9`. Accepted values depend on the model. |
+| `quality`, `style` | Model-specific settings, such as `low` or `vector_illustration`. |
+| `seed` | Repeat a result, where the model supports it. |
+| `images` | Reference images, as `FileRef`s with an `image/*` media type, to edit or vary. |
+| `model`, `signal` | Override the default model, or cancel the call. |
+
+Settings a model ignores come back in `warnings`. Each call is priced by the size, quality and
+style it requested and the number of images returned, and uses the same
+[accounting and limits](./usage-and-limits.md#image-and-speech-generation) as other models.
+Authorize access to a reference image in the application before accepting a user-supplied
+`FileRef`.
+
+## Speech generation
+
+Register speech models in `models.audio.speech`, beside any transcribers. The first is the default:
+
+```ts
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    audio: { speech: [vercelGateway.speech("openai/tts-1-hd", { voice: "alloy" })] },
+  },
+})
+```
+
+```ts
+const { file, cost } = await sixb.models.audio.speak({
+  text: "Your order shipped this morning.",
+  mediaType: "audio/mpeg",
+})
+```
+
+`file` is the generated audio as a `FileRef` in the project's blob storage. A request without a `voice` uses the voice
+the binding sets, so you can switch models without changing calls. You can also pass
+`instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
+never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
+
+## Call models over the API
+
+The same calls are available over HTTP, to a user or service account granted
+`can.run(project.models)`:
+
+```ts
+defineRole("model.users", { grantedTo: [designers], grants: [can.run(project.models)] })
+```
+
+```text
+POST /api/models/language/generations   { prompt, instructions?, maxOutputTokens?, reasoning? }
+POST /api/models/image/generations      { prompt, n?, size?, aspectRatio?, quality?, style?, seed?, images? }
+POST /api/models/audio/speech           { text, voice?, mediaType?, instructions?, speed?, language? }
+POST /api/models/audio/transcriptions   { audio }
+```
+
+Each body takes an optional `model: { provider, modelId }`; without one, the kind's default
+answers. Reference images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files).
+The response carries the `callId`, the `model` that answered, `usage` and `cost`, plus `text` or
+`files`:
+
+```json
+{
+  "callId": "call_…",
+  "model": { "provider": "vercel-ai-gateway", "modelId": "bfl/flux-3-image-klein" },
+  "files": [{ "blobId": "blob_…", "mediaType": "image/jpeg", "sizeBytes": 82749 }],
+  "warnings": [],
+  "usage": { "outputImages": 1 },
+  "cost": { "status": "reported", "money": { "currency": "USD", "amountNanos": "8000000" } }
+}
+```
+
+From the CLI, the same calls write their files where you say:
+
+```bash
+sixb models image "Isometric warehouse floor plan" --size 1024x1024 --output out/plan.png
+sixb models image "Same plan, night lighting" --image out/plan.png --output out/night.png
+sixb models speech "Your order shipped." --format mp3 --output out/shipped.mp3
+sixb models transcribe call.wav
+sixb models text "Summarize this week's incidents in one line"
+```
+
+```json
+{ "callId": "call_…", "model": "bfl/flux-3-image-klein", "files": ["out/plan.jpg"], "cost": "$0.008" }
+```
+
+`--output` takes a file, numbered when a call returns several, or a directory ending in `/`. The
+extension follows the file's type, so `files` lists the paths actually written. `--image` uploads
+a reference image; repeat it for several. `sixb models calls files <call-id> --output <path>`
+downloads a call's files again.
+
+A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that
+is reached answers `429`. An option the model does not accept answers `400` before any inference,
+and a provider failure answers `502`. Calls are synchronous; download a generated file through
+its call, below.
+
+## Read a call's files later
+
+Every image and speech result carries a `callId`. The files a call produced stay readable through
+it, by whoever can see the run that made the call:
+
+```ts
+const call = await sixb.models.calls.files(callId) // { callId, files, recordedAt } or null
+```
+
+```text
+GET /api/ai/model-calls/:callId/files                        the call's files
+GET /api/ai/model-calls/:callId/files/content?path=/files/0  one file's bytes
+```
+
+| Where the call ran | Who can read its files |
+| --- | --- |
+| A request to the API | The user or service account that made it |
+| An agent thread, or a subagent of it | Whoever can read the thread |
+| An action or workflow run, or a workflow's agent step | Whoever can view the run |
+
+Anyone else gets `null`, or a 404 from the API. Seeing a call in
+[AI usage](./usage-and-limits.md) shows what it cost, not what it produced.
+
+## List the catalog
+
+`GET /api/models` and `sixb models list` show every configured model by kind, with its default,
+description, the options a request can use, and its price:
+
+```bash
+sixb models list --kind image
+sixb models get bfl/flux-3-image
+```
+
+A price comes from the provider binding, as it bills: per token, image, character or second of
+audio, by size or voice tier where it varies. A model with no known price says "price unknown"; it
+can still be called, except while a [cost limit](./usage-and-limits.md#set-a-monthly-limit)
+applies.
 
 ## Embedding models
 

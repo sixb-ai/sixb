@@ -33,6 +33,7 @@ export type {
   MarkingDefinition,
   MembershipOperation,
   MembershipPolicyDefinition,
+  ModelsRunGrant,
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,

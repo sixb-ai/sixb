@@ -444,7 +444,9 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("071-agent-thread-participants", agentThreadParticipantsSql),
     pgSql("072-forked-context-checkpoints", forkedContextCheckpointsSql),
     pgSql("073-unique-values", uniqueValuesSql),
-    pgSql("074-artifact-threads", artifactThreadsSql),
+    pgSql("074-generated-media-usage", generatedMediaUsageSql),
+    pgSql("075-model-call-files", modelCallFilesSql),
+    pgSql("076-artifact-threads", artifactThreadsSql),
   ],
 })
 
@@ -496,4 +498,8 @@ import forkedContextCheckpointsSql from "./migrations/072-forked-context-checkpo
   type: "text",
 }
 import uniqueValuesSql from "./migrations/073-unique-values.sql" with { type: "text" }
-import artifactThreadsSql from "./migrations/074-artifact-threads.sql" with { type: "text" }
+import generatedMediaUsageSql from "./migrations/074-generated-media-usage.sql" with {
+  type: "text",
+}
+import modelCallFilesSql from "./migrations/075-model-call-files.sql" with { type: "text" }
+import artifactThreadsSql from "./migrations/076-artifact-threads.sql" with { type: "text" }

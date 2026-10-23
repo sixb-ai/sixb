@@ -145,6 +145,7 @@ export type {
   AiAccountingAggregate,
   AiAccountingAttribution,
   AiAccountingBucket,
+  AiAccountingKindBreakdown,
   AiAccountingModelBreakdown,
   AiAccountingOverview,
   AiAccountingRange,
@@ -210,6 +211,7 @@ export type {
 } from "./ai-limits"
 export { AiLimitStorageError, aiLimitCalendarMonth, InMemoryAiLimitStorage } from "./ai-limits"
 export type {
+  AiModelCallFilesRecord,
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
@@ -217,9 +219,11 @@ export type {
   AiUsageReportingStatus,
   AiUsageStorage,
   AiUsageStorageErrorCode,
+  GetAiModelCallFilesInput,
   GetLatestAiModelCallForExecutionInput,
   InMemoryAiUsageGroupRow,
   InMemoryAiUsageStorageSnapshot,
+  RecordAiModelCallFilesInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SummarizeAiUsageExecutionInput,

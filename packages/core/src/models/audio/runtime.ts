@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertProviderAccess } from "../../authorization"
+import { assertModelAccess } from "../../authorization"
 import type { BlobStorage } from "../../blob-storage/types"
 import type { ExecutionContext } from "../../execution"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -7,10 +7,11 @@ import type { ModelCatalog } from "../catalog"
 import type { ModelCallEndEvent } from "../events"
 import type { AiModelCallRecorder } from "../execution/model-call-recorder"
 import type { ModelExecutionSession } from "../execution/session"
+import { prepareModelInputFile, readModelInputFile } from "../input-file"
 import { estimateModelCall, type ModelMoney } from "../pricing"
 import { assertTranscriptionModel } from "./catalog"
 import { TranscriptionModelResponseError } from "./errors"
-import { prepareTranscriptionFile, readTranscriptionFile } from "./file"
+import { createSpeak } from "./speech"
 import type {
   AudioModelsRuntime,
   TranscriptionModel,
@@ -26,10 +27,11 @@ export function createAudioRuntime(
   blobs: BlobStorage | undefined
 ): AudioModelsRuntime {
   return {
+    speak: createSpeak(runtime, execution, catalog, session, blobs),
     async transcribe(input) {
-      assertProviderAccess(runtime, execution, "models.audio.transcribe")
+      assertModelAccess(runtime, execution, "models.audio.transcribe")
 
-      const { audio, mediaType } = prepareTranscriptionFile(input.audio)
+      const { file: audio, mediaType } = prepareModelInputFile(input.audio, "audio")
       if (!blobs) {
         throw new Error("[SixbModels] Transcription requires blob storage.")
       }
@@ -54,7 +56,7 @@ export function createAudioRuntime(
       assertFileSupport(model, audio.sizeBytes, mediaType)
 
       signal.throwIfAborted()
-      const bytes = await readTranscriptionFile(blobs, audio, signal)
+      const bytes = await readModelInputFile(blobs, audio, signal)
       accounting.assertHealthy()
 
       const reservationCost = estimateReservationCost(model, bytes.byteLength, mediaType)

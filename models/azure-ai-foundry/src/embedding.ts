@@ -7,9 +7,9 @@ import {
   type EmbeddingModelResponseMetadata,
   type EmbeddingModelResult,
   type JsonObject,
-  type LanguageModelRateCard,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
+  type ModelRateCard,
   type ModelUsage,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
@@ -30,7 +30,7 @@ export interface AzureAIFoundryEmbeddingOptions {
   readonly model: { readonly name: string; readonly version: string }
   /** Expected output size; sent to text-embedding-3 models, validated locally for ada-002. */
   readonly dimensions: number
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly costEstimator?: ModelCostEstimator
 }
 

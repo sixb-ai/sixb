@@ -59,7 +59,7 @@ async function setup(model = createTranscriber()) {
 }
 
 describe("audio transcription", () => {
-  // Removal proof: remove assertProviderAccess from the audio runtime; the protected call succeeds.
+  // Removal proof: remove assertModelAccess from the audio runtime; the protected call succeeds.
   test("denies principal-scoped calls before reading files or invoking a provider", async () => {
     const { host, audio, blobStorage } = await setup()
     let reads = 0
@@ -82,7 +82,7 @@ describe("audio transcription", () => {
     })
 
     await expect(scoped.models.audio.transcribe({ audio })).rejects.toThrow(
-      "not covered by scoped authorization"
+      "not allowed to call the project's models"
     )
     expect(reads).toBe(0)
   })

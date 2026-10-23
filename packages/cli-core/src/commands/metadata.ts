@@ -77,6 +77,12 @@ const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instan
     ""
   )
 
+  // The agent reaches models through its run's gateway once the model routes allow it.
+  .replace(
+    "Files:\n  sixb files upload|download ...\n",
+    "Files:\n  sixb files upload|download ...\n\nModels:\n  sixb models list [--kind <kind>]    Configured models of every kind, with prices\n  sixb models get <model>             One model's options and rate card\n  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help\n"
+  )
+
 export function renderInstanceHelp(mode: "local" | "sandbox"): string {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP
 }
@@ -269,6 +275,28 @@ Options:
 \`users search\` matches part of a display name or email, ignoring case. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  models: `Usage:
+  sixb models list [--kind language|image|speech|transcription]
+  sixb models get <model> [--kind <kind>]
+  sixb models text "<prompt>" [--model <model>] [--instructions <text>]
+                   [--max-output-tokens <n>] [--reasoning <level>]
+  sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
+                    [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
+                    [--seed <n>] [--image <file>]...
+  sixb models speech "<text>" --output <path> [--model <model>] [--voice <voice>]
+                     [--format mp3|wav|ogg|aac|flac] [--instructions <text>]
+                     [--speed <n>] [--language <code>]
+  sixb models transcribe <file> [--model <model>]
+  sixb models calls files <call-id> [--output <path>]
+
+<model> is a model id, or provider:model-id when two providers share one; without --model, the
+kind's default answers. \`list\` shows each model's kind, default, description and price; \`get\`
+adds the sizes, voices and other options a request can use. Prices are in USD.
+
+--output is a file, numbered when a call returns several, or a directory ending in /. The
+extension follows the file's type, and the result lists the paths written. --image uploads a
+reference image; repeat it for several. \`calls files\` lists a past call's files, or downloads
+them again.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>

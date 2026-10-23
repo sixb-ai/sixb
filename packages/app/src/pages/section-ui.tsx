@@ -219,8 +219,9 @@ export function PageSection({
   return (
     <section className="flex flex-col gap-3">
       {title || action ? (
-        <div className="flex items-end justify-between gap-4">
-          <div className="min-w-0">
+        // Narrow screens move the actions below the title rather than squeeze its description.
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <div className="min-w-48 flex-1">
             {title ? (
               <h2 className="text-[0.9375rem] leading-6 font-semibold tracking-[-0.01em]">
                 {title}

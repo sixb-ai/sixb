@@ -1975,6 +1975,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -1991,6 +2007,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2021,6 +2041,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2037,6 +2073,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2069,6 +2109,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2085,6 +2141,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2098,6 +2158,84 @@ export type GetAiAccountingOverviewResponses = {
       }
       providerId: string
       modelId: string
+    }>
+    kinds: Array<{
+      modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+          audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
+        }
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      /**
+       * Absent for calls recorded before their kind was captured.
+       */
+      modelKind?:
+        | "language"
+        | "image"
+        | "video"
+        | "embedding"
+        | "decision"
+        | "transcription"
+        | "speech"
+        | "reranking"
     }>
     agents: Array<
       | {
@@ -2118,6 +2256,22 @@ export type GetAiAccountingOverviewResponses = {
              * Audio content duration in milliseconds; not billed duration.
              */
             audioDurationMs?: number
+            /**
+             * Output tokens that encode generated images, within outputTokens.
+             */
+            imageOutputTokens?: number
+            /**
+             * Output tokens that encode generated audio, within outputTokens.
+             */
+            audioOutputTokens?: number
+            /**
+             * Images the call returned.
+             */
+            outputImages?: number
+            /**
+             * Input characters, counted by the provider's own billing rule.
+             */
+            inputCharacters?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2134,6 +2288,10 @@ export type GetAiAccountingOverviewResponses = {
               textOutputTokens: number
               reasoningOutputTokens: number
               audioDurationMs: number
+              imageOutputTokens: number
+              audioOutputTokens: number
+              outputImages: number
+              inputCharacters: number
             }
           }
           costs: {
@@ -2165,6 +2323,22 @@ export type GetAiAccountingOverviewResponses = {
              * Audio content duration in milliseconds; not billed duration.
              */
             audioDurationMs?: number
+            /**
+             * Output tokens that encode generated images, within outputTokens.
+             */
+            imageOutputTokens?: number
+            /**
+             * Output tokens that encode generated audio, within outputTokens.
+             */
+            audioOutputTokens?: number
+            /**
+             * Images the call returned.
+             */
+            outputImages?: number
+            /**
+             * Input characters, counted by the provider's own billing rule.
+             */
+            inputCharacters?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2181,6 +2355,10 @@ export type GetAiAccountingOverviewResponses = {
               textOutputTokens: number
               reasoningOutputTokens: number
               audioDurationMs: number
+              imageOutputTokens: number
+              audioOutputTokens: number
+              outputImages: number
+              inputCharacters: number
             }
           }
           costs: {
@@ -2215,6 +2393,22 @@ export type GetAiAccountingOverviewResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2231,6 +2425,10 @@ export type GetAiAccountingOverviewResponses = {
           textOutputTokens: number
           reasoningOutputTokens: number
           audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
         }
       }
       costs: {
@@ -2309,6 +2507,7 @@ export type ListAiModelCallsResponses = {
           | "embedding"
           | "decision"
           | "transcription"
+          | "speech"
           | "reranking"
         requestedReasoning?:
           | "provider-default"
@@ -2342,6 +2541,22 @@ export type ListAiModelCallsResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         occurredAt: string
@@ -2401,10 +2616,18 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "tokens.output.image"
+                      | "tokens.output.audio"
                       | "audio.input.milliseconds"
+                      | "images.output"
+                      | "characters.input"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
+                    /**
+                     * The price variant that applied, such as an image size. Display only.
+                     */
+                    variant?: string
                   }>
                 }
               | {
@@ -2425,7 +2648,11 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "tokens.output.image"
+                    | "tokens.output.audio"
                     | "audio.input.milliseconds"
+                    | "images.output"
+                    | "characters.input"
                   >
                 }
             billingIdentity: {
@@ -2466,10 +2693,18 @@ export type ListAiModelCallsResponses = {
                 | "tokens.output.total"
                 | "tokens.output.text"
                 | "tokens.output.reasoning"
+                | "tokens.output.image"
+                | "tokens.output.audio"
                 | "audio.input.milliseconds"
+                | "images.output"
+                | "characters.input"
               quantity: string
               rateAmountNanosPerMillion: string
               chargeAmountNanos: string
+              /**
+               * The price variant that applied, such as an image size. Display only.
+               */
+              variant?: string
             }>
             ratedAt: string
           }
@@ -2494,10 +2729,18 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "tokens.output.image"
+                      | "tokens.output.audio"
                       | "audio.input.milliseconds"
+                      | "images.output"
+                      | "characters.input"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
+                    /**
+                     * The price variant that applied, such as an image size. Display only.
+                     */
+                    variant?: string
                   }>
                 }
               | {
@@ -2518,7 +2761,11 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "tokens.output.image"
+                    | "tokens.output.audio"
                     | "audio.input.milliseconds"
+                    | "images.output"
+                    | "characters.input"
                   >
                 }
             billingIdentity?: {
@@ -2560,7 +2807,11 @@ export type ListAiModelCallsResponses = {
               | "tokens.output.total"
               | "tokens.output.text"
               | "tokens.output.reasoning"
+              | "tokens.output.image"
+              | "tokens.output.audio"
               | "audio.input.milliseconds"
+              | "images.output"
+              | "characters.input"
             >
             ratedAt: string
           }
@@ -3183,7 +3434,13 @@ export type ListAiModelCallGroupsResponses = {
             parentRunId: string
           }
       modelCallCount: number
+      /**
+       * Present when every call that reports tokens did; images and speech don't.
+       */
       totalTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
       costs: {
         amounts: Array<{
           currency: string
@@ -3231,7 +3488,13 @@ export type ListAiModelCallGroupsResponses = {
               parentRunId: string
             }
         modelCallCount: number
+        /**
+         * Present when every call that reports tokens did; images and speech don't.
+         */
         totalTokens?: number
+        outputImages?: number
+        inputCharacters?: number
+        audioDurationMs?: number
         costs: {
           amounts: Array<{
             currency: string
@@ -3258,6 +3521,605 @@ export type ListAiModelCallGroupsResponses = {
 
 export type ListAiModelCallGroupsResponse =
   ListAiModelCallGroupsResponses[keyof ListAiModelCallGroupsResponses]
+
+export type GetAiModelCallFilesData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query?: never
+  url: "/api/ai/model-calls/{callId}/files"
+}
+
+export type GetAiModelCallFilesErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAiModelCallFilesError = GetAiModelCallFilesErrors[keyof GetAiModelCallFilesErrors]
+
+export type GetAiModelCallFilesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    recordedAt: string
+  }
+}
+
+export type GetAiModelCallFilesResponse =
+  GetAiModelCallFilesResponses[keyof GetAiModelCallFilesResponses]
+
+export type GetAiModelCallFileContentData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/ai/model-calls/{callId}/files/content"
+}
+
+export type GetAiModelCallFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetAiModelCallFileContentError =
+  GetAiModelCallFileContentErrors[keyof GetAiModelCallFileContentErrors]
+
+export type GetAiModelCallFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetAiModelCallFileContentResponse =
+  GetAiModelCallFileContentResponses[keyof GetAiModelCallFileContentResponses]
+
+export type HeadAiModelCallFileContentData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/ai/model-calls/{callId}/files/content"
+}
+
+export type HeadAiModelCallFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadAiModelCallFileContentError =
+  HeadAiModelCallFileContentErrors[keyof HeadAiModelCallFileContentErrors]
+
+export type HeadAiModelCallFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
+export type GenerateTextData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    prompt: string
+    instructions?: string
+    maxOutputTokens?: number
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
+  }
+  path?: never
+  query?: never
+  url: "/api/models/language/generations"
+}
+
+export type GenerateTextErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateTextError = GenerateTextErrors[keyof GenerateTextErrors]
+
+export type GenerateTextResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    text: string
+    finishReason: string
+  }
+}
+
+export type GenerateTextResponse = GenerateTextResponses[keyof GenerateTextResponses]
+
+export type GenerateImagesData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    prompt: string
+    n?: number
+    size?: string
+    aspectRatio?: string
+    quality?: string
+    style?: string
+    seed?: number
+    images?: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+  }
+  path?: never
+  query?: never
+  url: "/api/models/image/generations"
+}
+
+export type GenerateImagesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateImagesError = GenerateImagesErrors[keyof GenerateImagesErrors]
+
+export type GenerateImagesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+  }
+}
+
+export type GenerateImagesResponse = GenerateImagesResponses[keyof GenerateImagesResponses]
+
+export type GenerateSpeechData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    text: string
+    voice?: string
+    instructions?: string
+    mediaType?: string
+    speed?: number
+    language?: string
+  }
+  path?: never
+  query?: never
+  url: "/api/models/audio/speech"
+}
+
+export type GenerateSpeechErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type GenerateSpeechError = GenerateSpeechErrors[keyof GenerateSpeechErrors]
+
+export type GenerateSpeechResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    warnings: Array<string>
+  }
+}
+
+export type GenerateSpeechResponse = GenerateSpeechResponses[keyof GenerateSpeechResponses]
+
+export type TranscribeAudioData = {
+  body: {
+    model?: {
+      provider: string
+      modelId: string
+    }
+    audio: {
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }
+  }
+  path?: never
+  query?: never
+  url: "/api/models/audio/transcriptions"
+}
+
+export type TranscribeAudioErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+  }
+}
+
+export type TranscribeAudioError = TranscribeAudioErrors[keyof TranscribeAudioErrors]
+
+export type TranscribeAudioResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    model: {
+      provider: string
+      modelId: string
+    }
+    usage: {
+      inputTokens?: number
+      outputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      imageOutputTokens?: number
+      audioOutputTokens?: number
+      outputImages?: number
+      inputCharacters?: number
+      audioDurationMs?: number
+    }
+    cost: {
+      status: "reported" | "rated" | "unpriceable"
+      money?: {
+        currency: "USD"
+        amountNanos: string
+      }
+      reason?: string
+    }
+    text: string
+  }
+}
+
+export type TranscribeAudioResponse = TranscribeAudioResponses[keyof TranscribeAudioResponses]
 
 export type GetProjectInfoData = {
   body?: never
@@ -6989,6 +7851,22 @@ export type GetWorkflowRunResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -7065,6 +7943,22 @@ export type GetWorkflowAgentNodeExecutionResponses = {
        * Audio content duration in milliseconds; not billed duration.
        */
       audioDurationMs?: number
+      /**
+       * Output tokens that encode generated images, within outputTokens.
+       */
+      imageOutputTokens?: number
+      /**
+       * Output tokens that encode generated audio, within outputTokens.
+       */
+      audioOutputTokens?: number
+      /**
+       * Images the call returned.
+       */
+      outputImages?: number
+      /**
+       * Input characters, counted by the provider's own billing rule.
+       */
+      inputCharacters?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -7492,6 +8386,22 @@ export type CancelWorkflowRunResponses = {
            * Audio content duration in milliseconds; not billed duration.
            */
           audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -11460,6 +12370,22 @@ export type PostAgentThreadMessageResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11722,6 +12648,22 @@ export type CancelAgentRunResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11901,6 +12843,22 @@ export type RetryAgentRunResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -12047,6 +13005,22 @@ export type ListAgentThreadRunsResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -12190,6 +13164,22 @@ export type GetAgentRunResponses = {
        * Audio content duration in milliseconds; not billed duration.
        */
       audioDurationMs?: number
+      /**
+       * Output tokens that encode generated images, within outputTokens.
+       */
+      imageOutputTokens?: number
+      /**
+       * Output tokens that encode generated audio, within outputTokens.
+       */
+      audioOutputTokens?: number
+      /**
+       * Images the call returned.
+       */
+      outputImages?: number
+      /**
+       * Input characters, counted by the provider's own billing rule.
+       */
+      inputCharacters?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -12781,6 +13771,22 @@ export type ListObservedAgentThreadRunsResponses = {
          * Audio content duration in milliseconds; not billed duration.
          */
         audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -14502,7 +15508,541 @@ export type ListModelsResponses = {
         | "high"
         | "xhigh"
         | "max"
+      /**
+       * USD. Token and character prices are per million; images per image; audio per second.
+       */
+      rateCard?: {
+        currency: "USD"
+        input?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        output?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheReadInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput5m?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput1h?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        imageOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        audioOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        images?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        characters?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        audioInputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+      }
     }>
+    image: Array<{
+      provider: string
+      modelId: string
+      isDefault: boolean
+      name: string
+      description?: string
+      via?: string
+      /**
+       * USD. Token and character prices are per million; images per image; audio per second.
+       */
+      rateCard?: {
+        currency: "USD"
+        input?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        output?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheReadInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput5m?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput1h?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        imageOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        audioOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        images?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        characters?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        audioInputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+      }
+      maxImagesPerCall?: number
+      sizes?: Array<string>
+      aspectRatios?: Array<string>
+      qualities?: Array<string>
+      styles?: Array<string>
+      /**
+       * Reference images the model takes for edits; absent when it takes none.
+       */
+      inputImages?: {
+        maxCount: number
+        maxBytes: number
+        mediaTypes?: Array<string>
+      }
+    }>
+    audio: {
+      speech: Array<{
+        provider: string
+        modelId: string
+        isDefault: boolean
+        name: string
+        description?: string
+        via?: string
+        /**
+         * USD. Token and character prices are per million; images per image; audio per second.
+         */
+        rateCard?: {
+          currency: "USD"
+          input?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          output?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheReadInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput5m?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput1h?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          imageOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          audioOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          images?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          characters?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          audioInputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+        }
+        defaultVoice?: string
+        voices?: Array<string>
+        outputMediaTypes?: Array<string>
+        maxInputCharacters?: number
+        instructions?: boolean
+      }>
+      transcription: Array<{
+        provider: string
+        modelId: string
+        isDefault: boolean
+        name: string
+        description?: string
+        via?: string
+        /**
+         * USD. Token and character prices are per million; images per image; audio per second.
+         */
+        rateCard?: {
+          currency: "USD"
+          input?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          output?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheReadInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput5m?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput1h?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          imageOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          audioOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          images?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          characters?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          audioInputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+        }
+        maxInputBytes: number
+        mediaTypes?: Array<string>
+      }>
+    }
   }
 }
 

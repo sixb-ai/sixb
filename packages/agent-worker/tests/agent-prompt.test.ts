@@ -347,6 +347,37 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("Available Agent Skills")
   })
 
+  // Removal proof: return [] from renderModelCommands; the image command is missing.
+  test("names one command per media model kind the project configures, and none otherwise", () => {
+    const base = { mode: "conversation", skills: [] } as const
+    const prompt = renderAgentSystemPrompt({
+      ...base,
+      sandboxModels: [
+        { kind: "image", modelId: "bfl/flux-3-image-klein", description: "Fast illustrations" },
+        {
+          kind: "image",
+          modelId: "google/gemini-3.1-flash-lite-image",
+          description: "Edits photos",
+        },
+        { kind: "transcription", modelId: "openai/gpt-4o-transcribe" },
+      ],
+    })
+
+    expect(prompt).toContain("pick the model whose description fits the task")
+    expect(prompt).toContain(
+      '`sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`'
+    )
+    expect(prompt).toContain(
+      "- bfl/flux-3-image-klein: Fast illustrations\n- google/gemini-3.1-flash-lite-image: Edits photos"
+    )
+    expect(prompt).toContain(
+      "`sixb models transcribe <audio-file> --model <id>`.\n- openai/gpt-4o-transcribe\n"
+    )
+    expect(prompt).not.toContain("sixb models speech")
+    expect(prompt).toContain("Each call is billed")
+    expect(renderAgentSystemPrompt(base)).not.toContain("sixb models")
+  })
+
   test("lists the ontology files it is given and tells the agent to read them first", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

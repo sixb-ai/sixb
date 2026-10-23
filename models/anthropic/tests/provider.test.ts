@@ -1275,6 +1275,9 @@ describe("Anthropic provider", () => {
     expect(
       serverToolModel.costEstimator?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
     ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
+    // The binding shows the card it prices with, and none where server tools make it unknown.
+    expect(model.rateCard).toMatchObject({ currency: "USD", input: expect.any(String) })
+    expect(serverToolModel.rateCard).toBeUndefined()
     expect(requests).toBe(0)
   })
 

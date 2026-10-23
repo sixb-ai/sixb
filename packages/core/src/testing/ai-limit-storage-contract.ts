@@ -539,7 +539,7 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
 
     // Removal proof: drop aiLimitMeterApplies from a provider's reserve loop (admission reports
     // missingEstimate) or from resolveAiLimitActual (the meter becomes unavailable).
-    test("token limits neither admit nor count transcription and reranking", async () => {
+    test("token limits neither admit nor count tokenless model kinds", async () => {
       await withStorage(async (storage) => {
         const status = async () =>
           (
@@ -570,11 +570,13 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
           meter: "cost.catalogEstimated",
           amount: { currency: "USD", amountNanos: "100" },
         }
-        await expect(
-          storage.aiLimits.reserveModelCall(
-            reservation("reranking", 0, { estimates: [cost], modelKind: "reranking" })
-          )
-        ).resolves.toEqual({ status: "notRequired" })
+        for (const modelKind of ["reranking", "image", "speech"] as const) {
+          await expect(
+            storage.aiLimits.reserveModelCall(
+              reservation(modelKind, 0, { estimates: [cost], modelKind })
+            )
+          ).resolves.toEqual({ status: "notRequired" })
+        }
         await expect(
           storage.aiLimits.reserveModelCall(reservation("language", 0, { estimates: [cost] }))
         ).resolves.toMatchObject({ status: "unavailable", reasons: ["missingEstimate"] })

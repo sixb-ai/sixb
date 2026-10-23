@@ -188,28 +188,54 @@ export function periodTokens(
   return period.modelCallCount === 0 ? 0 : period.usage[key]
 }
 
+// Billed per image, character, audio second or search: these calls mostly report no tokens.
+const tokenlessKinds: ReadonlySet<string> = new Set([
+  "image",
+  "speech",
+  "transcription",
+  "reranking",
+])
+
 /**
- * One meter as a share of another, only when both cover every call: equal reporting counts could
- * still describe different calls.
+ * The calls a token count is owed by: every call of a token-billed kind, and the tokenless calls
+ * that reported tokens anyway. Calls recorded before kinds were kept count as token-billed.
+ */
+export function tokenBilledCalls(overview: Pick<Overview, "kinds" | "totals">): number {
+  if (overview.kinds.length === 0) return overview.totals.modelCallCount
+  return overview.kinds.reduce(
+    (calls, kind) =>
+      calls +
+      (kind.modelKind !== undefined && tokenlessKinds.has(kind.modelKind)
+        ? kind.usageCoverage.completeCallCount
+        : kind.modelCallCount),
+    0
+  )
+}
+
+/**
+ * One meter as a share of another, only when both cover every call that owes them: equal
+ * reporting counts could still describe different calls.
  */
 export function usageShare(
   aggregate: Aggregate,
   numerator: UsageField,
-  denominator: UsageField
+  denominator: UsageField,
+  expected = aggregate.modelCallCount
 ): number | undefined {
   const counts = aggregate.usageCoverage.fieldCallCounts
-  if (counts[numerator] !== aggregate.modelCallCount) return undefined
-  if (counts[denominator] !== aggregate.modelCallCount) return undefined
+  if (counts[numerator] !== expected) return undefined
+  if (counts[denominator] !== expected) return undefined
   const top = aggregate.usage[numerator]
   const bottom = aggregate.usage[denominator]
   if (top === undefined || bottom === undefined || bottom === 0) return undefined
   return (top / bottom) * 100
 }
 
-/** How completely calls reported their usage: every call, some, or none. */
+/** How completely the calls that owe usage reported it: every one, some, or none. */
 export function reportingCoverage(
   aggregate: Aggregate,
-  field?: UsageField
+  field?: UsageField,
+  expected = aggregate.modelCallCount
 ): { readonly status: "complete" | "partial" | "unavailable"; readonly count: number } {
   const count = field
     ? aggregate.usageCoverage.fieldCallCounts[field]
@@ -218,7 +244,7 @@ export function reportingCoverage(
     ? aggregate.usage[field] !== undefined
     : aggregate.usage.totalTokens !== undefined
   return {
-    status: count === aggregate.modelCallCount ? "complete" : available ? "partial" : "unavailable",
+    status: count >= expected ? "complete" : available ? "partial" : "unavailable",
     count,
   }
 }
@@ -245,6 +271,33 @@ export function formatCompact(value: number | undefined, locale = "en"): string 
   return value === undefined
     ? "—"
     : new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value)
+}
+
+/** A duration as people say it: "1.25 s", "21 min 25 s", "1 h 4 min". */
+export function formatDuration(
+  milliseconds: number,
+  units: {
+    readonly seconds: (value: string) => string
+    readonly minutes: (minutes: string, seconds: string) => string
+    readonly hours: (hours: string, minutes: string) => string
+  },
+  locale = "en"
+): string {
+  const seconds = milliseconds / 1000
+  if (seconds < 60) {
+    return units.seconds(seconds.toLocaleString(locale, { maximumFractionDigits: 2 }))
+  }
+  const whole = Math.round(seconds)
+  if (whole < 3600) {
+    return units.minutes(
+      Math.floor(whole / 60).toLocaleString(locale),
+      (whole % 60).toLocaleString(locale)
+    )
+  }
+  return units.hours(
+    Math.floor(whole / 3600).toLocaleString(locale),
+    Math.floor((whole % 3600) / 60).toLocaleString(locale)
+  )
 }
 
 export function formatPercent(value: number | undefined, locale = "en"): string {

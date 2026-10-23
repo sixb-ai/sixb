@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision and reranking calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking, image and speech calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -64,8 +64,8 @@ and ranking validation. A complete permutation with finite scores is required; t
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
 Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
-neither admit nor count reranking or transcription calls (`aiLimitMeterApplies` in the limit
-storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
+neither admit nor count reranking, transcription, image or speech calls (`aiLimitMeterApplies` in
+the limit storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
 costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
 remains the existing accounting-only replay.
 
@@ -83,3 +83,30 @@ must preserve their actual output-token meters even when their output price is z
 `DecisionModelResponseError` carries accounting metadata when protocol translation fails after
 a billable response. Other errors retain unknown usage. Recovery replays accounting, never
 inference. Decision-only projects use the existing recovery worker without an agent sandbox.
+
+## Image flow
+
+Image generation in `../image/runtime.ts` snapshots the request, resolves only a permitted catalog
+binding and checks it against the definition's sizes, counts and reference-image limits before
+reading any file. Reference images are read with the same size and digest checks as transcription
+audio (`../input-file.ts`).
+
+Admission reserves the binding's `estimateReservation`, keyed by the request's size, quality and
+style; without one, cost limits refuse the call. The call is recorded before its images are
+validated or written: `outputImages` is the number the provider actually returned, whatever its
+own usage says, and the same dimensions select the rate-card variant. Generated images are written
+to blob storage only after accounting, so a cancelled call is billed but stores nothing. Once
+written, they are recorded against the call ID (`aiUsage.recordModelCallFiles`), which is how a
+caller outside the process reads them back; the execution that made the call decides who may.
+
+## Speech flow
+
+Speech generation in `../audio/speech.ts` follows the image flow. A request without a voice takes
+the binding's `defaultVoice`, and voice, format, length and instructions are checked against the
+definition before admission. Sixb never transcodes: a reply in a format other than the one requested
+is an invalid response, recorded but not stored.
+
+Characters and voice tiers are provider rules, so the binding owns both: `estimateReservation`
+receives the text and voice and counts characters itself, providers report `inputCharacters` in
+usage, and `pricingDimensions` in the reply names the tier the provider billed, which selects the
+rate-card variant.

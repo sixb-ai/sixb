@@ -22,6 +22,8 @@ import { registerFileDownloadRoutes } from "./routes/file-downloads"
 import { registerFileRoutes } from "./routes/files"
 import { registerLinkRoutes } from "./routes/links"
 import { registerLogRoutes } from "./routes/logs"
+import { registerModelCallRoutes } from "./routes/model-calls"
+import { registerModelGenerationRoutes } from "./routes/model-generations"
 import { registerModelRoutes } from "./routes/models"
 import { registerObjectRoutes } from "./routes/objects"
 import { registerObservedAgentThreadRoutes } from "./routes/observed-agent-threads"
@@ -49,6 +51,8 @@ export interface HttpRouteOptions {
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
   registerAgentApiGatewayRoutes(app, host)
   registerAiAccountingRoutes(app, host)
+  registerModelCallRoutes(app, host)
+  registerModelGenerationRoutes(app, host)
   registerProjectRoutes(app, host)
   registerStatusRoutes(app, host)
   registerConnectorRoutes(app, host)

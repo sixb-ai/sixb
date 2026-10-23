@@ -22,6 +22,7 @@ export type GrantKind =
   | "run:sync"
   | "run:pipeline"
   | "run:agent"
+  | "run:models"
   | "observe:logs"
   | "observe:aiUsage"
   | "observe:activity"
@@ -33,6 +34,7 @@ export type GrantKind =
 export type SingletonGrantKind =
   | "view:users"
   | "run:agent"
+  | "run:models"
   | "observe:logs"
   | "observe:aiUsage"
   | "observe:activity"
@@ -142,6 +144,11 @@ export const GRANT_KINDS: {
     subject: "agent",
     fix: "Configure models.language and use the exported agent reference in can.run(agent).",
   },
+  "run:models": {
+    singleton: true,
+    subject: "models",
+    fix: "Use can.run(project.models).",
+  },
   "observe:logs": {
     singleton: true,
     subject: "logs",
@@ -226,6 +233,7 @@ export function emptyGrantSets(): MutableGrantIndex {
     "run:sync": new Set(),
     "run:pipeline": new Set(),
     "run:agent": false,
+    "run:models": false,
     "observe:logs": false,
     "observe:aiUsage": false,
     "observe:activity": false,

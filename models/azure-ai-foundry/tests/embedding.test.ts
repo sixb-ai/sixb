@@ -340,7 +340,7 @@ test("explicit pricing can rate a model absent from the public catalog", async (
   const options: AzureAIFoundryEmbeddingOptions = {
     model: f.identity,
     dimensions: 2,
-    rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "0" },
+    rateCard: { currency: "USD", input: "1", output: "0" },
   }
   const model = await f.provider.embedding("products", options).resolve()
   const result = await model.embed({ texts: ["x"] })

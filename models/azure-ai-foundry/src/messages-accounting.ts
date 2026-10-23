@@ -1,10 +1,5 @@
-import type {
-  JsonObject,
-  LanguageModelRateCard,
-  ModelCostEstimator,
-  ModelUsage,
-} from "@sixb/core/models"
-import { tokenEstimator } from "./accounting"
+import type { JsonObject, ModelCostEstimator, ModelRateCard, ModelUsage } from "@sixb/core/models"
+import { type PricedEstimator, tokenEstimator } from "./accounting"
 import { counter, object } from "./util"
 
 /** Native Messages counters are additive; absent cache/thinking counters stay unknown. */
@@ -40,12 +35,12 @@ export function foundryMessagesUsage(raw: JsonObject): ModelUsage {
 }
 
 export function foundryMessagesEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   const estimator = tokenEstimator(
     card,
     request,

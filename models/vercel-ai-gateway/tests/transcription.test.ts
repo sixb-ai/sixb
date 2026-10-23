@@ -79,6 +79,7 @@ test("invalid transcript retains provider billing and duration", async () => {
 test("per-second catalog pricing is a pinned estimate, with unknown durations preserved", async () => {
   const gateway = createVercelGateway({ fetch: async () => Response.json(catalog) })
   const model = await gateway.transcription("test/transcribe").resolve!()
+  expect(model.rateCard).toEqual({ currency: "USD", audioInputSeconds: "0.0001" })
 
   const estimate = model.costEstimator?.estimate({ usage: { audioDurationMs: 1250 } })
 

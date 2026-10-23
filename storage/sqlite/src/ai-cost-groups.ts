@@ -3,6 +3,7 @@ import {
   aiModelCallGroupFragmentFromRow,
   buildAiModelCallGroupsFromFragments,
   normalizeAiModelCallAccountingQuery,
+  TOKENLESS_MODEL_KINDS,
 } from "@sixb/core/internal/ai-cost-storage-provider"
 import type { ListAiModelCallGroupsInput, ListAiModelCallGroupsResult } from "@sixb/core/storage"
 import type { SqliteStoreConnection } from "./transactions"
@@ -32,11 +33,15 @@ export async function listAiModelCallGroups(
   return { items, total, hasMore: query.offset + items.length < total }
 }
 
+// Fixed kind names, never user input.
+const TOKENLESS_KINDS = TOKENLESS_MODEL_KINDS.map((kind) => `'${kind}'`).join(", ")
+
 const FILTERED_SQL = `
 WITH filtered AS (
   SELECT COALESCE(root_agent.execution_id, usage.execution_id) AS root_execution_id,
     usage.execution_id, usage.provider_id, usage.requested_model_id, usage.occurred_at,
-    usage.total_tokens,
+    usage.total_tokens, usage.model_kind, usage.output_images, usage.input_characters,
+    usage.audio_duration_ms,
     execution.executor_kind, execution.executor_id, execution.authority_primitive_id AS primitive_id,
     COALESCE(cost.status, 'unvalued') AS valuation_status,
     cost.currency AS amount_currency, cost.amount_nanos,
@@ -82,7 +87,12 @@ SELECT filtered.root_execution_id, execution_id, provider_id, requested_model_id
   MIN(occurred_at) AS first_call_at, MAX(occurred_at) AS last_call_at,
   CAST(COUNT(*) AS TEXT) AS call_count,
   CAST(COUNT(total_tokens) AS TEXT) AS token_count,
+  CAST(COUNT(CASE WHEN total_tokens IS NULL AND model_kind IN (${TOKENLESS_KINDS}) THEN 1 END) AS TEXT)
+    AS tokenless_count,
   CAST(SUM(total_tokens) AS TEXT) AS total_tokens,
+  CAST(SUM(output_images) AS TEXT) AS output_images,
+  CAST(SUM(input_characters) AS TEXT) AS input_characters,
+  CAST(SUM(audio_duration_ms) AS TEXT) AS audio_duration_ms,
   valuation_status, amount_currency,
   CAST(SUM(amount_nanos / 1000000000000) AS TEXT) AS amount_high,
   CAST(SUM((amount_nanos / 1000000) % 1000000) AS TEXT) AS amount_middle,

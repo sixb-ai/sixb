@@ -57,6 +57,14 @@ export interface ModelUsage {
   readonly cacheWrite1hInputTokens?: number
   readonly textOutputTokens?: number
   readonly reasoningOutputTokens?: number
+  /** Output tokens that encode generated images, within outputTokens. */
+  readonly imageOutputTokens?: number
+  /** Output tokens that encode generated audio, within outputTokens. */
+  readonly audioOutputTokens?: number
+  /** Images the call returned. */
+  readonly outputImages?: number
+  /** Input characters, counted by the provider's own billing rule. */
+  readonly inputCharacters?: number
   readonly raw?: JsonObject
 }
 

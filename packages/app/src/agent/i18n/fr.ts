@@ -258,6 +258,15 @@ export const fr: Translation<AgentMessages> = {
     moreSources: (more) => `Afficher ${count(more, "autre source", "autres sources")}`,
     moreSourcesChip: (more) => `+${count(more, "source")}`,
   },
+  modelMedia: {
+    from: (names) => `À partir de ${names}`,
+    openImage: "Ouvrir l’image",
+    play: "Lire",
+    pause: "Pause",
+    expired: "Ce résultat n’est plus disponible.",
+    more: "Afficher plus",
+    less: "Afficher moins",
+  },
   viewFile: {
     title: (name) => (name ? `${name} consulté` : "Fichier consulté"),
     running: (name) => (name ? `Consultation de ${name}` : "Consultation d’un fichier"),
@@ -448,6 +457,26 @@ export const fr: Translation<AgentMessages> = {
     },
     upload: { title: "Fichier téléversé", running: "Téléversement d’un fichier" },
     download: { title: "Fichier téléchargé", running: "Téléchargement d’un fichier" },
+    models: {
+      title: "Modèles disponibles consultés",
+      running: "Consultation des modèles disponibles",
+    },
+    askModel: { title: "Autre modèle consulté", running: "Consultation d’un autre modèle" },
+    makeImage: {
+      title: (images) => (images > 1 ? `${images} images créées` : "Image créée"),
+      running: (images) => (images > 1 ? `Création de ${images} images` : "Création d’une image"),
+    },
+    editImage: {
+      title: (images) => (images > 1 ? `${images} versions d’une image créées` : "Image modifiée"),
+      running: (images) =>
+        images > 1 ? `Création de ${images} versions d’une image` : "Modification d’une image",
+    },
+    makeSpeech: { title: "Clip vocal créé", running: "Création d’un clip vocal" },
+    transcribe: { title: "Audio transcrit", running: "Transcription de l’audio" },
+    reopenCall: {
+      title: "Résultat précédent ouvert",
+      running: "Ouverture d’un résultat précédent",
+    },
     project: {
       title: "Informations du projet consultées",
       running: "Lecture des informations du projet",

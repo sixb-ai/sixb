@@ -29,6 +29,10 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.output.text": 7,
   "tokens.output.reasoning": 8,
   "audio.input.milliseconds": 9,
+  "tokens.output.image": 10,
+  "tokens.output.audio": 11,
+  "images.output": 12,
+  "characters.input": 13,
 }
 const METERS = new Set(Object.keys(METER_ORDER) as AiBillableMeter[])
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
@@ -133,17 +137,26 @@ export function aiModelCallCostMatchesUsage(
   return componentsMatchUsage(components, usage)
 }
 
+const UNIT_METERS = [
+  ["audio.input.milliseconds", "audioDurationMs"],
+  ["characters.input", "inputCharacters"],
+  ["images.output", "outputImages"],
+] as const
+
 function componentsMatchUsage(
   components: ReadonlyMap<AiBillableMeter, AiCostComponent>,
   usage: AiModelCallUsage
 ): boolean {
-  const audio = components.get("audio.input.milliseconds")
-  if (audio) {
-    return (
-      components.size === 1 &&
-      usage.audioDurationMs !== undefined &&
-      BigInt(audio.quantity) === BigInt(usage.audioDurationMs)
-    )
+  for (const [meter, field] of UNIT_METERS) {
+    const component = components.get(meter)
+    const expected = usage[field]
+    if (component && (expected === undefined || BigInt(component.quantity) !== BigInt(expected))) {
+      return false
+    }
+  }
+  // A call billed only by units carries no token components.
+  if (![...components.keys()].some((meter) => meter.startsWith("tokens."))) {
+    return components.size > 0
   }
 
   return (
@@ -203,18 +216,28 @@ function outputComponentsMatchUsage(
 ): boolean {
   if (usage.outputTokens === undefined) return false
   const total = components.get("tokens.output.total")
+  // Per-image prices cover the image tokens of a call that returned images.
+  const images = components.get("images.output")
+  const covered = images && BigInt(images.quantity) > 0n ? usage.imageOutputTokens : 0
+  if (covered === undefined) return false
   const partitions = [
     ["tokens.output.text", usage.textOutputTokens],
     ["tokens.output.reasoning", usage.reasoningOutputTokens],
+    ["tokens.output.image", usage.imageOutputTokens],
+    ["tokens.output.audio", usage.audioOutputTokens],
   ] as const
   const presentPartitions = partitions.filter(([meter]) => components.has(meter))
 
   if (total) {
-    return presentPartitions.length === 0 && BigInt(total.quantity) === BigInt(usage.outputTokens)
+    return (
+      presentPartitions.length === 0 &&
+      covered === 0 &&
+      BigInt(total.quantity) === BigInt(usage.outputTokens)
+    )
   }
-  if (presentPartitions.length === 0) return false
+  if (presentPartitions.length === 0 && covered === 0) return false
 
-  let quantity = 0n
+  let quantity = BigInt(covered)
   for (const [meter, expected] of presentPartitions) {
     if (expected === undefined) return false
     const component = components.get(meter)!
@@ -271,7 +294,8 @@ export function normalizeAiCostEstimate(value: unknown): AiCostEstimate {
           !meter ||
           typeof component.quantity !== "string" ||
           typeof component.rateAmountNanosPerMillion !== "string" ||
-          typeof component.chargeAmountNanos !== "string"
+          typeof component.chargeAmountNanos !== "string" ||
+          (component.variant !== undefined && typeof component.variant !== "string")
         )
           throw new TypeError("[Sixb] Invalid cost estimate component.")
         return normalizeCostComponent({
@@ -279,6 +303,7 @@ export function normalizeAiCostEstimate(value: unknown): AiCostEstimate {
           quantity: component.quantity,
           rateAmountNanosPerMillion: component.rateAmountNanosPerMillion,
           chargeAmountNanos: component.chargeAmountNanos,
+          ...(component.variant === undefined ? {} : { variant: component.variant }),
         })
       })
       .sort(compareComponents)
@@ -365,7 +390,9 @@ function normalizeCostComponent(input: AiCostComponent): AiCostComponent {
   if (expected.chargeAmountNanos !== input.chargeAmountNanos) {
     throw new TypeError(`[Sixb] AI cost component '${input.meter}' charge is invalid.`)
   }
-  return expected
+  if (input.variant === undefined) return expected
+  assertNonBlank(input.variant, `cost component '${input.meter}' variant`)
+  return { ...expected, variant: input.variant }
 }
 
 function calculateComponent(

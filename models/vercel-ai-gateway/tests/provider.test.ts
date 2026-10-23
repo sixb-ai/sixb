@@ -1599,6 +1599,27 @@ describe("Vercel AI Gateway provider", () => {
         },
       })
     ).toMatchObject({ status: "rated", money: { amountNanos: "500040000" } })
+    // A resolved binding shows the card it prices with; routing overrides show none.
+    expect(gateway("creator/reasoner").rateCard).toBeUndefined()
+    expect((await gateway("creator/reasoner").resolve?.())?.rateCard).toEqual({
+      currency: "USD",
+      input: {
+        default: "1",
+        tiers: [
+          { minTokens: 0, maxTokens: 100_000, price: "1" },
+          { minTokens: 100_000, price: "2.5" },
+        ],
+      },
+      output: "4",
+      cacheReadInput: "0.1",
+    })
+    expect(
+      (
+        await gateway("creator/reasoner", {
+          providerOptions: { gateway: { models: ["other/model"] } },
+        }).resolve?.()
+      )?.rateCard
+    ).toBeUndefined()
     expect(requests).toBe(1)
     await gateway.catalog.refresh()
     expect(requests).toBe(2)

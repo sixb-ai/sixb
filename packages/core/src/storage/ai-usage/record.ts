@@ -1,8 +1,16 @@
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
+import { isValidFileRef } from "../../blob-storage/validation"
 import { assertJsonValue, isPlainRecord } from "../../json"
+import { MODEL_KINDS } from "../../models/definitions"
 import { normalizeModelProviderIds } from "../../models/events"
 import { isModelReasoning } from "../../models/language-model"
-import type { AiModelCallUsageRecord, RecordAiModelCallInput } from "./types"
+import { AiUsageStorageError } from "./errors"
+import type {
+  AiModelCallFilesRecord,
+  AiModelCallUsageRecord,
+  RecordAiModelCallFilesInput,
+  RecordAiModelCallInput,
+} from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
 /** Validate and defensively snapshot one provider-neutral model-call ledger input. */
@@ -19,12 +27,7 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   }
   assertNonBlank(input.responseId, "responseId")
 
-  if (
-    input.modelKind !== undefined &&
-    !["language", "image", "video", "embedding", "decision", "transcription", "reranking"].includes(
-      input.modelKind
-    )
-  ) {
+  if (input.modelKind !== undefined && !MODEL_KINDS.includes(input.modelKind)) {
     throw new TypeError("[Sixb] AI model kind is invalid.")
   }
   const occurredAt = cloneValidDate(input.occurredAt, "occurredAt")
@@ -54,6 +57,40 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
     occurredAt,
     recordedAt,
   }
+}
+
+/** Validate and defensively snapshot the files one model call produced. */
+export function normalizeAiModelCallFilesRecord(
+  input: RecordAiModelCallFilesInput
+): AiModelCallFilesRecord {
+  assertNonBlank(input.projectId, "projectId")
+  assertAiUsageExecutionId(input.executionId)
+  assertNonBlank(input.callId, "callId")
+  if (!Array.isArray(input.files) || input.files.length === 0) {
+    throw new TypeError("[Sixb] AI model-call files must be a nonempty array.")
+  }
+  if (!input.files.every(isValidFileRef)) {
+    throw new TypeError("[Sixb] AI model-call files must be valid FileRefs.")
+  }
+  return {
+    projectId: input.projectId,
+    executionId: input.executionId,
+    callId: input.callId,
+    files: structuredClone(input.files),
+    recordedAt: cloneValidDate(input.recordedAt ?? new Date(), "recordedAt"),
+  }
+}
+
+/** A call's files belong to the execution that first recorded them. */
+export function assertSameCallExecution(
+  existing: AiModelCallFilesRecord,
+  input: Pick<AiModelCallFilesRecord, "executionId" | "callId">
+): AiModelCallFilesRecord {
+  if (existing.executionId === input.executionId) return existing
+  throw new AiUsageStorageError(
+    "duplicate_id",
+    `[Sixb] AI model call '${input.callId}' already has files from another execution.`
+  )
 }
 
 function cloneRequestedReasoning(

@@ -229,6 +229,7 @@ export async function runModelLoop(
           : estimate
         await input.onModelCallEnd?.({
           callId,
+          modelKind: "language",
           providerId: input.model.providerId,
           modelId: input.model.modelId,
           responseId: facts.responseId ?? `${callId}:response`,

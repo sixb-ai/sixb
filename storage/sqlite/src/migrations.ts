@@ -283,7 +283,9 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("069-agent-thread-participants", agentThreadParticipantsSql),
     sqliteSql("070-forked-context-checkpoints", forkedContextCheckpointsSql),
     sqliteSql("071-unique-values", uniqueValuesSql),
-    sqliteSql("072-artifact-threads", artifactThreadsSql),
+    sqliteSql("072-generated-media-usage", generatedMediaUsageSql),
+    sqliteSql("073-model-call-files", modelCallFilesSql),
+    sqliteSql("074-artifact-threads", artifactThreadsSql),
   ],
 })
 
@@ -650,4 +652,8 @@ import forkedContextCheckpointsSql from "./migrations/070-forked-context-checkpo
   type: "text",
 }
 import uniqueValuesSql from "./migrations/071-unique-values.sql" with { type: "text" }
-import artifactThreadsSql from "./migrations/072-artifact-threads.sql" with { type: "text" }
+import generatedMediaUsageSql from "./migrations/072-generated-media-usage.sql" with {
+  type: "text",
+}
+import modelCallFilesSql from "./migrations/073-model-call-files.sql" with { type: "text" }
+import artifactThreadsSql from "./migrations/074-artifact-threads.sql" with { type: "text" }
