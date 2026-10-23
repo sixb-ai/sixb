@@ -654,8 +654,15 @@ export type ModelMedia =
       /** Width over height, from the requested size or aspect ratio; square when unknown. */
       readonly aspect: number
       readonly callId?: string
+      /** Names of the files the command saved, in the call's order. */
+      readonly files?: readonly string[]
     }
-  | { readonly kind: "speech"; readonly text: string; readonly callId?: string }
+  | {
+      readonly kind: "speech"
+      readonly text: string
+      readonly callId?: string
+      readonly files?: readonly string[]
+    }
   | {
       readonly kind: "transcript"
       readonly source: string
@@ -670,25 +677,33 @@ export function modelMedia(intent: BashIntent, parsed: ParsedBashOutput | null):
   const output = isRecord(parsed?.json) ? parsed.json : {}
   const callId = typeof output.callId === "string" ? output.callId : undefined
   const text = typeof output.text === "string" ? output.text : undefined
+  const files = Array.isArray(output.files)
+    ? output.files.map((path) => (typeof path === "string" ? baseName(path) : ""))
+    : []
   const [first = ""] = positionals(call.args)
   switch (call.command) {
     case "models.image": {
-      const files = Array.isArray(output.files) ? output.files.length : 0
       const requested = Number(optionValue(call.args, "--n") ?? 1)
       return {
         kind: "image",
         prompt: first,
         sources: optionValues(call.args, "--image").map(baseName),
-        count: files || (Number.isSafeInteger(requested) && requested > 0 ? requested : 1),
+        count: files.length || (Number.isSafeInteger(requested) && requested > 0 ? requested : 1),
         aspect: requestedAspect(
           optionValue(call.args, "--size"),
           optionValue(call.args, "--aspect-ratio")
         ),
         ...(callId ? { callId } : {}),
+        ...(files.length ? { files } : {}),
       }
     }
     case "models.speech":
-      return { kind: "speech", text: first, ...(callId ? { callId } : {}) }
+      return {
+        kind: "speech",
+        text: first,
+        ...(callId ? { callId } : {}),
+        ...(files.length ? { files } : {}),
+      }
     case "models.transcribe":
       return {
         kind: "transcript",

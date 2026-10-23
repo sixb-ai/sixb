@@ -26,8 +26,14 @@ export function ModelMediaView({
   return <TranscriptResult media={media} running={running} />
 }
 
-/** The files a call made, readable to whoever can see the run that made them. */
-function useCallFiles(callId: string | undefined): {
+/**
+ * The files a call made, readable to whoever can see the run that made them, named as the command
+ * saved them: the call stores its files without a name.
+ */
+function useCallFiles(
+  callId: string | undefined,
+  names: readonly string[] = []
+): {
   readonly sources: readonly FileSource[]
   readonly missing: boolean
 } {
@@ -37,13 +43,16 @@ function useCallFiles(callId: string | undefined): {
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
-  const sources = useMemo(
-    () =>
-      callId && data
-        ? data.files.map((fileRef, index) => modelCallFileSource({ callId, index, fileRef }))
-        : [],
-    [callId, data]
-  )
+
+  // One value for the names, so a new array holding the same ones keeps the same sources.
+  const saved = names.join("\n")
+  const sources = useMemo(() => {
+    if (!callId || !data) return []
+    const fileNames = saved.split("\n")
+    return data.files.map((fileRef, index) =>
+      modelCallFileSource({ callId, index, fileRef, fileName: fileNames[index] })
+    )
+  }, [callId, data, saved])
   return { sources, missing: isError }
 }
 
@@ -55,7 +64,7 @@ function ImageResult({
   readonly running: boolean
 }) {
   const messages = useAgentMessages().modelMedia
-  const { sources, missing } = useCallFiles(running ? undefined : media.callId)
+  const { sources, missing } = useCallFiles(running ? undefined : media.callId, media.files)
   const slots = Math.max(1, Math.min(media.count, 4))
   const several = slots > 1
 
@@ -208,7 +217,7 @@ function SpeechResult({
   readonly running: boolean
 }) {
   const messages = useAgentMessages().modelMedia
-  const { sources, missing } = useCallFiles(running ? undefined : media.callId)
+  const { sources, missing } = useCallFiles(running ? undefined : media.callId, media.files)
   const source = sources[0]
   return (
     <figure className="min-w-0 space-y-2">
