@@ -46,7 +46,10 @@ with a table of a dozen rows is a document; data the reader works with is a shee
    `canvas.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
-   of it in place, use its address (`references.md`).
+   of it in place, use its address (`references.md`). A figure you cite from live data is the one
+   you read, and what the artifact shows moves on as the objects change, even at a pinned version:
+   date it with when you read it, in the user's time zone ("As of Oct 23, 10:42, three invoices
+   are overdue.").
 
 ## Revise
 
