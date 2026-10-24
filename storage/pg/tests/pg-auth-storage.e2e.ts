@@ -1,24 +1,61 @@
 import { describe, expect, test } from "bun:test"
-import { runAuthStorageContractSuite } from "@sixb/core/testing"
+import { type AuthUserHold, runAuthStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import type { PgAuthStorage } from "../src/auth-storage"
-import { createTestStorage, disposeTestStorage } from "./helpers"
+import { createPgClient } from "../src/pg-client"
+import { createTestStorage, disposeTestStorage, type TestStorage, waitForLockWait } from "./helpers"
 
-const owners = new WeakMap<PgAuthStorage, PostgresStorage>()
+const owners = new WeakMap<PgAuthStorage, TestStorage>()
 
 runAuthStorageContractSuite("PgAuthStorage", {
   createStorage: async () => {
-    const { storage } = await createTestStorage()
-    owners.set(storage.auth, storage)
-    return storage.auth
+    const created = await createTestStorage()
+    owners.set(created.storage.auth, created)
+    return created.storage.auth
   },
   teardown: async (auth) => {
-    const storage = owners.get(auth)
-    if (!storage) return
+    const created = owners.get(auth)
+    if (!created) return
 
-    await disposeTestStorage(storage)
+    await disposeTestStorage(created.storage)
+  },
+  holdUser: async (auth, user) => {
+    const created = owners.get(auth)
+    if (!created) throw new Error("Expected a test storage.")
+
+    return holdUserRow(created, user)
   },
 })
+
+/** Locks the user's row in a transaction of its own, open until `release`. */
+async function holdUserRow(
+  { connectionString, schemaName }: TestStorage,
+  user: { readonly projectId: string; readonly id: string }
+): Promise<AuthUserHold> {
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
+  const { promise: released, resolve: release } = Promise.withResolvers<void>()
+  const { promise: locked, resolve: lock } = Promise.withResolvers<void>()
+
+  const holding = sql.begin(async (tx) => {
+    await tx`
+      SELECT id FROM auth_users
+      WHERE project_id = ${user.projectId} AND id = ${user.id}
+      FOR UPDATE
+    `
+    lock()
+    await released
+  })
+  await Promise.race([locked, holding])
+
+  return {
+    waitForWaiters: (count, competing) => waitForLockWait(connectionString, competing, count),
+    release: async () => {
+      release()
+      await holding
+      await sql.end()
+    },
+  }
+}
 
 describe("PostgresStorage auth", () => {
   test("filters invitations by group ids with pagination metadata", async () => {
