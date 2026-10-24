@@ -135,8 +135,8 @@ function isObjectNotFound(status: number | undefined, error: unknown): boolean {
     notFound &&
     typeof body === "object" &&
     body !== null &&
-    "error" in body &&
-    body.error === "Object not found"
+    "code" in body &&
+    body.code === "object.not_found"
   )
 }
 

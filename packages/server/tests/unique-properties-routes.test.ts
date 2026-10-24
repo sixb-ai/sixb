@@ -102,7 +102,7 @@ test("an object is found by a unique property", async () => {
 
   const missing = await getBy("email", "bob@example.com")
   expect(missing.status).toBe(404)
-  expect(await missing.json()).toEqual({ error: "Object not found" })
+  expect(await missing.json()).toEqual({ error: "Object not found", code: "object.not_found" })
 
   const notUnique = await getBy("name", "Ada")
   expect(notUnique.status).toBe(400)
@@ -199,7 +199,7 @@ describe("getObjectByUniqueProperty authorization", () => {
     const hidden = await getBy("Secret", "code", { value: "s-1" })
 
     expect(hidden.status).toBe(404)
-    expect(await hidden.json()).toEqual({ error: "Object not found" })
+    expect(await hidden.json()).toEqual({ error: "Object not found", code: "object.not_found" })
   })
 
   test("a marked property needs clearance: 403", async () => {

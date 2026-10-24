@@ -60,13 +60,25 @@ describe("objects get-by", () => {
   })
 
   test("prints null when no visible object holds the value", async () => {
-    const { api } = serve(() => Response.json({ error: "Object not found" }, { status: 404 }))
+    const { api } = serve(() =>
+      Response.json({ error: "Object not found", code: "object.not_found" }, { status: 404 })
+    )
 
     const output = await captureOutput(() =>
       objects(api, ["get-by", "Customer", "email", "nobody@example.com"])
     )
 
     expect(JSON.parse(output)).toBeNull()
+  })
+
+  // Removal proof: compare `error.body.message` with "Object not found" in `isObjectNotFound`
+  // (`src/commands/objects.ts`); this 404 then prints null.
+  test("recognizes the lookup's 404 by its code, not its message", async () => {
+    const { api } = serve(() => Response.json({ error: "Object not found" }, { status: 404 }))
+
+    await expect(
+      objects(api, ["get-by", "Customer", "email", "nobody@example.com"])
+    ).rejects.toMatchObject({ body: { status: 404 } })
   })
 
   test("reports other failures", async () => {

@@ -10180,6 +10180,10 @@ export type GetObjectByUniquePropertyErrors = {
    */
   404: {
     error: string
+    /**
+     * `object.not_found` when no object visible to the caller holds the value. Other 404s, such as an unknown type, have no code.
+     */
+    code?: "object.not_found"
   }
 }
 
@@ -10386,6 +10390,7 @@ export type RequestActionErrors = {
       | "event.delivery_failed"
       | "internal.unexpected"
       | "queue.enqueue_failed"
+      | "object.not_found"
       | "object.unique_violation"
       | "pipeline.step_failed"
       | "projection.definition_invalid"
