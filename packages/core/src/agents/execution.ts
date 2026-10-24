@@ -4,17 +4,16 @@ import { isSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { canInheritAgentRequestAuthorization } from "../execution/agent"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
-import { nearestOwner } from "../execution/lineage"
 import type { DecisionModelsRuntime, ModelCatalog } from "../models"
-import { addCostSummaries, resolveExecutionCosts } from "../runtime/ai-cost"
-import { addUsageSummaries, resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
   AgentApprovalMode,
   AgentApprovalRecord,
+  AgentRunRecord,
   AgentStorage,
+  AgentThreadRecord,
   ConversationAgentRunRecord,
   ListAgentApprovalsInput,
   ListAgentApprovalsResult,
@@ -22,9 +21,11 @@ import type {
   ListAgentRunsResult,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
+  SubagentRunRecord,
 } from "../storage/agents"
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
+import { resolveTurnAccounting } from "./accounting"
 import { type AgentApprovalResume, registerAgentTurnResume } from "./approval-continuation"
 import { getAgentApprovalExecutor } from "./approval-executor"
 import {
@@ -42,6 +43,7 @@ import {
   stopAgentTurn,
 } from "./approvals"
 import { cancelAgentRun } from "./cancel"
+import { type AgentChildView, cancelAgentChildRun, listAgentChildren } from "./children"
 import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
@@ -109,6 +111,15 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
+    /**
+     * The sub-agents a conversation's turns spawned, oldest first, each the thread it works in with
+     * every run it took; `null` when the caller cannot read the conversation. `runId` keeps those
+     * one turn spawned. A sub-agent is visible exactly when its conversation is.
+     */
+    listChildren(
+      threadId: string,
+      input?: ListAgentChildrenInput
+    ): Promise<AgentChildListResult | null>
     /** Who else reads the conversation and talks in it. */
     readonly participants: AgentThreadParticipantsRuntime
     /**
@@ -153,7 +164,7 @@ export interface AgentApprovalsRuntime {
 export interface AgentApprovalDecision {
   readonly approval: AgentApprovalRecord
   /** The turn that resumed the paused one, when this decision was its last. */
-  readonly run?: AgentRunView
+  readonly run?: ConversationAgentRunView
   /**
    * Present when the paused turn could not resume: the decision and the call's outcome stand.
    * `retrying`: Sixb resumes it once it can, for example when an AI limit resets; otherwise the
@@ -221,27 +232,60 @@ export interface ObservedAgentThreadsRuntime {
     threadId: string,
     input?: Omit<ListAgentRunsInput, "projectId" | "threadId">
   ): Promise<AgentRunListResult | null>
+  /** The sub-agents the thread's turns spawned; `null` when the thread is not a conversation. */
+  listChildren(
+    threadId: string,
+    input?: ListAgentChildrenInput
+  ): Promise<AgentChildListResult | null>
 }
 
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
-  /** Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights. */
+  /**
+   * Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights.
+   * A sub-agent's run is never retried: its turn decides whether to spawn it again.
+   */
   retry(runId: string): Promise<ExecutionAgentRunResult>
   /**
    * Stop a turn; whoever asked for it, or the thread's owner, can. A queued turn is cancelled when
    * this returns; a running one is still running, with the stop signal sent to its worker. A turn
-   * paused for approval stays as it ended, with its held calls cancelled: it never resumes.
+   * paused for approval stays as it ended, with its held calls cancelled: it never resumes. A
+   * sub-agent's run stops as its turn would: whoever asked for that turn, or the conversation's
+   * owner, can, and its parent's `wait_agent` reads that it was stopped.
    */
   cancel(runId: string): Promise<AgentRunView>
+  /** A turn, or a sub-agent's run, read through its thread. */
   getById(runId: string): Promise<AgentRunView | null>
+  /** A conversation's turns, or the runs of a sub-agent's thread. */
   listForThread(
     threadId: string,
     input?: Omit<ListAgentRunsInput, "projectId" | "threadId">
   ): Promise<AgentRunListResult | null>
 }
 
-/** Execution-facing run view with provenance resolved from the immutable execution ledger. */
-export interface AgentRunView extends ConversationAgentRunRecord {
+export interface ListAgentChildrenInput {
+  /** Only those this turn of the conversation spawned. */
+  readonly runId?: string
+}
+
+export interface AgentChildListResult {
+  /** Oldest first. */
+  readonly children: readonly AgentChildView[]
+}
+
+/**
+ * Execution-facing run view with provenance resolved from the immutable execution ledger: a
+ * conversation turn, or a sub-agent's run.
+ */
+export type AgentRunView = ConversationAgentRunView | SubagentRunView
+
+/** A conversation turn's view: what a request, a retry or a resume returns. */
+export type ConversationAgentRunView = ConversationAgentRunRecord & AgentRunViewFields
+
+/** A sub-agent's run, read through its thread. */
+export type SubagentRunView = SubagentRunRecord & AgentRunViewFields
+
+interface AgentRunViewFields {
   readonly requestedBy?: AuthorizablePrincipal
   /**
    * Derived from the model-call ledger; never persisted on the Agent run row. Covers the turn and
@@ -258,7 +302,7 @@ export interface AgentRunListResult extends Omit<ListAgentRunsResult, "runs"> {
 }
 
 export interface ExecutionAgentRunResult extends Omit<RequestAgentRunResult, "run"> {
-  readonly run: AgentRunView
+  readonly run: ConversationAgentRunView
 }
 
 export type AgentRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> = {
@@ -305,14 +349,15 @@ export function createAgentRuntime<
     }
   }
 
-  const getVisibleRunRecord = async (runId: string): Promise<ConversationAgentRunRecord | null> => {
+  /** A turn, or a sub-agent's run, when the caller reads its thread. */
+  const getVisibleRunRecord = async (runId: string): Promise<AgentRunRecord | null> => {
     if (authority.type === "denied" || authority.type === "delegated") return null
     const run =
       (await runtime.storage.agents?.runs.getById({
         projectId: runtime.projectId,
         id: runId,
       })) ?? null
-    if (!run || run.kind !== "conversation") return null
+    if (!run) return null
     const thread = await getVisibleThreadRecord(run.threadId)
     return thread ? run : null
   }
@@ -335,9 +380,17 @@ export function createAgentRuntime<
       projectId: runtime.projectId,
       id: runId,
     })
-    const readable = run?.kind === "conversation" ? await rule.read(run.threadId) : null
-    if (run?.kind !== "conversation" || !readable) {
+    const readable = run ? await rule.read(run.threadId) : null
+    if (!run || !readable) {
       throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${runId}' was not found.`)
+    }
+    if (run.kind !== "conversation") {
+      throw new AgentRequestError(
+        action === "retry" ? "run_not_retryable" : "run_not_found",
+        action === "retry"
+          ? `[Sixb] Agent run '${runId}' is a sub-agent's: its turn spawns it again if it needs to.`
+          : `[Sixb] Agent run '${runId}' was not found.`
+      )
     }
 
     if (authority.type !== "principal") return run
@@ -705,6 +758,15 @@ export function createAgentRuntime<
         })
         return { ...created, participants: [] }
       },
+      listChildren: async (threadId, { runId } = {}) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (thread?.kind !== "conversation") return null
+        return {
+          children: await listAgentChildren(runtime, thread, {
+            ...(runId === undefined ? {} : { spawnedBy: runId }),
+          }),
+        }
+      },
       fork: async (threadId) => {
         // Checked before the copy's transaction: an access removed in between can still fork once.
         const readable = await rule.read(threadId)
@@ -789,14 +851,22 @@ export function createAgentRuntime<
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       cancel: async (runId) => {
-        const run = await getControllableRun(runId, "cancel")
-        return attachRunView(runtime, await cancelAgentRun(runtime, run))
+        const run = await getVisibleRunRecord(runId)
+        if (run?.kind !== "subagent") {
+          const turn = await getControllableRun(runId, "cancel")
+          return attachRunView(runtime, await cancelAgentRun(runtime, turn))
+        }
+
+        // A sub-agent's run stops as the turn it works under would.
+        await getControllableRun(run.parentRunId, "cancel")
+        return attachRunView(runtime, await cancelAgentChildRun(runtime, run))
       },
       getById: getRun,
       listForThread: async (threadId, input = {}) => {
         assertNoAgentSelector(input)
-        if (!(await getVisibleThreadRecord(threadId))) return null
-        return listConversationRuns(runtime, threadId, input)
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread) return null
+        return listThreadRuns(runtime, thread, input)
       },
     },
     observed: createObservedAgentThreadsRuntime(runtime),
@@ -826,18 +896,30 @@ function createObservedAgentThreadsRuntime(
 
     async listRuns(threadId, input = {}) {
       assertNoAgentSelector(input)
-      if (!(await getById(threadId))) {
-        return null
+      const thread = await getById(threadId)
+      if (!thread) return null
+      return listThreadRuns(runtime, thread, input)
+    },
+
+    async listChildren(threadId, { runId } = {}) {
+      const thread = await getById(threadId)
+      if (thread?.kind !== "conversation") return null
+      return {
+        children: await listAgentChildren(runtime, thread, {
+          ...(runId === undefined ? {} : { spawnedBy: runId }),
+        }),
       }
-      return listConversationRuns(runtime, threadId, input)
     },
   }
 }
 
-/** A thread's conversation runs with their views; whoever calls it has decided who may read them. */
-async function listConversationRuns(
+/**
+ * A thread's runs with their views: a conversation's turns, or a sub-agent's runs. Whoever calls it
+ * has decided who may read them.
+ */
+async function listThreadRuns(
   runtime: SixbRuntimeContext,
-  threadId: string,
+  thread: Pick<AgentThreadRecord, "id" | "kind">,
   input: Omit<ListAgentRunsInput, "projectId" | "threadId">
 ): Promise<AgentRunListResult | null> {
   const storage = runtime.storage.agents
@@ -846,32 +928,25 @@ async function listConversationRuns(
   const result = await storage.runs.list({
     ...input,
     projectId: runtime.projectId,
-    threadId,
-    kinds: ["conversation"],
+    threadId: thread.id,
+    kinds: [thread.kind],
   })
-  return {
-    ...result,
-    // Only narrows the type: storage listed turns alone.
-    runs: await attachRunViews(
-      runtime,
-      result.runs.filter((run) => run.kind === "conversation")
-    ),
-  }
+  return { ...result, runs: await attachRunViews(runtime, result.runs) }
 }
 
-async function attachRunView(
+async function attachRunView<TRun extends AgentRunRecord>(
   runtime: SixbRuntimeContext,
-  run: ConversationAgentRunRecord
-): Promise<AgentRunView> {
+  run: TRun
+): Promise<TRun & AgentRunViewFields> {
   const [view] = await attachRunViews(runtime, [run])
   if (!view) throw new Error(`[Sixb] Could not build Agent run '${run.id}' view.`)
   return view
 }
 
-async function attachRunViews(
+async function attachRunViews<TRun extends AgentRunRecord>(
   runtime: SixbRuntimeContext,
-  runs: readonly ConversationAgentRunRecord[]
-): Promise<readonly AgentRunView[]> {
+  runs: readonly TRun[]
+): Promise<readonly (TRun & AgentRunViewFields)[]> {
   const executionIds = runs.map((run) => run.executionId)
   const [executions, accounting] = await Promise.all([
     Promise.all(
@@ -925,56 +1000,4 @@ function refusedResume(error: unknown): Extract<AgentApprovalResume, { status: "
     message: "[Sixb] The Agent turn could not resume. Sixb tries again.",
     retrying: true,
   }
-}
-
-/**
- * Each turn's usage and cost: its own calls and those of everything below it, its children and
- * what its tools ran, as Activity counts them. Each call counts once, toward the nearest turn above
- * it. A child still at work adds what it has spent so far, and so does a workflow a tool started,
- * also once the turn has ended: Activity counts it toward the conversation the same way.
- */
-async function resolveTurnAccounting(
-  runtime: SixbRuntimeContext,
-  executionIds: readonly string[]
-): Promise<readonly { readonly usage?: AiModelCallUsage; readonly cost?: AiCostSummary }[]> {
-  if (executionIds.length === 0) return []
-  const { projectId, storage } = runtime
-
-  const below = await storage.executions.listDescendants({ projectId, executionIds })
-  const turns = new Set(executionIds)
-  const parentOf = new Map(below.map(({ id, parentId }) => [id, parentId]))
-  const turnOf = (executionId: string) =>
-    nearestOwner(
-      executionId,
-      (id) => parentOf.get(id),
-      (id) => turns.has(id)
-    )
-
-  const accounted = [...executionIds, ...below.map(({ id }) => id)]
-  const [usages, costs] = await Promise.all([
-    resolveExecutionUsage({ storage: storage.aiUsage, projectId, executionIds: accounted }),
-    resolveExecutionCosts({ storage: storage.aiCosts, projectId, executionIds: accounted }),
-  ])
-
-  const usagesByTurn = new Map<string, AiModelCallUsage[]>()
-  const costsByTurn = new Map<string, AiCostSummary[]>()
-  accounted.forEach((executionId, index) => {
-    const turn = turnOf(executionId)
-    const usage = usages[index]
-    const cost = costs[index]
-    // Never: every execution listed descends from a turn asked about.
-    if (turn === undefined) return
-
-    if (usage) usagesByTurn.set(turn, [...(usagesByTurn.get(turn) ?? []), usage])
-    if (cost) costsByTurn.set(turn, [...(costsByTurn.get(turn) ?? []), cost])
-  })
-
-  return executionIds.map((executionId) => {
-    const usage = addUsageSummaries(usagesByTurn.get(executionId) ?? [])
-    const cost = addCostSummaries(costsByTurn.get(executionId) ?? [])
-    return {
-      ...(usage === undefined ? {} : { usage }),
-      ...(cost === undefined ? {} : { cost }),
-    }
-  })
 }

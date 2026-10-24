@@ -256,6 +256,19 @@ export function isAwaitingApprovalRun(run: AgentRunRecord | null | undefined): b
 }
 
 /**
+ * Whether the child paused on its held calls: it succeeded before it was done. It continues once
+ * they are decided and its turn resumes, unless a new message sets them aside, one expires or the
+ * turn is stopped.
+ */
+export function isPausedSubagentRun(run: AgentRunRecord | null | undefined): boolean {
+  return (
+    run?.kind === "subagent" &&
+    run.status === "succeeded" &&
+    run.finishReason === "awaiting_approval"
+  )
+}
+
+/**
  * How long a process keeps an approved call it took to run. Longer than an Action's 30-second
  * limit, so a claim still held is a call still running; a claim older than this was lost in a crash.
  */
@@ -461,7 +474,7 @@ export async function agentApprovalCallers(
               {
                 runId: run.id,
                 key: run.spawnKey,
-                paused: run.status === "succeeded" && run.finishReason === "awaiting_approval",
+                paused: isPausedSubagentRun(run),
               },
             ] as const,
           ]
