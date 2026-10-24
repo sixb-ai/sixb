@@ -31,6 +31,7 @@ import {
   preferenceWithoutReasoning,
   preferenceWithReasoning,
   resolveModelSelection,
+  sixbPicksModel,
 } from "../model-selection"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
 import {
@@ -592,6 +593,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     reconnecting,
   }
 
+  // With tiers, the chat offers no model choice: the composer has no model controls.
+  const modelControlsProps = sixbPicksModel(models)
+    ? {}
+    : {
+        models,
+        selectedModel,
+        selectedReasoning,
+        modelsLoading: modelsQuery.isLoading,
+        modelsError: modelsQuery.isError,
+        onSelectModel: selectModel,
+        onSelectReasoning: selectReasoning,
+        onResetReasoning: resetReasoning,
+        usingDefaultModel: modelSelection.request === undefined,
+        onResetModelSelection: resetModelSelection,
+      }
+
   const composerProps: ConversationComposerProps = {
     onSend: send,
     error: currentSendError ?? undefined,
@@ -601,16 +618,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     running: isRunning,
     stopping,
     onStop: canStop ? stop : undefined,
-    models,
-    selectedModel,
-    selectedReasoning,
-    modelsLoading: modelsQuery.isLoading,
-    modelsError: modelsQuery.isError,
-    onSelectModel: selectModel,
-    onSelectReasoning: selectReasoning,
-    onResetReasoning: resetReasoning,
-    usingDefaultModel: modelSelection.request === undefined,
-    onResetModelSelection: resetModelSelection,
+    ...modelControlsProps,
     draft: draftReseed.text,
     draftAttachments: draftReseed.attachments,
     draftContext: draftReseed.context,

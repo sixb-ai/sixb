@@ -35,6 +35,10 @@ const newDefault = [
 ]
 const plain = model("plain", { isDefault: true, reasoningLevels: ["provider-default", "low"] })
 const unofferedDefault = model("plain", { isDefault: true, defaultReasoning: "max" })
+const tiers = [
+  { ...fast, tier: "standard" as const },
+  { ...deep, tier: "heavy" as const },
+]
 
 test.each<[string, readonly LanguageModel[], ModelPreference | null, ResolvedModelSelection]>([
   // Proven by removal: always build `request` from the displayed model and reasoning.
@@ -94,6 +98,13 @@ test.each<[string, readonly LanguageModel[], ModelPreference | null, ResolvedMod
     { model: unofferedDefault, reasoning: "provider-default" },
   ],
   ["resolves nothing from an empty catalog", [], null, {}],
+  // Proven by removal: drop the tiers check in resolveModelSelection.
+  [
+    "resolves nothing with tiers, whatever the browser remembered",
+    tiers,
+    { model: deepRef, reasoning: "low" },
+    {},
+  ],
 ])("%s", (_name, catalog, preference, expected) => {
   expect(resolveModelSelection(catalog, preference)).toEqual(expected)
 })
