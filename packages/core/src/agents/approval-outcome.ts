@@ -3,7 +3,7 @@ import type { AgentApprovalCallSummary, AgentApprovalOutcomePart } from "./messa
 
 /**
  * What the model reads for an {@link AgentApprovalOutcomePart}: how a call it made, and that
- * answered `awaiting_approval`, ended. A call with no such block never ran.
+ * answered `awaiting_approval`, ended. Until such a block comes, the call is not done.
  */
 export function approvalOutcomeInstruction(part: AgentApprovalOutcomePart): string {
   const call = describeCall(part.call)

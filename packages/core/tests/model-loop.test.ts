@@ -947,6 +947,70 @@ describe("runModelLoop", () => {
     ])
   })
 
+  // Guard proof: drop the `pauseAfterStep` check from the tool branch of `runModelLoop`; the
+  // loop calls the model a second time and completes instead of pausing.
+  test("pauses after a step that ran tools, once its tools and onStepEnd settled", async () => {
+    let calls = 0
+    const order: string[] = []
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return streamFromArray([
+          { type: "stream-start" },
+          { type: "tool-call", toolCallId: "a", toolName: "echo", input: '{"value":"a"}' },
+          { type: "tool-call", toolCallId: "b", toolName: "echo", input: '{"value":"b"}' },
+          finish("tool-calls"),
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Both" }] }],
+      tools: [echo],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+      onStepEnd: () => {
+        order.push("step-end")
+      },
+      pauseAfterStep: async (step) => {
+        order.push(`pause?${step.content.filter((part) => part.type === "tool-result").length}`)
+        return true
+      },
+    })
+
+    expect(calls).toBe(1)
+    expect(order).toEqual(["step-end", "pause?2"])
+    expect(result.status).toBe("paused")
+    expect(result.steps).toHaveLength(1)
+  })
+
+  test("is not asked to pause after a step without tools", async () => {
+    let asked = 0
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [
+          { type: "stream-start" },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "done" },
+          { type: "text-end", id: "t" },
+          finish(),
+        ],
+      ]),
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+      tools: [echo],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+      pauseAfterStep: () => {
+        asked += 1
+        return true
+      },
+    })
+
+    expect(result.status).toBe("completed")
+    expect(asked).toBe(0)
+  })
+
   test("returns coherent partial text when aborted mid-stream", async () => {
     const abort = new AbortController()
     const model = new MockLanguageModel({

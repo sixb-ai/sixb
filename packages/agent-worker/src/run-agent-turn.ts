@@ -1,5 +1,10 @@
 import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
-import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import {
+  createAgentMessageId,
+  type PausableModelLoopResult,
+  runModelLoop,
+  toModelMessages,
+} from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
@@ -219,7 +224,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   try {
     let chunkIndex = 0
-    let result: Awaited<ReturnType<typeof runModelLoop>>
+    let result: PausableModelLoopResult
     try {
       result = await runModelLoop({
         model: usageRecorder.wrapModel(plan.model),
@@ -240,6 +245,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         onEvent: async (chunk) => {
           await context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
         },
+        // The approval records decide, never the tool output: the model can send a command's
+        // output elsewhere, or print one of its own.
+        pauseAfterStep: () => holdsApproval(agents, run),
       })
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
@@ -272,7 +280,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       })
     }
 
-    const finishReason = coerceAgentRunFinishReason(result.finishReason) ?? "unknown"
+    // A call held after the last step that ran tools, by a command left running in the sandbox or
+    // by a child, pauses the turn too.
+    const finishReason =
+      result.status === "paused" || (await holdsApproval(agents, run))
+        ? "awaiting_approval"
+        : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
     const diagnostics = [
       stepLimitDiagnostic(assistant, { finishReason, maxSteps }),
@@ -313,6 +326,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   } finally {
     if (ownsRuntime) runtime.dispose()
   }
+}
+
+/**
+ * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
+ * waiting, or decided and not reported to the model yet.
+ */
+function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): Promise<boolean> {
+  return agents.approvals.holdsRun({ projectId: run.projectId, runId: run.id })
 }
 
 /**

@@ -112,6 +112,7 @@ export {
 } from "./message"
 export type {
   ModelLoopResult,
+  PausableModelLoopResult,
   PrepareModelStepInput,
   PrepareModelStepResult,
   RunModelLoopInput,
