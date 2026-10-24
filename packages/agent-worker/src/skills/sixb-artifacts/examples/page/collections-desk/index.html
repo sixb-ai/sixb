@@ -22,6 +22,7 @@
     .table-scroll table { min-width: 600px; }
     td { white-space: nowrap; }
     td.late { color: var(--late); font-weight: 600; }
+    td.locked, .stat .value.locked { color: var(--muted-foreground); font-weight: 500; }
     tbody tr.loading td { color: var(--muted-foreground); }
   </style>
 </head>
@@ -33,7 +34,7 @@
 
     <div class="grid">
       <div class="card stat"><div class="label">Overdue invoices</div><div class="value" id="count">–</div></div>
-      <div class="card stat"><div class="label">Outstanding</div><div class="value" id="outstanding">–</div></div>
+      <div class="card stat"><div class="label">Outstanding</div><div class="value" id="outstanding">–</div><div class="delta" id="outstanding-locked"></div></div>
       <div class="card stat"><div class="label">Over 60 days</div><div class="value" id="aged">–</div></div>
     </div>
 
@@ -73,16 +74,27 @@
     const today = new Date()
     const daysLate = (due) => Math.max(0, Math.floor((today - new Date(due)) / 86_400_000))
 
+    // A value the reader isn't cleared for is left out of `properties` and listed in the row's
+    // `redactions`: a permission they lack. It shows as locked, never as 0, and no total reads it.
+    const LABELS = { amount: "Amount", paid: "Paid" }
+    const hiddenOf = (row, ...ids) => ids.find((id) => Object.hasOwn(row.redactions ?? {}, id))
+    const permission = (id) => `You don't have permission to see ${LABELS[id]}`
+
     // One row per invoice, from the query's rows and the customer it expands.
     let invoices = []
     try {
       const { objects, total, truncated } = await sixb.query("overdue")
-      invoices = objects.map((row) => ({
-        number: row.properties.number ?? row.primaryId,
-        customer: row.links?.customer?.properties.name ?? "No customer",
-        due: row.properties.dueDate,
-        outstanding: (row.properties.amount ?? 0) - (row.properties.paid ?? 0),
-      }))
+      invoices = objects.map((row) => {
+        const hidden = hiddenOf(row, "amount", "paid")
+        return {
+          number: row.properties.number ?? row.primaryId,
+          customer: row.links?.customer?.properties.name ?? "No customer",
+          due: row.properties.dueDate,
+          // Nothing paid yet is 0; an amount the reader can't see is not.
+          outstanding: hidden ? null : (row.properties.amount ?? 0) - (row.properties.paid ?? 0),
+          locked: hidden ? permission(hidden) : null,
+        }
+      })
       status.textContent = truncated
         ? `The first ${number.format(objects.length)} of ${number.format(total)} overdue invoices.`
         : ""
@@ -101,9 +113,16 @@
       )
 
       document.querySelector("#count").textContent = number.format(shown.length)
-      document.querySelector("#outstanding").textContent = money.format(
-        shown.reduce((sum, invoice) => sum + invoice.outstanding, 0)
-      )
+
+      // Over a locked value, the total is locked too: never what it comes to without it.
+      const locked = shown.find((invoice) => invoice.locked)
+      const outstanding = document.querySelector("#outstanding")
+      outstanding.textContent = locked
+        ? "Locked"
+        : money.format(shown.reduce((sum, invoice) => sum + invoice.outstanding, 0))
+      outstanding.classList.toggle("locked", Boolean(locked))
+      document.querySelector("#outstanding-locked").textContent = locked ? locked.locked : ""
+
       document.querySelector("#aged").textContent = number.format(
         shown.filter((invoice) => daysLate(invoice.due) > 60).length
       )
@@ -112,16 +131,19 @@
         ...shown.map((invoice) => {
           const row = document.createElement("tr")
           const late = daysLate(invoice.due)
-          for (const [text, className] of [
+          for (const [text, className, title] of [
             [invoice.customer, ""],
             [invoice.number, ""],
             [invoice.due ? day.format(new Date(invoice.due)) : "–", ""],
             [number.format(late), late > 60 ? "num late" : "num"],
-            [money.format(invoice.outstanding), "num"],
+            invoice.locked
+              ? ["Locked", "num locked", invoice.locked]
+              : [money.format(invoice.outstanding), "num"],
           ]) {
             const cell = document.createElement("td")
             cell.textContent = text
             if (className) cell.className = className
+            if (title) cell.title = title
             row.append(cell)
           }
           return row
