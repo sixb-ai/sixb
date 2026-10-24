@@ -1030,6 +1030,7 @@ describe("runModelLoop", () => {
       },
     })
     const followUp: ModelMessage = { role: "user", content: [{ type: "text", text: "Also X." }] }
+    const indexes: number[] = []
     let asked = 0
 
     const result = await runModelLoop({
@@ -1037,15 +1038,16 @@ describe("runModelLoop", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
       maxSteps: 3,
       signal: new AbortController().signal,
-      beforeComplete: () => {
+      beforeComplete: (_step, stepIndex) => {
         asked += 1
+        indexes.push(stepIndex)
         return asked === 1 ? [followUp] : undefined
       },
     })
 
     expect(result).toMatchObject({ status: "completed", output: "final" })
     expect(result.steps).toHaveLength(2)
-    expect(asked).toBe(2)
+    expect(indexes).toEqual([0, 1])
     expect(requests[1]).toEqual([
       { role: "user", content: [{ type: "text", text: "Hi" }] },
       { role: "assistant", content: [{ type: "text", text: "draft" }] },
