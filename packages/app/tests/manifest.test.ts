@@ -227,6 +227,42 @@ describe("custom app metadata and manifest generation", () => {
     )
   })
 
+  // Regression proof: in metadata.ts, clear only the layout from the module cache and the second
+  // generation fails again on the duplicate that was already fixed in its own file.
+  test("reads a view again once it is fixed in its own file", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const writeCountView = (toolName: string) =>
+      writeFile(
+        join(fixture.appDir, "_agent", "count-view.ts"),
+        `export const countView = { kind: "agentToolView", toolName: "${toolName}", placement: "work", render: () => null }\n`
+      )
+
+    await mkdir(join(fixture.appDir, "_agent"), { recursive: true })
+    await writeFile(
+      join(fixture.appDir, "_agent", "quote-view.ts"),
+      `export const quoteView = { kind: "agentToolView", toolName: "quote_shipping", placement: "work", render: () => null }\n`
+    )
+    await writeCountView("quote_shipping")
+    await writeFile(
+      join(fixture.appDir, "layout.tsx"),
+      [
+        `import { quoteView } from "./_agent/quote-view"`,
+        `import { countView } from "./_agent/count-view"`,
+        "export const toolViews = [quoteView, countView]",
+        "export default function Layout() { return null }",
+        "",
+      ].join("\n")
+    )
+
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "two views for the tool 'quote_shipping'"
+    )
+
+    await writeCountView("count_rows")
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+  })
+
   test("builds a stable manifest and cannot be shadowed by a public manifest", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

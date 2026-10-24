@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { readFile, stat } from "node:fs/promises"
 import { createRequire } from "node:module"
-import { extname, join } from "node:path"
+import { dirname, extname, join, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { agentToolViews } from "./agent/tool-views/define"
 import { sectionIds } from "./sections/catalog"
@@ -124,7 +124,13 @@ async function loadConfiguredMetadata(layoutPath: string): Promise<AppMetadata> 
     // Bun currently canonicalizes file-URL query strings in its module cache.
     // Explicit invalidation makes the source fingerprint a reliable dev cache
     // buster while retaining a normal file URL and relative import behavior.
-    delete metadataRequire.cache[metadataRequire.resolve(layoutPath)]
+    // The layout's own imports are cached too: the tool views it lists live in
+    // their own files, and a view fixed after a failed check must be read again.
+    const appDir = dirname(metadataRequire.resolve(layoutPath)) + sep
+    for (const modulePath of Object.keys(metadataRequire.cache)) {
+      if (modulePath.startsWith(appDir)) delete metadataRequire.cache[modulePath]
+    }
+
     url.searchParams.set("sixb-metadata", sourceHash)
     const layoutModule = (await import(url.href)) as {
       readonly metadata?: unknown
