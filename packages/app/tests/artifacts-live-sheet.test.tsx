@@ -5,6 +5,7 @@ import { ARTIFACT_LIMITS, parseWorkbook } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { ArtifactPreview } from "../src/artifacts/card-preview"
 import { en } from "../src/artifacts/messages"
 import { artifactQueryKey } from "../src/artifacts/queries"
 import {
@@ -404,6 +405,42 @@ describe("a live sheet's figures over locked values", () => {
     expect(chartReadsLocked(chart, model)).toBe(true)
     expect(chartReadsLocked({ ...chart, y: [], aggregate: "count" }, model)).toBe(false)
     expect(chartReadsLocked({ ...chart, x: "Amount", y: [], aggregate: "count" }, model)).toBe(true)
+  })
+
+  // Guard proof: drop the `chartReadsLocked` check in card-preview.tsx's latestValue; the card
+  // then labels the chart with Acme's sum of the one amount the reader sees, "$1,250".
+  test("leave a card's chart without its latest value when it reads one", async () => {
+    const card = async (answer: GetArtifactQueryResponse) => {
+      const ui = render(
+        <QueryClientProvider client={cache(answer)}>
+          <ArtifactPreview version={version} kind="sheet" loading={false} />
+        </QueryClientProvider>
+      )
+      await settle()
+      const text = ui.container.textContent ?? ""
+      ui.unmount()
+      return text
+    }
+
+    // Acme last, so that its sum is the chart's latest value, with one of its amounts locked.
+    const acmeLast = (locked: boolean): GetArtifactQueryResponse => {
+      const base = result()
+      if (base.kind !== "objects") throw new Error("Expected rows.")
+      const objects = [
+        row("inv_3", "Globex", { amount: 400 }),
+        row("inv_1", "Acme", { amount: 1250 }),
+        locked
+          ? {
+              ...row("inv_2", "Acme", {}),
+              redactions: { amount: { reason: "missing_clearance" as const } },
+            }
+          : row("inv_2", "Acme", { amount: 750 }),
+      ]
+      return { ...base, objects }
+    }
+
+    expect(await card(acmeLast(false))).toContain("$2,000")
+    expect(await card(acmeLast(true))).not.toMatch(/\$\d/)
   })
 
   // Guard proof: drop the `isLocked` branch in rangeStats; the status bar then sums $2,000 as if
