@@ -43,6 +43,7 @@ export {
   type FormulaType,
   formulaDependencies,
   formulaFitsColumn,
+  formulaReferences,
   parseFormula,
   renameColumnReferences,
 } from "./formula"

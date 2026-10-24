@@ -1,4 +1,5 @@
 import { parseSheetNumber, type WorkbookChart } from "@sixb/core/artifacts"
+import { lockedByAny } from "./locked"
 import { lockedColumns, type SheetColumn, type SheetModel } from "./model"
 
 export interface ChartSeries {
@@ -40,10 +41,16 @@ export function chartReadsLocked(chart: WorkbookChart, model: SheetModel): boole
   return chartLockedColumns(chart, model).length > 0
 }
 
-/** The columns a chart reads that hold a value the reader may not see, in the sheet's order. */
+/**
+ * The properties the reader may not see that a chart would draw from, in the sheet's order: those
+ * it plots, and those a computed column it plots reads.
+ */
 export function chartLockedColumns(chart: WorkbookChart, model: SheetModel): string[] {
   const read = new Set([chart.x, ...chart.y, ...chart.line])
-  return lockedColumns(model).filter((name) => read.has(name))
+  return lockedByAny(
+    model,
+    lockedColumns(model).filter((name) => read.has(name))
+  )
 }
 
 /** The series a chart that counts rows plots: a whole number for each x value. */

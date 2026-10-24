@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test"
 import { type GetArtifactQueryResponse, type GetArtifactResponse, SixbApiError } from "@sixb/client"
 import { getArtifactQueryKey } from "@sixb/client/hooks"
-import { ARTIFACT_LIMITS, parseWorkbook } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, parseCsv, parseWorkbook } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
@@ -12,8 +12,14 @@ import {
   ArtifactReferencesProvider,
   ReferencingMarkdown,
 } from "../src/artifacts/references/references"
-import { chartData, chartReadsLocked } from "../src/artifacts/renderers/sheet/chart-data"
+import {
+  chartData,
+  chartLockedColumns,
+  chartReadsLocked,
+} from "../src/artifacts/renderers/sheet/chart-data"
 import { StatusFigures } from "../src/artifacts/renderers/sheet/frame"
+import { lockedCellLabel } from "../src/artifacts/renderers/sheet/locked"
+import { sheetModel } from "../src/artifacts/renderers/sheet/model"
 import { cellRange, rangeStats } from "../src/artifacts/renderers/sheet/selection"
 import { INITIAL_SHEET_VIEW } from "../src/artifacts/renderers/sheet/view"
 import { readSheetModel } from "../src/artifacts/renderers/sheet/workbook"
@@ -103,6 +109,32 @@ const version = artifactVersion({
   },
 })
 
+const overdueVersion = version
+const overdueTexts = texts
+
+/** The sheet with a Tax computed from Amount, totaled, and a count of its invoices. */
+const taxedTexts = {
+  ...texts,
+  "workbook.json": JSON.stringify({
+    ...workbook,
+    sheets: [
+      {
+        ...workbook.sheets[0],
+        columns: {
+          ...workbook.sheets[0]?.columns,
+          Tax: { type: "currency", formula: "[@Amount]*0.2" },
+        },
+        totals: { Invoice: "count", Amount: "sum", Tax: "sum" },
+      },
+    ],
+  }),
+}
+
+const taxed = {
+  texts: taxedTexts,
+  version: { ...version, files: textFiles(taxedTexts, OVERDUE) },
+}
+
 const schema = {
   properties: {
     number: { type: "string" },
@@ -157,7 +189,10 @@ function result(
 }
 
 /** The artifact read already, its query answered with `answer`: rows, or an error the API gave. */
-function cache(answer: GetArtifactQueryResponse | SixbApiError): QueryClient {
+function cache(
+  answer: GetArtifactQueryResponse | SixbApiError,
+  { version, texts } = { version: overdueVersion, texts: overdueTexts }
+): QueryClient {
   const queries = new QueryClient({
     // An answered error stays as answered: no read on mount reaches the network.
     defaultOptions: { queries: { enabled: false, retry: false, retryOnMount: false } },
@@ -223,25 +258,15 @@ const totalsText = (container: HTMLElement) =>
       []),
   ].map((cell) => cell.textContent)
 
-/**
- * The sheet with Globex's amount locked, a Tax computed from Amount, and a count of its invoices,
- * read as a download reads it.
- */
+/** The sheet with Globex's amount locked and a Tax computed from it, read as a download reads it. */
 async function taxedModel() {
-  const sheet = workbook.sheets[0]
-  const parsed = parseWorkbook(
-    JSON.stringify({
-      sheets: [
-        {
-          ...sheet,
-          columns: { ...sheet?.columns, Tax: { type: "currency", formula: "[@Amount]*0.2" } },
-          totals: { Invoice: "count", Amount: "sum" },
-        },
-      ],
-    })
-  )
+  const parsed = parseWorkbook(taxedTexts["workbook.json"])
   if (!("workbook" in parsed) || !parsed.workbook.sheets[0]) throw new Error("No workbook.")
-  return readSheetModel(cache(result({ locked: true })), version, parsed.workbook.sheets[0])
+  return readSheetModel(
+    cache(result({ locked: true }), taxed),
+    taxed.version,
+    parsed.workbook.sheets[0]
+  )
 }
 
 describe("a live sheet", () => {
@@ -426,6 +451,64 @@ describe("a live sheet's figures over locked values", () => {
     expect(chartReadsLocked(chart, model)).toBe(true)
     expect(chartReadsLocked({ ...chart, y: [], aggregate: "count" }, model)).toBe(false)
     expect(chartReadsLocked({ ...chart, x: "Amount", y: [], aggregate: "count" }, model)).toBe(true)
+  })
+
+  // Guard proof: name lockedColumns(model) in LockedNotice; the notice then asks for Tax too. Return
+  // messages.locked(name) from lockedCellLabel and lockedTotalLabel, and Tax's locks name Tax as a
+  // permission. Return the chart's own locked columns from chartLockedColumns, and it names Tax.
+  test("name the property a computed value is locked by, never the computed column", async () => {
+    const ui = await view(cache(result({ locked: true }), taxed))
+
+    expect(ui.container.querySelector('[role="note"]')?.textContent).toBe(
+      `Some values are hidden: you don't have permission to see Amount. ${ASK}`
+    )
+    expect(
+      ui.container
+        .querySelector('[role="grid"] [data-row="3"][data-column="4"] [data-locked]')
+        ?.getAttribute("title")
+    ).toBe(`Tax is computed from Amount, which you don't have permission to see. ${ASK}`)
+    expect(
+      [...ui.container.querySelectorAll('[aria-label="Totals"] [data-locked]')].map((total) =>
+        total.getAttribute("title")
+      )
+    ).toEqual([
+      `You don't have permission to see all of Amount, so its total is hidden. ${ASK}`,
+      `The total of Tax is hidden: it is computed from Amount, which you don't have permission to see. ${ASK}`,
+    ])
+    ui.unmount()
+
+    const { chart } = await lockedModel()
+    expect(chartLockedColumns({ ...chart, y: ["Tax"] }, await taxedModel())).toEqual(["Amount"])
+  })
+
+  // Guard proof: visit a whole-column reference at the cell's row in lockedBy; Share's lock on the
+  // row the reader sees then names no source, and reads as a permission on Share.
+  test("name what an aggregate is locked by on a row the reader sees whole", () => {
+    const parsed = parseWorkbook(
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Shares",
+            columns: {
+              Amount: "number",
+              Share: { type: "percent", formula: "[@Amount]/SUM([Amount])" },
+            },
+          },
+        ],
+      })
+    )
+    if (!("workbook" in parsed) || !parsed.workbook.sheets[0]) throw new Error("No workbook.")
+
+    // inv_1's amount is locked, so every row's share is.
+    const model = sheetModel(parsed.workbook.sheets[0], parseCsv("Amount,Share\n,\n100,\n"), {
+      locked: new Map([
+        [0, new Set([0, 1])],
+        [1, new Set([1])],
+      ]),
+    })
+    expect(lockedCellLabel(model, 1, 1, en.sheet)).toBe(
+      `Share is computed from Amount, which you don't have permission to see. ${ASK}`
+    )
   })
 
   // Guard proof: drop the `chartReadsLocked` check in card-preview.tsx's latestValue; the card

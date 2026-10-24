@@ -56,6 +56,7 @@ import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, type FormattedCell, numberFormat } from "./format"
 import { cellHighlight, highlightRanges } from "./highlight"
 import type { CellInput, CellInputError } from "./input"
+import { lockedCellLabel, lockedTotalLabel } from "./locked"
 import { isLocked, type SheetColumn, type SheetModel } from "./model"
 import {
   type CellPoint,
@@ -1180,7 +1181,7 @@ export function SheetGrid({
             />
           ) : lockedAt(row, column) ? (
             <LockedContent
-              label={messages.locked(model.columns[column]?.name ?? "")}
+              label={lockedCellLabel(model, order[row - 1] ?? -1, column, messages)}
               numeric={model.columns[column]?.numeric ?? false}
             />
           ) : (
@@ -1271,9 +1272,7 @@ export function SheetGrid({
           text={text}
           label={!entry}
           {...(entry ? { title: messages[entry.total] } : {})}
-          {...(entry?.locked
-            ? { locked: messages.lockedTotal(model.columns[column]?.name ?? "") }
-            : {})}
+          {...(entry?.locked ? { locked: lockedTotalLabel(model, column, messages) } : {})}
           fixed={fixed}
           lastFixed={fixed && column === frozenColumns - 1}
           scrolled={viewport.left > 0}
