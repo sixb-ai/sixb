@@ -5,13 +5,14 @@
  * the two together. Its tag names the layout, `data-sixb-layout`.
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
- * what draws its own colors; answers the app's requests; and tells the app about links to other
- * artifacts and where its `<sixb-embed>` boxes are, for the app to draw them over the frame. A
- * deck it also lays out: every `section.slide` is a 1280×720 slide, shown one at a time scaled to
- * fit, or all at once in a grid. The URL's fragment can open it at a slide, and with `sixb-fill`
- * show that slide alone filling the frame, as a thumbnail or an embed does; it tells the app about
- * keys and picks in the overview. A page scrolls as it is: it reports the embeds near its view as
- * it scrolls, and its height as it changes.
+ * what draws its own colors; answers the app's requests; and tells the app about the links the
+ * reader follows, to other artifacts or to web pages, for the app to open them, and where its
+ * `<sixb-embed>` boxes are, for the app to draw them over the frame. A deck it also lays out:
+ * every `section.slide` is a 1280×720 slide, shown one at a time scaled to fit, or all at once in
+ * a grid. The URL's fragment can open it at a slide, and with `sixb-fill` show that slide alone
+ * filling the frame, as a thumbnail or an embed does; it tells the app about keys and picks in the
+ * overview. A page scrolls as it is: it reports the embeds near its view as it scrolls, and its
+ * height as it changes.
  *
  * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
  * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
@@ -58,6 +59,16 @@ export function frameRuntime(): void {
     Array.from(document.querySelectorAll<HTMLElement>("section.slide"))
   const post = (message: Record<string, unknown>) =>
     window.parent.postMessage({ protocol: PROTOCOL, ...message }, "*")
+
+  /** A link's address resolved against the page, when it is a web page's: `http:` or `https:`. */
+  const webAddress = (href: string): string | null => {
+    try {
+      const url = new URL(href, document.baseURI)
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : null
+    } catch {
+      return null
+    }
+  }
 
   /** The scale that fits a slide in the window, and the one that fits a column of the grid. */
   const fit = () => {
@@ -371,14 +382,20 @@ export function frameRuntime(): void {
     const link = target?.closest<HTMLAnchorElement>("a[href]")
     if (link) {
       const href = link.getAttribute("href") ?? ""
+      // A link within the page moves through it, and one the page's own script handled is its.
+      if (href.startsWith("#") || event.defaultPrevented) return
+
+      // Anything else would leave the frame, which can open no window and navigates nowhere but
+      // the frames' origin: the app opens it, an artifact where the reader is and a web page in a
+      // new tab.
+      event.preventDefault()
       if (/^artifact:/i.test(href.trim())) {
-        event.preventDefault()
         post({ event: "open", params: { address: href.trim() } })
-      } else if (!href.startsWith("#")) {
-        // Outside the frame: a link opens in its own tab.
-        link.target = "_blank"
-        link.rel = "noopener noreferrer"
+        return
       }
+
+      const url = webAddress(href)
+      if (url) post({ event: "link", params: { url } })
       return
     }
     if (!deck || root.dataset.mode !== "overview") return

@@ -21,6 +21,11 @@ const FRAME_CDN_ALLOWLIST = [
  * `allow-same-origin`, so its page cannot read the app's cookies or call the API as the reader;
  * it loads only its own version's files, under its token, and the CDNs above; only the app's
  * origins may show it.
+ *
+ * A page reads its queries' rows as the reader, so it posts no form, and opens no window, not
+ * even one the reader's click allows: the app opens the web links the reader follows, and its own
+ * policy keeps the frame's navigations on the frames' origin. No policy reaches WebRTC: a page's
+ * code can still connect to a server it names that way.
  */
 export function frameContentSecurityPolicy(input: {
   readonly policy: ResolvedSixbApiBrowserPolicy
@@ -41,6 +46,6 @@ export function frameContentSecurityPolicy(input: {
     "form-action 'none'",
     "base-uri 'none'",
     `frame-ancestors 'self' ${input.policy.allowedOrigins.join(" ")}`.trim(),
-    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals",
+    "sandbox allow-scripts allow-modals",
   ].join("; ")
 }

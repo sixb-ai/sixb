@@ -52,6 +52,10 @@ const READY_TIMEOUT_MS = 20_000
  * A page in it keeps data with `sixb.state`, and reads its version's queries with `sixb.query`: the
  * frame's calls are answered here, for the artifact and the version it shows and the signed-in
  * reader, however many frames of it are open.
+ *
+ * The frame opens no window, and the app's policy lets it navigate only on the frames' origin, so a
+ * page's code cannot send what it reads to another site by loading an address: a web link the
+ * reader follows is opened from here, in a new tab.
  */
 export function ArtifactFrame({
   version,
@@ -207,6 +211,10 @@ export function ArtifactFrame({
         }
         const event = parseFrameEvent(data)
         if (!event) return
+        if (event.event === "link") {
+          openWebLink(iframe.current, event.params.url)
+          return
+        }
         if (event.event === "ready") {
           const loaded = sourceRef.current ?? null
           setReady(loaded)
@@ -289,7 +297,7 @@ export function ArtifactFrame({
             "absolute inset-0 size-full border-0 bg-transparent transition-opacity duration-200 ease-out motion-reduce:transition-none",
             shown === source ? "opacity-100" : "opacity-0"
           )}
-          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals"
+          sandbox="allow-scripts allow-modals"
           referrerPolicy="no-referrer"
           allow="fullscreen"
           {...(decorative
@@ -302,6 +310,24 @@ export function ArtifactFrame({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Opens a web page a frame's link points to, in a new tab that knows nothing of the app or the
+ * frame, while the reader is acting in that frame: it holds the focus, and the browser marks the
+ * app active for a moment after a click or a key in it. No script can do either, so a page's code
+ * cannot open a page on its own, and opening one uses the moment up: one click, one tab.
+ *
+ * The limit: within that moment, the page's code chooses what opens, as it chooses where any of
+ * its links points. A click on one of its buttons can open a page its code wrote the address of.
+ */
+function openWebLink(frame: HTMLIFrameElement, url: string): void {
+  if (document.activeElement !== frame) return
+
+  // Where the browser cannot say, it still opens a window only for a reader's action.
+  if (navigator.userActivation && !navigator.userActivation.isActive) return
+
+  window.open(url, "_blank", "noopener,noreferrer")
 }
 
 /** A version's frame link, shared by its frames and reused while it has most of its hour left. */

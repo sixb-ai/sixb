@@ -61,7 +61,7 @@ async function frameResponse(
   }
 
   // A frame link opens only in a frame. Opened as a page on the API's origin, its sandbox would
-  // still let it show dialogs and open windows that escape the sandbox, under the API's address.
+  // still let it show dialogs under the API's address, with no app policy to hold where it goes.
   if (request.headers.get("sec-fetch-dest") === "document") return notFound()
 
   const storage = host.storage.artifacts
