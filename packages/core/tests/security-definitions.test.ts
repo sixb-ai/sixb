@@ -10,27 +10,33 @@ import {
   can,
   col,
   createSixb,
+  currentUser,
   type DatasetDefinition,
   defineAction,
   defineConnector,
   defineDataset,
   defineGroup,
+  defineMarking,
   defineMembershipPolicy,
   defineObjectType,
   definePipeline,
   definePipelineStep,
   defineRole,
+  defineShare,
   defineSync,
   every,
+  type GrantDefinition,
   type GroupDefinition,
   type MembershipPolicyDefinition,
   type PipelineDefinition,
   project,
   prop,
   type RoleDefinition,
+  ref,
   SecurityValidationError,
   SixbHost,
   type SyncDefinition,
+  userRef,
 } from "../src"
 import { canPerformMembershipOperation, resolveMembershipPolicyScope } from "../src/security"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -835,6 +841,200 @@ describe("role definitions", () => {
     )
   })
 })
+
+describe("view grant conditions", () => {
+  const financial = defineMarking("financial")
+  const staff = defineGroup("staff")
+  const filterable = { query: { searchable: true, filterable: true } } as const
+
+  const Note = defineObjectType({
+    id: "note",
+    name: "Note",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("owner", ref.user(), filterable),
+      prop("topic", "string", filterable),
+      prop("body", "string"),
+    ],
+  })
+
+  const Invoice = defineObjectType({
+    id: "invoice",
+    name: "Invoice",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("status", "string", filterable),
+      prop("amount", "double", { ...filterable, markings: [financial] }),
+    ],
+  })
+
+  // A subtype may add markings to what it inherits, and `can.view(Invoice)` covers it.
+  const DisputedInvoice = defineObjectType({
+    id: "disputed-invoice",
+    name: "Disputed Invoice",
+    extends: Invoice,
+    properties: [prop("status", "string", { ...filterable, markings: [financial] })],
+  })
+
+  function start(grant: GrantDefinition): SixbHost {
+    return new SixbHost({
+      ontology: [Note, Invoice, DisputedInvoice],
+      markings: [financial],
+      groups: [staff],
+      roles: [defineRole("staff", { grantedTo: [staff], grants: [grant] })],
+      ...createTestRuntimeDeps(),
+    })
+  }
+
+  function conditionOn(objectTypeId: string, condition: unknown): GrantDefinition {
+    return {
+      kind: "grant",
+      capability: "view",
+      target: "object",
+      selection: { all: false, ids: [objectTypeId] },
+      condition,
+    } as GrantDefinition
+  }
+
+  test("can.view(Type).where(...) records the condition once, frozen", () => {
+    const grant = can.view(Invoice).where((invoice) => invoice.p.status.neq("draft"))
+
+    expect(grant).toEqual({
+      kind: "grant",
+      capability: "view",
+      target: "object",
+      selection: { all: false, ids: ["invoice"] },
+      condition: { propertyId: "status", op: "neq", value: "draft" },
+    })
+    expect(Object.isFrozen(grant)).toBe(true)
+    expect(Object.isFrozen(grant.condition)).toBe(true)
+    expect("where" in grant).toBe(false)
+  })
+
+  test("a condition returned as an array means AND, and keeps currentUser() and userRef()", () => {
+    const grant = can
+      .view(Note)
+      .where((note) => [note.p.owner.eq(currentUser()), note.p.owner.neq(userRef("usr_bot"))])
+
+    expect(grant.condition).toEqual({
+      op: "and",
+      items: [
+        { propertyId: "owner", op: "eq", value: { type: "currentUser" } },
+        { propertyId: "owner", op: "neq", value: { type: "user", id: "usr_bot" } },
+      ],
+    })
+  })
+
+  // Reproduce: attach `where` in `view` whatever its input, and every grant below carries it.
+  test("only a grant on one object type takes .where()", () => {
+    let shareGrant: object | undefined
+    defineShare("account", {
+      target: Account,
+      grants: ({ target }) => {
+        const grant = can.view(target)
+        shareGrant = grant
+        return [grant]
+      },
+    })
+
+    for (const grant of [
+      can.view([Invoice]),
+      can.view(every.object()),
+      can.view(AccountSnapshot),
+      can.view(project.users),
+      shareGrant,
+    ]) {
+      expect(grant).toBeDefined()
+      expect("where" in (grant as object)).toBe(false)
+    }
+  })
+
+  test.each([
+    [
+      "a value that is not a function",
+      "status",
+      '[Sixb] can.view(invoice).where(...) expects a function, such as (object) => object.p.status.eq("open").',
+    ],
+    [
+      "a callback that returns no condition",
+      () => [],
+      "[Sixb] can.view(invoice).where(...) returned no condition. Return a predicate, or drop .where() to grant every object.",
+    ],
+  ] as const)("can.view(Type).where(...) rejects %s", (_case, callback, message) => {
+    const grant = can.view(Invoice) as unknown as { where(callback: unknown): unknown }
+
+    expect(() => grant.where(callback)).toThrow(message)
+  })
+
+  // Reproduce: skip the validation in assertViewCondition, or check only the granted type for
+  // markings, and these reach the "not supported yet" refusal instead.
+  test.each([
+    [
+      "a condition reading an unknown property",
+      conditionOn("note", { propertyId: "missing", op: "eq", value: "x" }),
+      "[Sixb] Role 'staff': can.view(note).where(...): Property 'missing' does not exist on object type 'note'",
+    ],
+    [
+      "a condition reading a property without query metadata",
+      can.view(Note).where((note) => note.p.body.eq("x")),
+      "[Sixb] Role 'staff': can.view(note).where(...): Property 'body' on 'note' must set query.searchable: true and query.filterable: true before it can be used in predicates",
+    ],
+    [
+      "a condition comparing currentUser() with a property that holds no user reference",
+      conditionOn("note", { propertyId: "topic", op: "eq", value: currentUser() }),
+      "[Sixb] Role 'staff': can.view(note).where(...): currentUser() can only be compared with a ref.user() property; 'note.topic' is not one.",
+    ],
+    // Reproduce: drop the orderedTextComparison check, and this reaches the refusal instead.
+    [
+      "a condition ordering text",
+      can.view(Note).where((note) => note.not(note.p.topic.gte("M"))),
+      "[Sixb] Role 'staff': can.view(note).where(...) compares 'note.topic' with gte(). Storage providers order text differently, so a condition cannot order text: compare with eq, neq, in or contains instead.",
+    ],
+    [
+      "a condition reading a marked property",
+      can.view(Invoice).where((invoice) => invoice.p.amount.gt(100)),
+      "[Sixb] Role 'staff': can.view(invoice).where(...) reads 'invoice.amount', which carries [financial]. A condition can only read unmarked properties.",
+    ],
+    [
+      "a condition reading a property a covered subtype marks",
+      can.view(Invoice).where((invoice) => invoice.p.status.neq("draft")),
+      "[Sixb] Role 'staff': can.view(invoice).where(...) reads 'disputed-invoice.status', which carries [financial]. A condition can only read unmarked properties.",
+    ],
+    [
+      "a condition on a grant that does not view one object type",
+      {
+        ...conditionOn("note", { propertyId: "topic", op: "eq", value: "x" }),
+        target: "dataset",
+        selection: { all: false, ids: [] },
+      } as GrantDefinition,
+      "[Sixb] Role 'staff' declares a condition on a grant that is not a view grant on one object type. Write can.view(Type).where(...).",
+    ],
+  ] as const)("startup rejects %s", (_case, grant, message) => {
+    const error = catchError(() => start(grant))
+
+    expect(error).toBeInstanceOf(SecurityValidationError)
+    expect((error as Error).message).toBe(message)
+  })
+
+  // Reads do not apply conditions yet, so a valid one is refused rather than granting every note.
+  // Reproduce: drop the refusal at the end of assertViewCondition and startup succeeds.
+  test("startup refuses a valid condition until reads enforce it", () => {
+    const grant = can.view(Note).where((note) => note.p.owner.eq(currentUser()))
+
+    expect(() => start(grant)).toThrow(
+      "[Sixb] Role 'staff': can.view(note).where(...) is not supported yet."
+    )
+  })
+})
+
+function catchError(run: () => unknown): unknown {
+  try {
+    run()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected an error.")
+}
 
 async function createTempProjectRoot(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-security-"))

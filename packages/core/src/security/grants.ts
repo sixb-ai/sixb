@@ -17,7 +17,8 @@ import type {
 } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
-import type { ObjectType } from "../ontology"
+import { resolveWhere } from "../objects/sdk/where"
+import type { ObjectType, ObjectTypeWithPropertyTokens } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
 import { createShareActionGrant, createShareViewGrant, isShareTarget } from "../shares/builders"
 import type {
@@ -43,6 +44,7 @@ import type {
   EditGrant,
   ManageGrant,
   ModelsRunGrant,
+  ObjectViewGrantBuilder,
   ObserveGrant,
   ProjectReference,
   RunGrant,
@@ -175,6 +177,9 @@ function view<const TObjectTypeId extends string>(
   input: ShareTarget<TObjectTypeId>
 ): ShareViewGrantBuilder<TObjectTypeId>
 function view(input: ProjectReference["users"]): UsersViewGrant
+function view<const TObjectType extends ObjectTypeWithPropertyTokens>(
+  input: TObjectType
+): ObjectViewGrantBuilder<TObjectType>
 function view(input: GrantInput<ObjectType, "object">): ViewGrant<"object">
 function view(input: GrantInput<DatasetDefinition, "dataset">): ViewGrant<"dataset">
 function view(
@@ -197,7 +202,65 @@ function view(
   }
 
   const { target, selection } = resolveGrant(input, "can.view", VIEW_TARGETS)
-  return { kind: "grant", capability: "view", target, selection }
+  const grant: ViewGrant = { kind: "grant", capability: "view", target, selection }
+
+  // Only a grant on one object type takes a condition, since a condition reads that type's
+  // properties. As in `apply`, the cast restores the branch `Array.isArray` cannot narrow.
+  const one: ObjectType | undefined =
+    target !== "object" || Array.isArray(input) || isBreadthSelector(input)
+      ? undefined
+      : (input as ObjectType)
+
+  if (one) {
+    Object.defineProperty(grant, "where", {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: (callback: unknown) => conditionalViewGrant(grant, one, callback),
+    })
+  }
+
+  return grant
+}
+
+/**
+ * The condition is built once, here, with the same builder and the same conversion as an object
+ * query's `.where()`. Startup validates it against the ontology.
+ */
+function conditionalViewGrant(
+  grant: ViewGrant,
+  objectType: ObjectType,
+  callback: unknown
+): ViewGrant<"object"> {
+  const subject = `can.view(${objectType.id}).where(...)`
+
+  if (typeof callback !== "function") {
+    throw new SecurityValidationError(
+      `[Sixb] ${subject} expects a function, such as (object) => object.p.status.eq("open").`
+    )
+  }
+
+  const condition = resolveWhere(callback as Parameters<typeof resolveWhere>[0])
+  if (condition === undefined) {
+    throw new SecurityValidationError(
+      `[Sixb] ${subject} returned no condition. Return a predicate, or drop .where() to grant every object.`
+    )
+  }
+
+  return deepFreeze({
+    kind: "grant",
+    capability: "view",
+    target: "object",
+    selection: structuredClone(grant.selection),
+    condition: structuredClone(condition),
+  })
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value
+
+  for (const child of Object.values(value)) deepFreeze(child)
+  return Object.freeze(value)
 }
 
 function isUsersReference(input: unknown): input is ProjectReference["users"] {

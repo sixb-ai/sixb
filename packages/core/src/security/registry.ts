@@ -1,4 +1,5 @@
 import { type ResolvedRole, resolveRoleGrants } from "../authorization"
+import type { OntologyRegistry } from "../ontology"
 import type {
   GroupDefinition,
   MarkingDefinition,
@@ -6,6 +7,7 @@ import type {
   RoleDefinition,
 } from "./types"
 import { validateSecurityDefinitionsAtStartup } from "./validation"
+import { assertViewCondition } from "./view-conditions"
 
 /** Read-only access to validated security definitions and resolved role grants. */
 export interface SecurityDefinitionCatalog {
@@ -35,6 +37,7 @@ export interface SecurityRegistryOptions {
   readonly connectorIds?: ReadonlySet<string>
   readonly shareIds?: ReadonlySet<string>
   readonly getSubTypes?: (objectTypeId: string) => readonly string[]
+  readonly ontology?: OntologyRegistry
 }
 
 export class SecurityRegistry implements SecurityDefinitionCatalog {
@@ -60,6 +63,12 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       connectorIds: input.connectorIds,
       shareIds: input.shareIds,
     })
+
+    // Conditions are checked here rather than with the other grant rules: those also load in the
+    // browser through `defineGroup`, and a condition needs the object-query validator.
+    for (const role of definitions.roles) {
+      for (const grant of role.grants) assertViewCondition(role.id, grant, input.ontology)
+    }
 
     const universe = {
       objectTypeIds: input.objectTypeIds ?? new Set<string>(),

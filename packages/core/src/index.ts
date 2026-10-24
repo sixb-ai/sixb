@@ -470,6 +470,7 @@ export type {
   MembershipOperation,
   MembershipPolicyDefinition,
   ModelsRunGrant,
+  ObjectViewGrantBuilder,
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,
