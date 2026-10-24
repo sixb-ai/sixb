@@ -8,6 +8,8 @@ import {
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentApprovalCall,
+  type AgentApprovalCursor,
+  type AgentApprovalMode,
   type AgentApprovalOutcome,
   type AgentApprovalRecord,
   type AgentApprovalStore,
@@ -20,6 +22,8 @@ import {
   type RequestAgentApprovalInput,
   type RequestAgentApprovalResult,
   type SettleAgentApprovalsInput,
+  type StopAgentApprovalsInput,
+  type StopAgentApprovalsResult,
 } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import { type AgentRunRow, rowToRunRecord } from "./rows"
@@ -43,6 +47,9 @@ interface AgentApprovalRow {
   readonly decided_by_id: string | null
   readonly outcome: string | null
   readonly reported_in_message_id: string | null
+  readonly raised_mode: AgentApprovalMode | null
+  readonly turn_stopped_at: string | null
+  readonly execution_claimed_at: string | null
 }
 
 const LIVE_CALL = `
@@ -118,7 +125,7 @@ export class SqliteAgentApprovalStore implements AgentApprovalStore {
         this.db
           .query(
             `UPDATE agent_approvals
-             SET status = ?, decided_at = ?, decided_by_type = ?, decided_by_id = ?
+             SET status = ?, decided_at = ?, decided_by_type = ?, decided_by_id = ?, raised_mode = ?
              WHERE project_id = ? AND id = ?`
           )
           .run(
@@ -126,6 +133,7 @@ export class SqliteAgentApprovalStore implements AgentApprovalStore {
             decidedAt,
             input.decidedBy.type,
             input.decidedBy.id,
+            input.decision === "approved" ? (input.raisedMode ?? null) : null,
             input.projectId,
             input.id
           )
@@ -170,6 +178,130 @@ export class SqliteAgentApprovalStore implements AgentApprovalStore {
     return rows.map(rowToApproval).sort(compareApprovals)
   }
 
+  async stop(input: StopAgentApprovalsInput): Promise<StopAgentApprovalsResult> {
+    const stoppedAt = (input.stoppedAt ?? new Date()).toISOString()
+    const clauses = [
+      "project_id = ?",
+      "thread_id = ?",
+      "reported_in_message_id IS NULL",
+      "(status = 'pending' OR turn_stopped_at IS NULL)",
+    ]
+    const params: string[] = [input.projectId, input.threadId]
+    if (input.runId !== undefined) {
+      clauses.push("run_id = ?")
+      params.push(input.runId)
+    }
+    if (input.requestedBy !== undefined) {
+      clauses.push("requested_by_type = ? AND requested_by_id = ?")
+      params.push(input.requestedBy.type, input.requestedBy.id)
+    }
+
+    return runImmediateTransaction(this.db, () => {
+      const matched = this.db
+        .query(`SELECT * FROM agent_approvals WHERE ${clauses.join(" AND ")}`)
+        .all(...params) as AgentApprovalRow[]
+      const update = this.db.query(
+        `UPDATE agent_approvals
+         SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
+           turn_stopped_at = COALESCE(turn_stopped_at, ?)
+         WHERE project_id = ? AND id = ?`
+      )
+      for (const row of matched) update.run(stoppedAt, input.projectId, row.id)
+
+      const cancelled = matched
+        .filter((row) => row.status === "pending")
+        .map((row) => this.require(input.projectId, row.id))
+      const stopped = matched.filter((row) => row.turn_stopped_at === null).length
+      return { cancelled: cancelled.sort(compareApprovals), stopped }
+    })
+  }
+
+  async holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean> {
+    return sqliteHoldsRun(this.db, input.projectId, input.runId)
+  }
+
+  async claimExecution(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly claimedAt: Date
+    readonly staleBefore: Date
+  }): Promise<AgentApprovalRecord | null> {
+    const row = this.db
+      .query(
+        `UPDATE agent_approvals SET execution_claimed_at = ?
+         WHERE project_id = ? AND id = ? AND status = 'approved' AND outcome IS NULL
+           AND COALESCE(execution_claimed_at, decided_at) <= ?
+         RETURNING *`
+      )
+      .get(
+        input.claimedAt.toISOString(),
+        input.projectId,
+        input.id,
+        input.staleBefore.toISOString()
+      ) as AgentApprovalRow | null
+    return row ? rowToApproval(row) : null
+  }
+
+  async listRepairable(input: {
+    readonly projectId: string
+    readonly claimableBefore: Date
+    readonly after?: AgentApprovalCursor
+    readonly limit: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    const afterAt = input.after?.createdAt.toISOString() ?? null
+    const afterId = input.after?.id ?? ""
+    // Each half of the OR matches one partial index.
+    const rows = this.db
+      .query(
+        `SELECT * FROM agent_approvals
+         WHERE project_id = ?
+           AND (
+             (status = 'approved' AND outcome IS NULL
+               AND COALESCE(execution_claimed_at, decided_at) <= ?)
+             OR (status IN ('approved', 'denied') AND reported_in_message_id IS NULL
+               AND turn_stopped_at IS NULL)
+           )
+           AND (? IS NULL OR created_at > ? OR (created_at = ? AND id > ?))
+         ORDER BY created_at, id
+         LIMIT ?`
+      )
+      .all(
+        input.projectId,
+        input.claimableBefore.toISOString(),
+        afterAt,
+        afterAt,
+        afterAt,
+        afterId,
+        input.limit
+      ) as AgentApprovalRow[]
+    return rows.map(rowToApproval)
+  }
+
+  async expireDue(input: {
+    readonly projectId: string
+    readonly now: Date
+    readonly limit?: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    const rows = this.db
+      .query(
+        `UPDATE agent_approvals SET status = 'expired'
+         WHERE project_id = ? AND id IN (
+           SELECT id FROM agent_approvals
+           WHERE project_id = ? AND status = 'pending' AND expires_at <= ?
+           ORDER BY created_at, id
+           LIMIT ?
+         )
+         RETURNING *`
+      )
+      .all(
+        input.projectId,
+        input.projectId,
+        input.now.toISOString(),
+        input.limit ?? -1
+      ) as AgentApprovalRow[]
+    return rows.map(rowToApproval).sort(compareApprovals)
+  }
+
   async markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]> {
     const ids = [...new Set(input.ids)]
     if (ids.length === 0) return []
@@ -178,10 +310,17 @@ export class SqliteAgentApprovalStore implements AgentApprovalStore {
       .query(
         `UPDATE agent_approvals SET reported_in_message_id = ?
          WHERE project_id = ? AND thread_id = ? AND reported_in_message_id IS NULL
+           AND (? = 0 OR turn_stopped_at IS NULL)
            AND id IN (${ids.map(() => "?").join(", ")})
          RETURNING id`
       )
-      .all(input.messageId, input.projectId, input.threadId, ...ids) as { id: string }[]
+      .all(
+        input.messageId,
+        input.projectId,
+        input.threadId,
+        input.resuming === true ? 1 : 0,
+        ...ids
+      ) as { id: string }[]
     const marked = new Set(rows.map((row) => row.id))
     return ids.filter((id) => marked.has(id))
   }
@@ -288,7 +427,28 @@ function rowToApproval(row: AgentApprovalRow): AgentApprovalRecord {
     ...(row.reported_in_message_id === null
       ? {}
       : { reportedInMessageId: row.reported_in_message_id }),
+    ...(row.raised_mode === null ? {} : { raisedMode: row.raised_mode }),
+    ...(row.turn_stopped_at === null ? {} : { turnStoppedAt: new Date(row.turn_stopped_at) }),
+    ...(row.execution_claimed_at === null
+      ? {}
+      : { executionClaimedAt: new Date(row.execution_claimed_at) }),
   }
+}
+
+/**
+ * Whether a run holds a call: an approval of its, or one it made for its turn, pending or decided
+ * and not reported yet. `holdsRun` and the paused finish of `runs.finish` both ask this.
+ */
+export function sqliteHoldsRun(db: Database, projectId: string, runId: string): boolean {
+  const held = db
+    .query(
+      `SELECT id FROM agent_approvals
+       WHERE project_id = ? AND (run_id = ? OR caller_run_id = ?)
+         AND status IN ('pending', 'approved', 'denied') AND reported_in_message_id IS NULL
+       LIMIT 1`
+    )
+    .get(projectId, runId, runId)
+  return held !== null
 }
 
 function compareApprovals(left: AgentApprovalRecord, right: AgentApprovalRecord): number {

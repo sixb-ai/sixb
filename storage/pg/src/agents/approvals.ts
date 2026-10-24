@@ -7,6 +7,8 @@ import {
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentApprovalCall,
+  type AgentApprovalCursor,
+  type AgentApprovalMode,
   type AgentApprovalOutcome,
   type AgentApprovalRecord,
   type AgentApprovalStore,
@@ -19,6 +21,8 @@ import {
   type RequestAgentApprovalInput,
   type RequestAgentApprovalResult,
   type SettleAgentApprovalsInput,
+  type StopAgentApprovalsInput,
+  type StopAgentApprovalsResult,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
@@ -43,6 +47,9 @@ interface AgentApprovalRow {
   readonly decided_by_id: string | null
   readonly outcome: AgentApprovalOutcome | string | null
   readonly reported_in_message_id: string | null
+  readonly raised_mode: AgentApprovalMode | null
+  readonly turn_stopped_at: Date | string | null
+  readonly execution_claimed_at: Date | string | null
 }
 
 export class PgAgentApprovalStore implements AgentApprovalStore {
@@ -97,7 +104,9 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
         status = CASE WHEN expires_at <= ${decidedAt} THEN 'expired' ELSE ${input.decision} END,
         decided_at = CASE WHEN expires_at <= ${decidedAt} THEN NULL ELSE ${decidedAt}::timestamptz END,
         decided_by_type = CASE WHEN expires_at <= ${decidedAt} THEN NULL ELSE ${input.decidedBy.type} END,
-        decided_by_id = CASE WHEN expires_at <= ${decidedAt} THEN NULL ELSE ${input.decidedBy.id} END
+        decided_by_id = CASE WHEN expires_at <= ${decidedAt} THEN NULL ELSE ${input.decidedBy.id} END,
+        raised_mode = CASE WHEN expires_at <= ${decidedAt} OR ${input.decision} <> 'approved'
+          THEN NULL ELSE ${input.raisedMode ?? null}::text END
       WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = 'pending'
       RETURNING *
     `
@@ -144,6 +153,108 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
     return rows.map(rowToApproval).sort(compareApprovals)
   }
 
+  async stop(input: StopAgentApprovalsInput): Promise<StopAgentApprovalsResult> {
+    const runId = input.runId ?? null
+    const requesterType = input.requestedBy?.type ?? null
+    const requesterId = input.requestedBy?.id ?? null
+    const stoppedAt = input.stoppedAt ?? new Date()
+
+    // What each row was before the update tells what this stop changed.
+    const rows = await this.sql<
+      (AgentApprovalRow & { readonly was_pending: boolean; readonly newly_stopped: boolean })[]
+    >`
+      WITH matched AS (
+        SELECT id, status = 'pending' AS was_pending, turn_stopped_at IS NULL AS newly_stopped
+        FROM agent_approvals
+        WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+          AND reported_in_message_id IS NULL
+          AND (status = 'pending' OR turn_stopped_at IS NULL)
+          AND (${runId}::text IS NULL OR run_id = ${runId})
+          AND (${requesterType}::text IS NULL
+            OR (requested_by_type = ${requesterType} AND requested_by_id = ${requesterId}))
+        FOR UPDATE
+      )
+      UPDATE agent_approvals AS approval
+      SET
+        status = CASE WHEN matched.was_pending THEN 'cancelled' ELSE approval.status END,
+        turn_stopped_at = COALESCE(approval.turn_stopped_at, ${stoppedAt}::timestamptz)
+      FROM matched
+      WHERE approval.project_id = ${input.projectId} AND approval.id = matched.id
+      RETURNING approval.*, matched.was_pending, matched.newly_stopped
+    `
+    const cancelled = rows.filter((row) => row.was_pending).map(rowToApproval)
+    const stopped = rows.filter((row) => row.newly_stopped).length
+    return { cancelled: cancelled.sort(compareApprovals), stopped }
+  }
+
+  async holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean> {
+    return pgHoldsRun(this.sql, input.projectId, input.runId)
+  }
+
+  async claimExecution(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly claimedAt: Date
+    readonly staleBefore: Date
+  }): Promise<AgentApprovalRecord | null> {
+    const [row] = await this.sql<AgentApprovalRow[]>`
+      UPDATE agent_approvals SET execution_claimed_at = ${input.claimedAt}
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
+        AND status = 'approved' AND outcome IS NULL
+        AND COALESCE(execution_claimed_at, decided_at) <= ${input.staleBefore}
+      RETURNING *
+    `
+    return row ? rowToApproval(row) : null
+  }
+
+  async listRepairable(input: {
+    readonly projectId: string
+    readonly claimableBefore: Date
+    readonly after?: AgentApprovalCursor
+    readonly limit: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    const afterAt = input.after?.createdAt ?? null
+    const afterId = input.after?.id ?? ""
+    // Each half of the OR matches one partial index.
+    const rows = await this.sql<AgentApprovalRow[]>`
+      SELECT * FROM agent_approvals
+      WHERE project_id = ${input.projectId}
+        AND (
+          (status = 'approved' AND outcome IS NULL
+            AND COALESCE(execution_claimed_at, decided_at) <= ${input.claimableBefore})
+          OR (status IN ('approved', 'denied') AND reported_in_message_id IS NULL
+            AND turn_stopped_at IS NULL)
+        )
+        AND (${afterAt}::timestamptz IS NULL OR (created_at, id) > (${afterAt}::timestamptz, ${afterId}))
+      ORDER BY created_at, id
+      LIMIT ${input.limit}
+    `
+    return rows.map(rowToApproval)
+  }
+
+  async expireDue(input: {
+    readonly projectId: string
+    readonly now: Date
+    readonly limit?: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    // The CTE picks the rows once, under the limit; an `IN` subquery did not keep to it.
+    const rows = await this.sql<AgentApprovalRow[]>`
+      WITH due AS (
+        SELECT id FROM agent_approvals
+        WHERE project_id = ${input.projectId} AND status = 'pending'
+          AND expires_at <= ${input.now}
+        ORDER BY created_at, id
+        LIMIT ${input.limit ?? null}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE agent_approvals AS approval SET status = 'expired'
+      FROM due
+      WHERE approval.project_id = ${input.projectId} AND approval.id = due.id
+      RETURNING approval.*
+    `
+    return rows.map(rowToApproval).sort(compareApprovals)
+  }
+
   async markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]> {
     const ids = [...new Set(input.ids)]
     if (ids.length === 0) return []
@@ -152,6 +263,7 @@ export class PgAgentApprovalStore implements AgentApprovalStore {
       UPDATE agent_approvals SET reported_in_message_id = ${input.messageId}
       WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
         AND id = ANY(${this.sql.array(ids)}::text[]) AND reported_in_message_id IS NULL
+        AND (${input.resuming !== true} OR turn_stopped_at IS NULL)
       RETURNING id
     `
     const marked = new Set(rows.map((row) => row.id))
@@ -253,7 +365,30 @@ function rowToApproval(row: AgentApprovalRow): AgentApprovalRecord {
     ...(row.reported_in_message_id === null
       ? {}
       : { reportedInMessageId: row.reported_in_message_id }),
+    ...(row.raised_mode === null ? {} : { raisedMode: row.raised_mode }),
+    ...(row.turn_stopped_at === null ? {} : { turnStoppedAt: new Date(row.turn_stopped_at) }),
+    ...(row.execution_claimed_at === null
+      ? {}
+      : { executionClaimedAt: new Date(row.execution_claimed_at) }),
   }
+}
+
+/**
+ * Whether a run holds a call: an approval of its, or one it made for its turn, pending or decided
+ * and not reported yet. `holdsRun` and the paused finish of `runs.finish` both ask this.
+ */
+export async function pgHoldsRun(
+  sql: PgStoreClient,
+  projectId: string,
+  runId: string
+): Promise<boolean> {
+  const [held] = await sql<{ id: string }[]>`
+    SELECT id FROM agent_approvals
+    WHERE project_id = ${projectId} AND (run_id = ${runId} OR caller_run_id = ${runId})
+      AND status IN ('pending', 'approved', 'denied') AND reported_in_message_id IS NULL
+    LIMIT 1
+  `
+  return held !== undefined
 }
 
 function parseJson<T>(value: T | string): T {

@@ -449,6 +449,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("076-agent-memory", agentMemorySql),
     pgSql("077-artifact-threads", artifactThreadsSql),
     pgSql("078-agent-approvals", agentApprovalsSql),
+    pgSql("079-agent-approval-resume", agentApprovalResumeSql),
   ],
 })
 
@@ -507,3 +508,6 @@ import modelCallFilesSql from "./migrations/075-model-call-files.sql" with { typ
 import agentMemorySql from "./migrations/076-agent-memory.sql" with { type: "text" }
 import artifactThreadsSql from "./migrations/077-artifact-threads.sql" with { type: "text" }
 import agentApprovalsSql from "./migrations/078-agent-approvals.sql" with { type: "text" }
+import agentApprovalResumeSql from "./migrations/079-agent-approval-resume.sql" with {
+  type: "text",
+}

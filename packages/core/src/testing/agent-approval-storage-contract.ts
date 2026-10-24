@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Principal } from "../auth"
 import {
   type AgentApprovalCall,
+  type AgentApprovalCursor,
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
@@ -41,6 +42,8 @@ const markPaid: AgentApprovalCall = {
   actionRunId: "act_mark_paid",
   effect: "external",
 }
+
+const markPaidCall = markPaid as Extract<AgentApprovalCall, { readonly kind: "action" }>
 
 const sendReminders: AgentApprovalCall = {
   kind: "workflow",
@@ -393,14 +396,357 @@ export function runAgentApprovalStorageContractSuite<
       })
     })
 
-    test("a turn that succeeds leaves its pending approvals for their decision", async () => {
+    test("a turn that pauses keeps its approvals for their decision", async () => {
       await withStorage(async (storage) => {
         await startTurn(storage)
         await storage.agents.approvals.request(approvalInput())
 
+        await finishTurn(storage, "succeeded", "awaiting_approval")
+
+        expect(await storage.agents.approvals.getById({ projectId, id: "apr_1" })).toMatchObject({
+          status: "pending",
+        })
+        expect(
+          (await storage.agents.approvals.getById({ projectId, id: "apr_1" }))?.turnStoppedAt
+        ).toBeUndefined()
+      })
+    })
+
+    // A call can land after the turn's last check and before its finish.
+    test("a turn that succeeds without pausing cancels a late call and never resumes", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.request(approvalInput({ id: "apr_2", call: sendReminders }))
+        await storage.agents.approvals.decide({ ...decision("denied"), id: "apr_2" })
+
         await finishTurn(storage, "succeeded")
 
+        const approvals = (await storage.agents.approvals.list({ projectId })).approvals
+        expect(approvals.map(({ id, status }) => [id, status])).toEqual([
+          ["apr_1", "cancelled"],
+          ["apr_2", "denied"],
+        ])
+        expect(approvals.every((approval) => approval.turnStoppedAt !== undefined)).toBe(true)
+      })
+    })
+
+    test("a child that succeeds leaves its turn's approvals waiting", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await startChild(storage)
+        await storage.agents.approvals.request(
+          approvalInput({ callerRunId: "child_1", executionToken: "child_token" })
+        )
+
+        await storage.agents.runs.finish({
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          result: { text: "Waiting for approval." },
+        })
+
         expect(await statuses(storage)).toEqual([["apr_1", "pending"]])
+      })
+    })
+
+    test("a turn pauses for approval only while it holds a call", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await startTurn(storage, { threadId: "thr_2", runId: "run_2", token: "token_2" })
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.decide(decision("approved"))
+        const pause = { projectId, finishReason: "awaiting_approval" } as const
+
+        // Decided before the turn could pause, and not reported yet: the turn still holds it.
+        expect(await storage.agents.approvals.holdsRun({ projectId, runId: "run_1" })).toBe(true)
+        expect(await storage.agents.approvals.holdsRun({ projectId, runId: "run_2" })).toBe(false)
+        const paused = await storage.agents.runs.finish({
+          ...pause,
+          id: "run_1",
+          executionToken: "token_1",
+          status: "succeeded",
+        })
+        await expectAgentError(
+          storage.agents.runs.finish({
+            ...pause,
+            id: "run_2",
+            executionToken: "token_2",
+            status: "succeeded",
+          }),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.agents.runs.finish({
+            projectId,
+            id: "run_2",
+            executionToken: "token_2",
+            status: "failed",
+            finishReason: "awaiting_approval" as "error",
+          }),
+          "invalid_input"
+        )
+
+        expect(paused).toMatchObject({ status: "succeeded", finishReason: "awaiting_approval" })
+        expect(await storage.agents.runs.getById({ projectId, id: "run_2" })).toMatchObject({
+          status: "running",
+        })
+      })
+    })
+
+    test("a reported call no longer holds its turn", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.settle({
+          projectId,
+          threadId: "thr_1",
+          status: "superseded",
+        })
+        await storage.agents.approvals.markReported({
+          projectId,
+          threadId: "thr_1",
+          ids: ["apr_1"],
+          messageId: "msg_2",
+        })
+
+        expect(await storage.agents.approvals.holdsRun({ projectId, runId: "run_1" })).toBe(false)
+        await expectAgentError(
+          storage.agents.runs.finish({
+            projectId,
+            id: "run_1",
+            executionToken: "token_1",
+            status: "succeeded",
+            finishReason: "awaiting_approval",
+          }),
+          "invalid_input"
+        )
+      })
+    })
+
+    test("keeps the mode always allow raised a call's turn to", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.request(approvalInput({ id: "apr_2", call: sendReminders }))
+
+        await storage.agents.approvals.decide({ ...decision("approved"), raisedMode: "auto" })
+        await storage.agents.approvals.decide({
+          ...decision("denied"),
+          id: "apr_2",
+          raisedMode: "auto",
+        })
+
+        const [approved, denied] = (await storage.agents.approvals.list({ projectId })).approvals
+        expect(approved?.raisedMode).toBe("auto")
+        expect(denied?.raisedMode).toBeUndefined()
+      })
+    })
+
+    test("stops one turn, or one requester's turns, from resuming", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.request(
+          approvalInput({ id: "apr_marc", call: sendReminders, requestedBy: marc })
+        )
+        await storage.agents.approvals.request(
+          approvalInput({ id: "apr_decided", call: { ...markPaidCall, actionRunId: "act_2" } })
+        )
+        await storage.agents.approvals.decide({ ...decision("denied"), id: "apr_decided" })
+        const stoppedAt = new Date(t0.getTime() + 5_000)
+
+        const byRequester = await storage.agents.approvals.stop({
+          projectId,
+          threadId: "thr_1",
+          requestedBy: marc,
+          stoppedAt,
+        })
+        const byRun = await storage.agents.approvals.stop({
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          stoppedAt,
+        })
+        const again = await storage.agents.approvals.stop({
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+        })
+
+        expect(byRequester).toEqual({
+          cancelled: [expect.objectContaining({ id: "apr_marc", status: "cancelled" })],
+          stopped: 1,
+        })
+        expect(byRun).toEqual({
+          cancelled: [expect.objectContaining({ id: "apr_1", status: "cancelled" })],
+          stopped: 2,
+        })
+        expect(again).toEqual({ cancelled: [], stopped: 0 })
+        const approvals = (await storage.agents.approvals.list({ projectId })).approvals
+        expect(
+          approvals.map(({ id, status, turnStoppedAt }) => [id, status, turnStoppedAt])
+        ).toEqual([
+          ["apr_1", "cancelled", stoppedAt],
+          ["apr_decided", "denied", stoppedAt],
+          ["apr_marc", "cancelled", stoppedAt],
+        ])
+      })
+    })
+
+    test("a resume does not report a call whose turn was stopped", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.decide(decision("denied"))
+        await storage.agents.approvals.stop({ projectId, threadId: "thr_1", runId: "run_1" })
+        const report = { projectId, threadId: "thr_1", ids: ["apr_1"] }
+
+        const resumed = await storage.agents.approvals.markReported({
+          ...report,
+          messageId: "msg_resume",
+          resuming: true,
+        })
+        const next = await storage.agents.approvals.markReported({ ...report, messageId: "msg_2" })
+
+        expect(resumed).toEqual([])
+        expect(next).toEqual(["apr_1"])
+      })
+    })
+
+    test("lets one process at a time claim an approved call without its outcome", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.decide(decision("approved", t0))
+        const claim = (minutes: number, staleMinutes: number) =>
+          storage.agents.approvals.claimExecution({
+            projectId,
+            id: "apr_1",
+            claimedAt: new Date(t0.getTime() + minutes * 60_000),
+            staleBefore: new Date(t0.getTime() + staleMinutes * 60_000),
+          })
+
+        const beforeTheDecisionIsStale = await claim(1, -1)
+        const first = await claim(3, 1)
+        const racing = await claim(3, 1)
+        const afterItGoesStale = await claim(10, 5)
+        await storage.agents.approvals.recordOutcome({
+          projectId,
+          id: "apr_1",
+          outcome: ran("act_mark_paid"),
+        })
+        const afterItRan = await claim(20, 15)
+
+        expect(beforeTheDecisionIsStale).toBeNull()
+        expect(first?.executionClaimedAt).toEqual(new Date(t0.getTime() + 3 * 60_000))
+        expect(racing).toBeNull()
+        expect(afterItGoesStale?.executionClaimedAt).toEqual(new Date(t0.getTime() + 10 * 60_000))
+        expect(afterItRan).toBeNull()
+      })
+    })
+
+    test("lists what a repair pass works on, oldest first, after a cursor", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        const at = (ms: number) => new Date(t0.getTime() + ms)
+        const call = (id: string) => ({ ...markPaidCall, actionRunId: `act_${id}` })
+        for (const [index, id] of ["pending", "running", "ran", "denied", "reported"].entries()) {
+          await storage.agents.approvals.request(
+            approvalInput({ id, call: call(id), createdAt: at(index) })
+          )
+        }
+        await storage.agents.approvals.decide({ ...decision("approved", t0), id: "running" })
+        await storage.agents.approvals.decide({ ...decision("approved", t0), id: "ran" })
+        await storage.agents.approvals.recordOutcome({
+          projectId,
+          id: "ran",
+          outcome: ran("act_ran"),
+        })
+        await storage.agents.approvals.decide({ ...decision("denied", t0), id: "denied" })
+        await storage.agents.approvals.decide({ ...decision("denied", t0), id: "reported" })
+        await storage.agents.approvals.markReported({
+          projectId,
+          threadId: "thr_1",
+          ids: ["reported"],
+          messageId: "msg_2",
+        })
+        const list = (
+          claimableBefore: Date,
+          page: { readonly after?: AgentApprovalCursor; readonly limit?: number } = {}
+        ) =>
+          storage.agents.approvals
+            .listRepairable({ projectId, claimableBefore, limit: 10, ...page })
+            .then((approvals) => approvals.map(({ id }) => id))
+
+        expect(await list(at(-1))).toEqual(["running", "ran", "denied"])
+        expect(await list(at(-1), { limit: 1 })).toEqual(["running"])
+        expect(await list(at(-1), { after: { createdAt: at(1), id: "running" } })).toEqual([
+          "ran",
+          "denied",
+        ])
+        await storage.agents.approvals.stop({ projectId, threadId: "thr_1", runId: "run_1" })
+        expect(await list(at(-1))).toEqual([])
+        expect(await list(at(1))).toEqual(["running"])
+        expect(
+          await storage.agents.approvals.listRepairable({
+            projectId: otherProjectId,
+            claimableBefore: at(60_000),
+            limit: 10,
+          })
+        ).toEqual([])
+      })
+    })
+
+    test("expires the pending approvals whose time ran out, oldest first", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await storage.agents.approvals.request(approvalInput())
+        await storage.agents.approvals.request(
+          approvalInput({
+            id: "apr_later",
+            call: sendReminders,
+            createdAt: new Date(t0.getTime() + 1),
+            expiresAt: new Date(t0.getTime() + week + 1),
+          })
+        )
+        await storage.agents.approvals.request(
+          approvalInput({
+            id: "apr_decided",
+            call: { ...markPaidCall, actionRunId: "act_decided" },
+            expiresAt: new Date(t0.getTime() + 2_000),
+          })
+        )
+        await storage.agents.approvals.decide({ ...decision("denied"), id: "apr_decided" })
+
+        const early = await storage.agents.approvals.expireDue({
+          projectId,
+          now: new Date(t0.getTime() + week - 1),
+        })
+        const first = await storage.agents.approvals.expireDue({
+          projectId,
+          now: new Date(t0.getTime() + week + 1),
+          limit: 1,
+        })
+        const rest = await storage.agents.approvals.expireDue({
+          projectId,
+          now: new Date(t0.getTime() + week + 1),
+        })
+        const otherProject = await storage.agents.approvals.expireDue({
+          projectId: otherProjectId,
+          now: new Date(t0.getTime() + 2 * week),
+        })
+
+        expect(early).toEqual([])
+        expect(first.map(({ id, status }) => [id, status])).toEqual([["apr_1", "expired"]])
+        expect(rest.map(({ id }) => id)).toEqual(["apr_later"])
+        expect(otherProject).toEqual([])
+        expect(await statuses(storage)).toEqual([
+          ["apr_1", "expired"],
+          ["apr_decided", "denied"],
+          ["apr_later", "expired"],
+        ])
       })
     })
 
@@ -528,7 +874,7 @@ function runInput(id: string) {
     executionId: `test_agent_execution:${id}`,
     threadId: "thr_1",
     triggerMessageId: `msg_${id}`,
-    spec: { model: { provider: "test", modelId: "large" } },
+    spec: { model: { provider: "test", modelId: "large" }, approvalMode: "manual" as const },
     createdAt: t0,
   }
 }
@@ -581,6 +927,7 @@ async function startChild(storage: AgentApprovalStorageContractStorage): Promise
       task: "Pay the overdue invoices.",
       toolNames: [],
       maxSteps: 10,
+      approvalMode: "manual",
     },
     maxActiveChildren: 4,
     createdAt: t0,
@@ -595,9 +942,14 @@ async function startChild(storage: AgentApprovalStorageContractStorage): Promise
 
 async function finishTurn(
   storage: AgentApprovalStorageContractStorage,
-  status: "succeeded" | "failed" | "cancelled"
+  status: "succeeded" | "failed" | "cancelled",
+  finishReason?: "awaiting_approval"
 ): Promise<void> {
-  await storage.agents.runs.finish({ projectId, id: "run_1", executionToken: "token_1", status })
+  await storage.agents.runs.finish(
+    status === "succeeded"
+      ? { projectId, id: "run_1", executionToken: "token_1", status, finishReason }
+      : { projectId, id: "run_1", executionToken: "token_1", status }
+  )
 }
 
 async function statuses(storage: AgentApprovalStorageContractStorage) {

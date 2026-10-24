@@ -368,7 +368,7 @@ async function finalizeInterruptedTurn(input: {
   readonly projectId: string
   readonly modelId?: string
   readonly status: "failed" | "cancelled"
-  readonly finishReason?: AgentRunFinishReason
+  readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval">
   readonly error?: AgentRunFailure
   readonly completedAt?: Date
   readonly parts?: readonly AgentMessagePart[]

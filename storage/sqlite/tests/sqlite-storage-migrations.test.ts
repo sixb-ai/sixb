@@ -195,6 +195,7 @@ const shippedMigrationIds = [
   "074-agent-memory",
   "075-artifact-threads",
   "076-agent-approvals",
+  "077-agent-approval-resume",
 ]
 
 afterEach(async () => {

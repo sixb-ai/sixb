@@ -193,8 +193,9 @@ export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
 
 /**
  * Why a run ended — Sixb's provider-independent vocabulary. It includes model-loop reasons plus
- * platform-level endings such as `timeout`, or `interrupted` for a turn whose worker died before
- * finishing it, so reads remain typed and exhaustive. `other` and `unknown` preserve terminal state
+ * platform-level endings such as `timeout`, `interrupted` for a turn whose worker died before
+ * finishing it, or `awaiting_approval` for a succeeded turn that paused on calls waiting for its
+ * requester, so reads remain typed and exhaustive. `other` and `unknown` preserve terminal state
  * when a provider adds a new reason.
  */
 export const AGENT_RUN_FINISH_REASONS = [
@@ -204,6 +205,7 @@ export const AGENT_RUN_FINISH_REASONS = [
   "tool-calls",
   "timeout",
   "interrupted",
+  "awaiting_approval",
   "error",
   "other",
   "unknown",
@@ -408,7 +410,8 @@ export type FinishAgentRunInput =
       readonly executionToken: string
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
-      readonly finishReason?: AgentRunFinishReason
+      /** Only a succeeded run pauses for approval. */
+      readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval">
       readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly error?: SixbFailure<AgentRunFailureCode>
       readonly completedAt?: Date
@@ -590,7 +593,12 @@ export interface AgentRunStore {
    * Implementations must fence by token and must never move the expiration backwards.
    */
   confirmExecutionOwnership(input: ConfirmAgentRunExecutionOwnershipInput): Promise<AgentRunRecord>
-  /** Finalize a run and release the thread's `activeRunId`. */
+  /**
+   * Finalize a run and release the thread's `activeRunId`. `finishReason: "awaiting_approval"`
+   * needs a call the run holds (see `approvals.holdsRun`). A turn that ends any other way cancels
+   * its pending approvals and stops resuming on the rest; a child that fails or is cancelled
+   * cancels its own pending ones.
+   */
   finish(input: FinishAgentRunInput): Promise<AgentRunRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentRunRecord | null>
   getByIds(params: {
@@ -720,6 +728,15 @@ export interface AgentApprovalRecord {
   readonly outcome?: AgentApprovalOutcome
   /** The user message that told the model how the approval ended. */
   readonly reportedInMessageId?: string
+  /** "Always allow": the mode its requester raised the turn's calls to when deciding this one. */
+  readonly raisedMode?: AgentApprovalMode
+  /**
+   * The turn will not resume for it: stopped, its requester left, or another of its calls was set
+   * aside. The thread's next message still reports it.
+   */
+  readonly turnStoppedAt?: Date
+  /** When a process last took the approved call to run it; a stale claim can be taken again. */
+  readonly executionClaimedAt?: Date
 }
 
 export interface RequestAgentApprovalInput {
@@ -748,6 +765,8 @@ export interface DecideAgentApprovalInput {
   readonly decision: "approved" | "denied"
   readonly decidedBy: Principal
   readonly decidedAt?: Date
+  /** With `approved`: "Always allow" raised the turn's mode to this one. */
+  readonly raisedMode?: AgentApprovalMode
 }
 
 export interface DecideAgentApprovalResult {
@@ -763,11 +782,37 @@ export interface SettleAgentApprovalsInput {
   readonly status: AgentApprovalSettledStatus
 }
 
+/** Stop a thread's turn, or a requester's turns there, from resuming on their calls. */
+export interface StopAgentApprovalsInput {
+  readonly projectId: string
+  readonly threadId: string
+  /** Only the calls of this conversation turn. */
+  readonly runId?: string
+  /** Only the calls this principal asked for. */
+  readonly requestedBy?: Principal
+  readonly stoppedAt?: Date
+}
+
+export interface StopAgentApprovalsResult {
+  /** The pending approvals it cancelled. */
+  readonly cancelled: readonly AgentApprovalRecord[]
+  /** How many unreported approvals it stopped, the cancelled ones included. */
+  readonly stopped: number
+}
+
+/** Where a keyset listing resumes: after this approval, in the order approvals are listed. */
+export interface AgentApprovalCursor {
+  readonly createdAt: Date
+  readonly id: string
+}
+
 export interface MarkAgentApprovalsReportedInput {
   readonly projectId: string
   readonly threadId: string
   readonly ids: readonly string[]
   readonly messageId: string
+  /** A resume: an approval whose turn was stopped is not marked. */
+  readonly resuming?: boolean
 }
 
 export interface ListAgentApprovalsInput {
@@ -790,8 +835,8 @@ export interface ListAgentApprovalsResult {
 }
 
 /**
- * Held calls and their decisions. `runs.finish` cancels the pending approvals of a run that failed
- * or was cancelled, in its own transaction; a succeeded run's stay pending for their decision.
+ * Held calls and their decisions. `runs.finish` settles a run's approvals in its own transaction:
+ * a turn that pauses keeps them for their decision, any other ending cancels its pending ones.
  */
 export interface AgentApprovalStore {
   /**
@@ -810,8 +855,44 @@ export interface AgentApprovalStore {
   }): Promise<AgentApprovalRecord>
   /** Settle the thread's pending approvals, and return the ones it settled. */
   settle(input: SettleAgentApprovalsInput): Promise<readonly AgentApprovalRecord[]>
+  /** Expire the project's pending approvals whose time ran out by `now`, and return them. */
+  expireDue(input: {
+    readonly projectId: string
+    readonly now: Date
+    readonly limit?: number
+  }): Promise<readonly AgentApprovalRecord[]>
+  /**
+   * Cancel the matching pending approvals and mark every matching one no message reported yet as
+   * stopped: their turn never resumes on them.
+   */
+  stop(input: StopAgentApprovalsInput): Promise<StopAgentApprovalsResult>
   /** Mark the ones no message reported yet, and return their ids. */
   markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]>
+  /**
+   * Whether the run holds a call: one of its approvals, or one it made for its turn, pending, or
+   * decided and not reported yet. `runs.finish` checks the same before `awaiting_approval`.
+   */
+  holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean>
+  /**
+   * Take an approved call without an outcome to run it, unless another process took it after
+   * `staleBefore`; its decision is its first claim. `null` when it is not there to take.
+   */
+  claimExecution(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly claimedAt: Date
+    readonly staleBefore: Date
+  }): Promise<AgentApprovalRecord | null>
+  /**
+   * What a repair pass works on, oldest first: approved calls without an outcome whose claim is
+   * older than `claimableBefore`, and decided calls no message reported whose turn is not stopped.
+   */
+  listRepairable(input: {
+    readonly projectId: string
+    readonly claimableBefore: Date
+    readonly after?: AgentApprovalCursor
+    readonly limit: number
+  }): Promise<readonly AgentApprovalRecord[]>
   getById(params: {
     readonly projectId: string
     readonly id: string

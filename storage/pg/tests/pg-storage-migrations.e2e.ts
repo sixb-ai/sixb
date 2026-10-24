@@ -116,6 +116,7 @@ const SHIPPED_MIGRATIONS = [
   "076-agent-memory",
   "077-artifact-threads",
   "078-agent-approvals",
+  "079-agent-approval-resume",
 ]
 
 const steps = postgresStorageMigrations.steps
