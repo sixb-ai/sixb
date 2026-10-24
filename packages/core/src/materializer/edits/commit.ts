@@ -274,7 +274,7 @@ function editExpectations(input: NormalizedEditCommit) {
       linkScopes: input.expectedLinkScopes,
     }
   }
-  return { objects: [], links: [], linkScopes: [] }
+  return { objects: input.expectedObjects ?? [], links: [], linkScopes: [] }
 }
 
 function applyEditOperations(

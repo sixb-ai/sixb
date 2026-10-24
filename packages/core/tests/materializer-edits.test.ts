@@ -1102,6 +1102,51 @@ describe("ontology materializer edits", () => {
     ).toHaveLength(1)
   })
 
+  // Reproduce: return no objects from editExpectations for a continue-mode commit, and the stale
+  // commit lands its other item.
+  test("fails a continue-mode commit whole when an object it expects changed", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    const get = (primaryId: string) =>
+      storage.objects.getByPrimaryId({ projectId: "project", ...ref(primaryId) })
+
+    await materializer.edits.commit(
+      atomic("seed-expected", [
+        { id: "one", kind: "object.create", ref: ref("one"), properties: { name: "one" } },
+      ])
+    )
+    const read = await get("one")
+    if (!read) throw new Error("Expected the seed commit to create 'one'.")
+
+    const commitExpecting = (
+      requestId: string,
+      seen: { readonly version: number; readonly lastCommitId: string }
+    ) =>
+      materializer.edits.commit({
+        mode: "continue",
+        source: { kind: "runtime", requestId },
+        operations: [
+          { id: "one", kind: "object.upsert", ref: ref("one"), properties: { name: "renamed" } },
+          { id: "two", kind: "object.create", ref: ref("two"), properties: { name: "two" } },
+        ],
+        expectedObjects: [{ ref: ref("one"), exists: true, ...seen }],
+      })
+
+    await materializer.edits.commit(
+      atomic("concurrent", [
+        { id: "one", kind: "object.upsert", ref: ref("one"), properties: { name: "changed" } },
+      ])
+    )
+
+    const conflict = await commitExpecting("stale", read).catch((error) => error)
+    expect(conflict).toMatchObject({ kind: "expectation" })
+    expect(await get("two")).toBeNull()
+
+    const current = await get("one")
+    if (!current) throw new Error("Expected 'one' to remain.")
+    await commitExpecting("current", current)
+    expect(await get("two")).not.toBeNull()
+  })
+
   test("replays a runtime commit and rejects divergent intent under its request id", async () => {
     const { materializer } = createMaterializerFixture()
     await materializer.edits.commit(

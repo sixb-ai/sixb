@@ -197,6 +197,16 @@ function deduplicateExpectations<T>(
   )
 }
 
+function normalizeExpectedObjects(
+  values: readonly ExpectedObjectRevision[]
+): readonly ExpectedObjectRevision[] {
+  return deduplicateExpectations(
+    values.map(normalizeExpectedObject),
+    (value) => objectRefKey(value.ref),
+    "Expected objects"
+  )
+}
+
 function normalizeExpectedObject(value: ExpectedObjectRevision): ExpectedObjectRevision {
   const ref = normalizeObjectRef(value.ref)
   if (!value.exists) return Object.freeze({ ref, exists: false })
@@ -300,6 +310,9 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       ...(input.operationGroups !== undefined
         ? { operationGroups: normalizeOperationGroups(input.operationGroups, operationIds) }
         : {}),
+      ...(input.expectedObjects !== undefined
+        ? { expectedObjects: normalizeExpectedObjects(input.expectedObjects) }
+        : {}),
     })
   }
 
@@ -309,7 +322,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
     )
   }
   if (input.vectorWrites !== undefined) assertJsonValue(input.vectorWrites, "Vector writes")
-  const expectedObjects = input.expectedObjects.map(normalizeExpectedObject)
   const expectedLinks = input.expectedLinks.map(normalizeExpectedLink)
   const expectedLinkScopes = input.expectedLinkScopes.map(normalizeExpectedLinkScope)
 
@@ -319,11 +331,7 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       ? {}
       : { vectorWrites: structuredClone(input.vectorWrites) }),
     operations: Object.freeze(operations),
-    expectedObjects: deduplicateExpectations(
-      expectedObjects,
-      (value) => objectRefKey(value.ref),
-      "Expected objects"
-    ),
+    expectedObjects: normalizeExpectedObjects(input.expectedObjects),
     expectedLinks: deduplicateExpectations(
       expectedLinks,
       (value) => linkRefKey(value.ref),
