@@ -1,12 +1,13 @@
 import { isCurrentUser, type UserRef } from "../../ontology/user-ref"
-import type { ObjectQuery, ObjectQueryPredicate, ObjectQueryPredicateContains } from "./ir"
+import type { ObjectQuery, ObjectQueryPredicate } from "./ir"
 
 /**
  * Replace every `currentUser()` of a validated query with the reader's user reference.
  *
  * Validation admits the placeholder only where a predicate compares user references, so storage
  * never receives it. Without a user, as for a service account, a schedule, or a share, `eq`, `in`
- * and `contains` match nothing and `neq` matches every row: it stays the complement of `eq`.
+ * and `contains` become a constant that matches nothing, and `neq` one that matches every row: it
+ * stays the complement of `eq`.
  *
  * The bound query is valid again and holds no placeholder: the executor validates parts of it
  * once more, and binding it twice changes nothing.
@@ -48,54 +49,24 @@ function bindPredicate(
       const values = predicate.values.flatMap((value) =>
         isCurrentUser(value) ? (user ? [user] : []) : [value]
       )
-      return values.length > 0 ? { ...predicate, values } : matchNone(predicate.propertyId)
+      return values.length > 0 ? { ...predicate, values } : NO_ROW
     }
     case "contains": {
       if (!isCurrentUser(predicate.value)) return predicate
       if (user) return { ...predicate, value: user }
 
-      return containsNone(predicate)
+      return NO_ROW
     }
     default: {
       if (!isCurrentUser(predicate.value)) return predicate
       if (user) return { ...predicate, value: user }
 
-      return predicate.op === "neq"
-        ? matchAll(predicate.propertyId)
-        : matchNone(predicate.propertyId)
+      return predicate.op === "neq" ? EVERY_ROW : NO_ROW
     }
   }
 }
 
-// Without a user, a predicate is rewritten into a constant built from its own property, because
-// the query IR has no constant predicate. Comparing with a reserved user id instead would be
-// unsafe: auth strategies choose user ids, so any id could one day name a real user.
-//
-// No property is both present and absent, so every provider evaluates that conjunction to false
-// on any row, and the disjunction to true.
-
-function matchNone(propertyId: string): ObjectQueryPredicate {
-  return { op: "and", items: presence(propertyId) }
-}
-
-function matchAll(propertyId: string): ObjectQueryPredicate {
-  return { op: "or", items: presence(propertyId) }
-}
-
-function presence(propertyId: string): ObjectQueryPredicate[] {
-  return [
-    { op: "exists", propertyId, value: true },
-    { op: "exists", propertyId, value: false },
-  ]
-}
-
-const ANY_USER: UserRef = Object.freeze({ type: "user", id: "any" })
-
-/**
- * Validation refuses `exists` on a list, so a list's contradiction is built from `contains`
- * itself. The user it names makes no difference: no list both holds and lacks the same one.
- */
-function containsNone(predicate: ObjectQueryPredicateContains): ObjectQueryPredicate {
-  const item = { ...predicate, value: ANY_USER }
-  return { op: "and", items: [item, { op: "not", item }] }
-}
+// A constant rather than a comparison with a reserved user id: auth strategies choose user ids, so
+// any id could one day name a real user.
+const NO_ROW: ObjectQueryPredicate = Object.freeze({ op: "constant", value: false })
+const EVERY_ROW: ObjectQueryPredicate = Object.freeze({ op: "constant", value: true })

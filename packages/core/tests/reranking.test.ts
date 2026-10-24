@@ -153,8 +153,8 @@ test("empty candidates skip inference and unknown models fail before query embed
 })
 
 test("reranks candidates filtered by currentUser() for a reader that is not a user", async () => {
-  // Removal proof: bind a list with `matchNone` instead of `containsNone` in `current-user.ts`.
-  // The executor validates the bound vector stage again and refuses `exists` on a list.
+  // Removal proof: make `validatePredicate` refuse the `constant` predicate. The executor validates
+  // the bound vector stage again, and binding leaves a constant without a user.
   const f = await setup()
   const result = await f.sixb
     .objects(f.Product)

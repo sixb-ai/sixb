@@ -121,15 +121,8 @@ describe("bindCurrentUser", () => {
     const bound = bindCurrentUser(filtered(predicate), user)
     return bound.kind === "filter" ? bound.predicate : undefined
   }
-  const presence = (op: "and" | "or", propertyId: string): ObjectQueryPredicate => ({
-    op,
-    items: [
-      { op: "exists", propertyId, value: true },
-      { op: "exists", propertyId, value: false },
-    ],
-  })
-  const none = (propertyId: string) => presence("and", propertyId)
-  const all = (propertyId: string) => presence("or", propertyId)
+  const none: ObjectQueryPredicate = { op: "constant", value: false }
+  const all: ObjectQueryPredicate = { op: "constant", value: true }
 
   test("substitutes the reading user", () => {
     expect(bind({ op: "eq", propertyId: "assignee", value: me }, alice)).toEqual({
@@ -148,27 +141,19 @@ describe("bindCurrentUser", () => {
   })
 
   test("matches no one without a user, and neq matches every row", () => {
-    expect(bind({ op: "eq", propertyId: "assignee", value: me })).toEqual(none("assignee"))
-    expect(bind({ op: "neq", propertyId: "assignee", value: me })).toEqual(all("assignee"))
-    const anyReviewer: ObjectQueryPredicate = {
-      op: "contains",
-      propertyId: "reviewers",
-      value: { type: "user", id: "any" },
-    }
-    expect(bind({ op: "contains", propertyId: "reviewers", value: me })).toEqual({
-      op: "and",
-      items: [anyReviewer, { op: "not", item: anyReviewer }],
-    })
+    expect(bind({ op: "eq", propertyId: "assignee", value: me })).toEqual(none)
+    expect(bind({ op: "neq", propertyId: "assignee", value: me })).toEqual(all)
+    expect(bind({ op: "contains", propertyId: "reviewers", value: me })).toEqual(none)
     expect(bind({ op: "in", propertyId: "assignee", values: [me, bob] })).toEqual({
       op: "in",
       propertyId: "assignee",
       values: [bob],
     })
-    expect(bind({ op: "in", propertyId: "assignee", values: [me] })).toEqual(none("assignee"))
+    expect(bind({ op: "in", propertyId: "assignee", values: [me] })).toEqual(none)
   })
 
-  // Guard: `containsNone`. The executor validates parts of a bound query again, as for a vector
-  // search, and validation refuses the `exists` pair on a list.
+  // Guard: the `constant` case of `validatePredicate`. The executor validates parts of a bound
+  // query again, as for a vector search.
   test("binds to a query that validates again", () => {
     const ontology = new OntologyRegistry({ sources: [Project, Task] })
     for (const predicate of [
