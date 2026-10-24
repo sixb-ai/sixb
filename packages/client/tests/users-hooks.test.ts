@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { listUsersQueryKey } from "../src/generated/@tanstack/react-query.gen"
+import { getUserQueryKey, listUsersQueryKey } from "../src/generated/@tanstack/react-query.gen"
 import { createClient, createConfig } from "../src/generated/client"
 import type { ListUsersResponse } from "../src/generated/types.gen"
 import { userQueryOptions, usersQueryOptions } from "../src/hooks"
@@ -67,13 +67,28 @@ describe("userQueryOptions", () => {
     expect(requests).toEqual(["/api/users/usr_ava", "/api/users/usr_gone"])
   })
 
-  test("fails without access to the directory", async () => {
-    const { client } = createUsersTestClient(() =>
-      Response.json({ error: "[Sixb] Principal 'usr_1' is not allowed." }, { status: 403 })
+  // Removal proof: drop the 403 mapping in `userQueryOptions`; the lookup then rejects, so each
+  // user chip of the app that mounts asks again.
+  test("answers null without access to the directory, and fails on anything else", async () => {
+    const answer = (status: number) => {
+      const { client } = createUsersTestClient(() =>
+        Response.json({ error: "[Sixb] No." }, { status })
+      )
+      return (userQueryOptions("usr_ava", { client }).queryFn as unknown as QueryFn<unknown>)({})
+    }
+
+    expect(await answer(403)).toBeNull()
+    await expect(answer(503)).rejects.toBeDefined()
+  })
+
+  // Removal proof: key it with `getUserQueryKey`; `getUserOptions` would then read a cached
+  // `null` as a member.
+  test("keeps its cache apart from the generated getUserOptions", () => {
+    const path = { userId: "usr_ava" }
+
+    expect<unknown>(userQueryOptions("usr_ava").queryKey).not.toEqual(getUserQueryKey({ path }))
+    expect(userQueryOptions({ type: "user", id: "usr_ava" }).queryKey).toEqual(
+      userQueryOptions("usr_ava").queryKey
     )
-
-    const options = userQueryOptions("usr_ava", { client })
-
-    await expect((options.queryFn as unknown as QueryFn<unknown>)({})).rejects.toBeDefined()
   })
 })
