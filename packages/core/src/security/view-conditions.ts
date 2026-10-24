@@ -1,3 +1,4 @@
+import { bindCurrentUserPredicate } from "../objects/query/current-user"
 import { ObjectQueryValidationError } from "../objects/query/errors"
 import type { ObjectQueryPredicate } from "../objects/query/ir"
 import {
@@ -5,6 +6,8 @@ import {
   validateObjectQueryWithAdmission,
 } from "../objects/query/validate"
 import type { OntologyRegistry } from "../ontology"
+import { compileConditionalObjectReadScope } from "../storage/objects/read-scope"
+import type { ObjectReadScopeFactory } from "../storage/objects/types"
 import { SecurityValidationError } from "./errors"
 import type { GrantDefinition, Selection } from "./types"
 
@@ -85,6 +88,43 @@ export function resolveViewCondition(
     throw new SecurityValidationError(`[Sixb] ${subject}: ${reasons}`)
   }
 }
+
+/**
+ * Compile each condition once against the object storage, at startup. A condition the storage
+ * cannot read would otherwise fail every read of its type, for every reader it applies to.
+ *
+ * Each reader binds `currentUser()` to its own user; the check binds it to a placeholder, so the
+ * storage compiles the comparison a user's reads run.
+ */
+export function assertViewConditionsReadable(input: {
+  readonly projectId: string
+  readonly conditions: readonly ViewCondition[]
+  readonly objectStorage: Pick<ObjectReadScopeFactory, "createConditionalReadScope">
+  readonly getSubTypes: (objectTypeId: string) => readonly string[]
+}): void {
+  for (const condition of input.conditions) {
+    const predicate = bindCurrentUserPredicate(condition.predicate, STARTUP_CHECK_USER)
+    const objectTypeIds = [condition.objectTypeId, ...input.getSubTypes(condition.objectTypeId)]
+
+    try {
+      input.objectStorage.createConditionalReadScope({
+        projectId: input.projectId,
+        scope: compileConditionalObjectReadScope({
+          kind: "conditional",
+          conditions: objectTypeIds.map((objectTypeId) => ({ objectTypeId, predicate })),
+        }),
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new SecurityValidationError(
+        `[Sixb] ${viewConditionSubject(condition)} cannot be read by the configured object storage: ${reason}`,
+        { cause: error }
+      )
+    }
+  }
+}
+
+const STARTUP_CHECK_USER = Object.freeze({ type: "user", id: "usr_sixb_startup_check" } as const)
 
 /**
  * A type a reader sees only through a condition is denied by events, telemetry, runs, files and
