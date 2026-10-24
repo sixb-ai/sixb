@@ -200,26 +200,36 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
 
 - **Transport.** The parent appends an `agent.mail` record (`id`, `fromRunId`, `toThreadId`,
   `kind`, `text`, `sentAt`) to the inbox stream of the child's thread,
-  `agents.threads.<childThreadId>.inbox`, kept a day or 1,000 records. Its id is
-  `<parentRunId>:<toolCallId>` and its idempotency key. There is no table: both threads keep it,
-  the parent's tool call and the child's `agent-message` part.
+  `agents.threads.<childThreadId>.inbox`, which every run of the child reads. Its id,
+  `<parentRunId>:<modelCallId>:<toolCallId>`, is its idempotency key: a provider that reuses tool
+  call ids across steps still sends two messages. There is no table: both threads keep it, the
+  parent's tool call and the child's `mail` part. The stream keeps mail 8 days, past the 7 an
+  approval may wait, for the continuation below.
+- **Kinds.** Every mail carries `text` its reader's model can read. A reader delivers a kind it
+  does not know (a newer sender's) as a message, with a warning, so no cursor passes mail it never
+  delivered; a record with no mail envelope is reported and passed.
 - **Reading.** At each step boundary the child reads its inbox from its last cursor, from the
   start for its first step, so a message sent while it was queued is read then. It keeps each id
   once, whatever the broker delivers again, and skips the ids its thread already holds. The
-  messages become one user message of `agent-message` parts, projected as
-  `<sixb_parent_message id="…">`, which stays in the history of every later step. A read that
-  fails is tried again at the next boundary.
+  messages become one user message of `mail` parts, projected as `<sixb_parent_message id="…">`,
+  the sender's text escaped, which stays in the history of every later step. A read that fails is
+  tried again at the next boundary.
 - **As it answers.** When the model answers without tools and a step is left, `beforeComplete`
-  reads the inbox once more: a message there adds a step after the answer, and the child's answer
-  is what it wrote after its last message. On its last step, or when it pauses on a held call, it
-  ends without reading; `wait_agent` then lists the message in `unread`, from the child's thread.
+  reads the inbox once more. A message there adds a step after the answer, marked `afterAnswer`:
+  the child is told its parent has not received that answer, and writes its result again. Its
+  answer is what it wrote after; `wait_agent` also returns the one before as `earlierAnswer`, so
+  an addendum never replaces the answer it amends, or says in `answerNote` that the child did not
+  answer again.
 - **In the child's thread.** Each delivery is a user message of the run that read it, between the
   steps it came between, written with the run's finish, so a continuation replays it in place,
   with the bytes the child read.
-- **Refusals.** A key that is no child of the turn, a child that ended, and a paused child are
-  refused, each with what to do. A paused child reads nothing until a later turn continues it
-  under a new run, and only if the user decides: a message held for it could go unread. In that
-  turn, the parent messages the continuation by the same key.
+- **Pausing.** A child whose call is filed (`holdsRun`) or that paused is refused: it reads nothing
+  until a later turn continues it, if the user decides. A message accepted just before it filed
+  its call is not lost: the continuation reads the same inbox from its first step, skipping what
+  the thread holds. Until then `wait_agent` lists it in `unread`.
+- **Refusals.** A key that is no child of the turn, a child of one of the conversation's 20 latest
+  earlier turns (spawn it again), a child that ended, and a paused one are refused, each with what
+  to do.
 
 ## Child runs
 
