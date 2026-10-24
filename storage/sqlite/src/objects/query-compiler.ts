@@ -118,6 +118,12 @@ export interface SqliteObjectQuerySource {
   readonly objectsTable: string
   readonly linksTable: string
   readonly objectPropertyPermissionsTable?: string
+  /**
+   * Where to read one concrete type's objects, when the source can say it more precisely than
+   * `objectsTable`: a table and that type's own filter over its `properties`. A statement that
+   * reads a single type then holds the filter as a top-level condition, which an index can serve.
+   */
+  objectsOfType?(objectTypeId: string): SqliteTypedObjects
   /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
   wrapStatement(
     sql: string,
@@ -127,6 +133,26 @@ export interface SqliteObjectQuerySource {
     readonly args: readonly SqliteValue[]
   }
   wrapQuery(query: CompiledObjectQuery): CompiledObjectQuery
+}
+
+export interface SqliteTypedObjects {
+  readonly table: string
+  readonly filter?: { readonly sql: string; readonly args: readonly SqliteValue[] }
+}
+
+/** The table and `AND ...` filter a statement reads one type's objects with. */
+export function sqliteObjectsOfType(
+  source: SqliteObjectQuerySource,
+  objectTypeId: string
+): { table: string; filter: string; args: readonly SqliteValue[] } {
+  const typed = source.objectsOfType?.(objectTypeId)
+  if (!typed) return { table: source.objectsTable, filter: "", args: [] }
+
+  return {
+    table: typed.table,
+    filter: typed.filter ? `AND (${typed.filter.sql})` : "",
+    args: typed.filter?.args ?? [],
+  }
 }
 
 export const DEFAULT_OBJECT_QUERY_SOURCE: SqliteObjectQuerySource = {
@@ -298,19 +324,20 @@ function compileStart(
   }
 
   const order = compileOrder(identityOrderFields())
+  const objects = sqliteObjectsOfType(ctx.source, query.objectTypeId)
   const sql = `
     SELECT *, properties AS _cursor_properties
-    FROM ${ctx.source.objectsTable}
-    WHERE project_id = ? AND object_type_id = ?
+    FROM ${objects.table}
+    WHERE project_id = ? AND object_type_id = ? ${objects.filter}
     ORDER BY ${order.sql}
   `
-  const args = [projectId, query.objectTypeId, ...order.args]
+  const args = [projectId, query.objectTypeId, ...objects.args, ...order.args]
 
   return {
     sql,
     args,
-    totalSql: `SELECT COUNT(*) as total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
-    totalArgs: [projectId, query.objectTypeId],
+    totalSql: `SELECT COUNT(*) as total FROM ${objects.table} WHERE project_id = ? AND object_type_id = ? ${objects.filter}`,
+    totalArgs: [projectId, query.objectTypeId, ...objects.args],
     order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -974,7 +1001,8 @@ export function sqliteJsonEachValue(alias: string): string {
   END`
 }
 
-function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
+/** Compile a predicate over the unqualified `properties` column of the relation it filters. */
+export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
   if (
     "scalarKind" in predicate &&
     predicate.scalarKind === "decimal" &&

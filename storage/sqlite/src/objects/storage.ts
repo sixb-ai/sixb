@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
+  CompiledConditionalObjectReadScope,
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
@@ -28,6 +29,7 @@ import {
   runDeferredReadTransaction,
   type SqliteStoreConnection,
 } from "../transactions"
+import { createSqliteConditionalReader } from "./conditional-reader"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
 import { assertLinkQueryLimit, SqliteObjectReader } from "./reader"
 import { type DatabaseRow, type LinkDatabaseRow, rowToLink, rowToObject } from "./rows"
@@ -136,6 +138,13 @@ export class SqliteObjectStorage implements ObjectStorage {
     limits: ObjectReadExecutionLimits
   }): ObjectReadStorage {
     return createSqliteSelectedReader(this.db, params, () => this.queryCapabilities())
+  }
+
+  createConditionalReadScope(params: {
+    projectId: string
+    scope: CompiledConditionalObjectReadScope
+  }): ObjectReadStorage {
+    return createSqliteConditionalReader(this.db, params, () => this.queryCapabilities())
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {

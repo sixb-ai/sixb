@@ -2,6 +2,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import {
+  compileConditionalObjectReadScope,
   compileSelectedObjectReadScope,
   linkBatchKey,
   type ObjectReadExecutionLimits,
@@ -13,7 +14,10 @@ import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/objects"
 import { compileObjectQuery } from "../src/objects/query-compiler"
-import { compileSqliteSelectedObjectReadSource } from "../src/objects/read-scope"
+import {
+  compileSqliteConditionalObjectReadSource,
+  compileSqliteSelectedObjectReadSource,
+} from "../src/objects/read-scope"
 import { runImmediateTransactionAsync } from "../src/transactions"
 import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
@@ -71,6 +75,44 @@ test("selected traversals seek authorized identities instead of rescanning grant
     expect(rows.map((row) => JSON.parse(row.properties))).toEqual([
       { id: "target-1", label: "visible" },
     ])
+  } finally {
+    storage.close()
+  }
+})
+
+test("conditional reads count an unconditioned type from a covering index", () => {
+  // Removal proof (Bun 1.4.2): drop the conditional source's `objectsOfType`. Every type is then
+  // read through the conditions' disjunction, which reads each row's JSON.
+  const storage = new SqliteObjectStorage()
+  try {
+    const db = databaseOf(storage)
+    insertObject(db, RootType, "root-1", { id: "root-1" })
+    insertObject(db, TargetType, "target-1", { id: "target-1", status: "open" })
+    const source = compileSqliteConditionalObjectReadSource(
+      projectId,
+      compileConditionalObjectReadScope({
+        kind: "conditional",
+        conditions: [
+          {
+            objectTypeId: TargetType,
+            predicate: { op: "eq", propertyId: "status", value: "open", scalarKind: "string" },
+          },
+        ],
+      })
+    )
+
+    const roots = compileObjectQuery(
+      projectId,
+      { kind: "start", objectTypeId: RootType },
+      { source }
+    )
+    const plan = db
+      .query<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${roots.totalSql}`)
+      .all(...roots.totalArgs)
+      .map((row) => row.detail)
+
+    expect(plan).toHaveLength(1)
+    expect(plan[0]).toContain("USING COVERING INDEX")
   } finally {
     storage.close()
   }

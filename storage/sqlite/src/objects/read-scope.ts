@@ -1,6 +1,10 @@
-import type { CompiledSelectedObjectReadScope } from "@sixb/core/storage"
+import type {
+  CompiledConditionalObjectReadScope,
+  CompiledSelectedObjectReadScope,
+} from "@sixb/core/storage"
 import {
   type CompiledObjectQuery,
+  compilePredicate,
   type SqliteObjectQuerySource,
   type SqliteValue,
   sqliteJsonEachValue,
@@ -35,35 +39,12 @@ export function compileSqliteSelectedObjectReadSource(
     objects: scope.objects,
     steps: scope.steps,
   })
-  const compiled = compileSelectedReadScopeCte(scopeJson, projectId)
-  const wrapStatement = (sql: string, args: readonly SqliteValue[] = []) => ({
-    sql: `${compiled.sql}\n${sql}`,
-    args: [...compiled.args, ...args],
-  })
+  const source = scopedQuerySource(compileSelectedReadScopeCte(scopeJson, projectId))
 
   return Object.freeze({
-    objectsTable: "_sixb_scope_objects",
-    linksTable: "_sixb_scope_links",
+    ...source,
     objectPropertyPermissionsTable: "_sixb_scope_object_permissions",
-    wrapStatement,
-    wrapQuery: (query: CompiledObjectQuery): CompiledObjectQuery => ({
-      ...query,
-      ...wrapStatement(query.sql, query.args),
-      vectorProbe: query.vectorProbe
-        ? { ...query.vectorProbe, ...wrapStatement(query.vectorProbe.sql, query.vectorProbe.args) }
-        : undefined,
-      totalSql: `${compiled.sql}\n${query.totalSql}`,
-      totalArgs: [...compiled.args, ...query.totalArgs],
-      ...(query.hasMoreProbe
-        ? {
-            hasMoreProbe: {
-              ...query.hasMoreProbe,
-              ...wrapStatement(query.hasMoreProbe.sql, query.hasMoreProbe.args),
-            },
-          }
-        : {}),
-    }),
-    traversalProbe: wrapStatement(
+    traversalProbe: source.wrapStatement(
       `
         SELECT COUNT(*) AS total
         FROM (
@@ -83,9 +64,145 @@ export function compileSqliteSelectedObjectReadSource(
   })
 }
 
+/**
+ * Prepare a conditional scope as SQLite relations that filter stored rows as they are read.
+ *
+ * Both relations are NOT MATERIALIZED, so SQLite flattens them into each statement: its filters,
+ * index seeks and LIMIT reach the stored tables, and the conditions become one more filter. An
+ * object of a conditioned type is visible while its condition matches; a link while each of its
+ * conditioned endpoints is a visible object.
+ */
+export function compileSqliteConditionalObjectReadSource(
+  projectId: string,
+  scope: CompiledConditionalObjectReadScope
+): SqliteObjectQuerySource {
+  const filters = new Map(
+    scope.conditions.map((condition) => [
+      condition.objectTypeId,
+      compilePredicate(condition.predicate),
+    ])
+  )
+
+  return Object.freeze({
+    ...scopedQuerySource(compileConditionalReadScopeCte(projectId, filters)),
+    // One type's visible objects are the stored ones its own condition matches.
+    objectsOfType: (objectTypeId: string) => {
+      const filter = filters.get(objectTypeId)
+      return filter ? { table: "objects", filter } : { table: "objects" }
+    },
+  })
+}
+
 interface CompiledReadScopeCte {
   readonly sql: string
   readonly args: readonly SqliteValue[]
+}
+
+/** Prefix every statement of a query with the scope's relations, ahead of its own arguments. */
+function scopedQuerySource(compiled: CompiledReadScopeCte): SqliteObjectQuerySource {
+  const wrapStatement = (sql: string, args: readonly SqliteValue[] = []) => ({
+    sql: `${compiled.sql}\n${sql}`,
+    args: [...compiled.args, ...args],
+  })
+
+  return {
+    objectsTable: "_sixb_scope_objects",
+    linksTable: "_sixb_scope_links",
+    wrapStatement,
+    wrapQuery: (query: CompiledObjectQuery): CompiledObjectQuery => ({
+      ...query,
+      ...wrapStatement(query.sql, query.args),
+      vectorProbe: query.vectorProbe
+        ? { ...query.vectorProbe, ...wrapStatement(query.vectorProbe.sql, query.vectorProbe.args) }
+        : undefined,
+      totalSql: `${compiled.sql}\n${query.totalSql}`,
+      totalArgs: [...compiled.args, ...query.totalArgs],
+      ...(query.hasMoreProbe
+        ? {
+            hasMoreProbe: {
+              ...query.hasMoreProbe,
+              ...wrapStatement(query.hasMoreProbe.sql, query.hasMoreProbe.args),
+            },
+          }
+        : {}),
+    }),
+  }
+}
+
+/** Conditions keyed by their concrete type, each compiled over that type's `properties`. */
+type ConditionFilters = ReadonlyMap<
+  string,
+  { readonly sql: string; readonly args: readonly SqliteValue[] }
+>
+
+function compileConditionalReadScopeCte(
+  projectId: string,
+  filters: ConditionFilters
+): CompiledReadScopeCte {
+  if (filters.size === 0) {
+    return {
+      sql: `
+        WITH
+        _sixb_scope_objects AS NOT MATERIALIZED (
+          SELECT * FROM objects WHERE project_id = ?
+        ),
+        _sixb_scope_links AS NOT MATERIALIZED (
+          SELECT * FROM links WHERE project_id = ?
+        )
+      `,
+      args: [projectId, projectId],
+    }
+  }
+
+  const conditionedTypeArgs = [...filters.keys()]
+  const conditionedTypes = conditionedTypeArgs.map(() => "?").join(", ")
+
+  const matches: string[] = []
+  const matchArgs: SqliteValue[] = []
+  for (const [objectTypeId, filter] of filters) {
+    matches.push(`(object_type_id = ? AND ${filter.sql})`)
+    matchArgs.push(objectTypeId, ...filter.args)
+  }
+
+  const visibleEndpoint = (end: "source" | "target") => `
+    (
+      stored.${end}_type_id NOT IN (${conditionedTypes})
+      OR EXISTS (
+        SELECT 1
+        FROM _sixb_scope_objects AS endpoint
+        WHERE endpoint.project_id = stored.project_id
+          AND endpoint.object_type_id = stored.${end}_type_id
+          AND endpoint.primary_id = stored.${end}_id
+      )
+    )
+  `
+
+  return {
+    sql: `
+      WITH
+      _sixb_scope_objects AS NOT MATERIALIZED (
+        SELECT *
+        FROM objects
+        WHERE project_id = ?
+          AND (object_type_id NOT IN (${conditionedTypes}) OR ${matches.join(" OR ")})
+      ),
+      _sixb_scope_links AS NOT MATERIALIZED (
+        SELECT stored.*
+        FROM links AS stored
+        WHERE stored.project_id = ?
+          AND ${visibleEndpoint("source")}
+          AND ${visibleEndpoint("target")}
+      )
+    `,
+    args: [
+      projectId,
+      ...conditionedTypeArgs,
+      ...matchArgs,
+      projectId,
+      ...conditionedTypeArgs,
+      ...conditionedTypeArgs,
+    ],
+  }
 }
 
 function compileSelectedReadScopeCte(scopeJson: string, projectId: string): CompiledReadScopeCte {

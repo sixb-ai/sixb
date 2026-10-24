@@ -108,7 +108,7 @@ export function runDeferredReadTransaction<T>(db: Database, run: () => T): T {
   }
   if (db.inTransaction) {
     throw new Error(
-      "[SixbSqlite] Selected object reads cannot join an unverified SQLite transaction."
+      "[SixbSqlite] Scoped object reads cannot join an unverified SQLite transaction."
     )
   }
 

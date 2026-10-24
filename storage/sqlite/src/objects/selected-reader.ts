@@ -5,19 +5,12 @@ import type {
   ObjectReadExecutionLimits,
   ObjectReadStorage,
 } from "@sixb/core/storage"
-import {
-  assertObjectReaderProject,
-  assertObjectReadFacetCount,
-  assertObjectReadOutputWithinLimit,
-  ObjectReadLimitExceededError,
-  snapshotObjectReadExecutionLimits,
-} from "@sixb/core/storage"
-import { runDeferredReadTransaction } from "../transactions"
+import { ObjectReadLimitExceededError, snapshotObjectReadExecutionLimits } from "@sixb/core/storage"
 import {
   compileSqliteSelectedObjectReadSource,
   type SqliteSelectedObjectReadSource,
 } from "./read-scope"
-import { assertLinkQueryLimit, SqliteObjectReader } from "./reader"
+import { createSqliteScopedReader } from "./scoped-reader"
 
 /** Keep the traversal probe and every terminal statement in the same synchronous snapshot. */
 export function createSqliteSelectedReader(
@@ -36,77 +29,17 @@ export function createSqliteSelectedReader(
     params.scope,
     limits.maxTraversalFacts
   )
-  const reader = new SqliteObjectReader(db, source)
-  const assertProject = (actualProjectId: string): void =>
-    assertObjectReaderProject(projectId, actualProjectId)
-  const read = <T>(run: () => T): T =>
-    runDeferredReadTransaction(db, () => {
-      assertTraversalBudget(db, source, limits.maxTraversalFacts)
-      const value = run()
-      assertObjectReadOutputWithinLimit(value, limits)
-      return value
-    })
-  const readMap = <TKey, TValue>(run: () => Map<TKey, TValue>): Map<TKey, TValue> =>
-    runDeferredReadTransaction(db, () => {
-      assertTraversalBudget(db, source, limits.maxTraversalFacts)
-      const value = run()
-      assertObjectReadOutputWithinLimit([...value.entries()], limits)
-      return value
-    })
 
-  return Object.freeze({
-    queryCapabilities,
-    queryObjects: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.queryObjects(input))
+  return createSqliteScopedReader(
+    db,
+    {
+      projectId,
+      source,
+      beforeRead: () => assertTraversalBudget(db, source, limits.maxTraversalFacts),
+      limits,
     },
-    countObjects: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.countObjects(input))
-    },
-    existsObjects: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.existsObjects(input))
-    },
-    facetObjects: async (input) => {
-      assertProject(input.projectId)
-      assertObjectReadFacetCount(input.facets.length)
-      return read(() => reader.facetObjects(input))
-    },
-    getByPrimaryId: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.getByPrimaryId(input))
-    },
-    getByUniqueValue: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.getByUniqueValue(input))
-    },
-    selectsObjectProperties: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.selectsObjectProperties(input))
-    },
-    listLinks: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.listLinks(input))
-    },
-    getByPrimaryIdBatch: async (input) => {
-      assertProject(input.projectId)
-      return readMap(() => reader.getByPrimaryIdBatch(input))
-    },
-    listLinksBatch: async (input) => {
-      assertProject(input.projectId)
-      return readMap(() => reader.listLinksBatch(input))
-    },
-    queryLinks: async (input) => {
-      assertProject(input.projectId)
-      assertLinkQueryLimit(input.limit)
-      return read(() => reader.queryLinks(input))
-    },
-    list: async (input) => {
-      assertProject(input.projectId)
-      return read(() => reader.list(input))
-    },
-  } satisfies ObjectReadStorage)
+    queryCapabilities
+  )
 }
 
 function assertTraversalBudget(
