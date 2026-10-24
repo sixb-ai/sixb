@@ -10,7 +10,7 @@ import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
-import { describeMessageAgent } from "../message-agent/interpret"
+import { childQuestions, describeMessageAgent } from "../message-agent/interpret"
 import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
 import { builtInToolView } from "../tool-views/built-in"
@@ -264,10 +264,14 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
   const files = tool.files ?? []
   const expandable = hasInput || hasOutput || isError || files.length > 0
+  // A wait that a child's question ended reads as the question, one row for each.
+  const [question, ...otherQuestions] = childQuestions(tool)
   const title =
     tool.toolName === "message_agent"
       ? describeMessageAgent(tool, agentMessages).title
-      : tool.toolName
+      : question
+        ? messages.agentAsks(question.key, question.text)
+        : tool.toolName
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.
@@ -308,6 +312,15 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
           ) : null}
         </CollapsibleContent>
       </Collapsible>
+      {otherQuestions.map((other) => (
+        <p
+          key={`${other.key}:${other.text}`}
+          className="mt-1 flex max-w-full items-center gap-1.5 text-[13px] leading-normal font-medium text-muted-foreground"
+        >
+          <Wrench className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate">{messages.agentAsks(other.key, other.text)}</span>
+        </p>
+      ))}
     </div>
   )
 }
