@@ -23,6 +23,7 @@ import {
   isAgentToolResult,
   listChildApprovalsAwaiting,
   listSubagentThreadRuns,
+  publishAgentMail,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
@@ -97,6 +98,24 @@ export interface SpawnSubagentOutput {
   readonly model: LanguageModelRef
 }
 
+export interface MessageSubagentInput {
+  readonly key: string
+  readonly text: string
+}
+
+export interface MessageSubagentOutput {
+  readonly runId: string
+  readonly status: "queued" | "running"
+  /** When the child reads it: before its first step while it is queued, else before its next. */
+  readonly delivery: "first-step" | "next-step"
+}
+
+/** A message the parent sent a child this turn. */
+interface SentMessage {
+  readonly id: string
+  readonly text: string
+}
+
 export interface WaitForSubagentsInput {
   readonly runIds: readonly string[]
 }
@@ -125,6 +144,8 @@ export interface WaitedSubagentResult {
   }[]
   /** Why its files are not listed: they did not come back, could not be copied, or wait. */
   readonly filesNote?: string
+  /** What this turn sent it that it ended without reading. */
+  readonly unread?: readonly SentMessage[]
 }
 
 export interface WaitForSubagentsOutput {
@@ -143,6 +164,8 @@ export class SubagentCoordinator {
   readonly #installed = new Map<string, readonly InstalledChildFile[]>()
   /** The spawn being admitted: only this turn adds children to it. */
   #admissions: Promise<unknown> = Promise.resolve()
+  /** What this turn sent each child, by its run id, in order. */
+  readonly #sent = new Map<string, SentMessage[]>()
 
   constructor(
     private readonly host: AgentWorkerHost,
@@ -316,6 +339,7 @@ export class SubagentCoordinator {
         "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
         "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides.",
+        "A message you sent a child that it ended without reading is listed in its unread.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
       parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
@@ -341,7 +365,74 @@ export class SubagentCoordinator {
       }),
       errorText: agentToolErrorText,
     }
-    return [spawn, wait]
+    const message: ModelTool<MessageSubagentInput> = {
+      name: "message_agent",
+      description: [
+        "Send a message to a child agent still at work, by the key you spawned it with. It reads the message before its next step, or before its first while it is queued, and its answer accounts for it.",
+        "Use it to correct its course, add information it needs, or narrow its task, instead of waiting for an answer you would discard. Then collect its answer with wait_agent as usual.",
+        "A child that finished, or paused for the user's approval, cannot read one.",
+      ].join("\n"),
+      inputSchema: messageInputSchema(),
+      parseInput: parseMessageInput,
+      execute: async (value, { signal, toolCallId }) => {
+        const output = await this.message(value, toolCallId, signal)
+        assertJsonValue(output)
+        return output
+      },
+      errorText: agentToolErrorText,
+    }
+    return [spawn, wait, message]
+  }
+
+  /**
+   * Write a message to a child's inbox, its thread's. Its id is this turn's tool call, so a replay
+   * of the call is the same message and the child reads it once.
+   */
+  async message(
+    input: MessageSubagentInput,
+    toolCallId: string,
+    signal: AbortSignal
+  ): Promise<MessageSubagentOutput> {
+    signal.throwIfAborted()
+    const key = requireNonEmpty("message_agent", input.key, "key", 128)
+    const text = requireNonEmpty("message_agent", input.text, "text")
+    const child = await this.context.storage.agents.runs.getById({
+      projectId: this.context.id,
+      id: createSubagentRunId(this.parentRun.id, key),
+    })
+    if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
+      throw new AgentToolPublicError(
+        `[SixbAgentWorker] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
+      )
+    }
+    if (isPausedSubagent(child)) {
+      throw new AgentToolPublicError(
+        `[SixbAgentWorker] '${key}' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change.`
+      )
+    }
+    const { status } = child
+    if (status !== "queued" && status !== "running") {
+      throw new AgentToolPublicError(
+        `[SixbAgentWorker] '${key}' already ended (${status}), so it cannot read a message. Spawn a new child with another key to go on.`
+      )
+    }
+
+    const sent = { id: `${this.parentRun.id}:${toolCallId}`, text }
+    await publishAgentMail(this.host.broker, {
+      projectId: this.context.id,
+      mail: {
+        ...sent,
+        fromRunId: this.parentRun.id,
+        toThreadId: child.threadId,
+        kind: "message",
+        sentAt: new Date().toISOString(),
+      },
+    })
+    const toChild = this.#sent.get(child.id) ?? []
+    if (!toChild.some((message) => message.id === sent.id)) toChild.push(sent)
+    this.#sent.set(child.id, toChild)
+
+    return { runId: child.id, status, delivery: status === "queued" ? "first-step" : "next-step" }
   }
 
   async spawn(input: SpawnSubagentInput, signal: AbortSignal): Promise<SpawnSubagentOutput> {
@@ -587,10 +678,12 @@ export class SubagentCoordinator {
           childRunIds: runIds,
         })
         const delivered = await this.deliverFiles(children, signal)
+        const unread = await Promise.all(children.map((run) => this.unreadBy(run)))
         return {
           // Each result keeps the id the Agent passed.
           results: children.map((run, index) => ({
             ...waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id)),
+            ...unread[index],
             runId: passedIds[index] ?? run.id,
           })),
           files: delivered.attached,
@@ -601,6 +694,29 @@ export class SubagentCoordinator {
       }
       await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
     }
+  }
+
+  /**
+   * What an ended child did not read of what this turn sent it: its thread holds each message it
+   * read. A failed child's failure is what the parent acts on.
+   */
+  private async unreadBy(
+    run: SubagentRunRecord
+  ): Promise<{ readonly unread?: readonly SentMessage[] }> {
+    const sent = this.#sent.get(run.id)
+    if (!sent || !isTerminalSubagent(run) || run.status === "failed") return {}
+
+    const { messages } = await this.context.storage.agents.messages.list({
+      projectId: this.context.id,
+      threadId: run.threadId,
+    })
+    const read = new Set(
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => (part.type === "agent-message" ? [part.id] : []))
+      )
+    )
+    const unread = sent.filter((message) => !read.has(message.id))
+    return unread.length > 0 ? { unread } : {}
   }
 
   /**
@@ -875,6 +991,27 @@ function modelRefChoices(models: LanguageModelCatalog): readonly JsonObject[] {
   }))
 }
 
+function messageInputSchema(): JsonObject {
+  return {
+    type: "object",
+    properties: {
+      key: {
+        type: "string",
+        minLength: 1,
+        maxLength: 128,
+        description: "The key you spawned the child with.",
+      },
+      text: {
+        type: "string",
+        minLength: 1,
+        description: "What the child should change or know, as an instruction for its task.",
+      },
+    },
+    required: ["key", "text"],
+    additionalProperties: false,
+  }
+}
+
 function waitInputSchema(maxRunIds: number): JsonObject {
   return {
     type: "object",
@@ -906,7 +1043,7 @@ function normalizeRunIds(value: readonly string[], maxRunIds: number): readonly 
 }
 
 function requireNonEmpty(
-  toolName: "spawn_agent" | "wait_agent",
+  toolName: "spawn_agent" | "wait_agent" | "message_agent",
   value: unknown,
   field: string,
   maxLength?: number
@@ -1075,6 +1212,16 @@ function parseSpawnFiles(value: unknown): readonly string[] | undefined {
     throw new AgentToolPublicError("[SixbAgentWorker] spawn_agent files must not repeat a path.")
   }
   return files.length > 0 ? files : undefined
+}
+
+function parseMessageInput(value: unknown): MessageSubagentInput {
+  if (!isJsonObject(value) || Object.keys(value).some((key) => key !== "key" && key !== "text")) {
+    throw new AgentToolPublicError("[SixbAgentWorker] message_agent expects key and text.")
+  }
+  return {
+    key: requireNonEmpty("message_agent", value.key, "key", 128),
+    text: requireNonEmpty("message_agent", value.text, "text"),
+  }
 }
 
 function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInput {
