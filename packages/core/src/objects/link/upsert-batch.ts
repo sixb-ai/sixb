@@ -11,6 +11,7 @@ import { linkRefKey } from "../../materialization/refs"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ResolvedLinkBatchItem } from "../context"
 import {
+  expectedRevision,
   linkUpsertOperation,
   normalizeRuntimeLink,
   runtimeOperationId,
@@ -45,6 +46,7 @@ export async function upsertLinkBatch(
   return runRuntimeItemBatch({
     ctx,
     items,
+    expectedObjects: existing.seen.map(expectedRevision),
     plan(item, index) {
       requireEndpoints(item, existing)
       const properties = normalizeRuntimeLink({

@@ -4,6 +4,7 @@
 import type { ResolvedLinkContext } from "../context"
 import {
   commitRuntimeOperations,
+  expectedRevision,
   linkUpsertOperation,
   normalizeRuntimeLink,
   runtimeOperationId,
@@ -30,7 +31,8 @@ export async function upsertLink(
   // refuses a link whose endpoints are not effective when it commits. This runs before property
   // normalization so the same input reports the same error class here and through the batch APIs,
   // which check endpoints first inside `plan`.
-  requireEndpoints(endpoints, await loadEndpointExistence(ctx, collectEndpointLookups([endpoints])))
+  const existing = await loadEndpointExistence(ctx, collectEndpointLookups([endpoints]))
+  requireEndpoints(endpoints, existing)
 
   const normalizedProperties = normalizeRuntimeLink({
     objectType,
@@ -42,15 +44,19 @@ export async function upsertLink(
     isValidLinkTarget: (expected, actual) => ontology.isValidLinkTarget(expected, actual),
   })
 
-  await commitRuntimeOperations(ctx, [
-    linkUpsertOperation({
-      id: runtimeOperationId(0),
-      ref: {
-        source: { objectTypeId: objectType.id, primaryId: sourceId },
-        linkId,
-        target: { objectTypeId: targetTypeId, primaryId: targetId },
-      },
-      ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
-    }),
-  ])
+  await commitRuntimeOperations(
+    ctx,
+    [
+      linkUpsertOperation({
+        id: runtimeOperationId(0),
+        ref: {
+          source: { objectTypeId: objectType.id, primaryId: sourceId },
+          linkId,
+          target: { objectTypeId: targetTypeId, primaryId: targetId },
+        },
+        ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
+      }),
+    ],
+    existing.seen.map(expectedRevision)
+  )
 }

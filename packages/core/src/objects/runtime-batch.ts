@@ -6,7 +6,11 @@
  * repeat is rejected, and each item's Materializer outcomes map back to the position they came from.
  */
 
-import type { OntologyEditOperation, OntologyOperationOutcome } from "../materialization/model"
+import type {
+  ExpectedObjectRevision,
+  OntologyEditOperation,
+  OntologyOperationOutcome,
+} from "../materialization/model"
 import { OntologyValidationError } from "../ontology/errors"
 import type { BatchItemResult } from "../runtime/types"
 import {
@@ -33,6 +37,8 @@ export interface RuntimeItemBatch<TItem, TValue> {
   plan(item: TItem, index: number): RuntimeBatchItemPlan
   /** Maps the outcomes of a fully successful item to its public value. */
   value(outcomes: readonly OntologyOperationOutcome[]): TValue
+  /** Objects as the batch's author read them: one that changed fails the whole batch. */
+  readonly expectedObjects?: readonly ExpectedObjectRevision[]
 }
 
 interface PlannedItem {
@@ -88,7 +94,7 @@ export async function runRuntimeItemBatch<TItem, TValue>(
     planned.push({ index, operations: plan.operations })
   }
 
-  const commit = await commitRuntimeBatch(batch.ctx, planned)
+  const commit = await commitRuntimeBatch(batch.ctx, planned, batch.expectedObjects)
 
   for (const { index } of planned) {
     const outcomes = requireItemOutcomes(commit, index)

@@ -5,9 +5,12 @@
  * over links and the effective-state bookkeeping happen inside the commit.
  */
 import { assertCanEdit } from "../../authorization"
+import type { ExpectedObjectRevision } from "../../materialization/model"
+import { assertCanEditType } from "../conditional-writes"
 import type { ResolvedObjectContext } from "../context"
 import {
   commitRuntimeOperations,
+  expectedRevision,
   objectDeleteOperation,
   objectRestoreOperation,
   runtimeOperationId,
@@ -21,14 +24,25 @@ import {
  * stays hidden even while the projection keeps asserting it — `restore()` is what reveals it again.
  */
 export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
-  assertCanEdit(ctx, ctx.objectType.id)
+  await assertCanEditType(ctx, ctx.objectType.id)
   await ctx.objectReader.assertReadable({ objectTypeIds: [ctx.objectType.id] })
-  await commitRuntimeOperations(ctx, [
-    objectDeleteOperation({
-      id: runtimeOperationId(0),
-      ref: { objectTypeId: ctx.objectType.id, primaryId },
-    }),
-  ])
+  const ref = { objectTypeId: ctx.objectType.id, primaryId }
+
+  // A writer that views the type through a condition deletes only an object it sees, as it is: a
+  // hidden one is deleted as a missing one is, not at all.
+  let expected: ExpectedObjectRevision[] = []
+  if (ctx.objectReader.viewsThroughCondition(ref.objectTypeId)) {
+    const seen = await ctx.objectReader.getByPrimaryId(ref)
+    if (!seen) return
+
+    expected = [expectedRevision(seen)]
+  }
+
+  await commitRuntimeOperations(
+    ctx,
+    [objectDeleteOperation({ id: runtimeOperationId(0), ref })],
+    expected
+  )
 }
 
 /**
@@ -36,6 +50,9 @@ export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string
  *
  * For an object written only from code this is a no-op — there is nothing left to reveal, so write it
  * again instead. For an object a projection also writes, it makes the projected state visible again.
+ *
+ * It requires a view of every object of the type: no reader sees a deleted object, so none can
+ * show that a condition matches the one it would reveal.
  */
 export async function restoreObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
   assertCanEdit(ctx, ctx.objectType.id)

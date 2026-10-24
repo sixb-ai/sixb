@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import {
   type AuthorizationContext,
+  AuthorizationError,
   can,
   currentUser,
   defineAction,
   defineGroup,
   defineObjectType,
   defineRole,
+  type EmbeddingModel,
   link,
   ObjectNotFoundError,
   param,
@@ -16,7 +18,7 @@ import {
   userRef,
 } from "../src"
 import type { ShareAccessPlan } from "../src/shares/access-plan"
-import type { ObjectStorage } from "../src/storage"
+import { type InMemoryStorage, objectBatchKey } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb } from "../src/testing"
 import { resolveRolesWithConditions } from "./helpers/view-conditions"
@@ -141,7 +143,7 @@ const ontology = [Team, Ticket, Watcher, Note]
 
 async function deploy() {
   const deps = createTestRuntimeDeps()
-  const reads = countObjectReads(deps.storage.objects)
+  const reads = countObjectReads(deps.storage)
   const host = new SixbHost({
     id: projectId,
     ontology,
@@ -162,6 +164,10 @@ async function deploy() {
     .objects(Ticket)
     .upsert({ properties: { id: "t-closed", status: "closed", title: "b" } })
   await trusted.objects(Watcher).upsert({ properties: { id: "watcher-1" } })
+  await trusted.objects.upsertLink(Watcher.id, "watcher-1", "watches", {
+    targetTypeId: Ticket.id,
+    targetId: "t-closed",
+  })
   await trusted.objects(Note).upsert({ properties: { id: "n-alice", owner: userRef(alice.id) } })
   await trusted.objects(Note).upsert({ properties: { id: "n-bob", owner: userRef(bob.id) } })
 
@@ -174,41 +180,83 @@ async function deploy() {
   const stored = (objectTypeId: string, primaryId: string) =>
     host.storage.objects.getByPrimaryId({ projectId, objectTypeId, primaryId })
 
-  return { host, trusted, sixbFor, stored, reads }
+  const watched = async () =>
+    (
+      await host.storage.objects.listLinks({
+        projectId,
+        objectTypeId: Watcher.id,
+        objectId: "watcher-1",
+        linkId: "watches",
+      })
+    )
+      .map((row) => row.targetId)
+      .sort()
+
+  return { host, trusted, sixbFor, stored, watched, reads }
 }
 
 /**
  * Count the object reads a principal's reader makes, through the store or through the conditional
- * scope it reads a conditioned type through.
+ * scope it reads a conditioned type through. Reads inside a commit's transaction are the
+ * Materializer's own, and are not counted.
  *
- * `answerNextRead` answers the next `getByPrimaryId` on the store in its place: a read made before
- * a concurrent change.
+ * `answerNextScopedRead` answers the next read through that scope in its place, and `answerNextRead`
+ * the next `getByPrimaryId` on the store: a read made before a concurrent change.
  */
-function countObjectReads(objects: ObjectStorage) {
-  const counter: { count: number; answerNextRead?: () => unknown } = { count: 0 }
-  const counted = <TRead extends (input: never) => unknown>(read: TRead) =>
-    ((input: never) => {
-      counter.count += 1
-      return read(input)
+function countObjectReads(storage: InMemoryStorage) {
+  const counter: {
+    count: number
+    answerNextScopedRead?: () => unknown
+    answerNextRead?: () => unknown
+  } = { count: 0 }
+  const objects = storage.objects
+
+  let transactions = 0
+  const transaction = storage.transaction.bind(storage)
+  storage.transaction = async (run, options) => {
+    transactions += 1
+    try {
+      return await transaction(run, options)
+    } finally {
+      transactions -= 1
+    }
+  }
+
+  // A batch read the store answers one id at a time counts once.
+  let reading = 0
+  const counted = <TRead extends (input: never) => Promise<unknown>>(
+    read: TRead,
+    answers?: "answerNextScopedRead" | "answerNextRead"
+  ) =>
+    (async (input: never) => {
+      if (transactions === 0 && reading === 0) counter.count += 1
+
+      const answer = answers ? counter[answers] : undefined
+      if (answers && answer) {
+        counter[answers] = undefined
+        return answer()
+      }
+
+      reading += 1
+      try {
+        return await read(input)
+      } finally {
+        reading -= 1
+      }
     }) as TRead
 
   decorateOperationScopedMethodForTesting(objects, "getByPrimaryId", (read) =>
-    counted(((input: never) => {
-      const answer = counter.answerNextRead
-      if (!answer) return read(input)
-
-      counter.answerNextRead = undefined
-      return Promise.resolve(answer())
-    }) as typeof read)
+    counted(read, "answerNextRead")
   )
-  decorateOperationScopedMethodForTesting(objects, "getByPrimaryIdBatch", counted)
+  decorateOperationScopedMethodForTesting(objects, "getByPrimaryIdBatch", (read) => counted(read))
   decorateOperationScopedMethodForTesting(objects, "createConditionalReadScope", (create) => {
+    // The scope is a plain object of its own methods.
     return (input) => {
       const scope = create(input)
       return {
         ...scope,
-        getByPrimaryId: counted(scope.getByPrimaryId.bind(scope)),
-        getByPrimaryIdBatch: counted(scope.getByPrimaryIdBatch.bind(scope)),
+        getByPrimaryId: counted(scope.getByPrimaryId, "answerNextScopedRead"),
+        getByPrimaryIdBatch: counted(scope.getByPrimaryIdBatch, "answerNextScopedRead"),
       }
     }
   })
@@ -527,5 +575,308 @@ describe("action requests through view conditions", () => {
     // counter sees the reads it would make.
     expect(await readsBeforeRecording(["open"])).toBe(1)
     expect(await readsBeforeRecording(["open", "all"])).toBe(0)
+  })
+})
+
+describe("direct writes through view conditions", () => {
+  test("a writer updates an object it sees, and creates one it then cannot see", async () => {
+    const { sixbFor, stored } = await deploy()
+    const tickets = sixbFor(["open"]).objects(Ticket)
+
+    const updated = await tickets.upsert({ properties: { id: "t-open", title: "renamed" } })
+    expect(updated.properties).toEqual({ id: "t-open", status: "open", title: "renamed" })
+
+    // Nothing is checked after a write. The writer gets the row it sent back, and no longer sees it.
+    const created = await tickets.upsert({
+      properties: { id: "t-new", status: "closed", title: "new" },
+    })
+    expect(created.properties).toEqual({ id: "t-new", status: "closed", title: "new" })
+    expect(await tickets.get("t-new")).toBeNull()
+    expect(await stored(Ticket.id, "t-new")).not.toBeNull()
+  })
+
+  // Reproduce: upsert in upsertObject whatever the writer finds, and the operator overwrites the
+  // closed ticket.
+  test("a create on an id a hidden object holds fails as taken, and leaves that object as it was", async () => {
+    const { sixbFor, stored } = await deploy()
+    const before = await stored(Ticket.id, "t-closed")
+
+    const taken = await sixbFor(["open"])
+      .objects(Ticket)
+      .upsert({ properties: { id: "t-closed", title: "overwritten" } })
+      .catch((error) => error)
+
+    // The issue's known limit: the writer learns that the id is taken, and nothing else.
+    expect(taken).toMatchObject({
+      code: "object.unique_violation",
+      message: "[Sixb] Another 'ticket' object already has this 'id'.",
+      details: { objectTypeId: Ticket.id, propertyId: "id" },
+    })
+    expect(await stored(Ticket.id, "t-closed")).toEqual(before)
+
+    // A writer that sees every ticket updates it.
+    const updated = await sixbFor(["open", "all"])
+      .objects(Ticket)
+      .upsert({ properties: { id: "t-closed", title: "updated" } })
+    expect(updated.properties.title).toBe("updated")
+  })
+
+  test("a batch fails a hidden id alone, and writes the rest", async () => {
+    const { sixbFor, stored } = await deploy()
+    const before = await stored(Ticket.id, "t-closed")
+
+    const results = await sixbFor(["open"]).objects.upsertBatch(Ticket.id, [
+      { properties: { id: "t-open", title: "renamed" } },
+      { properties: { id: "t-new", status: "closed" } },
+      { properties: { id: "t-closed", title: "overwritten" } },
+    ])
+
+    expect(results.map((result) => result.ok)).toEqual([true, true, false])
+    expect(results[2]).toMatchObject({ error: { code: "object.unique_violation" } })
+    expect(await stored(Ticket.id, "t-closed")).toEqual(before)
+    expect((await stored(Ticket.id, "t-open"))?.properties.title).toBe("renamed")
+  })
+
+  // Reproduce: drop the expected revisions from any object or link write, and the operator writes
+  // a ticket that was closed after it read it.
+  test("a write expects each object as its writer saw it", async () => {
+    const { trusted, sixbFor, stored, watched, reads } = await deploy()
+    const objects = sixbFor(["open"]).objects
+    const watch = { targetTypeId: Ticket.id, targetId: "t-open" }
+
+    // The operator watches the open ticket, which someone closes between each read of it and the
+    // write that follows.
+    await objects.upsertLink(Watcher.id, "watcher-1", "watches", watch)
+    const seen = await stored(Ticket.id, "t-open")
+    await trusted.objects(Ticket).upsert({ properties: { id: "t-open", status: "closed" } })
+    const closed = await stored(Ticket.id, "t-open")
+
+    // Each write reads it as it was before, by id or in a batch.
+    const batch = new Map([[objectBatchKey(Ticket.id, "t-open"), seen]])
+    const writes: [() => Promise<unknown>, unknown][] = [
+      [() => objects.upsert(Ticket.id, { id: "t-open", title: "renamed" }), batch],
+      [
+        () => objects.upsertBatch(Ticket.id, [{ properties: { id: "t-open", title: "renamed" } }]),
+        batch,
+      ],
+      [() => objects(Ticket).byId("t-open").delete(), seen],
+      [() => objects.removeLink(Watcher.id, "watcher-1", "watches", watch), batch],
+      [() => objects.upsertLink(Watcher.id, "watcher-1", "watches", watch), batch],
+      [
+        () =>
+          objects.upsertLinkBatch([
+            { objectTypeId: Watcher.id, sourceId: "watcher-1", linkId: "watches", target: watch },
+          ]),
+        batch,
+      ],
+    ]
+    for (const [write, readBeforeClosing] of writes) {
+      reads.answerNextScopedRead = () => readBeforeClosing
+      expect(await write().catch((error) => error)).toMatchObject({ kind: "expectation" })
+    }
+
+    expect(await stored(Ticket.id, "t-open")).toEqual(closed)
+    expect(await watched()).toEqual(["t-closed", "t-open"])
+  })
+
+  // Reproduce: delete in deleteObject without reading the object first, and the operator deletes
+  // the closed ticket.
+  test("a delete reaches only an object the writer sees", async () => {
+    const { sixbFor, stored } = await deploy()
+    const tickets = sixbFor(["open"]).objects(Ticket)
+
+    // A hidden object is deleted as a missing one is: not at all.
+    expect(await tickets.byId("t-closed").delete()).toBeUndefined()
+    expect(await tickets.byId("t-none").delete()).toBeUndefined()
+    expect(await stored(Ticket.id, "t-closed")).not.toBeNull()
+
+    await tickets.byId("t-open").delete()
+    expect(await stored(Ticket.id, "t-open")).toBeNull()
+
+    // No reader sees a deleted object, so a restore still needs a view of every ticket.
+    const restore = await tickets
+      .byId("t-open")
+      .restore()
+      .catch((error) => error)
+    expect(restore).toBeInstanceOf(AuthorizationError)
+  })
+
+  // Reproduce: read every endpoint from the object storage in loadEndpointExistence, and the
+  // operator links the watcher to the closed ticket.
+  test("a link needs both of its ends visible: a hidden one is not found, as a missing one is", async () => {
+    const { sixbFor } = await deploy()
+    const objects = sixbFor(["open"]).objects
+    const watch = (targetId: string) =>
+      objects
+        .upsertLink(Watcher.id, "watcher-1", "watches", { targetTypeId: Ticket.id, targetId })
+        .catch((error) => error)
+    const assign = (sourceId: string) =>
+      objects
+        .upsertLink(Ticket.id, sourceId, "team", { targetTypeId: Team.id, targetId: "team-1" })
+        .catch((error) => error)
+
+    expect(await watch("t-open")).toBeUndefined()
+    expect(await assign("t-open")).toBeUndefined()
+
+    const hiddenTarget = await watch("t-closed")
+    expect(hiddenTarget).toBeInstanceOf(ObjectNotFoundError)
+    expect(hiddenTarget.message).toBe("[Sixb] Target object not found: ticket:t-closed")
+    expect(outcomeOf(hiddenTarget, "t-closed")).toEqual(outcomeOf(await watch("t-none"), "t-none"))
+
+    const hiddenSource = await assign("t-closed")
+    expect(hiddenSource.message).toBe("[Sixb] Source object not found: ticket:t-closed")
+    expect(outcomeOf(hiddenSource, "t-closed")).toEqual(outcomeOf(await assign("t-none"), "t-none"))
+
+    const [batched] = await objects.upsertLinkBatch([
+      {
+        objectTypeId: Watcher.id,
+        sourceId: "watcher-1",
+        linkId: "watches",
+        target: { targetTypeId: Ticket.id, targetId: "t-closed" },
+      },
+    ])
+    expect(batched).toMatchObject({ ok: false, error: { name: "ObjectNotFoundError" } })
+  })
+
+  // Reproduce: drop the endpoint read from removeLink, and the operator unlinks the closed ticket.
+  test("a link to a hidden object is removed as a missing one is: not at all", async () => {
+    const { sixbFor, watched } = await deploy()
+    const objects = sixbFor(["open"]).objects
+
+    await objects.removeLink(Watcher.id, "watcher-1", "watches", {
+      targetTypeId: Ticket.id,
+      targetId: "t-closed",
+    })
+    expect(await watched()).toEqual(["t-closed"])
+
+    await sixbFor(["open", "all"]).objects.removeLink(Watcher.id, "watcher-1", "watches", {
+      targetTypeId: Ticket.id,
+      targetId: "t-closed",
+    })
+    expect(await watched()).toEqual([])
+  })
+
+  test("currentUser(): a writer edits its own note, and may create one it then cannot see", async () => {
+    const { sixbFor, stored } = await deploy()
+    const write = (principal: AuthorizationContext["principal"], properties: object) =>
+      sixbFor(["notes"], principal)
+        .objects.upsert(Note.id, { ...properties })
+        .catch((error) => error)
+
+    expect((await write(alice, { id: "n-alice", text: "mine" })).properties.text).toBe("mine")
+    expect(await write(bob, { id: "n-alice", text: "bob's" })).toMatchObject({
+      code: "object.unique_violation",
+    })
+    expect(await write(reports, { id: "n-alice", text: "reports" })).toMatchObject({
+      code: "object.unique_violation",
+    })
+    expect((await stored(Note.id, "n-alice"))?.properties.text).toBe("mine")
+
+    // The owner is a value the writer sets: Alice may write a note for Bob, which only he sees.
+    const forBob = await write(alice, { id: "n-for-bob", owner: userRef(bob.id), text: "hi" })
+    expect(forBob.properties).toEqual({ id: "n-for-bob", owner: userRef(bob.id), text: "hi" })
+    expect(await sixbFor(["notes"], alice).objects(Note).get("n-for-bob")).toBeNull()
+    expect(await sixbFor(["notes"], bob).objects(Note).get("n-for-bob")).not.toBeNull()
+  })
+
+  // Reproduce: require view:object again in objects/vectors/handle.ts, and the operator cannot
+  // index the open ticket it sees.
+  test("a writer indexes the vectors of an object it sees, and of no other", async () => {
+    const embedding: EmbeddingModel = {
+      providerId: "test",
+      modelId: "embedding-v1",
+      definition: { kind: "embedding", providerId: "test", modelId: "embedding-v1", dimensions: 3 },
+      embed: async ({ texts }) => ({ vectors: texts.map(() => [1, 0, 0]) }),
+    }
+    const Article = defineObjectType({
+      id: "article",
+      name: "Article",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("status", "string", filterable),
+        prop("title", "string"),
+      ],
+      search: { vectors: { content: { source: ["title"], model: embedding } } },
+    })
+    const editors = defineRole("published-articles", {
+      grantedTo: [defineGroup("editors")],
+      grants: [
+        can.view(Article).where((article) => article.p.status.eq("published")),
+        can.edit(Article),
+      ],
+    })
+
+    const host = new SixbHost({
+      id: projectId,
+      ontology: [Article],
+      models: { embedding: [embedding] },
+      ...createTestRuntimeDeps(),
+    })
+    const trusted = createTestSixb(host)
+    await host.storage.auth?.users.create({ projectId, id: alice.id, email: "alice@example.com" })
+    await trusted
+      .objects(Article)
+      .upsert({ properties: { id: "a-published", status: "published", title: "a" } })
+    await trusted
+      .objects(Article)
+      .upsert({ properties: { id: "a-draft", status: "draft", title: "b" } })
+
+    const { contextFor } = resolveRolesWithConditions({ ontology: [Article], roles: [editors] })
+    const articles = createTestSixb(host, {
+      authorization: contextFor(["editors"], alice),
+    }).objects(Article)
+    const index = (id: string) =>
+      articles
+        .byId(id)
+        .vector("content")
+        .index()
+        .catch((error) => error)
+
+    expect(await index("a-published")).toBeUndefined()
+
+    const hidden = await index("a-draft")
+    expect(hidden).toBeInstanceOf(AuthorizationError)
+    expect(outcomeOf(hidden, "a-draft")).toEqual(outcomeOf(await index("a-none"), "a-none"))
+  })
+
+  // Reproduce: take the conditioned branch in upsertObject, deleteObject and loadEndpointExistence
+  // for every writer, and the writer of every ticket reads more.
+  test("a writer that views every object reads nothing more", async () => {
+    const { sixbFor, reads } = await deploy()
+    const readsDuring = async (write: () => Promise<unknown>) => {
+      const before = reads.count
+      await write()
+      return reads.count - before
+    }
+
+    const operator = sixbFor(["open"]).objects
+    expect(
+      await readsDuring(() => operator.upsert(Ticket.id, { id: "t-open", title: "x" }))
+    ).toBeGreaterThan(0)
+
+    const writer = sixbFor(["open", "all"]).objects
+    const closed = { id: "t-closed", title: "x" }
+
+    expect(await readsDuring(() => writer.upsert(Ticket.id, closed))).toBe(0)
+    expect(await readsDuring(() => writer.upsertBatch(Ticket.id, [{ properties: closed }]))).toBe(0)
+    expect(await readsDuring(() => writer(Ticket).byId("t-closed").delete())).toBe(0)
+
+    // A link reads its two ends from the object storage in one batch, as it always did.
+    expect(
+      await readsDuring(() =>
+        writer.upsertLink(Watcher.id, "watcher-1", "watches", {
+          targetTypeId: Ticket.id,
+          targetId: "t-open",
+        })
+      )
+    ).toBe(1)
+    expect(
+      await readsDuring(() =>
+        writer.removeLink(Watcher.id, "watcher-1", "watches", {
+          targetTypeId: Ticket.id,
+          targetId: "t-open",
+        })
+      )
+    ).toBe(0)
   })
 })

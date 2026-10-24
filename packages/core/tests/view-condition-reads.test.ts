@@ -437,33 +437,7 @@ describe("surfaces that do not apply view conditions deny the type", () => {
     expect(denial).toBeInstanceOf(AuthorizationError)
   })
 
-  test("direct writes, link writes included", async () => {
-    const { host, sixbFor } = await deploy()
-    const operator = sixbFor(["open"])
-
-    const upsert = await operator
-      .objects(Ticket)
-      .upsert({ properties: { id: "t-open-alice", status: "open" } })
-      .catch((error) => error)
-    expect(upsert).toBeInstanceOf(AuthorizationError)
-
-    const linked = await operator.objects
-      .upsertLink(Ticket.id, "t-open-alice", "team", { targetTypeId: Team.id, targetId: "team-1" })
-      .catch((error) => error)
-    expect(linked).toBeInstanceOf(AuthorizationError)
-
-    expect(
-      (
-        await host.storage.objects.getByPrimaryId({
-          projectId,
-          objectTypeId: Ticket.id,
-          primaryId: "t-open-alice",
-        })
-      )?.version
-    ).toBe(1)
-  })
-
-  // Action requests apply them: view-condition-writes.test.ts.
+  // Action requests and writes apply them: view-condition-writes.test.ts.
 })
 
 describe("share issuance through view conditions", () => {

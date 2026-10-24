@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { assertCanEdit } from "../../authorization"
 import { AuthorizationError } from "../../authorization/errors"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type { PreparedObjectVector } from "../../materialization/vectors"
 import { sameEmbeddingModel } from "../../models/embedding-model"
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
+import { assertCanEditType } from "../conditional-writes"
 import type { ExecutionObjectContext } from "../context"
 import {
   INDEXING_EMBEDDING_TIMEOUT_MS,
@@ -42,7 +42,7 @@ export function createObjectVectorHandle(
 
   return Object.freeze({
     async index(): Promise<void> {
-      assertCanEdit(ctx, ref.objectTypeId)
+      await assertCanEditType(ctx, ref.objectTypeId)
       await assertReadable()
       const mutations = getOntologyMutationRuntime(ctx)
       const model = ctx.embeddingModels?.getByRef({
@@ -84,7 +84,7 @@ export function createObjectVectorHandle(
         result.vectors[0]!,
         profileDefinition.model.definition.dimensions
       )
-      assertCanEdit(ctx, ref.objectTypeId)
+      await assertCanEditType(ctx, ref.objectTypeId)
       await assertReadable()
       await mutations.commitEdits({
         mode: "atomic",
