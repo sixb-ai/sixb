@@ -105,7 +105,8 @@ test("with tiers, a remembered model is neither shown nor asked for", async () =
   })
 
   // Removal proof: drop the tiers check from resolveModelSelection, the tiered message asks for
-  // Opus; drop it from the conversation's composer props, the tiered composer shows the picker.
+  // Opus; drop it from the conversation's composer props, the tiered composer shows the picker;
+  // return `canChooseModel: true` from the conversation, a custom chat would show its own.
   const chat = async (language: readonly LanguageModel[]) => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(listModelsOptions().queryKey, { language })
@@ -123,16 +124,22 @@ test("with tiers, a remembered model is neither shown nor asked for", async () =
     await conversation?.send("Why did margin drop?", [], [])
     queryClient.clear()
 
-    return { picker: html.includes('aria-label="Choose model and reasoning effort"'), posted }
+    return {
+      canChooseModel: conversation?.canChooseModel,
+      picker: html.includes('aria-label="Choose model and reasoning effort"'),
+      posted,
+    }
   }
 
   try {
     expect(await chat(list)).toEqual({
+      canChooseModel: true,
       picker: true,
       posted: [expect.objectContaining(remembered)],
     })
 
     const tiered = await chat(tiers)
+    expect(tiered.canChooseModel).toBe(false)
     expect(tiered.picker).toBe(false)
     expect(tiered.posted).toEqual([expect.objectContaining({ text: "Why did margin drop?" })])
     expect(tiered.posted[0]).not.toHaveProperty("model")
