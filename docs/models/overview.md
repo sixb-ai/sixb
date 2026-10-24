@@ -154,6 +154,46 @@ Each person sees their own conversations and the ones [shared with them](#share-
 `can.observe(agent.threads)` lets others [read them](../apps/activity.md#read-a-conversation),
 read-only.
 
+## Approve what the agent changes
+
+Each user chooses what the agent may change without asking them:
+
+| Mode | Action that only changes Sixb | Action with a writeback or effects | Workflow start |
+| --- | --- | --- | --- |
+| `manual` | waits | waits | waits |
+| `accept-edits` | runs | waits | waits |
+| `auto` (default) | runs | runs | runs |
+
+```ts
+await sixb.agent.preferences.update({ approvalMode: "accept-edits" }) // your default
+await sixb.agent.threads.setApprovalMode(thread.id, "manual") // yours here; null follows your default
+await sixb.agent.runs.request({ threadId: thread.id, text: "Mark INV-2041 paid", approvalMode: "manual" })
+
+const { approvals } = await sixb.agent.approvals.list({ threadId: thread.id, statuses: ["pending"] })
+await sixb.agent.approvals.decide(approvals[0].id, { decision: "approve" }) // runs it now
+```
+
+- **A turn keeps the mode it started with**: the message's, else the sender's choice in the
+  conversation, else their default. Participants each have their own. `getApprovalMode` and the
+  thread's `GET` say where yours comes from: `thread`, `default` or `fallback`.
+- **A call that waits does not run.** Sixb holds it, whatever the agent does, and tells the agent
+  to end its turn. A call that would be refused, such as a workflow start with invalid input, is
+  refused instead of held. Only whoever sent the message decides; an approved call runs with their
+  permissions and returns its result on the approval. `always: true` also raises their mode in
+  the conversation so such calls no longer wait.
+- **The agent learns how it ended with the next message.** A new message also sets aside the calls
+  still waiting: they never run. A turn that fails or is stopped cancels its own. An approval
+  expires after 7 days.
+- The app does not show approvals yet; until it does, the default stays `auto`.
+- [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
+
+Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,
+`approvalMode` on `POST /api/agent-threads/:threadId/messages`,
+`GET /api/agent-threads/:threadId/approvals`,
+`POST /api/agent-threads/:threadId/approvals/:approvalId/decision` with
+`{ "decision": "approve" | "deny", "always"?: true }`, and `GET /api/agent-approvals` for yours
+across conversations.
+
 ## Use in your app
 
 [Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`

@@ -69,7 +69,8 @@ export const extractDocument = defineAgentTool("extract_document")
 | Child agent (delegation is currently disabled) | The parent chat's user's. |
 | Workflow AI task | Those granted through the step's `groups`. |
 
-An action a tool requests runs at once, without the confirmation the agent asks for itself.
+An action a tool requests runs at once, without the confirmation the agent asks for itself, and
+whatever the user's [approval mode](./overview.md#approve-what-the-agent-changes).
 
 ## Register the tool
 

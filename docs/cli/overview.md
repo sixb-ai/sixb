@@ -170,3 +170,4 @@ Use `--json` for machine-readable output from profile and credential commands. S
 | `1` | Command or runtime failure. |
 | `2` | Invalid arguments. |
 | `3` | API failure. |
+| `4` | The request waits for the user's approval and did not run (Agent sandbox). |
