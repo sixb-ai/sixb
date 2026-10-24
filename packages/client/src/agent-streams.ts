@@ -1,7 +1,12 @@
-import type { AgentRunActivityEvent, AgentRunStreamEvent } from "@sixb/core/agents/streams"
+import type {
+  AgentActivityEvent,
+  AgentApprovalActivityEvent,
+  AgentRunActivityEvent,
+  AgentRunStreamEvent,
+} from "@sixb/core/agents/streams"
 // Import the wire validator from the browser-safe streams subpath: the `@sixb/core` root pulls in
 // node-only runtime (e.g. `node:crypto`), which breaks browser bundles.
-import { isAgentRunActivityEvent, isAgentRunStreamEvent } from "@sixb/core/agents/streams"
+import { isAgentActivityEvent, isAgentRunStreamEvent } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
 import type { Client } from "./generated/client"
 import type { GetAgentRunResponses } from "./generated/types.gen"
@@ -13,6 +18,8 @@ import {
 } from "./ws-socket"
 
 export type {
+  AgentActivityEvent,
+  AgentApprovalActivityEvent,
   AgentRunActivityEvent,
   AgentRunFailure,
   AgentRunStreamEvent,
@@ -66,7 +73,7 @@ export type AgentRunStreamServerMessage =
   | { readonly type: "unsubscribed"; readonly runId?: string | null }
   | { readonly type: "subscribed.activity" }
   | { readonly type: "unsubscribed.activity" }
-  | { readonly type: "activity"; readonly event: AgentRunActivityEvent }
+  | { readonly type: "activity"; readonly event: AgentActivityEvent }
   | { readonly type: "error"; readonly message: string }
   | { readonly type: "run.snapshot"; readonly run: AgentRunSnapshot }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
@@ -98,6 +105,8 @@ export interface AgentActivitySocketOptions {
   /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
   readonly client?: Client
   readonly onActivity: (event: AgentRunActivityEvent) => void
+  /** One of a turn's held calls was held, decided, ran, or was set aside. */
+  readonly onApprovalActivity?: (event: AgentApprovalActivityEvent) => void
   /** Called after each initial or reconnect subscription, so durable state can be reconciled. */
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
@@ -164,7 +173,8 @@ export function createAgentActivitySocket(options: AgentActivitySocketOptions): 
       const message = parseAgentRunStreamServerMessage(data)
       if (!message) return
       if (message.type === "activity") {
-        options.onActivity(message.event)
+        if (message.event.type === "agent.run.activity") options.onActivity(message.event)
+        else options.onApprovalActivity?.(message.event)
         return
       }
       if (message.type === "subscribed.activity") {
@@ -206,7 +216,7 @@ export function parseAgentRunStreamServerMessage(
     return { type: "error", message: String(parsed.message ?? "Agent stream error.") }
   }
 
-  if (parsed.type === "activity" && isAgentRunActivityEvent(parsed.event)) {
+  if (parsed.type === "activity" && isAgentActivityEvent(parsed.event)) {
     return { type: "activity", event: parsed.event }
   }
 

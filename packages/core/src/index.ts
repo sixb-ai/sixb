@@ -922,6 +922,7 @@ export type { AgentApprovalModeSource, ResolvedAgentApprovalMode } from "./agent
 export type { AgentMemoryErrorCode } from "./agents/errors"
 export { AgentMemoryError } from "./agents/errors"
 export type {
+  AgentApprovalDecision,
   AgentApprovalsRuntime,
   AgentPreferences,
   AgentPreferencesRuntime,

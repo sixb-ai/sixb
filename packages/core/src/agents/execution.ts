@@ -1,5 +1,6 @@
 import { principalsEqual, type UserPrincipal } from "../auth"
-import { assertAuthorized, isRuntimeAllowed } from "../authorization"
+import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
+import { isSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { canInheritAgentRequestAuthorization } from "../execution/agent"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
@@ -23,15 +24,21 @@ import type {
 } from "../storage/agents"
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
+import { type AgentApprovalResume, registerAgentTurnResume } from "./approval-continuation"
 import { getAgentApprovalExecutor } from "./approval-executor"
 import {
+  agentRunApprovalMode,
   approvalModeAllows,
   assertAgentApprovalMode,
   decideAgentApproval,
   defaultAgentApprovalMode,
+  isAwaitingApprovalRun,
   leastApprovalModeAllowing,
+  listTurnApprovals,
   type ResolvedAgentApprovalMode,
   resolveAgentApprovalMode,
+  resumedApprovalMode,
+  stopAgentTurn,
 } from "./approvals"
 import { cancelAgentRun } from "./cancel"
 import { AgentRequestError } from "./errors"
@@ -48,6 +55,7 @@ import {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
+  resumeAgentTurn,
   retryAgentRun,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
@@ -128,10 +136,32 @@ export interface AgentApprovalsRuntime {
   getById(approvalId: string): Promise<AgentApprovalRecord | null>
   /**
    * Approve or deny a pending call. An approved call runs now, and the approval comes back with its
-   * outcome; the model reads it at the start of the thread's next message. `always` also sets the
-   * caller's mode in the thread to the least that runs such a call without asking.
+   * outcome. Once every call the turn held is decided, the turn resumes: `run` is the turn that
+   * continues it, and the model reads how each call ended. `always` also sets the caller's mode in
+   * the thread to the least that runs such a call without asking, and approves the turn's other
+   * calls that mode runs.
    */
-  decide(approvalId: string, input: DecideExecutionAgentApprovalInput): Promise<AgentApprovalRecord>
+  decide(
+    approvalId: string,
+    input: DecideExecutionAgentApprovalInput
+  ): Promise<AgentApprovalDecision>
+}
+
+export interface AgentApprovalDecision {
+  readonly approval: AgentApprovalRecord
+  /** The turn that resumed the paused one, when this decision was its last. */
+  readonly run?: AgentRunView
+  /**
+   * Present when the paused turn could not resume: the decision and the call's outcome stand.
+   * `retrying`: Sixb resumes it once it can, for example when an AI limit resets; otherwise the
+   * thread's next message tells the model how its calls ended.
+   */
+  readonly resume?: {
+    readonly status: "refused"
+    readonly code: string
+    readonly message: string
+    readonly retrying: boolean
+  }
 }
 
 export type ListExecutionAgentApprovalsInput = Omit<
@@ -196,7 +226,8 @@ export interface AgentRunsRuntime {
   retry(runId: string): Promise<ExecutionAgentRunResult>
   /**
    * Stop a turn; whoever asked for it, or the thread's owner, can. A queued turn is cancelled when
-   * this returns; a running one is still running, with the stop signal sent to its worker.
+   * this returns; a running one is still running, with the stop signal sent to its worker. A turn
+   * paused for approval stays as it ended, with its held calls cancelled: it never resumes.
    */
   cancel(runId: string): Promise<AgentRunView>
   getById(runId: string): Promise<AgentRunView | null>
@@ -432,33 +463,132 @@ export function createAgentRuntime<
         )
       }
 
-      const decided = await decideAgentApproval(
-        requireAgents(),
-        getAgentApprovalExecutor(runtime),
-        {
-          approval,
-          decision: input.decision === "approve" ? "approved" : "denied",
-          decidedBy: principal,
-          decider: { execution, authorization: runtime.runtimeAuthorization },
-        }
-      )
-      if (input.always === true && decided.status === "approved") {
-        await allowAlways(decided)
+      // "Always allow" raises the thread's mode first: nothing has run yet if that fails.
+      const always = input.always === true && input.decision === "approve"
+      const raisedMode = always ? leastApprovalModeAllowing(approval.call) : undefined
+      if (raisedMode !== undefined && approval.status === "pending") {
+        await allowInThread(approval, raisedMode)
       }
-      return decided
+
+      const decided = await decide(
+        approval,
+        input.decision === "approve" ? "approved" : "denied",
+        raisedMode
+      )
+      if (raisedMode !== undefined && decided.status === "approved") {
+        await approveAllowed(decided, raisedMode)
+      }
+
+      // The decision and the call's outcome stand from here: a resume that fails is reported.
+      const resume = await resumeDecidedTurn(decided.runId)
+      if (resume.status === "refused") return { approval: decided, resume }
+      if (resume.status !== "resumed") return { approval: decided }
+
+      // The resume reported it to the model.
+      const reported = await requireAgents().approvals.getById({
+        projectId: runtime.projectId,
+        id: decided.id,
+      })
+      return { approval: reported ?? decided, run: await attachRunView(runtime, resume.run) }
     },
   }
+
+  const decide = (
+    approval: AgentApprovalRecord,
+    decision: "approved" | "denied",
+    raisedMode?: AgentApprovalMode
+  ) =>
+    decideAgentApproval(requireAgents(), getAgentApprovalExecutor(runtime), {
+      approval,
+      decision,
+      decidedBy: principal,
+      decider: { execution, authorization: runtime.runtimeAuthorization },
+      ...(raisedMode === undefined ? {} : { raisedMode }),
+      broker: runtime.broker,
+    })
 
   /**
    * "Always allow": the caller's thread mode rises to the least that runs such a call, unless what
    * they chose already runs it. The fallback is no choice: it would hide the raise.
    */
-  const allowAlways = async (approval: AgentApprovalRecord): Promise<void> => {
+  const allowInThread = async (
+    approval: AgentApprovalRecord,
+    raised: AgentApprovalMode
+  ): Promise<void> => {
     const current = await getThreadApprovalMode(approval.threadId)
     const chosen = current?.approvalModeSource === "fallback" ? undefined : current?.approvalMode
-    if (chosen !== undefined && approvalModeAllows(chosen, approval.call)) return
+    if (chosen === undefined || !approvalModeAllows(chosen, approval.call)) {
+      await setThreadApprovalMode(approval.threadId, raised)
+    }
+  }
 
-    await setThreadApprovalMode(approval.threadId, leastApprovalModeAllowing(approval.call))
+  /** "Always allow" also approves the turn's other calls the raised mode runs. */
+  const approveAllowed = async (
+    approval: AgentApprovalRecord,
+    raised: AgentApprovalMode
+  ): Promise<void> => {
+    const { approvals: waiting } = await requireAgents().approvals.list({
+      projectId: runtime.projectId,
+      runId: approval.runId,
+      requestedBy: principal,
+      statuses: ["pending"],
+    })
+    for (const other of waiting) {
+      if (!approvalModeAllows(raised, other.call)) continue
+      try {
+        await decide(other, "approved", raised)
+      } catch (error) {
+        // Decided, set aside or expired meanwhile: that outcome stands.
+        if (!(error instanceof AgentRequestError)) throw error
+      }
+    }
+  }
+
+  /**
+   * Resume a paused turn once its requester decided on every call it held, as that requester. It
+   * never throws: what keeps the turn from resuming comes back as `refused`, and unless Sixb can
+   * try again, the turn is stopped so that the thread's next message reports its calls.
+   */
+  const resumeDecidedTurn = async (runId: string): Promise<AgentApprovalResume> => {
+    const agents = requireAgents()
+    const run = await agents.runs.getById({ projectId: runtime.projectId, id: runId })
+    if (run?.kind !== "conversation" || !isAwaitingApprovalRun(run)) return { status: "closed" }
+
+    const requester = (
+      await runtime.storage.executions.getById({
+        projectId: runtime.projectId,
+        id: run.executionId,
+      })
+    )?.requestedBy
+    if (authority.type === "principal" && !(requester && principalsEqual(requester, principal))) {
+      return { status: "closed" }
+    }
+
+    const stop = () => stopAgentTurn(agents, runtime.broker, run)
+    try {
+      // A requester who left the thread no longer runs turns in it.
+      if (!(await rule.read(run.threadId))) {
+        throw new AgentRequestError(
+          "thread_not_found",
+          `[Sixb] Agent thread '${run.threadId}' is no longer readable by whoever asked for its turn.`
+        )
+      }
+
+      const approvalMode = resumedApprovalMode(
+        agentRunApprovalMode(run),
+        await listTurnApprovals(agents, { projectId: runtime.projectId, runId: run.id })
+      )
+      const resumed = await resumeAgentTurn(runtime, execution, models?.language, run, {
+        approvalMode,
+        principal,
+      })
+      if (resumed.status === "closed") await stop()
+      return resumed
+    } catch (error) {
+      const refused = refusedResume(error)
+      if (!refused.retrying) await stop()
+      return refused
+    }
   }
 
   const preferences: AgentPreferencesRuntime = {
@@ -484,7 +614,7 @@ export function createAgentRuntime<
     },
   }
 
-  return {
+  const agentRuntime: AgentRuntime<TParams> = {
     get: getAgent,
     memory: createAgentMemoryRuntime(runtime),
     approvals,
@@ -644,6 +774,8 @@ export function createAgentRuntime<
     },
     observed: createObservedAgentThreadsRuntime(runtime),
   }
+  registerAgentTurnResume(agentRuntime, resumeDecidedTurn)
+  return agentRuntime
 }
 
 function createObservedAgentThreadsRuntime(
@@ -747,4 +879,27 @@ async function attachRunViews(
       ...(cost === undefined ? {} : { cost }),
     }
   })
+}
+
+/**
+ * Why a resume was refused. An AI limit, or a failure Sixb did not expect, is tried again by the
+ * worker's repair pass; a lost grant, a thread left or a sandbox to recreate is not.
+ */
+function refusedResume(error: unknown): Extract<AgentApprovalResume, { status: "refused" }> {
+  if (error instanceof AgentRequestError) {
+    return { status: "refused", code: error.code, message: error.message, retrying: false }
+  }
+  if (error instanceof AuthorizationError) {
+    return { status: "refused", code: "forbidden", message: error.message, retrying: false }
+  }
+  if (isSixbError(error)) {
+    return { status: "refused", code: error.code, message: error.message, retrying: true }
+  }
+  console.error("[Sixb] Could not resume an Agent turn after its approvals; retrying later.", error)
+  return {
+    status: "refused",
+    code: "internal.unexpected",
+    message: "[Sixb] The Agent turn could not resume. Sixb tries again.",
+    retrying: true,
+  }
 }

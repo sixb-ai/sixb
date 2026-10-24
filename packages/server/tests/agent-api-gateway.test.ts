@@ -34,7 +34,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
-import type { ImageModel, ModelCatalogInput } from "@sixb/core/models"
+import type { ImageModel, LanguageModel, ModelCatalogInput } from "@sixb/core/models"
 import {
   AGENT_APPROVAL_MODES,
   type AgentApprovalMode,
@@ -166,6 +166,16 @@ const relabelDevice = defineWorkflowStep("relabel-device")
 const relabelDevices = defineWorkflow("relabel-devices")
   .input({ label: "string" })
   .then(relabelDevice)
+
+// The resumed turn needs a model in the catalog; the routes never invoke it.
+const routeLanguageModel = {
+  providerId: "test",
+  modelId: "test-model",
+  definition: { kind: "language", providerId: "test", modelId: "test-model", capabilities: {} },
+  stream: async () => {
+    throw new Error("Must not invoke the route test model")
+  },
+} satisfies LanguageModel
 
 const agentRuntime = defineGroup("agent-runtime")
 const agentRole = defineRole("agent.runtime", {
@@ -1588,6 +1598,39 @@ describe("approval mode routes", () => {
       },
     })
     expect(inThread.body).toEqual(waiting.body)
+  })
+
+  // Guard proof: drop `run` from the decision route's response; nothing tells the caller the turn
+  // resumed, or which turn follows it.
+  test("the last decision of a paused turn answers with the turn that resumes it", async () => {
+    const { app, gatewayBaseUrl, sixb, storage, runId, executionToken } =
+      await createGatewayRuntime({
+        approvalMode: "manual",
+        models: { language: [routeLanguageModel] },
+      })
+    await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_label")
+    await storage.agents.runs.finish({
+      projectId: PROJECT_ID,
+      id: runId,
+      executionToken,
+      status: "succeeded",
+      finishReason: "awaiting_approval",
+    })
+    const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
+    if (!approval) throw new Error("Expected a held call.")
+    const routes = asRequester(sixb)
+
+    const paused = await routes.handle(jsonRequest("GET", "/api/agent-threads/thread-1/runs"))
+    const decided = await decideAs(sixb, approval, "approve")
+
+    expect(await paused.json()).toMatchObject({
+      runs: [{ id: runId, status: "succeeded", finishReason: "awaiting_approval" }],
+    })
+    expect(decided.status).toBe(200)
+    expect(await decided.json()).toMatchObject({
+      approval: { status: "approved", reported: true, outcome: { runId: "act_label" } },
+      run: { status: "queued", threadId: "thread-1", approvalMode: "manual" },
+    })
   })
 })
 

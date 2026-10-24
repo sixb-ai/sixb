@@ -2,6 +2,7 @@ import type { SixbHostView } from "@sixb/core"
 import { bindAgentGatewayRequestExecution } from "@sixb/core/internal/agent-execution"
 import {
   agentRunApprovalMode,
+  announceAgentApprovals,
   approvalCallSummary,
   findAgentApiRoute,
   holdAgentApprovalCall,
@@ -87,6 +88,8 @@ async function answerHold(
     case "pass":
       return { kind: "pass" }
     case "held":
+      // Announced on every answer: the feed keeps one record per change.
+      await announceAgentApprovals(input.host.broker, [hold.approval])
       return {
         kind: "answer",
         response: Response.json(heldCallBody(hold.approval), { status: 202 }),

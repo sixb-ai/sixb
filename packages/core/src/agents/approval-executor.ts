@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { captureSixbFailure, isSixbError } from "../errors/internal"
+import type { Broker } from "../broker"
+import { SIXB_ERROR_CODES } from "../errors/catalog"
+import { captureSixbFailure, createSixbError, isSixbError, toSixbFailure } from "../errors/internal"
 import { bindDurableAgentExecution, createInheritedAgentExecutionRecord } from "../execution/agent"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionScope } from "../execution/types"
@@ -12,9 +14,14 @@ import type {
   AgentStorage,
 } from "../storage/agents"
 import type { WorkflowRunRecord } from "../storage/workflow-runs"
+import { announceAgentApprovals } from "./approvals"
 import { resolveInheritedAgentExecutionAuthorization } from "./authority"
 import { AgentRequestError } from "./errors"
-import type { AgentRunScopeHost } from "./run-scope"
+import {
+  AgentRunScopeError,
+  type AgentRunScopeHost,
+  resolveAgentRunExecutionScope,
+} from "./run-scope"
 
 export interface AgentApprovalHost extends AgentRunScopeHost {
   readonly storage: AgentRunScopeHost["storage"] & {
@@ -26,6 +33,7 @@ export interface AgentApprovalHost extends AgentRunScopeHost {
       getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>
     }
   }
+  readonly broker: Broker
   withScope(scope: ExecutionScope): object
 }
 
@@ -39,6 +47,12 @@ export type AgentApprovalDecider = ExecutionScope
 export interface AgentApprovalExecutor {
   /** Run the call the caller's decision just approved, and record its outcome. */
   run(approval: AgentApprovalRecord, decider: AgentApprovalDecider): Promise<AgentApprovalRecord>
+  /**
+   * Run an approved call a crash left without its outcome, as the run that made it, with the
+   * authority its turn holds now. When that authority has ended, the outcome says so and the call
+   * does not run. The caller holds the call's execution claim.
+   */
+  complete(approval: AgentApprovalRecord): Promise<AgentApprovalRecord>
   /**
    * The outcome of a call another decision approved, without starting it: the outcome of the run
    * this process is making, or the one the call's run recorded. Without either, the approval comes
@@ -66,6 +80,53 @@ class HostAgentApprovalExecutor implements AgentApprovalExecutor {
     )
     this.running.set(key, started)
     return started
+  }
+
+  complete(approval: AgentApprovalRecord): Promise<AgentApprovalRecord> {
+    const key = runningKey(approval)
+    const running = this.running.get(key)
+    if (running) return running
+
+    const started = this.completeLost(approval).finally(() => this.running.delete(key))
+    this.running.set(key, started)
+    return started
+  }
+
+  private async completeLost(approval: AgentApprovalRecord): Promise<AgentApprovalRecord> {
+    let sixb: Sixb
+    try {
+      sixb = await this.bindCallerRun(approval)
+    } catch (error) {
+      if (!(error instanceof AgentRunScopeError)) throw error
+      return this.record(approval, {
+        kind: "error",
+        error: toSixbFailure(
+          createSixbError(
+            "agent.approval_authority_lost",
+            "[Sixb] The approved call did not run: the sign-in of whoever asked for it ended first. Ask the Agent again.",
+            { cause: error }
+          ),
+          { allowedCodes: SIXB_ERROR_CODES }
+        ),
+      })
+    }
+    return this.execute(approval, async () => sixb)
+  }
+
+  /** The run that made the call, with the authority its execution holds now. */
+  private async bindCallerRun(approval: AgentApprovalRecord): Promise<Sixb> {
+    const run = await this.host.storage.agents?.runs.getById({
+      projectId: approval.projectId,
+      id: approval.callerRunId,
+    })
+    if (!run) throw new Error(`[Sixb] Agent run '${approval.callerRunId}' was not found.`)
+
+    const scope = await resolveAgentRunExecutionScope(this.host, {
+      runId: run.id,
+      executionId: run.executionId,
+      authority: { type: "inherited" },
+    })
+    return bindDurableAgentExecution(this.host, scope)
   }
 
   async settle(approval: AgentApprovalRecord): Promise<AgentApprovalRecord> {
@@ -120,7 +181,8 @@ class HostAgentApprovalExecutor implements AgentApprovalExecutor {
     return run ? actionRunOutcome(run) : undefined
   }
 
-  private record(
+  /** Record the outcome, once, and announce it. */
+  private async record(
     approval: AgentApprovalRecord,
     outcome: AgentApprovalOutcome
   ): Promise<AgentApprovalRecord> {
@@ -128,11 +190,13 @@ class HostAgentApprovalExecutor implements AgentApprovalExecutor {
     if (!agents) {
       throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
     }
-    return agents.approvals.recordOutcome({
+    const recorded = await agents.approvals.recordOutcome({
       projectId: approval.projectId,
       id: approval.id,
       outcome,
     })
+    await announceAgentApprovals(this.host.broker, [recorded])
+    return recorded
   }
 
   /**
@@ -222,15 +286,23 @@ interface ApprovalExecutorOwner {
   readonly [approvalExecutorKey]?: AgentApprovalExecutor
 }
 
+export function createAgentApprovalExecutor(host: AgentApprovalHost): AgentApprovalExecutor {
+  return new HostAgentApprovalExecutor(host)
+}
+
 /**
- * Attach the host's approval executor to its context. Enumerable, like the Action run executor, so
- * that the runtime context of every bound SDK carries it: deciding needs to bind another execution.
+ * Attach the host's approval executor to the host, for its workers, and to its context.
+ * Enumerable, like the Action run executor, so that the runtime context of every bound SDK carries
+ * it: deciding needs to bind another execution.
  */
-export function registerAgentApprovalExecutor(owner: object, host: AgentApprovalHost): void {
+export function registerAgentApprovalExecutor(
+  owner: object,
+  executor: AgentApprovalExecutor
+): void {
   Object.defineProperty(owner, approvalExecutorKey, {
     configurable: false,
     enumerable: true,
-    value: new HostAgentApprovalExecutor(host),
+    value: executor,
     writable: false,
   })
 }

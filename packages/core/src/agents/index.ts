@@ -20,8 +20,21 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
+export type { AgentApprovalResume } from "./approval-continuation"
+export { resumeDecidedAgentTurn } from "./approval-continuation"
+export { getAgentApprovalExecutor } from "./approval-executor"
 export type { AgentApprovalHold } from "./approvals"
-export { agentRunApprovalMode, approvalCallSummary, holdAgentApprovalCall } from "./approvals"
+export {
+  AGENT_APPROVAL_EXECUTION_LEASE_MS,
+  agentRunApprovalMode,
+  announceAgentApprovals,
+  approvalCallSummary,
+  holdAgentApprovalCall,
+  isAwaitingApprovalRun,
+  listTurnApprovals,
+  stopAgentTurn,
+  turnResumeReadiness,
+} from "./approvals"
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,

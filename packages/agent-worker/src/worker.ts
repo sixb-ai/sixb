@@ -31,6 +31,7 @@ import type {
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
+import { repairAgentApprovals, resumeIfDecided } from "./approval-repair"
 import { prepareAgentModel } from "./context-budget"
 import {
   isPermanentAgentPreparationError,
@@ -349,6 +350,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         threadContext: environment.threadContext,
       })
       await this.cancelActiveSubagents(completed.id, "The parent Agent run has finished.")
+      if (completed.kind === "conversation") {
+        await resumeIfDecided(prepared.executionContext.sixb, completed)
+      }
     } catch (caughtError) {
       let error = caughtError
       let environmentSaveFailed = error instanceof AgentEnvironmentSaveError
@@ -818,6 +822,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   /**
    * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
    * Each read covers only active rows, and the deterministic job ids make republication idempotent.
+   * Held calls are repaired in the same pass: expired, run after a crash, and their turns resumed.
    */
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
@@ -845,6 +850,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         await this.dispatchWorkflowAgentNodes(context)
       } catch (error) {
         console.error("[SixbAgentWorker] Could not scan queued agent runs; retrying.", error)
+      }
+      try {
+        await repairAgentApprovals({ host: this.host, agents: context.storage.agents })
+      } catch (error) {
+        console.error("[SixbAgentWorker] Could not repair Agent approvals; retrying.", error)
       }
       await waitForAbort(AGENT_DISPATCH_REPAIR_MS, signal)
     }

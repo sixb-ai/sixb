@@ -24405,6 +24405,7 @@
                                               "action.rejected",
                                               "action.run_in_progress",
                                               "action.timeout",
+                                              "agent.approval_authority_lost",
                                               "agent.execution_failed",
                                               "ai.usage_limit_exceeded",
                                               "ai.usage_limit_unavailable",
@@ -31870,6 +31871,7 @@
                         "action.rejected",
                         "action.run_in_progress",
                         "action.timeout",
+                        "agent.approval_authority_lost",
                         "agent.execution_failed",
                         "ai.usage_limit_exceeded",
                         "ai.usage_limit_unavailable",
@@ -36432,6 +36434,7 @@
                                                     "action.rejected",
                                                     "action.run_in_progress",
                                                     "action.timeout",
+                                                    "agent.approval_authority_lost",
                                                     "agent.execution_failed",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -37894,6 +37897,7 @@
                             "tool-calls",
                             "timeout",
                             "interrupted",
+                            "awaiting_approval",
                             "error",
                             "other",
                             "unknown"
@@ -38669,6 +38673,7 @@
                             "tool-calls",
                             "timeout",
                             "interrupted",
+                            "awaiting_approval",
                             "error",
                             "other",
                             "unknown"
@@ -39144,6 +39149,7 @@
                             "tool-calls",
                             "timeout",
                             "interrupted",
+                            "awaiting_approval",
                             "error",
                             "other",
                             "unknown"
@@ -39682,6 +39688,7 @@
                               "tool-calls",
                               "timeout",
                               "interrupted",
+                              "awaiting_approval",
                               "error",
                               "other",
                               "unknown"
@@ -40100,6 +40107,7 @@
                         "tool-calls",
                         "timeout",
                         "interrupted",
+                        "awaiting_approval",
                         "error",
                         "other",
                         "unknown"
@@ -41299,6 +41307,7 @@
                                           "action.rejected",
                                           "action.run_in_progress",
                                           "action.timeout",
+                                          "agent.approval_authority_lost",
                                           "agent.execution_failed",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -41488,7 +41497,7 @@
     "/api/agent-threads/{threadId}/approvals/{approvalId}/decision": {
       "post": {
         "summary": "Approve or deny a held agent call",
-        "description": "Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. The Agent reads how it ended at the start of the thread's next message. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.",
+        "description": "Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. A turn paused on its calls resumes once all of them are decided: `run` is the turn that continues it, and the Agent reads how each call ended. Once the call ran, the decision never fails: when the turn cannot resume, `resume` says why, and whether Sixb tries again, as it does once an AI limit resets. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.",
         "tags": ["Agent Runs"],
         "operationId": "decideAgentApproval",
         "security": [
@@ -41908,6 +41917,7 @@
                                         "action.rejected",
                                         "action.run_in_progress",
                                         "action.timeout",
+                                        "agent.approval_authority_lost",
                                         "agent.execution_failed",
                                         "ai.usage_limit_exceeded",
                                         "ai.usage_limit_unavailable",
@@ -42024,6 +42034,356 @@
                         "expiresAt",
                         "reported"
                       ],
+                      "additionalProperties": false
+                    },
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["provider", "modelId"],
+                          "additionalProperties": false
+                        },
+                        "tier": {
+                          "type": "string",
+                          "enum": ["light", "standard", "heavy"]
+                        },
+                        "reasoning": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "provider-default",
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "budgetTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": ["budgetTokens"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "approvalMode": {
+                          "type": "string",
+                          "enum": ["manual", "accept-edits", "auto"]
+                        },
+                        "modelId": {
+                          "type": "string"
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "timeout",
+                            "interrupted",
+                            "awaiting_approval",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "inputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "outputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
+                            },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
+                            }
+                          },
+                          "required": ["reportingStatus"],
+                          "additionalProperties": false
+                        },
+                        "cost": {
+                          "type": "object",
+                          "properties": {
+                            "amounts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "currency": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{3}$"
+                                  },
+                                  "amountNanos": {
+                                    "type": "string",
+                                    "pattern": "^\\d+$"
+                                  }
+                                },
+                                "required": ["currency", "amountNanos"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "ratedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unpriceableCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unvaluedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "amounts",
+                            "ratedCallCount",
+                            "unpriceableCallCount",
+                            "unvaluedCallCount"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "diagnostics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["step_limit_reached", "output_limit_reached"]
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": ["warning", "error"]
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": ["run"]
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "severity", "scope", "message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "streamId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "threadId",
+                        "triggerMessageId",
+                        "status",
+                        "attempt",
+                        "streamId",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resume": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["refused"]
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "retrying": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["status", "code", "message", "retrying"],
                       "additionalProperties": false
                     }
                   },
@@ -42498,6 +42858,7 @@
                                           "action.rejected",
                                           "action.run_in_progress",
                                           "action.timeout",
+                                          "agent.approval_authority_lost",
                                           "agent.execution_failed",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -43304,6 +43665,7 @@
                                                     "action.rejected",
                                                     "action.run_in_progress",
                                                     "action.timeout",
+                                                    "agent.approval_authority_lost",
                                                     "agent.execution_failed",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -44312,6 +44674,7 @@
                               "tool-calls",
                               "timeout",
                               "interrupted",
+                              "awaiting_approval",
                               "error",
                               "other",
                               "unknown"

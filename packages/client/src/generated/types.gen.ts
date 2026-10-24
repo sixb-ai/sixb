@@ -8169,6 +8169,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "action.rejected"
                     | "action.run_in_progress"
                     | "action.timeout"
+                    | "agent.approval_authority_lost"
                     | "agent.execution_failed"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
@@ -10605,6 +10606,7 @@ export type RequestActionErrors = {
       | "action.rejected"
       | "action.run_in_progress"
       | "action.timeout"
+      | "agent.approval_authority_lost"
       | "agent.execution_failed"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
@@ -12291,6 +12293,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "action.rejected"
                       | "action.run_in_progress"
                       | "action.timeout"
+                      | "agent.approval_authority_lost"
                       | "agent.execution_failed"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -12735,6 +12738,7 @@ export type PostAgentThreadMessageResponses = {
         | "tool-calls"
         | "timeout"
         | "interrupted"
+        | "awaiting_approval"
         | "error"
         | "other"
         | "unknown"
@@ -13015,6 +13019,7 @@ export type CancelAgentRunResponses = {
         | "tool-calls"
         | "timeout"
         | "interrupted"
+        | "awaiting_approval"
         | "error"
         | "other"
         | "unknown"
@@ -13212,6 +13217,7 @@ export type RetryAgentRunResponses = {
         | "tool-calls"
         | "timeout"
         | "interrupted"
+        | "awaiting_approval"
         | "error"
         | "other"
         | "unknown"
@@ -13376,6 +13382,7 @@ export type ListAgentThreadRunsResponses = {
         | "tool-calls"
         | "timeout"
         | "interrupted"
+        | "awaiting_approval"
         | "error"
         | "other"
         | "unknown"
@@ -13537,6 +13544,7 @@ export type GetAgentRunResponses = {
       | "tool-calls"
       | "timeout"
       | "interrupted"
+      | "awaiting_approval"
       | "error"
       | "other"
       | "unknown"
@@ -13949,6 +13957,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "action.rejected"
                 | "action.run_in_progress"
                 | "action.timeout"
+                | "agent.approval_authority_lost"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -14177,6 +14186,7 @@ export type DecideAgentApprovalResponses = {
                 | "action.rejected"
                 | "action.run_in_progress"
                 | "action.timeout"
+                | "agent.approval_authority_lost"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -14238,6 +14248,130 @@ export type DecideAgentApprovalResponses = {
             }
           }
       reported: boolean
+    }
+    run?: {
+      id: string
+      projectId: string
+      threadId: string
+      triggerMessageId: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      tier?: "light" | "standard" | "heavy"
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "timeout"
+        | "interrupted"
+        | "awaiting_approval"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      diagnostics?: Array<{
+        code: "step_limit_reached" | "output_limit_reached"
+        severity: "warning" | "error"
+        scope: "run"
+        message: string
+      }>
+      error?: {
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        httpStatus?: number
+        redacted?: true
+        truncated?: true
+      }
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
+    resume?: {
+      status: "refused"
+      code: string
+      message: string
+      retrying: boolean
     }
   }
 }
@@ -14380,6 +14514,7 @@ export type ListAgentApprovalsResponses = {
                 | "action.rejected"
                 | "action.run_in_progress"
                 | "action.timeout"
+                | "agent.approval_authority_lost"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -14691,6 +14826,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "action.rejected"
                       | "action.run_in_progress"
                       | "action.timeout"
+                      | "agent.approval_authority_lost"
                       | "agent.execution_failed"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -15100,6 +15236,7 @@ export type ListObservedAgentThreadRunsResponses = {
         | "tool-calls"
         | "timeout"
         | "interrupted"
+        | "awaiting_approval"
         | "error"
         | "other"
         | "unknown"

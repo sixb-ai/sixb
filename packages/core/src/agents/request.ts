@@ -23,6 +23,7 @@ import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentApprovalMode,
+  type AgentApprovalRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
@@ -38,9 +39,15 @@ import {
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
 import type { ExecutionRecord } from "../storage/executions"
 import {
+  type AgentTurnReadiness,
+  announceAgentApprovals,
   assertAgentApprovalMode,
+  isAwaitingApprovalRun,
+  listTurnApprovals,
   reportAgentApprovals,
+  reportSettledAgentApprovals,
   resolveAgentApprovalMode,
+  turnResumeReadiness,
 } from "./approvals"
 import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
@@ -198,6 +205,7 @@ export async function requestAgentRun(
 
   const triggerMessageId = input.messageId ?? createAgentMessageId()
   let run: ConversationAgentRunRecord
+  let superseded: readonly AgentApprovalRecord[] = []
   try {
     run = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
@@ -210,13 +218,14 @@ export async function requestAgentRun(
       await tx.executions.create(durableExecution)
       // The model learns, once, how the calls it made earlier ended: the ones still waiting are
       // set aside by this message.
-      const approvalOutcomes = createdThread
-        ? []
+      const reported = createdThread
+        ? { parts: [], superseded: [] }
         : await reportAgentApprovals(agents, {
             projectId,
             threadId: thread.id,
             messageId: triggerMessageId,
           })
+      superseded = reported.superseded
       await agents.messages.append({
         id: triggerMessageId,
         projectId,
@@ -224,7 +233,7 @@ export async function requestAgentRun(
         runId: null,
         role: "user",
         parts: [
-          ...approvalOutcomes,
+          ...reported.parts,
           ...contextParts,
           ...trigger,
           ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
@@ -247,6 +256,7 @@ export async function requestAgentRun(
     throw error
   }
 
+  await announceAgentApprovals(runtime.broker, superseded)
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
 
@@ -331,6 +341,177 @@ export async function retryAgentRun(
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+/** Where a resume left a paused turn. */
+export type AgentTurnResume =
+  | { readonly status: "resumed"; readonly run: ConversationAgentRunRecord }
+  | { readonly status: Exclude<AgentTurnReadiness, "ready"> }
+
+/**
+ * Resume a turn that paused on held calls, once its requester decided on all of them: a new turn
+ * with the paused one's spec and the given mode, whose trigger message carries how each call ended,
+ * and that the chat shows no text for. It checks what a retry checks, and throws what a retry
+ * throws; there are no words for Sixb to pick a model from.
+ *
+ * It writes nothing while a call still waits or an approved one has not run (`waiting`), and once
+ * the turn cannot resume (`closed`): a call was set aside, the turn was stopped or resumed already,
+ * or a message moved the thread on.
+ */
+export async function resumeAgentTurn(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  models: LanguageModelCatalog | undefined,
+  pausedRun: ConversationAgentRunRecord,
+  input: { readonly approvalMode: AgentApprovalMode; readonly principal?: Principal }
+): Promise<AgentTurnResume> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  if (!isAwaitingApprovalRun(pausedRun)) return { status: "closed" }
+
+  const agents = requireAgentStorage(runtime)
+  const projectId = runtime.projectId
+  const scope = { projectId, runId: pausedRun.id }
+  // Read first, so a decision that leaves calls waiting never meets a check below.
+  const readiness = turnResumeReadiness(await listTurnApprovals(agents, scope))
+  if (readiness !== "ready") return { status: readiness }
+
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+  const thread = await agents.threads.getById({ projectId, id: pausedRun.threadId })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${pausedRun.threadId}' was not found.`
+    )
+  }
+  assertSandboxExecutionAvailable(thread)
+
+  const runId = createAgentRunId()
+  const durableExecution = await prepareResumedExecution(runtime, execution, runId)
+  await assertAiLimitPreflight(runtime, durableExecution)
+  const spec = await resumedConversationRunSpec(models, pausedRun.spec, input.approvalMode)
+  const principal =
+    authority.type === "principal"
+      ? authority.context.principal
+      : (input.principal ?? SYSTEM_PRINCIPAL)
+  const triggerMessageId = createAgentMessageId()
+
+  let run: ConversationAgentRunRecord
+  try {
+    run = await runtime.storage.transaction(async (tx) => {
+      const agents = tx.agents
+      if (!agents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+      // Checked again where it is written: a message sent meanwhile moved the thread on.
+      const latest = await latestConversationRun(agents, projectId, pausedRun.threadId)
+      if (latest?.id !== pausedRun.id) throw new TurnClosed()
+      const approvals = await listTurnApprovals(agents, scope)
+      if (turnResumeReadiness(approvals) !== "ready") throw new TurnClosed()
+
+      // The report's compare-and-swap lets one of two racing final decisions resume the turn, and
+      // a stop that lands first keeps it from resuming.
+      const parts = await reportSettledAgentApprovals(agents, {
+        projectId,
+        threadId: pausedRun.threadId,
+        messageId: triggerMessageId,
+        resuming: true,
+      })
+      const reported = new Set(parts.map((part) => part.approvalId))
+      const unreported = approvals.filter((approval) => approval.reportedInMessageId === undefined)
+      if (!unreported.every((approval) => reported.has(approval.id))) throw new TurnClosed()
+
+      await tx.executions.create(durableExecution)
+      await agents.messages.append({
+        id: triggerMessageId,
+        projectId,
+        threadId: pausedRun.threadId,
+        runId: null,
+        role: "user",
+        parts,
+        authorPrincipal: principal,
+      })
+      return agents.runs.create({
+        id: runId,
+        projectId,
+        executionId: durableExecution.id,
+        threadId: pausedRun.threadId,
+        triggerMessageId,
+        spec,
+      })
+    })
+  } catch (error) {
+    if (error instanceof TurnClosed) return { status: "closed" }
+    // Another turn took the thread first; its message reports what this one would have.
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      return { status: "closed" }
+    }
+    throw error
+  }
+
+  await publishRunActivity(runtime, run)
+  await dispatchAgentRun(runtime, agents, runId)
+  return { status: "resumed", run }
+}
+
+/** Rolls the resume's transaction back: the turn cannot resume. */
+class TurnClosed extends Error {
+  constructor() {
+    super("[Sixb] The paused Agent turn can no longer resume.")
+  }
+}
+
+/**
+ * A resumed turn's execution. From a request, it is that request's child, like a retry. From the
+ * paused turn's own execution, as the worker resumes it, it is a sibling of the paused turn: a
+ * child of the request that started it, so that resumes never nest.
+ */
+async function prepareResumedExecution(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  runId: string
+): Promise<Omit<ExecutionRecord, "createdAt">> {
+  if (execution.executor.type !== "agent" || execution.source.type !== "execution") {
+    return prepareDurableAgentExecution(runtime, execution, runId)
+  }
+
+  const parent = await runtime.storage.executions.getById({
+    projectId: runtime.projectId,
+    id: execution.source.executionId,
+  })
+  if (!parent) {
+    throw new AgentRequestError(
+      "authority_not_inheritable",
+      `[Sixb] Agent execution '${execution.id}' has no parent to resume under.`
+    )
+  }
+  return createInheritedAgentExecutionRecord({ id: `exec_${randomUUID()}`, parent, runId })
+}
+
+/** The paused turn's spec, with defaults for a model that has since left the catalog. */
+async function resumedConversationRunSpec(
+  models: LanguageModelCatalog | undefined,
+  paused: ConversationAgentRunSpec | undefined,
+  approvalMode: AgentApprovalMode
+): Promise<ConversationAgentRunSpec> {
+  const kept =
+    paused && models?.getByRef(paused.model)
+      ? paused
+      : await resolveConversationRunSpec({
+          models,
+          selection: {},
+          settings: {
+            ...(paused?.timeZone === undefined ? {} : { timeZone: paused.timeZone }),
+            ...(paused?.locale === undefined ? {} : { locale: paused.locale }),
+          },
+        })
+  return Object.freeze({ ...kept, approvalMode })
 }
 
 /**

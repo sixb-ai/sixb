@@ -1,7 +1,7 @@
 import {
   AGENT_ACTIVITY_STREAM_ID,
-  type AgentRunActivityEvent,
-  isAgentRunActivityEvent,
+  type AgentActivityEvent,
+  isAgentActivityEvent,
 } from "@sixb/core/agents/streams"
 import { BrokerCursorExpiredError, type BrokerRecord } from "@sixb/core/broker"
 import {
@@ -90,9 +90,10 @@ export async function canAccessAgentRunStream(
   return { ok: true }
 }
 
+/** A run's or an approval's activity reaches whoever reads the turn it belongs to. */
 export async function canAccessAgentThreadActivity(
   sixb: Sixb,
-  event: AgentRunActivityEvent
+  event: AgentActivityEvent
 ): Promise<boolean> {
   const run = await sixb.agent.runs.getById(event.runId)
   return run?.projectId === event.projectId && run.threadId === event.threadId
@@ -311,9 +312,9 @@ async function sendVisibleActivityRecords(
   ws: { send: (message: string) => void },
   records: readonly BrokerRecord[]
 ): Promise<void> {
-  const events: AgentRunActivityEvent[] = []
+  const events: AgentActivityEvent[] = []
   for (const record of records) {
-    if (isAgentRunActivityEvent(record.payload)) events.push(record.payload)
+    if (isAgentActivityEvent(record.payload)) events.push(record.payload)
   }
   const visible = await Promise.all(
     events.map((event) => canAccessAgentThreadActivity(sixb, event))
