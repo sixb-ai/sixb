@@ -9077,8 +9077,8 @@ describe("AgentWorker", () => {
   })
 
   test("tells the parent which of a child's calls wait for the user's approval", async () => {
-    // Removal proof: leave `awaitingApproval` out of waitedResult; the parent reads a finished child
-    // and never learns its call is held on the turn.
+    // Removal proof: leave `awaitingApproval` out of waitedResult, or report a paused child's own
+    // status; the parent reads a finished child and never learns its call is held on the turn.
     const sixb = buildSixb(answerModel())
     const storage = agentStorageOf(sixb)
     const {
@@ -9099,7 +9099,8 @@ describe("AgentWorker", () => {
       id: child.id,
       executionToken: execution.token,
       status: "succeeded",
-      result: { text: "Closing the month awaits the user's approval." },
+      finishReason: "awaiting_approval",
+      result: { text: "" },
     })
 
     const { results } = await coordinator.wait({ runIds: [child.id] }, new AbortController().signal)
@@ -9107,109 +9108,12 @@ describe("AgentWorker", () => {
     expect(results).toEqual([
       {
         runId: child.id,
-        status: "succeeded",
-        text: "Closing the month awaits the user's approval.",
+        status: "awaiting_approval",
         awaitingApproval: [
           { approvalId: hold.approval.id, call: { kind: "workflow", workflowId: "close-month" } },
         ],
       },
     ])
-  })
-
-  test("pauses a turn on a child's held call only once the child has ended", async () => {
-    // Removal proof: pause on `approvals.holdsRun` alone in run-agent-turn's holdsApproval; the turn
-    // pauses after the step that follows the child's held call, and that cancels the child.
-    let childRunId = ""
-    let releaseChild!: () => void
-    const childReleased = new Promise<void>((resolve) => {
-      releaseChild = resolve
-    })
-    let markHeld!: () => void
-    const childHeld = new Promise<void>((resolve) => {
-      markHeld = resolve
-    })
-    const host: { sixb?: TestSixb } = {}
-    const childModel = new WorkerTestModel({
-      providerId: "child-provider",
-      modelId: "holding-child",
-      stream: async () => {
-        // What the gateway does when the child asks to start a workflow its mode does not run.
-        if (!host.sixb) throw new Error("Expected the host.")
-        const storage = agentStorageOf(host.sixb)
-        const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
-        if (!child) throw new Error("Expected the running child.")
-        await holdAgentApprovalCall(storage, {
-          projectId: PROJECT_ID,
-          run: child,
-          call: {
-            kind: "workflow",
-            workflowId: "close-month",
-            input: {},
-            workflowRunId: "run_close",
-          },
-        })
-        markHeld()
-        await childReleased
-        return answerStream("Closing the month awaits the user's approval.")
-      },
-    })
-    const spawnChild = {
-      key: "close",
-      task: "Close the month.",
-      model: { provider: childModel.providerId, modelId: childModel.modelId },
-    }
-    let parentCall = 0
-    const parentModel = new WorkerTestModel({
-      providerId: "parent-provider",
-      modelId: "parent-model",
-      stream: async () => {
-        parentCall += 1
-        if (parentCall === 1) return toolCallStream("spawn", "spawn_agent", spawnChild)
-        // A step taken while the child, still at work, holds its call.
-        if (parentCall === 2) {
-          await childHeld
-          return toolCallStream("spawn-again", "spawn_agent", spawnChild)
-        }
-        if (parentCall === 3) {
-          releaseChild()
-          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
-        }
-        return answerStream("The month closes once you approve it.")
-      },
-    })
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-    })
-    host.sixb = sixb
-    const storage = agentStorageOf(sixb)
-    const requested = await requestAgent(sixb, { text: "Close the month.", approvalMode: "manual" })
-    childRunId = createSubagentRunId(requested.run.id, "close")
-    const worker = new AgentWorker(sixb, workerOptions())
-
-    jest.useFakeTimers()
-    try {
-      await worker.start()
-      const parent = await underFakeTime(
-        () => terminalRun(storage, requested.run.id),
-        "parent paused on its child's held call"
-      )
-      const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
-
-      expect(child?.status).toBe("succeeded")
-      expect(parent).toMatchObject({ status: "succeeded", finishReason: "awaiting_approval" })
-      // It paused after the step whose wait_agent saw the child end, not before.
-      expect(parentCall).toBe(3)
-      // Spawning it again with its key wrote no second task into its thread.
-      const childMessages = await listMessages(
-        storage,
-        createSubagentThreadId(requested.run.id, "close")
-      )
-      expect(childMessages.map((message) => message.role)).toEqual(["user", "assistant"])
-    } finally {
-      releaseChild()
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
   })
 
   test("ends a child found running on redelivery as interrupted, once its lease lapses", async () => {
@@ -13262,6 +13166,7 @@ describe("agent tools act as the requester", () => {
       plan,
       run: childRun,
       thread: childThread,
+      history: { messages: [] },
     })
     const openQuote = (environment: typeof task, key: string) => {
       const tool = environment.turnContext.tools.find(({ name }) => name === readAttachment.name)

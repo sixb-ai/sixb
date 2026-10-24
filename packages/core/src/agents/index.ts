@@ -23,12 +23,18 @@ export {
 export type { AgentApprovalResume } from "./approval-continuation"
 export { resumeDecidedAgentTurn } from "./approval-continuation"
 export { getAgentApprovalExecutor } from "./approval-executor"
-export type { AgentApprovalHold, AgentChildApprovalAwaiting } from "./approvals"
+export type {
+  AgentApprovalCallerRun,
+  AgentApprovalHold,
+  AgentChildApprovalAwaiting,
+} from "./approvals"
 export {
   AGENT_APPROVAL_EXECUTION_LEASE_MS,
+  agentApprovalCallers,
   agentRunApprovalMode,
   announceAgentApprovals,
   approvalCallSummary,
+  hasActiveChildren,
   holdAgentApprovalCall,
   isAwaitingApprovalRun,
   listChildApprovalsAwaiting,
@@ -111,6 +117,7 @@ export {
 } from "./ids"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
+  type AgentApprovalCaller,
   type AgentApprovalCallSummary,
   type AgentApprovalOutcomePart,
   type AgentContinuationPart,

@@ -1,20 +1,28 @@
 import type { AgentMessagePart } from "@sixb/core"
-import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import {
+  createAgentMessageId,
+  type PausableModelLoopResult,
+  runModelLoop,
+  toModelMessages,
+} from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
 import {
+  type AgentRunFinishReason,
   type AgentThreadRecord,
   type AppendAgentMessageInput,
   coerceAgentRunFinishReason,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
+import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
+import type { SubagentHistory } from "./subagent-continuation"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentRunFiles, AgentTurnContext } from "./types"
 
@@ -28,14 +36,16 @@ export interface SubagentWork {
 
 /**
  * Run one child in its thread. Its request is the thread's messages, the task dated at the thread's
- * creation; what it did is the thread's next message, written with its finish.
+ * creation; what it did is the thread's next message, written with its finish. A held call stops it
+ * after that step: it pauses, and its thread's next run continues it once the call is decided.
  */
 export async function runSubagent(input: {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly run: SubagentRunRecord
-  /** The child's own thread. */
+  /** The child's own thread, and what its runs before this one left there. */
   readonly thread: AgentThreadRecord
+  readonly history: SubagentHistory
   /** Created by the worker before the run's tools, which share its signal and accounting. */
   readonly runtime: AgentTurnRuntime
   /** Filled once the model loop returns, for the worker to keep when the run fails afterwards. */
@@ -53,9 +63,10 @@ export async function runSubagent(input: {
     )
   }
 
-  const history = await subagentHistory({
+  const messages = subagentModelMessages({
     context,
     thread,
+    history: input.history,
     timeZone: plan.timeZone ?? context.projectTimeZone,
   })
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
@@ -63,7 +74,7 @@ export async function runSubagent(input: {
   let chunkIndex = 0
   const generation = await runModelLoop({
     model: runtime.usageRecorder.wrapModel(plan.model),
-    messages: [{ role: "system", content: context.systemPrompt }, ...history],
+    messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
     maxSteps: plan.maxSteps,
@@ -72,6 +83,9 @@ export async function runSubagent(input: {
     signal: abortSignal,
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) => context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
+    // The approval records decide, never the prompt or the tool output: a held call stops the
+    // child after that step, whatever its model would do next.
+    pauseAfterStep: () => holdsSubagentCalls(context, run),
   })
   const traceDetails = { threadId: run.threadId, runId: run.id }
   const parts =
@@ -80,9 +94,36 @@ export async function runSubagent(input: {
       : agentTraceFromModelSteps(generation.steps, traceDetails)
   if (input.work) input.work.parts = parts
 
-  assertSubagentCanFinalize({ runtime, sandboxReadiness })
+  return settleSubagent({
+    ...input,
+    executionToken,
+    generation,
+    parts,
+    abortSignal,
+    sandboxReadiness,
+  })
+}
+
+function holdsSubagentCalls(context: AgentTurnContext, run: SubagentRunRecord): Promise<boolean> {
+  return context.storage.agents.approvals.holdsRun({ projectId: context.id, runId: run.id })
+}
+
+/** End a child whose model loop returned: paused on its held calls, answered, or failed. */
+async function settleSubagent(
+  input: Omit<Parameters<typeof finishSubagent>[0], "finishReason" | "text"> & {
+    readonly generation: PausableModelLoopResult
+    readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
+  }
+): Promise<SubagentRunRecord> {
+  const { generation, run } = input
+  assertSubagentCanFinalize(input)
   if (generation.status === "aborted")
     throw new DOMException("Subagent stream was aborted.", "AbortError")
+
+  // A call held after its last step, by a command left running in the sandbox, pauses it too.
+  const paused = generation.status === "paused" || (await holdsSubagentCalls(input.context, run))
+  if (paused) return finishSubagent({ ...input, finishReason: "awaiting_approval" })
+
   // The parent would read a cut-short answer as complete: it gets the cause instead.
   if (generation.finishReason === "length") {
     const remedy = "Spawn it again with lower reasoning or a narrower task."
@@ -95,26 +136,50 @@ export async function runSubagent(input: {
       `The subagent's model reached its output limit before finishing its answer. ${remedy}`
     )
   }
-  const text = subagentResult(generation.steps, run)
-  // Only a child that finished returns files: an unfinished one's would pass for complete.
+  return finishSubagent({
+    ...input,
+    text: subagentResult(generation.steps, run),
+    finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
+  })
+}
+
+/**
+ * Keep the child's outcome: its answer, what it wrote under `out/`, and what it did as its thread's
+ * next message. A paused child keeps its files too, for the run that continues it; `wait_agent`
+ * hands over only a finished child's, as an unfinished one's would pass for complete.
+ */
+async function finishSubagent(input: {
+  readonly context: AgentTurnContext
+  readonly plan: ResolvedAgentExecutionPlan
+  readonly run: SubagentRunRecord
+  readonly runtime: AgentTurnRuntime
+  readonly runFiles: AgentRunFiles
+  readonly executionToken: string
+  readonly abortSignal: AbortSignal
+  readonly finishReason: AgentRunFinishReason
+  readonly parts: readonly AgentMessagePart[]
+  /** None yet for a paused child. */
+  readonly text?: string
+}): Promise<SubagentRunRecord> {
+  const { context, run } = input
   const outputs = await storeChildOutputs({
     files: input.runFiles,
     handed: run.spec.files ?? [],
-    signal: abortSignal,
+    signal: input.abortSignal,
   })
-  runtime.assertCanContinue()
+  input.runtime.assertCanContinue()
 
   const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
-    message: subagentWorkMessage(run, parts),
+    message: subagentWorkMessage(run, input.parts),
     finish: {
       projectId: context.id,
       id: run.id,
-      executionToken,
+      executionToken: input.executionToken,
       status: "succeeded",
-      modelId: plan.model.modelId,
-      finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
+      modelId: input.plan.model.modelId,
+      finishReason: input.finishReason,
       result: {
-        text,
+        text: input.text ?? "",
         ...(outputs.files.length > 0 ? { files: outputs.files } : {}),
         ...(outputs.error === undefined ? {} : { filesError: outputs.error }),
       },
@@ -144,24 +209,30 @@ export function subagentWorkMessage(
 
 /**
  * The child's thread as its model reads it. The task, its first message, closes with the time the
- * thread was created, so each run of the child replays the same bytes.
+ * thread was created, so each run of the child replays the same bytes. Files a tool showed it are
+ * projected again as a turn projects its own.
  */
-async function subagentHistory(input: {
+function subagentModelMessages(input: {
   readonly context: AgentTurnContext
   readonly thread: AgentThreadRecord
+  readonly history: SubagentHistory
   readonly timeZone: string
-}): Promise<ModelMessage[]> {
-  const { context, thread } = input
-  const { messages } = await context.storage.agents.messages.list({
-    projectId: context.id,
-    threadId: thread.id,
-    order: "asc",
-  })
+}): ModelMessage[] {
+  const { messages } = input.history
+  const projections = input.context.attachmentContext
   const taskId = messages[0]?.id
-  const createdAt = renderCurrentTime(thread.createdAt, input.timeZone)
+  const createdAt = renderCurrentTime(input.thread.createdAt, input.timeZone)
 
   return toModelMessages(messages, {
     userMessageSuffix: (message) => (message.id === taskId ? createdAt : undefined),
+    fileText: ({ message, partIndex }) =>
+      projections?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
+    fileData: ({ message, partIndex }) =>
+      projections?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
+    toolResultFileText: ({ message, partIndex, contentIndex }) =>
+      projections?.promptTextByPartKey.get(
+        toolResultAttachmentKey(message.id, partIndex, contentIndex)
+      ),
   })
 }
 

@@ -3,11 +3,21 @@ import type { AgentApprovalCallSummary, AgentApprovalOutcomePart } from "./messa
 
 /**
  * What the model reads for an {@link AgentApprovalOutcomePart}: how a call it made, and that
- * answered `awaiting_approval`, ended. Until such a block comes, the call is not done.
+ * answered `awaiting_approval`, ended. Until such a block comes, the call is not done. A call one
+ * of its sub-agents made says so, and whether the sub-agent continues, as the part recorded it.
  */
 export function approvalOutcomeInstruction(part: AgentApprovalOutcomePart): string {
   const call = describeCall(part.call)
-  return `<sixb_approval id="${part.approvalId}" status="${part.status}">${approvalOutcomeText(part, call)}</sixb_approval>`
+  const text = approvalOutcomeText(part, call)
+  const body =
+    part.caller === undefined
+      ? text
+      : `Your sub-agent '${part.caller.key}' made this request. ${text} ${
+          part.caller.continues
+            ? "It continues with this outcome, and wait_agent with its run id returns its answer."
+            : "It does not continue: wait_agent with its run id returns how it ended, and you can spawn it again with a new key if its work is still needed."
+        }`
+  return `<sixb_approval id="${part.approvalId}" status="${part.status}">${body}</sixb_approval>`
 }
 
 function approvalOutcomeText(part: AgentApprovalOutcomePart, call: string): string {
