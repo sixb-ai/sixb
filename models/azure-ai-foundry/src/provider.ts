@@ -3,6 +3,7 @@ import {
   type JsonObject,
   type LanguageModel,
   type LanguageModelDefinition,
+  type LanguageModelLabel,
   type LanguageModelProvider,
   type LanguageModelRequest,
   type LanguageModelStream,
@@ -82,7 +83,7 @@ export interface AzureAIFoundryModelMetadata {
   readonly discoveredAt?: string
 }
 
-export interface AzureAIFoundryModelOptions extends RequestOptions {
+export interface AzureAIFoundryModelOptions extends RequestOptions, LanguageModelLabel {
   /** Reasoning Sixb applies when this model runs without an explicit choice. */
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: Omit<LanguageModelDefinition, "kind" | "providerId" | "modelId">
@@ -92,14 +93,14 @@ export interface AzureAIFoundryModelOptions extends RequestOptions {
   readonly reasoningUsage?: "reported" | "unknown"
 }
 
-export interface AzureAIFoundryMessagesOptions extends MessagesRequestOptions {
+export interface AzureAIFoundryMessagesOptions extends MessagesRequestOptions, LanguageModelLabel {
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
   readonly rateCard?: ModelRateCard
   readonly costEstimator?: ModelCostEstimator
 }
 
-export interface AzureAIFoundryChatOptions extends ChatRequestOptions {
+export interface AzureAIFoundryChatOptions extends ChatRequestOptions, LanguageModelLabel {
   readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
   readonly rateCard?: ModelRateCard

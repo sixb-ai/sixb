@@ -1,6 +1,7 @@
 import {
   assertJsonObject,
   defineLanguageModel,
+  defineLanguageModelLabel,
   estimateModelReservation,
   isJsonObject,
   isModelReasoning,
@@ -8,6 +9,7 @@ import {
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
+  type LanguageModelLabel,
   type LanguageModelProvider,
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
@@ -53,7 +55,7 @@ export interface AnthropicOptions {
   readonly models?: readonly LanguageModelDefinition[]
 }
 
-export interface AnthropicModelOptions {
+export interface AnthropicModelOptions extends LanguageModelLabel {
   /** Reasoning Sixb applies when this model runs without an explicit choice. */
   readonly reasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
@@ -349,6 +351,7 @@ class AnthropicLanguageModel implements LanguageModel {
     this.definition = defineLanguageModel({
       ...base,
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+      ...defineLanguageModelLabel(options, "[SixbAnthropic]"),
     })
     this.costEstimator = {
       estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard }),

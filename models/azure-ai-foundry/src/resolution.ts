@@ -1,5 +1,6 @@
 import {
   defineLanguageModel,
+  defineLanguageModelLabel,
   defineModelRateCard,
   type LanguageModelDefinition,
   UnsupportedModelFeatureError,
@@ -67,6 +68,7 @@ export function resolveModel(input: {
     publisher,
     via: "Azure AI Foundry",
     ...options.definition,
+    ...defineLanguageModelLabel(options, PREFIX),
     kind: "language",
     providerId: input.providerId,
     modelId: input.modelId,
@@ -85,6 +87,8 @@ export function resolveModel(input: {
           kind: "language",
           providerId: input.providerId,
           modelId: input.modelId,
+          name: definition.name,
+          description: definition.description,
           publisher: definition.publisher,
           via: definition.via,
           capabilities: {},

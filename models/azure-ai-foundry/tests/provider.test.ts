@@ -730,3 +730,36 @@ test("exposes the binding's output limit only when the binding sets one", async 
   expect(provider.chat("deployment", { maxOutputTokens: 1_024 }).maxOutputTokens).toBe(1_024)
   expect(provider("deployment").maxOutputTokens).toBeUndefined()
 })
+
+test("keeps the binding's own name and description over the public catalog's", async () => {
+  // Proven by removal: drop the defineLanguageModelLabel spread from resolveModel.
+  const provider = createAzureAIFoundry({
+    endpoint,
+    apiKey: "test",
+    catalog: {
+      fetch: async () =>
+        Response.json({
+          azure: {
+            models: {
+              deployment: {
+                id: "deployment",
+                name: "GPT-5 mini",
+                modalities: { output: ["text"] },
+                limit: { context: 400_000 },
+              },
+            },
+          },
+        }),
+    },
+  })
+  const label = { name: "GPT", description: "A second opinion, useful to compare an analysis." }
+  const model = provider("deployment", label)
+
+  expect(model.definition).toMatchObject(label)
+  expect((await model.resolve()).definition).toMatchObject({ ...label, contextWindow: 400_000 })
+  expect((await provider.chat("deployment").resolve()).definition.name).toBe("GPT-5 mini")
+
+  expect(() => provider.messages("deployment", { name: "GPT\n" })).toThrow(
+    "[SixbAzureAIFoundry] name must be a nonempty trimmed string."
+  )
+})

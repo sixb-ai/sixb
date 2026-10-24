@@ -73,10 +73,11 @@ export type {
 } from "./decision/types"
 export type {
   LanguageModelDefinition,
+  LanguageModelLabel,
   ModelDefinition,
   ModelKind,
 } from "./definitions"
-export { defineLanguageModel } from "./definitions"
+export { defineLanguageModel, defineLanguageModelLabel } from "./definitions"
 export type {
   EmbeddingBatchLimits,
   EmbeddingModel,

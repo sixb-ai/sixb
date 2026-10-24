@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createSixb, defineAgentTool, defineObjectType, prop } from "../src"
-import { createModelCatalog, defineLanguageModel, type LanguageModel } from "../src/models"
+import {
+  createModelCatalog,
+  defineLanguageModel,
+  defineLanguageModelLabel,
+  type LanguageModel,
+} from "../src/models"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -41,6 +46,28 @@ test("model definitions validate and snapshot display metadata and input limits"
     ),
   ] as const) {
     expect(() => defineLanguageModel({ ...input, ...invalid })).toThrow(field)
+  }
+})
+
+// Removal proof: drop the trim check, or return the binding's options as they are.
+test("a model label keeps only a nonempty trimmed name and description", () => {
+  const options = { name: "GPT", description: "A second opinion.", reasoning: "low" }
+
+  expect(defineLanguageModelLabel(options, "[Provider]")).toEqual({
+    name: "GPT",
+    description: "A second opinion.",
+  })
+  expect(defineLanguageModelLabel({}, "[Provider]")).toEqual({})
+
+  for (const [invalid, field] of [
+    [{ name: "" }, "name"],
+    [{ name: " GPT" }, "name"],
+    [{ description: "A second opinion.\n" }, "description"],
+    [{ description: 42 as unknown as string }, "description"],
+  ] as const) {
+    expect(() => defineLanguageModelLabel(invalid, "[Provider]")).toThrow(
+      `[Provider] ${field} must be a nonempty trimmed string.`
+    )
   }
 })
 

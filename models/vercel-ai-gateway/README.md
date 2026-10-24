@@ -29,6 +29,9 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 })
 ```
 
+- **Name and description:** `name` and `description` replace the catalog's own in the chat's
+  model picker and in the delegation guide of `spawn_agent`; every other fact still comes from the
+  live catalog.
 - **Default reasoning:** `reasoning` is the level Sixb applies when the model runs without an
   explicit choice. It is checked against the model's capabilities at startup.
 - **Caching:** automatic by default; set per-call `caching: "off"` to disable it.
