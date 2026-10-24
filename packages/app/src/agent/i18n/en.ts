@@ -694,6 +694,10 @@ export const en = {
     showInput: "Show details",
     hideInput: "Hide details",
     viewRun: "View run",
+    stopWaiting: "Stop waiting",
+    stoppingWaiting: "Stopping…",
+    stopWaitingHint: "Sets aside every request this reply waits on. It won't continue.",
+    stopFailed: "Couldn't stop waiting. Try again.",
     open: (name: string) => `Open ${name}`,
     resume: {
       retrying: "The agent continues as soon as it can.",

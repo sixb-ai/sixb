@@ -334,6 +334,13 @@ function api(scenario: Scenario, requests: string[]) {
         ...(scenario.refused ? { resume: scenario.refused } : {}),
       })
     }
+    if (path === "/api/agent-threads/thr_1/cancel") {
+      // The server sets the turn's waiting calls aside; their events say so.
+      scenario.approvals = scenario.approvals.map((entry) =>
+        entry.status === "pending" ? { ...entry, status: "cancelled", decidedAt: at } : entry
+      )
+      return Response.json({ run: run() })
+    }
     if (path === "/api/object-types") return Response.json([])
 
     return Response.json({ error: "Not found" }, { status: 404 })
@@ -587,6 +594,40 @@ describe("an approval card", () => {
 
     expect(await view.findByText("Denied · Didn't run")).toBeDefined()
     expect(view.queryByRole("button", { name: "Approve" })).toBeNull()
+  })
+
+  // Removal proof: drop the Stop waiting button from the card; the paused turn can only be denied
+  // call by call.
+  test("Stop waiting stops the paused turn, and its cards say so", async () => {
+    const { view, requests } = renderChat("dana")
+
+    fireEvent.click(within(await card(view)).getByRole("button", { name: "Stop waiting" }))
+
+    await waitFor(() =>
+      expect(requests).toContain('POST /api/agent-threads/thr_1/cancel {"runId":"run_1"}')
+    )
+    expect(await view.findByText("Stopped")).toBeDefined()
+    expect(view.queryByRole("button", { name: "Approve" })).toBeNull()
+  })
+
+  test("the thread's owner may stop someone else's paused turn, and no one else may", async () => {
+    const shared = thread({
+      participants: [
+        { principal: { ...sam, displayName: "Sam Ortiz" }, addedAt: at, addedBy: dana },
+      ],
+    })
+    const samsCall = approval({ requestedBy: sam })
+
+    const owner = renderChat("dana", { thread: shared, approvals: [samsCall] })
+    expect(
+      within(await card(owner.view)).getByRole("button", { name: "Stop waiting" })
+    ).toBeDefined()
+    cleanup()
+
+    const other = renderChat("sam", { thread: shared, approvals: [approval()] })
+    expect(
+      within(await card(other.view)).queryByRole("button", { name: "Stop waiting" })
+    ).toBeNull()
   })
 
   // Removal proof: make `canDecide` return true; Sam gets Dana's buttons.

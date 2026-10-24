@@ -169,7 +169,8 @@ Shift+Tab switches between Manual and Accept edits. Settings › Personal sets y
 that waits shows as a card in the reply: what it does, to which record, with which values, and
 whether it reaches an external system. Approve, Deny or "Always allow" answer it there, and the
 reply continues under the card. "Always allow" says which mode it switches you to, and which other
-waiting calls of the reply it approves with it. In a shared conversation, the others see the card
+waiting calls of the reply it approves with it. "Stop waiting" sets every call of the reply
+aside, for its sender or the conversation's owner. In a shared conversation, the others see the card
 and who decides, and are warned that sending a message sets it aside. The thread list puts the
 conversations waiting for you first.
 
