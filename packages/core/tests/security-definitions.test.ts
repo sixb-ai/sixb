@@ -39,6 +39,7 @@ import {
   userRef,
 } from "../src"
 import { canPerformMembershipOperation, resolveMembershipPolicyScope } from "../src/security"
+import type { CompiledConditionalObjectReadScope } from "../src/storage"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
@@ -1014,6 +1015,73 @@ describe("view grant conditions", () => {
 
     expect(error).toBeInstanceOf(SecurityValidationError)
     expect((error as Error).message).toBe(message)
+  })
+
+  function startOn(
+    grant: GrantDefinition,
+    createConditionalReadScope: (params: { scope: CompiledConditionalObjectReadScope }) => void
+  ): SixbHost {
+    const deps = createTestRuntimeDeps()
+    const objects = new Proxy(deps.storage.objects, {
+      get(target, property, receiver) {
+        if (property !== "createConditionalReadScope")
+          return Reflect.get(target, property, receiver)
+
+        return (params: Parameters<typeof target.createConditionalReadScope>[0]) => {
+          createConditionalReadScope(params)
+          return target.createConditionalReadScope(params)
+        }
+      },
+    })
+    const storage = new Proxy(deps.storage, {
+      get: (target, property, receiver) =>
+        property === "objects" ? objects : Reflect.get(target, property, receiver),
+    })
+
+    return new SixbHost({
+      ontology: [Note, Invoice, DisputedInvoice],
+      markings: [financial],
+      groups: [staff],
+      roles: [defineRole("staff", { grantedTo: [staff], grants: [grant] })],
+      ...deps,
+      storage,
+    })
+  }
+
+  // Reproduce: drop assertViewConditionsReadable from the SixbHost constructor, and startup fails
+  // on the refusal that follows instead of naming what the storage cannot read.
+  test("startup fails on a condition the object storage cannot read", () => {
+    const grant = can.view(Note).where((note) => note.p.topic.eq("m"))
+    const error = catchError(() =>
+      startOn(grant, () => {
+        throw new Error("Object storage cannot compile this predicate")
+      })
+    )
+
+    expect(error).toBeInstanceOf(SecurityValidationError)
+    expect((error as Error).message).toBe(
+      "[Sixb] Role 'staff': can.view(note).where(...) cannot be read by the configured object storage: Object storage cannot compile this predicate"
+    )
+  })
+
+  test("startup compiles each condition against the storage, with currentUser() bound", () => {
+    const scopes: CompiledConditionalObjectReadScope[] = []
+    const grant = can.view(Note).where((note) => note.p.owner.eq(currentUser()))
+
+    expect(() => startOn(grant, ({ scope }) => scopes.push(scope))).toThrow("is not supported yet")
+
+    expect(scopes).toHaveLength(1)
+    expect(scopes[0]?.conditions).toEqual([
+      {
+        objectTypeId: "note",
+        predicate: {
+          propertyId: "owner",
+          op: "eq",
+          value: { type: "user", id: expect.any(String) },
+          scalarKind: "userRef",
+        },
+      },
+    ])
   })
 
   // Reads do not apply conditions yet, so a valid one is refused rather than granting every note.
