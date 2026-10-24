@@ -144,6 +144,10 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
   minute before the turn's time is up, the agent stops waiting and answers with what the others
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
+- **The agent can steer a sub-agent at work.** It sends it a message to correct its course, add
+  what it lacks or narrow its task, and the sub-agent reads it before its next step. One that
+  comes as the sub-agent answers makes it answer again. A sub-agent that finished, or waits for
+  your approval, reads none, and the agent is told so.
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
