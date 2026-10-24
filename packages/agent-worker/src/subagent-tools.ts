@@ -4,6 +4,7 @@ import {
   AgentToolPublicError,
   type LanguageModelCatalog,
   type LanguageModelRef,
+  type LanguageModelTier,
 } from "@sixb/core"
 import {
   createInheritedAgentExecutionRecord,
@@ -14,13 +15,13 @@ import {
   createSubagentRunId,
   dispatchQueuedSubagentRuns,
 } from "@sixb/core/internal/agents"
+import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
   assertJsonValue,
   defineLanguageModel,
   isJsonObject,
   isModelReasoning,
   type JsonObject,
-  ModelCatalogUnavailableError,
   type ModelTool,
 } from "@sixb/core/models"
 import type {
@@ -36,10 +37,25 @@ const MAX_ACTIVE_SUBAGENTS = 4
 const MAX_WAITED_SUBAGENTS = 4
 const WAIT_POLL_MS = 250
 
+const OMIT_MODEL = "Omit model to use the project default."
+
+/** With tiers, the model guide says how to choose, so only a list adds advice. */
+const TIERED_MODEL_CHOICE = {
+  advice: [],
+  field: "A tier, or one exact model reference from the models you can delegate to.",
+}
+
+const LISTED_MODEL_CHOICE = {
+  advice: [
+    "Prefer the default model unless another configured model is clearly better suited to the task. Price and runtime speed are not known, so do not infer them from model names.",
+  ],
+  field: "Copy one exact model reference from the available models.",
+}
+
 export interface SpawnSubagentInput {
   readonly key: string
   readonly task: string
-  readonly model?: LanguageModelRef
+  readonly model?: LanguageModelRef | LanguageModelTier
   readonly reasoning?: AgentReasoning
 }
 
@@ -83,9 +99,9 @@ export class SubagentCoordinator {
       description: [
         "Start an isolated child agent and return immediately.",
         "Use a short, stable key for the same logical delegation so retries cannot duplicate work.",
-        await renderSubagentModelGuide(this.models),
-        "Prefer the default model unless another configured model is clearly better suited to the task. Price and runtime speed are not known, so do not infer them from model names.",
-        "Omit model to use the project default.",
+        renderSubagentModelGuide(this.models),
+        ...modelChoice(this.models).advice,
+        OMIT_MODEL,
         `At most ${MAX_ACTIVE_SUBAGENTS} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
@@ -208,8 +224,9 @@ export class SubagentCoordinator {
     }
   }
 
-  private resolveModel(ref: LanguageModelRef | undefined) {
+  private resolveModel(ref: LanguageModelRef | LanguageModelTier | undefined) {
     if (ref === undefined) return this.models.default
+    if (typeof ref === "string") return this.models.getByTier(ref)
     const model = this.models.getByRef(ref)
     if (model) return model
     const available = this.models.list().map(formatModelRef).join(", ")
@@ -220,55 +237,56 @@ export class SubagentCoordinator {
   }
 }
 
-export async function renderSubagentModelGuide(models: LanguageModelCatalog): Promise<string> {
-  const entries = await Promise.all(
-    models.list().map(async (entry) => {
-      let metadata = entry.model.definition
-      try {
-        const resolved = await entry.model.resolve?.()
-        if (resolved) {
-          if (resolved.providerId !== entry.provider || resolved.modelId !== entry.modelId) {
-            throw new Error(
-              "[SixbAgentWorker] Resolved delegation model identity does not match its catalog entry."
-            )
-          }
-          metadata = resolved.definition
-        }
-      } catch (error) {
-        if (!(error instanceof ModelCatalogUnavailableError)) throw error
-        console.warn(
-          `[SixbAgentWorker] Delegation metadata is unavailable for ${formatModelRef(entry)}; using its configured definition.`
-        )
-      }
-      metadata = defineLanguageModel(metadata)
-      if (metadata.providerId !== entry.provider || metadata.modelId !== entry.modelId) {
-        throw new Error(
-          "[SixbAgentWorker] Delegation model definition identity does not match its catalog entry."
-        )
-      }
-      const details: string[] = []
-      if (sameModel(entry, models.default)) details.push("default")
-      if (metadata.contextWindow !== undefined)
-        details.push(`context ${formatTokenCount(metadata.contextWindow)} tokens`)
-      if (metadata.maxInputTokens !== undefined)
-        details.push(`max input ${formatTokenCount(metadata.maxInputTokens)} tokens`)
-      if (metadata.capabilities.reasoning) details.push("reasoning")
-      if (metadata.capabilities.localTools) details.push("tools")
-      const media = metadata.capabilities.inputMediaTypes
-      if (media === "any") details.push("multimodal input")
-      else if (media?.length) details.push(`input: ${media.join(", ")}`)
-      if (details.length === 0 || (details.length === 1 && details[0] === "default"))
-        details.push("metadata unavailable")
+/**
+ * Built from each model's configured definition, never from its provider catalog: the guide is in
+ * every turn's tools, so it stays the same for the process and catalog I/O cannot fail a turn.
+ */
+export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
+  const entries = models.list().map((entry) => {
+    const metadata = defineLanguageModel(entry.model.definition)
+    if (metadata.providerId !== entry.provider || metadata.modelId !== entry.modelId) {
+      throw new Error(
+        "[SixbAgentWorker] Delegation model definition identity does not match its catalog entry."
+      )
+    }
+    const details: string[] = []
+    if (sameModel(entry, models.default)) details.push("default")
+    if (metadata.contextWindow !== undefined)
+      details.push(`context ${formatTokenCount(metadata.contextWindow)} tokens`)
+    if (metadata.maxInputTokens !== undefined)
+      details.push(`max input ${formatTokenCount(metadata.maxInputTokens)} tokens`)
+    if (metadata.capabilities.reasoning) details.push("reasoning")
+    if (metadata.capabilities.localTools) details.push("tools")
+    const media = metadata.capabilities.inputMediaTypes
+    if (media === "any") details.push("multimodal input")
+    else if (media?.length) details.push(`input: ${media.join(", ")}`)
+    if (details.length === 0 || (details.length === 1 && details[0] === "default"))
+      details.push("metadata unavailable")
 
-      // A provider's catalog text may span lines; each model keeps to one.
-      const name = metadata.name === undefined ? "" : ` ${oneLine(metadata.name)}`
-      const description =
-        metadata.description === undefined ? "" : `: ${oneLine(metadata.description)}`
+    // A provider's catalog text may span lines; each model keeps to one.
+    const name = metadata.name === undefined ? "" : ` ${oneLine(metadata.name)}`
+    const description =
+      metadata.description === undefined ? "" : `: ${oneLine(metadata.description)}`
+    const line = `${formatModelRef(entry)}${name} (${details.join("; ")})${description}`
 
-      return `- ${formatModelRef(entry)}${name} (${details.join("; ")})${description}`
-    })
-  )
-  return ["Available models (provider-declared metadata when available):", ...entries].join("\n")
+    return entry.tier === undefined ? `- ${line}` : `${entry.tier.padEnd(10)}${line}`
+  })
+
+  const { tiers } = models
+  if (tiers.length === 0) {
+    return ["Available models (provider-declared metadata when available):", ...entries].join("\n")
+  }
+
+  return [
+    "Models you can delegate to:",
+    ...entries,
+    "Tiers rank cost and strength: light is the cheapest and fastest, heavy the strongest.",
+    `Use a tier by default (model: ${tiers.map((tier) => `"${tier}"`).join(" | ")}). Use a specific model when its description fits the task.`,
+  ].join("\n")
+}
+
+function modelChoice(models: LanguageModelCatalog): typeof LISTED_MODEL_CHOICE {
+  return models.tiers.length > 0 ? TIERED_MODEL_CHOICE : LISTED_MODEL_CHOICE
 }
 
 function formatModelRef({ provider, modelId }: LanguageModelRef): string {
@@ -308,18 +326,8 @@ function spawnInputSchema(models: LanguageModelCatalog): JsonObject {
       },
       task: { type: "string", minLength: 1, description: "Focused task for the child agent." },
       model: {
-        description:
-          "Copy one exact model reference from the available models. Keep provider and modelId unchanged, including any '/' inside modelId. Omit to use the project default.",
-        // Keep each pair together: independent enums would also admit unconfigured bindings.
-        anyOf: models.list().map(({ provider, modelId }) => ({
-          type: "object",
-          properties: {
-            provider: { type: "string", enum: [provider] },
-            modelId: { type: "string", enum: [modelId] },
-          },
-          required: ["provider", "modelId"],
-          additionalProperties: false,
-        })),
+        description: `${modelChoice(models).field} Keep provider and modelId unchanged, including any '/' inside modelId. ${OMIT_MODEL}`,
+        anyOf: [...tierChoice(models.tiers), ...modelRefChoices(models)],
       },
       reasoning: {
         anyOf: [
@@ -336,6 +344,23 @@ function spawnInputSchema(models: LanguageModelCatalog): JsonObject {
     required: ["key", "task"],
     additionalProperties: false,
   }
+}
+
+function tierChoice(tiers: readonly LanguageModelTier[]): readonly JsonObject[] {
+  return tiers.length > 0 ? [{ type: "string", enum: [...tiers] }] : []
+}
+
+// Keep each pair together: independent enums would also admit unconfigured bindings.
+function modelRefChoices(models: LanguageModelCatalog): readonly JsonObject[] {
+  return models.list().map(({ provider, modelId }) => ({
+    type: "object",
+    properties: {
+      provider: { type: "string", enum: [provider] },
+      modelId: { type: "string", enum: [modelId] },
+    },
+    required: ["provider", "modelId"],
+    additionalProperties: false,
+  }))
 }
 
 const WAIT_INPUT_SCHEMA = {
@@ -455,8 +480,15 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   }
   const key = requireNonEmpty("spawn_agent", value.key, "key", 128)
   const task = requireNonEmpty("spawn_agent", value.task, "task")
-  let model: LanguageModelRef | undefined
-  if (value.model !== undefined) {
+  let model: LanguageModelRef | LanguageModelTier | undefined
+  if (typeof value.model === "string") {
+    if (!isLanguageModelTier(value.model)) {
+      throw new AgentToolPublicError(
+        `[SixbAgentWorker] Unknown spawn_agent model tier '${value.model}'. Use ${formatLanguageModelTiers()}, or a model reference.`
+      )
+    }
+    model = value.model
+  } else if (value.model !== undefined) {
     if (
       !isJsonObject(value.model) ||
       Object.keys(value.model).some((key) => !["provider", "modelId"].includes(key))
