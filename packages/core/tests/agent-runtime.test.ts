@@ -74,6 +74,7 @@ describe("single project Agent", () => {
     expect(run.spec).toEqual({
       model: { provider: "test", modelId: "test-model" },
       reasoning: "low",
+      approvalMode: "auto",
     })
     expect(
       await storage.executions.getById({ projectId: host.id, id: run.executionId })
@@ -99,12 +100,16 @@ describe("single project Agent", () => {
     expect(first.run.spec).toEqual({
       model: { provider: "test", modelId: "test-model" },
       reasoning: "low",
+      approvalMode: "auto",
     })
     const plain = await sixb.agent.runs.request({
       text: "Hi",
       model: { provider: "test", modelId: "plain-model" },
     })
-    expect(plain.run.spec).toEqual({ model: { provider: "test", modelId: "plain-model" } })
+    expect(plain.run.spec).toEqual({
+      model: { provider: "test", modelId: "plain-model" },
+      approvalMode: "auto",
+    })
   })
 
   test("rejects a reasoning the selected model cannot use before creating history", async () => {

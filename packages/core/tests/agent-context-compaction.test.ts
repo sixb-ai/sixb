@@ -42,6 +42,29 @@ describe("agent context token estimation", () => {
       serializeAgentMessagesForSummary([base])
     )
   })
+  test("counts and summarizes how a held call ended as the model reads it", () => {
+    // Regression proof: drop approval-outcome from either switch in context-compaction.ts.
+    const base = message(3, "user", "Thanks")
+    const withOutcome: AgentMessageRecord = {
+      ...base,
+      parts: [
+        {
+          type: "approval-outcome",
+          approvalId: "apr_1",
+          status: "denied",
+          call: { kind: "workflow", workflowId: "send-reminders" },
+        },
+        ...base.parts,
+      ],
+    }
+
+    expect(estimateAgentContextMessagesTokens([withOutcome]).tokens).toBeGreaterThan(
+      estimateAgentContextMessagesTokens([base]).tokens
+    )
+    expect(serializeAgentMessagesForSummary([withOutcome])).toContain(
+      "The user denied `workflows start send-reminders`. It did not run."
+    )
+  })
   test("compacts only above the reserved input budget", () => {
     const inputBudgetTokens = 8_000
     expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 7_999 })).toBe(

@@ -21,6 +21,7 @@ import { createEventsRuntime, type EventsRuntime } from "../events/execution"
 import type { ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-object-reader"
+import { registerRequestPreparation } from "../execution/preparation"
 import type { LakeStorage } from "../lake-storage/types"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
@@ -105,6 +106,7 @@ export function createBoundSixb<TParams extends Record<string, unknown> = Record
   }
   shareOntologyMutationRuntime(runtime, sixb)
   registerActivityCaptureRuntime(sixb, createActivityCaptureRuntime(runtime, dependencies.activity))
+  registerRequestPreparation(sixb, runtime, execution, dependencies.definitions.workflows)
   if (dependencies.connectorConnections) {
     registerConnectorConnectionsRuntime(
       sixb,

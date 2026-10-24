@@ -50,6 +50,10 @@ export type AgentRequestErrorCode =
   | "not_thread_owner"
   | "not_run_requester"
   | "run_not_active"
+  | "invalid_approval_mode"
+  | "approval_not_found"
+  | "approval_not_pending"
+  | "approval_expired"
 
 /**
  * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text

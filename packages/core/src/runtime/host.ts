@@ -10,6 +10,7 @@ import { ActionRunExecutor, registerActionRunExecutor } from "../actions/run/exe
 import type { ActionDefinition } from "../actions/types"
 import { type ActivityOptions, ActivityService } from "../activity/service"
 import type { AgentDefinitionsInput, AgentToolDefinition } from "../agents"
+import { registerAgentApprovalExecutor } from "../agents/approval-executor"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -343,6 +344,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     const executor = new ActionRunExecutor(this)
     registerActionRunExecutor(this, executor)
     registerActionRunExecutor(this.hostContext, executor)
+    // Deciding on a held Agent call runs it under another execution than the decider's.
+    registerAgentApprovalExecutor(this.hostContext, this)
     registerVectorIndexingRuntime(
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)

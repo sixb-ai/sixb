@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { SIXB_API_ROUTES } from "../http/api-routes"
+import { type AgentApiEffect, SIXB_API_ROUTES } from "../http/api-routes"
 import { matchesPathPattern, normalizeRoutePath } from "../http/route-pattern"
 
 export const AGENT_API_GATEWAY_PREFIX = "/__sixb/agent-api"
@@ -15,6 +15,8 @@ export interface AgentApiGatewayCapabilityInput {
 export interface AgentApiRoute {
   readonly method: string
   readonly path: string
+  /** What a call changes; a GET reads. */
+  readonly effect: AgentApiEffect
 }
 
 /**
@@ -23,7 +25,11 @@ export interface AgentApiRoute {
  */
 export const AGENT_API_ROUTES: readonly AgentApiRoute[] = SIXB_API_ROUTES.filter(
   (route) => route.agentApi
-).map((route) => ({ method: route.method, path: route.path }))
+).map((route) => ({
+  method: route.method,
+  path: route.path,
+  effect: route.agentEffect ?? "read",
+}))
 
 export function createAgentApiGatewayCapability(input: AgentApiGatewayCapabilityInput): string {
   return `${AGENT_API_GATEWAY_CAPABILITY_PREFIX}${capabilityDigest(input)}`
@@ -43,9 +49,14 @@ export function isValidAgentApiGatewayCapability(
 }
 
 export function isAllowedAgentApiRequest(method: string, pathname: string): boolean {
+  return findAgentApiRoute(method, pathname) !== undefined
+}
+
+/** The gateway route a request matches, with what it changes. */
+export function findAgentApiRoute(method: string, pathname: string): AgentApiRoute | undefined {
   const normalizedMethod = method.toUpperCase()
   const normalizedPath = normalizeRoutePath(pathname)
-  return AGENT_API_ROUTES.some(
+  return AGENT_API_ROUTES.find(
     (route) => route.method === normalizedMethod && matchesPathPattern(normalizedPath, route.path)
   )
 }

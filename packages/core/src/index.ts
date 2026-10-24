@@ -918,17 +918,23 @@ export type {
   ActivityVisitTimeline,
   ActivityWorkflowEntry,
 } from "./activity/timeline"
+export type { AgentApprovalModeSource, ResolvedAgentApprovalMode } from "./agents/approvals"
 export type { AgentMemoryErrorCode } from "./agents/errors"
 export { AgentMemoryError } from "./agents/errors"
 export type {
+  AgentApprovalsRuntime,
+  AgentPreferences,
+  AgentPreferencesRuntime,
   AgentRunListResult,
   AgentRunsRuntime,
   AgentRuntime,
   AgentRunView,
   AgentThreadParticipantsRuntime,
   AgentThreadsRuntime,
+  DecideExecutionAgentApprovalInput,
   ExecutionAgentRunResult,
   ListAgentThreadViewsResult,
+  ListExecutionAgentApprovalsInput,
   ListExecutionAgentThreadsInput,
   ObservedAgentThreadsRuntime,
 } from "./agents/execution"
@@ -1083,6 +1089,11 @@ export type {
   ActionRunFailure,
   ActionRunFailureCode,
   ActionRunPhase,
+  AgentApprovalCall,
+  AgentApprovalMode,
+  AgentApprovalOutcome,
+  AgentApprovalRecord,
+  AgentApprovalStatus,
   AgentRunFailureCode,
   AiCostSummary,
   PipelineRunFailureCode,
@@ -1122,6 +1133,8 @@ export type {
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentApprovalCallSummary,
+  AgentApprovalOutcomePart,
   AgentContextEntryInput,
   AgentContextInput,
   AgentContextOrigin,

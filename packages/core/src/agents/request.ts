@@ -22,6 +22,7 @@ import { resolveLanguageModel } from "../models/resolve"
 import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
+  type AgentApprovalMode,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
@@ -36,6 +37,11 @@ import {
 } from "../storage/ai-limits/enforcement"
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
 import type { ExecutionRecord } from "../storage/executions"
+import {
+  assertAgentApprovalMode,
+  reportAgentApprovals,
+  resolveAgentApprovalMode,
+} from "./approvals"
 import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
@@ -72,6 +78,11 @@ export interface RequestAgentRunInput {
   readonly timeZone?: string
   /** BCP 47 language of the person asking. Omitted uses the project locale. */
   readonly locale?: string
+  /**
+   * What the turn may change without asking whoever sent it. Omitted uses their choice in the
+   * thread, then their default, then `auto`.
+   */
+  readonly approvalMode?: AgentApprovalMode
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
@@ -124,6 +135,7 @@ export async function requestAgentRun(
     reasoning: input.reasoning ?? continued.reasoning,
   }
   const settings = requesterSettings(input)
+  if (input.approvalMode !== undefined) assertAgentApprovalMode(input.approvalMode)
 
   // Any other turn's spec is checked now, before anything is written. A routed turn holds its
   // router until its model is picked, last.
@@ -153,11 +165,16 @@ export async function requestAgentRun(
     ? await agents.threads.getById({ projectId, id: input.threadId })
     : null
   if (existingThread) assertThreadAcceptsRun(existingThread)
+  // The message's mode, else the sender's in the thread.
+  const approvalMode =
+    input.approvalMode ??
+    (await resolveAgentApprovalMode(agents, { projectId, principal, threadId: existingThread?.id }))
+      .approvalMode
 
   // Last before anything is written, so a message the checks above refuse never reaches the
   // decision model. Concurrent messages to an idle thread can still each ask before one of them is
   // refused with `active_run_exists` below.
-  const spec =
+  const selected =
     "router" in requested
       ? await routedConversationRunSpec(agents, {
           ...requested,
@@ -167,6 +184,7 @@ export async function requestAgentRun(
           language: models.language,
         })
       : requested
+  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode })
 
   const createdThread = existingThread === null
   const thread =
@@ -190,6 +208,15 @@ export async function requestAgentRun(
         )
       }
       await tx.executions.create(durableExecution)
+      // The model learns, once, how the calls it made earlier ended: the ones still waiting are
+      // set aside by this message.
+      const approvalOutcomes = createdThread
+        ? []
+        : await reportAgentApprovals(agents, {
+            projectId,
+            threadId: thread.id,
+            messageId: triggerMessageId,
+          })
       await agents.messages.append({
         id: triggerMessageId,
         projectId,
@@ -197,6 +224,7 @@ export async function requestAgentRun(
         runId: null,
         role: "user",
         parts: [
+          ...approvalOutcomes,
           ...contextParts,
           ...trigger,
           ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
