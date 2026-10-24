@@ -3,6 +3,7 @@ import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from 
 import { type ErrorReporter, SixbErrorReporter } from "../error-reporting/reporter"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
+import { objectPartitionKey } from "../materialization/event-envelopes"
 import type { OntologyMaterializationEvent } from "../materialization/events"
 import {
   EVENT_DEFINITIONS,
@@ -12,7 +13,14 @@ import {
   resolveEventStorage,
 } from "./definitions"
 import { EventsError } from "./errors"
-import type { DomainEvent, EventDraft, StoredAuthorableEvent, StoredDomainEvent } from "./types"
+import type {
+  DomainEvent,
+  EventDraft,
+  StoredAuthorableEvent,
+  StoredDomainEvent,
+  StoredObjectDeletedEvent,
+  StoredObjectMutationEvent,
+} from "./types"
 
 // Keep domain events as a short recent log. This is 2 days in milliseconds.
 export const DEFAULT_EVENTS_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
@@ -55,6 +63,15 @@ export interface EventsSubscribeInput {
   readonly types?: readonly DomainEvent["type"][]
 }
 
+export interface ObjectEventBeforeInput {
+  /** The event of the log to look before. */
+  readonly cursor: string
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+const OBJECT_EVENT_TYPES = EVENT_TYPES.filter((type) => EVENT_DEFINITIONS[type].topic === "objects")
+
 /** Exact, already-identified materialization event persisted before broker publication. @internal */
 export type StableEventEnvelope = OntologyMaterializationEvent
 
@@ -76,13 +93,26 @@ export interface DomainEventLog {
   ): Promise<() => void>
 }
 
+/** Internal port that reads the log for what an object held when another event happened. */
+export interface ObjectEventHistory {
+  /**
+   * The last event of an object before an event of the log, which carries the state the object
+   * held when that event happened. Undefined when the log keeps none.
+   */
+  lastObjectEventBefore(
+    input: ObjectEventBeforeInput
+  ): Promise<StoredObjectMutationEvent | StoredObjectDeletedEvent | undefined>
+}
+
 /** Narrow internal port used to publish envelopes already persisted in the ontology outbox. */
 export interface StableEventPublisher {
   publishEnvelopes(envelopes: readonly StableEventEnvelope[]): Promise<readonly StoredDomainEvent[]>
 }
 
 /** Project-scoped domain event service backed by the shared broker provider. */
-export class DomainEventService implements DomainEventLog, StableEventPublisher {
+export class DomainEventService
+  implements DomainEventLog, ObjectEventHistory, StableEventPublisher
+{
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition
@@ -231,6 +261,29 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
     })
 
     return page.records.map(hydrateEventRecord)
+  }
+
+  async lastObjectEventBefore(
+    input: ObjectEventBeforeInput
+  ): Promise<StoredObjectMutationEvent | StoredObjectDeletedEvent | undefined> {
+    await this.ensureStream()
+    const page = await this.broker.tail({
+      projectId: this.projectId,
+      streamId: this.stream.id,
+      beforeCursor: input.cursor,
+      limit: 1,
+      names: OBJECT_EVENT_TYPES,
+      keys: [objectPartitionKey(input)],
+    })
+
+    const [event] = page.records.map(hydrateEventRecord)
+    if (event?.topic !== "objects") return undefined
+
+    // A key joins two ids with a colon, so another object could share it: that one says nothing.
+    const { objectTypeId, primaryId } = event.payload
+    if (objectTypeId !== input.objectTypeId || primaryId !== input.primaryId) return undefined
+
+    return event
   }
 
   async latestCursor(): Promise<string | undefined> {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createAgentRuntime } from "../src/agents/execution"
 import { createDatasetsRuntime } from "../src/datasets/execution"
+import { createDomainEventService } from "../src/events"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import { OntologyRegistry } from "../src/ontology"
@@ -80,7 +81,7 @@ describe("AuthorizedObjectReader runtime binding", () => {
       broker: host.broker,
       ontology: host.definitions.ontology as OntologyRegistry,
       actionRegistry: host.definitions.actions,
-      events: host.events,
+      events: createDomainEventService({ projectId: host.id, broker: host.broker }),
       queues: host.queues,
       get storage() {
         return trap()

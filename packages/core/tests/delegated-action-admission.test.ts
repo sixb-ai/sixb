@@ -10,6 +10,7 @@ import {
 import { createActionsRuntime } from "../src/actions/execution"
 import { requestAction } from "../src/actions/request"
 import { AuthorizationError } from "../src/authorization"
+import { createDomainEventService } from "../src/events"
 import { createDisabledRuntimeAuthorization } from "../src/execution/authorization"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
@@ -80,7 +81,7 @@ async function createFixture() {
     broker: host.broker,
     ontology: host.definitions.ontology as OntologyRegistry,
     actionRegistry: host.definitions.actions,
-    events: host.events,
+    events: createDomainEventService({ projectId: host.id, broker: host.broker }),
     storage: host.storage,
     queues: host.queues,
   }

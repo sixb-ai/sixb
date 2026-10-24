@@ -29,7 +29,7 @@ import {
 import { createClearanceQueryAdmission } from "../objects/query/clearance-admission"
 import { ObjectQueryValidationError } from "../objects/query/errors"
 import { type QueryExecutorOptions, validateObjectFacetRequests } from "../objects/query/executor"
-import type { ObjectQuery } from "../objects/query/ir"
+import type { ObjectQuery, ObjectQueryPredicate } from "../objects/query/ir"
 import { assertLinkQueryReadable } from "../objects/query/link-query-clearance"
 import { preflightObjectQueryLinks } from "../objects/query/links"
 import { normalizeObjectQuery } from "../objects/query/normalize"
@@ -149,6 +149,25 @@ class AuthorizedObjectReaderImpl {
     sources: EventSources
   ): Clearance | Promise<Clearance> {
     return reader.#security.clearance.forEvent(sources)
+  }
+
+  /** The conditions the reader views object types through, by concrete type. */
+  static viewConditions(
+    reader: AuthorizedObjectReaderImpl
+  ): ReadonlyMap<string, ReaderViewCondition> {
+    const security = reader.#security
+    const conditions = security.conditionalScope?.conditions ?? []
+
+    return new Map(
+      conditions.map(({ objectTypeId, predicate }) => [
+        objectTypeId,
+        {
+          predicate,
+          hiddenBy: (clearance: Clearance) =>
+            !security.isObjectTypeViewable(objectTypeId, clearance),
+        },
+      ])
+    )
   }
 
   static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
@@ -806,6 +825,29 @@ export function readerEventClearance(
   sources: EventSources
 ): Clearance | Promise<Clearance> {
   return AuthorizedObjectReaderImpl.eventClearance(reader, sources)
+}
+
+/** A condition a reader views an object type through, for a surface that decides per object. */
+export interface ReaderViewCondition {
+  /** The condition, `currentUser()` bound, as the reader's storage reads it. */
+  readonly predicate: ObjectQueryPredicate
+  /**
+   * Whether a clearance hides the type, or a property the condition reads: which objects match
+   * would reveal it, so the reader reads no object of the type.
+   */
+  hiddenBy(clearance: Clearance): boolean
+}
+
+/**
+ * The conditions a reader views object types through, by concrete type: empty for a reader that
+ * views each type it reads whole. A type absent here is decided by its grants alone, which deny a
+ * type viewed only under a condition. Events match the state they carry against these, and read
+ * through the reader what they cannot decide from it.
+ */
+export function readerViewConditions(
+  reader: AuthorizedObjectReader
+): ReadonlyMap<string, ReaderViewCondition> {
+  return AuthorizedObjectReaderImpl.viewConditions(reader)
 }
 
 /** What a write or a request names: object types, and links by their source type. */
