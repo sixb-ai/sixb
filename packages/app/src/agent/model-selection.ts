@@ -18,6 +18,11 @@ export interface ResolvedModelSelection {
   readonly request?: ModelPreference
 }
 
+/** A project that configures tiers offers no model choice in chat. */
+export function sixbPicksModel(models: readonly LanguageModel[]): boolean {
+  return models.some((model) => model.tier !== undefined)
+}
+
 export function defaultLanguageModel(models: readonly LanguageModel[]): LanguageModel | undefined {
   return models.find((model) => model.isDefault) ?? models[0]
 }
@@ -36,11 +41,16 @@ export function defaultReasoningLevel(model: LanguageModel): ModelReasoningLevel
  * so project default changes still reach them. A reasoning chosen without a model stays with
  * whichever model is the project default. A preference the catalog no longer supports falls back
  * the same way.
+ *
+ * With tiers, nothing is shown or asked for, so the server's choice is never bypassed. The
+ * preference stays stored and applies again if the project goes back to a list.
  */
 export function resolveModelSelection(
   models: readonly LanguageModel[],
   preference: ModelPreference | null
 ): ResolvedModelSelection {
+  if (sixbPicksModel(models)) return {}
+
   const chosen = preference?.model
   const preferred = chosen
     ? models.find((model) => model.provider === chosen.provider && model.modelId === chosen.modelId)

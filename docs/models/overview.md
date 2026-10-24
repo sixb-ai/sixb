@@ -47,6 +47,7 @@ export const sixb = createSixb({
 
 You can offer models from multiple providers through the same harness. In chat, users choose
 from your configured catalog and adjust the reasoning effort supported by their selected model.
+With [tiers](./configuration.md#tiers), they don't: the chat has no picker.
 Each model can carry a [default reasoning](./configuration.md#default-reasoning).
 
 ## Give it project instructions

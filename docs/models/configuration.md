@@ -81,8 +81,9 @@ required: its first model is the default.
 | Omitted, or a tier left out | The first `standard` model |
 | A tier, with a list configured | The first model |
 
-Every model of every tier stays in the catalog: chat users pick from all of them, and the
-delegation guide of `spawn_agent` groups them by tier.
+Every model of every tier stays in the catalog, and the delegation guide of `spawn_agent` groups
+them by tier. With tiers, the chat offers no model choice or reasoning control; without a
+[decision model](#decision-models), every message runs on `standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
 names none. Before the answer starts, the default decision model scores the message's tiers:
