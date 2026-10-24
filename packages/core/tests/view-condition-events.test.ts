@@ -10,6 +10,7 @@ import {
   defineRule,
   link,
   prop,
+  type RuleDefinition,
   ref,
   SixbHost,
   type StoredDomainEvent,
@@ -55,6 +56,10 @@ const openTicket = defineRule("ticket.open")
   .on(Ticket)
   .where((ticket) => ticket.p.status.eq("open"))
 
+const watchedTeam = defineRule("team.watched")
+  .on(Team)
+  .where((team) => team.not(team.p.id.eq("")))
+
 const roles = [
   defineRole("open-tickets", {
     grantedTo: [defineGroup("open")],
@@ -83,7 +88,7 @@ async function deploy() {
     id: projectId,
     ontology: [Team, Ticket],
     markings: [restricted],
-    rules: [openTicket],
+    rules: [openTicket, watchedTeam],
     ...createTestRuntimeDeps(),
   })
   const trusted = createTestSixb(host)
@@ -157,14 +162,18 @@ async function createTicket(
   })
 }
 
-async function triggerRule(host: SixbHost, primaryId: string): Promise<void> {
+async function triggerRule(
+  host: SixbHost,
+  primaryId: string,
+  rule: RuleDefinition = openTicket
+): Promise<void> {
   const [triggered] = await host.events.append({
     events: [
       {
         type: "rule.triggered",
         payload: {
-          ruleId: openTicket.id,
-          subject: { kind: "object", objectTypeId: Ticket.id, primaryId },
+          ruleId: rule.id,
+          subject: { kind: "object", objectTypeId: rule.subject.objectTypeId, primaryId },
           triggeredAt: "2026-10-24T00:00:00.000Z",
         },
       },
@@ -688,6 +697,128 @@ describe("what a reader pays for view conditions", () => {
       "telemetry.appended t-open",
     ])
     expect(reads).toEqual({ unscoped: [1], conditional: [2], logged: 0 })
+  })
+})
+
+describe("rules follow view conditions", () => {
+  // Reproduce: drop the readerViewConditions() check from `visible` in rules/execution.ts.
+  test("a rule on a conditioned type is listed", async () => {
+    const { sixbFor } = await deploy()
+    const reader = sixbFor(["open"])
+
+    expect(reader.rules.list().map((rule) => rule.id)).toEqual([openTicket.id, watchedTeam.id])
+    expect(reader.rules.getById(openTicket.id)?.id).toBe(openTicket.id)
+    expect(sixbFor([]).rules.list()).toEqual([])
+  })
+
+  /** Three watched teams, and the open rule matching an open and a closed ticket. */
+  async function seedMatches(deployment: Deployment): Promise<void> {
+    const { host, trusted } = deployment
+
+    for (const id of ["team-2", "team-3"]) {
+      await trusted.objects(Team).upsert({ properties: { id } })
+    }
+    for (const id of ["team-1", "team-2", "team-3"]) {
+      await triggerRule(host, id, watchedTeam)
+    }
+
+    await createTicket(deployment, { id: "t-open", status: "open" })
+    await createTicket(deployment, { id: "t-closed", status: "closed" })
+    await triggerRule(host, "t-open")
+    await triggerRule(host, "t-closed")
+  }
+
+  const subjects = (result: Awaited<ReturnType<Reader["rules"]["states"]["list"]>>) =>
+    result.states.map((state) => state.subject.primaryId).sort()
+
+  // Reproduce: list the conditioned types too in rules/execution.ts (`objectTypeIds` from the
+  // reader's conditions as well as its grants); the tickets' matches are listed and counted.
+  test("a listing that names no object leaves out matches on a conditioned type", async () => {
+    const deployment = await deploy()
+    await seedMatches(deployment)
+    const reader = deployment.sixbFor(["open"])
+
+    const first = await reader.rules.states.list({ order: "asc", limit: 2 })
+    expect(first).toMatchObject({ total: 3, hasMore: true })
+    const rest = await reader.rules.states.list({ order: "asc", limit: 2, offset: 2 })
+    expect(rest).toMatchObject({ total: 3, hasMore: false })
+    expect([...subjects(first), ...subjects(rest)].sort()).toEqual(["team-1", "team-2", "team-3"])
+
+    const tickets = await reader.rules.states.list({ objectTypeId: Ticket.id })
+    expect(tickets).toEqual({ states: [], hasMore: false, total: 0 })
+
+    // A role that views every ticket lists them all.
+    const union = await deployment.sixbFor(["open", "all"]).rules.states.list()
+    expect(union.total).toBe(5)
+  })
+
+  // Reproduce: drop the per-object branch from rules/execution.ts, and the open ticket's match is
+  // not listed; list without reading the object, and the closed and missing tickets' are.
+  test("a listing that names an object of a conditioned type lists its matches when it is visible", async () => {
+    const deployment = await deploy()
+    const { host, sixbFor } = deployment
+    await seedMatches(deployment)
+    await triggerRule(host, "t-missing")
+    const reader = sixbFor(["open"])
+    const ticket = (primaryId: string) => ({ objectTypeId: Ticket.id, primaryId })
+
+    const open = await reader.rules.states.list(ticket("t-open"))
+    expect(subjects(open)).toEqual(["t-open"])
+    expect(open).toMatchObject({ total: 1, hasMore: false })
+
+    const empty = { states: [], hasMore: false, total: 0 }
+    expect(await reader.rules.states.list(ticket("t-closed"))).toEqual(empty)
+    expect(await reader.rules.states.list(ticket("t-missing"))).toEqual(empty)
+
+    expect(subjects(await sixbFor(["all"]).rules.states.list(ticket("t-closed")))).toEqual([
+      "t-closed",
+    ])
+  })
+
+  // Reproduce: drop the readerViewConditions() check from the per-object branch in
+  // rules/execution.ts; the reader of every ticket reads the object it lists matches for.
+  test("only a reader that views the object's type under a condition reads the object", async () => {
+    const deployment = await deploy()
+    await seedMatches(deployment)
+    const reads = { unscoped: 0, conditional: 0 }
+    const store = InMemoryObjectStorage.prototype
+
+    const get = store.getByPrimaryId
+    const unscoped = spyOn(store, "getByPrimaryId").mockImplementation(function (
+      this: InMemoryObjectStorage,
+      input
+    ) {
+      reads.unscoped += 1
+      return get.call(this, input)
+    })
+
+    const conditional = store.createConditionalReadScope
+    const scoped = spyOn(store, "createConditionalReadScope").mockImplementation(function (
+      this: InMemoryObjectStorage,
+      input
+    ) {
+      const storage = conditional.call(this, input)
+      return {
+        ...storage,
+        getByPrimaryId: (read) => {
+          reads.conditional += 1
+          return storage.getByPrimaryId(read)
+        },
+      }
+    })
+
+    try {
+      const ticket = { objectTypeId: Ticket.id, primaryId: "t-open" }
+      await deployment.sixbFor(["all"]).rules.states.list(ticket)
+      await deployment.sixbFor(["open"]).rules.states.list()
+      expect(reads).toEqual({ unscoped: 0, conditional: 0 })
+
+      await deployment.sixbFor(["open"]).rules.states.list(ticket)
+      expect(reads).toEqual({ unscoped: 0, conditional: 1 })
+    } finally {
+      unscoped.mockRestore()
+      scoped.mockRestore()
+    }
   })
 })
 
