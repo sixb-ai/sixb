@@ -439,6 +439,36 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // The Agent reads and saves its memory with `sixb memory` in its sandbox. Its history and deleting
+  // a repo are for people, so they stay off the gateway.
+  {
+    operationId: "getAgentMemory",
+    method: "GET",
+    path: "/api/agent-memory/:repo",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "listAgentMemoryRevisions",
+    method: "GET",
+    path: "/api/agent-memory/:repo/revisions",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "saveAgentMemory",
+    method: "POST",
+    path: "/api/agent-memory/:repo/revisions",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "deleteAgentMemory",
+    method: "DELETE",
+    path: "/api/agent-memory/:repo",
+    accessToken: true,
+    agentApi: false,
+  },
   // Artifacts are reachable with an access token, so the CLI and integrations can publish them. The
   // Agent publishes through its own tool, not the gateway.
   {

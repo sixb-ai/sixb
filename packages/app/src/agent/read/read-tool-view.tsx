@@ -1,5 +1,5 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
-import { BookOpen, ChevronRight, FileText, type LucideIcon } from "lucide-react"
+import { Bookmark, BookOpen, ChevronRight, FileText, type LucideIcon } from "lucide-react"
 import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
@@ -12,7 +12,7 @@ export function ReadToolView({ tool }: { tool: NormalizedTool }) {
   const description = describeRead(input, output, messages)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const error = tool.state === "output-error"
-  const Icon = description.skill ? BookOpen : FileText
+  const Icon = description.memory ? Bookmark : description.skill ? BookOpen : FileText
   const label = error
     ? description.failedTitle
     : running

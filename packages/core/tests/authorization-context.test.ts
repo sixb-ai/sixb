@@ -153,12 +153,13 @@ describe("resolveAuthorizationContext", () => {
       })),
     })
 
-  test("Agent execution, usage observation, and limit management remain independent", () => {
-    // Removal proof: making either usage grant imply another permission fails this matrix.
+  test("Agent execution, usage, limits and shared memory remain independent", () => {
+    // Removal proof: making any of these grants imply another permission fails this matrix.
     const cases = [
-      { grant: can.run(agent), run: true, observe: false, manage: false },
-      { grant: can.observe(agent.usage), run: false, observe: true, manage: false },
-      { grant: can.manage(agent.usage), run: false, observe: false, manage: true },
+      { grant: can.run(agent), run: true, observe: false, manage: false, memory: false },
+      { grant: can.observe(agent.usage), run: false, observe: true, manage: false, memory: false },
+      { grant: can.manage(agent.usage), run: false, observe: false, manage: true, memory: false },
+      { grant: can.manage(agent.memory), run: false, observe: false, manage: false, memory: true },
     ]
     for (const expected of cases) {
       const role = defineRole("isolated-capability", {
@@ -169,6 +170,7 @@ describe("resolveAuthorizationContext", () => {
       expect(context.grants["run:agent"]).toBe(expected.run)
       expect(context.grants["observe:aiUsage"]).toBe(expected.observe)
       expect(context.grants["manage:aiUsage"]).toBe(expected.manage)
+      expect(context.grants["manage:agentMemory"]).toBe(expected.memory)
     }
   })
 

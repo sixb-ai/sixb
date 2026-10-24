@@ -113,6 +113,7 @@ const SHIPPED_MIGRATIONS = [
   "073-unique-values",
   "074-generated-media-usage",
   "075-model-call-files",
+  "076-agent-memory",
 ]
 
 const steps = postgresStorageMigrations.steps

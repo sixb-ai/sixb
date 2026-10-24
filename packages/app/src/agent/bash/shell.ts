@@ -14,8 +14,7 @@ export interface ShellSegment {
 export function lexShellCommand(command: string): readonly ShellSegment[] | null {
   if (
     /(?:^|\s)<<-?\s*/.test(command) ||
-    /(?:^|[;\n]\s*)(?:if|for|while|until|case|select|function)\b/.test(command) ||
-    command.includes("[[")
+    /(?:^|[;\n]\s*)(?:if|for|while|until|case|select|function)\b/.test(command)
   ) {
     return null
   }
@@ -92,6 +91,8 @@ export function lexShellCommand(command: string): readonly ShellSegment[] | null
       continue
     }
     if (character === "`" || "(){}".includes(character)) return null
+    // Bash's `[[ test ]]`; a quoted `[[link]]`, as memory entries hold, is a plain word.
+    if (character === "[" && next === "[") return null
     if (/\s/.test(character) && character !== "\n") {
       commandText += character
       pushWord()

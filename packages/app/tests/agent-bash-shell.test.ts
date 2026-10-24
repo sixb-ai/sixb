@@ -19,5 +19,6 @@ describe("lexShellCommand", () => {
     expect(lexShellCommand("echo one & echo two")).toBeNull()
     expect(lexShellCommand("(bun test || true)")).toBeNull()
     expect(lexShellCommand("{ bun test || true; }")).toBeNull()
+    expect(lexShellCommand("[[ -f MEMORY.md ]] && cat MEMORY.md")).toBeNull()
   })
 })

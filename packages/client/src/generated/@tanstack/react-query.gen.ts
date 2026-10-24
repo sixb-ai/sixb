@@ -31,6 +31,7 @@ import {
   createAuthServiceAccountAccessToken,
   createDeviceAuthorization,
   createFileUpload,
+  deleteAgentMemory,
   deleteAiLimitPolicy,
   deleteArtifact,
   deleteArtifactStateValue,
@@ -52,6 +53,7 @@ import {
   getActivitySummary,
   getActivityVisitTimeline,
   getAgent,
+  getAgentMemory,
   getAgentMessageFileContent,
   getAgentRun,
   getAgentThread,
@@ -104,6 +106,7 @@ import {
   listActivityConnections,
   listActivityUsers,
   listActivityVisits,
+  listAgentMemoryRevisions,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -166,6 +169,7 @@ import {
   revokeAuthSession,
   revokeConnectorConnection,
   revokeSharedAccessGrant,
+  saveAgentMemory,
   searchObjects,
   selectConnectorConnectionRunAccount,
   setArtifactState,
@@ -249,6 +253,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
+  DeleteAgentMemoryData,
+  DeleteAgentMemoryError,
+  DeleteAgentMemoryResponse,
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyError,
   DeleteAiLimitPolicyResponse,
@@ -310,6 +317,9 @@ import type {
   GetActivityVisitTimelineResponse,
   GetAgentData,
   GetAgentError,
+  GetAgentMemoryData,
+  GetAgentMemoryError,
+  GetAgentMemoryResponse,
   GetAgentMessageFileContentData,
   GetAgentMessageFileContentError,
   GetAgentMessageFileContentResponse,
@@ -463,6 +473,9 @@ import type {
   ListActivityVisitsData,
   ListActivityVisitsError,
   ListActivityVisitsResponse,
+  ListAgentMemoryRevisionsData,
+  ListAgentMemoryRevisionsError,
+  ListAgentMemoryRevisionsResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -637,6 +650,9 @@ import type {
   RevokeSharedAccessGrantData,
   RevokeSharedAccessGrantError,
   RevokeSharedAccessGrantResponse,
+  SaveAgentMemoryData,
+  SaveAgentMemoryError,
+  SaveAgentMemoryResponse,
   SearchObjectsData,
   SearchObjectsError,
   SearchObjectsResponse,
@@ -5110,6 +5126,170 @@ export const listObservedAgentThreadRunsInfiniteOptions = (
       queryKey: listObservedAgentThreadRunsInfiniteQueryKey(options),
     }
   )
+
+/**
+ * Delete an Agent memory repo
+ *
+ * Deletes the repo with its history.
+ */
+export const deleteAgentMemoryMutation = (
+  options?: Partial<Options<DeleteAgentMemoryData>>
+): UseMutationOptions<
+  DeleteAgentMemoryResponse,
+  DeleteAgentMemoryError,
+  Options<DeleteAgentMemoryData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteAgentMemoryResponse,
+    DeleteAgentMemoryError,
+    Options<DeleteAgentMemoryData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteAgentMemory({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAgentMemoryQueryKey = (options: Options<GetAgentMemoryData>) =>
+  createQueryKey("getAgentMemory", options)
+
+/**
+ * Get an Agent memory repo
+ *
+ * Every file of the repo as of its latest revision, or as an earlier revision left it.
+ */
+export const getAgentMemoryOptions = (options: Options<GetAgentMemoryData>) =>
+  queryOptions<
+    GetAgentMemoryResponse,
+    GetAgentMemoryError,
+    GetAgentMemoryResponse,
+    ReturnType<typeof getAgentMemoryQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentMemory({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentMemoryQueryKey(options),
+  })
+
+export const listAgentMemoryRevisionsQueryKey = (options: Options<ListAgentMemoryRevisionsData>) =>
+  createQueryKey("listAgentMemoryRevisions", options)
+
+/**
+ * List an Agent memory repo's revisions
+ *
+ * Each save is one revision, newest first.
+ */
+export const listAgentMemoryRevisionsOptions = (options: Options<ListAgentMemoryRevisionsData>) =>
+  queryOptions<
+    ListAgentMemoryRevisionsResponse,
+    ListAgentMemoryRevisionsError,
+    ListAgentMemoryRevisionsResponse,
+    ReturnType<typeof listAgentMemoryRevisionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentMemoryRevisions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentMemoryRevisionsQueryKey(options),
+  })
+
+export const listAgentMemoryRevisionsInfiniteQueryKey = (
+  options: Options<ListAgentMemoryRevisionsData>
+): QueryKey<Options<ListAgentMemoryRevisionsData>> =>
+  createQueryKey("listAgentMemoryRevisions", options, true)
+
+/**
+ * List an Agent memory repo's revisions
+ *
+ * Each save is one revision, newest first.
+ */
+export const listAgentMemoryRevisionsInfiniteOptions = (
+  options: Options<ListAgentMemoryRevisionsData>
+) =>
+  infiniteQueryOptions<
+    ListAgentMemoryRevisionsResponse,
+    ListAgentMemoryRevisionsError,
+    InfiniteData<ListAgentMemoryRevisionsResponse>,
+    QueryKey<Options<ListAgentMemoryRevisionsData>>,
+    | string
+    | Pick<
+        QueryKey<Options<ListAgentMemoryRevisionsData>>[0],
+        "body" | "headers" | "path" | "query"
+      >
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentMemoryRevisionsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentMemoryRevisions({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentMemoryRevisionsInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Save changes to an Agent memory repo
+ *
+ * Stores the changes as the repo's next revision. When another save changed one of the files after baseRevision, nothing is saved and the response holds those files as they are now.
+ */
+export const saveAgentMemoryMutation = (
+  options?: Partial<Options<SaveAgentMemoryData>>
+): UseMutationOptions<
+  SaveAgentMemoryResponse,
+  SaveAgentMemoryError,
+  Options<SaveAgentMemoryData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SaveAgentMemoryResponse,
+    SaveAgentMemoryError,
+    Options<SaveAgentMemoryData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await saveAgentMemory({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listArtifactsQueryKey = (options?: Options<ListArtifactsData>) =>
   createQueryKey("listArtifacts", options)
