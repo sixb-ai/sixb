@@ -10,6 +10,7 @@ import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
+import { describeMessageAgent } from "../message-agent/interpret"
 import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
 import { builtInToolView } from "../tool-views/built-in"
@@ -253,7 +254,8 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
 }
 
 function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
-  const messages = useAgentMessages().activity
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.activity
   const builtIn = builtInToolView(tool)
   if (builtIn !== null) return builtIn
 
@@ -262,6 +264,8 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
   const files = tool.files ?? []
   const expandable = hasInput || hasOutput || isError || files.length > 0
+  const title =
+    tool.toolName === "message_agent" ? describeMessageAgent(tool, agentMessages) : tool.toolName
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.
@@ -273,7 +277,7 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
           className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground disabled:cursor-default disabled:hover:text-muted-foreground"
         >
           <Wrench className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate font-medium">{tool.toolName}</span>
+          <span className="min-w-0 truncate font-medium">{title}</span>
           <ToolStatus state={tool.state} />
           {expandable ? (
             <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />

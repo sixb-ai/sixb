@@ -221,6 +221,8 @@ export const fr: Translation<AgentMessages> = {
     stillWorking: "Toujours en cours",
     still: (label) => `Toujours en cours : ${lowercaseFirst(label)}`,
     using: (tool) => `Utilisation de ${tool}`,
+    messagingAgent: (key) => `Message à ${key}`,
+    toldAgent: (key, text) => `Message à ${key} : ${text}`,
     worked: "Travail effectué",
     reasoning: "Raisonnement",
     steps: (steps) => count(steps, "étape"),

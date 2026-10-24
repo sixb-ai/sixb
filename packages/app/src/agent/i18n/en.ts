@@ -229,6 +229,8 @@ export const en = {
     stillWorking: "Still working",
     still: (label: string) => `Still ${lowercaseFirst(label)}`,
     using: (tool: string) => `Using ${tool}`,
+    messagingAgent: (key: string) => `Messaging ${key}`,
+    toldAgent: (key: string, text: string) => `Told ${key}: ${text}`,
     worked: "Worked",
     reasoning: "Reasoning",
     steps: (steps: number) => count(steps, "step"),
