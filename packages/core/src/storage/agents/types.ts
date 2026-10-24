@@ -333,6 +333,8 @@ export interface ConversationAgentRunSpec {
 /** Immutable, serialisable child configuration captured before dispatch. */
 export interface SubagentRunSpec {
   readonly model: LanguageModelRef
+  /** With tiers, the tier of the model the child runs on. Absent on children admitted before it. */
+  readonly tier?: LanguageModelTier
   readonly reasoning?: AgentReasoning
   /** Focused task supplied by the parent Agent. */
   readonly task: string
