@@ -164,6 +164,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     model: run.spec?.model,
     tier: run.spec?.tier,
     reasoning: run.spec?.reasoning,
+    approvalMode: run.spec?.approvalMode,
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
@@ -221,12 +222,15 @@ export function handleAgentRouteError(
       case "agent_not_found":
       case "run_not_found":
       case "thread_not_found":
+      case "approval_not_found":
         set.status = 404
         break
       case "active_run_exists":
       case "run_not_retryable":
       case "run_not_active":
       case "sandbox_execution_unavailable":
+      case "approval_not_pending":
+      case "approval_expired":
         set.status = 409
         break
       case "authority_not_inheritable":
@@ -244,6 +248,7 @@ export function handleAgentRouteError(
       case "invalid_locale":
       case "invalid_message":
       case "invalid_participant":
+      case "invalid_approval_mode":
       case "model_not_found":
         set.status = 400
         break
@@ -550,7 +555,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
-          return serializeThread(host, thread)
+          const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
+          return { ...(await serializeThread(host, thread)), ...approvalMode }
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -819,6 +825,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             reasoning: parsed.reasoning,
             timeZone: parsed.timeZone,
             locale: parsed.locale,
+            approvalMode: parsed.approvalMode,
             attachments: parsed.attachments as readonly FileRef[] | undefined,
             context: parsed.context,
             messageId: parsed.messageId,

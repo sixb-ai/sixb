@@ -71,6 +71,8 @@ export const WorkflowInterventionsQuerySchema = z.object({
 export const RequestWorkflowRunBodySchema = z
   .object({
     input: WorkflowIOSnapshotSchema.optional(),
+    /** Names the run: a request repeated with the same id returns that run instead of another. */
+    runId: z.string().trim().min(1).optional(),
   })
   .default({})
 

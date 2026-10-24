@@ -12,6 +12,7 @@ import { pipeline } from "node:stream/promises";
 var INSTANCE_CLI_VERSION = "1";
 var EXIT_USAGE = 2;
 var EXIT_API = 3;
+var EXIT_AWAITING_APPROVAL = 4;
 
 class CliError extends Error {
   body;
@@ -30,12 +31,29 @@ function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value)}
 `);
 }
+
+class CliExit extends Error {
+  exitCode;
+  constructor(exitCode) {
+    super(`The Sixb CLI exited with code ${exitCode}.`);
+    this.exitCode = exitCode;
+    this.name = "CliExit";
+  }
+}
+function writeRequestResult(value) {
+  writeJson(value);
+  const status = typeof value === "object" && value !== null ? Reflect.get(value, "status") : null;
+  if (status === "awaiting_approval")
+    throw new CliExit(EXIT_AWAITING_APPROVAL);
+}
 function writeText(value) {
   process.stdout.write(value.endsWith(`
 `) ? value : `${value}
 `);
 }
 function reportError(error) {
+  if (error instanceof CliExit)
+    return error.exitCode;
   const cliError = error instanceof CliError ? error : new CliError({
     code: "internal_error",
     message: error instanceof Error ? error.message : "The Sixb CLI failed unexpectedly."
@@ -520,7 +538,8 @@ History options:
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
 contains that parameter object; use - to read standard input. \`actions request\` runs the Action
 and prints its finished run, with its status and any error. It waits at most 25 seconds: a run that
-takes longer keeps running, and the error names the run to read with \`action-runs get\`.`,
+takes longer keeps running, and the error names the run to read with \`action-runs get\`. A request
+that waits for the user's approval prints \`"status": "awaiting_approval"\` and exits with code 4.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -541,9 +560,10 @@ List options:
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
-  sixb workflows start <workflow-id> [--file <path|->]
+  sixb workflows start <workflow-id> [--file <path|->] [--run-id <id>]
 
-The JSON file contains the workflow input object. Use - to read standard input.`,
+The JSON file contains the workflow input object. Use - to read standard input. A start that waits
+for the user's approval prints \`"status": "awaiting_approval"\` and exits with code 4.`,
   users: `Usage:
   sixb users list [options]
   sixb users search <text> [options]
@@ -720,7 +740,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     const requestedRunId = runId ?? `act_${randomUUID2()}`;
     const waiting = AbortSignal.timeout(requestWaitMs);
     try {
-      return writeJson(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+      return writeRequestResult(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
         params,
         ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
         runId: requestedRunId
@@ -1856,6 +1876,7 @@ function listQuery(options) {
 }
 
 // ../cli-core/src/commands/workflows.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
 async function workflows(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -1874,12 +1895,16 @@ async function workflows(api, args) {
     const {
       positionals: [workflowId],
       options
-    } = parseCommandArgs(rest, { "--file": "string" }, "workflows start", 1);
+    } = parseCommandArgs(rest, { "--file": "string", "--run-id": "string" }, "workflows start", 1);
     const input = options["--file"] ? await readJson(options["--file"]) : {};
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.");
     }
-    return writeJson(await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, { input }));
+    const runId = options["--run-id"] ?? `run_${randomUUID3()}`;
+    return writeRequestResult(await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, {
+      input,
+      runId
+    }));
   }
   fail(`Unknown workflows command '${sub}'.`);
 }

@@ -8107,6 +8107,130 @@ export type GetWorkflowAgentNodeExecutionResponses = {
           type: "continuation"
         }
       | {
+          type: "approval-outcome"
+          approvalId: string
+          status: "approved" | "denied" | "cancelled" | "superseded" | "expired"
+          call:
+            | {
+                kind: "action"
+                actionId: string
+                subject:
+                  | {
+                      kind: "none"
+                    }
+                  | {
+                      kind: "object"
+                      objectTypeId: string
+                      primaryId: string
+                    }
+              }
+            | {
+                kind: "workflow"
+                workflowId: string
+              }
+          outcome?:
+            | {
+                kind: "action-run"
+                runId: string
+                status: "succeeded" | "failed"
+                error?: {
+                  code:
+                    | "internal.unexpected"
+                    | "runtime.cancelled"
+                    | "action.phase_failed"
+                    | "action.read_conflict"
+                    | "action.rejected"
+                    | "action.timeout"
+                    | "object.unique_violation"
+                  message: string
+                  retryable: boolean
+                  at: string
+                  details: {
+                    actionId: string
+                    runId: string
+                    phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+                  }
+                  httpStatus?: number
+                  redacted?: true
+                  truncated?: true
+                }
+              }
+            | {
+                kind: "workflow-run"
+                runId: string
+                queuedAt: string
+              }
+            | {
+                kind: "error"
+                error: {
+                  code:
+                    | "action.phase_failed"
+                    | "action.read_conflict"
+                    | "action.rejected"
+                    | "action.run_in_progress"
+                    | "action.timeout"
+                    | "agent.execution_failed"
+                    | "ai.usage_limit_exceeded"
+                    | "ai.usage_limit_unavailable"
+                    | "connector.adapter_invalid"
+                    | "connector.authorization_invalid"
+                    | "connector.authorization_required"
+                    | "connector.configuration_invalid"
+                    | "connector.credentials_unavailable"
+                    | "connector.not_found"
+                    | "connector.operation_conflict"
+                    | "connector.operation_in_progress"
+                    | "connector.provider_failed"
+                    | "connector.provider_unavailable"
+                    | "connector.replacement_required"
+                    | "connector.revocation_pending"
+                    | "dataset.not_found"
+                    | "dataset.version_incompatible"
+                    | "dataset.version_not_found"
+                    | "dataset.version_read_inconsistent"
+                    | "event.delivery_failed"
+                    | "internal.unexpected"
+                    | "queue.enqueue_failed"
+                    | "object.not_found"
+                    | "object.unique_violation"
+                    | "pipeline.step_failed"
+                    | "projection.definition_invalid"
+                    | "projection.execution_failed"
+                    | "projection.not_found"
+                    | "projection.run_already_terminal"
+                    | "projection.run_identity_mismatch"
+                    | "runtime.cancelled"
+                    | "runtime.stopping"
+                    | "vector.model_unavailable"
+                    | "vector.response_invalid"
+                    | "vector.outcome_unknown"
+                    | "storage.unavailable"
+                    | "sync.execution_failed"
+                    | "webhook.delivery_failed"
+                    | "webhook.delivery_rejected"
+                    | "workflow.node_failed"
+                  message: string
+                  retryable: boolean
+                  at: string
+                  /**
+                   * Any JSON-compatible value.
+                   */
+                  details?:
+                    | string
+                    | number
+                    | boolean
+                    | Array<unknown>
+                    | {
+                        [key: string]: unknown
+                      }
+                    | null
+                  httpStatus?: number
+                  redacted?: true
+                  truncated?: true
+                }
+              }
+        }
+      | {
           type: "reasoning"
           text: string
           /**
@@ -8751,6 +8875,7 @@ export type RequestWorkflowRunData = {
           }
         | null
     }
+    runId?: string
   }
   path: {
     workflowId: string
@@ -11465,6 +11590,8 @@ export type ListAgentThreadsResponses = {
       messageCount: number
       createdAt: string
       updatedAt: string
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      approvalModeSource?: "thread" | "default" | "fallback"
     }>
     hasMore: boolean
     total: number
@@ -11575,6 +11702,8 @@ export type CreateAgentThreadResponses = {
       messageCount: number
       createdAt: string
       updatedAt: string
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      approvalModeSource?: "thread" | "default" | "fallback"
     }
   }
 }
@@ -11664,6 +11793,8 @@ export type GetAgentThreadResponses = {
     messageCount: number
     createdAt: string
     updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback"
   }
 }
 
@@ -11771,6 +11902,8 @@ export type AddAgentThreadParticipantsResponses = {
     messageCount: number
     createdAt: string
     updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback"
   }
 }
 
@@ -11911,6 +12044,8 @@ export type ForkAgentThreadResponses = {
       messageCount: number
       createdAt: string
       updatedAt: string
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      approvalModeSource?: "thread" | "default" | "fallback"
     }
   }
 }
@@ -12011,6 +12146,8 @@ export type RecreateAgentThreadSandboxResponses = {
     messageCount: number
     createdAt: string
     updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback"
   }
 }
 
@@ -12090,6 +12227,130 @@ export type ListAgentThreadMessagesResponses = {
           }
         | {
             type: "continuation"
+          }
+        | {
+            type: "approval-outcome"
+            approvalId: string
+            status: "approved" | "denied" | "cancelled" | "superseded" | "expired"
+            call:
+              | {
+                  kind: "action"
+                  actionId: string
+                  subject:
+                    | {
+                        kind: "none"
+                      }
+                    | {
+                        kind: "object"
+                        objectTypeId: string
+                        primaryId: string
+                      }
+                }
+              | {
+                  kind: "workflow"
+                  workflowId: string
+                }
+            outcome?:
+              | {
+                  kind: "action-run"
+                  runId: string
+                  status: "succeeded" | "failed"
+                  error?: {
+                    code:
+                      | "internal.unexpected"
+                      | "runtime.cancelled"
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.timeout"
+                      | "object.unique_violation"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    details: {
+                      actionId: string
+                      runId: string
+                      phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+                    }
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
+              | {
+                  kind: "workflow-run"
+                  runId: string
+                  queuedAt: string
+                }
+              | {
+                  kind: "error"
+                  error: {
+                    code:
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.run_in_progress"
+                      | "action.timeout"
+                      | "agent.execution_failed"
+                      | "ai.usage_limit_exceeded"
+                      | "ai.usage_limit_unavailable"
+                      | "connector.adapter_invalid"
+                      | "connector.authorization_invalid"
+                      | "connector.authorization_required"
+                      | "connector.configuration_invalid"
+                      | "connector.credentials_unavailable"
+                      | "connector.not_found"
+                      | "connector.operation_conflict"
+                      | "connector.operation_in_progress"
+                      | "connector.provider_failed"
+                      | "connector.provider_unavailable"
+                      | "connector.replacement_required"
+                      | "connector.revocation_pending"
+                      | "dataset.not_found"
+                      | "dataset.version_incompatible"
+                      | "dataset.version_not_found"
+                      | "dataset.version_read_inconsistent"
+                      | "event.delivery_failed"
+                      | "internal.unexpected"
+                      | "queue.enqueue_failed"
+                      | "object.not_found"
+                      | "object.unique_violation"
+                      | "pipeline.step_failed"
+                      | "projection.definition_invalid"
+                      | "projection.execution_failed"
+                      | "projection.not_found"
+                      | "projection.run_already_terminal"
+                      | "projection.run_identity_mismatch"
+                      | "runtime.cancelled"
+                      | "runtime.stopping"
+                      | "vector.model_unavailable"
+                      | "vector.response_invalid"
+                      | "vector.outcome_unknown"
+                      | "storage.unavailable"
+                      | "sync.execution_failed"
+                      | "webhook.delivery_failed"
+                      | "webhook.delivery_rejected"
+                      | "workflow.node_failed"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    details?:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
           }
         | {
             type: "reasoning"
@@ -12323,6 +12584,7 @@ export type PostAgentThreadMessageData = {
         }
     timeZone?: string
     locale?: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
     attachments?: Array<{
       blobId: string
       digest: string
@@ -12464,6 +12726,7 @@ export type PostAgentThreadMessageResponses = {
         | {
             budgetTokens: number
           }
+      approvalMode?: "manual" | "accept-edits" | "auto"
       modelId?: string
       finishReason?:
         | "stop"
@@ -12743,6 +13006,7 @@ export type CancelAgentRunResponses = {
         | {
             budgetTokens: number
           }
+      approvalMode?: "manual" | "accept-edits" | "auto"
       modelId?: string
       finishReason?:
         | "stop"
@@ -12939,6 +13203,7 @@ export type RetryAgentRunResponses = {
         | {
             budgetTokens: number
           }
+      approvalMode?: "manual" | "accept-edits" | "auto"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13102,6 +13367,7 @@ export type ListAgentThreadRunsResponses = {
         | {
             budgetTokens: number
           }
+      approvalMode?: "manual" | "accept-edits" | "auto"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13262,6 +13528,7 @@ export type GetAgentRunResponses = {
       | {
           budgetTokens: number
         }
+    approvalMode?: "manual" | "accept-edits" | "auto"
     modelId?: string
     finishReason?:
       | "stop"
@@ -13355,6 +13622,834 @@ export type GetAgentRunResponses = {
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
 
+export type GetAgentPreferencesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/agent/preferences"
+}
+
+export type GetAgentPreferencesErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetAgentPreferencesError = GetAgentPreferencesErrors[keyof GetAgentPreferencesErrors]
+
+export type GetAgentPreferencesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    approvalMode: "manual" | "accept-edits" | "auto"
+    approvalModeSource: "default" | "fallback"
+  }
+}
+
+export type GetAgentPreferencesResponse =
+  GetAgentPreferencesResponses[keyof GetAgentPreferencesResponses]
+
+export type UpdateAgentPreferencesData = {
+  body: {
+    approvalMode: "manual" | "accept-edits" | "auto"
+  }
+  path?: never
+  query?: never
+  url: "/api/agent/preferences"
+}
+
+export type UpdateAgentPreferencesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type UpdateAgentPreferencesError =
+  UpdateAgentPreferencesErrors[keyof UpdateAgentPreferencesErrors]
+
+export type UpdateAgentPreferencesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    approvalMode: "manual" | "accept-edits" | "auto"
+    approvalModeSource: "default" | "fallback"
+  }
+}
+
+export type UpdateAgentPreferencesResponse =
+  UpdateAgentPreferencesResponses[keyof UpdateAgentPreferencesResponses]
+
+export type SetAgentThreadApprovalModeData = {
+  body: {
+    approvalMode: "manual" | "accept-edits" | "auto"
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/approval-mode"
+}
+
+export type SetAgentThreadApprovalModeErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type SetAgentThreadApprovalModeError =
+  SetAgentThreadApprovalModeErrors[keyof SetAgentThreadApprovalModeErrors]
+
+export type SetAgentThreadApprovalModeResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sandboxState?: {
+      name: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    owner: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+      displayName?: string
+    }
+    participants: Array<{
+      principal: {
+        type: "user"
+        id: string
+        displayName?: string
+      }
+      addedAt: string
+      addedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+    title?: string
+    sandboxParams?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+    }
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback"
+  }
+}
+
+export type SetAgentThreadApprovalModeResponse =
+  SetAgentThreadApprovalModeResponses[keyof SetAgentThreadApprovalModeResponses]
+
+export type ListAgentThreadApprovalsData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    status?: "pending" | "approved" | "denied" | "cancelled" | "superseded" | "expired"
+    runId?: string
+    limit?: string
+    offset?: string
+  }
+  url: "/api/agent-threads/{threadId}/approvals"
+}
+
+export type ListAgentThreadApprovalsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAgentThreadApprovalsError =
+  ListAgentThreadApprovalsErrors[keyof ListAgentThreadApprovalsErrors]
+
+export type ListAgentThreadApprovalsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    approvals: Array<{
+      id: string
+      threadId: string
+      runId: string
+      callerRunId: string
+      requestedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      mode: "manual" | "accept-edits"
+      status: "pending" | "approved" | "denied" | "cancelled" | "superseded" | "expired"
+      call:
+        | {
+            kind: "action"
+            actionId: string
+            subject:
+              | {
+                  kind: "none"
+                }
+              | {
+                  kind: "object"
+                  objectTypeId: string
+                  primaryId: string
+                }
+            params: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            actionRunId: string
+            effect: "ontology" | "external"
+          }
+        | {
+            kind: "workflow"
+            workflowId: string
+            input: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            workflowRunId: string
+          }
+      createdAt: string
+      expiresAt: string
+      decidedAt?: string
+      decidedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      outcome?:
+        | {
+            kind: "action-run"
+            runId: string
+            status: "succeeded" | "failed"
+            error?: {
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.timeout"
+                | "object.unique_violation"
+              message: string
+              retryable: boolean
+              at: string
+              details: {
+                actionId: string
+                runId: string
+                phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+              }
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+        | {
+            kind: "workflow-run"
+            runId: string
+            queuedAt: string
+          }
+        | {
+            kind: "error"
+            error: {
+              code:
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.run_in_progress"
+                | "action.timeout"
+                | "agent.execution_failed"
+                | "ai.usage_limit_exceeded"
+                | "ai.usage_limit_unavailable"
+                | "connector.adapter_invalid"
+                | "connector.authorization_invalid"
+                | "connector.authorization_required"
+                | "connector.configuration_invalid"
+                | "connector.credentials_unavailable"
+                | "connector.not_found"
+                | "connector.operation_conflict"
+                | "connector.operation_in_progress"
+                | "connector.provider_failed"
+                | "connector.provider_unavailable"
+                | "connector.replacement_required"
+                | "connector.revocation_pending"
+                | "dataset.not_found"
+                | "dataset.version_incompatible"
+                | "dataset.version_not_found"
+                | "dataset.version_read_inconsistent"
+                | "event.delivery_failed"
+                | "internal.unexpected"
+                | "queue.enqueue_failed"
+                | "object.not_found"
+                | "object.unique_violation"
+                | "pipeline.step_failed"
+                | "projection.definition_invalid"
+                | "projection.execution_failed"
+                | "projection.not_found"
+                | "projection.run_already_terminal"
+                | "projection.run_identity_mismatch"
+                | "runtime.cancelled"
+                | "runtime.stopping"
+                | "vector.model_unavailable"
+                | "vector.response_invalid"
+                | "vector.outcome_unknown"
+                | "storage.unavailable"
+                | "sync.execution_failed"
+                | "webhook.delivery_failed"
+                | "webhook.delivery_rejected"
+                | "workflow.node_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+      reported: boolean
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentThreadApprovalsResponse =
+  ListAgentThreadApprovalsResponses[keyof ListAgentThreadApprovalsResponses]
+
+export type DecideAgentApprovalData = {
+  body: {
+    decision: "approve" | "deny"
+    always?: true
+  }
+  path: {
+    threadId: string
+    approvalId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/approvals/{approvalId}/decision"
+}
+
+export type DecideAgentApprovalErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type DecideAgentApprovalError = DecideAgentApprovalErrors[keyof DecideAgentApprovalErrors]
+
+export type DecideAgentApprovalResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    approval: {
+      id: string
+      threadId: string
+      runId: string
+      callerRunId: string
+      requestedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      mode: "manual" | "accept-edits"
+      status: "pending" | "approved" | "denied" | "cancelled" | "superseded" | "expired"
+      call:
+        | {
+            kind: "action"
+            actionId: string
+            subject:
+              | {
+                  kind: "none"
+                }
+              | {
+                  kind: "object"
+                  objectTypeId: string
+                  primaryId: string
+                }
+            params: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            actionRunId: string
+            effect: "ontology" | "external"
+          }
+        | {
+            kind: "workflow"
+            workflowId: string
+            input: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            workflowRunId: string
+          }
+      createdAt: string
+      expiresAt: string
+      decidedAt?: string
+      decidedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      outcome?:
+        | {
+            kind: "action-run"
+            runId: string
+            status: "succeeded" | "failed"
+            error?: {
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.timeout"
+                | "object.unique_violation"
+              message: string
+              retryable: boolean
+              at: string
+              details: {
+                actionId: string
+                runId: string
+                phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+              }
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+        | {
+            kind: "workflow-run"
+            runId: string
+            queuedAt: string
+          }
+        | {
+            kind: "error"
+            error: {
+              code:
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.run_in_progress"
+                | "action.timeout"
+                | "agent.execution_failed"
+                | "ai.usage_limit_exceeded"
+                | "ai.usage_limit_unavailable"
+                | "connector.adapter_invalid"
+                | "connector.authorization_invalid"
+                | "connector.authorization_required"
+                | "connector.configuration_invalid"
+                | "connector.credentials_unavailable"
+                | "connector.not_found"
+                | "connector.operation_conflict"
+                | "connector.operation_in_progress"
+                | "connector.provider_failed"
+                | "connector.provider_unavailable"
+                | "connector.replacement_required"
+                | "connector.revocation_pending"
+                | "dataset.not_found"
+                | "dataset.version_incompatible"
+                | "dataset.version_not_found"
+                | "dataset.version_read_inconsistent"
+                | "event.delivery_failed"
+                | "internal.unexpected"
+                | "queue.enqueue_failed"
+                | "object.not_found"
+                | "object.unique_violation"
+                | "pipeline.step_failed"
+                | "projection.definition_invalid"
+                | "projection.execution_failed"
+                | "projection.not_found"
+                | "projection.run_already_terminal"
+                | "projection.run_identity_mismatch"
+                | "runtime.cancelled"
+                | "runtime.stopping"
+                | "vector.model_unavailable"
+                | "vector.response_invalid"
+                | "vector.outcome_unknown"
+                | "storage.unavailable"
+                | "sync.execution_failed"
+                | "webhook.delivery_failed"
+                | "webhook.delivery_rejected"
+                | "workflow.node_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+      reported: boolean
+    }
+  }
+}
+
+export type DecideAgentApprovalResponse =
+  DecideAgentApprovalResponses[keyof DecideAgentApprovalResponses]
+
+export type ListAgentApprovalsData = {
+  body?: never
+  path?: never
+  query?: {
+    status?: "pending" | "approved" | "denied" | "cancelled" | "superseded" | "expired"
+    limit?: string
+    offset?: string
+  }
+  url: "/api/agent-approvals"
+}
+
+export type ListAgentApprovalsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAgentApprovalsError = ListAgentApprovalsErrors[keyof ListAgentApprovalsErrors]
+
+export type ListAgentApprovalsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    approvals: Array<{
+      id: string
+      threadId: string
+      runId: string
+      callerRunId: string
+      requestedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      mode: "manual" | "accept-edits"
+      status: "pending" | "approved" | "denied" | "cancelled" | "superseded" | "expired"
+      call:
+        | {
+            kind: "action"
+            actionId: string
+            subject:
+              | {
+                  kind: "none"
+                }
+              | {
+                  kind: "object"
+                  objectTypeId: string
+                  primaryId: string
+                }
+            params: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            actionRunId: string
+            effect: "ontology" | "external"
+          }
+        | {
+            kind: "workflow"
+            workflowId: string
+            input: {
+              [key: string]:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+            }
+            workflowRunId: string
+          }
+      createdAt: string
+      expiresAt: string
+      decidedAt?: string
+      decidedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      outcome?:
+        | {
+            kind: "action-run"
+            runId: string
+            status: "succeeded" | "failed"
+            error?: {
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.timeout"
+                | "object.unique_violation"
+              message: string
+              retryable: boolean
+              at: string
+              details: {
+                actionId: string
+                runId: string
+                phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+              }
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+        | {
+            kind: "workflow-run"
+            runId: string
+            queuedAt: string
+          }
+        | {
+            kind: "error"
+            error: {
+              code:
+                | "action.phase_failed"
+                | "action.read_conflict"
+                | "action.rejected"
+                | "action.run_in_progress"
+                | "action.timeout"
+                | "agent.execution_failed"
+                | "ai.usage_limit_exceeded"
+                | "ai.usage_limit_unavailable"
+                | "connector.adapter_invalid"
+                | "connector.authorization_invalid"
+                | "connector.authorization_required"
+                | "connector.configuration_invalid"
+                | "connector.credentials_unavailable"
+                | "connector.not_found"
+                | "connector.operation_conflict"
+                | "connector.operation_in_progress"
+                | "connector.provider_failed"
+                | "connector.provider_unavailable"
+                | "connector.replacement_required"
+                | "connector.revocation_pending"
+                | "dataset.not_found"
+                | "dataset.version_incompatible"
+                | "dataset.version_not_found"
+                | "dataset.version_read_inconsistent"
+                | "event.delivery_failed"
+                | "internal.unexpected"
+                | "queue.enqueue_failed"
+                | "object.not_found"
+                | "object.unique_violation"
+                | "pipeline.step_failed"
+                | "projection.definition_invalid"
+                | "projection.execution_failed"
+                | "projection.not_found"
+                | "projection.run_already_terminal"
+                | "projection.run_identity_mismatch"
+                | "runtime.cancelled"
+                | "runtime.stopping"
+                | "vector.model_unavailable"
+                | "vector.response_invalid"
+                | "vector.outcome_unknown"
+                | "storage.unavailable"
+                | "sync.execution_failed"
+                | "webhook.delivery_failed"
+                | "webhook.delivery_rejected"
+                | "workflow.node_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              httpStatus?: number
+              redacted?: true
+              truncated?: true
+            }
+          }
+      reported: boolean
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentApprovalsResponse =
+  ListAgentApprovalsResponses[keyof ListAgentApprovalsResponses]
+
 export type GetObservedAgentThreadData = {
   body?: never
   path: {
@@ -13445,6 +14540,8 @@ export type GetObservedAgentThreadResponses = {
     messageCount: number
     createdAt: string
     updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback"
   }
 }
 
@@ -13530,6 +14627,130 @@ export type ListObservedAgentThreadMessagesResponses = {
           }
         | {
             type: "continuation"
+          }
+        | {
+            type: "approval-outcome"
+            approvalId: string
+            status: "approved" | "denied" | "cancelled" | "superseded" | "expired"
+            call:
+              | {
+                  kind: "action"
+                  actionId: string
+                  subject:
+                    | {
+                        kind: "none"
+                      }
+                    | {
+                        kind: "object"
+                        objectTypeId: string
+                        primaryId: string
+                      }
+                }
+              | {
+                  kind: "workflow"
+                  workflowId: string
+                }
+            outcome?:
+              | {
+                  kind: "action-run"
+                  runId: string
+                  status: "succeeded" | "failed"
+                  error?: {
+                    code:
+                      | "internal.unexpected"
+                      | "runtime.cancelled"
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.timeout"
+                      | "object.unique_violation"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    details: {
+                      actionId: string
+                      runId: string
+                      phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+                    }
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
+              | {
+                  kind: "workflow-run"
+                  runId: string
+                  queuedAt: string
+                }
+              | {
+                  kind: "error"
+                  error: {
+                    code:
+                      | "action.phase_failed"
+                      | "action.read_conflict"
+                      | "action.rejected"
+                      | "action.run_in_progress"
+                      | "action.timeout"
+                      | "agent.execution_failed"
+                      | "ai.usage_limit_exceeded"
+                      | "ai.usage_limit_unavailable"
+                      | "connector.adapter_invalid"
+                      | "connector.authorization_invalid"
+                      | "connector.authorization_required"
+                      | "connector.configuration_invalid"
+                      | "connector.credentials_unavailable"
+                      | "connector.not_found"
+                      | "connector.operation_conflict"
+                      | "connector.operation_in_progress"
+                      | "connector.provider_failed"
+                      | "connector.provider_unavailable"
+                      | "connector.replacement_required"
+                      | "connector.revocation_pending"
+                      | "dataset.not_found"
+                      | "dataset.version_incompatible"
+                      | "dataset.version_not_found"
+                      | "dataset.version_read_inconsistent"
+                      | "event.delivery_failed"
+                      | "internal.unexpected"
+                      | "queue.enqueue_failed"
+                      | "object.not_found"
+                      | "object.unique_violation"
+                      | "pipeline.step_failed"
+                      | "projection.definition_invalid"
+                      | "projection.execution_failed"
+                      | "projection.not_found"
+                      | "projection.run_already_terminal"
+                      | "projection.run_identity_mismatch"
+                      | "runtime.cancelled"
+                      | "runtime.stopping"
+                      | "vector.model_unavailable"
+                      | "vector.response_invalid"
+                      | "vector.outcome_unknown"
+                      | "storage.unavailable"
+                      | "sync.execution_failed"
+                      | "webhook.delivery_failed"
+                      | "webhook.delivery_rejected"
+                      | "workflow.node_failed"
+                    message: string
+                    retryable: boolean
+                    at: string
+                    /**
+                     * Any JSON-compatible value.
+                     */
+                    details?:
+                      | string
+                      | number
+                      | boolean
+                      | Array<unknown>
+                      | {
+                          [key: string]: unknown
+                        }
+                      | null
+                    httpStatus?: number
+                    redacted?: true
+                    truncated?: true
+                  }
+                }
           }
         | {
             type: "reasoning"
@@ -13870,6 +15091,7 @@ export type ListObservedAgentThreadRunsResponses = {
         | {
             budgetTokens: number
           }
+      approvalMode?: "manual" | "accept-edits" | "auto"
       modelId?: string
       finishReason?:
         | "stop"

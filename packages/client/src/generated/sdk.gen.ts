@@ -71,6 +71,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadErrors,
   CreateFileUploadResponses,
+  DecideAgentApprovalData,
+  DecideAgentApprovalErrors,
+  DecideAgentApprovalResponses,
   DeleteAgentMemoryData,
   DeleteAgentMemoryErrors,
   DeleteAgentMemoryResponses,
@@ -141,6 +144,9 @@ import type {
   GetAgentMessageFileContentData,
   GetAgentMessageFileContentErrors,
   GetAgentMessageFileContentResponses,
+  GetAgentPreferencesData,
+  GetAgentPreferencesErrors,
+  GetAgentPreferencesResponses,
   GetAgentResponses,
   GetAgentRunData,
   GetAgentRunErrors,
@@ -315,9 +321,15 @@ import type {
   ListActivityVisitsData,
   ListActivityVisitsErrors,
   ListActivityVisitsResponses,
+  ListAgentApprovalsData,
+  ListAgentApprovalsErrors,
+  ListAgentApprovalsResponses,
   ListAgentMemoryRevisionsData,
   ListAgentMemoryRevisionsErrors,
   ListAgentMemoryRevisionsResponses,
+  ListAgentThreadApprovalsData,
+  ListAgentThreadApprovalsErrors,
+  ListAgentThreadApprovalsResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -502,6 +514,9 @@ import type {
   SelectConnectorConnectionRunAccountData,
   SelectConnectorConnectionRunAccountErrors,
   SelectConnectorConnectionRunAccountResponses,
+  SetAgentThreadApprovalModeData,
+  SetAgentThreadApprovalModeErrors,
+  SetAgentThreadApprovalModeResponses,
   SetArtifactStateData,
   SetArtifactStateErrors,
   SetArtifactStateResponses,
@@ -529,6 +544,9 @@ import type {
   TranscribeAudioData,
   TranscribeAudioErrors,
   TranscribeAudioResponses,
+  UpdateAgentPreferencesData,
+  UpdateAgentPreferencesErrors,
+  UpdateAgentPreferencesResponses,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyErrors,
   UpdateAiLimitPolicyResponses,
@@ -3056,6 +3074,133 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * Get your Agent preferences
+ */
+export const getAgentPreferences = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAgentPreferencesData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetAgentPreferencesResponses,
+    GetAgentPreferencesErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent/preferences",
+    ...options,
+  })
+
+/**
+ * Update your Agent preferences
+ *
+ * `approvalMode` is your default in the threads where you chose none: `manual` asks before every action and workflow, `accept-edits` runs the actions that only change Sixb, `auto` runs everything.
+ */
+export const updateAgentPreferences = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAgentPreferencesData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    UpdateAgentPreferencesResponses,
+    UpdateAgentPreferencesErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent/preferences",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Choose your approval mode in an agent thread
+ *
+ * Applies to your next turns in the thread; other participants keep theirs. `null` follows your default again. A message can still pass its own `approvalMode`.
+ */
+export const setAgentThreadApprovalMode = <ThrowOnError extends boolean = false>(
+  options: Options<SetAgentThreadApprovalModeData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    SetAgentThreadApprovalModeResponses,
+    SetAgentThreadApprovalModeErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/approval-mode",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * List an agent thread's held calls
+ *
+ * Oldest first. Whoever reads the thread reads its approvals.
+ */
+export const listAgentThreadApprovals = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadApprovalsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadApprovalsResponses,
+    ListAgentThreadApprovalsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/approvals",
+    ...options,
+  })
+
+/**
+ * Approve or deny a held agent call
+ *
+ * Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. The Agent reads how it ended at the start of the thread's next message. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.
+ */
+export const decideAgentApproval = <ThrowOnError extends boolean = false>(
+  options: Options<DecideAgentApprovalData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    DecideAgentApprovalResponses,
+    DecideAgentApprovalErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/approvals/{approvalId}/decision",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * List the calls held for your decision
+ *
+ * Your own, across threads, oldest first.
+ */
+export const listAgentApprovals = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAgentApprovalsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListAgentApprovalsResponses,
+    ListAgentApprovalsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-approvals",
     ...options,
   })
 

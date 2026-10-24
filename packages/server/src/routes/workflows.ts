@@ -1312,6 +1312,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           const input = {
             workflowId: params.workflowId,
             input: parsedBody.input ?? {},
+            ...(parsedBody.runId === undefined ? {} : { runId: parsedBody.runId }),
             source: { type: "manual" } as const,
           }
           const result = await sixb.workflows.requestById(input)

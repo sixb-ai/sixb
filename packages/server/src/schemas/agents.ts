@@ -9,6 +9,13 @@ import {
   type SixbFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
+import {
+  AgentApprovalCallSummarySchema,
+  AgentApprovalModeSchema,
+  AgentApprovalModeSourceSchema,
+  AgentApprovalOutcomeSchema,
+  AgentApprovalStatusSchema,
+} from "./agent-approvals"
 import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { ErrorResponseSchema, JsonValueSchema, sixbFailureSchema } from "./common"
@@ -138,6 +145,10 @@ export const AgentThreadSchema = z.object({
   messageCount: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** Your mode in this thread, when the thread is read alone. */
+  approvalMode: AgentApprovalModeSchema.optional(),
+  /** Where your mode in this thread comes from, with `approvalMode`. */
+  approvalModeSource: AgentApprovalModeSourceSchema.optional(),
 })
 
 export const AgentThreadListResponseSchema = z.object({
@@ -227,9 +238,19 @@ const AgentContinuationPartSchema = z.object({
   type: z.literal("continuation"),
 })
 
+/** How a call the Agent held ended; Sixb writes it at the start of the next message. */
+const AgentApprovalOutcomePartSchema = z.object({
+  type: z.literal("approval-outcome"),
+  approvalId: z.string(),
+  status: AgentApprovalStatusSchema.exclude(["pending"]),
+  call: AgentApprovalCallSummarySchema,
+  outcome: AgentApprovalOutcomeSchema.optional(),
+})
+
 export const AgentMessagePartSchema = z.union([
   AgentTextPartSchema,
   AgentContinuationPartSchema,
+  AgentApprovalOutcomePartSchema,
   AgentReasoningPartSchema,
   AgentStepStartPartSchema,
   AgentFilePartSchema,
@@ -298,6 +319,8 @@ export const PostAgentMessageBodySchema = z
     timeZone: z.string().trim().min(1).max(100).optional(),
     /** BCP 47 language of the person asking. */
     locale: z.string().trim().min(1).max(100).optional(),
+    /** What this turn may change without asking you. Omitted: your choice in the thread. */
+    approvalMode: AgentApprovalModeSchema.optional(),
     attachments: z.array(FileRefSchema).optional(),
     context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
     messageId: z.string().trim().min(1).optional(),
@@ -334,6 +357,8 @@ export const AgentRunSchema = z.object({
   /** With tiers, the tier of the model the turn runs on. */
   tier: z.enum(LANGUAGE_MODEL_TIERS).optional(),
   reasoning: ModelReasoningSchema.optional(),
+  /** What the turn could change without asking. Absent on turns from before approval modes. */
+  approvalMode: AgentApprovalModeSchema.optional(),
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AiUsageSummarySchema.optional(),

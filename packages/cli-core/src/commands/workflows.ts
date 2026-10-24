@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto"
 import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
-import { fail, writeJson, writeText } from "../output"
+import { fail, writeJson, writeRequestResult, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { readJson } from "./shared"
 
@@ -21,13 +22,18 @@ export async function workflows(api: ApiClient, args: readonly string[]): Promis
     const {
       positionals: [workflowId],
       options,
-    } = parseCommandArgs(rest, { "--file": "string" }, "workflows start", 1)
+    } = parseCommandArgs(rest, { "--file": "string", "--run-id": "string" }, "workflows start", 1)
     const input: unknown = options["--file"] ? await readJson(options["--file"]) : {}
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.")
     }
-    return writeJson(
-      await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, { input })
+    // Every start names its run, so a repeated request returns the same run instead of another.
+    const runId = options["--run-id"] ?? `run_${randomUUID()}`
+    return writeRequestResult(
+      await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, {
+        input,
+        runId,
+      })
     )
   }
   fail(`Unknown workflows command '${sub}'.`)

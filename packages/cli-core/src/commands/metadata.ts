@@ -238,7 +238,8 @@ History options:
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
 contains that parameter object; use - to read standard input. \`actions request\` runs the Action
 and prints its finished run, with its status and any error. It waits at most 25 seconds: a run that
-takes longer keeps running, and the error names the run to read with \`action-runs get\`.`,
+takes longer keeps running, and the error names the run to read with \`action-runs get\`. A request
+that waits for the user's approval prints \`"status": "awaiting_approval"\` and exits with code 4.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -259,9 +260,10 @@ List options:
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
-  sixb workflows start <workflow-id> [--file <path|->]
+  sixb workflows start <workflow-id> [--file <path|->] [--run-id <id>]
 
-The JSON file contains the workflow input object. Use - to read standard input.`,
+The JSON file contains the workflow input object. Use - to read standard input. A start that waits
+for the user's approval prints \`"status": "awaiting_approval"\` and exits with code 4.`,
   users: `Usage:
   sixb users list [options]
   sixb users search <text> [options]

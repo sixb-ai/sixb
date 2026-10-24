@@ -992,7 +992,10 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         expect(api.requests[12]?.url.searchParams.get("limit")).toBe("20")
         expect(api.requests[12]?.url.searchParams.get("order")).toBe("desc")
         expect(api.requests[12]?.url.searchParams.get("startedAfter")).toBe("2026-01-01T00:00:00Z")
-        expect(api.requests[18]?.body).toEqual({ input: { value: "sent" } })
+        expect(api.requests[18]?.body).toEqual({
+          input: { value: "sent" },
+          runId: expect.stringMatching(/^run_/),
+        })
         expect(api.requests[19]?.url.searchParams.get("limit")).toBe("3")
         expect(api.requests[19]?.url.searchParams.get("order")).toBe("desc")
         expect(api.requests[19]?.url.searchParams.get("startedBefore")).toBe("2026-01-02T00:00:00Z")
@@ -1283,7 +1286,10 @@ export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
           params: { value: "sent" },
           subject: { kind: "object", objectTypeId: "ServiceCase", primaryId: "case-1" },
         })
-        expect(bodyOf("/api/workflows/review-case/runs")).toEqual({ input: { value: "sent" } })
+        expect(bodyOf("/api/workflows/review-case/runs")).toEqual({
+          input: { value: "sent" },
+          runId: expect.stringMatching(/^run_/),
+        })
         expect(String(bodyOf("/api/files"))).toContain("upload contents")
         expect(await readFile(downloadPath, "utf8")).toBe("downloaded bytes")
         expect((await readdir(tempDir)).sort()).toEqual([
