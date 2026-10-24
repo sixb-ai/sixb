@@ -172,7 +172,7 @@ describe("Sixb picks the model of each turn", () => {
     await createUser(list.host)
     listed.answer(HEAVY)
     const fromList = await userScope(list.host).agent.runs.request({ text: "Why?" })
-    expect(fromList.run.spec).toEqual({ approvalMode: "auto", model: ref("sonnet") })
+    expect(fromList.run.spec).toEqual({ approvalMode: "manual", model: ref("sonnet") })
     expect(listed.evaluate).toHaveBeenCalledTimes(0)
 
     // Proven by removal: drop the decision check; the turn warns of a decision it cannot ask.
@@ -180,7 +180,7 @@ describe("Sixb picks the model of each turn", () => {
     await createUser(tiered.host)
     const fromTiers = await userScope(tiered.host).agent.runs.request({ text: "Why?" })
     expect(fromTiers.run.spec).toEqual({
-      approvalMode: "auto",
+      approvalMode: "manual",
       model: ref("sonnet"),
       tier: "standard",
     })
@@ -201,7 +201,7 @@ describe("Sixb picks the model of each turn", () => {
       decision.answer(probabilities)
       const { run } = await sixb.agent.runs.request({ text: "How many open orders?" })
       expect(run.spec).toEqual({
-        approvalMode: "auto",
+        approvalMode: "manual",
         model: ref(modelId),
         tier,
         tierProbabilities: probabilities,
@@ -237,7 +237,7 @@ describe("Sixb picks the model of each turn", () => {
     setSystemTime(new Date("2026-10-24T10:00:00.000Z"))
     // An explicit model asks nothing, and its turn takes the tier the model is in.
     const first = await sixb.agent.runs.request({ text: "Compare", model: ref("gpt") })
-    expect(first.run.spec).toEqual({ approvalMode: "auto", model: ref("gpt"), tier: "heavy" })
+    expect(first.run.spec).toEqual({ approvalMode: "manual", model: ref("gpt"), tier: "heavy" })
     expect(decision.evaluate).toHaveBeenCalledTimes(0)
     await finish(host, first.run)
     const threadId = first.run.threadId
@@ -270,7 +270,7 @@ describe("Sixb picks the model of each turn", () => {
     const before = setup({ language: [opus, sonnet] }, deps)
     await createUser(before.host)
     const first = await userScope(before.host).agent.runs.request({ text: "Why?" })
-    expect(first.run.spec).toEqual({ approvalMode: "auto", model: ref("opus") })
+    expect(first.run.spec).toEqual({ approvalMode: "manual", model: ref("opus") })
     await finish(before.host, first.run)
 
     const decision = router()
@@ -299,7 +299,7 @@ describe("Sixb picks the model of each turn", () => {
 
     const { run } = await sixb.agent.runs.request({ text: "Why?", reasoning: "low" })
     expect(run.spec).toEqual({
-      approvalMode: "auto",
+      approvalMode: "manual",
       model: ref("sonnet"),
       tier: "standard",
       reasoning: "low",
@@ -325,7 +325,11 @@ describe("Sixb picks the model of each turn", () => {
       threadId: first.run.threadId,
       continue: true,
     })
-    expect(continued.run.spec).toEqual({ approvalMode: "auto", model: ref("opus"), tier: "heavy" })
+    expect(continued.run.spec).toEqual({
+      approvalMode: "manual",
+      model: ref("opus"),
+      tier: "heavy",
+    })
 
     await host.storage.agents!.runs.finishQueued({
       projectId: host.id,
@@ -401,7 +405,7 @@ describe("Sixb picks the model of each turn", () => {
     setSystemTime(new Date("2026-10-24T10:01:00.000Z"))
     fails = true
     const { run } = await sixb.agent.runs.request({ threadId: first.run.threadId, text: "And?" })
-    expect(run.spec).toEqual({ approvalMode: "auto", model: ref("opus"), tier: "heavy" })
+    expect(run.spec).toEqual({ approvalMode: "manual", model: ref("opus"), tier: "heavy" })
   })
 
   test("runs on standard when the decision model is too slow, even if it ignores the signal", async () => {
@@ -420,7 +424,7 @@ describe("Sixb picks the model of each turn", () => {
     await asked
     jest.advanceTimersByTime(2_000)
     const { run } = await request
-    expect(run.spec).toEqual({ approvalMode: "auto", model: ref("sonnet"), tier: "standard" })
+    expect(run.spec).toEqual({ approvalMode: "manual", model: ref("sonnet"), tier: "standard" })
   })
 
   test("a cancelled request still cancels, before anything is written", async () => {

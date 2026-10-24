@@ -271,7 +271,9 @@ describe("agent system prompt", () => {
 
     expect(prompt).toContain("<sixb_mode_rules>")
     expect(prompt).toContain("show a concise preview of the operation, subject, inputs")
-    expect(prompt).toContain("do not execute it until the user confirms")
+    // Sixb asks for approval: a "yes" in the text is never one, so the model must not ask for it.
+    expect(prompt).toContain("Never ask for confirmation in text")
+    expect(prompt).not.toContain("until the user confirms")
     expect(prompt).toContain("Speak like a helpful teammate")
     expect(prompt).toContain("Keep intermediate work silent")
     expect(prompt).toContain("commands, redirects, paths, sandbox restrictions")

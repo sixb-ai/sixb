@@ -17,12 +17,11 @@ import type { AgentApprovalCallSummary, AgentApprovalOutcomePart } from "./messa
 import { publishAgentApprovalActivity } from "./streams/protocol"
 
 /**
- * The mode of a turn whose requester chose none, in the thread or as their default.
- *
- * `auto` is how the Agent worked before approval modes: until the app shows held calls, a stricter
- * default would hold calls nobody sees. It becomes `manual` once it does.
+ * The mode of a turn whose requester chose none, in the thread or as their default: every action
+ * and workflow waits for them. A run admitted before approval modes keeps `auto`
+ * ({@link agentRunApprovalMode}).
  */
-const FALLBACK_AGENT_APPROVAL_MODE: AgentApprovalMode = "auto"
+const FALLBACK_AGENT_APPROVAL_MODE: AgentApprovalMode = "manual"
 
 /** How long a held call waits for its requester. */
 export const AGENT_APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1_000

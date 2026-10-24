@@ -74,7 +74,7 @@ describe("single project Agent", () => {
     expect(run.spec).toEqual({
       model: { provider: "test", modelId: "test-model" },
       reasoning: "low",
-      approvalMode: "auto",
+      approvalMode: "manual",
     })
     expect(
       await storage.executions.getById({ projectId: host.id, id: run.executionId })
@@ -100,7 +100,7 @@ describe("single project Agent", () => {
     expect(first.run.spec).toEqual({
       model: { provider: "test", modelId: "test-model" },
       reasoning: "low",
-      approvalMode: "auto",
+      approvalMode: "manual",
     })
     const plain = await sixb.agent.runs.request({
       text: "Hi",
@@ -108,7 +108,7 @@ describe("single project Agent", () => {
     })
     expect(plain.run.spec).toEqual({
       model: { provider: "test", modelId: "plain-model" },
-      approvalMode: "auto",
+      approvalMode: "manual",
     })
   })
 

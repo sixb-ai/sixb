@@ -1562,11 +1562,11 @@ describe("approval mode routes", () => {
 
     expect(await send("GET", "/api/agent/preferences")).toEqual({
       status: 200,
-      body: { approvalMode: "auto", approvalModeSource: "fallback" },
+      body: { approvalMode: "manual", approvalModeSource: "fallback" },
     })
-    expect(await send("PUT", "/api/agent/preferences", { approvalMode: "manual" })).toEqual({
+    expect(await send("PUT", "/api/agent/preferences", { approvalMode: "accept-edits" })).toEqual({
       status: 200,
-      body: { approvalMode: "manual", approvalModeSource: "default" },
+      body: { approvalMode: "accept-edits", approvalModeSource: "default" },
     })
     expect(await send("PUT", "/api/agent/preferences", { approvalMode: "ask" })).toMatchObject({
       status: 422,
@@ -1585,7 +1585,7 @@ describe("approval mode routes", () => {
       await send("PUT", "/api/agent-threads/thread-1/approval-mode", { approvalMode: null })
     ).toMatchObject({
       status: 200,
-      body: { approvalMode: "manual", approvalModeSource: "default" },
+      body: { approvalMode: "accept-edits", approvalModeSource: "default" },
     })
 
     const waiting = await send("GET", "/api/agent-approvals?status=pending")
