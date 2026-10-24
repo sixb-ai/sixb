@@ -1,5 +1,6 @@
 import { isRuntimeAllowed } from "../authorization"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import { readerViewConditions } from "../execution/authorized-object-reader"
 import type { DefinitionCatalog } from "../runtime/definitions"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ListActiveRuleStatesInput, ListActiveRuleStatesResult } from "../storage/rules"
@@ -22,12 +23,16 @@ export function createRulesRuntime(
   source: DefinitionCatalog<RuleDefinition>
 ): RulesRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
+
+  // A rule on a type the reader views under a condition shows: the reader sees some of its objects.
   const visible = (rule: RuleDefinition) => {
     if (authority.type === "denied" || authority.type === "delegated") return false
-    return isRuntimeAllowed(runtime, {
-      kind: "object.view",
-      objectTypeId: rule.subject.objectTypeId,
-    })
+
+    const objectTypeId = rule.subject.objectTypeId
+    return (
+      isRuntimeAllowed(runtime, { kind: "object.view", objectTypeId }) ||
+      readerViewConditions(runtime.objectReader).has(objectTypeId)
+    )
   }
 
   return {
@@ -41,12 +46,33 @@ export function createRulesRuntime(
       return rule && visible(rule) ? rule : null
     },
     states: {
-      list: (input = {}) => {
+      list: async (input = {}) => {
         if (authority.type === "denied" || authority.type === "delegated") {
-          return Promise.resolve({ states: [], hasMore: false, total: 0 })
+          return { states: [], hasMore: false, total: 0 }
         }
         const storage = runtime.storage.rules
-        if (!storage) return Promise.resolve({ states: [], hasMore: false, total: 0 })
+        if (!storage) return { states: [], hasMore: false, total: 0 }
+
+        // Storage cannot tell which objects of a type viewed under a condition the reader sees, so
+        // their matches list one object at a time, once the reader reads it. A listing that names
+        // no object leaves them out: it lists only the types the reader views whole.
+        const { objectTypeId, primaryId } = input
+        if (
+          authority.type === "principal" &&
+          objectTypeId !== undefined &&
+          primaryId !== undefined &&
+          readerViewConditions(runtime.objectReader).has(objectTypeId)
+        ) {
+          const object = await runtime.objectReader.getByPrimaryId({ objectTypeId, primaryId })
+          if (!object) return { states: [], hasMore: false, total: 0 }
+
+          return storage.listActive({
+            ...input,
+            objectTypeIds: [objectTypeId],
+            projectId: runtime.projectId,
+          })
+        }
+
         return storage.listActive({
           ...input,
           objectTypeIds:

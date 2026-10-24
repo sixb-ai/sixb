@@ -493,14 +493,6 @@ describe("surfaces that do not apply view conditions deny the type", () => {
     expect(await operator.actions.runs.getById("act_trusted")).toBeNull()
     expect((await operator.actions.runs.list()).runs).toEqual([])
   })
-
-  test("rules", async () => {
-    const { sixbFor } = await deploy()
-    const operator = sixbFor(["open"])
-
-    expect(operator.rules.list()).toEqual([])
-    expect(operator.rules.getById(openTicket.id)).toBeNull()
-  })
 })
 
 describe("share issuance through view conditions", () => {
