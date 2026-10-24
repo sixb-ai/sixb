@@ -140,9 +140,17 @@ export class PgAgentThreadStore implements AgentThreadStore {
                 WHERE project_id = ${input.projectId} AND id = ${source.active_run_id}
               `
 
-        // Only what the plan needs: the parts are copied by the database, not through here.
-        const messages = await tx<Pick<AgentMessageRow, "id" | "seq">[]>`
-          SELECT id, seq FROM agent_messages
+        // Only what the plan needs: the parts are copied by the database, not through here. A
+        // message of approval outcomes only is not counted (`countsAsThreadMessage`).
+        const messages = await tx<(Pick<AgentMessageRow, "id" | "seq"> & { counted: boolean })[]>`
+          SELECT id, seq,
+            NOT (
+              jsonb_array_length(parts) > 0 AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements(parts) AS part
+                WHERE part->>'type' <> 'approval-outcome'
+              )
+            ) AS counted
+          FROM agent_messages
           WHERE project_id = ${input.projectId} AND thread_id = ${source.id}
           ORDER BY seq ASC
         `
@@ -158,7 +166,11 @@ export class PgAgentThreadStore implements AgentThreadStore {
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
-            messages: messages.map((message) => ({ id: message.id, seq: Number(message.seq) })),
+            messages: messages.map((message) => ({
+              id: message.id,
+              seq: Number(message.seq),
+              counted: message.counted,
+            })),
             checkpoints: checkpoints.map(rowToContextCheckpointRecord),
           },
           "SixbPg"

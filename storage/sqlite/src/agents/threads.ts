@@ -133,12 +133,26 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
 
         const activeRun = source.active_run_id === null ? null : this.findActiveRun(input, source)
 
-        // Only what the plan needs: the parts are copied by the database, not through here.
-        const messages = this.db
-          .query(
-            "SELECT id, seq FROM agent_messages WHERE project_id = ? AND thread_id = ? ORDER BY seq ASC"
-          )
-          .all(input.projectId, source.id) as Pick<AgentMessageRow, "id" | "seq">[]
+        // Only what the plan needs: the parts are copied by the database, not through here. A
+        // message of approval outcomes only is not counted (`countsAsThreadMessage`).
+        const messages = (
+          this.db
+            .query(
+              `
+              SELECT id, seq,
+                NOT (
+                  json_array_length(parts) > 0 AND NOT EXISTS (
+                    SELECT 1 FROM json_each(agent_messages.parts)
+                    WHERE json_extract(value, '$.type') <> 'approval-outcome'
+                  )
+                ) AS counted
+              FROM agent_messages WHERE project_id = ? AND thread_id = ? ORDER BY seq ASC
+            `
+            )
+            .all(input.projectId, source.id) as (Pick<AgentMessageRow, "id" | "seq"> & {
+            counted: number
+          })[]
+        ).map((row) => ({ id: row.id, seq: row.seq, counted: row.counted === 1 }))
 
         const checkpoints = this.db
           .query(

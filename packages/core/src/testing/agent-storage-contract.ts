@@ -1776,6 +1776,70 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // Guard proof: make `countsAsThreadMessage` return true; the thread, its fork and the count
+    // after a run's messages go read 2, 2 and 2.
+    test("counts only the messages the conversation shows", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        await storage.messages.append({
+          id: "msg_user_1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Mark INV-2041 paid" }],
+          createdAt: at("2026-06-23T10:00:30.000Z"),
+        })
+        // What Sixb writes to resume a turn once its calls are decided: the chat shows none of it.
+        await storage.messages.append({
+          id: "msg_resume_1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          authorPrincipal: owner,
+          parts: [
+            {
+              type: "approval-outcome",
+              approvalId: "apr_1",
+              status: "approved",
+              call: {
+                kind: "action",
+                actionId: "mark-paid",
+                subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-2041" },
+              },
+            },
+          ],
+          createdAt: at("2026-06-23T10:02:00.000Z"),
+        })
+
+        const thread = await storage.threads.getById({ projectId, id: "thr_1" })
+        expect(thread).toMatchObject({ messageCount: 1 })
+        // It is still the thread's latest message.
+        expect(thread?.lastMessageAt?.toISOString()).toBe("2026-06-23T10:02:00.000Z")
+        expect((await storage.threads.fork(forkInput())).messageCount).toBe(1)
+
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
+        await storage.messages.append({
+          id: "msg_asst_1",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Marked paid." }],
+          createdAt: at("2026-06-23T10:03:00.000Z"),
+        })
+        expect(await storage.threads.getById({ projectId, id: "thr_1" })).toMatchObject({
+          messageCount: 2,
+        })
+
+        await storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+        expect(await storage.threads.getById({ projectId, id: "thr_1" })).toMatchObject({
+          messageCount: 1,
+        })
+      })
+    })
+
     test("lists messages with role filter, ordering, and pagination", async () => {
       await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
