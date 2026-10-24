@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import { projectAgentThreadModelContext } from "../agents/thread-context-projection"
 import type { Principal } from "../auth"
+import type { FileRef } from "../blob-storage/types"
 import type { SixbFailure } from "../errors/types"
 import {
   type AddAgentThreadParticipantsInput,
@@ -133,6 +135,18 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
   }
 }
 
+/** A content-addressed reference, as blob storage returns it. */
+function testFileRef(fileName: string): FileRef {
+  const hex = createHash("sha256").update(fileName).digest("hex")
+  return {
+    blobId: `blob_${hex}`,
+    digest: `sha256:${hex}`,
+    sizeBytes: 12,
+    fileName,
+    mediaType: "text/csv",
+  }
+}
+
 function subagentInput(
   parentExecutionToken: string,
   overrides: Partial<CreateSubagentRunInput> = {}
@@ -151,6 +165,7 @@ function subagentInput(
       task: "Research the open orders.",
       toolNames: ["search_orders"],
       maxSteps: 25,
+      files: [{ path: "reports/orders.csv", fileRef: testFileRef("orders.csv") }],
     },
     thread: { id: `thread_${id}`, create: true },
     trigger: { id: `task_${id}`, parts: [{ type: "text", text: "Research the open orders." }] },
@@ -1523,7 +1538,24 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           "invalid_input"
         )
 
-        const result = { text: "Three open orders." }
+        await expectAgentError(
+          storage.runs.finish({
+            projectId,
+            id: "child_1",
+            executionToken: "child_token",
+            status: "succeeded",
+            result: {
+              text: "Three open orders.",
+              files: [{ path: "../orders.png", fileRef: testFileRef("orders.png") }],
+            },
+          }),
+          "invalid_input"
+        )
+
+        const result = {
+          text: "Three open orders.",
+          files: [{ path: "charts/orders.png", fileRef: testFileRef("orders.png") }],
+        }
         const completed = await storage.runs.finish({
           projectId,
           id: "child_1",

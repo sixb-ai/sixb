@@ -70,6 +70,7 @@ export type {
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
   StartAgentRunInput,
+  SubagentRunFile,
   SubagentRunRecord,
   SubagentRunResult,
   SubagentRunSpec,

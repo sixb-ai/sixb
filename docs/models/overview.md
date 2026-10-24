@@ -132,8 +132,12 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **It knows the project, not the conversation.** It gets `SIXB.md`, the ontology reference files,
   the user's time zone and language, and the memory, which it reads but never saves to. It sees only
   the task the agent writes, and answers the agent, not the user.
+- **Files go both ways.** The agent hands it files from its own sandbox, such as an attachment,
+  and the sub-agent finds them at the same paths. What the sub-agent writes to `out/` comes back
+  to the agent when it finishes, for the rest of the turn: up to 50 files of 25 MB, 100 MB in all.
+  A sub-agent that fails or is stopped returns none.
 - **What it publishes lands in the conversation**, like the agent's own
-  [artifacts](../artifacts/overview.md).
+  [artifacts](../artifacts/overview.md), and the agent can revise it in the same turn.
 - **Its work is a thread you can open**: its task, then what it did, read by whoever reads the
   conversation. It is never listed with your conversations and takes no messages of its own.
 - **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A

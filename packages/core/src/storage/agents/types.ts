@@ -2,6 +2,7 @@ import type { ActionSubject } from "../../actions/types"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { AgentReasoning } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
+import type { FileRef } from "../../blob-storage/types"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonObject, JsonValue } from "../../json"
 import type {
@@ -346,11 +347,24 @@ export interface SubagentRunSpec {
   /** The parent turn's requester settings. Absent uses the project's. */
   readonly timeZone?: string
   readonly locale?: string
+  /** Files the parent handed over, copied into the child's sandbox at these paths. */
+  readonly files?: readonly SubagentRunFile[]
+}
+
+/** A file a parent and its child hand each other, stored once and copied into a sandbox. */
+export interface SubagentRunFile {
+  /** Relative, `/`-separated, without `.` or `..` segments. */
+  readonly path: string
+  readonly fileRef: FileRef
 }
 
 /** Durable child output returned to its parent by `wait_agent`. */
 export interface SubagentRunResult {
   readonly text: string
+  /** What the child wrote under `out/`, by path relative to it. */
+  readonly files?: readonly SubagentRunFile[]
+  /** Why none of what it wrote under `out/` came back, and what to do about it. */
+  readonly filesError?: string
 }
 
 export interface SubagentRunRecord extends AgentRunRecordBase {

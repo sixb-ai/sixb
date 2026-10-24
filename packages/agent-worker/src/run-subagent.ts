@@ -10,6 +10,7 @@ import {
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
+import { type AgentRunWorkspace, storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
@@ -39,6 +40,8 @@ export async function runSubagent(input: {
   readonly runtime: AgentTurnRuntime
   /** Filled once the model loop returns, for the worker to keep when the run fails afterwards. */
   readonly work?: SubagentWork
+  /** Where it finds the files its parent handed over, and leaves the ones it returns. */
+  readonly workspace: AgentRunWorkspace
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime } = input
   const executionToken = run.execution?.token
@@ -92,7 +95,16 @@ export async function runSubagent(input: {
       `The subagent's model reached its output limit before finishing its answer. ${remedy}`
     )
   }
-  const childResult = subagentResult(generation.steps, run)
+  const text = subagentResult(generation.steps, run)
+  // Only a child that finished returns files: an unfinished one's would pass for complete.
+  const files = await storeChildOutputs({
+    workspace: input.workspace,
+    handed: run.spec.files ?? [],
+    runId: run.id,
+    parentRunId: run.parentRunId,
+    signal: abortSignal,
+  })
+  runtime.assertCanContinue()
 
   const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
     message: subagentWorkMessage(run, parts),
@@ -103,7 +115,7 @@ export async function runSubagent(input: {
       status: "succeeded",
       modelId: plan.model.modelId,
       finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
-      result: childResult,
+      result: { text, ...(files.length > 0 ? { files } : {}) },
     },
   })
   if (finalized.kind !== "subagent") {
@@ -164,10 +176,7 @@ function assertSubagentCanFinalize(input: {
 }
 
 /** The child's answer, or a failure that tells the parent what to do about none. */
-function subagentResult(
-  steps: readonly ModelStep[],
-  run: SubagentRunRecord
-): NonNullable<SubagentRunRecord["result"]> {
+function subagentResult(steps: readonly ModelStep[], run: SubagentRunRecord): string {
   const text = subagentAnswer(steps)
   if (!text) {
     const remedy = "Spawn it again with a task that says what its answer must contain."
@@ -180,7 +189,7 @@ function subagentResult(
       `The subagent finished without an answer. ${remedy}`
     )
   }
-  return { text }
+  return text
 }
 
 /**

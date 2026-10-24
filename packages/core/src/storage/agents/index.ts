@@ -81,6 +81,7 @@ export type {
   StartAgentRunInput,
   StopAgentApprovalsInput,
   StopAgentApprovalsResult,
+  SubagentRunFile,
   SubagentRunRecord,
   SubagentRunResult,
   SubagentRunSpec,
