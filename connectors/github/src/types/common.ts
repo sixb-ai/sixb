@@ -10,6 +10,11 @@ export interface GitHubPaginationOptions {
   readonly pageToken?: string
 }
 
+export interface GitHubRequestOptions {
+  /** Aborts the request, and any retry still pending. */
+  readonly signal?: AbortSignal
+}
+
 export interface GitHubPage<T> {
   readonly items: readonly T[]
   readonly hasMore: boolean

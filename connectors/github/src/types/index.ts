@@ -3,6 +3,7 @@ export type {
   GitHubPage,
   GitHubPaginationOptions,
   GitHubRepositoryTarget,
+  GitHubRequestOptions,
   GitHubUser,
 } from "./common"
 export type {
@@ -51,6 +52,12 @@ export type {
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
 export type { GitHubConnectorOptions } from "./options"
+export type {
+  GitHubRelease,
+  GitHubReleaseAsset,
+  ListReleasesOptions,
+  RepositoryReleasesApi,
+} from "./releases"
 export type {
   AuthenticatedUserRepositoriesApi,
   GitHubOrganizationRepositoryType,

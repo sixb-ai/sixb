@@ -204,6 +204,12 @@ describe("github connector", () => {
       "/repos/acme/web/issues/7/comments",
       { per_page: "50", since: "2026-01-01T00:00:00Z" },
     ],
+    [
+      "repo().releases.list",
+      (client: GitHubClient) => client.repo(webRepo).releases.list({ pageSize: 50 }),
+      "/repos/acme/web/releases",
+      { per_page: "50" },
+    ],
   ] as const)("%s maps its filters and returns GitHub's items", async (_name, list, path, query) => {
     const calls = record(() => json(listItems))
     const client = await connect()
@@ -285,6 +291,13 @@ describe("github connector", () => {
       "/repos/acme/web/issues/comments/99",
       undefined,
     ],
+    [
+      "repo().releases.getByTag",
+      (c) => c.repo(webRepo).releases.getByTag("@sixb/core@0.1.5"),
+      "GET",
+      "/repos/acme/web/releases/tags/%40sixb%2Fcore%400.1.5",
+      undefined,
+    ],
   ]
 
   test.each(requests)("%s sends its documented request", async (_name, run, method, path, body) => {
@@ -361,14 +374,30 @@ describe("github connector", () => {
     expect(calls[1]?.url.pathname).toBe("/api/v3/user/repos")
   })
 
-  test("rejects invalid issue and comment ids before requesting", async () => {
+  test("rejects invalid issue ids, comment ids and release tags before requesting", async () => {
     const calls = record()
-    const issues = (await connect()).repo(webRepo).issues
+    const { issues, releases } = (await connect()).repo(webRepo)
 
     await expect(issues.get(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
+    await expect(releases.getByTag(" ")).rejects.toThrow("tag must not be empty")
 
+    expect(calls).toHaveLength(0)
+  })
+
+  // Reproduce: drop `signal` from the `http.get` init in resources/releases.ts; both calls then
+  // reach fetch and resolve.
+  test("releases forward the caller's signal", async () => {
+    const calls = record(() => json([]))
+    const releases = (await connect()).repo(webRepo).releases
+    const signal = AbortSignal.abort()
+
+    const listed: unknown = await releases.list({ signal }).catch((error) => error)
+    const fetched: unknown = await releases.getByTag("v1", { signal }).catch((error) => error)
+
+    expect(listed).toMatchObject({ name: "AbortError" })
+    expect(fetched).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(0)
   })
 

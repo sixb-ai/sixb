@@ -10,6 +10,7 @@ import type {
   OrganizationMembersApi,
   OrganizationOutsideCollaboratorsApi,
 } from "./members"
+import type { RepositoryReleasesApi } from "./releases"
 import type {
   AuthenticatedUserRepositoriesApi,
   GitHubRepository,
@@ -28,6 +29,7 @@ export interface GitHubClient {
 
 export interface GitHubRepositoryScope {
   readonly issues: RepositoryIssuesApi
+  readonly releases: RepositoryReleasesApi
   get(): Promise<GitHubRepository>
 }
 

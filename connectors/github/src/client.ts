@@ -10,6 +10,7 @@ import {
   createOrganizationMembersApi,
   createOrganizationOutsideCollaboratorsApi,
 } from "./resources/members"
+import { createRepositoryReleasesApi } from "./resources/releases"
 import {
   createAuthenticatedUserRepositoriesApi,
   createOrganizationRepositoriesApi,
@@ -28,6 +29,7 @@ export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubCli
     repo: (target) => ({
       ...createRepositoryApi(context, target),
       issues: createRepositoryIssuesApi(context, target),
+      releases: createRepositoryReleasesApi(context, target),
     }),
     org: (org) => ({
       repos: createOrganizationRepositoriesApi(context, org),
