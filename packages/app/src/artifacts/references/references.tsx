@@ -35,6 +35,7 @@ import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
 import { usePageEvents } from "../renderers/page"
 import { cellFormatter } from "../renderers/sheet/format"
+import { lockedCellLabel } from "../renderers/sheet/locked"
 import { isLocked } from "../renderers/sheet/model"
 import { liveSheetErrorText, useSheetModel, useWorkbook } from "../renderers/sheet/workbook"
 import { type ArtifactTarget, artifactTargetHref } from "../target"
@@ -474,8 +475,13 @@ function SheetEmbed({
                     {locked ? (
                       <span
                         role="img"
-                        aria-label={all.sheet.locked(column.name)}
-                        title={all.sheet.locked(column.name)}
+                        aria-label={lockedCellLabel(
+                          model,
+                          first + rowIndex,
+                          left + index,
+                          all.sheet
+                        )}
+                        title={lockedCellLabel(model, first + rowIndex, left + index, all.sheet)}
                         data-locked=""
                         className="inline-flex text-muted-foreground/70"
                       >

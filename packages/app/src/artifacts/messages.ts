@@ -384,8 +384,12 @@ export const en = {
     loadFailed: "This sheet could not be read.",
     tooLarge: "This sheet is too large to show here",
     locked: (column: string) => `You don't have permission to see ${column}. ${ASK_FOR_ACCESS}`,
+    lockedComputed: (column: string, sources: readonly string[]) =>
+      `${column} is computed from ${sources.join(", ")}, which you don't have permission to see. ${ASK_FOR_ACCESS}`,
     lockedTotal: (column: string) =>
       `You don't have permission to see all of ${column}, so its total is hidden. ${ASK_FOR_ACCESS}`,
+    lockedTotalComputed: (column: string, sources: readonly string[]) =>
+      `The total of ${column} is hidden: it is computed from ${sources.join(", ")}, which you don't have permission to see. ${ASK_FOR_ACCESS}`,
     lockedFigures: (columns: readonly string[]) =>
       `You don't have permission to see some of the selected values: ${columns.join(", ")}. ${ASK_FOR_ACCESS}`,
     chartLocked: (columns: readonly string[]) =>
@@ -816,8 +820,12 @@ export const fr: Translation<ArtifactMessages> = {
     loadFailed: "Impossible de lire cette feuille.",
     tooLarge: "Cette feuille est trop volumineuse pour s’afficher ici",
     locked: (column) => `Vous n’avez pas l’autorisation de voir ${column}. ${ASK_FOR_ACCESS_FR}`,
+    lockedComputed: (column, sources) =>
+      `${column} est calculé à partir de ${sources.join(", ")}, que vous n’avez pas l’autorisation de voir. ${ASK_FOR_ACCESS_FR}`,
     lockedTotal: (column) =>
       `Vous n’avez pas l’autorisation de voir toutes les valeurs de ${column} : son total est masqué. ${ASK_FOR_ACCESS_FR}`,
+    lockedTotalComputed: (column, sources) =>
+      `Le total de ${column} est masqué : il est calculé à partir de ${sources.join(", ")}, que vous n’avez pas l’autorisation de voir. ${ASK_FOR_ACCESS_FR}`,
     lockedFigures: (columns) =>
       `Vous n’avez pas l’autorisation de voir certaines des valeurs sélectionnées : ${columns.join(", ")}. ${ASK_FOR_ACCESS_FR}`,
     chartLocked: (columns) =>
