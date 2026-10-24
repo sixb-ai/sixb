@@ -1,4 +1,4 @@
-import { AuthorizationError, assertAuthorized, canViewActionRun } from "../authorization"
+import { AuthorizationError, assertAuthorized } from "../authorization"
 import {
   getAuthorizationRef,
   type ResolvedRuntimeAuthorization,
@@ -21,7 +21,11 @@ import {
 } from "../storage/objects/execution-limits"
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
 import { getActionRunExecutor } from "./run/executor"
-import { actionRunBelongsToShareGrant, canReadActionRunSubject } from "./run-authorization"
+import {
+  actionRunBelongsToShareGrant,
+  canReadActionRunSubject,
+  viewableActionRuns,
+} from "./run-authorization"
 import { createActionRunId } from "./run-id"
 import { type ExistingActionRun, persistActionRun } from "./run-persistence"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -125,7 +129,7 @@ export async function requestAction(
     objectType = resolveObjectActionSubject({ runtime, action, subject })
     pathPrefix = `${objectType.id}.${action.id}`
     if (authorization.type !== "delegated") {
-      // A run is visible to whoever may view its subject's type (`canViewActionRun`). A subtype
+      // A run is visible to whoever may view its subject (`viewableActionRuns`). A subtype
       // excluded from a broad grant is not visible through its parent, so admitting the request on
       // the bound type alone would run what its caller can never read back.
       assertAuthorized(
@@ -227,7 +231,7 @@ async function assertCallerMayHaveRun(input: {
           grantId: authorization.delegation.grantId,
         }))
       : authorization.type !== "principal" ||
-        (canViewActionRun(authorization.context, run) &&
+        ((await viewableActionRuns(input.objectReader, authorization.context, [run])).length > 0 &&
           (await canReadActionRunSubject(input.objectReader, run)))
   if (!visible) {
     throw new AuthorizationError(

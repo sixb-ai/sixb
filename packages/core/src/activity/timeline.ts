@@ -1,11 +1,9 @@
-import type { ActionObjectSubject } from "../actions"
-import { unreadableActionRunTypes } from "../actions/run-authorization"
 import {
-  AuthorizationError,
-  canViewActionRun,
-  canViewWorkflowRun,
-  isRuntimeAllowed,
-} from "../authorization"
+  readableSubjects,
+  unreadableActionRunTypes,
+  viewableActionRuns,
+} from "../actions/run-authorization"
+import { canViewWorkflowRun, isRuntimeAllowed } from "../authorization"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ActionRunStatus } from "../storage/action-runs"
@@ -182,16 +180,18 @@ export async function composeActivityTimeline(
   )
   const subjects = actionRuns.flatMap((run) => (run.subject.kind === "object" ? [run.subject] : []))
 
-  const [threads, readable, unreadableRunTypes] = await Promise.all([
+  const [threads, readable, unreadableRunTypes, viewableRuns] = await Promise.all([
     storage.agents?.threads.getByIds({
       projectId,
       ids: [...conversations.values()].map((run) => run.threadId),
     }) ?? [],
-    readableObjects(runtime, subjects),
+    readableSubjects(runtime.objectReader, subjects),
     subjects.length > 0 ? unreadableActionRunTypes(runtime.objectReader) : new Set<string>(),
+    viewableActionRuns(runtime.objectReader, runtime.authorization, actionRuns),
   ])
 
   const actionRunByExecution = new Map(actionRuns.map((run) => [run.executionId, run]))
+  const viewableRunIds = new Set(viewableRuns.map((run) => run.id))
   const workflowRunByExecution = new Map(workflowRuns.map((run) => [run.executionId, run]))
   const threadById = new Map(threads.map((thread) => [thread.id, thread]))
   const observesThreads = isRuntimeAllowed(runtime, { kind: "agentThreads.observe" })
@@ -211,10 +211,11 @@ export async function composeActivityTimeline(
             ? { objectTypeId: subject.objectTypeId, primaryId: subject.primaryId }
             : undefined
 
-        // As the runs page decides: the action and its subject's type, and the type's markings.
+        // As the runs page decides: the action, its subject's type or, through a condition, the
+        // subject itself, and the type's markings.
         const runVisible =
           run !== undefined &&
-          canViewActionRun(runtime.authorization, run) &&
+          viewableRunIds.has(run.id) &&
           (subject === undefined || !unreadableRunTypes.has(subject.objectTypeId))
 
         return [
@@ -402,38 +403,4 @@ function addCosts(summaries: readonly AiCostSummary[]): AiCostSummary | undefine
     unpriceableCallCount,
     unvaluedCallCount,
   }
-}
-
-/**
- * The action subjects the viewer can read, through its own object reader: object type grants,
- * markings and existence alike. One batch per object type, as a type the viewer cannot see fails
- * its whole batch.
- */
-async function readableObjects(
-  runtime: SixbRuntimeContext,
-  subjects: readonly ActionObjectSubject[]
-): Promise<ReadonlySet<string>> {
-  const byType = new Map<string, Map<string, ActionObjectSubject>>()
-  for (const subject of subjects) {
-    const items = byType.get(subject.objectTypeId) ?? new Map()
-    items.set(subject.primaryId, subject)
-    byType.set(subject.objectTypeId, items)
-  }
-
-  const readable = new Set<string>()
-  await Promise.all(
-    [...byType.values()].map(async (items) => {
-      try {
-        const rows = await runtime.objectReader.getByPrimaryIdBatch({ items: [...items.values()] })
-        for (const key of rows.keys()) {
-          readable.add(key)
-        }
-      } catch (error) {
-        if (!(error instanceof AuthorizationError)) {
-          throw error
-        }
-      }
-    })
-  )
-  return readable
 }

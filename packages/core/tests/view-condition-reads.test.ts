@@ -463,8 +463,8 @@ describe("surfaces that do not apply view conditions deny the type", () => {
     ).toBe(1)
   })
 
-  test("action requests and runs", async () => {
-    const { host, trusted, sixbFor } = await deploy()
+  test("action requests", async () => {
+    const { host, sixbFor } = await deploy()
     const operator = sixbFor(["open"])
     const subject = { kind: "object", objectTypeId: Ticket.id, primaryId: "t-open-alice" } as const
 
@@ -473,11 +473,6 @@ describe("surfaces that do not apply view conditions deny the type", () => {
       .catch((error) => error)
     expect(requested).toBeInstanceOf(AuthorizationError)
     expect(await host.storage.actionRuns?.getById({ projectId, id: "act_operator" })).toBeNull()
-
-    // A run someone else requested on a ticket the operator reads stays out of its history.
-    await trusted.actions.request({ actionId: escalate.id, subject, runId: "act_trusted" })
-    expect(await operator.actions.runs.getById("act_trusted")).toBeNull()
-    expect((await operator.actions.runs.list()).runs).toEqual([])
   })
 })
 
