@@ -463,17 +463,7 @@ describe("surfaces that do not apply view conditions deny the type", () => {
     ).toBe(1)
   })
 
-  test("action requests", async () => {
-    const { host, sixbFor } = await deploy()
-    const operator = sixbFor(["open"])
-    const subject = { kind: "object", objectTypeId: Ticket.id, primaryId: "t-open-alice" } as const
-
-    const requested = await operator.actions
-      .request({ actionId: escalate.id, subject, runId: "act_operator" })
-      .catch((error) => error)
-    expect(requested).toBeInstanceOf(AuthorizationError)
-    expect(await host.storage.actionRuns?.getById({ projectId, id: "act_operator" })).toBeNull()
-  })
+  // Action requests apply them: view-condition-writes.test.ts.
 })
 
 describe("share issuance through view conditions", () => {

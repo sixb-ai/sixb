@@ -10,7 +10,7 @@ import {
 import { type ActionRunHost, executeActionRun } from "./execute"
 import { toActionRunFailure } from "./normalize"
 import { UnrecordedActionRunError } from "./run-action"
-import type { PendingActionRun } from "./types"
+import type { PendingActionRun, ReadSubjectAsRequester } from "./types"
 
 /** A request for an Action run, handed over to execute in the requesting process. */
 export interface ActionRunRequest {
@@ -24,6 +24,8 @@ export interface ActionRunRequest {
   readonly signal?: AbortSignal
   /** Called once the run's execution exists, before the run executes. A throw starts nothing. */
   readonly onRequested?: (runId: string) => void | Promise<void>
+  /** Set when the requester views the subject's type through a condition. */
+  readonly readSubjectAsRequester?: ReadSubjectAsRequester
 }
 
 type NewActionRun = Extract<PersistedActionRun, { readonly kind: "new" }>
@@ -180,7 +182,14 @@ export class ActionRunExecutor {
 
     let outcome: Awaited<ReturnType<typeof executeActionRun>>
     try {
-      outcome = await executeActionRun(this.host, { run, execution, signal: request.signal })
+      outcome = await executeActionRun(this.host, {
+        run,
+        execution,
+        signal: request.signal,
+        ...(request.readSubjectAsRequester === undefined
+          ? {}
+          : { readSubjectAsRequester: request.readSubjectAsRequester }),
+      })
     } catch (error) {
       throw this.failRequest(run, error)
     }

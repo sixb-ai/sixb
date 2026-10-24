@@ -2,7 +2,7 @@ import { createSixbError } from "../../errors/internal"
 import { uniqueLookupKeyOf } from "../../execution/unique-lookup"
 import type { Logger } from "../../logging"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import { ObjectNotFoundError } from "../../storage"
+import { ObjectNotFoundError, type ObjectRow } from "../../storage"
 import type { ActionReadRecorder } from "../read-facade"
 import { createActionReadFacade } from "../read-facade"
 import type {
@@ -165,10 +165,46 @@ export async function loadObjectTarget(input: {
     )
   }
 
+  await assertRequesterSees(input.runtime, targetRow, {
+    actionId: input.action.id,
+    runId: input.run.id,
+  })
+
   return {
     subjectObjectType,
     snapshot: toActionTargetObject(targetRow, input.action.binding.objectType.id),
     row: targetRow,
+  }
+}
+
+/**
+ * Handlers run on, and the commit fences on, the state just read. A requester that views the type
+ * through a condition must see that very state: hidden, it is not found, as a missing subject is,
+ * and on a replay too. A state that changed between the two reads conflicts, and the run replays
+ * on what it finds then.
+ */
+async function assertRequesterSees(
+  runtime: ActionRunContext,
+  row: ObjectRow,
+  ids: { readonly actionId: string; readonly runId: string }
+): Promise<void> {
+  if (!runtime.readSubjectAsRequester) return
+
+  const seen = await runtime.readSubjectAsRequester(row)
+  if (!seen) {
+    throw new ObjectNotFoundError(
+      row.objectTypeId,
+      row.primaryId,
+      "Object not found for action run"
+    )
+  }
+
+  if (seen.version !== row.version) {
+    throw createSixbError(
+      "action.read_conflict",
+      `[Sixb] Action run '${ids.runId}' read its subject while it changed.`,
+      { details: ids }
+    )
   }
 }
 
