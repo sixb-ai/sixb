@@ -365,7 +365,7 @@ function completeEvaluation(entries: QueryEntry[]): QueryEvaluation {
   }
 }
 
-function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): boolean {
+export function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): boolean {
   switch (predicate.op) {
     case "and":
       return predicate.items.every((item) => matchesPredicate(row, item))

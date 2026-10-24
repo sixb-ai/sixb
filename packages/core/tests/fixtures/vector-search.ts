@@ -10,7 +10,11 @@ import {
   SixbHost,
 } from "../../src"
 import { executeObjectQuery } from "../../src/objects/query"
-import { compileSelectedObjectReadScope, type Storage } from "../../src/storage"
+import {
+  compileConditionalObjectReadScope,
+  compileSelectedObjectReadScope,
+  type Storage,
+} from "../../src/storage"
 import { createTestSixb } from "../../src/testing"
 import { createTestRuntimeDeps } from "../test-runtime-deps"
 
@@ -219,6 +223,28 @@ export async function verifyVectorSearch(
   assert.equal(authorized.objects[0]!.score, 0)
   assert.equal(authorized.total, 1)
   assert.equal((await reader.countObjects!({ projectId: "vector-search", query })).count, 1)
+  const conditional = storage.objects.createConditionalReadScope({
+    projectId: "vector-search",
+    scope: compileConditionalObjectReadScope({
+      kind: "conditional",
+      conditions: [
+        {
+          objectTypeId: Product.id,
+          predicate: { op: "neq", propertyId: "status", value: "hidden", scalarKind: "string" },
+        },
+      ],
+    }),
+  })
+  // Removal proof: read the vector candidates of a conditioned type without its condition.
+  const conditioned = await conditional.queryObjects!({
+    projectId: "vector-search",
+    query: { ...query, k: 4 },
+  })
+  assert.deepEqual(
+    conditioned.objects.map((o) => o.primaryId),
+    ["d", "b", "c"]
+  )
+  assert.equal(conditioned.total, 3)
   assert.deepEqual(
     (await storage.objects.queryObjects!({ projectId: "another-project", query })).objects,
     []

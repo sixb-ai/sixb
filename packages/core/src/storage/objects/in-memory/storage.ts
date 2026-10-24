@@ -12,6 +12,7 @@ import type { StoredObjectVector } from "../../ontology/vectors"
 import type { ObjectReadExecutionLimits } from "../execution-limits"
 import { type LinkBatchKey, type ObjectBatchKey, objectBatchKey } from "../keys"
 import type {
+  CompiledConditionalObjectReadScope,
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
@@ -30,6 +31,7 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../types"
+import { createInMemoryConditionalReader } from "./conditional-reader"
 import {
   compareStrings,
   fullLinkRowKey,
@@ -383,11 +385,21 @@ export class InMemoryObjectStorage implements ObjectStorage {
     )
   }
 
+  createConditionalReadScope(params: {
+    projectId: string
+    scope: CompiledConditionalObjectReadScope
+  }): ObjectReadStorage {
+    return createInMemoryConditionalReader(this.readSource(params.projectId), params.scope, () =>
+      this.queryCapabilities()
+    )
+  }
+
   private readSource(projectId: string): InMemoryReadSource {
     // Keep indexed access live across writes and snapshot restores; do not capture individual buckets.
     return {
       projectId,
       getVector: (ref, profile) => this.vectorReader?.(projectId, ref, profile),
+      allObjects: () => projectObjectRows(this.rows, projectId),
       objectsOfType: (objectTypeId) => [
         ...(this.rows.get(objectRowKey(projectId, objectTypeId))?.values() ?? []),
       ],
@@ -395,7 +407,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         this.rows.get(objectRowKey(projectId, objectTypeId))?.get(primaryId),
       outgoingLinks: (objectTypeId, primaryId) =>
         this.links.get(sourceLinkBucketKey(projectId, objectTypeId, primaryId))?.values() ?? [],
-      allLinks: () => allLinkRows(this.links),
+      allLinks: () => projectLinkRows(this.links, projectId),
       uniqueHolder: (value) => this.uniqueHolder(projectId, value),
     }
   }
@@ -748,6 +760,27 @@ function cloneLinkBuckets(
     )
   }
   return clone
+}
+
+function* projectObjectRows(
+  buckets: ReadonlyMap<string, ReadonlyMap<string, ObjectRow>>,
+  projectId: string
+): Iterable<ObjectRow> {
+  const prefix = objectRowProjectPrefix(projectId)
+  for (const [key, bucket] of buckets) {
+    if (key.startsWith(prefix)) yield* bucket.values()
+  }
+}
+
+/** Link buckets are keyed like object buckets, project first. */
+function* projectLinkRows(
+  buckets: ReadonlyMap<string, ReadonlyMap<string, ObjectLinkRow>>,
+  projectId: string
+): Iterable<ObjectLinkRow> {
+  const prefix = objectRowProjectPrefix(projectId)
+  for (const [key, bucket] of buckets) {
+    if (key.startsWith(prefix)) yield* bucket.values()
+  }
 }
 
 function* allLinkRows(

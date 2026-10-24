@@ -7,16 +7,19 @@ export interface ObjectReadStorageCallGuard {
 
 /** Validate the required runtime capability before any facade can expose broad object reads. */
 export function requireObjectReadScopeFactory(storage: ObjectStorage): ObjectReadScopeFactory {
-  if (typeof storage.createSelectedReadScope !== "function") {
+  if (
+    typeof storage.createSelectedReadScope !== "function" ||
+    typeof storage.createConditionalReadScope !== "function"
+  ) {
     throw new Error(
-      "[Sixb] Object storage provider must implement ObjectReadScopeFactory to create selected object readers."
+      "[Sixb] Object storage provider must implement ObjectReadScopeFactory to create selected and conditional object readers."
     )
   }
   return storage
 }
 
 /**
- * Guard every selected-reader terminal without proxying the provider reader.
+ * Guard every scoped-reader terminal without proxying the provider reader.
  *
  * First-party providers freeze their readers. A Proxy cannot substitute a frozen own method
  * without violating JavaScript's invariants, so operation and lifetime guards use this explicit

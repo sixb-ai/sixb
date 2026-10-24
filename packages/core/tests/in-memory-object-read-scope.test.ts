@@ -8,7 +8,11 @@ import {
   getInMemoryObjectMaterializerAdapter,
   InMemoryObjectStorage,
 } from "../src/storage/objects/in-memory"
-import { createTestSixb, runObjectReadScopeContractSuite } from "../src/testing"
+import {
+  createTestSixb,
+  runConditionalObjectReadScopeContractSuite,
+  runObjectReadScopeContractSuite,
+} from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 runObjectReadScopeContractSuite("InMemoryStorage selected object-read scope contract", {
@@ -17,6 +21,16 @@ runObjectReadScopeContractSuite("InMemoryStorage selected object-read scope cont
     return { storage, objectReadScopeFactory: storage.objects }
   },
 })
+
+runConditionalObjectReadScopeContractSuite(
+  "InMemoryStorage conditional object-read scope contract",
+  {
+    createHarness: () => {
+      const storage = new InMemoryStorage()
+      return { storage, objectReadScopeFactory: storage.objects }
+    },
+  }
+)
 
 describe("InMemoryObjectStorage selected read behavior", () => {
   test("keeps batch link keys in first-request order for incoming and both directions", async () => {

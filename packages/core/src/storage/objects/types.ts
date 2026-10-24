@@ -413,12 +413,21 @@ export interface ObjectReadStorage {
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }>
 }
 
-/** Provider capability for enforcing a finite, precompiled object-read selection. */
+/** Provider capability for enforcing a precompiled object-read scope on every read. */
 export interface ObjectReadScopeFactory {
   createSelectedReadScope(params: {
     projectId: string
     scope: CompiledSelectedObjectReadScope
     limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage
+
+  /**
+   * Read only the objects and links a conditional scope leaves visible. The provider applies the
+   * conditions inside each statement, so filters, ordering, limits and totals run after them.
+   */
+  createConditionalReadScope(params: {
+    projectId: string
+    scope: CompiledConditionalObjectReadScope
   }): ObjectReadStorage
 }
 
