@@ -3,6 +3,8 @@ import { type Principal, SYSTEM_PRINCIPAL } from "../auth"
 import { isRuntimeAllowed } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import type { ObjectQuery } from "../objects/query/ir"
+import type { PropertyToken } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
@@ -22,7 +24,8 @@ import {
 } from "./access"
 import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
-import { ARTIFACT_STATE_LIMITS } from "./limits"
+import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
+import { invalidArtifact, readArtifactText } from "./publish/files"
 import {
   artifactVersionWarnings,
   type PreparedArtifactVersion,
@@ -31,6 +34,15 @@ import {
   publishArtifact,
   storeArtifactVersion,
 } from "./publish/publish"
+import { type ArtifactQueryChecker, createArtifactQueryChecker } from "./publish/queries"
+import {
+  ARTIFACT_QUERY_KINDS,
+  type ArtifactQueryResult,
+  artifactQueryPath,
+  isArtifactQueryName,
+  parseArtifactQuery,
+} from "./queries"
+import { runArtifactQuery } from "./run-query"
 
 /** A version's content: what its kind renders from, and what it is called. */
 export interface ArtifactContentInput {
@@ -38,7 +50,24 @@ export interface ArtifactContentInput {
   readonly title: string
   /** Files stored with `sixb.blobs.put()` or `POST /api/files`, at their paths in the artifact. */
   readonly files: readonly ArtifactFile[]
+  /**
+   * Queries the version holds, by name, each stored as `queries/<name>.json` beside `files` and
+   * checked as those files are. Each reader runs them with their own rights.
+   */
+  readonly queries?: Readonly<Record<string, ArtifactQueryInput>>
 }
+
+/**
+ * A query a version holds, from the query builders: `sixb.objects(Invoice).where(...)` for rows,
+ * or such a query with the properties to facet its rows by. Any builder fits: its `ir` is what
+ * the version keeps.
+ */
+export type ArtifactQueryInput =
+  | { readonly ir: ObjectQuery }
+  | {
+      readonly query: { readonly ir: ObjectQuery }
+      readonly facets: readonly { readonly property: PropertyToken; readonly limit: number }[]
+    }
 
 export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
   /**
@@ -80,6 +109,18 @@ export interface ArtifactsRuntime {
   /** Most recently updated first. */
   list(input?: ListArtifactsRuntimeInput): Promise<ListArtifactsResult>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
+  /**
+   * Runs the version's query `queries/<name>.json` as the caller, with their rights: a type they
+   * cannot view refuses it, and a marked property they are not cleared for is left out of each
+   * row. Whoever reads the artifact runs its queries, an observer too. `null` when the caller
+   * cannot read the artifact or it has no such version. Throws `query_not_found`, and
+   * `query_invalid` for a query the ontology no longer admits.
+   */
+  query(
+    artifactId: string,
+    name: string,
+    options?: { readonly version?: number | "latest" }
+  ): Promise<ArtifactQueryResult | null>
   /** Newest first; `null` when the caller cannot read the artifact. */
   listVersions(
     artifactId: string,
@@ -124,8 +165,23 @@ export interface ArtifactStateValue {
 /** Where an access rule reads: the project's storage, or a transaction's to decide inside it. */
 export type ArtifactAccessStorage = Pick<Storage, "artifacts" | "agents">
 
-/** Each runtime's access rule, for this repo's packages: an Agent turn publishes by it. */
-const accessRules = new WeakMap<object, (storage?: ArtifactAccessStorage) => ArtifactAccessRule>()
+/**
+ * What each runtime's caller publishes by, for this repo's packages: an Agent turn publishes with
+ * the access rule and the query checker of whoever asked for it.
+ */
+const publishers = new WeakMap<
+  object,
+  {
+    readonly rule: (storage?: ArtifactAccessStorage) => ArtifactAccessRule
+    readonly checkQuery: ArtifactQueryChecker
+  }
+>()
+
+function publisherOf(artifacts: Partial<ArtifactsRuntime>) {
+  const publisher = publishers.get(artifacts)
+  if (!publisher) throw new Error("[Sixb] These artifacts are not a Sixb runtime's.")
+  return publisher
+}
 
 /**
  * The access rule of the caller `artifacts` acts for, reading from `storage`: a transaction's, to
@@ -135,9 +191,12 @@ export function artifactAccessRule(
   artifacts: Partial<ArtifactsRuntime>,
   storage: ArtifactAccessStorage
 ): ArtifactAccessRule {
-  const rule = accessRules.get(artifacts)
-  if (!rule) throw new Error("[Sixb] These artifacts have no access rule.")
-  return rule(storage)
+  return publisherOf(artifacts).rule(storage)
+}
+
+/** What checks a version's queries as the caller `artifacts` acts for. */
+export function artifactQueryChecker(artifacts: Partial<ArtifactsRuntime>): ArtifactQueryChecker {
+  return publisherOf(artifacts).checkQuery
 }
 
 /** The access rule for the runtime's caller, reading from `storage`. */
@@ -206,6 +265,7 @@ export function createArtifactsRuntime(
 
   const rule = (storage?: ArtifactAccessStorage): ArtifactAccessRule =>
     createRuntimeArtifactAccessRule(runtime, storage)
+  const checkQuery = createArtifactQueryChecker(runtime)
 
   /** The artifact with what the caller may do with it; `null` when there is none. */
   const reach = async (
@@ -217,6 +277,19 @@ export function createArtifactsRuntime(
   const getReadable = async (artifactId: string): Promise<ArtifactRecord | null> => {
     const reached = await reach(artifactId)
     return reached && reached.access !== "none" ? reached.artifact : null
+  }
+
+  /** The version with its artifact; `null` when the caller cannot read it or there is none. */
+  const readVersion = async (artifactId: string, number: number | "latest") => {
+    const artifact = await getReadable(artifactId)
+    if (!artifact) return null
+
+    const version = await requireStorage().getVersion({
+      projectId: runtime.projectId,
+      artifactId,
+      version: number === "latest" ? artifact.latestVersion : number,
+    })
+    return version ? { artifact, version } : null
   }
 
   /** What an address in a version may name: one artifact the caller reads, by one rule. */
@@ -247,12 +320,46 @@ export function createArtifactsRuntime(
       )
     })
 
+  /**
+   * The version's files with its `queries` stored among them. Publishing then checks each one as
+   * it checks a query file.
+   */
+  const contentFiles = async (input: ArtifactContentInput): Promise<readonly ArtifactFile[]> => {
+    if (!input.queries) return input.files
+
+    const files = [...input.files]
+    for (const [name, query] of Object.entries(input.queries)) {
+      const path = artifactQueryPath(name)
+      if (input.files.some((file) => file.path === path)) {
+        throw invalidArtifact(`'${path}' is both a file and a query; give it once.`)
+      }
+
+      const body = new TextEncoder().encode(JSON.stringify(queryFile(query)))
+      const file = await blobStorage.put({
+        body,
+        expectedSizeBytes: body.byteLength,
+        fileName: `${name}.json`,
+        mediaType: "application/json",
+      })
+      files.push({ path, file })
+    }
+    return files
+  }
+
   const artifacts: ArtifactsRuntime = {
     async create(input) {
       const author = requireCaller()
+
       return publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, author, readable: readableBy(rule()) },
+        {
+          kind: input.kind,
+          title: input.title,
+          files: await contentFiles(input),
+          author,
+          readable: readableBy(rule()),
+          checkQuery,
+        },
         (artifact) => rule().publishAccess(artifact)
       )
     },
@@ -263,10 +370,14 @@ export function createArtifactsRuntime(
 
       const context = { projectId: runtime.projectId, storage: requireStorage(), blobStorage }
       const prepared = await prepareArtifactVersion(context, {
-        ...input,
         artifactId,
+        kind: input.kind,
+        title: input.title,
+        files: await contentFiles(input),
+        ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
         author,
         readable: readableBy(rule()),
+        checkQuery,
       })
       const stored = await store(prepared)
 
@@ -298,13 +409,33 @@ export function createArtifactsRuntime(
     },
 
     async getVersion(artifactId, version) {
-      const artifact = await getReadable(artifactId)
-      if (!artifact) return null
-      return requireStorage().getVersion({
-        projectId: runtime.projectId,
-        artifactId,
-        version: version === "latest" ? artifact.latestVersion : version,
-      })
+      return (await readVersion(artifactId, version))?.version ?? null
+    },
+
+    async query(artifactId, name, options = {}) {
+      const read = await readVersion(artifactId, options.version ?? "latest")
+      if (!read) return null
+
+      // A file artifact is delivered as it is: its one file is never run.
+      const { artifact, version } = read
+      const file =
+        ARTIFACT_QUERY_KINDS.includes(artifact.kind) && isArtifactQueryName(name)
+          ? version.files.find((candidate) => candidate.path === artifactQueryPath(name))
+          : undefined
+      if (!file) {
+        throw new ArtifactRequestError(
+          "query_not_found",
+          `[Sixb] Version ${version.version} of artifact '${artifactId}' has no query '${name}'.`
+        )
+      }
+
+      const text = await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxQueryBytes)
+      const parsed = parseArtifactQuery(file.path, text)
+      if ("error" in parsed) {
+        throw new ArtifactRequestError("query_invalid", `[Sixb] ${parsed.error}`)
+      }
+
+      return runArtifactQuery(runtime, name, parsed.query)
     },
 
     async listVersions(artifactId, input = {}) {
@@ -362,7 +493,7 @@ export function createArtifactsRuntime(
     },
   }
 
-  accessRules.set(artifacts, rule)
+  publishers.set(artifacts, { rule, checkQuery })
   return artifacts
 }
 
@@ -402,6 +533,16 @@ function stateValue(value: unknown): string {
     )
   }
   return text
+}
+
+/** What a query file holds for a query from the builders: its IR, with any facets by id. */
+function queryFile(query: ArtifactQueryInput): unknown {
+  if ("ir" in query) return query.ir
+
+  return {
+    query: query.query.ir,
+    facets: query.facets.map((facet) => ({ propertyId: facet.property.id, limit: facet.limit })),
+  }
 }
 
 function notFound(artifactId: string): ArtifactRequestError {

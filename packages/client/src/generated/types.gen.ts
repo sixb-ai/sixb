@@ -98,6 +98,65 @@ export type ObjectQueryFacetsResponse = {
   plan: ObjectQueryPlanSummary
 }
 
+export type ArtifactErrorResponse = {
+  error: string
+  /**
+   * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
+   */
+  code?: string
+  /**
+   * With artifact_moved: the latest version and who published it
+   */
+  latest?: {
+    version: number
+    author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+  }
+}
+
+export type ArtifactQueryResponse =
+  | {
+      kind: "objects"
+      /**
+       * The rows as the caller reads them, at most 10000: a marked property they are not cleared for is left out and listed in redactions
+       */
+      objects: Array<ObjectQueryObject>
+      /**
+       * Every row the query matches for the caller
+       */
+      total: number
+      /**
+       * Whether rows past the cap are left out
+       */
+      truncated: boolean
+      /**
+       * The object types the query returns
+       */
+      resultObjectTypeIds: Array<string>
+      /**
+       * Every object type the query reads: where it starts, and what it traverses or expands
+       */
+      readObjectTypeIds: Array<string>
+    }
+  | {
+      kind: "facets"
+      /**
+       * Every row the query matches for the caller
+       */
+      total: number
+      facets: Array<ObjectQueryFacetResult>
+      /**
+       * The object types the query returns
+       */
+      resultObjectTypeIds: Array<string>
+      /**
+       * Every object type the query reads: where it starts, and what it traverses or expands
+       */
+      readObjectTypeIds: Array<string>
+    }
+
 export type ObjectQueryLink = {
   source: ObjectRef
   linkId: string
@@ -14200,7 +14259,7 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14220,7 +14279,7 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14297,7 +14356,7 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14317,7 +14376,7 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14337,7 +14396,7 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14357,7 +14416,7 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14377,7 +14436,7 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14524,7 +14583,7 @@ export type DeleteArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14544,7 +14603,7 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14564,7 +14623,7 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14609,7 +14668,7 @@ export type GetArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14629,7 +14688,7 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14649,7 +14708,7 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14726,7 +14785,7 @@ export type ClearArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14746,7 +14805,7 @@ export type ClearArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14766,7 +14825,7 @@ export type ClearArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14815,7 +14874,7 @@ export type GetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14835,7 +14894,7 @@ export type GetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14855,7 +14914,7 @@ export type GetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14914,7 +14973,7 @@ export type DeleteArtifactStateValueErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14934,7 +14993,7 @@ export type DeleteArtifactStateValueErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14954,7 +15013,7 @@ export type DeleteArtifactStateValueErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -14974,7 +15033,7 @@ export type DeleteArtifactStateValueErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15030,7 +15089,7 @@ export type SetArtifactStateErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15050,7 +15109,7 @@ export type SetArtifactStateErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15070,7 +15129,7 @@ export type SetArtifactStateErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15090,7 +15149,7 @@ export type SetArtifactStateErrors = {
   413: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15110,7 +15169,7 @@ export type SetArtifactStateErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15184,7 +15243,7 @@ export type PublishArtifactVersionErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15204,7 +15263,7 @@ export type PublishArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15224,7 +15283,7 @@ export type PublishArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15244,7 +15303,7 @@ export type PublishArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15264,7 +15323,7 @@ export type PublishArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15417,7 +15476,7 @@ export type CreateArtifactFrameErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15437,7 +15496,7 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15457,7 +15516,7 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15477,7 +15536,7 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15534,7 +15593,7 @@ export type GetArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15554,7 +15613,7 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15574,7 +15633,7 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable.
      */
     code?: string
     /**
@@ -15685,6 +15744,57 @@ export type GetArtifactVersionResponses = {
 
 export type GetArtifactVersionResponse =
   GetArtifactVersionResponses[keyof GetArtifactVersionResponses]
+
+export type GetArtifactQueryData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+    /**
+     * The query's name: queries/<name>.json in the version
+     */
+    name: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}/queries/{name}"
+}
+
+export type GetArtifactQueryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ArtifactErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ArtifactErrorResponse
+  /**
+   * Response for status 409
+   */
+  409: ArtifactErrorResponse
+  /**
+   * Response for status 501
+   */
+  501: ArtifactErrorResponse
+}
+
+export type GetArtifactQueryError = GetArtifactQueryErrors[keyof GetArtifactQueryErrors]
+
+export type GetArtifactQueryResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ArtifactQueryResponse
+}
+
+export type GetArtifactQueryResponse = GetArtifactQueryResponses[keyof GetArtifactQueryResponses]
 
 export type GetArtifactFileContentData = {
   body?: never

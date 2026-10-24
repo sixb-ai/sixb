@@ -168,6 +168,9 @@ import type {
   GetArtifactFileContentData,
   GetArtifactFileContentErrors,
   GetArtifactFileContentResponses,
+  GetArtifactQueryData,
+  GetArtifactQueryErrors,
+  GetArtifactQueryResponses,
   GetArtifactResponses,
   GetArtifactStateData,
   GetArtifactStateErrors,
@@ -3429,6 +3432,23 @@ export const getArtifactVersion = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/artifacts/{artifactId}/versions/{version}",
+    ...options,
+  })
+
+/**
+ * Run an artifact's query
+ *
+ * Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them. Use "latest" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.
+ */
+export const getArtifactQuery = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactQueryData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactQueryResponses, GetArtifactQueryErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/queries/{name}",
     ...options,
   })
 

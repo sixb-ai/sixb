@@ -347,6 +347,57 @@ Publishing warns of boards that overlap and of notes or text on a board. When th
 canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent
 gets each board's warnings and screenshot.
 
+## Declare a query
+
+A sheet, a page, a deck, or a canvas can hold queries over your objects rather than a copy of
+them. Each is a file `queries/<name>.json` holding what `sixb objects query --file` runs, and each
+reader runs it with their own rights: they get the objects they can view, without the marked
+properties they are not cleared for.
+
+File: `queries/overdue.json`
+
+```json
+{
+  "kind": "limit",
+  "limit": 200,
+  "input": {
+    "kind": "filter",
+    "input": { "kind": "start", "objectTypeId": "Invoice" },
+    "predicate": { "op": "eq", "propertyId": "status", "value": "overdue" }
+  }
+}
+```
+
+- A file may also hold `{ "query": … }`, or `{ "query": …, "facets": [{ "propertyId": "status",
+  "limit": 10 }] }` to count rows by value, as `sixb objects facets --file` takes it.
+- Publishing runs each query once as its author and refuses one they could not run, naming the
+  file and where in it. `page`, `vector`, and `rerank` are refused: Sixb pages the result, and a
+  search would bill every reader who opens the artifact. A document holds no queries.
+- A query returns only what its author can read: one that would return a marked property they
+  are not cleared for, on its rows or on an object an `expand` attaches, or member profiles they
+  may not view, is refused. Use a `project` node to leave those properties out.
+- A version holds up to 20 queries of 64 KB each. A query returns up to 10,000 rows, and
+  `truncated` says when there were more.
+- `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does
+  `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. A query the ontology no
+  longer admits fails with `query_invalid` (409 over HTTP).
+
+From server code, pass query builders as `queries`; each is stored as its file:
+
+```ts
+const invoices = sixb.objects(Invoice).query()
+
+await sixb.artifacts.create({
+  kind: "page",
+  title: "Overdue invoices",
+  files: [{ path: "index.html", file: html }],
+  queries: {
+    overdue: invoices.where((invoice) => invoice.p.status.eq("overdue")).limit(200),
+    statuses: { query: invoices, facets: [{ property: Invoice.p.status, limit: 10 }] },
+  },
+})
+```
+
 ## Reference another artifact
 
 A document, a sheet, a deck, a page, or an agent's reply can show another artifact, or a part of

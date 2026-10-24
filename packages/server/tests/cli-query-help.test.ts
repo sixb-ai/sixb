@@ -1,6 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runInstanceCli } from "@sixb/cli-core"
-import { ObjectQueryPredicateSchema, ObjectQuerySchema } from "../src/schemas/objects"
+import { parseArtifactQuery } from "../../core/src/artifacts/queries"
+import {
+  ObjectQueryFacetsRequestSchema,
+  ObjectQueryPredicateSchema,
+  ObjectQueryRequestSchema,
+  ObjectQuerySchema,
+} from "../src/schemas/objects"
 
 // The sandbox CLI's query help is hand-written for the model. These tests hold it to the schema
 // the API enforces, so a shape the help teaches is a shape the API accepts.
@@ -98,6 +104,72 @@ describe("sixb objects query help", () => {
         name,
         issues: undefined,
       })
+    }
+  })
+})
+
+// Core reads an artifact's query files without the API's schema. These hold the two to the same
+// shapes: what the help teaches reads, and what the API refuses is refused.
+describe("an artifact's query file", () => {
+  const parse = (value: unknown) => parseArtifactQuery("queries/q.json", JSON.stringify(value))
+
+  test("reads every node and predicate the help teaches, but those it refuses", async () => {
+    // Regression proof: add "expand" to REFUSED_NODES in core's queries.ts; it fails here.
+    const shapes = helpShapes(await cli("objects", "query", "--help"))
+
+    for (const shape of shapes) {
+      const record = shape as { kind?: string }
+      const node = record.kind
+        ? shape
+        : { kind: "filter", input: JSON.parse(QUERY), predicate: shape }
+      const parsed = parse(node)
+
+      if (record.kind === "page" || record.kind === "vector" || record.kind === "rerank") {
+        expect(parsed).toEqual({
+          error: expect.stringContaining(`"${record.kind}" is not allowed in an artifact's query`),
+        })
+      } else {
+        expect({ node, parsed }).toEqual({ node, parsed: expect.objectContaining({ at: "$" }) })
+      }
+    }
+  })
+
+  // Regression proof: return early from `only` in core's queries.ts; the forged fields read.
+  test("reads the requests the API takes, and refuses what it refuses", () => {
+    const query = JSON.parse(QUERY)
+    const accepted = [
+      { query },
+      { query, includeTotal: false },
+      { query, facets: [{ propertyId: "status", limit: 10 }] },
+    ]
+    for (const request of accepted) {
+      const schema = "facets" in request ? ObjectQueryFacetsRequestSchema : ObjectQueryRequestSchema
+      expect(schema.safeParse(request).success).toBe(true)
+      expect(parse(request)).toMatchObject({ at: "$.query" })
+    }
+
+    const refused = [
+      { query, facets: [{ propertyId: "status", limit: 0 }] },
+      { query, facets: [] },
+      { query, includeTotal: true, facets: [{ propertyId: "status", limit: 1 }] },
+      { query: { ...query, fieldsByObjectType: {} } },
+      {
+        query: {
+          kind: "filter",
+          input: query,
+          predicate: { ...JSON.parse(PREDICATE), scalarKind: "string" },
+        },
+      },
+      { query: { kind: "limit", input: query, limit: -1 } },
+      { query: { kind: "traverse", input: query, linkId: "owner", direction: "sideways" } },
+    ]
+    for (const request of refused) {
+      const schema = "facets" in request ? ObjectQueryFacetsRequestSchema : ObjectQueryRequestSchema
+      expect({ request, accepted: schema.safeParse(request).success }).toEqual({
+        request,
+        accepted: false,
+      })
+      expect(parse(request)).toEqual({ error: expect.any(String) })
     }
   })
 })
