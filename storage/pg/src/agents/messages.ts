@@ -1,3 +1,4 @@
+import { countsAsThreadMessage } from "@sixb/core/internal/agent-run-storage-provider"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
@@ -91,7 +92,10 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
         await tx`
           UPDATE agent_threads
-          SET message_count = message_count + 1, last_message_at = ${createdAt}, updated_at = ${createdAt}
+          SET
+            message_count = message_count + ${countsAsThreadMessage(input) ? 1 : 0},
+            last_message_at = ${createdAt},
+            updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `
 
@@ -124,25 +128,28 @@ export class PgAgentMessageStore implements AgentMessageStore {
         )
       }
 
-      const deleted = await tx<{ id: string }[]>`
+      const deleted = await tx<{ id: string; parts: AgentMessageRecord["parts"] | string }[]>`
         DELETE FROM agent_messages
         WHERE project_id = ${input.projectId}
           AND thread_id = ${input.threadId}
           AND run_id = ${input.runId}
-        RETURNING id
+        RETURNING id, parts
       `
       if (deleted.length === 0) {
         return 0
       }
+      // The thread counts only the messages the conversation shows: take back the ones it counted.
+      const counted = deleted.filter((row) =>
+        countsAsThreadMessage({
+          parts: typeof row.parts === "string" ? JSON.parse(row.parts) : row.parts,
+        })
+      ).length
 
       const updatedAt = new Date()
       await tx`
         UPDATE agent_threads
         SET
-          message_count = (
-            SELECT COUNT(*) FROM agent_messages
-            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
-          ),
+          message_count = GREATEST(message_count - ${counted}, 0),
           last_message_at = (
             SELECT created_at FROM agent_messages
             WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}

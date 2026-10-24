@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { countsAsThreadMessage } from "@sixb/core/internal/agent-run-storage-provider"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
@@ -101,11 +102,17 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
         .query(
           `
           UPDATE agent_threads
-          SET message_count = message_count + 1, last_message_at = ?, updated_at = ?
+          SET message_count = message_count + ?, last_message_at = ?, updated_at = ?
           WHERE project_id = ? AND id = ?
         `
         )
-        .run(createdAt.toISOString(), createdAt.toISOString(), input.projectId, input.threadId)
+        .run(
+          countsAsThreadMessage(input) ? 1 : 0,
+          createdAt.toISOString(),
+          createdAt.toISOString(),
+          input.projectId,
+          input.threadId
+        )
 
       return this.requireMessage(input.projectId, input.id)
     })()
@@ -125,11 +132,17 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
       }
 
       const deleted = this.db
-        .query("DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ?")
-        .run(input.projectId, input.threadId, input.runId)
-      if (deleted.changes === 0) {
+        .query(
+          "DELETE FROM agent_messages WHERE project_id = ? AND thread_id = ? AND run_id = ? RETURNING parts"
+        )
+        .all(input.projectId, input.threadId, input.runId) as { parts: string }[]
+      if (deleted.length === 0) {
         return 0
       }
+      // The thread counts only the messages the conversation shows: take back the ones it counted.
+      const counted = deleted.filter((row) =>
+        countsAsThreadMessage({ parts: JSON.parse(row.parts) })
+      ).length
 
       const updatedAt = new Date().toISOString()
       this.db
@@ -137,9 +150,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           `
           UPDATE agent_threads
           SET
-            message_count = (
-              SELECT COUNT(*) FROM agent_messages WHERE project_id = ? AND thread_id = ?
-            ),
+            message_count = MAX(message_count - ?, 0),
             last_message_at = (
               SELECT created_at FROM agent_messages
               WHERE project_id = ? AND thread_id = ?
@@ -150,17 +161,9 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
           WHERE project_id = ? AND id = ?
         `
         )
-        .run(
-          input.projectId,
-          input.threadId,
-          input.projectId,
-          input.threadId,
-          updatedAt,
-          input.projectId,
-          input.threadId
-        )
+        .run(counted, input.projectId, input.threadId, updatedAt, input.projectId, input.threadId)
 
-      return deleted.changes
+      return deleted.length
     })()
   }
 

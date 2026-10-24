@@ -199,8 +199,13 @@ export function remapArtifactIds(
 export interface AgentThreadForkSource {
   /** The active run's trigger message, when a turn is running. */
   readonly triggerMessageId?: string
-  /** Every message of the source, ordered by ascending `seq`. */
-  readonly messages: readonly Pick<AgentMessageRecord, "id" | "seq">[]
+  /**
+   * Every message of the source, ordered by ascending `seq`. `counted: false` marks one the thread
+   * does not count ({@link countsAsThreadMessage}); a provider reads it from the parts it copies.
+   */
+  readonly messages: readonly (Pick<AgentMessageRecord, "id" | "seq"> & {
+    readonly counted?: boolean
+  })[]
   /** Every checkpoint of the source, latest first, in `getLatest` order. */
   readonly checkpoints: readonly AgentContextCheckpointRecord[]
 }
@@ -221,6 +226,17 @@ export interface AgentThreadForkPlan {
  * The plan mints the ids of the copies: which messages are copied is only known here, under the
  * provider's lock, so the caller cannot supply them.
  */
+/**
+ * Whether a message counts in its thread's `messageCount`, which reads as what the conversation
+ * shows. The message Sixb writes to resume a paused turn carries only how its calls ended, which the
+ * chat shows on their cards: it is not counted.
+ */
+export function countsAsThreadMessage(message: Pick<AgentMessageRecord, "parts">): boolean {
+  return !(
+    message.parts.length > 0 && message.parts.every((part) => part.type === "approval-outcome")
+  )
+}
+
 export function planAgentThreadFork(
   input: ForkAgentThreadInput,
   source: AgentThreadForkSource,
@@ -253,7 +269,7 @@ export function planAgentThreadFork(
     activeRunId: null,
     // No `lastMessageAt` until the fork's first new message: threads sort by it, else by their
     // creation, so a fork of an old conversation sorts with what its owner just did.
-    messageCount: copied.length,
+    messageCount: copied.filter((message) => message.counted !== false).length,
     createdAt,
     updatedAt: createdAt,
   }

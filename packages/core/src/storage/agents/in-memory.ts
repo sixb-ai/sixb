@@ -30,6 +30,7 @@ import {
   assertSubagentRunResult,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
+  countsAsThreadMessage,
   LIVE_AGENT_APPROVAL_STATUSES,
   newAgentApprovalRecord,
   participantsToAdd,
@@ -273,7 +274,10 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       ...(activeRun?.kind === "conversation"
         ? { triggerMessageId: activeRun.triggerMessageId }
         : {}),
-      messages,
+      messages: messages.map((message) => ({
+        ...message,
+        counted: countsAsThreadMessage(message),
+      })),
       checkpoints,
     })
 
@@ -837,7 +841,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       threadKey,
       clone({
         ...thread,
-        messageCount: thread.messageCount + 1,
+        messageCount: thread.messageCount + (countsAsThreadMessage(input) ? 1 : 0),
         lastMessageAt: createdAt,
         updatedAt: createdAt,
       })
@@ -881,7 +885,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       threadKey,
       clone({
         ...thread,
-        messageCount: remainingMessages.length,
+        messageCount: remainingMessages.filter(countsAsThreadMessage).length,
         lastMessageAt: latestMessage?.createdAt,
         updatedAt,
       })
