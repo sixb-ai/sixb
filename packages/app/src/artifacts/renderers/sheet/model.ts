@@ -49,6 +49,15 @@ export function isLocked(model: SheetModel, row: number, column: number): boolea
   return model.locked?.get(row)?.has(column) ?? false
 }
 
+/** The names of the columns that hold a value the reader may not see, in the sheet's order. */
+export function lockedColumns(model: SheetModel): string[] {
+  if (!model.locked) return []
+
+  const columns = new Set<number>()
+  for (const cells of model.locked.values()) for (const column of cells) columns.add(column)
+  return model.columns.flatMap((column, index) => (columns.has(index) ? [column.name] : []))
+}
+
 type SheetLayout = Pick<
   WorkbookSheet,
   "name" | "frozenRows" | "frozenColumns" | "columns" | "widths"

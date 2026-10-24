@@ -210,6 +210,10 @@ async function view(queries: QueryClient) {
   return ui
 }
 
+/** What a locked surface tells the reader to do: the permission is one an admin can give. */
+const ASK = "Ask an admin of the project for access."
+const LOCKED_AMOUNT = `You don't have permission to see Amount. ${ASK}`
+
 const cellText = (container: HTMLElement, row: number, column: number) =>
   container.querySelector(`[role="grid"] [data-row="${row}"][data-column="${column}"]`)?.textContent
 
@@ -261,14 +265,30 @@ describe("a live sheet", () => {
     const locked = ui.container.querySelector(
       '[role="grid"] [data-row="3"][data-column="2"] [data-locked]'
     )
-    expect(locked?.getAttribute("aria-label")).toBe("You can't see this value")
-    expect(locked?.getAttribute("title")).toBe("You can't see this value")
+    expect(locked?.getAttribute("aria-label")).toBe(LOCKED_AMOUNT)
+    expect(locked?.getAttribute("title")).toBe(LOCKED_AMOUNT)
     expect(ui.container.querySelectorAll("[role=grid] [data-cell] [data-locked]")).toHaveLength(1)
 
     const total = ui.container.querySelector('[aria-label="Totals"] [data-locked]')
-    expect(total?.getAttribute("aria-label")).toBe("This total reads values you can't see")
+    expect(total?.getAttribute("aria-label")).toBe(
+      `You don't have permission to see all of Amount, so its total is hidden. ${ASK}`
+    )
     expect(totalsText(ui.container)).toEqual(["Total", "", "", ""])
     ui.unmount()
+  })
+
+  // Guard proof: return null from LockedNotice in sheet.tsx; the sheet then says it only on hover.
+  test("says above its rows which columns the reader lacks permission to see", async () => {
+    const ui = await view(cache(result({ locked: true })))
+    expect(ui.container.querySelector('[role="note"]')?.textContent).toBe(
+      `Some values are hidden: you don't have permission to see Amount. ${ASK}`
+    )
+    ui.unmount()
+
+    const open = await view(cache(result()))
+    expect(open.container.querySelector('[role="grid"]')).not.toBeNull()
+    expect(open.container.querySelector('[role="note"]')).toBeNull()
+    open.unmount()
   })
 
   test("says when its rows are the first its query returns", async () => {
@@ -288,6 +308,7 @@ describe("a live sheet", () => {
     expect(forbidden.container.textContent).toContain(
       "You don't have access to the data this sheet shows."
     )
+    expect(forbidden.container.textContent).toContain(ASK)
     expect(forbidden.container.querySelector('[role="grid"]')).toBeNull()
     forbidden.unmount()
 
@@ -382,7 +403,7 @@ async function settle() {
   for (let attempt = 0; attempt < 5; attempt += 1) await act(async () => {})
 }
 
-const CHART_LOCKED = "You can't see some of the values this chart draws."
+const CHART_LOCKED = `You don't have permission to see Amount, which this chart draws. ${ASK}`
 
 describe("a live sheet's figures over locked values", () => {
   // Guard proof: return false from chartReadsLocked; the chart beside the grid then draws
@@ -466,7 +487,7 @@ describe("a live sheet's figures over locked values", () => {
     expect(text).not.toContain("2,000")
     expect(ui.container.querySelectorAll("[data-locked]")).toHaveLength(4)
     expect(ui.container.querySelector("[data-locked]")?.getAttribute("title")).toBe(
-      "The selection holds values you can't see"
+      `You don't have permission to see some of the selected values: Amount. ${ASK}`
     )
     ui.unmount()
   })
@@ -517,7 +538,7 @@ describe("a live sheet shown in a document", () => {
       ["inv_3", "Globex", ""],
     ])
     expect(ui.container.querySelector("tbody [data-locked]")?.getAttribute("title")).toBe(
-      "You can't see this value"
+      LOCKED_AMOUNT
     )
     ui.unmount()
   })

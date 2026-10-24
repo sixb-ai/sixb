@@ -59,7 +59,7 @@ import {
 } from "./frame"
 import { SheetGrid, type SheetGridEditor, type SheetGridStatus } from "./grid"
 import { cellInputText, parseCellInput } from "./input"
-import type { SheetModel } from "./model"
+import { lockedColumns, type SheetModel } from "./model"
 import { rangeLabel } from "./selection"
 import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
 import { liveSheetErrorText, useSheetModel, useWorkbook } from "./workbook"
@@ -217,6 +217,8 @@ function WorkbookView({
           ) : null
         }
       />
+
+      {onSheet ? <LockedNotice model={model} /> : null}
 
       <div
         role="tabpanel"
@@ -543,6 +545,26 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
         }
       />
     </div>
+  )
+}
+
+/**
+ * Above a live sheet with values the reader may not see: which columns, and that it is a
+ * permission they can ask for, said once where each lock only says it on hover.
+ */
+function LockedNotice({ model }: { readonly model: SheetModel }) {
+  const messages = useArtifactMessages().sheet
+  const columns = useMemo(() => lockedColumns(model), [model])
+  if (columns.length === 0) return null
+
+  return (
+    <p
+      role="note"
+      className="m-0 flex shrink-0 items-start gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-xs break-words text-muted-foreground"
+    >
+      <Lock className="mt-0.5 size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+      <span className="min-w-0">{messages.lockedNotice(columns)}</span>
+    </p>
   )
 }
 

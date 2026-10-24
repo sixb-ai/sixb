@@ -474,8 +474,8 @@ function SheetEmbed({
                     {locked ? (
                       <span
                         role="img"
-                        aria-label={all.sheet.locked}
-                        title={all.sheet.locked}
+                        aria-label={all.sheet.locked(column.name)}
+                        title={all.sheet.locked(column.name)}
                         data-locked=""
                         className="inline-flex text-muted-foreground/70"
                       >
