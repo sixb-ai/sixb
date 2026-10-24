@@ -6,6 +6,7 @@ import type {
   AgentToolCatalog,
   AgentToolDefinition,
   LanguageModelCatalog,
+  LanguageModelTier,
   ModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -34,21 +35,48 @@ export interface ResolvedAgentExecutionPlan {
   /** The requester's time zone and locale, when the run captured them. */
   readonly timeZone?: string
   readonly locale?: string
-  /** Media models the sandbox CLI can call beside the agent's own, listed in the prompt. */
+  /** Models the sandbox CLI can call beside the agent's own, listed in the prompt. */
   readonly sandboxModels?: readonly SandboxModel[]
 }
 
-export type SandboxModelKind = "image" | "speech" | "transcription"
+export type SandboxModelKind = "language" | "image" | "speech" | "transcription"
 
-/** One media model the agent reaches through `sixb models`, as its prompt describes it. */
+/** One model the agent reaches through `sixb models`, as its prompt describes it. */
 export interface SandboxModel {
   readonly kind: SandboxModelKind
+  readonly provider: string
   readonly modelId: string
+  /** A language model's tier, when the project configures its language models by tier. */
+  readonly tier?: LanguageModelTier
+  /** A language model's display name. */
+  readonly name?: string
   readonly description?: string
 }
 
-/** The project's media models, each kind's default first, with what each is for. */
+/**
+ * The project's models, with what each is for: its language models in catalog order, then each
+ * media kind's, default first. Read from each model's configured definition, never its provider
+ * catalog, so the prompt that lists them stays the same from turn to turn.
+ */
 export function listSandboxModels(models: ModelCatalog | undefined): readonly SandboxModel[] {
+  return [...listLanguageModels(models?.language), ...listMediaModels(models)]
+}
+
+function listLanguageModels(catalog: LanguageModelCatalog | undefined): SandboxModel[] {
+  return (catalog?.list() ?? []).map((entry) => {
+    const { name, description } = entry.model.definition
+    return {
+      kind: "language",
+      provider: entry.provider,
+      modelId: entry.modelId,
+      ...(entry.tier === undefined ? {} : { tier: entry.tier }),
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {}),
+    }
+  })
+}
+
+function listMediaModels(models: ModelCatalog | undefined): SandboxModel[] {
   const kinds = [
     ["image", models?.image],
     ["speech", models?.audio?.speech],
@@ -57,7 +85,12 @@ export function listSandboxModels(models: ModelCatalog | undefined): readonly Sa
   return kinds.flatMap(([kind, catalog]) =>
     (catalog?.list() ?? []).map((entry) => {
       const description = entry.model.definition.description
-      return { kind, modelId: entry.modelId, ...(description ? { description } : {}) }
+      return {
+        kind,
+        provider: entry.provider,
+        modelId: entry.modelId,
+        ...(description ? { description } : {}),
+      }
     })
   )
 }

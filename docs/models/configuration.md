@@ -81,8 +81,9 @@ required: its first model is the default.
 | Omitted, or a tier left out | The first `standard` model |
 | A tier, with a list configured | The first model |
 
-Every model of every tier stays in the catalog, and the delegation guide of `spawn_agent` groups
-them by tier. With tiers, the chat offers no model choice or reasoning control; without a
+Every model of every tier stays in the catalog. The Agent sees them grouped by tier, for
+[`sixb models text`](#call-models-over-the-api) and in the delegation guide of `spawn_agent`. With
+tiers, the chat offers no model choice or reasoning control; without a
 [decision model](#decision-models), every message runs on `standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
@@ -122,8 +123,9 @@ const gptModel = vercelGateway("openai/gpt-5.5", {
 })
 ```
 
-They show in the chat's model picker and in the delegation guide of `spawn_agent`. Each replaces
-the provider's own text; without them, the provider's name and description apply.
+They show in the chat's model picker, in the models the Agent can ask for a second opinion, and in
+the delegation guide of `spawn_agent`. Each replaces the provider's own text; without them, the
+provider's name and description apply.
 
 ### Default reasoning
 
@@ -493,7 +495,8 @@ sixb models image "Isometric warehouse floor plan" --size 1024x1024 --output out
 sixb models image "Same plan, night lighting" --image out/plan.png --output out/night.png
 sixb models speech "Your order shipped." --format mp3 --output out/shipped.mp3
 sixb models transcribe call.wav
-sixb models text "Summarize this week's incidents in one line"
+sixb models text "Summarize this week's incidents in one line" --model light
+sixb models text --file incidents.md --model heavy
 ```
 
 ```json
@@ -503,7 +506,12 @@ sixb models text "Summarize this week's incidents in one line"
 `--output` takes a file, numbered when a call returns several, or a directory ending in `/`. The
 extension follows the file's type, so `files` lists the paths actually written. `--image` uploads
 a reference image; repeat it for several. `sixb models calls files <call-id> --output <path>`
-downloads a call's files again.
+downloads a call's files again. `sixb models text` takes a model or a tier as `--model`, and reads
+a long prompt from `--file`: a path, or `-` for standard input.
+
+With several language models, the Agent uses `sixb models text` to ask another one for a second
+opinion or a quick generation. Its prompt lists them with their tier, name and description. The
+model answers once, from the prompt alone: it does not see the project's data.
 
 A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that
 is reached answers `429`. An option the model does not accept answers `400` before any inference,

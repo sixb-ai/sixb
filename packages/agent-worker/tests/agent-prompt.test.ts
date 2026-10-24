@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { renderInstanceHelp } from "@sixb/cli-core"
+import { createModelCatalog } from "@sixb/core/models"
 import {
   agentRuntimeFacts,
   renderAgentSystemPrompt,
@@ -7,7 +8,11 @@ import {
   renderWorkflowOutputFinalizerPrompt,
   withCurrentTime,
 } from "../src/agent-prompt"
+import { listSandboxModels } from "../src/execution-plan"
 import type { AgentRequester } from "../src/requester"
+import { WorkerTestModel } from "./worker-model-fixture"
+
+const GATEWAY = "vercel-ai-gateway"
 
 const SKILLS = [
   {
@@ -353,13 +358,19 @@ describe("agent system prompt", () => {
     const prompt = renderAgentSystemPrompt({
       ...base,
       sandboxModels: [
-        { kind: "image", modelId: "bfl/flux-3-image-klein", description: "Fast illustrations" },
         {
           kind: "image",
+          provider: GATEWAY,
+          modelId: "bfl/flux-3-image-klein",
+          description: "Fast illustrations",
+        },
+        {
+          kind: "image",
+          provider: GATEWAY,
           modelId: "google/gemini-3.1-flash-lite-image",
           description: "Edits photos",
         },
-        { kind: "transcription", modelId: "openai/gpt-4o-transcribe" },
+        { kind: "transcription", provider: GATEWAY, modelId: "openai/gpt-4o-transcribe" },
       ],
     })
 
@@ -376,6 +387,93 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("sixb models speech")
     expect(prompt).toContain("Each call is billed")
     expect(renderAgentSystemPrompt(base)).not.toContain("sixb models")
+  })
+
+  test("lists the language models `sixb models text` can ask, by tier, from their definitions", () => {
+    // Removal proof: return [] from renderLanguageModelCommand; the command and its models are
+    // missing. Read the names from `await entry.model.resolve()`; the throwing catalog fails it.
+    let resolutions = 0
+    const model = (modelId: string, name: string, description?: string) => {
+      const configured = new WorkerTestModel({
+        definition: {
+          kind: "language",
+          providerId: GATEWAY,
+          modelId,
+          name,
+          ...(description === undefined ? {} : { description }),
+          capabilities: {},
+        },
+      })
+      return Object.assign(configured, {
+        resolve: async () => {
+          resolutions += 1
+          throw new Error("Gateway returned an invalid model catalog body.")
+        },
+      })
+    }
+    const catalog = createModelCatalog({
+      language: {
+        light: model("deepseek/deepseek-v4.1-flash", "DeepSeek V4.1 Flash"),
+        standard: model("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5"),
+        heavy: [
+          model("anthropic/claude-opus-5.5", "Claude Opus 5.5"),
+          model("openai/gpt-5.5", "GPT", "A second opinion,\nuseful to compare an analysis."),
+        ],
+      },
+    })
+
+    const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      skills: [],
+      sandboxModels: listSandboxModels(catalog),
+    })
+
+    expect(prompt).toContain(
+      [
+        "The project's models are yours to call through `sixb models`.",
+        'Ask another model for a second opinion or a quick generation: `sixb models text "<prompt>" --model <tier or model>`, or `--file -` to send a long prompt on standard input. It answers once from the prompt alone, without the project\'s data or tools, so put everything it needs in the prompt.',
+        "light     deepseek/deepseek-v4.1-flash DeepSeek V4.1 Flash",
+        "standard  anthropic/claude-sonnet-5.5 Claude Sonnet 5.5",
+        "heavy     anthropic/claude-opus-5.5 Claude Opus 5.5",
+        "heavy     openai/gpt-5.5 GPT: A second opinion, useful to compare an analysis.",
+        "Tiers rank cost and strength: light is the cheapest and fastest, heavy the strongest. Pass a tier (light, standard, heavy), or a model whose description fits the task.",
+        "Each call is billed: make what the task needs, not drafts, unless the user asks for options.",
+      ].join("\n")
+    )
+    expect(resolutions).toBe(0)
+  })
+
+  test("lists a list of language models by the reference --model takes, and one model not at all", () => {
+    // Removal proof: list a model by its id alone; the two providers' shared id is ambiguous.
+    const listed = (provider: string, modelId: string, name?: string) =>
+      ({ kind: "language", provider, modelId, ...(name ? { name } : {}) }) as const
+    const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      skills: [],
+      sandboxModels: [
+        listed("anthropic", "claude-sonnet-5-5", "Claude Sonnet 5.5"),
+        listed(GATEWAY, "claude-sonnet-5-5"),
+        listed(GATEWAY, "openai/gpt-5.5", "GPT"),
+      ],
+    })
+
+    expect(prompt).toContain('`sixb models text "<prompt>" --model <model>`')
+    expect(prompt).toContain(
+      [
+        "- anthropic:claude-sonnet-5-5 Claude Sonnet 5.5",
+        `- ${GATEWAY}:claude-sonnet-5-5`,
+        "- openai/gpt-5.5 GPT",
+        "Pass the model whose description fits the task.",
+      ].join("\n")
+    )
+    // A project's only model is the one the agent runs on: there is no other model to ask.
+    expect(
+      renderAgentSystemPrompt({
+        mode: "conversation",
+        skills: [],
+        sandboxModels: [listed(GATEWAY, "openai/gpt-5.5")],
+      })
+    ).not.toContain("sixb models")
   })
 
   test("lists the ontology files it is given and tells the agent to read them first", () => {

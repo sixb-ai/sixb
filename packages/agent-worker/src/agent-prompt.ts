@@ -2,7 +2,7 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition } from "@sixb/core"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
-import type { SandboxModel, SandboxModelKind } from "./execution-plan"
+import type { SandboxModel } from "./execution-plan"
 import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
@@ -69,7 +69,7 @@ export interface RenderAgentSystemPromptInput {
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
   readonly facts?: AgentRuntimeFacts
-  /** Media models the sandbox CLI can call; omitted, the prompt does not mention them. */
+  /** Models the sandbox CLI can call; omitted, the prompt does not mention them. */
   readonly sandboxModels?: readonly SandboxModel[]
   readonly memory?: AgentMemoryPromptContext
 }
@@ -230,7 +230,9 @@ function renderRuntimeContext(
   ].join("\n")
 }
 
-const MODEL_COMMANDS: Readonly<Record<SandboxModelKind, string>> = {
+const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
+
+const MODEL_COMMANDS: Readonly<Record<(typeof MEDIA_MODEL_KINDS)[number], string>> = {
   image:
     'Make or change an image: `sixb models image "<what it shows>" --model <id> --image <file> --output out/image.png`, leaving out `--image` to start from nothing. Use it whenever an image is to be made or changed, never code that draws or edits pixels. Look at the result with view_file before you use it.',
   speech: 'Make speech: `sixb models speech "<text>" --model <id> --output out/speech.mp3`.',
@@ -238,22 +240,78 @@ const MODEL_COMMANDS: Readonly<Record<SandboxModelKind, string>> = {
 }
 
 /**
- * One command per media model kind the project configures, then its models with what each is for,
- * the default first, so the agent picks one without listing them. Each call is billed.
+ * The commands that call the project's models, each followed by its models with what each is for,
+ * so the agent picks one without listing them. Each call is billed.
  */
 function renderModelCommands(models: readonly SandboxModel[]): string[] {
-  if (models.length === 0) return []
-  const kinds = [...new Set(models.map((model) => model.kind))]
+  const language = renderLanguageModelCommand(models.filter((model) => model.kind === "language"))
+  const media = renderMediaModelCommands(models.filter((model) => model.kind !== "language"))
+  if (language.length === 0 && media.length === 0) return []
+
   return [
-    "The project's models are yours to call through `sixb models`. Under each command, pick the model whose description fits the task; the first is the default.",
-    ...kinds.flatMap((kind) => [
-      MODEL_COMMANDS[kind],
-      ...models
-        .filter((model) => model.kind === kind)
-        .map((model) => `- ${model.modelId}${model.description ? `: ${model.description}` : ""}`),
-    ]),
+    "The project's models are yours to call through `sixb models`.",
+    ...language,
+    ...media,
     "Each call is billed: make what the task needs, not drafts, unless the user asks for options.",
   ]
+}
+
+/**
+ * Another model's answer, without a child agent: one generation from the prompt alone. Listed only
+ * when the project has several language models, since otherwise there is no other to ask.
+ */
+function renderLanguageModelCommand(models: readonly SandboxModel[]): string[] {
+  if (models.length < 2) return []
+
+  const tiers = [...new Set(models.flatMap((model) => (model.tier ? [model.tier] : [])))]
+  const reference = tiers.length > 0 ? "<tier or model>" : "<model>"
+  const lines = models.map((model) => {
+    const name = model.name === undefined ? "" : ` ${oneLine(model.name)}`
+    const description = model.description === undefined ? "" : `: ${oneLine(model.description)}`
+    const line = `${cliModelReference(model, models)}${name}${description}`
+    return model.tier === undefined ? `- ${line}` : `${model.tier.padEnd(10)}${line}`
+  })
+
+  return [
+    `Ask another model for a second opinion or a quick generation: \`sixb models text "<prompt>" --model ${reference}\`, or \`--file -\` to send a long prompt on standard input. It answers once from the prompt alone, without the project's data or tools, so put everything it needs in the prompt.`,
+    ...lines,
+    tiers.length > 0
+      ? `Tiers rank cost and strength: light is the cheapest and fastest, heavy the strongest. Pass a tier (${tiers.join(", ")}), or a model whose description fits the task.`
+      : "Pass the model whose description fits the task.",
+  ]
+}
+
+/** One command per media model kind the project configures, then its models, the default first. */
+function renderMediaModelCommands(models: readonly SandboxModel[]): string[] {
+  if (models.length === 0) return []
+
+  const kinds = MEDIA_MODEL_KINDS.filter((kind) => models.some((model) => model.kind === kind))
+  return [
+    "Under each of these commands, pick the model whose description fits the task; the first is the default.",
+    ...kinds.flatMap((kind) => {
+      const ofKind = models.filter((model) => model.kind === kind)
+      return [
+        MODEL_COMMANDS[kind],
+        ...ofKind.map(
+          (model) =>
+            `- ${cliModelReference(model, ofKind)}${model.description ? `: ${model.description}` : ""}`
+        ),
+      ]
+    }),
+  ]
+}
+
+/** What `--model` takes: the model id, or provider:model-id when another provider shares it. */
+function cliModelReference(model: SandboxModel, ofKind: readonly SandboxModel[]): string {
+  const shared = ofKind.some(
+    (other) => other.modelId === model.modelId && other.provider !== model.provider
+  )
+  return shared ? `${model.provider}:${model.modelId}` : model.modelId
+}
+
+// A provider's catalog text may span lines; each model keeps to one.
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
 }
 
 const ONTOLOGY_ROOT = ".sixb/agent/ontology/"
