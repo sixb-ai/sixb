@@ -30,7 +30,13 @@ import { ArtifactCardFace } from "../card-preview"
 import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
-import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "../queries"
+import {
+  type ArtifactVersion,
+  holdsQueries,
+  useArtifactTheme,
+  useFileText,
+  versionFileSource,
+} from "../queries"
 import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
 import { usePageEvents } from "../renderers/page"
@@ -324,6 +330,7 @@ function LoadedEmbed({
           version={version}
           pinned={address.version}
           part={partLabel(resolved.part, version)}
+          live={<ReadsQuery part={resolved.part} version={version} />}
         />
       }
       bare={resolved.part.type === "file" || resolved.part.type === "artifact"}
@@ -747,17 +754,23 @@ function Figure({
   )
 }
 
-/** Where an embed comes from: the artifact, the part, the version it follows, and a way to it. */
+/**
+ * Where an embed comes from: the artifact, the part, the version it follows, whether what it shows
+ * is live, and a way to it.
+ */
 function Source({
   address,
   version,
   pinned,
   part,
+  live,
 }: {
   readonly address: string
   readonly version: ArtifactVersion
   readonly pinned: number | undefined
   readonly part?: string
+  /** What says the part reads a query: rendered after the version, when it does. */
+  readonly live?: ReactNode
 }) {
   const messages = useArtifactMessages()
   return (
@@ -771,6 +784,7 @@ function Source({
         ]
           .filter(Boolean)
           .join(" · ")}
+        {live}
       </span>
       <ArtifactLink
         address={address}
@@ -781,6 +795,47 @@ function Source({
       </ArtifactLink>
     </span>
   )
+}
+
+/**
+ * " · Live data" after an embed's source when the part it shows reads a query: a live sheet's
+ * range or chart, or a page, a deck, or a board of a version that holds queries.
+ */
+function ReadsQuery({
+  part,
+  version,
+}: {
+  readonly part: ResolvedArtifactPart
+  readonly version: ArtifactVersion
+}) {
+  const messages = useArtifactMessages().references
+  const { workbook } = useWorkbook(version)
+  const { outline } = version
+
+  const liveSheet = (name: string | undefined) =>
+    outline.kind === "sheet" && outline.sheets.some((sheet) => sheet.name === name && sheet.query)
+
+  // What a frame draws: an artifact's own embed is a frame for a deck or a page, a card otherwise.
+  const framed =
+    part.type === "slide" ||
+    part.type === "board" ||
+    (part.type === "artifact" && (outline.kind === "slides" || outline.kind === "page"))
+
+  const live =
+    part.type === "sheet"
+      ? liveSheet(part.sheet)
+      : part.type === "chart"
+        ? liveSheet(workbook?.charts.find((chart) => chart.name === part.chart)?.sheet)
+        : framed && holdsQueries(version)
+
+  return live ? (
+    <>
+      {" · "}
+      <span data-live="" className="text-success">
+        {messages.live}
+      </span>
+    </>
+  ) : null
 }
 
 function Unavailable({
