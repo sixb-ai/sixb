@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { resolveExecutionUsage } from "../src/runtime/ai-usage"
+import { addUsageSummaries, resolveExecutionUsage } from "../src/runtime/ai-usage"
 import { createTestAgentExecution } from "../src/testing"
 
 function modelCall(executionId: string, id: string, usage: Record<string, number>) {
@@ -72,5 +72,40 @@ describe("resolveExecutionUsage", () => {
         executionIds: ["execution_1", "execution_2"],
       })
     ).resolves.toEqual([undefined, undefined])
+  })
+})
+
+describe("addUsageSummaries", () => {
+  test("adds executions as their calls would add, and keeps what is known of a partial one", () => {
+    // Removal proofs: return `aggregateAiModelCallUsage(usages)` alone; the complete execution's
+    // output is lost beside a partial one, and two partial executions come out `unavailable`.
+    expect(
+      addUsageSummaries([
+        { inputTokens: 12, outputTokens: 8, totalTokens: 20, reportingStatus: "complete" },
+        { inputTokens: 3, outputTokens: 1, totalTokens: 4, reportingStatus: "complete" },
+      ])
+    ).toEqual({ inputTokens: 15, outputTokens: 9, totalTokens: 24, reportingStatus: "complete" })
+
+    expect(
+      addUsageSummaries([
+        { inputTokens: 12, outputTokens: 8, totalTokens: 20, reportingStatus: "complete" },
+        { inputTokens: 3, reportingStatus: "partial" },
+      ])
+    ).toEqual({ inputTokens: 15, outputTokens: 8, totalTokens: 23, reportingStatus: "partial" })
+    // A child cut short mid-call knows nothing: the turn keeps its own counts, as a floor.
+    expect(
+      addUsageSummaries([
+        { inputTokens: 12, outputTokens: 8, totalTokens: 20, reportingStatus: "complete" },
+        { reportingStatus: "unavailable" },
+      ])
+    ).toEqual({ inputTokens: 12, outputTokens: 8, totalTokens: 20, reportingStatus: "partial" })
+
+    expect(
+      addUsageSummaries([{ reportingStatus: "partial" }, { reportingStatus: "partial" }])
+    ).toEqual({ reportingStatus: "partial" })
+    expect(
+      addUsageSummaries([{ reportingStatus: "unavailable" }, { reportingStatus: "unavailable" }])
+    ).toEqual({ reportingStatus: "unavailable" })
+    expect(addUsageSummaries([])).toBeUndefined()
   })
 })

@@ -1,6 +1,7 @@
 import type { AiModelCallUsage, AiModelCallUsageInput } from "./types"
 
-const USAGE_FIELDS = [
+/** Every count a model call can report. */
+export const AI_USAGE_FIELDS = [
   "inputTokens",
   "outputTokens",
   "uncachedInputTokens",
@@ -14,6 +15,7 @@ const USAGE_FIELDS = [
   "outputImages",
   "inputCharacters",
 ] as const
+const USAGE_FIELDS = AI_USAGE_FIELDS
 
 type AiUsageField = (typeof USAGE_FIELDS)[number]
 

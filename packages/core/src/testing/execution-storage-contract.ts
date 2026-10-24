@@ -459,6 +459,59 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
       })
     })
 
+    test("lists everything executions caused, at any depth, each once", async () => {
+      // Removal proof: make a provider's walk stop at the first level; `inner`, `inner-action` and
+      // `grandchild` go missing. Make it `UNION ALL`; `inner-action` is listed twice.
+      await withStorage(async (storage) => {
+        await seedAuth(storage.auth)
+
+        const root = await createAt(storage, 0, principalRequest({ id: "root" }))
+        const sibling = await createAt(storage, 1_000, principalRequest({ id: "sibling" }))
+        const child = await createAt(storage, 2_000, childOf(root, trustedPrimitive("child")))
+        const inner = await createAt(storage, 3_000, childOf(child, trustedPrimitive("inner")))
+        await createAt(storage, 4_000, childOf(inner, trustedPrimitive("inner-action")))
+        await createAt(storage, 5_000, childOf(child, trustedPrimitive("grandchild")))
+        await createAt(
+          storage,
+          6_000,
+          childOf(root, trustedPrimitive("late-workflow", {}, "workflow"))
+        )
+        await createAt(storage, 7_000, childOf(sibling, trustedPrimitive("sibling-action")))
+
+        const ids = async (executionIds: readonly string[]) =>
+          (await storage.executions.listDescendants({ projectId, executionIds })).map(
+            (execution) => execution.id
+          )
+
+        expect(await ids(["root"])).toEqual([
+          "child",
+          "grandchild",
+          "inner",
+          "inner-action",
+          "late-workflow",
+        ])
+        // Asked about too, `inner` is not listed, and what it caused is listed once.
+        expect(await ids(["root", "inner"])).toEqual([
+          "child",
+          "grandchild",
+          "inner-action",
+          "late-workflow",
+        ])
+        expect(await ids(["sibling", "inner"])).toEqual(["inner-action", "sibling-action"])
+        expect(await ids(["grandchild", "unknown"])).toEqual([])
+        expect(await ids([])).toEqual([])
+
+        const listed = await storage.executions.listDescendants({
+          projectId,
+          executionIds: ["inner"],
+        })
+        expect(listed).toEqual([{ id: "inner-action", parentId: "inner" }])
+        expect(
+          await storage.executions.listDescendants({ projectId: "other", executionIds: ["root"] })
+        ).toEqual([])
+      })
+    })
+
     test("participates in storage transactions and rollback", async () => {
       await withStorage(async (storage) => {
         await expect(

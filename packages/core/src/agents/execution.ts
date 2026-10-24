@@ -4,9 +4,10 @@ import { isSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { canInheritAgentRequestAuthorization } from "../execution/agent"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import { nearestOwner } from "../execution/lineage"
 import type { DecisionModelsRuntime, ModelCatalog } from "../models"
-import { resolveExecutionCosts } from "../runtime/ai-cost"
-import { resolveExecutionUsage } from "../runtime/ai-usage"
+import { addCostSummaries, resolveExecutionCosts } from "../runtime/ai-cost"
+import { addUsageSummaries, resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
@@ -242,9 +243,13 @@ export interface AgentRunsRuntime {
 /** Execution-facing run view with provenance resolved from the immutable execution ledger. */
 export interface AgentRunView extends ConversationAgentRunRecord {
   readonly requestedBy?: AuthorizablePrincipal
-  /** Derived from the model-call ledger; never persisted on the Agent run row. */
+  /**
+   * Derived from the model-call ledger; never persisted on the Agent run row. Covers the turn and
+   * everything below its execution: its children and what its tools ran, including what a workflow
+   * it started spends after the turn ends, as Activity counts it.
+   */
   readonly usage?: AiModelCallUsage
-  /** Preferred valuation; omitted when there are no calls or cost storage is unavailable. */
+  /** Preferred valuation of the same calls; omitted without calls or cost storage. */
   readonly cost?: AiCostSummary
 }
 
@@ -868,7 +873,7 @@ async function attachRunViews(
   runs: readonly ConversationAgentRunRecord[]
 ): Promise<readonly AgentRunView[]> {
   const executionIds = runs.map((run) => run.executionId)
-  const [executions, usages, costs] = await Promise.all([
+  const [executions, accounting] = await Promise.all([
     Promise.all(
       runs.map((run) =>
         runtime.storage.executions.getById({
@@ -877,16 +882,7 @@ async function attachRunViews(
         })
       )
     ),
-    resolveExecutionUsage({
-      storage: runtime.storage.aiUsage,
-      projectId: runtime.projectId,
-      executionIds,
-    }),
-    resolveExecutionCosts({
-      storage: runtime.storage.aiCosts,
-      projectId: runtime.projectId,
-      executionIds,
-    }),
+    resolveTurnAccounting(runtime, executionIds),
   ])
 
   return runs.map((run, index) => {
@@ -896,8 +892,7 @@ async function attachRunViews(
         `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
       )
     }
-    const usage = usages[index]
-    const cost = usage === undefined ? undefined : costs[index]
+    const { usage, cost } = accounting[index] ?? {}
     return {
       ...run,
       ...(execution.requestedBy === undefined
@@ -930,4 +925,56 @@ function refusedResume(error: unknown): Extract<AgentApprovalResume, { status: "
     message: "[Sixb] The Agent turn could not resume. Sixb tries again.",
     retrying: true,
   }
+}
+
+/**
+ * Each turn's usage and cost: its own calls and those of everything below it, its children and
+ * what its tools ran, as Activity counts them. Each call counts once, toward the nearest turn above
+ * it. A child still at work adds what it has spent so far, and so does a workflow a tool started,
+ * also once the turn has ended: Activity counts it toward the conversation the same way.
+ */
+async function resolveTurnAccounting(
+  runtime: SixbRuntimeContext,
+  executionIds: readonly string[]
+): Promise<readonly { readonly usage?: AiModelCallUsage; readonly cost?: AiCostSummary }[]> {
+  if (executionIds.length === 0) return []
+  const { projectId, storage } = runtime
+
+  const below = await storage.executions.listDescendants({ projectId, executionIds })
+  const turns = new Set(executionIds)
+  const parentOf = new Map(below.map(({ id, parentId }) => [id, parentId]))
+  const turnOf = (executionId: string) =>
+    nearestOwner(
+      executionId,
+      (id) => parentOf.get(id),
+      (id) => turns.has(id)
+    )
+
+  const accounted = [...executionIds, ...below.map(({ id }) => id)]
+  const [usages, costs] = await Promise.all([
+    resolveExecutionUsage({ storage: storage.aiUsage, projectId, executionIds: accounted }),
+    resolveExecutionCosts({ storage: storage.aiCosts, projectId, executionIds: accounted }),
+  ])
+
+  const usagesByTurn = new Map<string, AiModelCallUsage[]>()
+  const costsByTurn = new Map<string, AiCostSummary[]>()
+  accounted.forEach((executionId, index) => {
+    const turn = turnOf(executionId)
+    const usage = usages[index]
+    const cost = costs[index]
+    // Never: every execution listed descends from a turn asked about.
+    if (turn === undefined) return
+
+    if (usage) usagesByTurn.set(turn, [...(usagesByTurn.get(turn) ?? []), usage])
+    if (cost) costsByTurn.set(turn, [...(costsByTurn.get(turn) ?? []), cost])
+  })
+
+  return executionIds.map((executionId) => {
+    const usage = addUsageSummaries(usagesByTurn.get(executionId) ?? [])
+    const cost = addCostSummaries(costsByTurn.get(executionId) ?? [])
+    return {
+      ...(usage === undefined ? {} : { usage }),
+      ...(cost === undefined ? {} : { cost }),
+    }
+  })
 }

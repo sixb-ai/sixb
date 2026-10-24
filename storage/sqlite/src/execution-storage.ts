@@ -8,8 +8,10 @@ import {
 } from "@sixb/core/internal/execution-storage"
 import type {
   CreateExecutionInput,
+  ExecutionDescendant,
   ExecutionRecord,
   ExecutionStorage,
+  ListExecutionDescendantsInput,
   ListSessionExecutionsInput,
   SessionExecutions,
   ShareSessionStorage,
@@ -170,6 +172,43 @@ export class SqliteExecutionStorage implements ExecutionStorage {
       executions: kept.sort(compareExecutionCreation),
       truncated: rows.length > input.limit,
     }
+  }
+
+  async listDescendants(
+    input: ListExecutionDescendantsInput
+  ): Promise<readonly ExecutionDescendant[]> {
+    if (input.executionIds.length === 0) return []
+    const ids = [...new Set(input.executionIds)]
+
+    // UNION, not UNION ALL: an execution asked about may sit below another one asked about, and
+    // the walk would otherwise reach what it caused twice.
+    const rows = this.db
+      .query(
+        `
+        WITH RECURSIVE tree(id, parent_id) AS (
+          SELECT child.id, child.parent_execution_id
+          FROM executions child
+          WHERE child.project_id = ?
+            AND child.parent_execution_id IN (SELECT value FROM json_each(?))
+          UNION
+          SELECT child.id, child.parent_execution_id
+          FROM tree
+          CROSS JOIN executions child
+            ON child.project_id = ?
+            AND child.parent_execution_id = tree.id
+        )
+        SELECT id, parent_id
+        FROM tree
+        WHERE id NOT IN (SELECT value FROM json_each(?))
+        ORDER BY id
+      `
+      )
+      .all(input.projectId, JSON.stringify(ids), input.projectId, JSON.stringify(ids)) as {
+      id: string
+      parent_id: string
+    }[]
+
+    return rows.map((row) => ({ id: row.id, parentId: row.parent_id }))
   }
 }
 

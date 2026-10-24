@@ -11,9 +11,11 @@ export type {
   CreateExecutionInput,
   DurableExecutionExecutor,
   DurableExecutionSource,
+  ExecutionDescendant,
   ExecutionRecord,
   ExecutionSessionRef,
   ExecutionStorage,
+  ListExecutionDescendantsInput,
   ListSessionExecutionsInput,
   SessionExecutions,
 } from "./types"

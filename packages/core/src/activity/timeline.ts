@@ -4,7 +4,8 @@ import {
   viewableActionRuns,
 } from "../actions/run-authorization"
 import { canViewWorkflowRun, isRuntimeAllowed } from "../authorization"
-import { resolveExecutionCosts } from "../runtime/ai-cost"
+import { nearestOwner } from "../execution/lineage"
+import { addCostSummaries, resolveExecutionCosts } from "../runtime/ai-cost"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ActionRunStatus } from "../storage/action-runs"
 import { ACTIVITY_MAX_VISIT_MS, ACTIVITY_MIN_IDLE_TIMEOUT_MS } from "../storage/activity/policy"
@@ -358,49 +359,27 @@ function rollUpCosts(
 
   withAgent.forEach((execution, index) => {
     const cost = costs[index]
-    const owner = lineage(execution, byId).find((ancestor) => conversations.has(ancestor.id))
+    const owner = nearestOwner(
+      execution.id,
+      (id) => {
+        const source = byId.get(id)?.source
+        return source?.type === "execution" ? source.executionId : undefined
+      },
+      (id) => conversations.has(id)
+    )
     if (!cost || !owner) {
       return
     }
 
-    const summaries = grouped.get(owner.id) ?? []
+    const summaries = grouped.get(owner) ?? []
     summaries.push(cost)
-    grouped.set(owner.id, summaries)
+    grouped.set(owner, summaries)
   })
 
   return new Map(
     [...grouped].flatMap(([owner, summaries]) => {
-      const total = addCosts(summaries)
+      const total = addCostSummaries(summaries)
       return total ? [[owner, total] as const] : []
     })
   )
-}
-
-function addCosts(summaries: readonly AiCostSummary[]): AiCostSummary | undefined {
-  const amounts = new Map<string, bigint>()
-  let ratedCallCount = 0
-  let unpriceableCallCount = 0
-  let unvaluedCallCount = 0
-
-  for (const summary of summaries) {
-    for (const money of summary.amounts) {
-      amounts.set(money.currency, (amounts.get(money.currency) ?? 0n) + BigInt(money.amountNanos))
-    }
-    ratedCallCount += summary.ratedCallCount
-    unpriceableCallCount += summary.unpriceableCallCount
-    unvaluedCallCount += summary.unvaluedCallCount
-  }
-
-  if (ratedCallCount + unpriceableCallCount + unvaluedCallCount === 0) {
-    return undefined
-  }
-
-  return {
-    amounts: [...amounts]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([currency, amount]) => ({ currency, amountNanos: amount.toString() })),
-    ratedCallCount,
-    unpriceableCallCount,
-    unvaluedCallCount,
-  }
 }
