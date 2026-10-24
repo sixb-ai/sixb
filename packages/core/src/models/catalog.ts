@@ -162,9 +162,7 @@ function createLanguageCatalog(
   }
 
   const index = indexModelBindings(models, "language", (model, position) => {
-    assertLanguageModel(model, position)
-    assertDefaultReasoning(model, position)
-    assertMaxOutputTokens(model, position)
+    assertValidLanguageModel(model, (detail) => invalidLanguageModel(position, detail))
   })
   const [defaultEntry] = index.list()
   if (!defaultEntry) {
@@ -186,25 +184,38 @@ function createEmbeddingCatalog(
   return indexModelBindings(models ?? [], "embedding", assertEmbeddingModel)
 }
 
+/** Builds the error for an invalid language model, naming where it was configured. */
+type InvalidLanguageModel = (detail: string) => Error
+
+/**
+ * Check a language model the project configures, in the catalog or on an agent step: its shape
+ * and identity, its default reasoning and its output limit.
+ */
+export function assertValidLanguageModel(
+  model: unknown,
+  fail: InvalidLanguageModel
+): asserts model is LanguageModel {
+  assertLanguageModel(model, fail)
+  assertDefaultReasoning(model, fail)
+  assertMaxOutputTokens(model, fail)
+}
+
 // Capabilities known without catalog I/O. Unknown support is accepted: providers fall back to their
 // default when a resolved model turns out not to support the level.
-function assertDefaultReasoning(model: LanguageModel, index: number): void {
+function assertDefaultReasoning(model: LanguageModel, fail: InvalidLanguageModel): void {
   const reasoning: unknown = model.defaultReasoning
   if (reasoning === undefined) return
   if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(reasoning)) {
-    throw invalidLanguageModel(
-      index,
-      `expected 'defaultReasoning' to be one of: ${MODEL_REASONING_LEVELS.join(", ")}`
-    )
+    throw fail(`expected 'defaultReasoning' to be one of: ${MODEL_REASONING_LEVELS.join(", ")}`)
   }
   const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
   if (issue !== undefined) {
-    throw invalidLanguageModel(index, `default reasoning '${reasoning}' cannot be used: ${issue}`)
+    throw fail(`default reasoning '${reasoning}' cannot be used: ${issue}`)
   }
 }
 
 // Providers validate their own options; this holds the same rule for providers written elsewhere.
-function assertMaxOutputTokens(model: LanguageModel, index: number): void {
+function assertMaxOutputTokens(model: LanguageModel, fail: InvalidLanguageModel): void {
   const maxOutputTokens: unknown = model.maxOutputTokens
   if (maxOutputTokens === undefined) return
   if (
@@ -212,27 +223,27 @@ function assertMaxOutputTokens(model: LanguageModel, index: number): void {
     !Number.isSafeInteger(maxOutputTokens) ||
     maxOutputTokens <= 0
   ) {
-    throw invalidLanguageModel(index, "expected 'maxOutputTokens' to be a positive safe integer")
+    throw fail("expected 'maxOutputTokens' to be a positive safe integer")
   }
   const modelMaximum = model.definition.maxOutputTokens
   if (modelMaximum !== undefined && maxOutputTokens > modelMaximum) {
-    throw invalidLanguageModel(
-      index,
-      `'maxOutputTokens' (${maxOutputTokens}) exceeds the model maximum (${modelMaximum})`
-    )
+    throw fail(`'maxOutputTokens' (${maxOutputTokens}) exceeds the model maximum (${modelMaximum})`)
   }
 }
 
-function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModel {
+function assertLanguageModel(
+  model: unknown,
+  fail: InvalidLanguageModel
+): asserts model is LanguageModel {
   if ((typeof model !== "object" && typeof model !== "function") || model === null) {
-    throw invalidLanguageModel(index, "expected a Sixb LanguageModel instance")
+    throw fail("expected a Sixb LanguageModel instance")
   }
 
   const candidate = model as Record<string, unknown>
-  assertModelIdentifier(candidate.providerId, "provider", index)
-  assertModelIdentifier(candidate.modelId, "modelId", index)
+  assertModelIdentifier(candidate.providerId, "provider", fail)
+  assertModelIdentifier(candidate.modelId, "modelId", fail)
   if (typeof candidate.stream !== "function") {
-    throw invalidLanguageModel(index, "expected 'stream' to be a function")
+    throw fail("expected 'stream' to be a function")
   }
   try {
     const definition = defineLanguageModel(candidate.definition as LanguageModelDefinition)
@@ -243,16 +254,20 @@ function assertLanguageModel(model: unknown, index: number): asserts model is La
       throw new Error("definition identity does not match the binding")
     }
   } catch (error) {
-    throw invalidLanguageModel(index, error instanceof Error ? error.message : "invalid definition")
+    throw fail(error instanceof Error ? error.message : "invalid definition")
   }
 }
 
-function assertModelIdentifier(value: unknown, field: "provider" | "modelId", index: number): void {
+function assertModelIdentifier(
+  value: unknown,
+  field: "provider" | "modelId",
+  fail: InvalidLanguageModel
+): void {
   if (typeof value !== "string" || value.length === 0) {
-    throw invalidLanguageModel(index, `expected '${field}' to be a non-empty string`)
+    throw fail(`expected '${field}' to be a non-empty string`)
   }
   if (value.trim() !== value) {
-    throw invalidLanguageModel(index, `expected '${field}' not to have surrounding whitespace`)
+    throw fail(`expected '${field}' not to have surrounding whitespace`)
   }
 }
 

@@ -1,6 +1,7 @@
 import { isActionDefinition } from "../actions"
 import type { AgentSkillCatalog, AgentToolCatalog } from "../agents"
 import type { ModelCatalog } from "../models"
+import { assertValidLanguageModel } from "../models/catalog"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology/refs"
@@ -188,6 +189,16 @@ function validateWorkflowAgentStepRuntimeReferences(
   if (step.model === undefined && options.models?.language === undefined) {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" agent step "${step.id}" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().`
+    )
+  }
+  // The step's own model runs as given, so it passes the checks a catalog model passes.
+  if (step.model !== undefined) {
+    assertValidLanguageModel(
+      step.model,
+      (detail) =>
+        new WorkflowDefinitionError(
+          `Workflow "${workflowId}" agent step "${step.id}" has an invalid language model: ${detail}.`
+        )
     )
   }
   // Same rule as a catalog default: checked against the capabilities the model declares, so an

@@ -816,6 +816,42 @@ describe("SixbHost workflow registration", () => {
     )
   })
 
+  test("checks an agent step's own model like a catalog model", () => {
+    // Proven by removal: drop the assertValidLanguageModel call for step models in validation.
+    const limited: LanguageModel = {
+      ...testModel("test", "limited-model"),
+      definition: {
+        kind: "language",
+        providerId: "test",
+        modelId: "limited-model",
+        maxOutputTokens: 4_096,
+        capabilities: { reasoning: { efforts: ["low"] } },
+      },
+    }
+    const host = (model: LanguageModel) =>
+      new SixbHost({
+        ontology: [Transaction, Invoice],
+        models: { language: [workflowModel] },
+        workflows: [withStep("checked-model-workflow", resolveStep("checked-model", { model }))],
+        ...createTestRuntimeDeps(),
+      })
+    const invalid =
+      'Workflow "checked-model-workflow" agent step "checked-model" has an invalid language model: '
+
+    expect(() =>
+      host({ ...limited, defaultReasoning: "low", maxOutputTokens: 4_096 })
+    ).not.toThrow()
+    expect(() => host({ ...limited, defaultReasoning: "high" })).toThrow(
+      `${invalid}default reasoning 'high' cannot be used: reasoning effort 'high' is not supported`
+    )
+    expect(() => host({ ...limited, maxOutputTokens: 8_192 })).toThrow(
+      `${invalid}'maxOutputTokens' (8192) exceeds the model maximum (4096).`
+    )
+    expect(() => host({ ...limited, modelId: "renamed-model" })).toThrow(
+      `${invalid}definition identity does not match the binding.`
+    )
+  })
+
   test("rejects agent-step skills that are not unique names", () => {
     const define = (skills: unknown) =>
       defineAgentStep("bad-skills", {

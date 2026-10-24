@@ -25,6 +25,7 @@ import { drainActionRuns } from "@sixb/core/internal/actions"
 import { agentServiceAccountId } from "@sixb/core/internal/agents"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
+import type { LanguageModel } from "@sixb/core/models"
 import type { ActionRunRecord, QueueWorkflowRunInput, WorkflowRunStorage } from "@sixb/core/storage"
 import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
@@ -38,6 +39,16 @@ const Transaction = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
+// The worker parks at an agent node; the model is checked at startup but never called.
+const agentStepModel: LanguageModel = {
+  providerId: "test",
+  modelId: "test-model",
+  definition: { kind: "language", providerId: "test", modelId: "test-model", capabilities: {} },
+  async stream() {
+    throw new Error("The agent step's model must not be called.")
+  },
+}
+
 const Invoice = defineObjectType({
   id: "Invoice",
   name: "Invoice",
@@ -45,7 +56,7 @@ const Invoice = defineObjectType({
 })
 
 const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice-with-agent", {
-  model: {} as NonNullable<Parameters<typeof defineAgentStep>[1]["model"]>,
+  model: agentStepModel,
   instructions: "Resolve the best matching invoice.",
 })
   .input({ transaction: ref(Transaction) })
@@ -642,7 +653,7 @@ describe("runWorkflowJob", () => {
   test("parks at an agent node and resumes from its validated structured output", async () => {
     const finance = defineGroup("finance")
     const configuredStep = defineAgentStep("resolve-invoice-with-agent", {
-      model: {} as NonNullable<Parameters<typeof defineAgentStep>[1]["model"]>,
+      model: agentStepModel,
       instructions: "Resolve the best matching invoice.",
       groups: [finance],
     })
