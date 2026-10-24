@@ -65,11 +65,13 @@ interface ModelLoopOptions {
    */
   readonly pauseAfterStep?: (step: ModelStep) => boolean | Promise<boolean>
   /**
-   * Asked when the model answers without local tools and a step is left, once `onStepEnd` settled.
-   * Messages it returns follow that answer in one more step, instead of the loop ending on it.
+   * Asked when the model answers without local tools and a step is left, once `onStepEnd` settled,
+   * with that step's index. Messages it returns follow that answer in one more step, instead of the
+   * loop ending on it.
    */
   readonly beforeComplete?: (
-    step: ModelStep
+    step: ModelStep,
+    stepIndex: number
   ) => readonly ModelMessage[] | undefined | Promise<readonly ModelMessage[] | undefined>
   readonly generateCallId?: () => string
 }
@@ -318,7 +320,7 @@ export async function runModelLoop(
       const canContinue = response.finishReason !== "length" && stepIndex + 1 < input.maxSteps
       let followUp: readonly ModelMessage[] | undefined
       try {
-        followUp = canContinue ? await input.beforeComplete?.(step) : undefined
+        followUp = canContinue ? await input.beforeComplete?.(step, stepIndex) : undefined
       } catch (error) {
         if (!input.signal.aborted && !isAbortError(error)) throw error
         return { status: "aborted", steps, partialContent: [] }
