@@ -3,6 +3,7 @@ import {
   agent,
   can,
   col,
+  currentUser,
   defineAction,
   defineConnector,
   defineDataset,
@@ -13,15 +14,20 @@ import {
   defineRole,
   defineSync,
   every,
+  type ObjectQueryPredicate,
   project,
   prop,
   type RoleDefinition,
+  ref,
   resolveAuthorizationContext,
   SixbHost,
 } from "../src"
 import { createSessionCredential } from "../src/auth"
 import { resolveRoleGrants } from "../src/authorization"
+import { resolveRuntimeAuthorization } from "../src/execution/authorization"
+import { createTestingScope } from "../src/execution/scopes"
 import { testLanguageModel } from "./helpers/language-model"
+import { resolveRolesWithConditions } from "./helpers/view-conditions"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
@@ -309,6 +315,143 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["view:object"]).toEqual(
       new Set(["contract", "signed-contract", "invoice"])
     )
+  })
+})
+
+describe("view conditions", () => {
+  const filterable = { query: { searchable: true, filterable: true } } as const
+
+  const Ticket = defineObjectType({
+    id: "ticket",
+    name: "Ticket",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("status", "string", filterable),
+      prop("priority", "integer", filterable),
+      prop("owner", ref.user(), filterable),
+    ],
+  })
+
+  const Incident = defineObjectType({
+    id: "incident",
+    name: "Incident",
+    extends: Ticket,
+    properties: [],
+  })
+
+  const Note = defineObjectType({
+    id: "note",
+    name: "Note",
+    properties: [prop("id", "string", { required: true, primary: true })],
+  })
+
+  const open = can.view(Ticket).where((ticket) => ticket.p.status.eq("open"))
+  const mine = can.view(Ticket).where((ticket) => ticket.p.owner.eq(currentUser()))
+  const urgent = can.view(Ticket).where((ticket) => ticket.p.priority.gt(3))
+
+  const resolveWith = (roles: readonly RoleDefinition[]) =>
+    resolveRolesWithConditions({ ontology: [Ticket, Incident, Note], roles })
+
+  const role = (id: string, groupId: string, grants: RoleDefinition["grants"]) =>
+    defineRole(id, { grantedTo: [defineGroup(groupId)], grants: [...grants] })
+
+  const openTickets: ObjectQueryPredicate = {
+    propertyId: "status",
+    op: "eq",
+    value: "open",
+    scalarKind: "string",
+  }
+  const myTickets: ObjectQueryPredicate = {
+    propertyId: "owner",
+    op: "eq",
+    value: currentUser(),
+    scalarKind: "userRef",
+  }
+
+  // Reproduce: let resolveRoleGrants expand a grant that carries a condition, and the types land
+  // in view:object, where every check on that grant reads them whole.
+  test("a conditional grant views no type whole, and applies to the subtypes", () => {
+    const { contextFor } = resolveWith([role("triage", "support", [open, can.view(Note)])])
+    const context = contextFor(["support"])
+
+    expect(context.grants["view:object"]).toEqual(new Set(["note"]))
+    expect(context.viewConditions).toEqual(
+      new Map([
+        ["ticket", [openTickets]],
+        ["incident", [openTickets]],
+      ])
+    )
+  })
+
+  test("keeps the condition the validator returns, scalar kinds resolved", () => {
+    const { security } = resolveWith([role("triage", "support", [urgent])])
+    const [resolved] = security.listResolvedRoles()
+
+    expect(resolved?.viewConditions?.get("ticket")).toEqual({
+      propertyId: "priority",
+      op: "gt",
+      value: 3,
+      scalarKind: "integer",
+    })
+    expect(Object.isFrozen(resolved?.viewConditions?.get("ticket"))).toBe(true)
+  })
+
+  test("one role's conditions on a type combine with or", () => {
+    const { contextFor } = resolveWith([role("triage", "support", [open, mine])])
+
+    expect(contextFor(["support"]).viewConditions?.get("ticket")).toEqual([
+      { op: "or", items: [openTickets, myTickets] },
+    ])
+  })
+
+  test("a role that also views a type without a condition shows all of it", () => {
+    const { contextFor } = resolveWith([role("triage", "support", [open, can.view(Ticket)])])
+    const context = contextFor(["support"])
+
+    expect(context.grants["view:object"]).toEqual(new Set(["ticket", "incident"]))
+    expect(context.viewConditions).toBeUndefined()
+  })
+
+  test("an unconditional subtype grant leaves the parent conditioned", () => {
+    const { contextFor } = resolveWith([role("triage", "support", [open, can.view(Incident)])])
+    const context = contextFor(["support"])
+
+    expect(context.grants["view:object"]).toEqual(new Set(["incident"]))
+    expect(context.viewConditions).toEqual(new Map([["ticket", [openTickets]]]))
+  })
+
+  test("roles union: conditions add up, and an unconditional grant from any role wins", () => {
+    const { contextFor } = resolveWith([
+      role("triage", "support", [open]),
+      role("owner", "owners", [mine]),
+      role("manager", "managers", [can.view(Ticket)]),
+    ])
+
+    expect(contextFor(["support", "owners"]).viewConditions?.get("ticket")).toEqual([
+      openTickets,
+      myTickets,
+    ])
+
+    const managed = contextFor(["support", "managers"])
+    expect(managed.grants["view:object"]).toEqual(new Set(["ticket", "incident"]))
+    expect(managed.viewConditions).toBeUndefined()
+  })
+
+  // Reproduce: drop viewConditions from snapshotAuthorizationContext, and a reader bound to the
+  // runtime authority would see no condition at all.
+  test("runtime authority keeps the conditions, detached and immutable", () => {
+    const { contextFor } = resolveWith([role("triage", "support", [open])])
+    const context = contextFor(["support"])
+    const scope = createTestingScope({ projectId: "conditions", context })
+
+    const resolved = resolveRuntimeAuthorization(scope.authorization)
+    if (resolved.type !== "principal") throw new Error("expected principal authority")
+
+    const conditions = resolved.context.viewConditions
+    expect(new Map(conditions)).toEqual(new Map(context.viewConditions))
+    expect(conditions?.get("ticket")).not.toBe(context.viewConditions?.get("ticket"))
+    expect(Object.isFrozen(conditions?.get("ticket"))).toBe(true)
+    expect("set" in (conditions ?? {})).toBe(false)
   })
 })
 

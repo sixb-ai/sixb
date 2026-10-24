@@ -9,6 +9,7 @@ import {
 } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
+import type { ObjectQueryPredicate } from "../objects/query/ir"
 import type { ObjectRef } from "../ontology"
 import {
   type ObjectReadExecutionLimits,
@@ -602,6 +603,9 @@ function snapshotAuthorizationContext(
     groupIds: Object.freeze([...context.groupIds]),
     roleIds: Object.freeze([...context.roleIds]),
     grants: frozenGrants,
+    ...(context.viewConditions === undefined
+      ? {}
+      : { viewConditions: new ImmutableViewConditions(context.viewConditions) }),
     clearances: new ImmutableGrantSet(context.clearances ?? []),
   })
 }
@@ -666,6 +670,72 @@ Object.freeze(ImmutableGrantSet.prototype)
 
 function immutableGrantSetMutation(): Error {
   return new Error("[Sixb] Runtime authorization grants are immutable.")
+}
+
+/** Conditions detached from the caller's map and predicates, readable and never writable. */
+class ImmutableViewConditions implements ReadonlyMap<string, readonly ObjectQueryPredicate[]> {
+  readonly #entries: Map<string, readonly ObjectQueryPredicate[]>
+  readonly [Symbol.toStringTag] = "Map"
+
+  constructor(entries: ReadonlyMap<string, readonly ObjectQueryPredicate[]>) {
+    this.#entries = new Map(
+      [...entries].map(([objectTypeId, predicates]) => [
+        objectTypeId,
+        deepFreeze(structuredClone([...predicates])),
+      ])
+    )
+    Object.freeze(this)
+  }
+
+  get size(): number {
+    return this.#entries.size
+  }
+
+  get(objectTypeId: string): readonly ObjectQueryPredicate[] | undefined {
+    return this.#entries.get(objectTypeId)
+  }
+
+  has(objectTypeId: string): boolean {
+    return this.#entries.has(objectTypeId)
+  }
+
+  entries(): ReturnType<Map<string, readonly ObjectQueryPredicate[]>["entries"]> {
+    return this.#entries.entries()
+  }
+
+  keys(): ReturnType<Map<string, readonly ObjectQueryPredicate[]>["keys"]> {
+    return this.#entries.keys()
+  }
+
+  values(): ReturnType<Map<string, readonly ObjectQueryPredicate[]>["values"]> {
+    return this.#entries.values()
+  }
+
+  [Symbol.iterator](): ReturnType<Map<string, readonly ObjectQueryPredicate[]>["entries"]> {
+    return this.#entries.entries()
+  }
+
+  forEach(
+    callback: (
+      predicates: readonly ObjectQueryPredicate[],
+      objectTypeId: string,
+      map: ReadonlyMap<string, readonly ObjectQueryPredicate[]>
+    ) => void,
+    thisArg?: unknown
+  ): void {
+    for (const [objectTypeId, predicates] of this.#entries) {
+      callback.call(thisArg, predicates, objectTypeId, this)
+    }
+  }
+}
+
+Object.freeze(ImmutableViewConditions.prototype)
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null) return value
+
+  for (const child of Object.values(value)) deepFreeze(child)
+  return Object.freeze(value)
 }
 
 function snapshotAuthorizablePrincipal(principal: Principal): AuthorizablePrincipal {

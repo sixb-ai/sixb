@@ -1,4 +1,5 @@
 import type { Principal } from "../auth/types"
+import type { ObjectQueryPredicate } from "../objects/query/ir"
 import type { RoleDefinition, Selection } from "../security"
 import {
   emptyGrantSets,
@@ -20,11 +21,15 @@ import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
  * become booleans.
  * The per-kind universe and subtype rules come from the `GRANT_KINDS` table, so
  * this loop never enumerates targets by hand.
+ *
+ * A view grant with a condition grants no type here: see {@link resolveRoleViewConditions}.
  */
 export function resolveRoleGrants(role: RoleDefinition, universe: GrantUniverse): GrantIndex {
   const grants = emptyGrantSets()
 
   for (const grant of role.grants) {
+    if ("condition" in grant && grant.condition !== undefined) continue
+
     const kind = grantKindOf(grant)
     if (isSingletonGrantKind(kind)) {
       grants[kind] = true
@@ -42,6 +47,45 @@ export function resolveRoleGrants(role: RoleDefinition, universe: GrantUniverse)
   }
 
   return grants
+}
+
+/**
+ * Resolve a role's conditional view grants once at startup, from their validated conditions.
+ *
+ * A condition applies to the type its grant names and to each subtype, as a view grant does.
+ * Several conditions on one type combine with `or`, and a type the role also views without a
+ * condition drops them: the role shows every object of it.
+ */
+export function resolveRoleViewConditions(
+  conditions: readonly {
+    readonly objectTypeId: string
+    readonly predicate: ObjectQueryPredicate
+  }[],
+  grants: GrantIndex,
+  universe: GrantUniverse
+): ReadonlyMap<string, ObjectQueryPredicate> {
+  const byType = new Map<string, ObjectQueryPredicate[]>()
+
+  for (const condition of conditions) {
+    const objectTypeIds = [condition.objectTypeId, ...universe.getSubTypes(condition.objectTypeId)]
+
+    for (const objectTypeId of objectTypeIds) {
+      if (grants["view:object"].has(objectTypeId)) continue
+
+      const predicates = byType.get(objectTypeId) ?? []
+      predicates.push(condition.predicate)
+      byType.set(objectTypeId, predicates)
+    }
+  }
+
+  return new Map(
+    [...byType].map(([objectTypeId, predicates]) => [objectTypeId, anyOf(predicates)] as const)
+  )
+}
+
+function anyOf(predicates: readonly ObjectQueryPredicate[]): ObjectQueryPredicate {
+  if (predicates.length === 1) return predicates[0]!
+  return Object.freeze({ op: "or", items: Object.freeze([...predicates]) })
 }
 
 function expandSelection(
@@ -76,6 +120,9 @@ function expandSelection(
  * Pure set-union over pre-resolved roles: roles match when their grantedTo
  * groups intersect the principal's memberships, and their concrete id sets
  * and clearances union into the principal's context.
+ *
+ * View conditions union too: the principal sees an object any of them matches. A type one role
+ * views without a condition is viewed whole, whatever conditions the others put on it.
  */
 export function resolveAuthorizationContext(input: {
   readonly principal: Principal
@@ -87,6 +134,7 @@ export function resolveAuthorizationContext(input: {
   const roleIds: string[] = []
   const grants = emptyGrantSets()
   const clearances = new Set<string>()
+  const viewConditions = new Map<string, ObjectQueryPredicate[]>()
 
   for (const role of input.roles) {
     if (!role.grantedToGroupIds.some((groupId) => memberGroupIds.has(groupId))) {
@@ -105,6 +153,13 @@ export function resolveAuthorizationContext(input: {
     for (const markingId of role.clearances ?? []) {
       clearances.add(markingId)
     }
+    for (const [objectTypeId, predicate] of role.viewConditions ?? []) {
+      viewConditions.set(objectTypeId, [...(viewConditions.get(objectTypeId) ?? []), predicate])
+    }
+  }
+
+  for (const objectTypeId of grants["view:object"]) {
+    viewConditions.delete(objectTypeId)
   }
 
   return {
@@ -113,6 +168,7 @@ export function resolveAuthorizationContext(input: {
     groupIds: input.groupIds,
     roleIds,
     grants,
+    ...(viewConditions.size > 0 ? { viewConditions } : {}),
     clearances,
   }
 }

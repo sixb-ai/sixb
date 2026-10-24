@@ -1,4 +1,4 @@
-import { type ResolvedRole, resolveRoleGrants } from "../authorization"
+import { type ResolvedRole, resolveRoleGrants, resolveRoleViewConditions } from "../authorization"
 import type { OntologyRegistry } from "../ontology"
 import type {
   GroupDefinition,
@@ -7,7 +7,7 @@ import type {
   RoleDefinition,
 } from "./types"
 import { validateSecurityDefinitionsAtStartup } from "./validation"
-import { assertViewCondition } from "./view-conditions"
+import { resolveViewCondition, type ViewCondition } from "./view-conditions"
 
 /** Read-only access to validated security definitions and resolved role grants. */
 export interface SecurityDefinitionCatalog {
@@ -46,6 +46,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
   private readonly rolesById: ReadonlyMap<string, RoleDefinition>
   private readonly membershipPoliciesById: ReadonlyMap<string, MembershipPolicyDefinition>
   private readonly resolvedRoles: readonly ResolvedRole[]
+  private readonly viewConditions: readonly ViewCondition[]
 
   constructor(input: SecurityRegistryOptions) {
     const definitions = validateSecurityDefinitionsAtStartup({
@@ -66,9 +67,9 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
 
     // Conditions are checked here rather than with the other grant rules: those also load in the
     // browser through `defineGroup`, and a condition needs the object-query validator.
-    for (const role of definitions.roles) {
-      for (const grant of role.grants) assertViewCondition(role.id, grant, input.ontology)
-    }
+    this.viewConditions = definitions.roles.flatMap((role) =>
+      role.grants.flatMap((grant) => resolveViewCondition(role.id, grant, input.ontology) ?? [])
+    )
 
     const universe = {
       objectTypeIds: input.objectTypeIds ?? new Set<string>(),
@@ -86,12 +87,22 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
     this.groupsById = definitions.groupsById
     this.rolesById = definitions.rolesById
     this.membershipPoliciesById = definitions.membershipPoliciesById
-    this.resolvedRoles = definitions.roles.map((role) => ({
-      id: role.id,
-      grantedToGroupIds: role.grantedToGroupIds,
-      grants: resolveRoleGrants(role, universe),
-      clearances: new Set(role.clearances ?? []),
-    }))
+    this.resolvedRoles = definitions.roles.map((role) => {
+      const grants = resolveRoleGrants(role, universe)
+      const viewConditions = resolveRoleViewConditions(
+        this.viewConditions.filter((condition) => condition.roleId === role.id),
+        grants,
+        universe
+      )
+
+      return {
+        id: role.id,
+        grantedToGroupIds: role.grantedToGroupIds,
+        grants,
+        ...(viewConditions.size > 0 ? { viewConditions } : {}),
+        clearances: new Set(role.clearances ?? []),
+      }
+    })
   }
 
   listMarkings(): readonly MarkingDefinition[] {
@@ -120,6 +131,11 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
 
   listResolvedRoles(): readonly ResolvedRole[] {
     return this.resolvedRoles
+  }
+
+  /** Every role's `can.view(Type).where(...)`, validated, in declaration order. */
+  listViewConditions(): readonly ViewCondition[] {
+    return this.viewConditions
   }
 
   listMembershipPolicies(): readonly MembershipPolicyDefinition[] {
