@@ -1004,6 +1004,8 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       const item = compilePredicate(predicate.item)
       return negatePredicate(item)
     }
+    case "constant":
+      return { sql: predicate.value ? "1" : "0", args: [] }
     case "eq":
       return predicate.scalarKind === "userRef"
         ? compileUserRefInPredicate(predicate.propertyId, [predicate.value])

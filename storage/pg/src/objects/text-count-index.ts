@@ -401,6 +401,7 @@ function stringPredicate(
       ? `(${items.join(predicate.op === "and" ? " AND " : " OR ")})`
       : undefined
   }
+  if (predicate.op === "constant") return predicate.value ? "true" : "false"
   if ((predicate.op !== "eq" && predicate.op !== "in") || predicate.scalarKind === "decimal")
     return undefined
   const column = columns.get(predicate.propertyId)

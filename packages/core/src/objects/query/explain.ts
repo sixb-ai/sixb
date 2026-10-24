@@ -239,6 +239,8 @@ function summarizePredicate(predicate: ObjectQueryPredicate): string {
       return `${predicate.propertyId} exists=${predicate.value}`
     case "contains":
       return `${predicate.propertyId} contains`
+    case "constant":
+      return String(predicate.value)
     default:
       return `${predicate.propertyId} ${predicate.op}`
   }

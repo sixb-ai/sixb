@@ -711,6 +711,11 @@ function validatePredicate(
         addIssue(ctx, path, "invalid_exists_value", "Predicate 'exists' value must be boolean")
       }
       return predicate
+    case "constant":
+      if (typeof predicate.value !== "boolean") {
+        addIssue(ctx, path, "invalid_constant_value", "Predicate 'constant' value must be boolean")
+      }
+      return predicate
     case "contains": {
       const { scalarKind: _authoredScalarKind, ...authoredPredicate } = predicate
       const scalarKind = resolveAndValidatePredicateProperty(

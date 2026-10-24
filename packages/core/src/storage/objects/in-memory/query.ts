@@ -60,6 +60,7 @@ export const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     in: true,
     exists: true,
     contains: true,
+    constant: true,
   },
   sortKinds: {
     property: true,
@@ -372,6 +373,8 @@ function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): bool
       return predicate.items.some((item) => matchesPredicate(row, item))
     case "not":
       return !matchesPredicate(row, predicate.item)
+    case "constant":
+      return predicate.value
     case "eq":
       return queryScalarValuesEqual(
         row.properties[predicate.propertyId],

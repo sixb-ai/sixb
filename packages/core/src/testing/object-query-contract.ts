@@ -227,6 +227,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           "in",
           "exists",
           "contains",
+          "constant",
         ] as const) {
           expect(capabilities.predicateOps?.[op]).toBe(true)
         }
@@ -913,6 +914,65 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
 
         expect(received.length).toBeGreaterThan(0)
         expect(received.filter((call) => call.includes('"currentUser"'))).toEqual([])
+      })
+    })
+
+    test("matches every object on a constant true and none on a constant false", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await fixture.seed({
+          objects: [
+            objectSeed(Device.id, "d1", { id: "d1", name: "Lamp" }),
+            objectSeed(Device.id, "d2", { id: "d2", name: "Fan" }),
+          ],
+        })
+
+        const context = { ontology: objectQueryContractOntology, storage }
+        const matching = async (predicate: ObjectQueryPredicate) => {
+          const query: ObjectQuery = {
+            kind: "filter",
+            predicate,
+            input: { kind: "start", objectTypeId: Device.id },
+          }
+
+          const listed = await executeObjectQuery(
+            {
+              projectId,
+              query: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id" }],
+                input: query,
+              },
+            },
+            context
+          )
+          const counted = await countObjects({ projectId, query }, context)
+          const exists = await existsObjects({ projectId, query }, context)
+
+          expect([listed.plan.mode, counted.plan.mode, exists.plan.mode]).toEqual([
+            "pushdown",
+            "pushdown",
+            "pushdown",
+          ])
+          expect(counted.count).toBe(listed.objects.length)
+          expect(exists.exists).toBe(listed.objects.length > 0)
+
+          return listed.objects.map((object) => object.primaryId)
+        }
+
+        const all: ObjectQueryPredicate = { op: "constant", value: true }
+        const none: ObjectQueryPredicate = { op: "constant", value: false }
+        const lamp: ObjectQueryPredicate = { op: "eq", propertyId: "name", value: "Lamp" }
+
+        expect(await matching(all)).toEqual(["d1", "d2"])
+        expect(await matching(none)).toEqual([])
+
+        expect(await matching({ op: "and", items: [all, lamp] })).toEqual(["d1"])
+        expect(await matching({ op: "and", items: [none, lamp] })).toEqual([])
+        expect(await matching({ op: "or", items: [none, lamp] })).toEqual(["d1"])
+        expect(await matching({ op: "or", items: [all, lamp] })).toEqual(["d1", "d2"])
+
+        expect(await matching({ op: "not", item: none })).toEqual(["d1", "d2"])
+        expect(await matching({ op: "not", item: all })).toEqual([])
       })
     })
 
