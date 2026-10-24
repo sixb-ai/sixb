@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { noopLogger } from "@sixb/core"
-import type { GitHubClient, GitHubEventContext, GitHubIssueEvent } from "../src"
+import type {
+  GitHubClient,
+  GitHubEventContext,
+  GitHubIssueEvent,
+  GitHubRepositoryScope,
+} from "../src"
 import { GitHubApiError, github, githubEventsWebhook } from "../src"
 
 const CONTEXT = {
@@ -18,6 +23,8 @@ interface RecordedRequest {
   readonly method: string
   readonly headers: Headers
   readonly body?: unknown
+  /** The body as handed to fetch, for binary uploads. */
+  readonly rawBody?: unknown
 }
 
 const originalFetch = globalThis.fetch
@@ -37,6 +44,7 @@ function record(
       method: init?.method ?? "GET",
       headers: new Headers(init?.headers),
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+      rawBody: init?.body,
     }
     calls.push(request)
     return respond(request, calls.length)
@@ -210,6 +218,12 @@ describe("github connector", () => {
       "/repos/acme/web/releases",
       { per_page: "50" },
     ],
+    [
+      "repo().releases.assets.list",
+      (client: GitHubClient) => client.repo(webRepo).releases.assets.list(7, { pageSize: 50 }),
+      "/repos/acme/web/releases/7/assets",
+      { per_page: "50" },
+    ],
   ] as const)("%s maps its filters and returns GitHub's items", async (_name, list, path, query) => {
     const calls = record(() => json(listItems))
     const client = await connect()
@@ -298,6 +312,94 @@ describe("github connector", () => {
       "/repos/acme/web/releases/tags/%40sixb%2Fcore%400.1.5",
       undefined,
     ],
+    [
+      "repo().releases.get",
+      (c) => c.repo(webRepo).releases.get(7),
+      "GET",
+      "/repos/acme/web/releases/7",
+      undefined,
+    ],
+    [
+      "repo().releases.getLatest",
+      (c) => c.repo(webRepo).releases.getLatest(),
+      "GET",
+      "/repos/acme/web/releases/latest",
+      undefined,
+    ],
+    [
+      "repo().releases.create",
+      (c) =>
+        c.repo(webRepo).releases.create({
+          tagName: "v1.0.0",
+          targetCommitish: "main",
+          draft: true,
+          generateReleaseNotes: true,
+          makeLatest: false,
+        }),
+      "POST",
+      "/repos/acme/web/releases",
+      {
+        tag_name: "v1.0.0",
+        target_commitish: "main",
+        draft: true,
+        generate_release_notes: true,
+        make_latest: "false",
+      },
+    ],
+    [
+      "repo().releases.update",
+      (c) =>
+        c.repo(webRepo).releases.update(7, {
+          name: "1.0.0",
+          draft: false,
+          discussionCategoryName: "Announcements",
+          makeLatest: "legacy",
+        }),
+      "PATCH",
+      "/repos/acme/web/releases/7",
+      {
+        name: "1.0.0",
+        draft: false,
+        discussion_category_name: "Announcements",
+        make_latest: "legacy",
+      },
+    ],
+    [
+      "repo().releases.delete",
+      (c) => c.repo(webRepo).releases.delete(7),
+      "DELETE",
+      "/repos/acme/web/releases/7",
+      undefined,
+    ],
+    [
+      "repo().releases.generateNotes",
+      (c) =>
+        c.repo(webRepo).releases.generateNotes({ tagName: "v1.1.0", previousTagName: "v1.0.0" }),
+      "POST",
+      "/repos/acme/web/releases/generate-notes",
+      { tag_name: "v1.1.0", previous_tag_name: "v1.0.0" },
+    ],
+    [
+      "repo().releases.assets.get",
+      (c) => c.repo(webRepo).releases.assets.get(99),
+      "GET",
+      "/repos/acme/web/releases/assets/99",
+      undefined,
+    ],
+    [
+      "repo().releases.assets.update",
+      (c) => c.repo(webRepo).releases.assets.update(99, { label: "macOS build" }),
+      "PATCH",
+      "/repos/acme/web/releases/assets/99",
+      { label: "macOS build" },
+    ],
+    [
+      "repo().releases.assets.delete",
+      (c) => c.repo(webRepo).releases.assets.delete(99),
+      "DELETE",
+      "/repos/acme/web/releases/assets/99",
+      undefined,
+    ],
   ]
 
   test.each(requests)("%s sends its documented request", async (_name, run, method, path, body) => {
@@ -382,23 +484,95 @@ describe("github connector", () => {
     await expect(issues.comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
     await expect(issues.comments.get(0)).rejects.toThrow("commentId must be a positive integer")
     await expect(releases.getByTag(" ")).rejects.toThrow("tag must not be empty")
+    await expect(releases.get(0)).rejects.toThrow("releaseId must be a positive integer")
+    await expect(releases.assets.list(0)).rejects.toThrow("releaseId must be a positive integer")
+    await expect(releases.assets.get(0)).rejects.toThrow("assetId must be a positive integer")
 
     expect(calls).toHaveLength(0)
   })
 
-  // Reproduce: drop `signal` from the `http.get` init in resources/releases.ts; both calls then
-  // reach fetch and resolve.
-  test("releases forward the caller's signal", async () => {
-    const calls = record(() => json([]))
+  const upload = {
+    upload_url: "https://uploads.github.com/repos/acme/web/releases/7/assets{?name,label}",
+  }
+  const releaseCalls: readonly (readonly [
+    name: string,
+    run: (releases: GitHubRepositoryScope["releases"], signal: AbortSignal) => Promise<unknown>,
+  ])[] = [
+    ["list", (r, signal) => r.list({ signal })],
+    ["get", (r, signal) => r.get(7, { signal })],
+    ["getLatest", (r, signal) => r.getLatest({ signal })],
+    ["getByTag", (r, signal) => r.getByTag("v1", { signal })],
+    ["create", (r, signal) => r.create({ tagName: "v1" }, { signal })],
+    ["update", (r, signal) => r.update(7, { name: "v1" }, { signal })],
+    ["delete", (r, signal) => r.delete(7, { signal })],
+    ["generateNotes", (r, signal) => r.generateNotes({ tagName: "v1" }, { signal })],
+    ["assets.list", (r, signal) => r.assets.list(7, { signal })],
+    ["assets.get", (r, signal) => r.assets.get(99, { signal })],
+    [
+      "assets.upload",
+      (r, signal) => r.assets.upload(upload, { name: "a", data: new Uint8Array() }, { signal }),
+    ],
+    ["assets.update", (r, signal) => r.assets.update(99, { label: "a" }, { signal })],
+    ["assets.delete", (r, signal) => r.assets.delete(99, { signal })],
+  ]
+
+  // Reproduce: drop `signal` from one method's request init in resources/releases.ts; its row
+  // then reaches fetch and resolves.
+  test.each(releaseCalls)("releases.%s forwards the caller's signal", async (_name, run) => {
+    const calls = record(() => json({}))
     const releases = (await connect()).repo(webRepo).releases
-    const signal = AbortSignal.abort()
 
-    const listed: unknown = await releases.list({ signal }).catch((error) => error)
-    const fetched: unknown = await releases.getByTag("v1", { signal }).catch((error) => error)
+    const error: unknown = await run(releases, AbortSignal.abort()).catch((caught) => caught)
 
-    expect(listed).toMatchObject({ name: "AbortError" })
-    expect(fetched).toMatchObject({ name: "AbortError" })
+    expect(error).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(0)
+  })
+
+  test("uploads a release asset to the release's upload URL", async () => {
+    const calls = record(() => json({ id: 1, name: "app.zip" }, { status: 201 }))
+    const assets = (await connect()).repo(webRepo).releases.assets
+    const data = new Uint8Array([1, 2, 3])
+
+    const asset = await assets.upload(upload, { name: "app.zip", label: "App", data })
+    await assets.upload(upload, {
+      name: "notes.txt",
+      data: new Blob(["hi"], { type: "application/zip" }),
+    })
+
+    expect(calls[0]?.url.href).toBe(
+      "https://uploads.github.com/repos/acme/web/releases/7/assets?name=app.zip&label=App"
+    )
+    expect(calls[0]?.method).toBe("POST")
+    expect(calls[0]?.headers.get("content-type")).toBe("application/octet-stream")
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer t")
+    expect(calls[0]?.rawBody).toBe(data)
+    expect(calls[1]?.headers.get("content-type")).toBe("application/zip")
+    expect(asset).toEqual({ id: 1, name: "app.zip" } as never)
+  })
+
+  test("uploads only to the configured GitHub host", async () => {
+    const calls = record(() => json({ id: 1 }))
+    const data = new Uint8Array()
+    const githubAssets = (await connect()).repo(webRepo).releases.assets
+    const enterpriseAssets = (await connect("https://ghe.example.com/api/v3/")).repo(webRepo)
+      .releases.assets
+
+    const foreign = { upload_url: "https://evil.example/upload{?name,label}" }
+    const enterprise = {
+      upload_url:
+        "https://ghe.example.com/api/uploads/repos/acme/web/releases/7/assets{?name,label}",
+    }
+
+    await expect(githubAssets.upload(foreign, { name: "a", data })).rejects.toThrow(
+      "Refusing upload URL outside the configured GitHub host"
+    )
+    await expect(enterpriseAssets.upload(upload, { name: "a", data })).rejects.toThrow(
+      "Refusing upload URL outside the configured GitHub host"
+    )
+    await enterpriseAssets.upload(enterprise, { name: "a", data })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url.pathname).toBe("/api/uploads/repos/acme/web/releases/7/assets")
   })
 
   test("throws GitHubApiError on non-2xx responses", async () => {
