@@ -7,6 +7,7 @@ import {
   AgentStorageError,
   type AgentThreadParticipantRecord,
 } from "../storage/agents"
+import { announceAgentApprovals } from "./approvals"
 import { userCanRunAgent } from "./authority"
 import { AgentRequestError } from "./errors"
 import type { AgentThreadAccessRule, AgentThreadView } from "./thread-access"
@@ -79,7 +80,7 @@ export async function removeAgentThreadParticipant(
   threadId: string,
   user: UserPrincipal
 ): Promise<void> {
-  const storage = requireStorage(runtime)
+  requireStorage(runtime)
   const readable = await rule.read(threadId)
   if (!readable) throw threadNotFound(threadId)
 
@@ -95,7 +96,17 @@ export async function removeAgentThreadParticipant(
     )
   }
 
-  await storage.threads.removeParticipant({ projectId: runtime.projectId, threadId, principal })
+  // Their turns never resume: the calls still waiting are cancelled, and the thread's next message
+  // reports what they decided.
+  const { cancelled } = await runtime.storage.transaction(async (tx) => {
+    const agents = tx.agents
+    if (!agents) {
+      throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    }
+    await agents.threads.removeParticipant({ projectId: runtime.projectId, threadId, principal })
+    return agents.approvals.stop({ projectId: runtime.projectId, threadId, requestedBy: principal })
+  })
+  await announceAgentApprovals(runtime.broker, cancelled)
 }
 
 /**

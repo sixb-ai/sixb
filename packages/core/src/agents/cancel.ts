@@ -1,12 +1,14 @@
 import type { SixbRuntimeContext } from "../runtime/types"
 import { AgentStorageError, type ConversationAgentRunRecord } from "../storage/agents"
+import { isAwaitingApprovalRun, stopAgentTurn } from "./approvals"
 import { AgentRequestError } from "./errors"
 import { publishAgentRunCancel, publishAgentRunFinished } from "./streams/protocol"
 
 /**
  * Stop a turn. A queued turn ends here, before any worker starts it. A running turn receives the
- * stop signal its worker obeys, so it is still running when this returns. Who may stop it is the
- * caller's decision.
+ * stop signal its worker obeys, so it is still running when this returns. A turn paused on held
+ * calls is returned as it ended, `awaiting_approval`, and never resumes: its waiting calls are
+ * cancelled. Who may stop it is the caller's decision.
  */
 export async function cancelAgentRun(
   runtime: SixbRuntimeContext,
@@ -44,6 +46,15 @@ export async function cancelAgentRun(
       }
       current = refreshed
     }
+  }
+
+  // A paused turn is stopped from resuming: its waiting calls are cancelled, and the thread's next
+  // message reports them and the decided ones. Nothing left to stop means it resumed already.
+  if (
+    isAwaitingApprovalRun(current) &&
+    (await stopAgentTurn(storage, runtime.broker, current)) > 0
+  ) {
+    return current
   }
 
   if (current.status !== "running") {

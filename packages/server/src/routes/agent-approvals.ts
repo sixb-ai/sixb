@@ -12,20 +12,20 @@ import {
   AgentPreferencesSchema,
   AgentThreadApprovalModeBodySchema,
   DecideAgentApprovalBodySchema,
-  DecideAgentApprovalResponseSchema,
   MyAgentApprovalListQuerySchema,
 } from "../schemas/agent-approvals"
 import {
   AgentRequestErrorResponseSchema,
   AgentThreadParamsSchema,
   AgentThreadSchema,
+  DecideAgentApprovalResponseSchema,
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseOptionalInt, toIsoString, unconfiguredStorageResponse } from "../utils/http"
-import { handleAgentRouteError, serializeThread } from "./agents"
+import { handleAgentRouteError, serializeAgentRun, serializeThread } from "./agents"
 
 const DECIDING =
-  "Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. The Agent reads how it ended at the start of the thread's next message. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox."
+  "Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. A turn paused on its calls resumes once all of them are decided: `run` is the turn that continues it, and the Agent reads how each call ended. Once the call ran, the decision never fails: when the turn cannot resume, `resume` says why, and whether Sixb tries again, as it does once an AI limit resets. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox."
 
 function serializeApproval(
   approval: AgentApprovalRecord
@@ -214,7 +214,11 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = DecideAgentApprovalBodySchema.parse(body)
           const decided = await sixb.agent.approvals.decide(approval.id, parsed)
-          return DecideAgentApprovalResponseSchema.parse({ approval: serializeApproval(decided) })
+          return DecideAgentApprovalResponseSchema.parse({
+            approval: serializeApproval(decided.approval),
+            ...(decided.run === undefined ? {} : { run: serializeAgentRun(decided.run) }),
+            ...(decided.resume === undefined ? {} : { resume: decided.resume }),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

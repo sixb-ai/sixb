@@ -5099,7 +5099,7 @@ export const listAgentThreadApprovalsInfiniteOptions = (
 /**
  * Approve or deny a held agent call
  *
- * Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. The Agent reads how it ended at the start of the thread's next message. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.
+ * Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. A turn paused on its calls resumes once all of them are decided: `run` is the turn that continues it, and the Agent reads how each call ended. Once the call ran, the decision never fails: when the turn cannot resume, `resume` says why, and whether Sixb tries again, as it does once an AI limit resets. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.
  */
 export const decideAgentApprovalMutation = (
   options?: Partial<Options<DecideAgentApprovalData>>

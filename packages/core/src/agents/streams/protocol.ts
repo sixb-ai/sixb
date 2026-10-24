@@ -4,7 +4,10 @@ import type { SixbFailure } from "../../errors/types"
 import { isPlainRecord, type JsonValue } from "../../json"
 import { isModelUiChunk, type ModelUiChunk } from "../../models/events"
 import {
+  AGENT_APPROVAL_STATUSES,
   AGENT_RUN_FAILURE_CODES,
+  type AgentApprovalRecord,
+  type AgentApprovalStatus,
   type AgentContextCheckpointReason,
   type AgentRunFailureCode,
   type AgentRunRecord,
@@ -71,6 +74,91 @@ export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivi
     Number.isFinite(value.attempt) &&
     typeof value.occurredAt === "string"
   )
+}
+
+/**
+ * A held call of a thread's turn changed: it was held, decided, ran, or was set aside. Clients read
+ * the thread's approvals again.
+ */
+export interface AgentApprovalActivityEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.approval.activity"
+  readonly projectId: string
+  readonly approvalId: string
+  readonly threadId: string
+  /** The conversation turn the call belongs to. */
+  readonly runId: string
+  readonly status: AgentApprovalStatus
+  /** Whether the approved call ran and has its outcome. */
+  readonly hasOutcome: boolean
+  readonly occurredAt: string
+}
+
+/** Everything the project's activity feed carries. */
+export type AgentActivityEvent = AgentRunActivityEvent | AgentApprovalActivityEvent
+
+export function agentApprovalActivityEvent(
+  approval: AgentApprovalRecord,
+  occurredAt: Date = new Date()
+): AgentApprovalActivityEvent {
+  return {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.approval.activity",
+    projectId: approval.projectId,
+    approvalId: approval.id,
+    threadId: approval.threadId,
+    runId: approval.runId,
+    status: approval.status,
+    hasOutcome: approval.outcome !== undefined,
+    occurredAt: occurredAt.toISOString(),
+  }
+}
+
+export function isAgentApprovalActivityEvent(value: unknown): value is AgentApprovalActivityEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.approval.activity" &&
+    typeof value.projectId === "string" &&
+    typeof value.approvalId === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.runId === "string" &&
+    (AGENT_APPROVAL_STATUSES as readonly unknown[]).includes(value.status) &&
+    typeof value.hasOutcome === "boolean" &&
+    typeof value.occurredAt === "string"
+  )
+}
+
+export function isAgentActivityEvent(value: unknown): value is AgentActivityEvent {
+  return isAgentRunActivityEvent(value) || isAgentApprovalActivityEvent(value)
+}
+
+/** Announce held calls that changed, in one append. Each change is announced once. */
+export async function publishAgentApprovalActivity(
+  broker: Broker,
+  approvals: readonly AgentApprovalRecord[]
+): Promise<void> {
+  const first = approvals[0]
+  if (!first) return
+
+  await broker.ensureStream({
+    projectId: first.projectId,
+    stream: agentActivityStreamDefinition(),
+  })
+  await broker.append({
+    projectId: first.projectId,
+    streamId: AGENT_ACTIVITY_STREAM_ID,
+    records: approvals.map((approval) => {
+      const event = agentApprovalActivityEvent(approval)
+      return {
+        name: event.type,
+        key: event.threadId,
+        // The event is composed only of validated JSON primitives.
+        payload: event as unknown as JsonValue,
+        idempotencyKey: `${event.approvalId}:${event.status}${event.hasOutcome ? ":outcome" : ""}`,
+      }
+    }),
+  })
 }
 
 export async function publishAgentRunActivity(

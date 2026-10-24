@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import { type AgentRunActivityEvent, createAgentActivitySocket } from "./agent-streams"
+import {
+  type AgentApprovalActivityEvent,
+  type AgentRunActivityEvent,
+  createAgentActivitySocket,
+} from "./agent-streams"
 import type { Client } from "./generated/client"
 import type { ReconnectingSocketState } from "./ws-socket"
 
@@ -10,6 +14,8 @@ export interface UseAgentActivityStreamOptions {
   /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
   readonly client?: Client
   readonly onActivity?: (event: AgentRunActivityEvent) => void
+  /** One of a turn's held calls was held, decided, ran, or was set aside. */
+  readonly onApprovalActivity?: (event: AgentApprovalActivityEvent) => void
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
 }
@@ -25,6 +31,8 @@ export function useAgentActivityStream(
   const { enabled = true, reconnect, reconnectDelayMs, client } = options
   const onActivityRef = useRef(options.onActivity)
   onActivityRef.current = options.onActivity
+  const onApprovalActivityRef = useRef(options.onApprovalActivity)
+  onApprovalActivityRef.current = options.onApprovalActivity
   const onSubscribedRef = useRef(options.onSubscribed)
   onSubscribedRef.current = options.onSubscribed
   const onErrorRef = useRef(options.onError)
@@ -41,6 +49,7 @@ export function useAgentActivityStream(
       reconnectDelayMs,
       client,
       onActivity: (event) => onActivityRef.current?.(event),
+      onApprovalActivity: (event) => onApprovalActivityRef.current?.(event),
       onSubscribed: () => onSubscribedRef.current?.(),
       onError: (message) => onErrorRef.current?.(message),
       onStateChange: setState,

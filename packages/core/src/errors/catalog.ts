@@ -38,6 +38,12 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "The Action exceeded its 30-second time limit.",
     retryable: false,
   },
+  // The requester signed out, their session expired, or they lost access before the call ran.
+  "agent.approval_authority_lost": {
+    publicMessage:
+      "The approved call did not run: the sign-in of whoever asked for it ended first. Ask the Agent again.",
+    retryable: false,
+  },
   "agent.execution_failed": {
     publicMessage: "Agent execution failed.",
     retryable: false,

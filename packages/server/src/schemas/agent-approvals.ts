@@ -108,10 +108,6 @@ export const DecideAgentApprovalBodySchema = z
   })
   .strict()
 
-export const DecideAgentApprovalResponseSchema = z.object({
-  approval: AgentApprovalSchema,
-})
-
 export const AgentPreferencesBodySchema = z
   .object({ approvalMode: AgentApprovalModeSchema })
   .strict()

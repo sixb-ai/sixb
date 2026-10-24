@@ -14,6 +14,7 @@ import {
   AgentApprovalModeSchema,
   AgentApprovalModeSourceSchema,
   AgentApprovalOutcomeSchema,
+  AgentApprovalSchema,
   AgentApprovalStatusSchema,
 } from "./agent-approvals"
 import { AiCostSummarySchema } from "./ai-accounting"
@@ -360,6 +361,11 @@ export const AgentRunSchema = z.object({
   /** What the turn could change without asking. Absent on turns from before approval modes. */
   approvalMode: AgentApprovalModeSchema.optional(),
   modelId: z.string().optional(),
+  /**
+   * `awaiting_approval`: the turn succeeded and paused on calls waiting for its requester. It stays
+   * so: a later turn continues it once they decided on every call, unless a call was set aside or
+   * the turn stopped. The thread's approvals say where they stand.
+   */
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AiUsageSummarySchema.optional(),
   cost: AiCostSummarySchema.optional(),
@@ -378,6 +384,24 @@ export const PostAgentMessageResponseSchema = z.object({
 
 export const CancelAgentRunResponseSchema = z.object({
   run: AgentRunSchema,
+})
+
+export const DecideAgentApprovalResponseSchema = z.object({
+  approval: AgentApprovalSchema,
+  /** The turn that resumed the paused one, when this decision was its last. */
+  run: AgentRunSchema.optional(),
+  /**
+   * The paused turn could not resume; the decision and the call's outcome stand. `retrying`: Sixb
+   * resumes it once it can. Otherwise the thread's next message tells the Agent how its calls ended.
+   */
+  resume: z
+    .object({
+      status: z.literal("refused"),
+      code: z.string(),
+      message: z.string(),
+      retrying: z.boolean(),
+    })
+    .optional(),
 })
 
 export const RetryAgentRunResponseSchema = z.object({

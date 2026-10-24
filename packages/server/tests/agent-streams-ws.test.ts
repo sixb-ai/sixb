@@ -15,6 +15,7 @@ import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   type AgentRunStreamEvent,
 } from "@sixb/core/agents/streams"
+import { announceAgentApprovals } from "@sixb/core/internal/agents"
 import {
   agentRunStreamDefinition,
   agentRunStreamId,
@@ -79,6 +80,52 @@ describe("/ws/agents", () => {
             runId,
             threadId,
             status: "running",
+          },
+        })
+      } finally {
+        ws.close()
+      }
+    })
+  })
+
+  // Guard proof: forward only `isAgentRunActivityEvent` records in `sendVisibleActivityRecords`;
+  // the approval's change never reaches the thread's reader.
+  test("streams a held call's changes to whoever reads its turn", async () => {
+    await withAgentWsServer(async ({ baseUrl, sixb }) => {
+      await advanceDurableRun(sixb, { type: "agent.run.started", runId })
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "agents" })
+        ws.send(JSON.stringify({ type: "subscribe.activity" }))
+        expect(await nextWsMessage(ws)).toEqual({ type: "subscribed.activity" })
+
+        await announceAgentApprovals(sixb.broker, [
+          {
+            id: "apr_1",
+            projectId,
+            threadId,
+            runId,
+            callerRunId: runId,
+            requestedBy: { type: "user", id: "usr_owner" },
+            mode: "manual",
+            callKey: "act_1",
+            call: { kind: "workflow", workflowId: "send", input: {}, workflowRunId: "act_1" },
+            status: "pending",
+            createdAt: new Date(),
+            expiresAt: new Date(Date.now() + 60_000),
+          },
+        ])
+
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "activity",
+          event: {
+            type: "agent.approval.activity",
+            approvalId: "apr_1",
+            runId,
+            threadId,
+            status: "pending",
+            hasOutcome: false,
           },
         })
       } finally {

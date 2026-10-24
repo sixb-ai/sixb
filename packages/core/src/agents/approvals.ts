@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import { type Principal, principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
+import type { Broker } from "../broker"
 import type {
   AgentApprovalCall,
   AgentApprovalMode,
@@ -13,6 +14,7 @@ import { AGENT_APPROVAL_MODES } from "../storage/agents/types"
 import type { AgentApprovalDecider, AgentApprovalExecutor } from "./approval-executor"
 import { AgentRequestError } from "./errors"
 import type { AgentApprovalCallSummary, AgentApprovalOutcomePart } from "./message"
+import { publishAgentApprovalActivity } from "./streams/protocol"
 
 /**
  * The mode of a turn whose requester chose none, in the thread or as their default.
@@ -188,9 +190,134 @@ export function approvalCallSummary(call: AgentApprovalCall): AgentApprovalCallS
 export async function reportAgentApprovals(
   agents: AgentStorage,
   input: { readonly projectId: string; readonly threadId: string; readonly messageId: string }
-): Promise<readonly AgentApprovalOutcomePart[]> {
-  await agents.approvals.settle({ ...input, status: "superseded" })
+): Promise<{
+  readonly parts: readonly AgentApprovalOutcomePart[]
+  /** The approvals this message set aside, to announce once it is admitted. */
+  readonly superseded: readonly AgentApprovalRecord[]
+}> {
+  const superseded = await agents.approvals.settle({ ...input, status: "superseded" })
+  return { parts: await reportSettledAgentApprovals(agents, input), superseded }
+}
 
+/** Whether the turn paused on held calls: it succeeded, waiting for its requester's decisions. */
+export function isAwaitingApprovalRun(run: AgentRunRecord | null | undefined): boolean {
+  return (
+    run?.kind === "conversation" &&
+    run.status === "succeeded" &&
+    run.finishReason === "awaiting_approval"
+  )
+}
+
+/**
+ * How long a process keeps an approved call it took to run. Longer than an Action's 30-second
+ * limit, so a claim still held is a call still running; a claim older than this was lost in a crash.
+ */
+export const AGENT_APPROVAL_EXECUTION_LEASE_MS = 2 * 60_000
+
+/** Where a paused turn stands, from the calls it held. */
+export type AgentTurnReadiness =
+  /** Every call was decided, every approved one ran, and none was reported yet. */
+  | "ready"
+  /** A call still waits for its decision, or an approved one has not run yet. */
+  | "waiting"
+  /**
+   * It never resumes: a call was set aside, cancelled or expired, the turn was stopped, or it
+   * resumed already. The thread's next message reports what is left.
+   */
+  | "closed"
+
+export function turnResumeReadiness(approvals: readonly AgentApprovalRecord[]): AgentTurnReadiness {
+  if (
+    approvals.some(
+      (approval) =>
+        approval.status === "pending" ||
+        (approval.status === "approved" && approval.outcome === undefined)
+    )
+  ) {
+    return "waiting"
+  }
+  const resumable =
+    approvals.length > 0 &&
+    approvals.every(
+      (approval) =>
+        (approval.status === "approved" || approval.status === "denied") &&
+        approval.turnStoppedAt === undefined
+    ) &&
+    approvals.some((approval) => approval.reportedInMessageId === undefined)
+  return resumable ? "ready" : "closed"
+}
+
+/** The calls a conversation turn held, its children's included. */
+export async function listTurnApprovals(
+  agents: AgentStorage,
+  input: { readonly projectId: string; readonly runId: string }
+): Promise<readonly AgentApprovalRecord[]> {
+  return (await agents.approvals.list({ projectId: input.projectId, runId: input.runId })).approvals
+}
+
+/**
+ * The mode a resumed turn runs with: the paused turn's, raised only by "Always allow" on one of its
+ * own calls. A choice made elsewhere in the thread never reaches it, and nothing lowers it.
+ */
+export function resumedApprovalMode(
+  paused: AgentApprovalMode,
+  approvals: readonly AgentApprovalRecord[]
+): AgentApprovalMode {
+  return approvals.reduce<AgentApprovalMode>(
+    (mode, { raisedMode }) =>
+      raisedMode !== undefined && APPROVAL_MODE_RANK[raisedMode] > APPROVAL_MODE_RANK[mode]
+        ? raisedMode
+        : mode,
+    paused
+  )
+}
+
+/**
+ * Stop a paused turn from resuming: its calls still waiting are cancelled, and the decided ones are
+ * reported by the thread's next message. Returns how many calls it stopped; none means the turn had
+ * nothing left to resume on.
+ */
+export async function stopAgentTurn(
+  agents: AgentStorage,
+  broker: Broker,
+  turn: { readonly projectId: string; readonly threadId: string; readonly id: string }
+): Promise<number> {
+  const { cancelled, stopped } = await agents.approvals.stop({
+    projectId: turn.projectId,
+    threadId: turn.threadId,
+    runId: turn.id,
+  })
+  await announceAgentApprovals(broker, cancelled)
+  return stopped
+}
+
+/** Announce changed approvals on the activity feed. Clients learn it best-effort. */
+export async function announceAgentApprovals(
+  broker: Broker,
+  approvals: readonly AgentApprovalRecord[]
+): Promise<void> {
+  try {
+    await publishAgentApprovalActivity(broker, approvals)
+  } catch (error) {
+    console.error("[Sixb] Agent approval activity stream publish failed:", error)
+  }
+}
+
+/**
+ * Mark and return, as message parts, the thread's approvals that left `pending` and no message
+ * reported yet. An approved call reports once it ran: one still running when this message is
+ * admitted stays for a later one.
+ */
+export async function reportSettledAgentApprovals(
+  agents: AgentStorage,
+  input: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly messageId: string
+    /** A resume: the approvals of a stopped turn stay for the next message. */
+    readonly resuming?: boolean
+  }
+): Promise<readonly AgentApprovalOutcomePart[]> {
   const { approvals } = await agents.approvals.list({
     projectId: input.projectId,
     threadId: input.threadId,
@@ -233,6 +360,10 @@ export async function decideAgentApproval(
     readonly decidedBy: Principal
     /** The deciding request: an approved call runs with its authority. */
     readonly decider: AgentApprovalDecider
+    /** "Always allow": the mode the requester raises the turn's calls to with this approval. */
+    readonly raisedMode?: AgentApprovalMode
+    /** Where the decision is announced; the executor announces the call's outcome. */
+    readonly broker: Broker
   }
 ): Promise<AgentApprovalRecord> {
   const { approval } = input
@@ -248,6 +379,7 @@ export async function decideAgentApproval(
     id: approval.id,
     decision: input.decision,
     decidedBy: input.decidedBy,
+    ...(input.raisedMode === undefined ? {} : { raisedMode: input.raisedMode }),
   })
   const decided = result?.approval
   if (!result || !decided) {
@@ -257,6 +389,7 @@ export async function decideAgentApproval(
     )
   }
   if (decided.status === "expired") {
+    await announceAgentApprovals(input.broker, [decided])
     throw new AgentRequestError(
       "approval_expired",
       `[Sixb] Agent approval '${approval.id}' expired before it was decided. Ask the Agent again.`
@@ -269,6 +402,13 @@ export async function decideAgentApproval(
     )
   }
 
-  if (decided.status !== "approved" || decided.outcome !== undefined) return decided
-  return result.decided ? executor.run(decided, input.decider) : executor.settle(decided)
+  if (decided.status !== "approved" || decided.outcome !== undefined) {
+    if (result.decided) await announceAgentApprovals(input.broker, [decided])
+    return decided
+  }
+
+  // Started before anything else is awaited, so a second approval finds it running.
+  const running = result.decided ? executor.run(decided, input.decider) : executor.settle(decided)
+  if (result.decided) await announceAgentApprovals(input.broker, [decided])
+  return running
 }
