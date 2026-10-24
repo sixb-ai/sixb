@@ -160,9 +160,16 @@ Each user chooses what the agent may change without asking them:
 
 | Mode | Action that only changes Sixb | Action with a writeback or effects | Workflow start |
 | --- | --- | --- | --- |
-| `manual` | waits | waits | waits |
+| `manual` (default) | waits | waits | waits |
 | `accept-edits` | runs | waits | waits |
-| `auto` (default) | runs | runs | runs |
+| `auto` | runs | runs | runs |
+
+In the app, a chip under the message box shows the mode and switches it, as does Shift+Tab in the
+message; Settings › Personal sets the default. A call that waits shows as a card in the reply: what
+it does, to which record, with which values, and whether it reaches an external system. Approve,
+Deny or "Always allow in this thread" answer it there, and the reply continues under the card. In a
+shared conversation, the others see the card and who decides. The thread list marks the
+conversations waiting for you.
 
 ```ts
 await sixb.agent.preferences.update({ approvalMode: "accept-edits" }) // your default
@@ -197,7 +204,6 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
   its calls. A turn that fails or is stopped while running cancels its own.
 - If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
   run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
-- The app does not show approvals yet; until it does, the default stays `auto`.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
 Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,
@@ -291,9 +297,9 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 
 | Part | Use it for |
 | --- | --- |
-| `useAgentConversation` | One conversation: messages, the live run, threads, models, and `send`, `stop` and `retry` |
-| `Transcript` | The messages, the streaming reply, and retry or continue after a run stops early |
-| `Composer` | Text, attachments, `@` context and the model picker |
+| `useAgentConversation` | One conversation: messages, the live run, threads, models, `send`, `stop` and `retry`, and `approvals`, `decide`, `approvalMode`, `setApprovalMode` |
+| `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, and a card for each call waiting for approval |
+| `Composer` | Text, attachments, `@` context, the model picker and the approval mode chip |
 | `AgentThreadSwitcher` | Search and switch between the person's threads |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
 | `ModelControls` | The model picker on its own; `ProviderLogo` and `ReasoningEffortSlider` to build another |
