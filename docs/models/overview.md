@@ -159,6 +159,12 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
+- **In the chat, each sub-agent is a card under the work that started it**: its task, model and
+  tier, what it is doing right now, its time and cost, what the agent told it and what it asked,
+  the calls it waits on, and the files it made. "Show work" opens its own steps, in a sheet on a
+  phone. Several read as one group that says how many work and how many wait for you. Whoever may
+  stop the turn can stop a sub-agent at work from its card; once the reply waits on a sub-agent's
+  call, "Stop waiting" on that call stops the reply.
 - **The conversation's owner and participants see its sub-agents**, live or once they ended:
   `GET /api/agent-threads/:threadId/children` lists them (`?runId=` for those one turn spawned),
   each with its thread, runs, status, usage and cost; its thread's messages are what it did. A
@@ -365,7 +371,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | Part | Use it for |
 | --- | --- |
 | `useAgentConversation` | One conversation: messages, the live run, threads, models, `send`, `stop` and `retry`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
-| `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, and a card for each call waiting for approval |
+| `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and one for each sub-agent |
 | `Composer` | Text, attachments, `@` context, the model picker and the approval mode chip |
 | `AgentThreadSwitcher` | Search and switch between the person's threads |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
