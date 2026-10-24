@@ -12,12 +12,18 @@ export {
   objectBatchKey,
   objectLinkCursor,
 } from "./keys"
-export { assertObjectReaderProject, compileSelectedObjectReadScope } from "./read-scope"
+export {
+  assertObjectReaderProject,
+  compileConditionalObjectReadScope,
+  compileSelectedObjectReadScope,
+} from "./read-scope"
 export type {
+  CompiledConditionalObjectReadScope,
   CompiledObjectReadObjectSelection,
   CompiledObjectReadRoot,
   CompiledObjectReadStep,
   CompiledSelectedObjectReadScope,
+  ConditionalObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -36,6 +42,7 @@ export type {
   ObjectQueryCapabilityMap,
   ObjectQueryScalarOperation,
   ObjectQueryScalarOperations,
+  ObjectReadCondition,
   ObjectReadLinkDefinitionSelection,
   ObjectReadLinkSelection,
   ObjectReadNode,

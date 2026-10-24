@@ -1,8 +1,14 @@
+import { compareStrings, getInvalidJsonValueReason } from "../../json"
+import type { ObjectQueryPredicate, QueryScalarKind } from "../../objects/query"
+import { isCurrentUser } from "../../ontology/user-ref"
 import type {
+  CompiledConditionalObjectReadScope,
   CompiledObjectReadObjectSelection,
   CompiledObjectReadRoot,
   CompiledObjectReadStep,
   CompiledSelectedObjectReadScope,
+  ConditionalObjectReadScope,
+  ObjectReadCondition,
   ObjectReadLinkDefinitionSelection,
   ObjectReadLinkSelection,
   ObjectReadNode,
@@ -496,6 +502,191 @@ function captureArray(value: unknown, path: string): CapturedArray {
 function reserveCount(current: number, count: number, limit: number, message: string): number {
   if (count > limit - current) throw invalidScope(message)
   return current + count
+}
+
+/** Admission bounds of a raw conditional scope, checked while its predicates are captured. */
+const CONDITIONAL_READ_SCOPE_LIMITS = Object.freeze({
+  maxPredicateDepth: 32,
+  maxPredicateNodes: 4_096,
+})
+
+const SCALAR_KINDS: ReadonlySet<string> = new Set<QueryScalarKind>([
+  "string",
+  "uuid",
+  "boolean",
+  "integer",
+  "double",
+  "decimal",
+  "date",
+  "timestamp",
+  "userRef",
+])
+
+/**
+ * Validate, detach and freeze a conditional scope exactly once.
+ *
+ * Core validated each predicate as a filter over its type and bound `currentUser()` to the reader,
+ * so this checks only the shape providers compile: an IR predicate made of JSON values, one per
+ * concrete type. A placeholder left unbound would otherwise reach SQL as an ordinary value.
+ */
+export function compileConditionalObjectReadScope(
+  rawScope: ConditionalObjectReadScope
+): CompiledConditionalObjectReadScope {
+  const value: unknown = rawScope
+  if (!isRecord(value) || value.kind !== "conditional") {
+    throw invalidScope("scope must be a conditional scope with a conditions array")
+  }
+
+  const source = captureArray(value.conditions, "conditions")
+  const budget = { nodes: 0 }
+  const objectTypeIds = new Set<string>()
+  const conditions: ObjectReadCondition[] = []
+
+  for (let index = 0; index < source.length; index += 1) {
+    const path = `conditions[${index}]`
+    const condition = source.value[index]
+    if (!isRecord(condition)) {
+      throw invalidScope(`${path} must contain an object type and a predicate`)
+    }
+
+    const objectTypeId = nonEmptyString(condition.objectTypeId, `${path}.objectTypeId`)
+    // A padded id names no type, and would leave the type it was meant for unconditioned.
+    if (objectTypeId.trim() !== objectTypeId) {
+      throw invalidScope(`${path}.objectTypeId must not start or end with whitespace`)
+    }
+    if (objectTypeIds.has(objectTypeId)) {
+      throw invalidScope(`${path} repeats the condition on '${objectTypeId}'`)
+    }
+    objectTypeIds.add(objectTypeId)
+
+    const predicate = capturePredicate(condition.predicate, `${path}.predicate`, 0, budget)
+    conditions.push(Object.freeze({ objectTypeId, predicate }))
+  }
+
+  conditions.sort((left, right) => compareStrings(left.objectTypeId, right.objectTypeId))
+
+  return Object.freeze({
+    kind: "conditional",
+    conditions: Object.freeze(conditions),
+  }) as CompiledConditionalObjectReadScope
+}
+
+function capturePredicate(
+  value: unknown,
+  path: string,
+  depth: number,
+  budget: { nodes: number }
+): ObjectQueryPredicate {
+  if (depth > CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateDepth) {
+    throw invalidScope(
+      `${path} exceeds the maximum predicate depth of ${CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateDepth}`
+    )
+  }
+
+  budget.nodes += 1
+  if (budget.nodes > CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateNodes) {
+    throw invalidScope(
+      `scope exceeds the maximum of ${CONDITIONAL_READ_SCOPE_LIMITS.maxPredicateNodes} predicate nodes`
+    )
+  }
+
+  if (!isRecord(value)) throw invalidScope(`${path} must be a query predicate`)
+
+  const op = value.op
+  switch (op) {
+    case "and":
+    case "or": {
+      const items = captureArray(value.items, `${path}.items`)
+      if (items.length === 0) throw invalidScope(`${path}.items must not be empty`)
+
+      const captured: ObjectQueryPredicate[] = []
+      for (let index = 0; index < items.length; index += 1) {
+        captured.push(
+          capturePredicate(items.value[index], `${path}.items[${index}]`, depth + 1, budget)
+        )
+      }
+      return Object.freeze({ op, items: Object.freeze(captured) })
+    }
+
+    case "not":
+      return Object.freeze({
+        op,
+        item: capturePredicate(value.item, `${path}.item`, depth + 1, budget),
+      })
+
+    case "constant":
+      return Object.freeze({ op, value: captureBoolean(value.value, `${path}.value`) })
+
+    case "exists": {
+      const propertyId = nonEmptyString(value.propertyId, `${path}.propertyId`)
+      return Object.freeze({ op, propertyId, value: captureBoolean(value.value, `${path}.value`) })
+    }
+
+    case "eq":
+    case "neq":
+    case "lt":
+    case "lte":
+    case "gt":
+    case "gte":
+    case "contains": {
+      const propertyId = nonEmptyString(value.propertyId, `${path}.propertyId`)
+      const compared = capturePredicateValue(value.value, `${path}.value`)
+      const scalarKind = captureScalarKind(value.scalarKind, `${path}.scalarKind`)
+      return Object.freeze({ op, propertyId, value: compared, ...scalarKind })
+    }
+
+    case "in": {
+      const propertyId = nonEmptyString(value.propertyId, `${path}.propertyId`)
+      const source = captureArray(value.values, `${path}.values`)
+      if (source.length === 0) throw invalidScope(`${path}.values must not be empty`)
+
+      const values: unknown[] = []
+      for (let index = 0; index < source.length; index += 1) {
+        values.push(capturePredicateValue(source.value[index], `${path}.values[${index}]`))
+      }
+      const scalarKind = captureScalarKind(value.scalarKind, `${path}.scalarKind`)
+      return Object.freeze({ op, propertyId, values: Object.freeze(values), ...scalarKind })
+    }
+
+    default:
+      throw invalidScope(`${path}.op must be a query predicate operator`)
+  }
+}
+
+function capturePredicateValue(value: unknown, path: string): unknown {
+  const reason = getInvalidJsonValueReason(value, path)
+  if (reason) throw invalidScope(`${path} must be a JSON value; ${reason}`)
+
+  const detached = JSON.parse(JSON.stringify(value)) as unknown
+  if (containsCurrentUser(detached)) {
+    throw invalidScope(`${path} holds currentUser(); bind the condition to its reader first`)
+  }
+  return deepFreeze(detached)
+}
+
+function captureBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") throw invalidScope(`${path} must be a boolean`)
+  return value
+}
+
+function captureScalarKind(value: unknown, path: string): { scalarKind?: QueryScalarKind } {
+  if (value === undefined) return {}
+  if (typeof value !== "string" || !SCALAR_KINDS.has(value)) {
+    throw invalidScope(`${path} must be a query scalar kind`)
+  }
+  return { scalarKind: value as QueryScalarKind }
+}
+
+function containsCurrentUser(value: unknown): boolean {
+  if (isCurrentUser(value)) return true
+  if (Array.isArray(value)) return value.some(containsCurrentUser)
+  return isRecord(value) && Object.values(value).some(containsCurrentUser)
+}
+
+function deepFreeze<T>(value: T): T {
+  if (!isRecord(value)) return value
+  for (const child of Object.values(value)) deepFreeze(child)
+  return Object.freeze(value)
 }
 
 /** Fail closed when a project-bound selected reader is accidentally reused across projects. */
