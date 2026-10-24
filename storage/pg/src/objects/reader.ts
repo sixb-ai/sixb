@@ -30,6 +30,7 @@ import {
   compilePgObjectStatement,
   DEFAULT_OBJECT_QUERY_SOURCE,
   type PgObjectQuerySource,
+  pgObjectsOfType,
 } from "./query-compiler"
 import { findPgSortIndexBound } from "./query-indexes"
 import type { PgSelectedObjectReadSource } from "./read-scope"
@@ -258,13 +259,14 @@ export class PgObjectReader {
   }): Promise<ObjectRow | null> {
     const sql = this.sql
     const source = this.source
+    const objects = pgObjectsOfType(source, params.objectTypeId)
     const statement = compilePgObjectStatement(
       `
         SELECT *
-        FROM ${source.objectsTable}
-        WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
+        FROM ${objects.table}
+        WHERE project_id = ? AND object_type_id = ? AND primary_id = ? ${objects.filter}
       `,
-      [params.projectId, params.objectTypeId, params.primaryId],
+      [params.projectId, params.objectTypeId, params.primaryId, ...objects.args],
       source
     )
     const [row] = await sql.unsafe<ObjectDatabaseRow[]>(
@@ -630,11 +632,15 @@ export class PgObjectReader {
     const order = params.order ?? "desc"
     const orderColumn =
       orderBy === "primaryId" ? "primary_id" : orderBy === "createdAt" ? "created_at" : "updated_at"
+    const typed =
+      typeof params.objectTypeId === "string"
+        ? pgObjectsOfType(source, params.objectTypeId)
+        : { table: source.objectsTable, filter: "", args: [] }
     const filters = ["project_id = ?"]
     const args: unknown[] = [params.projectId]
     if (typeof params.objectTypeId === "string") {
-      filters.push("object_type_id = ?")
-      args.push(params.objectTypeId)
+      filters.push(`object_type_id = ? ${typed.filter}`)
+      args.push(params.objectTypeId, ...typed.args)
     } else if (params.objectTypeId !== undefined) {
       filters.push("object_type_id IN (SELECT jsonb_array_elements_text(?::text::jsonb))")
       args.push(JSON.stringify(params.objectTypeId))
@@ -664,7 +670,7 @@ export class PgObjectReader {
       args.push(params.createdBefore)
     }
 
-    const objectsTable = source.objectsTable
+    const objectsTable = typed.table
     const whereSql = filters.join(" AND ")
     const countStatement = compilePgObjectStatement(
       `SELECT COUNT(*)::int AS total FROM ${objectsTable} WHERE ${whereSql}`,

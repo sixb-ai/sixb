@@ -159,7 +159,7 @@ export async function runPgRepeatableReadTransaction<T>(
   }
 
   throw new Error(
-    '[SixbPg] Selected object reads cannot join an unverified PostgreSQL transaction. Use storage.transaction(..., { isolation: "serializable" }) when reading through tx.objects.'
+    '[SixbPg] Scoped object reads cannot join an unverified PostgreSQL transaction. Use storage.transaction(..., { isolation: "serializable" }) when reading through tx.objects.'
   )
 }
 

@@ -1,5 +1,6 @@
 import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
+  CompiledConditionalObjectReadScope,
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
@@ -28,6 +29,7 @@ import {
   runPgRepeatableReadTransaction,
 } from "../transactions"
 import { PgAggregateAdmission } from "./aggregate-admission"
+import { createPgConditionalReader } from "./conditional-reader"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
 import { assertLinkQueryLimit, PgObjectReader } from "./reader"
 import {
@@ -111,17 +113,17 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
 
 /** PostgreSQL object provider; interactive reads share one source-aware reader. */
 export class PgObjectStorage implements ObjectStorage {
+  private readonly aggregateAdmission?: PgAggregateAdmission
   private readonly reader: PgObjectReader
 
   constructor(
     private readonly sql: PgStoreClient,
     maxConcurrentAggregates = 1
   ) {
-    this.reader = new PgObjectReader(
-      sql,
-      DEFAULT_OBJECT_QUERY_SOURCE,
-      canStartPgTransaction(sql) ? new PgAggregateAdmission(maxConcurrentAggregates) : undefined
-    )
+    this.aggregateAdmission = canStartPgTransaction(sql)
+      ? new PgAggregateAdmission(maxConcurrentAggregates)
+      : undefined
+    this.reader = new PgObjectReader(sql, DEFAULT_OBJECT_QUERY_SOURCE, this.aggregateAdmission)
   }
 
   queryCapabilities(): ObjectQueryCapabilities {
@@ -134,6 +136,16 @@ export class PgObjectStorage implements ObjectStorage {
     limits: ObjectReadExecutionLimits
   }): ObjectReadStorage {
     return createPgSelectedReader(this.sql, params, () => this.queryCapabilities())
+  }
+
+  createConditionalReadScope(params: {
+    projectId: string
+    scope: CompiledConditionalObjectReadScope
+  }): ObjectReadStorage {
+    return createPgConditionalReader(this.sql, params, {
+      aggregateAdmission: this.aggregateAdmission,
+      queryCapabilities: () => this.queryCapabilities(),
+    })
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
