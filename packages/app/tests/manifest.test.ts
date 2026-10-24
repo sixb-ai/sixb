@@ -195,6 +195,74 @@ describe("custom app metadata and manifest generation", () => {
     )
   })
 
+  // Regression proof: remove the agentToolViews call in metadata.ts and the three rejections fail;
+  // the app would then generate and fail only in the browser.
+  test("rejects a toolViews export that is not a list of views, one per tool", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const view = (toolName: string) =>
+      `{ kind: "agentToolView", toolName: "${toolName}", placement: "work", render: () => null }`
+    const writeToolViews = (source: string) =>
+      writeFile(
+        join(fixture.appDir, "layout.tsx"),
+        `export const toolViews = ${source}\nexport default function Layout() { return null }\n`
+      )
+
+    await writeToolViews(`[${view("quote_shipping")}, ${view("count_rows")}]`)
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+
+    await writeToolViews(view("quote_shipping"))
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "[SixbCustomApp] Invalid toolViews in"
+    )
+
+    await writeToolViews(`[${view("quote_shipping")}, "count_rows"]`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "toolViews[1] is not a view from defineAgentToolView."
+    )
+
+    await writeToolViews(`[${view("quote_shipping")}, ${view("quote_shipping")}]`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "two views for the tool 'quote_shipping'. Keep one view per tool."
+    )
+  })
+
+  // Regression proof: in metadata.ts, clear only the layout from the module cache and the second
+  // generation fails again on the duplicate that was already fixed in its own file.
+  test("reads a view again once it is fixed in its own file", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const writeCountView = (toolName: string) =>
+      writeFile(
+        join(fixture.appDir, "_agent", "count-view.ts"),
+        `export const countView = { kind: "agentToolView", toolName: "${toolName}", placement: "work", render: () => null }\n`
+      )
+
+    await mkdir(join(fixture.appDir, "_agent"), { recursive: true })
+    await writeFile(
+      join(fixture.appDir, "_agent", "quote-view.ts"),
+      `export const quoteView = { kind: "agentToolView", toolName: "quote_shipping", placement: "work", render: () => null }\n`
+    )
+    await writeCountView("quote_shipping")
+    await writeFile(
+      join(fixture.appDir, "layout.tsx"),
+      [
+        `import { quoteView } from "./_agent/quote-view"`,
+        `import { countView } from "./_agent/count-view"`,
+        "export const toolViews = [quoteView, countView]",
+        "export default function Layout() { return null }",
+        "",
+      ].join("\n")
+    )
+
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "two views for the tool 'quote_shipping'"
+    )
+
+    await writeCountView("count_rows")
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+  })
+
   test("builds a stable manifest and cannot be shadowed by a public manifest", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

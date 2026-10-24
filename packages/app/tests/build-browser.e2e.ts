@@ -37,6 +37,19 @@ export default function Page() {
 }
 `
     )
+    // A layout without `toolViews`: the app reads the export it does not have and still mounts.
+    // It also brings the tool views provider from @sixb/app/pages with the built-in pages off.
+    // Reproduce: move one of pages.ts's re-exports back to an import plus a local function; the
+    // bundle keeps every page and splits them into chunks this harness cannot load.
+    await writeFile(
+      join(root, "app", "layout.tsx"),
+      `import type { PropsWithChildren } from "react"
+
+export default function RootLayout({ children }: PropsWithChildren) {
+  return <>{children}</>
+}
+`
+    )
 
     const buildScript = join(root, "build.ts")
     await writeFile(

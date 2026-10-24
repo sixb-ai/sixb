@@ -5,21 +5,17 @@ import { memo, useState } from "react"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { latestWorkLabel } from "../activity-label"
 import { ArtifactCards } from "../artifact-card"
-import { BashToolView, generatedMedia } from "../bash/bash-tool-view"
+import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedPart, NormalizedTool } from "../parts"
-import { isPublishTool, turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
-import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
-import { ReadToolView } from "../read/read-tool-view"
-import { coerceWebFetchOutput } from "../utils/web-fetch"
+import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
+import { builtInToolView } from "../tool-views/built-in"
+import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
-import { ViewFileToolView } from "../view-file/view-file-tool-view"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-status"
 import { FileAttachmentCard } from "./file-attachment-card"
-import { WebFetchToolView } from "./web-fetch-tool-view"
-import { WebSearchToolView } from "./web-search-tool-view"
 import { WebSources } from "./web-sources"
 
 /**
@@ -27,7 +23,8 @@ import { WebSources } from "./web-sources"
  * every run of consecutive reasoning + tool parts collapses into a single "work" disclosure, so a
  * long chain of thinking and tool calls reads as one quiet line above the answer instead of a stack
  * of separate dropdowns. What the turn published closes the body as one row of cards, while each
- * publish keeps its row in the work. `step-start` markers are intentionally skipped.
+ * publish keeps its row in the work; the project's tool views placed in the answer come just
+ * before, the same way. `step-start` markers are intentionally skipped.
  */
 export function AssistantBody({
   parts,
@@ -81,6 +78,7 @@ export function AssistantBody({
   flushText()
   // The final work run is the only one that can still be receiving steps.
   flushWork(live)
+  blocks.push(<AnswerToolViews key="answer-tools" parts={parts} />)
   const artifacts = turnArtifacts(parts)
   if (artifacts.length > 0) blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} />)
   // Saving is work the reply keeps quiet about; what was remembered is the user's to see.
@@ -236,41 +234,23 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
 }
 
 /**
- * A single tool call within a work group. Framework tools render through purpose-built views;
- * project tools fall back to the generic inspector. Both keep their bodies
- * borderless and inline so an expanded result flows within the group rather than reading as a
- * nested dropdown.
+ * A single tool call within a work group. A project view placed in the work takes the row; else
+ * framework tools render through purpose-built views, and other tools fall back to the generic
+ * inspector. All keep their bodies borderless and inline so an expanded result flows within the
+ * group rather than reading as a nested dropdown.
  */
 function ToolCallRow({ tool }: { tool: NormalizedTool }) {
+  const view = useAgentToolView(tool.toolName)
+  if (view?.placement === "work") {
+    return <ProjectToolView view={view} tool={tool} fallback={<BuiltInToolRow tool={tool} />} />
+  }
+  return <BuiltInToolRow tool={tool} />
+}
+
+function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
   const messages = useAgentMessages().activity
-  if (tool.toolName === "bash") {
-    return (
-      <BashToolView
-        tool={{
-          state: tool.state,
-          input: tool.input,
-          inputText: tool.inputText,
-          output: tool.output,
-          errorText: tool.errorText,
-        }}
-      />
-    )
-  }
-  if (tool.toolName === "read") return <ReadToolView tool={tool} />
-  if (tool.toolName === "view_file") return <ViewFileToolView tool={tool} />
-  if (isPublishTool(tool.toolName)) return <PublishArtifactToolView tool={tool} />
-  if (
-    tool.toolName === "web_fetch" &&
-    (tool.state !== "output-available" || coerceWebFetchOutput(tool.output) !== null)
-  ) {
-    return <WebFetchToolView tool={tool} />
-  }
-  if (
-    tool.toolName === "web_search" &&
-    (tool.state !== "output-available" || coerceWebSearchOutput(tool.output) !== null)
-  ) {
-    return <WebSearchToolView tool={tool} />
-  }
+  const builtIn = builtInToolView(tool)
+  if (builtIn !== null) return builtIn
 
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
