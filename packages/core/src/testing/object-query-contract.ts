@@ -153,8 +153,33 @@ const Task = defineObjectType({
   ],
 })
 
+const Meeting = defineObjectType({
+  id: "ContractMeeting",
+  name: "Contract Meeting",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("startsAt", "timestamp", { query: { searchable: true, filterable: true } }),
+    prop("day", "date", { query: { searchable: true, filterable: true } }),
+    prop(
+      "reminders",
+      { type: "array", items: "timestamp" },
+      { query: { searchable: true, filterable: true } }
+    ),
+  ],
+})
+
 export const objectQueryContractOntology = new OntologyRegistry({
-  sources: [Room, Device, Zone, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild, Task],
+  sources: [
+    Room,
+    Device,
+    Zone,
+    Asset,
+    LaptopAsset,
+    DefaultTextBase,
+    DefaultTextChild,
+    Task,
+    Meeting,
+  ],
 })
 
 /**
@@ -973,6 +998,80 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
 
         expect(await matching({ op: "not", item: none })).toEqual(["d1", "d2"])
         expect(await matching({ op: "not", item: all })).toEqual([])
+      })
+    })
+
+    test("compares dates and timestamps as instants, whatever offset or precision", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await fixture.seed({
+          objects: [
+            objectSeed(Meeting.id, "m1", {
+              id: "m1",
+              startsAt: "2026-01-01T00:00:00.000Z",
+              day: "2026-01-01",
+              reminders: ["2025-12-31T23:00:00.000Z"],
+            }),
+            objectSeed(Meeting.id, "m2", {
+              id: "m2",
+              startsAt: "2026-01-01T01:00:00.000Z",
+              day: "2026-01-02",
+              reminders: [],
+            }),
+            objectSeed(Meeting.id, "m3", {
+              id: "m3",
+              startsAt: "2026-01-01T02:00:00.000Z",
+              day: "2026-01-03",
+              reminders: [],
+            }),
+          ],
+        })
+
+        const context = { ontology: objectQueryContractOntology, storage }
+        const matching = async (predicate: ObjectQueryPredicate) => {
+          const query: ObjectQuery = {
+            kind: "filter",
+            predicate,
+            input: { kind: "start", objectTypeId: Meeting.id },
+          }
+
+          const listed = await executeObjectQuery({ projectId, query }, context)
+          expect(listed.plan.mode).toBe("pushdown")
+
+          return listed.objects.map((object) => object.primaryId).sort()
+        }
+
+        // Each value names a stored instant in another offset, or without milliseconds.
+        const startsAt = (op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte", value: string) =>
+          matching({ op, propertyId: "startsAt", value })
+
+        expect(await startsAt("eq", "2026-01-01T01:00:00Z")).toEqual(["m2"])
+        expect(await startsAt("neq", "2026-01-01T00:00:00Z")).toEqual(["m2", "m3"])
+        expect(await startsAt("lt", "2026-01-01T02:00:00+02:00")).toEqual([])
+        expect(await startsAt("lte", "2026-01-01T02:00:00+02:00")).toEqual(["m1"])
+        expect(await startsAt("gt", "2026-01-01T02:30:00+01:30")).toEqual(["m3"])
+        expect(await startsAt("gte", "2026-01-01T02:30:00+01:30")).toEqual(["m2", "m3"])
+        expect(
+          await matching({
+            op: "in",
+            propertyId: "startsAt",
+            values: ["2026-01-01T03:00:00+01:00", "2026-01-01T00:00:00Z"],
+          })
+        ).toEqual(["m1", "m3"])
+        expect(
+          await matching({
+            op: "contains",
+            propertyId: "reminders",
+            value: "2026-01-01T00:00:00+01:00",
+          })
+        ).toEqual(["m1"])
+
+        // A date is the calendar day of its instant in UTC, as storage writes it.
+        expect(
+          await matching({ op: "lt", propertyId: "day", value: "2026-01-02T00:00:00+05:00" })
+        ).toEqual([])
+        expect(
+          await matching({ op: "eq", propertyId: "day", value: "2026-01-02T12:00:00Z" })
+        ).toEqual(["m2"])
       })
     })
 

@@ -16,7 +16,11 @@ import {
   queryScalarKindForSchema,
 } from "../../ontology/query-capabilities"
 import { isCurrentUser, isUserRefPropertySchema } from "../../ontology/user-ref"
-import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
+import {
+  normalizeSchemaValue,
+  validatePropertyValue,
+  validateSchemaValue,
+} from "../../ontology/validation"
 import { MAX_VECTOR_K, normalizeVector, vectorConfiguration } from "../vectors/profile"
 import { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
 import { ObjectQueryValidationError } from "./errors"
@@ -835,13 +839,28 @@ function resolveValueTypeRefs(
   return resolved ? resolveValueTypeRefs(resolved, valueTypesById, seen) : undefined
 }
 
+/**
+ * Write a compared value in the form storage writes it. Stores compare dates and timestamps as
+ * their canonical text, so `…T02:00:00+02:00` and `…T00:00:00Z` only meet once both are canonical.
+ * A value that does not normalize stays as authored: validation reports it.
+ */
 function normalizeObjectQueryValue(value: unknown, scalarKind: QueryScalarKind | undefined) {
-  if (scalarKind !== "decimal" || typeof value !== "string") return value
   try {
-    return normalizeDecimalValue(value)
+    if (scalarKind === "decimal" && typeof value === "string") return normalizeDecimalValue(value)
+    if ((scalarKind === "date" || scalarKind === "timestamp") && isTemporalValue(value)) {
+      return normalizeSchemaValue(scalarKind, value, "predicate value", NO_VALUE_TYPES)
+    }
   } catch {
     return value
   }
+
+  return value
+}
+
+const NO_VALUE_TYPES: ReadonlyMap<string, ValueType> = new Map()
+
+function isTemporalValue(value: unknown): value is string | Date {
+  return typeof value === "string" || value instanceof Date
 }
 
 function resolveCommonQueryScalarKind(
