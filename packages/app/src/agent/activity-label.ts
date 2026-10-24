@@ -7,6 +7,7 @@ import {
   humanize,
 } from "./bash/interpret"
 import { type AgentMessages, en } from "./i18n/en"
+import { describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import { isPublishTool, publishTitle } from "./publish-artifact/interpret"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
@@ -62,6 +63,7 @@ function toolProgressLabel(tool: NormalizedTool, messages: AgentMessages): strin
   }
 
   if (tool.toolName === "view_file") return messages.viewFile.running(describeViewFile(tool).target)
+  if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages)
   if (isPublishTool(tool.toolName)) {
     const title = publishTitle(tool)
     if (tool.state === "output-error") return messages.artifacts.publishFailed(title)
