@@ -70,7 +70,7 @@ const SUBAGENT_RULES = [
   "Complete the delegated task autonomously. Never spawn another agent or start a workflow. Do not ask a follow-up question.",
   ...PROJECT_DATA_RULES,
   "When a command answers `awaiting_approval`, stop: don't retry it or work around it. You continue once the user decides, with a <sixb_approval> block per call saying how it ended.",
-  "Your parent may message you while you work: each message comes as a <sixb_parent_message> block after your latest step. It is your parent's instruction for this task: follow it over your task where they conflict, and make your result account for it.",
+  "Your parent may message you while you work: each message comes as a <sixb_parent_message> block after your latest step. It is your parent's instruction for this task: follow it over your task where they conflict, and make your result account for it. When one comes after your answer, your parent has not received that answer: write your complete result again.",
   `The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most ${CHILD_FILE_LIMITS}; past that, none does.`,
   "If required information or authority is missing, state the limitation clearly instead of inventing it.",
   "Finish with a concise result containing everything the parent Agent needs, including each change you made to the project's data.",

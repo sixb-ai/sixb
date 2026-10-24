@@ -172,6 +172,7 @@ export type {
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
+  ReceivedAgentMail,
 } from "./streams/protocol"
 export {
   AGENT_COMPACTION_FAILURE_CODES,
@@ -186,6 +187,7 @@ export {
   agentThreadInboxStreamId,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   isAgentRunStreamEvent,
+  isKnownAgentMailKind,
   publishAgentMail,
   publishAgentRunCancel,
   publishAgentRunFinished,

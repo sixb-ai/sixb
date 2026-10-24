@@ -107,12 +107,17 @@ export type AgentApprovalCallSummary =
  * never from the user.
  */
 export interface AgentMailPart {
-  readonly type: "agent-message"
+  readonly type: "mail"
   /** The mail's id, the same in the sender's and the reader's records. */
   readonly id: string
   readonly from: "parent"
   readonly kind: "message"
   readonly text: string
+  /**
+   * It came as the reader answered: the sender has not received that answer, so the reader writes
+   * its whole result again.
+   */
+  readonly afterAnswer?: true
 }
 
 /** Ordered, hidden provider state required to replay a model response losslessly. */

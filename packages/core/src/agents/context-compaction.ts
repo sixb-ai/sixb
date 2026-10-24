@@ -153,7 +153,7 @@ function estimateMessageTokens(
       case "approval-outcome":
         tokens += textTokens(approvalOutcomeInstruction(part))
         break
-      case "agent-message":
+      case "mail":
         tokens += textTokens(agentMailInstruction(part))
         break
       case "context":
@@ -215,7 +215,7 @@ function serializeSummaryPart(
       return [`${indent}<continuation_request />`]
     case "approval-outcome":
       return [`${indent}${escapeXml(approvalOutcomeInstruction(part))}`]
-    case "agent-message":
+    case "mail":
       return [`${indent}${escapeXml(agentMailInstruction(part))}`]
     case "context":
       return part.context.kind === "object"

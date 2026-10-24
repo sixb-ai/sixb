@@ -76,7 +76,6 @@ export async function runSubagent(input: {
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
-  let stepsRun = 0
   const generation = await runModelLoop({
     model: runtime.usageRecorder.wrapModel(plan.model),
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
@@ -93,13 +92,10 @@ export async function runSubagent(input: {
 
       return { messages: [...(prepared?.messages ?? step.messages), ...toModelMessages([mail])] }
     },
-    // One that arrives as the child answers is read too: it answers again, after reading it.
-    beforeComplete: async () => {
-      const mail = await inbox.take(stepsRun)
+    // One that arrives as the child answers is read too: it writes its result again, after it.
+    beforeComplete: async (_step, stepIndex) => {
+      const mail = await inbox.take(stepIndex + 1, { afterAnswer: true })
       return mail ? toModelMessages([mail]) : undefined
-    },
-    onStepEnd: () => {
-      stepsRun += 1
     },
     signal: abortSignal,
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,

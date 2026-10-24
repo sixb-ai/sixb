@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   type AgentApprovalCall,
+  type AgentMessage,
   agent,
   type CommandResult,
   can,
@@ -27,6 +28,7 @@ import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { AgentWorker } from "../src"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
@@ -78,7 +80,11 @@ function spawn(child: typeof COMPARE) {
   }
 }
 
+/** What the held command waits for once it filed its call, when a test needs that moment. */
+let afterHold: (() => Promise<void>) | undefined
+
 afterEach(() => {
+  afterHold = undefined
   jest.useRealTimers()
 })
 
@@ -119,6 +125,7 @@ class TestSandbox implements Sandbox {
     }
     if (script === HELD_COMMAND) {
       await holdTheCall(this.host, String(options.env?.SIXB_RUN_ID))
+      await afterHold?.()
       // Exit code 4: the call waits.
       return { exitCode: 4, stdout: "", stderr: "", durationMs: 1 }
     }
@@ -214,9 +221,11 @@ function setup(scripts: {
     modelId: "child-model",
     stream: async (request) => {
       const text = modelText(request)
-      const key = [COMPARE, COLLECT].find((child) => text.includes(child.task))?.key
+      const task = [COMPARE, COLLECT].find((child) => text.includes(child.task))?.key
+      // A continuation reads how its calls ended.
+      const key = task && text.includes("<sixb_approval id=") ? `${task}'` : task
       const script = key === undefined ? undefined : scripts.children[key]
-      if (!key || !script) throw new Error("Expected a scripted child's task.")
+      if (!key || !script) throw new Error(`Expected a scripted child, got '${key}'.`)
 
       const requests = childRequests.get(key) ?? []
       requests.push(request)
@@ -262,13 +271,15 @@ function requireAgents(host: SixbHost): AgentStorage {
 async function signedIn(host: SixbHost) {
   const auth = host.storage.auth
   if (!auth) throw new Error("Expected auth storage.")
-  await auth.users.create({ projectId, id: alice.id, email: "alice@example.com" })
-  await auth.groupMemberships.upsert({
-    projectId,
-    userId: alice.id,
-    groupId: agentUsers.id,
-    source: "manual",
-  })
+  if (!(await auth.users.getById({ projectId, id: alice.id }))) {
+    await auth.users.create({ projectId, id: alice.id, email: "alice@example.com" })
+    await auth.groupMemberships.upsert({
+      projectId,
+      userId: alice.id,
+      groupId: agentUsers.id,
+      source: "manual",
+    })
+  }
   const sessionId = `session-${crypto.randomUUID()}`
   await auth.sessions.create({
     projectId,
@@ -345,14 +356,6 @@ async function terminal(agents: AgentStorage, runId: string): Promise<AgentRunRe
   }, `run ${runId} terminal`)
 }
 
-/** What a child run did, as its thread keeps it: every message of the run but its trigger. */
-async function work(agents: AgentStorage, run: SubagentRunRecord) {
-  const { messages } = await agents.messages.list({ projectId, threadId: run.threadId })
-  return messages
-    .filter((message) => message.runId === run.id && message.id !== run.triggerMessageId)
-    .map(({ role, parts }) => ({ role, parts }))
-}
-
 async function child(agents: AgentStorage, runId: string): Promise<SubagentRunRecord> {
   const run = await agents.runs.getById({ projectId, id: runId })
   if (run?.kind !== "subagent") throw new Error(`Expected child run '${runId}'.`)
@@ -381,23 +384,77 @@ function toolOutput(request: LanguageModelRequest | undefined, toolCallId: strin
   return undefined
 }
 
+/** What wait_agent answered in a turn, as the thread keeps it. */
+async function storedWait(agents: AgentStorage, threadId: string, toolCallId: string) {
+  const { messages } = await agents.messages.list({ projectId, threadId })
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== "tool-call" || part.toolCallId !== toolCallId) continue
+      if (part.state !== "output-available") throw new Error(`Expected '${toolCallId}' to answer.`)
+      const output = part.output as { readonly content?: readonly { readonly text?: string }[] }
+      return JSON.parse(output.content?.[0]?.text ?? "null")
+    }
+  }
+  throw new Error(`Expected the tool call '${toolCallId}'.`)
+}
+
 function spawnedRunId(request: LanguageModelRequest): string {
   const spawned = toolOutput(request, "spawn") as { readonly runId?: string } | undefined
   if (!spawned?.runId) throw new Error("Expected the spawned child's run id.")
   return spawned.runId
 }
 
-/** Request a turn as Alice and run it until it ends. */
-async function requestTurn(harness: ReturnType<typeof setup>) {
+/** Request a turn as Alice, in a new thread or after the last one, and run it until it ends. */
+async function requestTurn(harness: ReturnType<typeof setup>, threadId?: string) {
   const alicesSixb = await signedIn(harness.host)
   const { run } = await settle(
     alicesSixb.agent.runs.request({
-      text: "Compare our suppliers and pay INV-2041.",
+      text: threadId ? "And the payment terms?" : "Compare our suppliers and pay INV-2041.",
       approvalMode: "manual",
+      ...(threadId === undefined ? {} : { threadId }),
     }),
     "request"
   )
-  return { run, finished: await terminal(harness.agents, run.id) }
+  return { run, finished: await terminal(harness.agents, run.id), alicesSixb }
+}
+
+/** What a child run did, as its thread keeps it: every message of the run but its trigger. */
+async function transcriptOf(
+  harness: ReturnType<typeof setup>,
+  runId: string
+): Promise<readonly AgentMessage[]> {
+  const run = await child(harness.agents, runId)
+  const { messages } = await harness.agents.messages.list({ projectId, threadId: run.threadId })
+  return messages
+    .filter((message) => message.runId === run.id && message.id !== run.triggerMessageId)
+    .map(({ role, parts }) => ({ role, parts }))
+}
+
+function mailParts(transcript: readonly AgentMessage[] | null) {
+  return (transcript ?? []).flatMap((message) =>
+    message.parts.filter((part) => part.type === "mail")
+  )
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/** A mail id this turn gave the message of one of its tool calls. */
+function mailId(parentRunId: string, toolCallId = "steer") {
+  return expect.stringMatching(new RegExp(`^${escapeRegExp(parentRunId)}:.+:${toolCallId}$`))
+}
+
+/** Whether a request holds the parent's message, as the child's model reads it. */
+function readsMessage(
+  request: LanguageModelRequest | undefined,
+  parentRunId: string,
+  text = STEER,
+  toolCallId = "steer"
+): boolean {
+  // The messages as JSON, where each quote is escaped.
+  const block = `<sixb_parent_message id=\\\\"${escapeRegExp(parentRunId)}:[^"\\\\]+:${toolCallId}\\\\">${escapeRegExp(text)}</sixb_parent_message>`
+  return new RegExp(block).test(modelText(request))
 }
 
 /**
@@ -406,6 +463,7 @@ async function requestTurn(harness: ReturnType<typeof setup>) {
  */
 function steeredMidWork(input: {
   readonly firstStep: () => LanguageModelStream
+  readonly secondStep?: Script
   readonly afterSent?: (harness: ReturnType<typeof setup>, childRunId: string) => Promise<void>
 }) {
   const childAtWork = moment()
@@ -426,8 +484,12 @@ function steeredMidWork(input: {
       return answer("Payment terms compared.")
     },
     children: {
-      [COMPARE.key]: async (_request, call) => {
-        if (call > 1) return answer("Compared payment terms, without Globex.")
+      [COMPARE.key]: async (request, call) => {
+        if (call > 1) {
+          return (
+            input.secondStep?.(request, call) ?? answer("Compared payment terms, without Globex.")
+          )
+        }
 
         childAtWork.reached()
         await sent.promise
@@ -437,9 +499,6 @@ function steeredMidWork(input: {
   })
   return harness
 }
-
-const PARENT_MESSAGE = (parentRunId: string) =>
-  `<sixb_parent_message id=\\"${parentRunId}:steer\\">${STEER}</sixb_parent_message>`
 
 describe("a message to a child at work", () => {
   // Removal proof: drop the inbox read from runSubagent's prepareStep; the child's second request
@@ -462,7 +521,7 @@ describe("a message to a child at work", () => {
       expect(modelText(harness.childRequests(COMPARE.key)[0])).not.toContain(
         "<sixb_parent_message id="
       )
-      expect(modelText(harness.childRequests(COMPARE.key)[1])).toContain(PARENT_MESSAGE(run.id))
+      expect(readsMessage(harness.childRequests(COMPARE.key)[1], run.id)).toBe(true)
       expect(harness.childRequests(COMPARE.key)).toHaveLength(2)
       expect(toolOutput(harness.parentRequests[3], "wait")).toMatchObject({
         results: [{ status: "succeeded", text: "Compared payment terms, without Globex." }],
@@ -472,24 +531,77 @@ describe("a message to a child at work", () => {
     }
   })
 
-  // Removal proof: drop `beforeComplete` from runSubagent; the child ends on its first answer,
-  // which wait_agent returns with the message as unread.
-  test("adds a step when it arrives as the child answers, and the answer is the one after it", async () => {
+  // Removal proofs: drop `beforeComplete` from runSubagent; the child ends on its first answer,
+  // which wait_agent returns with the message as unread. Drop `afterAnswer` from the inbox's take;
+  // the child is not told to answer again in full.
+  test("adds a step when it arrives as the child answers, which writes its result again", async () => {
     const harness = steeredMidWork({ firstStep: () => answer("Globex is cheapest.") })
     jest.useFakeTimers()
     await harness.worker.start()
     try {
       const { run } = await requestTurn(harness)
+      const second = harness.childRequests(COMPARE.key)[1]
 
       expect(harness.childRequests(COMPARE.key)).toHaveLength(2)
-      expect(modelText(harness.childRequests(COMPARE.key)[1])).toContain(PARENT_MESSAGE(run.id))
-      // Its first answer is in its history, before the message it now answers.
-      expect(modelText(harness.childRequests(COMPARE.key)[1])).toContain("Globex is cheapest.")
-      const waited = toolOutput(harness.parentRequests[3], "wait") as {
-        readonly results: readonly Record<string, unknown>[]
-      }
-      expect(waited.results[0]).toMatchObject({ text: "Compared payment terms, without Globex." })
-      expect(waited.results[0]).not.toHaveProperty("unread")
+      expect(readsMessage(second, run.id)).toBe(true)
+      // Its first answer is in its history, before the message, and it is told to write it again.
+      expect(modelText(second)).toContain("Globex is cheapest.")
+      expect(modelText(second)).toContain("Write your complete result again")
+      expect(toolOutput(harness.parentRequests[3], "wait")).toMatchObject({
+        results: [
+          {
+            text: "Compared payment terms, without Globex.",
+            earlierAnswer: "Globex is cheapest.",
+          },
+        ],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: drop `answerBeforeLateMessage` from wait_agent; the parent gets the addendum
+  // alone, and the comparison it amends is gone.
+  test("never loses the answer it amends: an addendum comes with the answer before it", async () => {
+    const full = "Acme: 30 days, 2% early. Globex: 60 days. Recommend Acme."
+    const harness = steeredMidWork({
+      firstStep: () => answer(full),
+      secondStep: () => answer("Noted: the budget changes nothing."),
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      await requestTurn(harness)
+
+      expect(toolOutput(harness.parentRequests[3], "wait")).toMatchObject({
+        results: [{ text: "Noted: the budget changes nothing.", earlierAnswer: full }],
+      })
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: drop the answerNote branch of `answerBeforeLateMessage`; the parent reads the
+  // answer before its message as if it accounted for it.
+  test("says so when the child did not answer again after it", async () => {
+    const harness = steeredMidWork({
+      firstStep: () => answer("Globex is cheapest."),
+      secondStep: () => answer(" "),
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      await requestTurn(harness)
+
+      expect(toolOutput(harness.parentRequests[3], "wait")).toMatchObject({
+        results: [
+          {
+            text: "Globex is cheapest.",
+            answerNote:
+              "It wrote this answer before your last message came, and did not answer again after reading it.",
+          },
+        ],
+      })
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
@@ -520,7 +632,7 @@ describe("a message to a child at work", () => {
         state: "output-available",
         output: { runId: compare.id, status: "running", delivery: "next-step" },
       })
-      expect(await work(harness.agents, compare)).toEqual([
+      expect(await transcriptOf(harness, compare.id)).toEqual([
         {
           role: "assistant",
           parts: expect.arrayContaining([expect.objectContaining({ toolCallId: "look" })]),
@@ -529,8 +641,8 @@ describe("a message to a child at work", () => {
           role: "user",
           parts: [
             {
-              type: "agent-message",
-              id: `${run.id}:steer`,
+              type: "mail",
+              id: mailId(run.id),
               from: "parent",
               kind: "message",
               text: STEER,
@@ -575,11 +687,96 @@ describe("a message to a child at work", () => {
         modelText(harness.childRequests(COMPARE.key)[1]).split("<sixb_parent_message id=").length -
           1
       ).toBe(1)
-      expect(
-        (await work(harness.agents, compare)).flatMap((message) =>
-          message.parts.filter((part) => part.type === "agent-message")
-        )
-      ).toHaveLength(1)
+      expect(mailParts(await transcriptOf(harness, compare.id))).toHaveLength(1)
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: accept only the kinds this version knows in readAgentMail's envelope check; the
+  // newer kind is skipped for good, as the cursor passes it.
+  test("reads a newer sender's kind as a message, rather than skipping it", async () => {
+    const harness = steeredMidWork({
+      firstStep: () => toolCalls(["look", "bash", { command: "ls offers" }]),
+      afterSent: async ({ broker }, childRunId) => {
+        const parentRunId = (await child(harness.agents, childRunId)).parentRunId
+        await broker.append({
+          projectId,
+          streamId: agentThreadInboxStreamId((await child(harness.agents, childRunId)).threadId),
+          records: [
+            {
+              name: "agent.mail",
+              payload: {
+                id: `${parentRunId}:future`,
+                fromRunId: parentRunId,
+                toThreadId: (await child(harness.agents, childRunId)).threadId,
+                kind: "answer",
+                text: "Use the fiscal year.",
+                sentAt: new Date().toISOString(),
+              },
+            },
+          ],
+        })
+      },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+      const compare = createSubagentRunId(run.id, COMPARE.key)
+
+      expect(mailParts(await transcriptOf(harness, compare))).toEqual([
+        expect.objectContaining({ id: mailId(run.id), kind: "message", text: STEER }),
+        expect.objectContaining({
+          id: `${run.id}:future`,
+          kind: "message",
+          text: "Use the fiscal year.",
+        }),
+      ])
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: build the mail id from the provider's tool call id alone; the second message,
+  // whose call reuses that id in a later step, is dropped as a duplicate.
+  test("is one message per call, even when a provider reuses a tool call id", async () => {
+    const childAtWork = moment()
+    const sent = moment()
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) {
+          await childAtWork.promise
+          return toolCalls(["steer", "message_agent", { key: COMPARE.key, text: STEER }])
+        }
+        if (call === 3) {
+          return toolCalls(["steer", "message_agent", { key: COMPARE.key, text: "Also Initech." }])
+        }
+        if (call === 4) {
+          sent.reached()
+          const compare = spawnedRunId(harness.parentRequests[1] ?? request)
+          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+        }
+        return answer("Payment terms compared.")
+      },
+      children: {
+        [COMPARE.key]: async (_request, call) => {
+          if (call > 1) return answer("Compared payment terms, without Globex, with Initech.")
+          childAtWork.reached()
+          await sent.promise
+          return toolCalls(["look", "bash", { command: "ls offers" }])
+        },
+      },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+      const second = harness.childRequests(COMPARE.key)[1]
+
+      expect(readsMessage(second, run.id)).toBe(true)
+      expect(readsMessage(second, run.id, "Also Initech.")).toBe(true)
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
@@ -682,7 +879,7 @@ describe("message_agent", () => {
         results: [
           {
             status: "awaiting_approval",
-            unread: [{ id: `${run.id}:steer`, text: STEER }],
+            unread: [{ id: mailId(run.id), text: STEER }],
           },
         ],
       })
@@ -691,6 +888,148 @@ describe("message_agent", () => {
       )
     } finally {
       collectReleased.reached()
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: drop the `holdsRun` check from SubagentCoordinator.message; the message is
+  // accepted while the child is about to pause on the call it filed.
+  test("refuses a child whose call was just filed, before it pauses", async () => {
+    const filed = moment()
+    const refused = moment()
+    afterHold = async () => {
+      filed.reached()
+      await refused.promise
+    }
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) {
+          await filed.promise
+          return toolCalls(["steer", "message_agent", { key: COMPARE.key, text: STEER }])
+        }
+        if (call === 3) {
+          refused.reached()
+          const compare = spawnedRunId(harness.parentRequests[1] ?? request)
+          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+        }
+        return answer("INV-2041 waits for your approval.")
+      },
+      children: { [COMPARE.key]: () => toolCalls(["held", "bash", { command: HELD_COMMAND }]) },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run } = await requestTurn(harness)
+
+      expect(await child(harness.agents, createSubagentRunId(run.id, COMPARE.key))).toMatchObject({
+        status: "succeeded",
+        finishReason: "awaiting_approval",
+      })
+      expect(toolOutput(harness.parentRequests[2], "steer")).toBe(
+        "[SixbAgentWorker] 'compare-suppliers' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change."
+      )
+    } finally {
+      refused.reached()
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+
+  // Removal proof: drop the earlier-turn lookup from SubagentCoordinator.message; the refusal
+  // says to use the key passed to spawn_agent, which the Agent did.
+  test("tells the Agent to spawn again a child of an earlier turn", async () => {
+    const harness = setup({
+      parent: (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) {
+          return toolCalls(["wait", "wait_agent", { runIds: [spawnedRunId(request)] }])
+        }
+        if (call === 3) return answer("Globex is cheapest.")
+        if (call === 4) {
+          return toolCalls(["steer", "message_agent", { key: COMPARE.key, text: STEER }])
+        }
+        return answer("Payment terms next.")
+      },
+      children: { [COMPARE.key]: () => answer("Globex is cheapest.") },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const first = await requestTurn(harness)
+      await requestTurn(harness, first.run.threadId)
+
+      expect(toolOutput(harness.parentRequests[4], "steer")).toBe(
+        "[SixbAgentWorker] 'compare-suppliers' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then."
+      )
+    } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("a message a child paused before reading", () => {
+  // Removal proof: read a run's mail in SubagentInbox.take only from the run's own start, past
+  // what was sent before it was admitted; the child that continues after the approval never reads
+  // the message its parent was told it would.
+  test("reaches the child that continues it once the user decides", async () => {
+    const childAtWork = moment()
+    const sent = moment()
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(COMPARE)])
+        if (call === 2) {
+          await childAtWork.promise
+          return toolCalls(["steer", "message_agent", { key: COMPARE.key, text: STEER }])
+        }
+        if (call === 3) {
+          sent.reached()
+          const compare = spawnedRunId(harness.parentRequests[1] ?? request)
+          return toolCalls(["wait", "wait_agent", { runIds: [compare] }])
+        }
+        if (call === 4) {
+          const compare = spawnedRunId(harness.parentRequests[1] ?? request)
+          return toolCalls(["wait-again", "wait_agent", { runIds: [compare] }])
+        }
+        return answer("Payment terms compared; INV-2041 is paid.")
+      },
+      children: {
+        // Its step files a call, so it pauses before it reads the message sent during it.
+        [COMPARE.key]: async () => {
+          childAtWork.reached()
+          await sent.promise
+          return toolCalls(["held", "bash", { command: HELD_COMMAND }])
+        },
+        [`${COMPARE.key}'`]: () => answer("Compared payment terms, without Globex."),
+      },
+    })
+    await createTestSixb(harness.host).objects.upsert("invoice", { id: "INV-2041", status: "open" })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run, finished, alicesSixb } = await requestTurn(harness)
+      expect(finished).toMatchObject({ status: "succeeded", finishReason: "awaiting_approval" })
+      // Its turn paused once it did: the wait is its last step.
+      expect(await storedWait(harness.agents, run.threadId, "wait")).toMatchObject({
+        results: [{ status: "awaiting_approval", unread: [{ id: mailId(run.id), text: STEER }] }],
+      })
+
+      const [held] = (await alicesSixb.agent.approvals.list({ threadId: run.threadId })).approvals
+      const decided = await settle(
+        alicesSixb.agent.approvals.decide(held?.id ?? "", { decision: "approve" }),
+        "decide"
+      )
+      if (!decided.run) throw new Error("Expected the turn to resume.")
+      await terminal(harness.agents, decided.run.id)
+      const continuation = createSubagentRunId(decided.run.id, COMPARE.key)
+
+      expect(readsMessage(harness.childRequests(`${COMPARE.key}'`)[0], run.id)).toBe(true)
+      expect(mailParts(await transcriptOf(harness, continuation))).toEqual([
+        expect.objectContaining({ id: mailId(run.id), text: STEER }),
+      ])
+      expect(toolOutput(harness.parentRequests[4], "wait-again")).toMatchObject({
+        results: [{ status: "succeeded", text: "Compared payment terms, without Globex." }],
+      })
+    } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
   })
