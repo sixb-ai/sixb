@@ -457,10 +457,17 @@ export function StatusFigures({
         // A figure over cells the reader may not see would be a partial one: each is locked.
         <>
           {[messages.sheet.average, messages.sheet.min, messages.sheet.max].map((label) => (
-            <LockedStat key={label} label={label} title={messages.sheet.lockedFigures} />
+            <LockedStat
+              key={label}
+              label={label}
+              title={messages.sheet.lockedFigures(stats.lockedColumns ?? [])}
+            />
           ))}
           <Stat label={messages.sheet.count} value={stats.count.toLocaleString(locale)} />
-          <LockedStat label={messages.sheet.sum} title={messages.sheet.lockedFigures} />
+          <LockedStat
+            label={messages.sheet.sum}
+            title={messages.sheet.lockedFigures(stats.lockedColumns ?? [])}
+          />
         </>
       ) : stats && stats.count > 1 ? (
         <>

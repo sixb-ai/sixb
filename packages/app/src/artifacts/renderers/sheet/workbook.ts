@@ -99,7 +99,7 @@ export function liveSheetErrorText(
 ): { readonly title: string; readonly description?: string } {
   switch (error.kind) {
     case "forbidden":
-      return { title: messages.queryForbidden }
+      return { title: messages.queryForbidden, description: messages.askForAccess }
     case "invalid":
       return {
         title: messages.queryInvalid,

@@ -2,7 +2,7 @@ import type { WorkbookChart } from "@sixb/core/artifacts"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { useMemo } from "react"
 import { useArtifactMessages } from "../../messages"
-import { chartData, chartReadsLocked } from "./chart-data"
+import { chartData, chartLockedColumns } from "./chart-data"
 import { ChartLocked } from "./chart-locked"
 import type { SheetModel } from "./model"
 
@@ -18,10 +18,13 @@ export function MiniChart({
   readonly chart: WorkbookChart
   readonly model: SheetModel
 }) {
-  const label = useArtifactMessages().sheet.chartLocked
-  const locked = useMemo(() => chartReadsLocked(chart, model), [chart, model])
-  const data = useMemo(() => (locked ? null : chartData(chart, model)), [locked, chart, model])
-  if (locked) return <ChartLocked label={label} compact />
+  const messages = useArtifactMessages().sheet
+  const locked = useMemo(() => chartLockedColumns(chart, model), [chart, model])
+  const data = useMemo(
+    () => (locked.length > 0 ? null : chartData(chart, model)),
+    [locked, chart, model]
+  )
+  if (locked.length > 0) return <ChartLocked label={messages.chartLocked(locked)} compact />
   if (!data) return null
   const series = data.series.map((entry) => ({
     color: entry.color,

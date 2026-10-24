@@ -1,5 +1,5 @@
 import { parseSheetNumber, type WorkbookChart } from "@sixb/core/artifacts"
-import { isLocked, type SheetColumn, type SheetModel } from "./model"
+import { lockedColumns, type SheetColumn, type SheetModel } from "./model"
 
 export interface ChartSeries {
   /** The data key, safe for the chart library whatever the column is named. */
@@ -37,17 +37,13 @@ export const MAX_CHART_POINTS = 500
  * instead. A chart that counts rows reads no value but its x.
  */
 export function chartReadsLocked(chart: WorkbookChart, model: SheetModel): boolean {
-  if (!model.locked) return false
+  return chartLockedColumns(chart, model).length > 0
+}
 
-  const read = new Set(
-    [chart.x, ...chart.y, ...chart.line].map((name) =>
-      model.columns.findIndex((column) => column.name === name)
-    )
-  )
-  for (const row of model.locked.keys()) {
-    for (const column of read) if (isLocked(model, row, column)) return true
-  }
-  return false
+/** The columns a chart reads that hold a value the reader may not see, in the sheet's order. */
+export function chartLockedColumns(chart: WorkbookChart, model: SheetModel): string[] {
+  const read = new Set([chart.x, ...chart.y, ...chart.line])
+  return lockedColumns(model).filter((name) => read.has(name))
 }
 
 /** The series a chart that counts rows plots: a whole number for each x value. */
