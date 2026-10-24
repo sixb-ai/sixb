@@ -764,4 +764,64 @@ describe("queries in the artifacts a conversation shares", () => {
     expect(await rowOf(observer)).toMatchObject({ properties: { id: "inv_1" } })
     expect(await other.artifacts.query(artifact.id, "invoices")).toBeNull()
   })
+
+  // Guard proof: drop the assertReturnsReadable call from createArtifactQueryChecker; Bob's first
+  // version then publishes, and the owner's rows reach his page with their amount.
+  test("a participant's version returns only what they can read, whoever reads it", async () => {
+    const { host } = setup()
+    const invoices: Grants = { "view:object": new Set([Invoice.id]) }
+    const { owner, participant, thread, run } = await sharedThread(host, {
+      owner: invoices,
+      participant: invoices,
+      cleared: true,
+    })
+    await createTestSixb(host)
+      .objects(Invoice)
+      .upsert({ properties: { id: "inv_1", amount: 1200 } })
+
+    const put = async (path: string, text: string) => ({
+      path,
+      file: await host.blobStorage.put({ body: new TextEncoder().encode(text), fileName: path }),
+    })
+    const index = await put("index.html", "<!doctype html><title>Invoices</title><p>Invoices</p>")
+
+    // Alice's page, which the Agent then showed in the thread.
+    const { artifact, version } = await owner.artifacts.create({
+      kind: "page",
+      title: "Invoices",
+      files: [index],
+    })
+    const { projectId: _p, artifactId: _a, version: _v, ...input } = version
+    await host.storage.artifacts?.publish({
+      projectId,
+      artifactId: artifact.id,
+      kind: "page",
+      version: { ...input, origin: { threadId: thread.id, runId: run.id } },
+    })
+
+    // Bob is not cleared for amounts: a query that returns them is his to leave out.
+    const all = await put("queries/invoices.json", '{"kind":"start","objectTypeId":"Invoice"}')
+    const refused = await participant.artifacts
+      .publish(artifact.id, { kind: "page", title: "Invoices", files: [index, all] })
+      .catch((error: unknown) => error)
+    expect(refused).toMatchObject({
+      code: "invalid_artifact",
+      message:
+        "[Sixb] queries/invoices.json: $: returns 'amount' on 'Invoice', which you are not cleared to read: add a \"project\" node that lists only the properties you can read.",
+    })
+
+    const ids = await put(
+      "queries/invoices.json",
+      '{"kind":"project","input":{"kind":"start","objectTypeId":"Invoice"},"properties":["id"]}'
+    )
+    await participant.artifacts.publish(artifact.id, {
+      kind: "page",
+      title: "Invoices",
+      files: [index, ids],
+    })
+
+    // Alice is cleared, and his page still gets only what he could read.
+    const rows = await owner.artifacts.query(artifact.id, "invoices")
+    expect(rows?.kind === "objects" && rows.objects[0]?.properties).toEqual({ id: "inv_1" })
+  })
 })
