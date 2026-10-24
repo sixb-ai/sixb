@@ -554,6 +554,34 @@ class AuthorizedObjectReaderImpl {
   }
 
   /**
+   * The check a direct write runs on each object's properties before its commit claims them. It
+   * refuses a value for a unique property this authority cannot read: whether the write is refused
+   * as taken would reveal which values objects hold, as a `getBy` would.
+   */
+  async uniqueValueWriteCheck(
+    objectTypeId: string
+  ): Promise<(properties: Readonly<Record<string, unknown>>) => void> {
+    const clearance = await this.#security.clearance.current()
+    const marked = this.#ontology.registry
+      .listUniqueProperties(objectTypeId)
+      .flatMap((property) => {
+        const marking = clearance?.missingMarking(objectTypeId, property.propertyId)
+        return marking === undefined ? [] : [{ propertyId: property.propertyId, marking }]
+      })
+
+    return (properties) => {
+      for (const { propertyId, marking } of marked) {
+        if (properties[propertyId] === undefined || properties[propertyId] === null) continue
+
+        throw new AuthorizationError(
+          `clearance:marking:${marking}`,
+          `[Sixb] Cannot write a value to '${objectTypeId}.${propertyId}': it is unique and requires clearance for marking '${marking}'.`
+        )
+      }
+    }
+  }
+
+  /**
    * Refuse a write or a request that names an object type or link this authority cannot read,
    * before any lookup: it would answer whether what it names exists, and land where the reader
    * cannot see.
