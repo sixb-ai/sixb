@@ -93,8 +93,11 @@ const ada = await sixb.objects(Person).getBy(Person.p.email, "ada@example.com")
 
 When a property becomes unique, startup (or `sixb db migrate`) collects the values that existing
 objects hold. If two objects share a value, startup fails and names both: fix the data, then start
-again. Add `unique` in a release where instances still running the previous version no longer write
-that type: values they write during the rollout are not checked.
+again. Values written during a rollout by instances that don't declare `unique` yet are not
+tracked, so a value they free can stay refused and a value they write can later be duplicated. Add
+`unique` in a release where older instances no longer write that type. To repair the values after
+such a rollout, remove `unique` in one release and add it back in the next: startup drops the
+values, then rebuilds them from the objects.
 
 ## Structured values
 
