@@ -265,7 +265,9 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
   const files = tool.files ?? []
   const expandable = hasInput || hasOutput || isError || files.length > 0
   const title =
-    tool.toolName === "message_agent" ? describeMessageAgent(tool, agentMessages) : tool.toolName
+    tool.toolName === "message_agent"
+      ? describeMessageAgent(tool, agentMessages).title
+      : tool.toolName
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.

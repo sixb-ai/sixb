@@ -63,7 +63,7 @@ function toolProgressLabel(tool: NormalizedTool, messages: AgentMessages): strin
   }
 
   if (tool.toolName === "view_file") return messages.viewFile.running(describeViewFile(tool).target)
-  if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages)
+  if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages).running
   if (isPublishTool(tool.toolName)) {
     const title = publishTitle(tool)
     if (tool.state === "output-error") return messages.artifacts.publishFailed(title)
