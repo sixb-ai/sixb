@@ -22,8 +22,11 @@ import {
   createSubagentExecutionId,
   createSubagentRunId,
   createSubagentThreadId,
+  deferredChildQuestion,
   dispatchQueuedSubagentRuns,
   isAgentToolResult,
+  isAwaitingAnswerRun,
+  isPausedSubagentRun,
   listChildApprovalsAwaiting,
   listSubagentThreadRuns,
   publishAgentMail,
@@ -66,7 +69,7 @@ import {
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { TurnQuestions } from "./run-agent-turn"
-import { continuationTrigger, isPausedSubagent } from "./subagent-continuation"
+import { continuationTrigger } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
 /** How often a wait for children reads their runs. */
@@ -139,7 +142,8 @@ export interface WaitedSubagentResult {
   readonly runId: string
   /**
    * `queued` or `running`: the turn is about to end, so the Agent answers without it.
-   * `awaiting_approval`: it paused on calls that wait for the user, and continues once they decide.
+   * `awaiting_approval`: it paused on calls that wait for the user, and continues once they decide,
+   * unless a new message sets the calls aside or the turn is stopped instead.
    */
   readonly status: SubagentRunRecord["status"] | "awaiting_approval" | "awaiting_answer"
   readonly text?: string
@@ -353,7 +357,7 @@ export class SubagentCoordinator {
 
     const continuing = []
     for (const child of await agents.runs.getByIds({ projectId, ids: callerIds })) {
-      if (child.kind !== "subagent" || !isPausedSubagent(child)) continue
+      if (child.kind !== "subagent" || !isPausedSubagentRun(child)) continue
 
       const { approvals } = await agents.approvals.list({ projectId, runId: child.parentRunId })
       const reported = new Set(
@@ -398,7 +402,7 @@ export class SubagentCoordinator {
       description: [
         "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
-        "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides.",
+        "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides, unless the user sends a new message or stops instead.",
         "A message you sent a child that it has not read is listed in its unread. When one came as it answered, earlierAnswer holds what it answered before, and text what it wrote after.",
         "It returns as soon as a child of this turn asks you a question, listed in questions with its key, whichever children you wait for: the child waits for your answer, which you give with message_agent.",
       ].join("\n"),
@@ -483,7 +487,7 @@ export class SubagentCoordinator {
     }
     // Once its call is filed it pauses at the end of its step, before it would read a message.
     if (
-      isPausedSubagent(child) ||
+      isPausedSubagentRun(child) ||
       (await agents.approvals.holdsRun({ projectId, runId: child.id }))
     ) {
       throw new AgentToolPublicError(
@@ -569,7 +573,7 @@ export class SubagentCoordinator {
     const live = [...runs]
       .reverse()
       .find((run) => run.status !== "failed" && run.status !== "cancelled")
-    return live && isAwaitingAnswer(live) ? live : undefined
+    return live && isAwaitingAnswerRun(live) ? live : undefined
   }
 
   /** Whether a continuation went on with its parent's answer, as its trigger says. */
@@ -660,7 +664,7 @@ export class SubagentCoordinator {
    * work since its last delivery. Only one `awaiting_answer` has one.
    */
   private async deferredQuestionOf(run: SubagentRunRecord): Promise<QuestionRef | undefined> {
-    if (!isAwaitingAnswer(run)) return undefined
+    if (!isAwaitingAnswerRun(run)) return undefined
 
     const { messages } = await this.context.storage.agents.messages.list({
       projectId: this.context.id,
@@ -671,7 +675,7 @@ export class SubagentCoordinator {
     const work = messages.find(
       (message) => message.runId === run.id && message.role === "assistant"
     )
-    return work ? deferredQuestion([work]) : undefined
+    return work ? deferredChildQuestion([work]) : undefined
   }
 
   /**
@@ -1188,13 +1192,13 @@ export class SubagentCoordinator {
 
     for (const child of children) {
       if (child.status !== "succeeded") continue
-      if (isAwaitingAnswer(child)) {
+      if (isAwaitingAnswerRun(child)) {
         if (child.result?.files?.length) {
           byChild.set(child.id, { note: "They come back once it continues and finishes." })
         }
         continue
       }
-      if (isPausedSubagent(child)) {
+      if (isPausedSubagentRun(child)) {
         if (child.result?.files?.length) {
           byChild.set(child.id, {
             note: "They come back if it continues once the user decides, when it finishes.",
@@ -1554,36 +1558,6 @@ interface ChildFiles {
   readonly note?: string
 }
 
-/** A child that paused on its question when its turn ended: it continues once answered. */
-function isAwaitingAnswer(run: SubagentRunRecord): boolean {
-  return run.status === "succeeded" && run.finishReason === "awaiting_answer"
-}
-
-/**
- * The question a run paused on: its `ask_parent` call whose answer was deferred to a later turn,
- * which names the question's id.
- */
-function deferredQuestion(messages: readonly AgentMessage[]): QuestionRef | undefined {
-  const asked = messages
-    .flatMap((message) => message.parts)
-    .flatMap((part) =>
-      part.type === "tool-call" &&
-      part.toolName === "ask_parent" &&
-      part.state === "output-available" &&
-      isJsonObject(part.output) &&
-      part.output.status === "deferred" &&
-      isJsonObject(part.input)
-        ? [{ input: part.input, output: part.output }]
-        : []
-    )
-    .at(-1)
-  if (!asked) return undefined
-
-  const { question: text } = asked.input
-  const { question: id } = asked.output
-  return typeof text === "string" && typeof id === "string" ? { id, text: text.trim() } : undefined
-}
-
 function waitedResult(
   run: SubagentRunRecord,
   awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined,
@@ -1592,9 +1566,9 @@ function waitedResult(
 ): WaitedSubagentResult {
   return {
     runId: run.id,
-    status: isPausedSubagent(run)
+    status: isPausedSubagentRun(run)
       ? "awaiting_approval"
-      : isAwaitingAnswer(run)
+      : isAwaitingAnswerRun(run)
         ? "awaiting_answer"
         : run.status,
     ...(run.result?.text ? { text: run.result.text } : {}),

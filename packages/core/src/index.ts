@@ -919,11 +919,19 @@ export type {
   ActivityWorkflowEntry,
 } from "./activity/timeline"
 export type { AgentApprovalModeSource, ResolvedAgentApprovalMode } from "./agents/approvals"
+export type { AgentChildQuestion } from "./agents/child-question"
+export type {
+  AgentChildAwaiting,
+  AgentChildEndReason,
+  AgentChildRunView,
+  AgentChildView,
+} from "./agents/children"
 export type { AgentMemoryErrorCode } from "./agents/errors"
 export { AgentMemoryError } from "./agents/errors"
 export type {
   AgentApprovalDecision,
   AgentApprovalsRuntime,
+  AgentChildListResult,
   AgentPreferences,
   AgentPreferencesRuntime,
   AgentRunListResult,
@@ -932,12 +940,15 @@ export type {
   AgentRunView,
   AgentThreadParticipantsRuntime,
   AgentThreadsRuntime,
+  ConversationAgentRunView,
   DecideExecutionAgentApprovalInput,
   ExecutionAgentRunResult,
+  ListAgentChildrenInput,
   ListAgentThreadViewsResult,
   ListExecutionAgentApprovalsInput,
   ListExecutionAgentThreadsInput,
   ObservedAgentThreadsRuntime,
+  SubagentRunView,
 } from "./agents/execution"
 export type { AgentMemoryLinkWarning, AgentMemoryRepoName } from "./agents/memory"
 export type {

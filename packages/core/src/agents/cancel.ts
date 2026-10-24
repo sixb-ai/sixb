@@ -1,5 +1,10 @@
 import type { SixbRuntimeContext } from "../runtime/types"
-import { AgentStorageError, type ConversationAgentRunRecord } from "../storage/agents"
+import {
+  type AgentRunRecord,
+  type AgentStorage,
+  AgentStorageError,
+  type ConversationAgentRunRecord,
+} from "../storage/agents"
 import { isAwaitingApprovalRun, stopAgentTurn } from "./approvals"
 import { AgentRequestError } from "./errors"
 import { publishAgentRunCancel, publishAgentRunFinished } from "./streams/protocol"
@@ -21,31 +26,18 @@ export async function cancelAgentRun(
 
   let current = run
   if (current.status === "queued") {
-    try {
-      const cancelled = await storage.runs.finishQueued({
-        projectId: runtime.projectId,
-        id: current.id,
-        status: "cancelled",
-      })
-      if (cancelled.kind !== "conversation") {
-        throw new Error(`[Sixb] Agent run '${cancelled.id}' changed kind.`)
+    const queued = await cancelQueuedRun(runtime, storage, current)
+    if (queued.cancelled) {
+      if (queued.run.kind !== "conversation") {
+        throw new Error(`[Sixb] Agent run '${queued.run.id}' changed kind.`)
       }
-
-      await publishQueuedRunCancellation(runtime, cancelled)
-      return cancelled
-    } catch (error) {
-      if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") throw error
-
-      // The worker may have started the run after our read but before finishQueued locked it.
-      // Re-read so that pickup race becomes a running-run cancellation instead of an invalid-state
-      // error. A retained control record is safe even if the worker has not attached its cancel
-      // subscription yet.
-      const refreshed = await storage.runs.getById({ projectId: runtime.projectId, id: run.id })
-      if (refreshed?.kind !== "conversation") {
-        throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${run.id}' was not found.`)
-      }
-      current = refreshed
+      return queued.run
     }
+
+    if (queued.run?.kind !== "conversation") {
+      throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${run.id}' was not found.`)
+    }
+    current = queued.run
   }
 
   // A paused turn is stopped from resuming: its waiting calls are cancelled, and the thread's next
@@ -68,10 +60,40 @@ export async function cancelAgentRun(
   return current
 }
 
+/**
+ * Cancel a queued run before any worker starts it. The worker may have started it after the
+ * caller's read but before `finishQueued` locked it: then the run comes back as it is now, for the
+ * caller to stop as a running one. A retained control record is safe even if the worker has not
+ * attached its cancel subscription yet.
+ */
+export async function cancelQueuedRun(
+  runtime: SixbRuntimeContext,
+  storage: AgentStorage,
+  run: AgentRunRecord
+): Promise<
+  | { readonly cancelled: true; readonly run: AgentRunRecord }
+  | { readonly cancelled: false; readonly run: AgentRunRecord | null }
+> {
+  try {
+    const cancelled = await storage.runs.finishQueued({
+      projectId: runtime.projectId,
+      id: run.id,
+      status: "cancelled",
+    })
+    await publishQueuedRunCancellation(runtime, cancelled)
+    return { cancelled: true, run: cancelled }
+  } catch (error) {
+    if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") throw error
+  }
+
+  const current = await storage.runs.getById({ projectId: runtime.projectId, id: run.id })
+  return { cancelled: false, run: current }
+}
+
 /** The run is cancelled once stored; its stream learns it best-effort. */
 async function publishQueuedRunCancellation(
   runtime: SixbRuntimeContext,
-  run: ConversationAgentRunRecord
+  run: AgentRunRecord
 ): Promise<void> {
   try {
     await publishAgentRunFinished(runtime.broker, run)

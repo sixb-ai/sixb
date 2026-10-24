@@ -1,5 +1,5 @@
 import type { AgentMessagePart } from "@sixb/core"
-import { listSubagentThreadRuns } from "@sixb/core/internal/agents"
+import { isPausedSubagentRun, listSubagentThreadRuns } from "@sixb/core/internal/agents"
 import type {
   AgentMessageRecord,
   AgentStorage,
@@ -48,12 +48,7 @@ async function latestPausedRun(
     threadId: run.threadId,
   })
   const previous = runs.filter((each) => each.status === "succeeded").at(-1)
-  return previous && isPausedSubagent(previous) ? previous : undefined
-}
-
-/** A child that paused on its held calls: it continues once they are decided. */
-export function isPausedSubagent(run: SubagentRunRecord): boolean {
-  return run.status === "succeeded" && run.finishReason === "awaiting_approval"
+  return previous && isPausedSubagentRun(previous) ? previous : undefined
 }
 
 /**

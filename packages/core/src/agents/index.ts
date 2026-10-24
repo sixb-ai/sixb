@@ -37,6 +37,7 @@ export {
   hasActiveChildren,
   holdAgentApprovalCall,
   isAwaitingApprovalRun,
+  isPausedSubagentRun,
   listChildApprovalsAwaiting,
   listTurnApprovals,
   stopAgentTurn,
@@ -53,6 +54,8 @@ export {
   userCanRunAgent,
 } from "./authority"
 export { defineAgentTool } from "./builders"
+export type { AgentChildQuestion } from "./child-question"
+export { deferredChildQuestion, isAwaitingAnswerRun } from "./child-question"
 export type {
   AgentContextEntryInput,
   AgentContextInput,
