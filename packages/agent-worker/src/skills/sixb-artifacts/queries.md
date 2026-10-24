@@ -39,6 +39,11 @@ work/overdue/
   `"from": "customer.name"` reads it.
 - Bound it with `limit`, `filter`, and `sort`, not `page`: Sixb pages it, up to 10,000 rows.
   `vector` and `rerank` are refused, since every reader would pay for the search.
+- To count rows by value, such as invoices by status, the file holds a query and its facets
+  instead: `{ "query": …, "facets": [{ "propertyId": "status", "limit": 10 }] }`. Run it with
+  `sixb objects facets --file`; `objects query` refuses it. A page reads its result,
+  `{ "kind": "facets", "total", "facets" }`, each facet's values with their counts; a sheet can't
+  show one, since it shows rows.
 - A version holds up to 20 queries. Publishing runs each one as the user who asked, and refuses
   one they could not run.
 
