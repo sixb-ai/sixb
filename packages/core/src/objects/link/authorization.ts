@@ -1,8 +1,9 @@
 /**
  * The authorization rule for writing a link, in one place because all three link leaves need it.
  */
-import { assertAuthorized, assertCanEdit } from "../../authorization"
+import { assertAuthorized } from "../../authorization"
 import type { SixbRuntimeContext } from "../../runtime/types"
+import { assertCanEditType } from "../conditional-writes"
 
 interface LinkWrite {
   readonly sourceTypeId: string
@@ -23,6 +24,9 @@ interface LinkWrite {
  * check that follows would answer whether a target the principal cannot see exists.
  *
  * Call this *before* any endpoint lookup, for that second reason.
+ *
+ * A view through a condition counts for either end: the endpoint lookup then reads each object of
+ * such a type through the writer's reader, and one it cannot see is not found.
  */
 export async function assertCanWriteLinks(
   ctx: Pick<
@@ -32,8 +36,13 @@ export async function assertCanWriteLinks(
   writes: readonly LinkWrite[]
 ): Promise<void> {
   for (const write of writes) {
-    assertCanEdit(ctx, write.sourceTypeId)
-    assertAuthorized(ctx, { kind: "object.view", objectTypeId: write.targetTypeId })
+    await assertCanEditType(ctx, write.sourceTypeId)
+
+    if (ctx.objectReader.viewsThroughCondition(write.targetTypeId)) {
+      await ctx.objectReader.assertViewable([write.targetTypeId])
+    } else {
+      assertAuthorized(ctx, { kind: "object.view", objectTypeId: write.targetTypeId })
+    }
   }
 
   // An endpoint type or a link the reader cannot read under the markings of the versions

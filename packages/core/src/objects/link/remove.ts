@@ -5,10 +5,12 @@ import { assertLinkTargetType } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
 import {
   commitRuntimeOperations,
+  expectedRevision,
   linkDeleteOperation,
   runtimeOperationId,
 } from "../materializer-adapter"
 import { assertCanWriteLinks } from "./authorization"
+import { collectEndpointLookups, conditionedEndpoints, readSeenEndpoints } from "./endpoints"
 
 export async function removeLink(
   ctx: ResolvedLinkContext,
@@ -27,16 +29,29 @@ export async function removeLink(
     ontology.isValidLinkTarget(expected, actual)
   )
 
+  // A writer removes a link only between objects it sees: one to an object hidden from it is
+  // removed as a missing one is, not at all.
+  const conditioned = conditionedEndpoints(
+    ctx,
+    collectEndpointLookups([{ objectType, sourceId, targetTypeId, targetId }])
+  )
+  const seen = await readSeenEndpoints(ctx, conditioned)
+  if (seen.size < conditioned.length) return
+
   // A missing link is a no-op: the delete records managed authority only when an effective edge
   // exists, so the commit reports `unchanged` instead of failing.
-  await commitRuntimeOperations(ctx, [
-    linkDeleteOperation({
-      id: runtimeOperationId(0),
-      ref: {
-        source: { objectTypeId: objectType.id, primaryId: sourceId },
-        linkId,
-        target: { objectTypeId: targetTypeId, primaryId: targetId },
-      },
-    }),
-  ])
+  await commitRuntimeOperations(
+    ctx,
+    [
+      linkDeleteOperation({
+        id: runtimeOperationId(0),
+        ref: {
+          source: { objectTypeId: objectType.id, primaryId: sourceId },
+          linkId,
+          target: { objectTypeId: targetTypeId, primaryId: targetId },
+        },
+      }),
+    ],
+    [...seen.values()].map(expectedRevision)
+  )
 }

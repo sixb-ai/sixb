@@ -12,6 +12,7 @@ import type { JsonValue } from "../json"
 import type {
   EditCommitResult,
   EffectiveObjectSnapshot,
+  ExpectedObjectRevision,
   MaterializationItemError,
   OntologyEditOperation,
   OntologyLinkRef,
@@ -57,11 +58,13 @@ export interface RuntimeBatchCommit {
  * Commits ordered operations as one atomic runtime commit.
  *
  * A fresh request id per call keeps each runtime mutation its own commit; the Materializer's
- * idempotency replay then only collapses a retry of the very same request.
+ * idempotency replay then only collapses a retry of the very same request. The commit fails with an
+ * `expectation` conflict when an object it expects changed since it was read.
  */
 export async function commitRuntimeOperations(
   ctx: RuntimeMaterializerContext,
-  operations: readonly OntologyEditOperation[]
+  operations: readonly OntologyEditOperation[],
+  expectedObjects: readonly ExpectedObjectRevision[] = []
 ): Promise<EditCommitResult> {
   const mutations = getOntologyMutationRuntime(ctx)
   try {
@@ -69,7 +72,7 @@ export async function commitRuntimeOperations(
       mode: "atomic",
       source: { kind: "runtime", requestId: randomUUID() },
       operations,
-      expectedObjects: [],
+      expectedObjects,
       expectedLinks: [],
       expectedLinkScopes: [],
     })
@@ -89,7 +92,8 @@ export async function commitRuntimeOperations(
  */
 export async function commitRuntimeBatch(
   ctx: RuntimeMaterializerContext,
-  groups: readonly RuntimeBatchGroup[]
+  groups: readonly RuntimeBatchGroup[],
+  expectedObjects: readonly ExpectedObjectRevision[] = []
 ): Promise<RuntimeBatchCommit> {
   const operations = groups.flatMap((group) => group.operations)
   if (operations.length === 0) {
@@ -110,6 +114,7 @@ export async function commitRuntimeBatch(
       source: { kind: "runtime", requestId: randomUUID() },
       operations,
       ...(operationGroups.length > 0 ? { operationGroups } : {}),
+      ...(expectedObjects.length > 0 ? { expectedObjects } : {}),
     })
   } catch (error) {
     throw uniqueViolationError(error) ?? error
@@ -212,6 +217,15 @@ export function objectUpsertOperation(input: {
   return { id: input.id, kind: "object.upsert", ref: input.ref, properties: input.properties }
 }
 
+/** Creates an object, and fails if any authority holds its id: a hidden one, or a deleted one. */
+export function objectCreateOperation(input: {
+  readonly id: string
+  readonly ref: OntologyObjectRef
+  readonly properties: Readonly<Record<string, JsonValue>>
+}): OntologyEditOperation {
+  return { id: input.id, kind: "object.create", ref: input.ref, properties: input.properties }
+}
+
 export function objectDeleteOperation(input: {
   readonly id: string
   readonly ref: OntologyObjectRef
@@ -276,6 +290,16 @@ export function toObjectRow(projectId: string, snapshot: EffectiveObjectSnapshot
     updatedAt: new Date(snapshot.updatedAt),
     version: snapshot.version,
     lastCommitId: snapshot.lastCommitId,
+  }
+}
+
+/** The revision a commit expects of an object, as it was read. */
+export function expectedRevision(row: ObjectRow): ExpectedObjectRevision {
+  return {
+    ref: { objectTypeId: row.objectTypeId, primaryId: row.primaryId },
+    exists: true,
+    version: row.version,
+    lastCommitId: row.lastCommitId,
   }
 }
 
