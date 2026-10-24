@@ -81,8 +81,9 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   [runtime design](./docs/runtime-design.md#child-runs)). It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
   `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
-  before its next step, and `wait_agent` lists in `unread` what a child ended without reading
-  (see [messages to a child](./docs/runtime-design.md#messages-to-a-child)).
+  before its next step, or answers again when it came as it answered, and `wait_agent` lists in
+  `unread` what a child has not read, which a paused child reads if it continues (see
+  [messages to a child](./docs/runtime-design.md#messages-to-a-child)).
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
   instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only

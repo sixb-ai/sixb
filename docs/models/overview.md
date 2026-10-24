@@ -146,8 +146,9 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
 - **The agent can steer a sub-agent at work.** It sends it a message to correct its course, add
   what it lacks or narrow its task, and the sub-agent reads it before its next step. One that
-  comes as the sub-agent answers makes it answer again. A sub-agent that finished, or waits for
-  your approval, reads none, and the agent is told so.
+  comes as the sub-agent answers makes it write its result again, and the agent keeps both
+  answers. A sub-agent that finished, or waits for your approval, takes no new message, and the
+  agent is told so; one sent just before it paused reaches it when it continues.
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
