@@ -186,6 +186,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     connectorIds: new Set(connectorsById.keys()),
     shareIds: new Set(sharesById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
+    ontology,
   })
   validateWorkflowAgentStepGroupReferences(workflows, security)
 

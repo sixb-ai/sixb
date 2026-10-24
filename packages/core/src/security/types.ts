@@ -1,3 +1,7 @@
+import type { ObjectQueryPredicate } from "../objects/query"
+import type { ObjectTypeWithPropertyTokens } from "../ontology"
+import type { ObjectWhereBuilder, ObjectWhereClause } from "../runtime/types"
+
 export interface GroupDefinition<TId extends string = string> {
   readonly kind: "group"
   readonly id: TId
@@ -53,6 +57,27 @@ export interface ViewGrant<TTarget extends ViewGrantTarget = ViewGrantTarget> {
   readonly capability: "view"
   readonly target: TTarget
   readonly selection: Selection
+  /**
+   * The objects this grant covers, when it covers only some. Built once by
+   * `can.view(Type).where(...)`, and only on a grant for one object type.
+   */
+  readonly condition?: ObjectQueryPredicate
+}
+
+/** `can.view(Type)`: a view grant on one object type, which `.where()` can narrow. */
+export interface ObjectViewGrantBuilder<
+  TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
+> extends ViewGrant<"object"> {
+  /**
+   * Grant only the objects that match, with the builder of an object query's `.where()`. An
+   * array means AND. A reader sees the union of their grants, so an unconditional
+   * `can.view(Type)` from another role still grants every object.
+   */
+  where(
+    condition: (
+      object: ObjectWhereBuilder<TObjectType>
+    ) => ObjectWhereClause<TObjectType> | readonly ObjectWhereClause<TObjectType>[]
+  ): ViewGrant<"object">
 }
 
 /**
