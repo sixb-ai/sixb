@@ -128,18 +128,21 @@ describe("audio transcription", () => {
     expect(overview.totals.usageCoverage.fieldCallCounts.audioDurationMs).toBe(1)
   })
 
-  test("uses the configured binding and validates catalog shape", async () => {
+  test("runs a passed model as given, whether or not the catalog lists it", async () => {
+    // Proven by removal: look the passed model up in models.audio.transcription again; the
+    // same-id binding answers the catalog's "Hello" and the unlisted one is refused.
     const { sixb, audio } = await setup()
-    const impostor = createTranscriber(async () => {
-      throw new Error("impostor")
-    })
+    const ownBinding = createTranscriber(async () => ({ output: { text: "Own binding" } }))
+    const unlisted = {
+      ...ownBinding,
+      modelId: "unlisted",
+      definition: { ...ownBinding.definition, modelId: "unlisted" },
+    }
 
-    const result = await sixb.models.audio.transcribe({ audio, model: impostor })
-    expect(result.output.text).toBe("Hello")
-
-    await expect(
-      sixb.models.audio.transcribe({ audio, model: { ...impostor, modelId: "other" } })
-    ).rejects.toThrow("Configure")
+    for (const model of [ownBinding, unlisted]) {
+      const result = await sixb.models.audio.transcribe({ audio, model })
+      expect(result.output.text).toBe("Own binding")
+    }
     expect(() => createModelCatalog({ audio: { transcription: [] } })).toThrow("at least one")
   })
 

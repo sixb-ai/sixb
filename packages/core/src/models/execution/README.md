@@ -72,7 +72,7 @@ remains the existing accounting-only replay.
 ## Decision flow
 
 Decision evaluation in `../decision/runtime.ts` uses the same session and recorder. It snapshots JSON input/questions
-before yielding, resolves only a permitted catalog binding, checks primitive capabilities,
+before yielding, runs the binding the caller passes or the catalog default, checks primitive capabilities,
 admits one call, invokes the provider, and records usage before validating or returning answers.
 The original question snapshot defines valid answer keys, labels and score levels.
 
@@ -86,9 +86,9 @@ inference. Decision-only projects use the existing recovery worker without an ag
 
 ## Image flow
 
-Image generation in `../image/runtime.ts` snapshots the request, resolves only a permitted catalog
-binding and checks it against the definition's sizes, counts and reference-image limits before
-reading any file. Reference images are read with the same size and digest checks as transcription
+Image generation in `../image/runtime.ts` snapshots the request, runs the binding the caller passes
+or the catalog default, and checks it against the definition's sizes, counts and reference-image
+limits before reading any file. Reference images are read with the same size and digest checks as transcription
 audio (`../input-file.ts`).
 
 Admission reserves the binding's `estimateReservation`, keyed by the request's size, quality and

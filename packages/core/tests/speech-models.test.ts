@@ -270,18 +270,30 @@ describe("speech generation", () => {
     expect(reservation).toEqual({ text: "Hello there.", voice: "alloy" })
   })
 
-  test("uses the configured binding and validates catalog shape", async () => {
+  test("runs a passed model as given, whether or not the catalog lists it", async () => {
+    // Proven by removal: look the passed model up in models.audio.speech again; the same-id
+    // binding reports the catalog's usage and the unlisted one is refused.
     const { sixb } = await setup()
-    const impostor = createSpeechModel(async () => {
-      throw new Error("impostor")
-    })
+    const ownBinding = createSpeechModel(async () => ({
+      output: { audio: { data: MP3, mediaType: "audio/mpeg" } },
+      usage: { inputCharacters: 3 },
+    }))
+    const unlisted = createSpeechModel(
+      ownBinding.speak,
+      { modelId: "unlisted" },
+      {
+        modelId: "unlisted",
+      }
+    )
 
-    expect((await sixb.models.audio.speak({ text: "Hi.", model: impostor })).usage).toEqual({
-      inputCharacters: 12,
-    })
-    await expect(
-      sixb.models.audio.speak({ text: "Hi.", model: { ...impostor, modelId: "other" } })
-    ).rejects.toThrow("Configure")
+    for (const model of [ownBinding, unlisted]) {
+      expect((await sixb.models.audio.speak({ text: "Hi.", model })).usage).toEqual({
+        inputCharacters: 3,
+      })
+    }
+  })
+
+  test("validates catalog shape", () => {
     expect(() => createModelCatalog({ audio: {} })).toThrow("transcription or speech")
     expect(() => createModelCatalog({ audio: { speech: [] } })).toThrow("at least one")
     expect(() =>
