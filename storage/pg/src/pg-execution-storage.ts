@@ -7,8 +7,10 @@ import {
 } from "@sixb/core/internal/execution-storage"
 import type {
   CreateExecutionInput,
+  ExecutionDescendant,
   ExecutionRecord,
   ExecutionStorage,
+  ListExecutionDescendantsInput,
   ListSessionExecutionsInput,
   SessionExecutions,
   ShareSessionStorage,
@@ -162,6 +164,35 @@ export class PgExecutionStorage implements ExecutionStorage {
       executions: records.sort(compareExecutionCreation),
       truncated: rows.length > input.limit,
     }
+  }
+
+  async listDescendants(
+    input: ListExecutionDescendantsInput
+  ): Promise<readonly ExecutionDescendant[]> {
+    if (input.executionIds.length === 0) return []
+    const ids = this.sql.array([...new Set(input.executionIds)])
+
+    // UNION, not UNION ALL: an execution asked about may sit below another one asked about, and
+    // the walk would otherwise reach what it caused twice.
+    const rows = await this.sql<{ id: string; parent_id: string }[]>`
+      WITH RECURSIVE tree(id, parent_id) AS (
+        SELECT child.id, child.parent_execution_id
+        FROM executions child
+        WHERE child.project_id = ${input.projectId}
+          AND child.parent_execution_id = ANY(${ids}::text[])
+        UNION
+        SELECT child.id, child.parent_execution_id
+        FROM tree
+        JOIN executions child
+          ON child.project_id = ${input.projectId}
+          AND child.parent_execution_id = tree.id
+      )
+      SELECT id, parent_id
+      FROM tree
+      WHERE id <> ALL(${ids}::text[])
+      ORDER BY id COLLATE "C"
+    `
+    return rows.map((row) => ({ id: row.id, parentId: row.parent_id }))
   }
 }
 

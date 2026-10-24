@@ -140,7 +140,9 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   minute before the turn's time is up, the agent stops waiting and answers with what the others
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
 - It cannot delegate again or start a workflow. Its model calls count toward the user's
-  [AI usage](./usage-and-limits.md).
+  [AI usage](./usage-and-limits.md), and toward the `usage` and `cost` of the turn that started
+  it. So does a workflow the agent's tools started, even for what it spends after the turn ends, as
+  in Activity.
 
 ## Control access
 

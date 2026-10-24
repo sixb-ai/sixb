@@ -72,6 +72,17 @@ export interface SessionExecutions {
   readonly truncated: boolean
 }
 
+export interface ListExecutionDescendantsInput {
+  readonly projectId: string
+  readonly executionIds: readonly string[]
+}
+
+/** An execution below the ones asked about, and the execution that caused it. */
+export interface ExecutionDescendant {
+  readonly id: string
+  readonly parentId: string
+}
+
 /** Immutable execution ledger. Records can be created and read, never updated or deleted. */
 export interface ExecutionStorage {
   create(input: CreateExecutionInput): Promise<ExecutionRecord>
@@ -81,4 +92,10 @@ export interface ExecutionStorage {
   }): Promise<ExecutionRecord | null>
   /** What one session started: its roots in a window, and what they caused through `source`. */
   listBySession(input: ListSessionExecutionsInput): Promise<SessionExecutions>
+  /**
+   * Everything these executions caused through `source`, at any depth, each once and without the
+   * executions asked about, ordered by id. Unbounded, as a sum over the tree needs all of it, so
+   * each is only its id and its parent's.
+   */
+  listDescendants(input: ListExecutionDescendantsInput): Promise<readonly ExecutionDescendant[]>
 }

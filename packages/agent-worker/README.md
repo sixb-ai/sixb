@@ -51,8 +51,11 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   turns.
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with
   an immutable valuation in `storage.aiCosts`; API conversation and workflow-agent summaries are
-  derived from that ledger. Accepted interrupted streams are recorded with unknown final usage and
-  cost, retaining received native IDs. Run rows do not store a second usage aggregate.
+  derived from that ledger. A conversation turn's usage and cost cover everything below its
+  execution, its children and what its tools ran, as Activity counts it: a workflow a tool started
+  counts even for what it spends after the turn ends. A child that knows fewer counts, cut short
+  mid-call, leaves the others' and makes the turn's usage `partial`. Accepted interrupted streams
+  are recorded with unknown final usage and cost, retaining received native IDs. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
   changes afterward. The run also persists the queue-returned lease expiration for gateway

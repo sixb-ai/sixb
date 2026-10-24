@@ -4,8 +4,10 @@ import { ExecutionStorageError } from "./errors"
 import { compareExecutionCreation } from "./provider"
 import type {
   CreateExecutionInput,
+  ExecutionDescendant,
   ExecutionRecord,
   ExecutionStorage,
+  ListExecutionDescendantsInput,
   ListSessionExecutionsInput,
   SessionExecutions,
 } from "./types"
@@ -114,6 +116,36 @@ export class InMemoryExecutionStorage implements ExecutionStorage {
           .map(cloneExecutionRecord),
         truncated: found.length > input.limit,
       }
+    })
+  }
+
+  async listDescendants(
+    input: ListExecutionDescendantsInput
+  ): Promise<readonly ExecutionDescendant[]> {
+    return this.runRootOperation(() => {
+      const rows = [...this.rows.values()].filter((row) => row.projectId === input.projectId)
+      const seen = new Set(input.executionIds)
+      const found: ExecutionRecord[] = []
+
+      let parents = new Set(input.executionIds)
+      while (parents.size > 0) {
+        const level = rows.filter(
+          (row) =>
+            row.source.type === "execution" &&
+            parents.has(row.source.executionId) &&
+            !seen.has(row.id)
+        )
+
+        for (const row of level) seen.add(row.id)
+        found.push(...level)
+        parents = new Set(level.map((row) => row.id))
+      }
+
+      return found
+        .flatMap((row) =>
+          row.source.type === "execution" ? [{ id: row.id, parentId: row.source.executionId }] : []
+        )
+        .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
     })
   }
 }
