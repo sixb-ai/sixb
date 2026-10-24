@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Collections desk</title>
+  <style>
+    :root { --late: #c2410c; }
+    html.dark { --late: #fb923c; }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .toolbar input[type="search"] { width: 260px; max-width: 100%; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chips label { position: relative; margin: 0; }
+    .chips input { position: absolute; opacity: 0; pointer-events: none; }
+    .chips span { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 500; cursor: pointer; }
+    .chips input:checked + span { border-color: var(--foreground); background: var(--foreground); color: var(--background); }
+    .chips input:focus-visible + span { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+    .status { min-height: 20px; margin: 0 0 12px; font-size: 13px; color: var(--muted-foreground); }
+    .status.failed { color: var(--late); font-weight: 600; }
+    /* Wide enough to read on a phone, where it scrolls in its box. */
+    .table-scroll table { min-width: 600px; }
+    td { white-space: nowrap; }
+    td.late { color: var(--late); font-weight: 600; }
+    td.locked, .stat .value.locked { color: var(--muted-foreground); font-weight: 500; }
+    tbody tr.loading td { color: var(--muted-foreground); }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Accounts receivable</p>
+    <h1>Collections desk</h1>
+    <p class="lede">Overdue invoices as they stand now, oldest first, by customer.</p>
+
+    <div class="grid">
+      <div class="card stat"><div class="label">Overdue invoices</div><div class="value" id="count">–</div></div>
+      <div class="card stat"><div class="label">Outstanding</div><div class="value" id="outstanding">–</div><div class="delta" id="outstanding-locked"></div></div>
+      <div class="card stat"><div class="label">Over 60 days</div><div class="value" id="aged">–</div></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="chips" role="radiogroup" aria-label="Days overdue">
+        <label><input type="radio" name="age" value="0" checked><span>All</span></label>
+        <label><input type="radio" name="age" value="30"><span>Over 30 days</span></label>
+        <label><input type="radio" name="age" value="60"><span>Over 60 days</span></label>
+      </div>
+      <input type="search" id="search" placeholder="Search customers" aria-label="Search customers">
+    </div>
+
+    <p class="status" id="status" role="status">Reading the overdue invoices…</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Customer</th><th>Invoice</th><th>Due</th><th class="num">Days late</th><th class="num">Outstanding</th></tr>
+        </thead>
+        <tbody id="rows">
+          <tr class="loading"><td colspan="5">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">Each reader sees the invoices they may view, read when the page opens.</p>
+  </main>
+
+  <script type="module">
+    const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })
+    const number = new Intl.NumberFormat()
+    const day = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
+    const status = document.querySelector("#status")
+    const rows = document.querySelector("#rows")
+    const search = document.querySelector("#search")
+
+    const today = new Date()
+    const daysLate = (due) => Math.max(0, Math.floor((today - new Date(due)) / 86_400_000))
+
+    // A value the reader isn't cleared for is left out of `properties` and listed in the row's
+    // `redactions`: a permission they lack. It shows as locked, never as 0, and no total reads it.
+    const LABELS = { amount: "Amount", paid: "Paid" }
+    const hiddenOf = (row, ...ids) => ids.find((id) => Object.hasOwn(row.redactions ?? {}, id))
+    const permission = (id) => `You don't have permission to see ${LABELS[id]}`
+
+    // One row per invoice, from the query's rows and the customer it expands.
+    let invoices = []
+    try {
+      const { objects, total, truncated } = await sixb.query("overdue")
+      invoices = objects.map((row) => {
+        const hidden = hiddenOf(row, "amount", "paid")
+        return {
+          number: row.properties.number ?? row.primaryId,
+          customer: row.links?.customer?.properties.name ?? "No customer",
+          due: row.properties.dueDate,
+          // Nothing paid yet is 0; an amount the reader can't see is not.
+          outstanding: hidden ? null : (row.properties.amount ?? 0) - (row.properties.paid ?? 0),
+          locked: hidden ? permission(hidden) : null,
+        }
+      })
+      status.textContent = truncated
+        ? `The first ${number.format(objects.length)} of ${number.format(total)} overdue invoices.`
+        : ""
+    } catch (error) {
+      status.textContent = `The overdue invoices could not be read: ${error.message}`
+      status.classList.add("failed")
+      rows.innerHTML = ""
+    }
+
+    // The query takes no parameters: the chips and the search filter its rows here.
+    const render = () => {
+      const age = Number(document.querySelector('input[name="age"]:checked').value)
+      const words = search.value.trim().toLowerCase()
+      const shown = invoices.filter(
+        (invoice) => daysLate(invoice.due) > age && invoice.customer.toLowerCase().includes(words)
+      )
+
+      document.querySelector("#count").textContent = number.format(shown.length)
+
+      // Over a locked value, the total is locked too: never what it comes to without it.
+      const locked = shown.find((invoice) => invoice.locked)
+      const outstanding = document.querySelector("#outstanding")
+      outstanding.textContent = locked
+        ? "Locked"
+        : money.format(shown.reduce((sum, invoice) => sum + invoice.outstanding, 0))
+      outstanding.classList.toggle("locked", Boolean(locked))
+      document.querySelector("#outstanding-locked").textContent = locked ? locked.locked : ""
+
+      document.querySelector("#aged").textContent = number.format(
+        shown.filter((invoice) => daysLate(invoice.due) > 60).length
+      )
+
+      rows.replaceChildren(
+        ...shown.map((invoice) => {
+          const row = document.createElement("tr")
+          const late = daysLate(invoice.due)
+          for (const [text, className, title] of [
+            [invoice.customer, ""],
+            [invoice.number, ""],
+            [invoice.due ? day.format(new Date(invoice.due)) : "–", ""],
+            [number.format(late), late > 60 ? "num late" : "num"],
+            invoice.locked
+              ? ["Locked", "num locked", invoice.locked]
+              : [money.format(invoice.outstanding), "num"],
+          ]) {
+            const cell = document.createElement("td")
+            cell.textContent = text
+            if (className) cell.className = className
+            if (title) cell.title = title
+            row.append(cell)
+          }
+          return row
+        })
+      )
+      if (shown.length === 0 && !status.classList.contains("failed")) {
+        rows.innerHTML = '<tr><td colspan="5">No overdue invoices match.</td></tr>'
+      }
+    }
+
+    for (const chip of document.querySelectorAll('input[name="age"]')) chip.addEventListener("change", render)
+    search.addEventListener("input", render)
+    if (!status.classList.contains("failed")) render()
+  </script>
+</body>
+</html>

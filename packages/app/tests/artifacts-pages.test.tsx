@@ -106,9 +106,9 @@ describe("a page", () => {
     const { frame, posted, post } = mount()
     expect(frame.getAttribute("src")).toEndWith("/api/artifact-frames/token/index.html")
     expect(frame.getAttribute("title")).toBe("Page Fleet planner")
-    expect(frame.getAttribute("sandbox")).toBe(
-      "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals"
-    )
+    // A page reads rows as its reader: its frame opens no window to take them elsewhere.
+    // Reproduce by putting `allow-popups` back on ArtifactFrame's sandbox.
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-modals")
     expect(frame.className).toContain("opacity-0")
 
     // A page's ready names no slides.
@@ -129,6 +129,81 @@ describe("a page", () => {
     expect(opened).toEqual([
       { type: "artifact", artifactId: "art_m3tr1csq3a", part: "chart=sla-trend" },
     ])
+  })
+})
+
+describe("a page's web links", () => {
+  /** What `window.open` was asked, and the browser's say on whether the reader is acting. */
+  function opener(active: boolean | undefined) {
+    const opened: unknown[][] = []
+    const open = browser.open
+    const activation = Object.getOwnPropertyDescriptor(browser.navigator, "userActivation")
+    browser.open = ((...args: unknown[]) => {
+      opened.push(args)
+      return null
+    }) as never
+    Object.defineProperty(browser.navigator, "userActivation", {
+      configurable: true,
+      value: active === undefined ? undefined : { isActive: active, hasBeenActive: true },
+    })
+    const restore = () => {
+      browser.open = open
+      if (activation) Object.defineProperty(browser.navigator, "userActivation", activation)
+      else Reflect.deleteProperty(browser.navigator, "userActivation")
+    }
+    return { opened, restore }
+  }
+
+  const link = { event: "link", params: { url: "https://example.com/fleet?region=north" } }
+
+  test("open in a new tab that knows nothing of the app, as the reader follows one", async () => {
+    const { opened, restore } = opener(true)
+    try {
+      const { frame, post } = mount()
+      frame.focus()
+      await post(link)
+      expect(opened).toEqual([
+        ["https://example.com/fleet?region=north", "_blank", "noopener,noreferrer"],
+      ])
+    } finally {
+      restore()
+    }
+  })
+
+  test("open nothing the reader did not just do in the frame", async () => {
+    // The page's code posts what it likes, so the app asks the browser: a link opens only while
+    // the frame holds the focus, and the reader has just clicked or typed. Reproduce by dropping
+    // either check from openWebLink in ArtifactFrame: the first case below, or the second, opens.
+    const elsewhere = opener(true)
+    try {
+      // The reader clicked the app, outside the frame.
+      await mount().post(link)
+      expect(elsewhere.opened).toEqual([])
+    } finally {
+      elsewhere.restore()
+    }
+
+    const idle = opener(false)
+    try {
+      // Focus stays in the frame after a click, long after the moment it allowed.
+      const { frame, post } = mount()
+      frame.focus()
+      await post(link)
+      expect(idle.opened).toEqual([])
+    } finally {
+      idle.restore()
+    }
+
+    const acting = opener(true)
+    try {
+      // And only a web page, whatever the reader does: the protocol drops any other address.
+      const { frame, post } = mount()
+      frame.focus()
+      await post({ event: "link", params: { url: "javascript:alert(document.cookie)" } })
+      expect(acting.opened).toEqual([])
+    } finally {
+      acting.restore()
+    }
   })
 })
 

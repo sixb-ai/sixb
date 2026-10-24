@@ -27,6 +27,12 @@ import operationsReview from "./sixb-artifacts/examples/document/operations-revi
 import restorationsFigure from "./sixb-artifacts/examples/document/operations-review/figures/restorations.svg" with {
   type: "text",
 }
+import collectionsDeskPage from "./sixb-artifacts/examples/page/collections-desk/index.html" with {
+  type: "text",
+}
+import collectionsDeskQuery from "./sixb-artifacts/examples/page/collections-desk/queries/overdue.json" with {
+  type: "text",
+}
 import dispatchBoardData from "./sixb-artifacts/examples/page/dispatch-board/data/dispatch.json" with {
   type: "text",
 }
@@ -117,6 +123,8 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/page/service-explorer/data/service.json": text(serviceExplorerData),
     "examples/page/dispatch-board/index.html": text(dispatchBoardPage),
     "examples/page/dispatch-board/data/dispatch.json": text(dispatchBoardData),
+    "examples/page/collections-desk/index.html": text(collectionsDeskPage),
+    "examples/page/collections-desk/queries/overdue.json": text(collectionsDeskQuery),
     "canvas.md": canvasGuide,
     "examples/canvas/onboarding-flow/canvas.json": text(onboardingCanvas),
     "examples/canvas/onboarding-flow/boards/welcome.html": text(onboardingWelcome),

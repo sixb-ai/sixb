@@ -17,7 +17,8 @@ work/fleet-planner/
 ├── index.html
 ├── style.css         optional, for what the kit doesn't cover
 ├── app.js            optional; a short script can sit in index.html
-└── data/regions.json the data it reads
+├── queries/jobs.json the project's objects it reads live, with sixb.query
+└── data/regions.json the data it was given, as a file
 ```
 
 ```html
@@ -100,8 +101,36 @@ html.dark { --over: #fb923c; --ok: #4ade80; }
 The page runs its own scripts in a sandboxed frame. It loads only its own files and libraries from
 cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing else on the network.
 
-- Put the data in JSON files beside the page and read them with `fetch("data/regions.json")`.
-  Write the numbers into the files when you publish; the page can't reach an API.
+- Read the project's objects live, not a copy: declare a query as `queries/<name>.json` beside
+  `index.html` (`queries.md` says how to write one) and read it with `sixb.query("<name>")`. Each
+  reader runs it with their own rights as the page opens, so its rows are current and hold only
+  what that reader may see. The page can't reach the API any other way.
+
+  ```js
+  // In <script type="module">, which can await at its top.
+  const status = document.querySelector("#status")
+  status.textContent = "Loading invoices…"
+  try {
+    const { objects, total, truncated } = await sixb.query("overdue")
+    // objects: [{ primaryId, objectTypeId, properties: { amount: 1200, … }, redactions? }, …]
+    // A facets query resolves to { kind: "facets", total, facets }.
+    render(objects)
+    status.textContent = truncated ? `The first ${objects.length} of ${total}` : ""
+  } catch (error) {
+    status.textContent = `The invoices could not be read: ${error.message}`
+  }
+  ```
+
+  Draw a loading state until it answers and an error state when it rejects: its message says why,
+  such as a type the reader can't view. A query takes no parameters: filter, sort, and group its
+  rows in the page as the reader changes the controls.
+
+  A value the reader isn't cleared for is missing from `properties` and listed in the row's
+  `redactions` (`{ amount: { reason: "missing_clearance" } }`): a permission they lack. Show it as
+  locked, with that reason ("You don't have permission to see Amount"), never as 0 or empty, and
+  never total, chart, or compare over it: a figure that reads it is locked too.
+- Copy values into JSON files beside the page only when `queries.md` says to copy, such as a
+  snapshot or figures the user gave you, and read them with `fetch("data/regions.json")`.
 - Load a library from a CDN, by exact version, when it does real work: ECharts for interactive
   charts (`https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js`), SortableJS for drag
   and drop (`https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js`). Say on the page what
@@ -129,7 +158,8 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   keeps values in memory, so a page that uses them checks as it runs. The reader can clear them
   with *Reset page data* in the viewer.
 - A link to another artifact (`<a href="artifact:…">`) opens it beside the conversation; a link to
-  a web page opens in a new tab.
+  a web page opens in a new tab. Open pages with links: the frame can't open windows
+  (`window.open`) or go to another address itself.
 - `<sixb-embed src="artifact:…#chart=revenue"></sixb-embed>` shows another artifact on the page: a
   chart, a range, a section, a slide (see `references.md`). Size the box with CSS like any block;
   it is the column's width and 16:9 unless you say otherwise. The app draws the artifact over it,
@@ -156,7 +186,9 @@ light and in dark mode or in the one mode its `theme.json` pins, and warns about
 screen's right edge, drawn over other text, or cut off; text under 12px; a control under 24px;
 text under WCAG AA contrast; an image that did not load; or a script error. Each warning names the
 width, the element as CSS names it, and where it is on the page. The result names the screenshots,
-`desktop.png` and `phone.png`, each the page's top 4000px, under `.sixb/agent/checks/`.
+`desktop.png` and `phone.png`, each the page's top 4000px, under `.sixb/agent/checks/`. The page's
+queries run as the user who asked, so the screenshots show their rows; a query that fails for them
+is a warning, and the page is checked with `sixb.query` rejecting.
 
 1. Open both screenshots with `view_file` and look at them as the reader will: does the page read
    well, and do its numbers make sense?
@@ -167,7 +199,7 @@ A script error means the page may show nothing at all: fix it first.
 
 ## Examples
 
-`examples/page/` holds three finished pages built on the kit, each with its data in JSON beside it:
+`examples/page/` holds four finished pages built on the kit:
 
 - `fleet-planner`: scenarios, sliders, a switch, and region chips drive animated stats, an ECharts
   chart of crews needed against crews available, and a table with sparklines. It keeps the
@@ -176,3 +208,5 @@ A script error means the page may show nothing at all: fix it first.
   a sortable table; a day picked anywhere fills a panel with every region that day.
 - `dispatch-board`: work orders dragged between crews with SortableJS, live capacity meters, a
   skill check on each drop, a filter and search, and auto-assign.
+- `collections-desk`: live overdue invoices from `queries/overdue.json`, read with `sixb.query`,
+  with loading and error states, stats, and chips and a search that filter the rows in the page.

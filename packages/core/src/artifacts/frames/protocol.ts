@@ -1,4 +1,5 @@
 import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "../limits"
+import { isArtifactQueryName } from "../queries"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
 /**
@@ -70,6 +71,11 @@ export type FrameEvent =
   /** A link to another artifact, which opens where the reader is. */
   | FrameEventOf<"open", { readonly address: string }>
   /**
+   * A link to a web page, which the app opens in a new tab: the frame cannot open windows itself.
+   * Only `http:` and `https:` addresses.
+   */
+  | FrameEventOf<"link", { readonly url: string }>
+  /**
    * Where the `<sixb-embed>` boxes in view are, for the app to draw each over the frame: in the
    * frame's pixels, with the scale they are drawn at. A deck reports the shown slide's, and none in
    * the overview, where an embed stays a placeholder, as it does in a filled frame, which never
@@ -105,13 +111,16 @@ interface FrameEventOf<Event extends string, Params> {
 
 /**
  * What the frame asks of the app, numbered so the app's `result` answers it: a page keeping data
- * with `sixb.state`. The app answers only its own frame, for the artifact it shows.
+ * with `sixb.state`, or reading one of its version's queries with `sixb.query`. The app answers
+ * only its own frame, for the artifact and the version it shows.
  */
 export type FrameCall =
   | FrameCallOf<"state.get", { readonly key: string }>
   | FrameCallOf<"state.set", { readonly key: string; readonly value: unknown }>
   | FrameCallOf<"state.delete", { readonly key: string }>
   | FrameCallOf<"state.keys", Record<string, never>>
+  /** Runs `queries/<name>.json` as the reader; the value is the query route's JSON. */
+  | FrameCallOf<"query.run", { readonly name: string }>
 
 interface FrameCallOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -159,6 +168,13 @@ export function parseFrameCall(data: unknown): FrameCall | null {
     }
     case "state.keys":
       return { protocol: FRAME_PROTOCOL, call, method: "state.keys", params: {} }
+    case "query.run": {
+      // The client puts the name in the URL's path, as it does a key.
+      const { name } = params
+      if (typeof name !== "string" || !isArtifactQueryName(name)) return null
+
+      return { protocol: FRAME_PROTOCOL, call, method: "query.run", params: { name } }
+    }
     default:
       return null
   }
@@ -233,6 +249,8 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
         : null
     case "open":
       return isAddress(params.address) ? event("open", { address: params.address }) : null
+    case "link":
+      return isWebAddress(params.url) ? event("link", { url: params.url }) : null
     case "embeds": {
       const { embeds } = params
       if (!Array.isArray(embeds) || embeds.length > ARTIFACT_LIMITS.maxReferences) return null
@@ -287,4 +305,19 @@ function isCount(value: unknown): value is number {
 /** Long enough for any address a version can record; the app resolves it before using it. */
 function isAddress(value: unknown): value is string {
   return typeof value === "string" && value.length <= 2048
+}
+
+/** The longest web address the app opens: longer than any link a page needs. */
+const MAX_URL_LENGTH = 8192
+
+/** An absolute `http:` or `https:` address, as the frame resolves a link's. */
+function isWebAddress(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > MAX_URL_LENGTH) return false
+
+  try {
+    const { protocol } = new URL(value)
+    return protocol === "http:" || protocol === "https:"
+  } catch {
+    return false
+  }
 }

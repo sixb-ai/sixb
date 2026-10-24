@@ -67,6 +67,12 @@ interface CheckReport {
   readonly failed?: string
 }
 
+/**
+ * What a page's `sixb.query(name)` reads in the check: the query route's JSON as it answers the
+ * requester, or why the query failed for them.
+ */
+export type CheckedQuery = { readonly result: unknown } | { readonly error: string }
+
 /** A width a page is checked at, as a laptop and a phone show it. */
 export type PageView = "desktop" | "phone"
 
@@ -88,6 +94,8 @@ export async function checkLayout(
     readonly name: string
     /** The version's `theme.json`, which the reader's frame applies over the app's theme. */
     readonly theme?: ArtifactTheme
+    /** The version's queries by name, served where the runtime reads them opened on its own. */
+    readonly queries?: Readonly<Record<string, CheckedQuery>>
     readonly signal: AbortSignal
     /** Test seam; production allows 120 seconds. */
     readonly timeoutMs?: number
@@ -101,7 +109,8 @@ export async function checkLayout(
   const library = posix.join(sandbox.workingDirectory, LIBRARY)
   const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
   // Each page to open, with the kit and the runtime as its frame serves them. The sandbox has no
-  // way to the API: what the version shows from other artifacts is a placeholder.
+  // way to the API: what the version shows from other artifacts is a placeholder, and what its
+  // queries return is read beforehand.
   const pages =
     input.layout === "canvas"
       ? input.boards.map((board) => ({
@@ -150,6 +159,7 @@ export async function checkLayout(
       : []),
     { path: posix.join(output, "themes.json"), contents: JSON.stringify(deckThemes(input.theme)) },
     { path: posix.join(output, "files.json"), contents: JSON.stringify(input.files) },
+    ...queryFiles(output, input.queries ?? {}),
   ])
   installed.add(sandbox)
   // The check stops itself first, so it reports what it found and closes its browser, which a
@@ -218,6 +228,29 @@ export async function checkLayout(
           ]),
     ],
   }
+}
+
+/**
+ * Each query's answer as `queries/<name>.json`, and `queries.json`, the status each is served
+ * with: a failed query answers with its error, which the runtime rejects the page's promise with.
+ */
+function queryFiles(
+  output: string,
+  queries: Readonly<Record<string, CheckedQuery>>
+): { path: string; contents: string }[] {
+  const entries = Object.entries(queries)
+  return [
+    ...entries.map(([name, query]) => ({
+      path: posix.join(output, "queries", `${name}.json`),
+      contents: JSON.stringify("error" in query ? { error: query.error } : query.result),
+    })),
+    {
+      path: posix.join(output, "queries.json"),
+      contents: JSON.stringify(
+        Object.fromEntries(entries.map(([name, query]) => [name, "error" in query ? 409 : 200]))
+      ),
+    },
+  ]
 }
 
 /**

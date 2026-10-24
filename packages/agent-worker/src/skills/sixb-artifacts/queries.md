@@ -3,7 +3,7 @@
 A query reads the project's objects each time the artifact is opened, as whoever opens it: they see
 the rows they may view, and a value they are not cleared for shows locked. Data from the project
 goes in a query, not a copy, so the artifact stays current: a sheet shows its rows (`sheet.md`, Live
-rows).
+rows), and a page, a deck, or a canvas board reads them with `sixb.query` (`page.md`).
 
 ## Write one
 
@@ -32,7 +32,7 @@ work/overdue/
 ```
 
 - Name it for what it returns, in lowercase letters, digits, and hyphens: `overdue`,
-  `open-cases`. A sheet names it in `"query"`.
+  `open-cases`. A sheet names it in `"query"`; a page passes it to `sixb.query("overdue")`.
 - Run it before publishing: `sixb objects query --file work/overdue/queries/overdue.json`. It
   returns what the artifact will show you; a reader with other rights sees other rows.
 - `expand` adds a linked object's properties to each row, such as the customer's name: a sheet's
@@ -54,7 +54,8 @@ work/overdue/
 
 ## When to copy instead
 
-Write the values into the artifact, a CSV for a sheet, when they are not the project's live data:
+Write the values into the artifact, a CSV for a sheet or a JSON file beside a page, when they are
+not the project's live data:
 
 - A snapshot the user asked for: "as of September 30", "the numbers we presented". Say in the
   title or a description that it is a snapshot, and of when.

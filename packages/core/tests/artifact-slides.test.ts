@@ -12,6 +12,7 @@ import {
 } from "../src/artifacts/frames/protocol"
 import { frameRuntime } from "../src/artifacts/frames/runtime"
 import { ARTIFACT_STATE_LIMITS } from "../src/artifacts/limits"
+import { isArtifactQueryName } from "../src/artifacts/queries"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -229,6 +230,65 @@ describe("the frame runtime", () => {
     expect(await state.keys()).toEqual(["v1..2"])
   })
 
+  test("reads a query from beside the runtime when it is opened on its own", async () => {
+    // Opened alone, as the layout check opens a page or a board, there is no app to run a query:
+    // the check serves its rows at __sixb/queries/<name>.json. Reproduce by making the call alone
+    // too: the values kept in memory answer it, and the page reads no rows. The names it sends
+    // are those Core reads.
+    const window: Record<string, unknown> = {
+      location: { hash: "", href: "http://127.0.0.1:4100/boards/region.html" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: () => {},
+      postMessage: () => {},
+    }
+    window.parent = window
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      // A board in its folder loads the runtime from the frame's root.
+      currentScript: {
+        getAttribute: () => "page",
+        src: "http://127.0.0.1:4100/__sixb/runtime.js",
+      },
+      readyState: "complete",
+      body: null,
+      addEventListener: () => {},
+      querySelectorAll: () => [],
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    const fetched: string[] = []
+    const overdue = { kind: "objects", objects: [], total: 0, truncated: false }
+    const fetch = async (url: URL) => {
+      fetched.push(url.href)
+      return url.pathname === "/__sixb/queries/overdue.json"
+        ? Response.json(overdue)
+        : new Response(null, { status: 404 })
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      "fetch",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, () => 0, fetch)
+    const { query } = window.sixb as { query: (name: string) => Promise<unknown> }
+
+    expect(await query("overdue")).toEqual(overdue)
+    expect(fetched).toEqual(["http://127.0.0.1:4100/__sixb/queries/overdue.json"])
+
+    const missing = await query("missing").catch((error: unknown) => error)
+    expect(missing).toBeInstanceOf(Error)
+    expect((missing as Error).message).toBe("[Sixb] No query 'missing' in this page's version.")
+
+    for (const name of ["by-region", "q3", "a".repeat(64), "", "-lead", "Overdue", "../x"]) {
+      const accepted = !((await query(name).catch((error: unknown) => error)) instanceof TypeError)
+      expect(accepted, name).toBe(isArtifactQueryName(name))
+    }
+  })
+
   test("gives each embed of a page one id, the same as the page scrolls", () => {
     // Reproduce by giving an embed its rank among those reported: once the first scrolls out of
     // reach, the next takes its id, and the app mounts what it draws there again.
@@ -299,6 +359,91 @@ describe("the frame runtime", () => {
     expect(new Set([before.a, before.b, after.c]).size).toBe(3)
   })
 
+  test("leaves the page only through the app, which opens what the reader follows", () => {
+    // The frame opens no window and navigates nowhere but the frames' origin: a link out goes to
+    // the app as a message. Reproduce by giving a web link `target="_blank"` again in the
+    // runtime's click handler, as it once did: nothing is posted, and the frame tries to open it.
+    let click: ((event: unknown) => void) | undefined
+    const posted: Record<string, unknown>[] = []
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: () => {},
+      postMessage: (message: Record<string, unknown>) => posted.push(message),
+    }
+    window.parent = window
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "complete",
+      baseURI: "https://api.sixb.test/api/artifact-frames/token/index.html",
+      body: null,
+      addEventListener: (name: string, listener: (event: unknown) => void) => {
+        if (name === "click") click = listener
+      },
+      querySelectorAll: () => [],
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, () => 0)
+
+    /** A click on a link to `href`, as the runtime hears it: what it posts, and if it stops it. */
+    const follow = (href: string, handled = false) => {
+      posted.length = 0
+      const link = { getAttribute: () => href }
+      const event = {
+        target: { closest: () => link },
+        defaultPrevented: handled,
+        stopped: false,
+        preventDefault() {
+          this.stopped = true
+        },
+      }
+      click?.(event)
+      const sent = posted.flatMap((message) => parseFrameEvent(message) ?? [])
+      return { sent, stopped: event.stopped }
+    }
+
+    expect(follow("https://example.com/report?q=1")).toEqual({
+      sent: [
+        {
+          protocol: FRAME_PROTOCOL,
+          event: "link",
+          params: { url: "https://example.com/report?q=1" },
+        },
+      ],
+      stopped: true,
+    })
+    // A file of the page is a web page too, at the frame's address.
+    expect(follow("notes.html").sent).toEqual([
+      {
+        protocol: FRAME_PROTOCOL,
+        event: "link",
+        params: { url: "https://api.sixb.test/api/artifact-frames/token/notes.html" },
+      },
+    ])
+    expect(follow("artifact:art_0123456789").sent).toEqual([
+      { protocol: FRAME_PROTOCOL, event: "open", params: { address: "artifact:art_0123456789" } },
+    ])
+
+    // Any other address goes nowhere, in the frame or out of it.
+    for (const href of ["mailto:ops@example.com", "javascript:void 0", "data:text/html,hi"]) {
+      expect(follow(href), href).toEqual({ sent: [], stopped: true })
+    }
+
+    // A link within the page, or one the page's own script handled, is the page's.
+    expect(follow("#totals")).toEqual({ sent: [], stopped: false })
+    expect(follow("https://example.com", true)).toEqual({ sent: [], stopped: false })
+  })
+
   test("reads its layout from the tag the frame injects it with", () => {
     // Reproduce by renaming the attribute on either side: every page lays out as a deck.
     expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
@@ -342,6 +487,9 @@ describe("a frame's events", () => {
     expect(event("open", { address: "artifact:art_0123456789" })?.params).toEqual({
       address: "artifact:art_0123456789",
     })
+    expect(event("link", { url: "https://example.com/a?b=1" })?.params).toEqual({
+      url: "https://example.com/a?b=1",
+    })
     expect(
       event("embeds", {
         embeds: [{ id: 1, address: "artifact:art_0123456789#1", rect, scale: 0.5 }],
@@ -367,6 +515,11 @@ describe("a frame's events", () => {
       ["key", { key: "q" }],
       ["open", { address: 42 }],
       ["open", { address: `artifact:${"a".repeat(3000)}` }],
+      // The app opens only a web page: reproduce by accepting any address in parseFrameEvent.
+      ["link", { url: "javascript:alert(1)" }],
+      ["link", { url: "data:text/html,hi" }],
+      ["link", { url: "/relative" }],
+      ["link", { url: `https://example.com/${"a".repeat(9000)}` }],
       ["embeds", { embeds: "all" }],
       ["embeds", { embeds: [{ id: 1, address: "artifact:art_0123456789", rect, scale: 0 }] }],
       [
@@ -427,6 +580,12 @@ describe("a frame's calls", () => {
     })
     expect(call("state.delete", { key: "inputs" })?.method).toBe("state.delete")
     expect(call("state.keys", {})?.params).toEqual({})
+    expect(call("query.run", { name: "overdue" })).toEqual({
+      protocol: FRAME_PROTOCOL,
+      call: 1,
+      method: "query.run",
+      params: { name: "overdue" },
+    })
   })
 
   test("that a page's own scripts could post out of shape are dropped", () => {
@@ -446,6 +605,12 @@ describe("a frame's calls", () => {
       ["state.clear", {}, 1],
       ["state.keys", {}, -1],
       ["state.keys", {}, "1"],
+      // A query's name is its file's: the client puts it in the path too.
+      ["query.run", { name: "../state" }, 1],
+      ["query.run", { name: "Overdue" }, 1],
+      ["query.run", { name: "" }, 1],
+      ["query.run", { name: 7 }, 1],
+      ["query.run", {}, 1],
     ] as const) {
       expect(call(method, params, id)).toBeNull()
     }
