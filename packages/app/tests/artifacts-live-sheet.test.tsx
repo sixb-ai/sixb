@@ -20,6 +20,7 @@ import { workbookXlsx } from "../src/artifacts/renderers/sheet/xlsx"
 import { Viewer } from "../src/artifacts/viewer"
 import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
 import { installDom } from "./helpers/dom"
+import { archivePart, UNZIP } from "./helpers/unzip"
 
 const browser = installDom([
   "document",
@@ -217,6 +218,27 @@ const totalsText = (container: HTMLElement) =>
       []),
   ].map((cell) => cell.textContent)
 
+/**
+ * The sheet with Globex's amount locked, a Tax computed from Amount, and a count of its invoices,
+ * read as a download reads it.
+ */
+async function taxedModel() {
+  const sheet = workbook.sheets[0]
+  const parsed = parseWorkbook(
+    JSON.stringify({
+      sheets: [
+        {
+          ...sheet,
+          columns: { ...sheet?.columns, Tax: { type: "currency", formula: "[@Amount]*0.2" } },
+          totals: { Invoice: "count", Amount: "sum" },
+        },
+      ],
+    })
+  )
+  if (!("workbook" in parsed) || !parsed.workbook.sheets[0]) throw new Error("No workbook.")
+  return readSheetModel(cache(result({ locked: true })), version, parsed.workbook.sheets[0])
+}
+
 describe("a live sheet", () => {
   test("shows its query's rows as the sheet formats them, and totals them", async () => {
     const ui = await view(cache(result()))
@@ -297,21 +319,31 @@ describe("a live sheet", () => {
     ui.unmount()
   })
 
-  test("downloads the reader's rows, a locked value left empty", async () => {
-    const queries = cache(result({ locked: true }))
-    const parsed = parseWorkbook(texts["workbook.json"])
-    if (!("workbook" in parsed) || !parsed.workbook.sheets[0]) throw new Error("No workbook.")
-
-    const model = await readSheetModel(queries, version, parsed.workbook.sheets[0])
+  // Guard proof: drop the blanking of locked cells in sheetModel; Globex's Tax then reads "0" in
+  // the rows a CSV writes.
+  test("downloads the reader's rows, a locked value and what it computes left empty", async () => {
+    const model = await taxedModel()
     expect(model.rows).toEqual([
-      ["inv_1", "Acme", "1250", "2026-09-30"],
-      ["inv_2", "Acme", "750", "2026-10-04"],
-      ["inv_3", "Globex", "", "2026-10-12"],
+      ["inv_1", "Acme", "1250", "2026-09-30", "250"],
+      ["inv_2", "Acme", "750", "2026-10-04", "150"],
+      ["inv_3", "Globex", "", "2026-10-12", ""],
     ])
+  })
 
-    // The workbook's total over the locked value is left out, not a SUBTOTAL of what remains.
-    const xlsx = new TextDecoder().decode(await workbookXlsx([model]))
-    expect(xlsx).not.toContain("SUBTOTAL")
+  // Guard proof: drop the `isLocked` skip in xlsx.ts's worksheet; Globex's Tax then keeps
+  // `<f>C4*0.2</f>`, which Excel computes to 0. Drop `if (entry.locked) return ""` in totalsRow,
+  // and Amount's total is a SUBTOTAL of what the reader sees.
+  test.skipIf(!UNZIP)("writes no formula or total over a locked value in the .xlsx", async () => {
+    const xlsx = await workbookXlsx([await taxedModel()])
+    const sheet = await archivePart(xlsx, "xl/worksheets/sheet1.xml")
+
+    expect(sheet).toMatch(/<c r="E2" s="\d+"><f>C2\*0.2<\/f><v>250<\/v><\/c>/)
+    expect(sheet).not.toContain('r="C4"')
+    expect(sheet).not.toContain('r="E4"')
+
+    // Under the locked value, no total; under a column the reader sees whole, its SUBTOTAL.
+    expect(sheet).toMatch(/<c r="A5" s="\d+"><f>SUBTOTAL\(103,A2:A4\)<\/f><v>3<\/v><\/c>/)
+    expect(sheet).not.toContain('r="C5"')
   })
 
   test("charts its rows as the sheet's chart summarizes them", async () => {
