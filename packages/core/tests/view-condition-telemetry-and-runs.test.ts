@@ -17,12 +17,11 @@ import { canViewProjection, canViewProjectionRun } from "../src/authorization"
 import type { ObjectProjectionDefinition } from "../src/projections"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb, recordTestActionRun } from "../src/testing"
-import { resolveRolesWithConditions } from "./helpers/view-conditions"
+import { contextIn, groupsOf } from "./helpers/view-conditions"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // Tickets carry telemetry and action runs. Staff read the open ones through a condition, owners
-// their own; roles here hold conditional view grants, which a host still refuses at startup, so
-// contexts are resolved beside the host.
+// their own.
 
 const projectId = "view-condition-telemetry-and-runs"
 const filterable = { query: { searchable: true, filterable: true } } as const
@@ -98,6 +97,8 @@ async function deploy() {
     id: projectId,
     ontology: [Team, Ticket],
     actions: [escalate, renameTeam, announce],
+    groups: groupsOf(roles),
+    roles,
     ...createTestRuntimeDeps(),
   })
   const trusted = createTestSixb(host)
@@ -117,7 +118,10 @@ async function deploy() {
       .append({ value: 20 + index, unit: "degreeCelsius", at: at(index) })
   }
 
-  const { contextFor } = resolveRolesWithConditions({ ontology: [Team, Ticket], roles })
+  const contextFor = (
+    groupIds: readonly string[],
+    principal: AuthorizationContext["principal"] = alice
+  ) => contextIn(host, groupIds, principal)
 
   const sixbFor = (
     groupIds: readonly string[],

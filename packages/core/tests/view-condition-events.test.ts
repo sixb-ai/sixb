@@ -22,11 +22,10 @@ import { NO_APPLIED_MARKINGS } from "../src/security/applied-markings-snapshot"
 import type { ObjectReadStorage } from "../src/storage"
 import { InMemoryObjectStorage } from "../src/storage/objects/in-memory"
 import { createTestSixb } from "../src/testing"
-import { resolveRolesWithConditions } from "./helpers/view-conditions"
+import { contextIn, groupsOf } from "./helpers/view-conditions"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
-// Tickets assigned to teams. Roles here hold conditional view grants, which a host still refuses
-// at startup, so contexts are resolved beside the host.
+// Tickets assigned to teams.
 
 const projectId = "view-condition-events"
 const filterable = { query: { searchable: true, filterable: true } } as const
@@ -89,6 +88,8 @@ async function deploy() {
     ontology: [Team, Ticket],
     markings: [restricted],
     rules: [openTicket, watchedTeam],
+    groups: groupsOf(roles),
+    roles,
     ...createTestRuntimeDeps(),
   })
   const trusted = createTestSixb(host)
@@ -102,11 +103,10 @@ async function deploy() {
     (events) => events.length === 1
   )
 
-  const { contextFor } = resolveRolesWithConditions({ ontology: [Team, Ticket], roles })
   const sixbFor = (
     groupIds: readonly string[],
     principal: AuthorizationContext["principal"] = alice
-  ) => createTestSixb(host, { authorization: contextFor(groupIds, principal) })
+  ) => createTestSixb(host, { authorization: contextIn(host, groupIds, principal) })
 
   return { host, trusted, sixbFor }
 }

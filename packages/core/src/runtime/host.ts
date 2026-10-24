@@ -90,7 +90,7 @@ import {
   type DatasetVersionMarkings,
   registerDatasetVersionMarkings,
 } from "../security/dataset-version-markings"
-import { assertViewConditionsReadable, refuseViewConditions } from "../security/view-conditions"
+import { assertViewConditionsReadable } from "../security/view-conditions"
 import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
@@ -228,14 +228,12 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
     const definitions = resolveDefinitions(options)
-    const viewConditions = definitions.security.listViewConditions()
     assertViewConditionsReadable({
       projectId: this.projectId,
-      conditions: viewConditions,
+      conditions: definitions.security.listViewConditions(),
       objectStorage: this.storage.objects,
       getSubTypes: (objectTypeId) => definitions.ontology.listSubTypes(objectTypeId),
     })
-    refuseViewConditions(viewConditions)
     this.definitions = definitions
     this.sandboxDefinition =
       options.sandboxes?.configuration === undefined

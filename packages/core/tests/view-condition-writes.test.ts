@@ -21,13 +21,11 @@ import type { ShareAccessPlan } from "../src/shares/access-plan"
 import { type InMemoryStorage, objectBatchKey } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb } from "../src/testing"
-import { resolveRolesWithConditions } from "./helpers/view-conditions"
+import { contextIn, groupsOf } from "./helpers/view-conditions"
 import { createSharedTestScope } from "./shared-test-scope"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-// A helpdesk where operators see open tickets only, and everyone sees their own notes. Roles here
-// hold conditional view grants, which a host still refuses at startup, so contexts are resolved
-// beside the host.
+// A helpdesk where operators see open tickets only, and everyone sees their own notes.
 
 const projectId = "view-condition-writes"
 const filterable = { query: { searchable: true, filterable: true } } as const
@@ -148,6 +146,8 @@ async function deploy() {
     id: projectId,
     ontology,
     actions: [escalate, retitle, merge, assign, editNote],
+    groups: groupsOf(roles),
+    roles,
     onError: () => {},
     ...deps,
   })
@@ -171,11 +171,10 @@ async function deploy() {
   await trusted.objects(Note).upsert({ properties: { id: "n-alice", owner: userRef(alice.id) } })
   await trusted.objects(Note).upsert({ properties: { id: "n-bob", owner: userRef(bob.id) } })
 
-  const { contextFor } = resolveRolesWithConditions({ ontology, roles })
   const sixbFor = (
     groupIds: readonly string[],
     principal: AuthorizationContext["principal"] = alice
-  ) => createTestSixb(host, { authorization: contextFor(groupIds, principal) })
+  ) => createTestSixb(host, { authorization: contextIn(host, groupIds, principal) })
 
   const stored = (objectTypeId: string, primaryId: string) =>
     host.storage.objects.getByPrimaryId({ projectId, objectTypeId, primaryId })
@@ -810,6 +809,8 @@ describe("direct writes through view conditions", () => {
       id: projectId,
       ontology: [Article],
       models: { embedding: [embedding] },
+      groups: groupsOf([editors]),
+      roles: [editors],
       ...createTestRuntimeDeps(),
     })
     const trusted = createTestSixb(host)
@@ -821,9 +822,8 @@ describe("direct writes through view conditions", () => {
       .objects(Article)
       .upsert({ properties: { id: "a-draft", status: "draft", title: "b" } })
 
-    const { contextFor } = resolveRolesWithConditions({ ontology: [Article], roles: [editors] })
     const articles = createTestSixb(host, {
-      authorization: contextFor(["editors"], alice),
+      authorization: contextIn(host, ["editors"], alice),
     }).objects(Article)
     const index = (id: string) =>
       articles

@@ -32,12 +32,11 @@ import type { AppliedMarkings } from "../src/security/applied-markings"
 import { NO_APPLIED_MARKINGS } from "../src/security/applied-markings-snapshot"
 import { SharedSessionProtocol } from "../src/shares/session-protocol"
 import { createTestSixb } from "../src/testing"
-import { resolveRolesWithConditions } from "./helpers/view-conditions"
+import { contextIn, groupsOf } from "./helpers/view-conditions"
 import { createSharedTestScope } from "./shared-test-scope"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-// A support desk: tickets, incidents (a kind of ticket) and teams. Roles here hold conditional
-// view grants, which a host still refuses at startup, so contexts are resolved beside the host.
+// A support desk: tickets, incidents (a kind of ticket) and teams.
 
 const projectId = "view-condition-reads"
 const filterable = { query: { searchable: true, filterable: true, facet: true } } as const
@@ -131,6 +130,8 @@ async function deploy() {
     actions: [escalate],
     shares: [ticketShare, teamShare],
     rules: [openTicket],
+    groups: groupsOf(roles),
+    roles,
     ...createTestRuntimeDeps(),
   })
   const trusted = createTestSixb(host)
@@ -163,7 +164,6 @@ async function deploy() {
     })
   }
 
-  const { contextFor } = resolveRolesWithConditions({ ontology: [Team, Ticket, Incident], roles })
   const ontology = host.definitions.ontology as OntologyRegistry
 
   const readerFor = (
@@ -172,7 +172,7 @@ async function deploy() {
     appliedMarkings?: AppliedMarkings
   ) =>
     createAuthorizedObjectReader({
-      scope: createTestingScope({ projectId, context: contextFor(groupIds, principal) }),
+      scope: createTestingScope({ projectId, context: contextIn(host, groupIds, principal) }),
       ontology,
       objectStorage: host.storage.objects,
       ...(appliedMarkings === undefined ? {} : { appliedMarkings }),
@@ -186,7 +186,7 @@ async function deploy() {
       scope: restoreAgentExecutionScope({
         actorId: "desk",
         runId: "agent-run-1",
-        authorization: { type: "principal", context: contextFor(groupIds, principal) },
+        authorization: { type: "principal", context: contextIn(host, groupIds, principal) },
         execution: {
           id: "agent-execution-1",
           projectId,
@@ -205,7 +205,7 @@ async function deploy() {
   }
 
   const sixbFor = (groupIds: readonly string[]) =>
-    createTestSixb(host, { authorization: contextFor(groupIds) })
+    createTestSixb(host, { authorization: contextIn(host, groupIds) })
 
   return { host, trusted, readerFor, agentReaderFor, sixbFor }
 }

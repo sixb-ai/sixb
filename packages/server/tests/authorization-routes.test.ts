@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import {
   can,
   col,
@@ -51,7 +51,11 @@ const Contract = defineObjectType({
   id: "contract",
   name: "Contract",
   properties: [
-    prop("id", "string", { required: true, primary: true }),
+    prop("id", "string", {
+      required: true,
+      primary: true,
+      query: { searchable: true, filterable: true },
+    }),
     prop("temperature", "double", { mode: "telemetry" }),
   ],
   links: [link("invoice", Invoice, { cardinality: "one" })],
@@ -133,6 +137,7 @@ const operations = defineGroup("operations")
 const admins = defineGroup("admins")
 const writers = defineGroup("writers")
 const ingest = defineGroup("ingest")
+const reviewers = defineGroup("reviewers")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -162,6 +167,12 @@ const contractWriter = defineRole("contract.writer", {
   grants: [can.view(Contract), can.edit(Contract), can.view(Invoice)],
 })
 
+// Sees one contract only, through a condition, and the runs of the action on it.
+const contractReviewer = defineRole("contract.reviewer", {
+  grantedTo: [reviewers],
+  grants: [can.view(Contract).where((contract) => contract.p.id.eq("c1")), can.apply(sendContract)],
+})
+
 // Telemetry only, with no view grant at all: the ingest principal.
 const contractIngestor = defineRole("contract.ingestor", {
   grantedTo: [ingest],
@@ -188,8 +199,15 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     queues: new InMemoryQueues(),
     actions: [sendContract],
     workflows: [renewContract],
-    groups: [commercial, operations, admins, writers, ingest],
-    roles: [contractOperator, operationsRunner, adminOperator, contractWriter, contractIngestor],
+    groups: [commercial, operations, admins, writers, ingest, reviewers],
+    roles: [
+      contractOperator,
+      operationsRunner,
+      adminOperator,
+      contractWriter,
+      contractIngestor,
+      contractReviewer,
+    ],
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
@@ -1147,26 +1165,12 @@ describe("authorized action routes", () => {
     expect(hiddenDetail.status).toBe(404)
   })
 
-  // Conditional view grants are still refused at startup, so the operator's context is resolved
-  // as its role will be once they are allowed: contracts it sees only where `id` is "c1".
   // Reproduce: drop the objectTypeId and primaryId subject from actions.runs.list; c1's runs
   // come back empty.
   test("an object's run history lists through a view condition", async () => {
     const { app, storage, host } = await createApp()
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const reviewer = await seedSession(storage, ["reviewers"], "usr_review")
     await createTestSixb(host).objects.upsert("contract", { id: "c2" })
-
-    const contextFromSession = host.auth.contextFromSession.bind(host.auth)
-    spyOn(host.auth, "contextFromSession").mockImplementation((session) => {
-      const context = contextFromSession(session)
-      const viewed = new Set(context.grants["view:object"])
-      viewed.delete("contract")
-      return {
-        ...context,
-        grants: { ...context.grants, "view:object": viewed },
-        viewConditions: new Map([["contract", [{ op: "eq", propertyId: "id", value: "c1" }]]]),
-      }
-    })
 
     for (const primaryId of ["c1", "c2"]) {
       await recordTestActionRun(storage, {
@@ -1184,7 +1188,7 @@ describe("authorized action routes", () => {
       const response = await app.fetch(
         new Request(
           `http://localhost/api/action-runs?objectTypeId=contract&primaryId=${primaryId}`,
-          { headers: operator.headers }
+          { headers: reviewer.headers }
         )
       )
       return response.json()

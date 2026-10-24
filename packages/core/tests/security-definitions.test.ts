@@ -968,7 +968,7 @@ describe("view grant conditions", () => {
   })
 
   // Reproduce: skip the validation in resolveViewCondition, or check only the granted type for
-  // markings, and these reach the "not supported yet" refusal instead.
+  // markings, and startup accepts these conditions or fails without naming the role.
   test.each([
     [
       "a condition reading an unknown property",
@@ -985,7 +985,7 @@ describe("view grant conditions", () => {
       conditionOn("note", { propertyId: "topic", op: "eq", value: currentUser() }),
       "[Sixb] Role 'staff': can.view(note).where(...): currentUser() can only be compared with a ref.user() property; 'note.topic' is not one.",
     ],
-    // Reproduce: drop the orderedTextComparison check, and this reaches the refusal instead.
+    // Reproduce: drop the orderedTextComparison check, and startup accepts this condition.
     [
       "a condition ordering text",
       can.view(Note).where((note) => note.not(note.p.topic.gte("M"))),
@@ -1048,8 +1048,8 @@ describe("view grant conditions", () => {
     })
   }
 
-  // Reproduce: drop assertViewConditionsReadable from the SixbHost constructor, and startup fails
-  // on the refusal that follows instead of naming what the storage cannot read.
+  // Reproduce: drop assertViewConditionsReadable from the SixbHost constructor, and startup
+  // succeeds: the condition fails every read of its type instead.
   test("startup fails on a condition the object storage cannot read", () => {
     const grant = can.view(Note).where((note) => note.p.topic.eq("m"))
     const error = catchError(() =>
@@ -1068,7 +1068,7 @@ describe("view grant conditions", () => {
     const scopes: CompiledConditionalObjectReadScope[] = []
     const grant = can.view(Note).where((note) => note.p.owner.eq(currentUser()))
 
-    expect(() => startOn(grant, ({ scope }) => scopes.push(scope))).toThrow("is not supported yet")
+    startOn(grant, ({ scope }) => scopes.push(scope))
 
     expect(scopes).toHaveLength(1)
     expect(scopes[0]?.conditions).toEqual([
@@ -1082,16 +1082,6 @@ describe("view grant conditions", () => {
         },
       },
     ])
-  })
-
-  // Reads do not apply conditions yet, so a valid one is refused rather than granting every note.
-  // Reproduce: drop refuseViewConditions from the SixbHost constructor and startup succeeds.
-  test("startup refuses a valid condition until reads enforce it", () => {
-    const grant = can.view(Note).where((note) => note.p.owner.eq(currentUser()))
-
-    expect(() => start(grant)).toThrow(
-      "[Sixb] Role 'staff': can.view(note).where(...) is not supported yet."
-    )
   })
 })
 

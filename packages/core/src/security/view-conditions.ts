@@ -126,18 +126,6 @@ export function assertViewConditionsReadable(input: {
 
 const STARTUP_CHECK_USER = Object.freeze({ type: "user", id: "usr_sixb_startup_check" } as const)
 
-/**
- * A type a reader sees only through a condition is denied by events, telemetry, runs, files and
- * writes, which do not apply conditions yet. Every condition is refused until they do, so a role
- * never grants less than it reads as granting.
- */
-export function refuseViewConditions(conditions: readonly ViewCondition[]): void {
-  const [first] = conditions
-  if (first === undefined) return
-
-  throw new SecurityValidationError(`[Sixb] ${viewConditionSubject(first)} is not supported yet.`)
-}
-
 function viewConditionSubject(condition: Pick<ViewCondition, "roleId" | "objectTypeId">): string {
   return `Role '${condition.roleId}': can.view(${condition.objectTypeId}).where(...)`
 }
