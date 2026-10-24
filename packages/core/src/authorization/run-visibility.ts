@@ -7,6 +7,10 @@ import type { WorkflowRunRecord } from "../storage/workflow-runs"
 import { isAllowed } from "./decision"
 import type { AuthorizationContext } from "./types"
 
+/**
+ * Whether a principal may view a run, by its action and its subject's type. A type the principal
+ * views only through a condition fails here: the subject decides, which `viewableActionRuns` reads.
+ */
 export function canViewActionRun(
   authorization: AuthorizationContext | null | undefined,
   run: Pick<ActionRunRecord, "actionId" | "subject">
@@ -55,7 +59,10 @@ export function canViewPipelineRun(
   )
 }
 
-/** A projection run is viewable when its target object type(s) are viewable. */
+/**
+ * A projection run is viewable when its target object type(s) are viewable. A run, like its
+ * definition, describes every object of the type, so a type viewed through a condition stays closed.
+ */
 export function canViewProjectionRun(
   authorization: AuthorizationContext | null | undefined,
   target: ProjectionTarget

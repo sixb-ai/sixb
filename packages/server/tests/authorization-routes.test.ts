@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   can,
   col,
@@ -224,7 +224,7 @@ async function createApp(options: { readonly auth?: boolean } = {}) {
     new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
 
-  return { app, storage }
+  return { app, storage, host: sixb }
 }
 
 async function seedSession(
@@ -1145,6 +1145,57 @@ describe("authorized action routes", () => {
       })
     )
     expect(hiddenDetail.status).toBe(404)
+  })
+
+  // Conditional view grants are still refused at startup, so the operator's context is resolved
+  // as its role will be once they are allowed: contracts it sees only where `id` is "c1".
+  // Reproduce: drop the objectTypeId and primaryId subject from actions.runs.list; c1's runs
+  // come back empty.
+  test("an object's run history lists through a view condition", async () => {
+    const { app, storage, host } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    await createTestSixb(host).objects.upsert("contract", { id: "c2" })
+
+    const contextFromSession = host.auth.contextFromSession.bind(host.auth)
+    spyOn(host.auth, "contextFromSession").mockImplementation((session) => {
+      const context = contextFromSession(session)
+      const viewed = new Set(context.grants["view:object"])
+      viewed.delete("contract")
+      return {
+        ...context,
+        grants: { ...context.grants, "view:object": viewed },
+        viewConditions: new Map([["contract", [{ op: "eq", propertyId: "id", value: "c1" }]]]),
+      }
+    })
+
+    for (const primaryId of ["c1", "c2"]) {
+      await recordTestActionRun(storage, {
+        id: `act_${primaryId}`,
+        projectId: "test-project",
+        actionId: "send-contract",
+        subject: { kind: "object", objectTypeId: "contract", primaryId },
+        params: {},
+        idempotencyKey: `act_${primaryId}`,
+        startedAt: new Date("2099-01-01T00:00:00.000Z"),
+      })
+    }
+
+    const runsOf = async (primaryId: string) => {
+      const response = await app.fetch(
+        new Request(
+          `http://localhost/api/action-runs?objectTypeId=contract&primaryId=${primaryId}`,
+          { headers: operator.headers }
+        )
+      )
+      return response.json()
+    }
+
+    expect(await runsOf("c1")).toMatchObject({
+      runs: [expect.objectContaining({ id: "act_c1" })],
+      hasMore: false,
+      total: 1,
+    })
+    expect(await runsOf("c2")).toEqual({ runs: [], hasMore: false, total: 0 })
   })
 })
 

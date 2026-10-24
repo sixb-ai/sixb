@@ -142,7 +142,7 @@ time range, so the same user's other browser, active at the same time, stays out
   there. Activity alone never reveals a conversation. An action
   names its object only when the viewer's own object reader returns it, so object type grants,
   markings and deletion all hide it. `runVisible` says whether the viewer may read the run
-  itself, decided as the runs reads decide it (`canViewActionRun` and the subject type's
+  itself, decided as the runs reads decide it (`viewableActionRuns` and the subject type's
   markings, `canViewWorkflowRun`); the app links a run only then.
 - **Bounds:** 200 page views and interactions together, and 200 recorded executions, roots first
   and the earliest first. Past either limit `truncated` is set and the timeline stops at the last

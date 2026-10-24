@@ -1,4 +1,4 @@
-import { canViewActionRun, isAllowed } from "../authorization"
+import { isAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import {
@@ -18,7 +18,9 @@ import { type RequestActionInput, requestAction } from "./request"
 import {
   canDelegationAccessActionRun,
   canReadActionRunSubject,
+  readableSubjects,
   unreadableActionRunTypes,
+  viewableActionRuns,
 } from "./run-authorization"
 import type { ActionDefinition } from "./types"
 
@@ -127,7 +129,8 @@ export function createActionsRuntime(
           })) ?? null
         return run &&
           (authorization.type === "unrestricted" ||
-            (authorization.type === "principal" && canViewActionRun(authorization.context, run)) ||
+            (authorization.type === "principal" &&
+              (await viewableActionRuns(objectReader, authorization.context, [run])).length > 0) ||
             (authorization.type === "delegated" &&
               (await canDelegationAccessActionRun({
                 storage: runtime.storage,
@@ -147,15 +150,36 @@ export function createActionsRuntime(
         if (!storage) return { runs: [], hasMore: false, total: 0 }
         if (authorization.type === "unrestricted") return storage.list({ ...input, projectId })
 
-        // Storage filters, so its pages and totals only count runs the reader can see.
+        // Storage filters, so its pages and totals only count runs the reader can see. A run on a
+        // type viewed through a condition shows only through its subject: a listing that names
+        // one the reader reads now includes it, every other listing leaves the type out. HTTP
+        // names it by objectTypeId and primaryId.
+        const context = authorization.context
         const unreadable = await unreadableActionRunTypes(objectReader)
+        const objectTypeIds = [...context.grants["view:object"]].filter(
+          (objectTypeId) => !unreadable.has(objectTypeId)
+        )
+
+        const subject =
+          input.subject ??
+          (input.objectTypeId !== undefined && input.primaryId !== undefined
+            ? {
+                kind: "object" as const,
+                objectTypeId: input.objectTypeId,
+                primaryId: input.primaryId,
+              }
+            : undefined)
+        if (subject?.kind === "object" && context.viewConditions?.has(subject.objectTypeId)) {
+          const readable = await readableSubjects(objectReader, [subject])
+          if (readable.size === 0) return { runs: [], hasMore: false, total: 0 }
+          objectTypeIds.push(subject.objectTypeId)
+        }
+
         return storage.list({
           ...input,
           projectId,
-          actionIds: [...authorization.context.grants["apply:action"]],
-          objectTypeIds: [...authorization.context.grants["view:object"]].filter(
-            (objectTypeId) => !unreadable.has(objectTypeId)
-          ),
+          actionIds: [...context.grants["apply:action"]],
+          objectTypeIds,
         })
       },
     },
