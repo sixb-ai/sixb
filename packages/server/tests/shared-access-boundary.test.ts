@@ -51,7 +51,7 @@ const publishers = defineGroup("shared-publishers")
 const broadReaders = defineGroup("shared-broad-readers")
 const publisher = defineRole("shared.publisher", {
   grantedTo: [publishers],
-  grants: [can.view(Report), can.share(PublishedReport)],
+  grants: [can.view(Report), can.view(ReportItem), can.share(PublishedReport)],
 })
 const broadReader = defineRole("shared.broad-reader", {
   grantedTo: [broadReaders],

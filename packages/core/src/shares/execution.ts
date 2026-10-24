@@ -1,11 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { assertAuthorized, isRuntimeAllowed } from "../authorization"
+import { AuthorizationError, assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { ObjectRef } from "../ontology"
 import type { DefinitionCatalog } from "../runtime/definitions"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { ObjectNotFoundError, type ShareGrantRecord, ShareGrantStorageError } from "../storage"
+import { compileSelectedObjectReadScope } from "../storage/objects/read-scope"
+import { objectReadScopeForAccessPlan, type ShareAccessPlan } from "./access-plan"
 import { compileShareAccessPlan } from "./compiler"
 import type { ShareDefinition } from "./types"
 
@@ -142,8 +144,22 @@ export function createSharesRuntime(
     const createdAt = new Date()
     const expiresAt = validFutureDate(input.expiresAt, createdAt)
     const target = exactTarget(definition, input.target)
+    const access = compileShareAccessPlan({
+      share: definition,
+      target,
+      ontology: runtime.ontology,
+      actions: runtime.actionRegistry,
+    })
+
+    // A link keeps showing whatever its target links to, now and later: on a type its issuer sees
+    // only through a condition, it would expose the objects that condition hides. Each type its
+    // links reach must be viewed whole.
+    assertViewsWhole(runtime, definition, issuer, linkedObjectTypeIds(access))
 
     // This canonical read checks both the caller's current object authority and target existence.
+    // A target its issuer sees through a condition must be visible now; a hidden one is not found,
+    // like a missing one. The link then holds its own grants: it keeps showing the target even
+    // once the target stops matching the issuer's condition.
     const object = await runtime.objectReader.getByPrimaryId({
       objectTypeId: target.objectTypeId,
       primaryId: target.primaryId,
@@ -152,15 +168,7 @@ export function createSharesRuntime(
       throw new ObjectNotFoundError(target.objectTypeId, target.primaryId, "Share target not found")
     }
 
-    const authoritySnapshot = {
-      version: 1 as const,
-      access: compileShareAccessPlan({
-        share: definition,
-        target,
-        ontology: runtime.ontology,
-        actions: runtime.actionRegistry,
-      }),
-    }
+    const authoritySnapshot = { version: 1 as const, access }
 
     for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS; attempt += 1) {
       const secret = randomBytes(32).toString("base64url")
@@ -331,6 +339,31 @@ function validDefinitionId(value: unknown): string {
 
 function assertCanManage(runtime: SixbRuntimeContext, shareId: string): void {
   assertAuthorized(runtime, { kind: "share.manage", shareId })
+}
+
+/** Every object type a Share's links reach from its target, nested links included. */
+function linkedObjectTypeIds(access: ShareAccessPlan): readonly string[] {
+  const { steps } = compileSelectedObjectReadScope(objectReadScopeForAccessPlan(access))
+  return [...new Set(steps.map((step) => step.targetObjectTypeId))]
+}
+
+/** Refuse links reaching a type the issuer views only through a condition, or not at all. */
+function assertViewsWhole(
+  runtime: SixbRuntimeContext,
+  definition: ShareDefinition,
+  issuer: AuthorizablePrincipal,
+  objectTypeIds: readonly string[]
+): void {
+  const partial = objectTypeIds.filter(
+    (objectTypeId) => !isRuntimeAllowed(runtime, { kind: "object.view", objectTypeId })
+  )
+  if (partial.length === 0) return
+
+  const types = partial.map((objectTypeId) => `'${objectTypeId}'`).join(", ")
+  throw new AuthorizationError(
+    `view:object:${partial[0]}`,
+    `[Sixb] Principal '${issuer.id}' cannot issue Share '${definition.id}', whose links show every object of ${types} they reach: the principal views these types only through a condition, or not at all. Grant can.view() on them without a condition, or leave their links out of the Share.`
+  )
 }
 
 function requireShareStorage(runtime: SixbRuntimeContext) {

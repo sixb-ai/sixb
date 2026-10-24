@@ -21,7 +21,7 @@ export function bindCurrentUser(query: ObjectQuery, user: UserRef | undefined): 
       return {
         ...query,
         input: bindCurrentUser(query.input, user),
-        predicate: bindPredicate(query.predicate, user),
+        predicate: bindCurrentUserPredicate(query.predicate, user),
       }
     case "set":
       return { ...query, inputs: query.inputs.map((input) => bindCurrentUser(input, user)) }
@@ -30,16 +30,20 @@ export function bindCurrentUser(query: ObjectQuery, user: UserRef | undefined): 
   }
 }
 
-function bindPredicate(
+/** Replace every `currentUser()` of a validated predicate, with the rules of {@link bindCurrentUser}. */
+export function bindCurrentUserPredicate(
   predicate: ObjectQueryPredicate,
   user: UserRef | undefined
 ): ObjectQueryPredicate {
   switch (predicate.op) {
     case "and":
     case "or":
-      return { ...predicate, items: predicate.items.map((item) => bindPredicate(item, user)) }
+      return {
+        ...predicate,
+        items: predicate.items.map((item) => bindCurrentUserPredicate(item, user)),
+      }
     case "not":
-      return { ...predicate, item: bindPredicate(predicate.item, user) }
+      return { ...predicate, item: bindCurrentUserPredicate(predicate.item, user) }
     case "exists":
     case "constant":
       return predicate

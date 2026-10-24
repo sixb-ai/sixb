@@ -79,10 +79,22 @@ export interface QueryExecutorOptions
   authorization?: AuthorizationContext
   /** Registered execution capability for queries reached through a bound Sixb SDK. */
   runtimeAuthorization?: RuntimeAuthorization
+  /**
+   * The object types the reader reads, decided by the reader itself. The authorized object reader
+   * passes its own, which hold the types its storage reads through a condition. When present, it
+   * decides in place of the grants of `authorization` and `runtimeAuthorization`.
+   */
+  readableObjectTypes?: ReadableObjectTypes
   /** Reader-specific admission applied after grants, such as marking clearances. */
   admission?: ObjectQuerySemanticAdmission
   /** The user `currentUser()` stands for; absent when the reader is not a user. */
   requestingUser?: UserRef
+}
+
+export interface ReadableObjectTypes {
+  /** Throw unless the reader reads every one of these object types. */
+  assert(objectTypeIds: readonly string[]): void
+  has(objectTypeId: string): boolean
 }
 
 export interface ExecuteObjectQueryInput {
@@ -454,8 +466,16 @@ function validateExecutableQuery(
 function assertQueryViewable(
   projectId: string,
   validated: ValidatedObjectQuery,
-  authorization: Pick<QueryExecutorOptions, "authorization" | "runtimeAuthorization">
+  authorization: Pick<
+    QueryExecutorOptions,
+    "authorization" | "runtimeAuthorization" | "readableObjectTypes"
+  >
 ): void {
+  if (authorization.readableObjectTypes) {
+    authorization.readableObjectTypes.assert(validated.touchedObjectTypeIds)
+    return
+  }
+
   // The query engine is also a storage-level utility. Authorization is activated by a runtime
   // context; execution SDKs always provide a registered capability, including auth-disabled ones.
   if (!authorization.runtimeAuthorization && !authorization.authorization) return

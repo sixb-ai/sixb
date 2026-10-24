@@ -1,4 +1,3 @@
-import { isAllowed } from "../authorization"
 import {
   type AuthorizedOntologySelection,
   type AuthorizedOntologyView,
@@ -6,26 +5,26 @@ import {
 } from "../objects/authorized-ontology-view"
 import type { OntologyRegistry } from "../ontology"
 import { assertObjectReadOutputWithinLimit } from "../storage"
-import type { ResolvedExecutionAuthority } from "./object-reader-security"
+import type { ObjectReaderSecurity } from "./object-reader-security"
 
 /** The ontology a reader resolves against, and the part of it its authority may describe. */
 export class ObjectReaderOntology {
   readonly registry: OntologyRegistry
-  readonly #authority: ResolvedExecutionAuthority
+  readonly #security: ObjectReaderSecurity
   #view?: AuthorizedOntologyView
 
-  constructor(registry: OntologyRegistry, authority: ResolvedExecutionAuthority) {
+  constructor(registry: OntologyRegistry, security: ObjectReaderSecurity) {
     this.registry = registry
-    this.#authority = authority
+    this.#security = security
     Object.freeze(this)
   }
 
   /** Inert metadata for the types the authority may view, built on first use. */
   view(): AuthorizedOntologyView {
-    const authority = this.#authority
+    const authority = this.#security.authority
     this.#view ??= createAuthorizedOntologyView({
       ontology: this.registry,
-      selection: selectionForAuthority(authority, this.registry),
+      selection: selectionForAuthority(this.#security, this.registry),
       ...(authority.type === "delegated"
         ? {
             assertOutputWithinLimit: (value: unknown) =>
@@ -38,9 +37,11 @@ export class ObjectReaderOntology {
 }
 
 function selectionForAuthority(
-  authority: ResolvedExecutionAuthority,
+  security: ObjectReaderSecurity,
   ontology: OntologyRegistry
 ): AuthorizedOntologySelection {
+  const authority = security.authority
+
   switch (authority.type) {
     case "unrestricted":
       return { kind: "all" }
@@ -49,12 +50,8 @@ function selectionForAuthority(
         kind: "types",
         objectTypeIds: ontology
           .listObjectTypes()
-          .filter((objectType) =>
-            isAllowed(authority.context, {
-              kind: "object.view",
-              objectTypeId: objectType.id,
-            })
-          )
+          // A type viewed through a condition is listed: the reader reads the objects it matches.
+          .filter((objectType) => security.isObjectTypeGranted(objectType.id, undefined))
           .map((objectType) => objectType.id),
       }
     case "delegated":

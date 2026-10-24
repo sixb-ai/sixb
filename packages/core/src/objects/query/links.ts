@@ -249,6 +249,14 @@ function assertLinkSelectorShape(query: ObjectQuery, path = "$.query", root = tr
 }
 
 function visibleEndpointTypeIds(options: QueryExecutorOptions): readonly string[] | undefined {
+  const readable = options.readableObjectTypes
+  if (readable) {
+    return options.ontology
+      .listObjectTypes()
+      .map((objectType) => objectType.id)
+      .filter((objectTypeId) => readable.has(objectTypeId))
+  }
+
   if (!options.authorization) return undefined
   return options.ontology
     .listObjectTypes()
