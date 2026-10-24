@@ -58,6 +58,37 @@ export function resolveVectorConcurrency(value: string | undefined): number | un
   return parseConcurrency(configured, "--vector-concurrency or SIXB_VECTOR_CONCURRENCY")
 }
 
+/**
+ * Resolve the agent worker's child agents: at once in this process, and at once for one turn.
+ * `undefined` leaves the worker's built-in defaults in authority.
+ */
+export function resolveSubagentConcurrency(input: {
+  readonly perWorker: string | undefined
+  readonly perRun: string | undefined
+}): { readonly subagentConcurrency?: number; readonly subagentConcurrencyPerRun?: number } {
+  const perWorker = input.perWorker?.trim() ?? nonblank(process.env.SIXB_SUBAGENT_CONCURRENCY)
+  const perRun = input.perRun?.trim() ?? nonblank(process.env.SIXB_SUBAGENT_CONCURRENCY_PER_RUN)
+
+  return {
+    ...(perWorker === undefined
+      ? {}
+      : {
+          subagentConcurrency: parseConcurrency(
+            perWorker,
+            "--subagent-concurrency or SIXB_SUBAGENT_CONCURRENCY"
+          ),
+        }),
+    ...(perRun === undefined
+      ? {}
+      : {
+          subagentConcurrencyPerRun: parseConcurrency(
+            perRun,
+            "--subagent-concurrency-per-run or SIXB_SUBAGENT_CONCURRENCY_PER_RUN"
+          ),
+        }),
+  }
+}
+
 function parseWorkerConcurrencyEntry(value: string): {
   readonly workerType: WorkerType
   readonly concurrency: number

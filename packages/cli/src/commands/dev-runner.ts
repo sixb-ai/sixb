@@ -25,7 +25,11 @@ import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { stopQuietly } from "../lib/role-lifecycle"
 import { startSixbRuntime, stopSixbProviders } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
-import { resolveVectorConcurrency, resolveWorkerConcurrency } from "../lib/worker-concurrency"
+import {
+  resolveSubagentConcurrency,
+  resolveVectorConcurrency,
+  resolveWorkerConcurrency,
+} from "../lib/worker-concurrency"
 import { devView, renderCliError, renderStatic, startTask } from "../ui"
 
 export interface DevOptions {
@@ -39,6 +43,8 @@ export interface DevOptions {
   agentTurnTimeout?: string
   concurrency?: readonly string[]
   vectorConcurrency?: string
+  subagentConcurrency?: string
+  subagentConcurrencyPerRun?: string
   /** Also open the app in a desktop window. The supervisor does, so the window outlives restarts. */
   desktop?: boolean
 }
@@ -49,6 +55,10 @@ export async function runDevRuntime(options: DevOptions = {}) {
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
+  const subagents = resolveSubagentConcurrency({
+    perWorker: options.subagentConcurrency,
+    perRun: options.subagentConcurrencyPerRun,
+  })
   const entry = resolve(options.entry ?? "sixb.config.ts")
 
   // Under a supervisor that draws the live footer, this process reports and prints nothing.
@@ -127,6 +137,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
       agentTurnTimeoutMs,
       workerConcurrency,
       vectorConcurrency,
+      ...subagents,
     })
     abort.signal.throwIfAborted()
 

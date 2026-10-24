@@ -11,9 +11,11 @@ import {
   ensureExecutionRecord,
 } from "@sixb/core/internal/agent-execution"
 import {
+  type AgentChildApprovalAwaiting,
   createSubagentExecutionId,
   createSubagentRunId,
   dispatchQueuedSubagentRuns,
+  listChildApprovalsAwaiting,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
@@ -34,9 +36,13 @@ import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
-const MAX_ACTIVE_SUBAGENTS = 4
-const MAX_WAITED_SUBAGENTS = 4
 const WAIT_POLL_MS = 250
+/**
+ * How long before its turn's deadline `wait_agent` stops waiting, so the Agent still answers with
+ * what its children found. A last step without tools takes seconds on a light model and up to about
+ * a minute on a heavy one with high reasoning; a turn has ten minutes by default.
+ */
+export const WAIT_ANSWER_MARGIN_MS = 60_000
 
 const OMIT_MODEL = "Omit model to use the project default."
 
@@ -72,9 +78,12 @@ export interface WaitForSubagentsInput {
 
 export interface WaitedSubagentResult {
   readonly runId: string
-  readonly status: "succeeded" | "failed" | "cancelled"
+  /** `queued` or `running`: the turn is about to end, so the Agent answers without it. */
+  readonly status: SubagentRunRecord["status"]
   readonly text?: string
   readonly error?: { readonly code: string; readonly message: string }
+  /** Calls it made that wait for the user's approval. */
+  readonly awaitingApproval?: readonly AgentChildApprovalAwaiting[]
 }
 
 /** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
@@ -105,7 +114,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
-        `At most ${MAX_ACTIVE_SUBAGENTS} child agents may be active for this run.`,
+        `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
       parseInput: parseSpawnInput,
@@ -118,10 +127,12 @@ export class SubagentCoordinator {
     }
     const wait: ModelTool<WaitForSubagentsInput> = {
       name: "wait_agent",
-      description:
+      description: [
         "Wait for previously spawned child agents and return their final text or failure. Pass every run id whose result is needed.",
-      inputSchema: WAIT_INPUT_SCHEMA,
-      parseInput: parseWaitInput,
+        "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
+      ].join("\n"),
+      inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
+      parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
       execute: async (value, { signal }) => {
         const output = await this.wait(value, signal)
         assertJsonValue(output)
@@ -175,11 +186,11 @@ export class SubagentCoordinator {
           parentExecutionToken: requiredExecutionToken(this.parentRun),
           spawnKey: key,
           spec,
-          maxActiveChildren: MAX_ACTIVE_SUBAGENTS,
+          maxActiveChildren: this.context.subagentConcurrencyPerRun,
         })
       })
     } catch (error) {
-      throw publicSpawnError(error, key)
+      throw publicSpawnError(error, key, this.context.subagentConcurrencyPerRun)
     }
 
     signal.throwIfAborted()
@@ -209,7 +220,9 @@ export class SubagentCoordinator {
     input: WaitForSubagentsInput,
     signal: AbortSignal
   ): Promise<{ readonly results: readonly WaitedSubagentResult[] }> {
-    const runIds = normalizeRunIds(input.runIds)
+    const runIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
+    // The Agent answers before its turn times out, with or without the children still at work.
+    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
     for (;;) {
       signal.throwIfAborted()
       const runs = await this.context.storage.agents.runs.getByIds({
@@ -226,10 +239,16 @@ export class SubagentCoordinator {
         }
         return run
       })
-      if (children.every(isTerminalSubagent)) {
-        return { results: children.map(waitedResult) }
+      const remainingMs = stopAt - Date.now()
+      if (children.every(isTerminalSubagent) || remainingMs <= 0) {
+        const awaiting = await listChildApprovalsAwaiting(this.context.storage.agents, {
+          projectId: this.context.id,
+          parentRunId: this.parentRun.id,
+          childRunIds: runIds,
+        })
+        return { results: children.map((run) => waitedResult(run, awaiting.get(run.id))) }
       }
-      await waitDelay(WAIT_POLL_MS, signal)
+      await waitDelay(Math.min(WAIT_POLL_MS, remainingMs), signal)
     }
   }
 
@@ -368,25 +387,27 @@ function modelRefChoices(models: LanguageModelCatalog): readonly JsonObject[] {
   }))
 }
 
-const WAIT_INPUT_SCHEMA = {
-  type: "object",
-  properties: {
-    runIds: {
-      type: "array",
-      minItems: 1,
-      maxItems: MAX_WAITED_SUBAGENTS,
-      uniqueItems: true,
-      items: { type: "string", minLength: 1 },
+function waitInputSchema(maxRunIds: number): JsonObject {
+  return {
+    type: "object",
+    properties: {
+      runIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: maxRunIds,
+        uniqueItems: true,
+        items: { type: "string", minLength: 1 },
+      },
     },
-  },
-  required: ["runIds"],
-  additionalProperties: false,
-} as const satisfies JsonObject
+    required: ["runIds"],
+    additionalProperties: false,
+  }
+}
 
-function normalizeRunIds(value: readonly string[]): readonly string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_WAITED_SUBAGENTS) {
+function normalizeRunIds(value: readonly string[], maxRunIds: number): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > maxRunIds) {
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] wait_agent requires between 1 and ${MAX_WAITED_SUBAGENTS} child run ids.`
+      `[SixbAgentWorker] wait_agent requires between 1 and ${maxRunIds} child run ids.`
     )
   }
   const runIds = value.map((runId) => requireNonEmpty("wait_agent", runId, "runId"))
@@ -421,12 +442,12 @@ function requiredExecutionToken(run: ConversationAgentRunRecord): string {
   return run.execution.token
 }
 
-function publicSpawnError(error: unknown, key: string): unknown {
+function publicSpawnError(error: unknown, key: string, maxActive: number): unknown {
   if (!(error instanceof AgentStorageError)) return error
   switch (error.code) {
     case "active_child_limit":
       return new AgentToolPublicError(
-        `[SixbAgentWorker] The current Agent run already has ${MAX_ACTIVE_SUBAGENTS} active children. Wait for one before spawning another.`
+        `[SixbAgentWorker] The current Agent run already has ${maxActive} active children. Wait for one before spawning another.`
       )
     case "duplicate_id":
       return new AgentToolPublicError(
@@ -446,7 +467,8 @@ function isTerminalSubagent(
 }
 
 function waitedResult(
-  run: SubagentRunRecord & { readonly status: "succeeded" | "failed" | "cancelled" }
+  run: SubagentRunRecord,
+  awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined
 ): WaitedSubagentResult {
   return {
     runId: run.id,
@@ -455,6 +477,7 @@ function waitedResult(
     ...(run.error === undefined
       ? {}
       : { error: { code: run.error.code, message: run.error.message } }),
+    ...(awaitingApproval?.length ? { awaitingApproval } : {}),
   }
 }
 
@@ -518,7 +541,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   }
 }
 
-function parseWaitInput(value: unknown): WaitForSubagentsInput {
+function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInput {
   if (
     !isJsonObject(value) ||
     Object.keys(value).some((key) => key !== "runIds") ||
@@ -529,5 +552,5 @@ function parseWaitInput(value: unknown): WaitForSubagentsInput {
       "[SixbAgentWorker] wait_agent expects an array of child run ids."
     )
   }
-  return { runIds: normalizeRunIds(value.runIds) }
+  return { runIds: normalizeRunIds(value.runIds, maxRunIds) }
 }

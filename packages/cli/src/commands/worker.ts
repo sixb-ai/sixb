@@ -6,7 +6,11 @@ import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { recordApiPublicOrigin, stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
-import { resolveSingleWorkerConcurrency, resolveVectorConcurrency } from "../lib/worker-concurrency"
+import {
+  resolveSingleWorkerConcurrency,
+  resolveSubagentConcurrency,
+  resolveVectorConcurrency,
+} from "../lib/worker-concurrency"
 import {
   agentRuntimeRequired,
   createWorkerForType,
@@ -24,6 +28,8 @@ export interface WorkerOptions {
   agentTurnTimeout?: string
   concurrency?: string
   vectorConcurrency?: string
+  subagentConcurrency?: string
+  subagentConcurrencyPerRun?: string
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
@@ -33,6 +39,10 @@ export async function runWorker(options: WorkerOptions = {}) {
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveSingleWorkerConcurrency(workerType, options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
+  const subagents = resolveSubagentConcurrency({
+    perWorker: options.subagentConcurrency,
+    perRun: options.subagentConcurrencyPerRun,
+  })
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = startTask("worker", "Loading runtime")
@@ -72,6 +82,7 @@ export async function runWorker(options: WorkerOptions = {}) {
       agentTurnTimeoutMs,
       workerConcurrency,
       vectorConcurrency,
+      ...subagents,
     })
     await worker.start()
 

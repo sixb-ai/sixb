@@ -320,6 +320,32 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("publishes nothing for a child once its parent turn has ended", async () => {
+    // Reproduce by dropping assertParentRunActive from the publish transaction: the child's
+    // version lands after its turn ended, past what a retry of that turn takes back.
+    write("work/review/document.md", "# Q3 review\n")
+    const parent = await startRun("thr_parent", owner)
+    const child = { ...run, parentRunId: parent.id }
+
+    await publish({ path: "work/review", kind: "document", title: "Q3 review" }, { run: child })
+    await storage.agents.runs.finish({
+      projectId,
+      id: parent.id,
+      executionToken: parent.executionToken,
+      status: "cancelled",
+    })
+    const { create } = tools({ run: child })
+    const refused = await create
+      .execute(
+        create.parseInput({ path: "work/review", kind: "document", title: "Again" }),
+        context
+      )
+      .catch((error: unknown) => error)
+
+    expect(create.errorText(refused)).toContain("the parent Agent run has ended")
+    expect((await storage.artifacts.list({ projectId })).artifacts).toHaveLength(1)
+  })
+
   test("points the Agent at a page's screenshots at both widths, and its warnings", () => {
     // Reproduce by wording every check as a deck's: the Agent looks for slide-NN.png.
     const output = {

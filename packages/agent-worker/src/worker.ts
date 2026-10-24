@@ -10,7 +10,7 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import {
   enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
@@ -82,6 +82,7 @@ import { executeWorkflowAgentNode } from "./workflow-node-execution"
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
 const DEFAULT_SUBAGENT_CONCURRENCY = 4
+const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const MAX_TIMER_DURATION_MS = 2_147_483_647
 /** Request paths publish their own jobs; this pass only repairs a publication or cancel they lost. */
@@ -527,8 +528,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    */
   private async finishInterruptedTurn(
     context: AgentWorkerContext,
-    queuedRun: ConversationAgentRunRecord,
-    delivery: QueueDelivery<AgentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
+    queuedRun: AgentRunRecord,
+    delivery: { readonly leaseExpiresAt: string }
   ): Promise<void> {
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
@@ -541,11 +542,18 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       reservation.run,
       reservation.run.execution.token,
       "cancelled",
-      new AgentTurnInterruptedError(queuedRun.id)
+      queuedRun.kind === "subagent"
+        ? withFailureMessage(
+            new AgentTurnInterruptedError(queuedRun.id),
+            "The subagent stopped when the worker running it did. Spawn it again with a new key if its answer is still needed: what it already changed stays changed."
+          )
+        : new AgentTurnInterruptedError(queuedRun.id)
     )
     if (!finalized) return
     await context.streamSink.publishRunFinished(finalized.run)
-    await this.cancelActiveSubagents(finalized.run.id, "The parent Agent run was interrupted.")
+    if (finalized.run.kind === "conversation") {
+      await this.cancelActiveSubagents(finalized.run.id, "The parent Agent run was interrupted.")
+    }
   }
 
   async executeSubagent(
@@ -567,6 +575,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
     }
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") return
+    // Like a conversation turn, a child left running by a dead delivery already ran its tools:
+    // actions, artifact versions, billed model calls. A replay would repeat them, so it ends
+    // interrupted and its parent decides whether to spawn it again.
+    if (queuedRun.status === "running") {
+      const ownedUntil = queuedRun.execution?.queueLeaseExpiresAt
+      if (ownedUntil && ownedUntil.getTime() > Date.now()) {
+        throw new AgentRunOwnedElsewhereError(queuedRun.id, ownedUntil)
+      }
+      await this.finishInterruptedTurn(context, queuedRun, delivery)
+      return
+    }
 
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
@@ -822,6 +841,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     claimed: ClaimedQueueJob<SubagentQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision<(typeof AGENT_RUN_FAILURE_CODES)[number]>> {
+    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
     if (
       error instanceof AgentFinalizationError &&
       claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS
@@ -840,8 +860,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   onSubagentAbortError(
     _claimed: ClaimedQueueJob<SubagentQueueJob>,
-    _error: unknown
+    error: unknown
   ): QueueWorkerFailureDecision {
+    // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
+    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
     return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
   }
 
@@ -1278,6 +1300,10 @@ function buildAgentContext(
     recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs,
+    subagentConcurrencyPerRun: normalizeConcurrency(
+      "subagentConcurrencyPerRun",
+      options.subagentConcurrencyPerRun ?? DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN
+    ),
     locale: host.locale,
     timeZone: host.timeZone,
   }
@@ -1414,6 +1440,16 @@ async function retryPreparationInPlace<T>(
     await waitForAbort(backoffMs, signal)
     signal.throwIfAborted()
   }
+}
+
+function normalizeConcurrency(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent worker option ${name} must be a positive integer.`
+    )
+  }
+  return value
 }
 
 function normalizeTurnTimeoutMs(value: number | undefined): number {

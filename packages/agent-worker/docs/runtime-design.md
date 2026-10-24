@@ -131,11 +131,16 @@ Each child:
   them with the parent's own;
 - owns a durable run, usage records and stream, but no conversation thread;
 - stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
-  the parent's deadline, which its spec carries, so its wait in the queue counts against it.
+  the parent's deadline, which its spec carries, so its wait in the queue counts against it. Once
+  its parent has ended, the gateway and the publish transaction refuse it;
+- is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
+  run actions or published. Its parent decides whether to spawn it again;
+- holds a call its mode does not run on its parent's turn, finishes and says so; `wait_agent` lists
+  that call under `awaitingApproval`.
 
-Up to four children may be active per parent run. They execute on a separate worker lane, sized by
-`subagentConcurrency`, so waiting parents cannot consume their capacity. Child agents cannot
-delegate again or start workflows.
+`subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They execute on a
+separate worker lane, sized by `subagentConcurrency`, so waiting parents cannot consume their
+capacity. Child agents cannot delegate again or start workflows.
 
 The delegation guide lists each model from its configured definition, never its provider catalog,
 so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
@@ -144,5 +149,8 @@ are not guessed.
 ## Child runs
 
 Child events are recorded in the broker, but the client API does not expose their streams. The
-parent receives their durable results through `wait_agent`: each child's final answer, the text of
-its last step. A child's files stay in its sandbox, except the artifacts it publishes.
+parent receives their durable results through `wait_agent`: each child's final answer, the text it
+wrote after its last local tool call, else its last text. `wait_agent` returns
+`WAIT_ANSWER_MARGIN_MS` (a minute) before the parent's deadline, children still at work reported
+`queued` or `running`, so the parent answers before it times out. A child's files stay in its
+sandbox, except the artifacts it publishes.

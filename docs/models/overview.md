@@ -134,8 +134,10 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   the task the agent writes, and answers the agent, not the user.
 - **What it publishes lands in the conversation**, like the agent's own
   [artifacts](../artifacts/overview.md).
-- **It stops with the turn that started it**, whether the turn ends, is stopped or times out. It
-  cannot delegate again or start a workflow. Its model calls count toward the user's
+- **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
+  minute before the turn's time is up, the agent stops waiting and answers with what the others
+  found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
+- It cannot delegate again or start a workflow. Its model calls count toward the user's
   [AI usage](./usage-and-limits.md).
 
 ## Control access
@@ -232,7 +234,7 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
 - If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
   run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
 - **A sub-agent asks with its turn's mode.** When one of its calls waits, it ends its work and
-  reports what it was about to do; the call waits on the turn that started it.
+  says so; the call waits on the turn that started it, and the agent tells you.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
 Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,

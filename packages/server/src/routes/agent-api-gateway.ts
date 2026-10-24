@@ -12,6 +12,7 @@ import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type {
   AgentRunRecord,
   ConversationAgentRunRecord,
+  SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -102,6 +103,11 @@ async function handleAgentApiGatewayRequest(input: {
   // saved a note.
   if (authState.agentExecution.kind === "workflow" && matchesAgentMemory(upstreamPath)) {
     return jsonError(403, "Workflow agent nodes have no Agent memory.")
+  }
+  // A child works for its turn: once the turn has ended, or a retry has taken back its work, the
+  // child changes nothing more.
+  if ("kind" in run && run.kind === "subagent" && !(await parentRunActive(input.host, run))) {
+    return jsonError(409, "The child agent's parent run has ended.")
   }
   // A child reads what its parent's conversation remembers; only the conversation saves to it.
   if (
@@ -356,6 +362,14 @@ async function readGatewayRequestBody(
 
 function isSimpleFileUpload(method: string, pathname: string): boolean {
   return method === "POST" && normalizeRoutePath(pathname) === "/api/files"
+}
+
+async function parentRunActive(host: SixbHostView, run: SubagentRunRecord): Promise<boolean> {
+  const parent = await host.storage.agents?.runs.getById({
+    projectId: host.id,
+    id: run.parentRunId,
+  })
+  return parent?.status === "queued" || parent?.status === "running"
 }
 
 function matchesAgentMemory(pathname: string): boolean {

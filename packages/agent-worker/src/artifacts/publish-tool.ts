@@ -121,6 +121,8 @@ export interface PublishingRun {
   readonly id: string
   readonly threadId: string
   readonly executionToken: string
+  /** A child's parent turn: once it ends, or a retry takes back what it published, nothing lands. */
+  readonly parentRunId?: string
 }
 
 interface PublishToolsInput {
@@ -177,6 +179,18 @@ export function createPublishArtifactTools(
   ]
 }
 
+async function assertParentRunActive(
+  storage: Storage,
+  projectId: string,
+  parentRunId: string,
+  tool: PublishToolName
+): Promise<void> {
+  const parent = await storage.agents?.runs.getById({ projectId, id: parentRunId })
+  if (parent?.status === "queued" || parent?.status === "running") return
+
+  throw publishError(tool, "the parent Agent run has ended, so nothing was published")
+}
+
 /** A run that lost its conversation stores nothing, and the trace says so instead of "an error". */
 function publishErrorText(error: unknown, tool: PublishToolName): string {
   return error instanceof AgentExecutionLostError
@@ -200,7 +214,8 @@ async function publish(
 ): Promise<JsonValue> {
   signal.throwIfAborted()
   const { artifacts } = input
-  const ownership = { projectId: input.projectId, ...input.run }
+  const { parentRunId, ...run } = input.run
+  const ownership = { projectId: input.projectId, ...run }
   await assertRunExecutionOwned(input.storage, ownership)
   const kind: ArtifactKind =
     "kind" in request.target
@@ -277,8 +292,11 @@ async function publish(
         origin: { threadId: input.run.threadId, runId: input.run.id },
       }
     )
+    signal.throwIfAborted()
     published = await input.storage.transaction(async (tx) => {
       await assertRunExecutionOwned(tx, ownership)
+      if (parentRunId !== undefined)
+        await assertParentRunActive(tx, input.projectId, parentRunId, tool)
       const stored = tx.artifacts
       if (!stored) throw new Error("[SixbAgentWorker] Storage transactions hold no artifacts.")
       // Checks again what the requester may do: the owner may have deleted it since the check

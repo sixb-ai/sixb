@@ -1,12 +1,11 @@
-import type { AgentMessage } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
+import type { ModelStep } from "@sixb/core/models"
 import { coerceAgentRunFinishReason, type SubagentRunRecord } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, withCurrentTime } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { finishRunOrThrow } from "./finalize"
-import { agentTraceFromModelSteps } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
@@ -65,13 +64,7 @@ export async function runSubagent(input: {
       `The subagent's model reached its output limit before finishing its answer. ${remedy}`
     )
   }
-  // The parent reads the child's answer, not the narration of the steps that led to it.
-  const finalStep = generation.steps.slice(-1)
-  const parts = agentTraceFromModelSteps(finalStep, {
-    parentRunId: run.parentRunId,
-    runId: run.id,
-  })
-  const childResult = subagentResult(parts, run)
+  const childResult = subagentResult(generation.steps, run)
 
   const finalized = await finishRunOrThrow(context.storage.agents, {
     projectId: context.id,
@@ -101,20 +94,46 @@ function assertSubagentCanFinalize(input: {
   input.runtime.assertCanContinue()
 }
 
+/** The child's answer, or a failure that tells the parent what to do about none. */
 function subagentResult(
-  parts: AgentMessage["parts"],
+  steps: readonly ModelStep[],
   run: SubagentRunRecord
 ): NonNullable<SubagentRunRecord["result"]> {
-  const text = parts
-    .flatMap((part) => (part.type === "text" ? [part.text] : []))
-    .join("\n")
-    .trim()
+  const text = subagentAnswer(steps)
   if (!text) {
-    throw createSixbError(
-      "agent.execution_failed",
-      `[SixbAgentWorker] Subagent run '${run.id}' produced no final text.`,
-      { details: { parentRunId: run.parentRunId, runId: run.id } }
+    const remedy = "Spawn it again with a task that says what its answer must contain."
+    throw withFailureMessage(
+      createSixbError(
+        "agent.execution_failed",
+        `[SixbAgentWorker] Subagent run '${run.id}' finished without an answer. ${remedy}`,
+        { details: { parentRunId: run.parentRunId, runId: run.id } }
+      ),
+      `The subagent finished without an answer. ${remedy}`
     )
   }
   return { text }
+}
+
+/**
+ * What the child answers: the text it wrote once its last local tool returned, through any provider
+ * continuation. Without any, the last text it wrote, such as an answer it gave before a final tool
+ * call. Narration written before earlier tool calls never reaches the parent.
+ */
+export function subagentAnswer(steps: readonly ModelStep[]): string {
+  const ranLocalTools = steps.map((step) =>
+    step.content.some((part) => part.type === "tool-call" && part.providerExecuted !== true)
+  )
+  const answer = textOf(steps.slice(ranLocalTools.lastIndexOf(true) + 1))
+  if (answer) return answer
+
+  const written = steps.map((step) => textOf([step])).filter(Boolean)
+  return written.at(-1) ?? ""
+}
+
+function textOf(steps: readonly ModelStep[]): string {
+  return steps
+    .flatMap((step) => step.content)
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n")
+    .trim()
 }
