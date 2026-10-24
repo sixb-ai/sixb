@@ -1,13 +1,17 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
-import { principalsEqual } from "../../auth"
+import { type Principal, principalsEqual } from "../../auth"
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
 import {
+  agentApprovalCallKey,
+  agentApprovalMatches,
   agentContextCheckpointMatchesCreateInput,
   agentMemoryConflicts,
   agentMemoryHistoryCutoff,
+  assertAgentApprovalCaller,
+  assertAgentApprovalModeInput,
   assertAgentContextCheckpointAnchors,
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
@@ -15,10 +19,13 @@ import {
   assertConversationAgentRunSpec,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
+  assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
   assertSubagentRunResult,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
+  LIVE_AGENT_APPROVAL_STATUSES,
+  newAgentApprovalRecord,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -28,6 +35,11 @@ import {
 } from "./provider"
 import type {
   AddAgentThreadParticipantsInput,
+  AgentApprovalMode,
+  AgentApprovalModeStore,
+  AgentApprovalOutcome,
+  AgentApprovalRecord,
+  AgentApprovalStore,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
   AgentMemoryChange,
@@ -51,10 +63,14 @@ import type {
   CreateAgentRunInput,
   CreateAgentThreadInput,
   CreateSubagentRunInput,
+  DecideAgentApprovalInput,
+  DecideAgentApprovalResult,
   DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ForkAgentThreadInput,
+  ListAgentApprovalsInput,
+  ListAgentApprovalsResult,
   ListAgentMemoryRevisionsInput,
   ListAgentMemoryRevisionsResult,
   ListAgentMessagesInput,
@@ -64,10 +80,14 @@ import type {
   ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
+  MarkAgentApprovalsReportedInput,
   ReclaimAgentRunInput,
   RemoveAgentThreadParticipantInput,
+  RequestAgentApprovalInput,
+  RequestAgentApprovalResult,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
+  SettleAgentApprovalsInput,
   StartAgentRunInput,
   SubagentRunRecord,
   TransitionAgentThreadSandboxInput,
@@ -132,6 +152,9 @@ interface AgentStoreState {
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
   readonly memory: Map<string, StoredAgentMemoryRepo>
+  readonly approvals: Map<string, AgentApprovalRecord>
+  /** By `[projectId, principal]` for a default, `[projectId, threadId, principal]` for a thread. */
+  readonly approvalModes: Map<string, AgentApprovalMode>
 }
 
 /** A memory repo as its two SQL tables hold it: revisions, and the file versions each wrote. */
@@ -149,6 +172,8 @@ export interface InMemoryAgentStorageSnapshot {
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
   readonly memory: Map<string, StoredAgentMemoryRepo>
+  readonly approvals: Map<string, AgentApprovalRecord>
+  readonly approvalModes: Map<string, AgentApprovalMode>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -626,6 +651,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
     this.state.runs.set(key(input.projectId, input.id), clone(next))
 
     this.releaseThread(run, completedAt)
+    if (input.status !== "succeeded") this.cancelPendingApprovals(run)
 
     return clone(next)
   }
@@ -697,6 +723,19 @@ class InMemoryAgentRunStore implements AgentRunStore {
       )
     }
     return run
+  }
+
+  /** A run that failed or was cancelled takes its held calls with it. */
+  private cancelPendingApprovals(run: AgentRunRecord): void {
+    for (const [approvalKey, approval] of this.state.approvals) {
+      if (
+        approval.projectId === run.projectId &&
+        approval.status === "pending" &&
+        (approval.runId === run.id || approval.callerRunId === run.id)
+      ) {
+        this.state.approvals.set(approvalKey, { ...approval, status: "cancelled" })
+      }
+    }
   }
 
   private releaseThread(run: AgentRunRecord, completedAt: Date): void {
@@ -1078,6 +1117,203 @@ function latestMemoryFiles(
   return latest
 }
 
+// ── approvals ─────────────────────────────────────────────────────────────────────────────────
+
+class InMemoryAgentApprovalStore implements AgentApprovalStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async request(input: RequestAgentApprovalInput): Promise<RequestAgentApprovalResult> {
+    assertRequestAgentApprovalInput(input)
+
+    const threadId = assertAgentApprovalCaller({
+      request: input,
+      turn: this.state.runs.get(key(input.projectId, input.runId)) ?? null,
+      caller: this.state.runs.get(key(input.projectId, input.callerRunId)) ?? null,
+    })
+    const callKey = agentApprovalCallKey(input.call)
+    const live = [...this.state.approvals.values()].find(
+      (approval) =>
+        approval.projectId === input.projectId &&
+        approval.threadId === threadId &&
+        approval.callKey === callKey &&
+        (LIVE_AGENT_APPROVAL_STATUSES as readonly string[]).includes(approval.status)
+    )
+    if (live) return { approval: clone(live), created: false }
+
+    if (this.state.approvals.has(key(input.projectId, input.id))) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent approval '${input.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+    const approval = newAgentApprovalRecord(input, threadId)
+    this.state.approvals.set(key(input.projectId, input.id), clone(approval))
+    return { approval: clone(approval), created: true }
+  }
+
+  async decide(input: DecideAgentApprovalInput): Promise<DecideAgentApprovalResult | null> {
+    const approvalKey = key(input.projectId, input.id)
+    const approval = this.state.approvals.get(approvalKey)
+    if (!approval) return null
+    if (approval.status !== "pending") return { approval: clone(approval), decided: false }
+
+    const decidedAt = new Date(input.decidedAt ?? new Date())
+    const next: AgentApprovalRecord =
+      approval.expiresAt <= decidedAt
+        ? { ...approval, status: "expired" }
+        : {
+            ...approval,
+            status: input.decision,
+            decidedAt,
+            decidedBy: clone(input.decidedBy),
+          }
+    this.state.approvals.set(approvalKey, clone(next))
+    return { approval: clone(next), decided: next.status === input.decision }
+  }
+
+  async recordOutcome(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly outcome: AgentApprovalOutcome
+  }): Promise<AgentApprovalRecord> {
+    const approvalKey = key(input.projectId, input.id)
+    const approval = this.state.approvals.get(approvalKey)
+    if (!approval) {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[Sixb] Agent approval '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (approval.status !== "approved") {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[Sixb] Agent approval '${input.id}' is not approved (status '${approval.status}').`
+      )
+    }
+    if (approval.outcome) return clone(approval)
+
+    const next = { ...approval, outcome: clone(input.outcome) }
+    this.state.approvals.set(approvalKey, clone(next))
+    return clone(next)
+  }
+
+  async settle(input: SettleAgentApprovalsInput): Promise<readonly AgentApprovalRecord[]> {
+    const settled: AgentApprovalRecord[] = []
+    for (const [approvalKey, approval] of this.state.approvals) {
+      if (
+        approval.projectId !== input.projectId ||
+        approval.threadId !== input.threadId ||
+        approval.status !== "pending"
+      ) {
+        continue
+      }
+      const next = { ...approval, status: input.status }
+      this.state.approvals.set(approvalKey, clone(next))
+      settled.push(next)
+    }
+    return settled.sort(compareApprovals).map(clone)
+  }
+
+  async markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]> {
+    const marked: string[] = []
+    for (const id of new Set(input.ids)) {
+      const approvalKey = key(input.projectId, id)
+      const approval = this.state.approvals.get(approvalKey)
+      if (
+        !approval ||
+        approval.threadId !== input.threadId ||
+        approval.reportedInMessageId !== undefined
+      ) {
+        continue
+      }
+      this.state.approvals.set(approvalKey, { ...approval, reportedInMessageId: input.messageId })
+      marked.push(id)
+    }
+    return marked
+  }
+
+  async getById(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<AgentApprovalRecord | null> {
+    const approval = this.state.approvals.get(key(params.projectId, params.id))
+    return approval ? clone(approval) : null
+  }
+
+  async list(input: ListAgentApprovalsInput): Promise<ListAgentApprovalsResult> {
+    const matching = [...this.state.approvals.values()]
+      .filter((approval) => agentApprovalMatches(approval, input))
+      .sort(compareApprovals)
+    const { page, hasMore, total } = applyWindow(matching, input.offset, input.limit)
+    return { approvals: page.map(clone), hasMore, total }
+  }
+}
+
+/** Oldest first, then by id: the order every provider lists approvals in. */
+function compareApprovals(left: AgentApprovalRecord, right: AgentApprovalRecord): number {
+  return compareByDate(left.createdAt, right.createdAt, left.id, right.id, "asc")
+}
+
+class InMemoryAgentApprovalModeStore implements AgentApprovalModeStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async getDefault(input: {
+    readonly projectId: string
+    readonly principal: Principal
+  }): Promise<AgentApprovalMode | null> {
+    return this.state.approvalModes.get(defaultModeKey(input)) ?? null
+  }
+
+  async setDefault(input: {
+    readonly projectId: string
+    readonly principal: Principal
+    readonly mode: AgentApprovalMode
+  }): Promise<void> {
+    assertAgentApprovalModeInput(input.mode)
+    this.state.approvalModes.set(defaultModeKey(input), input.mode)
+  }
+
+  async getForThread(input: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly principal: Principal
+  }): Promise<AgentApprovalMode | null> {
+    return this.state.approvalModes.get(threadModeKey(input)) ?? null
+  }
+
+  async setForThread(input: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly principal: Principal
+    readonly mode: AgentApprovalMode | null
+  }): Promise<void> {
+    if (input.mode !== null) assertAgentApprovalModeInput(input.mode)
+    if (!this.state.threads.has(key(input.projectId, input.threadId))) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (input.mode === null) {
+      this.state.approvalModes.delete(threadModeKey(input))
+      return
+    }
+    this.state.approvalModes.set(threadModeKey(input), input.mode)
+  }
+}
+
+function defaultModeKey(input: { readonly projectId: string; readonly principal: Principal }) {
+  return JSON.stringify([input.projectId, input.principal.type, input.principal.id])
+}
+
+function threadModeKey(input: {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: Principal
+}) {
+  return JSON.stringify([input.projectId, input.threadId, input.principal.type, input.principal.id])
+}
+
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
@@ -1086,6 +1322,8 @@ export class InMemoryAgentStorage implements AgentStorage {
     messages: new Map(),
     checkpoints: new Map(),
     memory: new Map(),
+    approvals: new Map(),
+    approvalModes: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
@@ -1093,6 +1331,8 @@ export class InMemoryAgentStorage implements AgentStorage {
   readonly messages: InMemoryAgentMessageStore
   readonly checkpoints: InMemoryAgentContextCheckpointStore
   readonly memory: InMemoryAgentMemoryStore
+  readonly approvals: InMemoryAgentApprovalStore
+  readonly approvalModes: InMemoryAgentApprovalModeStore
 
   constructor(executions: ExecutionStorage) {
     this.threads = new InMemoryAgentThreadStore(this.state)
@@ -1100,6 +1340,8 @@ export class InMemoryAgentStorage implements AgentStorage {
     this.messages = new InMemoryAgentMessageStore(this.state)
     this.checkpoints = new InMemoryAgentContextCheckpointStore(this.state)
     this.memory = new InMemoryAgentMemoryStore(this.state)
+    this.approvals = new InMemoryAgentApprovalStore(this.state)
+    this.approvalModes = new InMemoryAgentApprovalModeStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -1110,6 +1352,8 @@ export class InMemoryAgentStorage implements AgentStorage {
       messages: structuredClone(this.state.messages),
       checkpoints: structuredClone(this.state.checkpoints),
       memory: structuredClone(this.state.memory),
+      approvals: structuredClone(this.state.approvals),
+      approvalModes: structuredClone(this.state.approvalModes),
     }
   }
 
@@ -1120,6 +1364,8 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.messages, snapshot.messages)
     replace(this.state.checkpoints, snapshot.checkpoints)
     replace(this.state.memory, snapshot.memory)
+    replace(this.state.approvals, snapshot.approvals)
+    replace(this.state.approvalModes, snapshot.approvalModes)
   }
 }
 

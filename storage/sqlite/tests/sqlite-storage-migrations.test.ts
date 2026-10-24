@@ -194,6 +194,7 @@ const shippedMigrationIds = [
   "073-model-call-files",
   "074-agent-memory",
   "075-artifact-threads",
+  "076-agent-approvals",
 ]
 
 afterEach(async () => {

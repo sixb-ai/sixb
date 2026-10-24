@@ -251,6 +251,8 @@ export function createAgentOperationScope<T extends AgentStorage>(
     messages: createOperationScopedFacade(target.messages, scope),
     checkpoints: createOperationScopedFacade(target.checkpoints, scope),
     memory: createOperationScopedFacade(target.memory, scope),
+    approvals: createOperationScopedFacade(target.approvals, scope),
+    approvalModes: createOperationScopedFacade(target.approvalModes, scope),
   }) as T
 }
 

@@ -10,6 +10,10 @@ import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
 import type {
   AddAgentThreadParticipantsInput,
+  AgentApprovalCall,
+  AgentApprovalMode,
+  AgentApprovalRecord,
+  AgentApprovalStatus,
   AgentContextCheckpointRecord,
   AgentMemoryChange,
   AgentMessageRecord,
@@ -22,12 +26,18 @@ import type {
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   ForkAgentThreadInput,
+  ListAgentApprovalsInput,
+  RequestAgentApprovalInput,
   SaveAgentMemoryInput,
   SubagentRunRecord,
   SubagentRunResult,
   TransitionAgentThreadSandboxInput,
 } from "./types"
-import { AGENT_MEMORY_HISTORY_DAYS } from "./types"
+import {
+  AGENT_APPROVAL_MODES,
+  AGENT_HOLDING_APPROVAL_MODES,
+  AGENT_MEMORY_HISTORY_DAYS,
+} from "./types"
 
 const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9-]{1,80}$/
 
@@ -354,6 +364,33 @@ export function assertConversationAgentRunSpec(
       )
     }
   }
+  assertApprovalModeField(spec.approvalMode, "Conversational Agent run", prefix)
+}
+
+export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {
+  return (AGENT_APPROVAL_MODES as readonly unknown[]).includes(value)
+}
+
+/** Validate a mode a store is asked to keep, before it writes anything. */
+export function assertAgentApprovalModeInput(
+  mode: unknown,
+  prefix = "Sixb"
+): asserts mode is AgentApprovalMode {
+  if (!isAgentApprovalMode(mode)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent approval mode must be one of: ${AGENT_APPROVAL_MODES.join(", ")}.`
+    )
+  }
+}
+
+function assertApprovalModeField(value: unknown, owner: string, prefix: string): void {
+  if (value !== undefined && !isAgentApprovalMode(value)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] ${owner} 'approvalMode' must be one of: ${AGENT_APPROVAL_MODES.join(", ")}.`
+    )
+  }
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -441,6 +478,8 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
       `[${prefix}] Subagent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
+  assertApprovalModeField(input.spec.approvalMode, "Subagent run", prefix)
+
   if (input.spec.toolNames.some((name) => !name.trim())) {
     throw new AgentStorageError(
       "invalid_input",
@@ -759,4 +798,129 @@ export function compareAgentMemoryPaths(left: string, right: string): number {
 /** File versions written before this time leave the history once a newer version exists. */
 export function agentMemoryHistoryCutoff(savedAt: Date): Date {
   return new Date(savedAt.getTime() - AGENT_MEMORY_HISTORY_DAYS * 24 * 60 * 60 * 1000)
+}
+
+// ── approvals ─────────────────────────────────────────────────────────────────────────────────
+
+/** An approval that still answers for its call key: a settled one asks again. */
+export const LIVE_AGENT_APPROVAL_STATUSES = [
+  "pending",
+  "approved",
+  "denied",
+] as const satisfies readonly AgentApprovalStatus[]
+
+/** The run id the call names: unique among a thread's live approvals. */
+export function agentApprovalCallKey(call: AgentApprovalCall): string {
+  return call.kind === "action" ? call.actionRunId : call.workflowRunId
+}
+
+export function assertRequestAgentApprovalInput(
+  input: RequestAgentApprovalInput,
+  prefix = "Sixb"
+): void {
+  for (const [name, value] of [
+    ["id", input.id],
+    ["projectId", input.projectId],
+    ["runId", input.runId],
+    ["callerRunId", input.callerRunId],
+    ["executionToken", input.executionToken],
+    ["call key", agentApprovalCallKey(input.call)],
+  ] as const) {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Agent approval '${name}' must not be empty.`
+      )
+    }
+  }
+  if (!(AGENT_HOLDING_APPROVAL_MODES as readonly unknown[]).includes(input.mode)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent approval mode must be one of: ${AGENT_HOLDING_APPROVAL_MODES.join(", ")}.`
+    )
+  }
+}
+
+/**
+ * Fence a held call: the caller run is running with the request's token, and is the turn or one of
+ * its children. Returns the turn's thread.
+ */
+export function assertAgentApprovalCaller(input: {
+  readonly request: RequestAgentApprovalInput
+  readonly turn: AgentRunRecord | null
+  readonly caller: AgentRunRecord | null
+  readonly prefix?: string
+}): string {
+  const { request, turn, caller } = input
+  const prefix = input.prefix ?? "Sixb"
+  if (!turn || !caller) {
+    throw new AgentStorageError(
+      "run_not_found",
+      `[${prefix}] Agent run '${turn ? request.callerRunId : request.runId}' not found for project '${request.projectId}'.`
+    )
+  }
+  if (turn.kind !== "conversation") {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent approval run '${turn.id}' must be a conversation turn.`
+    )
+  }
+  if (caller.id !== turn.id && !(caller.kind === "subagent" && caller.parentRunId === turn.id)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent run '${caller.id}' does not belong to turn '${turn.id}'.`
+    )
+  }
+  if (caller.status !== "running") {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent run '${caller.id}' is not running (status '${caller.status}').`
+    )
+  }
+  if (!caller.execution || caller.execution.token !== request.executionToken) {
+    throw new AgentStorageError(
+      "execution_lost",
+      `[${prefix}] Execution token is no longer current on agent run '${caller.id}'.`
+    )
+  }
+  return turn.threadId
+}
+
+/** The approval a request creates, before any provider writes it. */
+export function newAgentApprovalRecord(
+  input: RequestAgentApprovalInput,
+  threadId: string
+): AgentApprovalRecord {
+  return {
+    id: input.id,
+    projectId: input.projectId,
+    threadId,
+    runId: input.runId,
+    callerRunId: input.callerRunId,
+    requestedBy: structuredClone(input.requestedBy),
+    mode: input.mode,
+    callKey: agentApprovalCallKey(input.call),
+    call: structuredClone(input.call),
+    status: "pending",
+    createdAt: new Date(input.createdAt ?? new Date()),
+    expiresAt: new Date(input.expiresAt),
+  }
+}
+
+/** Whether an approval matches a list filter; providers run the same filter in SQL. */
+export function agentApprovalMatches(
+  approval: AgentApprovalRecord,
+  input: ListAgentApprovalsInput
+): boolean {
+  return (
+    approval.projectId === input.projectId &&
+    (input.threadId === undefined || approval.threadId === input.threadId) &&
+    (input.runId === undefined || approval.runId === input.runId) &&
+    (input.requestedBy === undefined ||
+      (approval.requestedBy.type === input.requestedBy.type &&
+        approval.requestedBy.id === input.requestedBy.id)) &&
+    (input.statuses === undefined || input.statuses.includes(approval.status)) &&
+    (input.reported === undefined ||
+      (approval.reportedInMessageId !== undefined) === input.reported)
+  )
 }

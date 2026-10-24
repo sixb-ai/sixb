@@ -2150,6 +2150,8 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     messages: agents.messages,
     checkpoints: agents.checkpoints,
     memory: agents.memory,
+    approvals: agents.approvals,
+    approvalModes: agents.approvalModes,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2193,6 +2195,8 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     messages: agents.messages,
     checkpoints: agents.checkpoints,
     memory: agents.memory,
+    approvals: agents.approvals,
+    approvalModes: agents.approvalModes,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2233,6 +2237,8 @@ function withObservedAgentMessageAppendStorage(
     runs: agents.runs,
     checkpoints: agents.checkpoints,
     memory: agents.memory,
+    approvals: agents.approvals,
+    approvalModes: agents.approvalModes,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),

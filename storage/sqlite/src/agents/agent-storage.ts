@@ -4,10 +4,12 @@ import {
   openSqliteStoreConnection,
   type SqliteStoreConnection,
 } from "../transactions"
+import { SqliteAgentApprovalStore } from "./approvals"
 import { SqliteAgentContextCheckpointStore } from "./checkpoints"
 import { SqliteAgentMemoryStore } from "./memory"
 import { SqliteAgentMessageStore } from "./messages"
 import { SqliteAgentRunStore } from "./runs"
+import { SqliteAgentApprovalModeStore } from "./settings"
 import { SqliteAgentThreadStore } from "./threads"
 
 export interface SqliteAgentStorageOptions {
@@ -20,8 +22,8 @@ export interface SqliteAgentStorageOptions {
 }
 
 /**
- * SQLite-backed agent persistence: thread, run, message, context-checkpoint, and memory sub-stores
- * sharing one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
+ * SQLite-backed agent persistence: thread, run, message, context-checkpoint, memory, approval and
+ * approval-mode sub-stores sharing one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
  * serializes them for single-flight and checkpoint compare-and-swap safety.
  */
 export class SqliteAgentStorage implements AgentStorage {
@@ -30,6 +32,8 @@ export class SqliteAgentStorage implements AgentStorage {
   readonly messages: SqliteAgentMessageStore
   readonly checkpoints: SqliteAgentContextCheckpointStore
   readonly memory: SqliteAgentMemoryStore
+  readonly approvals: SqliteAgentApprovalStore
+  readonly approvalModes: SqliteAgentApprovalModeStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -41,6 +45,8 @@ export class SqliteAgentStorage implements AgentStorage {
     this.messages = new SqliteAgentMessageStore(this.connection.db)
     this.checkpoints = new SqliteAgentContextCheckpointStore(this.connection.db)
     this.memory = new SqliteAgentMemoryStore(this.connection.db)
+    this.approvals = new SqliteAgentApprovalStore(this.connection.db)
+    this.approvalModes = new SqliteAgentApprovalModeStore(this.connection.db)
   }
 
   close(): void {
