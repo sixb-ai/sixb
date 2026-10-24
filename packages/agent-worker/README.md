@@ -70,7 +70,10 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
   Each child works in a thread of its own, which holds its task and then its work.
   `wait_agent` returns each child's final answer, the text it wrote after its last local tool call
-  (else its last text), and the calls it made that wait for approval. `spawn_agent`'s `files` copy
+  (else its last text). A child whose call waits for approval pauses, its work in its thread, and comes
+  back `awaiting_approval`; the turn pauses once no other child is at work, and the turn that
+  resumes it continues the child first (see
+  [paused children](./docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
   paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
   back as files of `wait_agent`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is

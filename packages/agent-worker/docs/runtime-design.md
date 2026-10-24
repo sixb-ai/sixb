@@ -138,9 +138,8 @@ Each child:
   its parent has ended, the gateway and the publish transaction refuse it;
 - is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
   run actions or published. Its parent decides whether to spawn it again;
-- holds a call its mode does not run on its parent's turn, finishes and says so; `wait_agent` lists
-  that call under `awaitingApproval`. The parent pauses on it only once the child has ended
-  (`turnPausesOnHeldCalls`): pausing earlier would cancel the child. Children don't pause yet.
+- holds a call its mode does not run on its parent's turn, and pauses: see
+  [paused children](#paused-children).
 
 `subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They execute on a
 separate worker lane, sized by `subagentConcurrency`, so waiting parents cannot consume their
@@ -149,6 +148,49 @@ capacity. Child agents cannot delegate again or start workflows.
 The delegation guide lists each model from its configured definition, never its provider catalog,
 so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
 are not guessed.
+
+## Paused children
+
+A child's held call is filed on its parent turn (`runId` the turn, `callerRunId` the child). The
+approval records decide, never the prompt or the tool output (`src/run-subagent.ts`,
+`src/subagent-continuation.ts`):
+
+- **The child pauses.** Its loop stops after the step that made the call (`pauseAfterStep` on
+  `holdsRun` for the child), or at its finish when a command left running held one. It ends
+  `succeeded` with `finishReason: "awaiting_approval"`, maybe without an answer, with what it did
+  as its thread's next message and its `out/` in its result. `wait_agent` treats it as done:
+  `status: "awaiting_approval"`, its waiting calls, and no files, which would pass for complete.
+- **The turn never stops a child for a held call.** Its own call pauses it after the step that
+  made it. A child's pauses it only once none of its children is queued or running
+  (`turnPausesOnHeldCalls`), so it goes on waiting for the others. A turn that pauses, after a
+  step or because it ended holding a call, first waits for its children still at work, until
+  `PAUSE_WAIT_MARGIN_MS` before its deadline: its end cancels them, and one that holds a call
+  pauses by itself meanwhile.
+- **The resumed turn continues it.** The report that resumes a turn marks each outcome whose caller
+  paused on its calls `caller.continues`, and the model reads that from the part. Before the
+  model runs, `continuePausedChildren` admits each such child, still paused, as the next run of its
+  thread under this turn and the same key (`createSubagentRunId(turn, key)`, so a replay finds it,
+  with `thread.create: false`). Its trigger holds the outcomes, copied without their caller so the
+  child reads them as its own, what came back to its new sandbox (its `out/`, or why none could be
+  kept) and when it continues. The model, task and handed files are the paused child's; the mode
+  and deadline are this turn's. A new message continues none.
+- **A retried resume continues it again.** The retry keeps its trigger, so it continues the child
+  again under its own id. The runs of the thread after the pause that ran under the failed
+  attempt are waited for until they stop (`clearDeadAttempts`, bounded by the turn's deadline),
+  then their messages leave the thread (`deleteByRunId`), as a retried turn's leave its own.
+- **Its history is its thread.** A continuation reads its thread's messages: the task and handed
+  files, dated by the thread's creation, each run's work and each trigger, in order, so its request
+  starts like the paused run's last one. Files its tools showed the earlier runs are projected as a
+  turn projects its history's (`prepareAgentAttachments` over the thread's messages): kept as
+  metadata, at a path in its sandbox, so a request that replays one differs from the live one there.
+  Its sandbox gets the handed files and the paused run's `out/` (`result.files`); at its finish
+  everything under `out/` returns, the inherited files included.
+- **The parent waits by the old id.** `wait_agent` resolves the run id of a child of an earlier turn
+  of the conversation to its thread's latest run, the one of this turn that continues it when there
+  is one, and answers with the id it was given. `spawn_agent` refuses a key a continuation holds:
+  its run works in a thread an earlier turn spawned.
+- A decision made while the turn still runs takes effect once it pauses: it then resumes at once,
+  and the child continues in the next turn.
 
 ## Child runs
 
