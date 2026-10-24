@@ -27,7 +27,7 @@ import { resolveRoleGrants } from "../src/authorization"
 import { resolveRuntimeAuthorization } from "../src/execution/authorization"
 import { createTestingScope } from "../src/execution/scopes"
 import { testLanguageModel } from "./helpers/language-model"
-import { resolveRolesWithConditions } from "./helpers/view-conditions"
+import { contextIn, groupsOf } from "./helpers/view-conditions"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
@@ -349,8 +349,19 @@ describe("view conditions", () => {
   const mine = can.view(Ticket).where((ticket) => ticket.p.owner.eq(currentUser()))
   const urgent = can.view(Ticket).where((ticket) => ticket.p.priority.gt(3))
 
-  const resolveWith = (roles: readonly RoleDefinition[]) =>
-    resolveRolesWithConditions({ ontology: [Ticket, Incident, Note], roles })
+  const resolveWith = (roles: readonly RoleDefinition[]) => {
+    const host = new SixbHost({
+      ontology: [Ticket, Incident, Note],
+      groups: groupsOf(roles),
+      roles,
+      ...createTestRuntimeDeps(),
+    })
+
+    return {
+      security: host.definitions.security,
+      contextFor: (groupIds: readonly string[]) => contextIn(host, groupIds),
+    }
+  }
 
   const role = (id: string, groupId: string, grants: RoleDefinition["grants"]) =>
     defineRole(id, { grantedTo: [defineGroup(groupId)], grants: [...grants] })

@@ -9,7 +9,7 @@ import {
   type StoredDomainEvent,
 } from "../../core/src"
 import { createTestSixb } from "../../core/src/testing"
-import { resolveRolesWithConditions } from "../../core/tests/helpers/view-conditions"
+import { contextIn } from "../../core/tests/helpers/view-conditions"
 import { createTestRuntimeDeps, waitFor } from "../../core/tests/test-runtime-deps"
 import { SubscriptionHub } from "../src/routes/ws/subscription-hub"
 
@@ -27,8 +27,9 @@ const Ticket = defineObjectType({
   ],
 })
 
+const staff = defineGroup("staff")
 const openTickets = defineRole("open-tickets", {
-  grantedTo: [defineGroup("open")],
+  grantedTo: [staff],
   grants: [can.view(Ticket).where((ticket) => ticket.p.status.eq("open"))],
 })
 
@@ -38,10 +39,15 @@ afterEach(() => jest.useRealTimers())
 // Reproduce: make core's events/view-conditions.ts throw on an object event it hides, and the
 // stream closes at the batch; return true for it instead, and the closed ticket is delivered.
 test("the event stream skips what a view condition hides, and keeps streaming", async () => {
-  const host = new SixbHost({ id: projectId, ontology: [Ticket], ...createTestRuntimeDeps() })
+  const host = new SixbHost({
+    id: projectId,
+    ontology: [Ticket],
+    groups: [staff],
+    roles: [openTickets],
+    ...createTestRuntimeDeps(),
+  })
   const trusted = createTestSixb(host)
-  const { contextFor } = resolveRolesWithConditions({ ontology: [Ticket], roles: [openTickets] })
-  const reader = createTestSixb(host, { authorization: contextFor(["open"]) })
+  const reader = createTestSixb(host, { authorization: contextIn(host, [staff.id]) })
 
   await trusted.objects(Ticket).upsert({ properties: { id: "t-closed", status: "closed" } })
   await trusted.objects(Ticket).upsert({ properties: { id: "t-open", status: "open" } })
