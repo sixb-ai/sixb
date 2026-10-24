@@ -31,6 +31,7 @@ import {
   createAuthServiceAccountAccessToken,
   createDeviceAuthorization,
   createFileUpload,
+  decideAgentApproval,
   deleteAgentMemory,
   deleteAiLimitPolicy,
   deleteArtifact,
@@ -55,6 +56,7 @@ import {
   getAgent,
   getAgentMemory,
   getAgentMessageFileContent,
+  getAgentPreferences,
   getAgentRun,
   getAgentThread,
   getAiAccountingOverview,
@@ -107,7 +109,9 @@ import {
   listActivityConnections,
   listActivityUsers,
   listActivityVisits,
+  listAgentApprovals,
   listAgentMemoryRevisions,
+  listAgentThreadApprovals,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -173,6 +177,7 @@ import {
   saveAgentMemory,
   searchObjects,
   selectConnectorConnectionRunAccount,
+  setAgentThreadApprovalMode,
   setArtifactState,
   signFileUploadPart,
   signOut,
@@ -182,6 +187,7 @@ import {
   submitWorkflowIntervention,
   suspendAuthMember,
   transcribeAudio,
+  updateAgentPreferences,
   updateAiLimitPolicy,
   updateAuthMemberGroups,
   updateAuthProfile,
@@ -254,6 +260,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
+  DecideAgentApprovalData,
+  DecideAgentApprovalError,
+  DecideAgentApprovalResponse,
   DeleteAgentMemoryData,
   DeleteAgentMemoryError,
   DeleteAgentMemoryResponse,
@@ -324,6 +333,9 @@ import type {
   GetAgentMessageFileContentData,
   GetAgentMessageFileContentError,
   GetAgentMessageFileContentResponse,
+  GetAgentPreferencesData,
+  GetAgentPreferencesError,
+  GetAgentPreferencesResponse,
   GetAgentResponse,
   GetAgentRunData,
   GetAgentRunError,
@@ -477,9 +489,15 @@ import type {
   ListActivityVisitsData,
   ListActivityVisitsError,
   ListActivityVisitsResponse,
+  ListAgentApprovalsData,
+  ListAgentApprovalsError,
+  ListAgentApprovalsResponse,
   ListAgentMemoryRevisionsData,
   ListAgentMemoryRevisionsError,
   ListAgentMemoryRevisionsResponse,
+  ListAgentThreadApprovalsData,
+  ListAgentThreadApprovalsError,
+  ListAgentThreadApprovalsResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -663,6 +681,9 @@ import type {
   SelectConnectorConnectionRunAccountData,
   SelectConnectorConnectionRunAccountError,
   SelectConnectorConnectionRunAccountResponse,
+  SetAgentThreadApprovalModeData,
+  SetAgentThreadApprovalModeError,
+  SetAgentThreadApprovalModeResponse,
   SetArtifactStateData,
   SetArtifactStateError,
   SetArtifactStateResponse,
@@ -690,6 +711,9 @@ import type {
   TranscribeAudioData,
   TranscribeAudioError,
   TranscribeAudioResponse,
+  UpdateAgentPreferencesData,
+  UpdateAgentPreferencesError,
+  UpdateAgentPreferencesResponse,
   UpdateAiLimitPolicyData,
   UpdateAiLimitPolicyError,
   UpdateAiLimitPolicyResponse,
@@ -4909,6 +4933,270 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
     },
     queryKey: getAgentRunQueryKey(options),
   })
+
+export const getAgentPreferencesQueryKey = (options?: Options<GetAgentPreferencesData>) =>
+  createQueryKey("getAgentPreferences", options)
+
+/**
+ * Get your Agent preferences
+ */
+export const getAgentPreferencesOptions = (options?: Options<GetAgentPreferencesData>) =>
+  queryOptions<
+    GetAgentPreferencesResponse,
+    GetAgentPreferencesError,
+    GetAgentPreferencesResponse,
+    ReturnType<typeof getAgentPreferencesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentPreferences({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentPreferencesQueryKey(options),
+  })
+
+/**
+ * Update your Agent preferences
+ *
+ * `approvalMode` is your default in the threads where you chose none: `manual` asks before every action and workflow, `accept-edits` runs the actions that only change Sixb, `auto` runs everything.
+ */
+export const updateAgentPreferencesMutation = (
+  options?: Partial<Options<UpdateAgentPreferencesData>>
+): UseMutationOptions<
+  UpdateAgentPreferencesResponse,
+  UpdateAgentPreferencesError,
+  Options<UpdateAgentPreferencesData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAgentPreferencesResponse,
+    UpdateAgentPreferencesError,
+    Options<UpdateAgentPreferencesData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAgentPreferences({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Choose your approval mode in an agent thread
+ *
+ * Applies to your next turns in the thread; other participants keep theirs. `null` follows your default again. A message can still pass its own `approvalMode`.
+ */
+export const setAgentThreadApprovalModeMutation = (
+  options?: Partial<Options<SetAgentThreadApprovalModeData>>
+): UseMutationOptions<
+  SetAgentThreadApprovalModeResponse,
+  SetAgentThreadApprovalModeError,
+  Options<SetAgentThreadApprovalModeData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SetAgentThreadApprovalModeResponse,
+    SetAgentThreadApprovalModeError,
+    Options<SetAgentThreadApprovalModeData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await setAgentThreadApprovalMode({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAgentThreadApprovalsQueryKey = (options: Options<ListAgentThreadApprovalsData>) =>
+  createQueryKey("listAgentThreadApprovals", options)
+
+/**
+ * List an agent thread's held calls
+ *
+ * Oldest first. Whoever reads the thread reads its approvals.
+ */
+export const listAgentThreadApprovalsOptions = (options: Options<ListAgentThreadApprovalsData>) =>
+  queryOptions<
+    ListAgentThreadApprovalsResponse,
+    ListAgentThreadApprovalsError,
+    ListAgentThreadApprovalsResponse,
+    ReturnType<typeof listAgentThreadApprovalsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreadApprovals({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadApprovalsQueryKey(options),
+  })
+
+export const listAgentThreadApprovalsInfiniteQueryKey = (
+  options: Options<ListAgentThreadApprovalsData>
+): QueryKey<Options<ListAgentThreadApprovalsData>> =>
+  createQueryKey("listAgentThreadApprovals", options, true)
+
+/**
+ * List an agent thread's held calls
+ *
+ * Oldest first. Whoever reads the thread reads its approvals.
+ */
+export const listAgentThreadApprovalsInfiniteOptions = (
+  options: Options<ListAgentThreadApprovalsData>
+) =>
+  infiniteQueryOptions<
+    ListAgentThreadApprovalsResponse,
+    ListAgentThreadApprovalsError,
+    InfiniteData<ListAgentThreadApprovalsResponse>,
+    QueryKey<Options<ListAgentThreadApprovalsData>>,
+    | string
+    | Pick<
+        QueryKey<Options<ListAgentThreadApprovalsData>>[0],
+        "body" | "headers" | "path" | "query"
+      >
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentThreadApprovalsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentThreadApprovals({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentThreadApprovalsInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Approve or deny a held agent call
+ *
+ * Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. The Agent reads how it ended at the start of the thread's next message. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox.
+ */
+export const decideAgentApprovalMutation = (
+  options?: Partial<Options<DecideAgentApprovalData>>
+): UseMutationOptions<
+  DecideAgentApprovalResponse,
+  DecideAgentApprovalError,
+  Options<DecideAgentApprovalData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DecideAgentApprovalResponse,
+    DecideAgentApprovalError,
+    Options<DecideAgentApprovalData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await decideAgentApproval({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAgentApprovalsQueryKey = (options?: Options<ListAgentApprovalsData>) =>
+  createQueryKey("listAgentApprovals", options)
+
+/**
+ * List the calls held for your decision
+ *
+ * Your own, across threads, oldest first.
+ */
+export const listAgentApprovalsOptions = (options?: Options<ListAgentApprovalsData>) =>
+  queryOptions<
+    ListAgentApprovalsResponse,
+    ListAgentApprovalsError,
+    ListAgentApprovalsResponse,
+    ReturnType<typeof listAgentApprovalsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentApprovals({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentApprovalsQueryKey(options),
+  })
+
+export const listAgentApprovalsInfiniteQueryKey = (
+  options?: Options<ListAgentApprovalsData>
+): QueryKey<Options<ListAgentApprovalsData>> => createQueryKey("listAgentApprovals", options, true)
+
+/**
+ * List the calls held for your decision
+ *
+ * Your own, across threads, oldest first.
+ */
+export const listAgentApprovalsInfiniteOptions = (options?: Options<ListAgentApprovalsData>) =>
+  infiniteQueryOptions<
+    ListAgentApprovalsResponse,
+    ListAgentApprovalsError,
+    InfiniteData<ListAgentApprovalsResponse>,
+    QueryKey<Options<ListAgentApprovalsData>>,
+    | string
+    | Pick<QueryKey<Options<ListAgentApprovalsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentApprovalsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentApprovals({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentApprovalsInfiniteQueryKey(options),
+    }
+  )
 
 export const getObservedAgentThreadQueryKey = (options: Options<GetObservedAgentThreadData>) =>
   createQueryKey("getObservedAgentThread", options)

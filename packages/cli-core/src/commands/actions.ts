@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
-import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
+import { CliError, EXIT_API, fail, writeJson, writeRequestResult, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, parseQueryOptions, readJson } from "./shared"
 
@@ -62,7 +62,7 @@ export async function actions(
     const requestedRunId = runId ?? `act_${randomUUID()}`
     const waiting = AbortSignal.timeout(requestWaitMs)
     try {
-      return writeJson(
+      return writeRequestResult(
         await api.post(
           `/api/actions/${encodeURIComponent(actionId)}`,
           {

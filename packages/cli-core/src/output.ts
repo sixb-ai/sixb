@@ -2,6 +2,8 @@
 export const INSTANCE_CLI_VERSION = "1"
 export const EXIT_USAGE = 2
 export const EXIT_API = 3
+/** The request waits for its user's approval: it did not run. */
+export const EXIT_AWAITING_APPROVAL = 4
 
 export interface CliErrorBody {
   readonly code: string
@@ -31,11 +33,30 @@ export function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
+/** Ends a command that already wrote its output, with an exit code that is not a success. */
+export class CliExit extends Error {
+  constructor(readonly exitCode: number) {
+    super(`The Sixb CLI exited with code ${exitCode}.`)
+    this.name = "CliExit"
+  }
+}
+
+/**
+ * Print what a request that changes state answered. A request held for the user's approval prints
+ * as the API answered it, and exits with {@link EXIT_AWAITING_APPROVAL}: `a && b` does not run `b`.
+ */
+export function writeRequestResult(value: unknown): void {
+  writeJson(value)
+  const status = typeof value === "object" && value !== null ? Reflect.get(value, "status") : null
+  if (status === "awaiting_approval") throw new CliExit(EXIT_AWAITING_APPROVAL)
+}
+
 export function writeText(value: string): void {
   process.stdout.write(value.endsWith("\n") ? value : `${value}\n`)
 }
 
 export function reportError(error: unknown): number {
+  if (error instanceof CliExit) return error.exitCode
   const cliError =
     error instanceof CliError
       ? error

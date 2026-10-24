@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import {
   type AuthorizablePrincipal,
+  type AuthorizationContext,
   can,
   defineAction,
   defineGroup,
@@ -19,6 +20,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   link,
+  param,
   prop,
   ref,
   SixbHost,
@@ -30,12 +32,22 @@ import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
 } from "@sixb/core/internal/agents"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { ImageModel, ModelCatalogInput } from "@sixb/core/models"
+import {
+  AGENT_APPROVAL_MODES,
+  type AgentApprovalMode,
+  type AgentApprovalRecord,
+} from "@sixb/core/storage"
 import {
   createTestAgentExecution,
   createTestSixb,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
+import { Elysia } from "elysia"
+import { registerAgentApprovalRoutes } from "../src/routes/agent-approvals"
+import { registerAgentRoutes } from "../src/routes/agents"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -124,10 +136,50 @@ const inspectDevices = defineWorkflow("inspect-devices")
   .input({ document: "fileRef" })
   .then(inspectDevice)
 
+/** An Action that reaches beyond Sixb: `accept-edits` holds it, unlike `label-device`. */
+const syncDevice = defineAction("sync-device")
+  .on(Device)
+  .params({ label: param("string") })
+  .writeback(() => ({ synced: true }))
+
+/** Changes Sixb, then notifies someone: its effects reach beyond Sixb too. */
+const notifyDevice = defineAction("notify-device")
+  .on(Device)
+  .params({})
+  .edits(({ objects, subject }) => {
+    objects(Device).byId(subject.primaryId).update({ label: "Notified" })
+  })
+  .effects(() => {})
+
+const pingDevice = defineWorkflowStep("ping-device")
+  .input({})
+  .output({})
+  .run(() => ({}))
+
+const pingDevices = defineWorkflow("ping-devices").input({}).then(pingDevice)
+
+const relabelDevice = defineWorkflowStep("relabel-device")
+  .input({ label: "string" })
+  .output({})
+  .run(() => ({}))
+
+const relabelDevices = defineWorkflow("relabel-devices")
+  .input({ label: "string" })
+  .then(relabelDevice)
+
 const agentRuntime = defineGroup("agent-runtime")
 const agentRole = defineRole("agent.runtime", {
   grantedTo: [agentRuntime],
-  grants: [can.view(Device), can.view(Contract), can.apply(labelDevice), can.run(inspectDevices)],
+  grants: [
+    can.view(Device),
+    can.view(Contract),
+    can.apply(labelDevice),
+    can.apply(syncDevice),
+    can.apply(notifyDevice),
+    can.run(inspectDevices),
+    can.run(pingDevices),
+    can.run(relabelDevices),
+  ],
 })
 
 // The workflow's requester can read notes; its AI task cannot. Nothing a task's request starts may
@@ -302,6 +354,8 @@ describe("agent API gateway", () => {
     expect(workflows.status).toBe(200)
     await expect(workflows.json()).resolves.toEqual([
       expect.objectContaining({ id: "inspect-devices" }),
+      expect.objectContaining({ id: "ping-devices" }),
+      expect.objectContaining({ id: "relabel-devices" }),
     ])
 
     const workflow = await app.fetch(new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices`))
@@ -1183,6 +1237,444 @@ async function executionById(storage: InMemoryStorage, id: string) {
   return execution
 }
 
+type GatedCall = "ontology action" | "external action" | "workflow"
+
+/** What each mode holds; the rest runs. */
+const HELD_BY_MODE: Readonly<Record<AgentApprovalMode, readonly GatedCall[]>> = {
+  manual: ["ontology action", "external action", "workflow"],
+  "accept-edits": ["external action", "workflow"],
+  auto: [],
+}
+
+describe("agent approval gate", () => {
+  // Guard proof: drop the `gateAgentApiCall` call from `handleAgentApiGatewayRequest`; every held
+  // case below finds its run in storage, because the route ran it.
+  for (const mode of AGENT_APPROVAL_MODES) {
+    test(`${mode} holds exactly ${HELD_BY_MODE[mode].join(", ") || "nothing"}`, async () => {
+      const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: mode })
+
+      for (const call of ["ontology action", "external action", "workflow"] as const) {
+        const runId = `run-${call.replace(" ", "-")}`
+        const response = await requestGatedCall(app, gatewayBaseUrl, call, runId)
+        const body = (await response.json()) as { status?: string }
+
+        const held = HELD_BY_MODE[mode].includes(call)
+        expect({
+          call,
+          status: response.status,
+          held: body.status === "awaiting_approval",
+        }).toEqual({ call, status: call === "workflow" || held ? 202 : 200, held })
+        expect({ call, ran: await gatedCallRan(storage, call, runId) }).toEqual({
+          call,
+          ran: !held,
+        })
+      }
+
+      const { approvals } = await storage.agents.approvals.list({ projectId: PROJECT_ID })
+      expect(approvals.map((approval) => approval.status)).toEqual(
+        HELD_BY_MODE[mode].map(() => "pending")
+      )
+    })
+  }
+
+  // Guard proof: count only a writeback as external in `prepareActionRequest`; the call runs.
+  test("accept-edits holds an action whose effects reach beyond Sixb", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+      approvalMode: "accept-edits",
+    })
+
+    const response = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/actions/notify-device`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+          runId: "act_notify",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(202)
+    expect(await storage.actionRuns.getById({ projectId: PROJECT_ID, id: "act_notify" })).toBeNull()
+  })
+
+  test("a turn from before approval modes runs what it asks, as it always did", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+
+    const response = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_old")
+
+    expect(response.status).toBe(200)
+    expect(await gatedCallRan(storage, "external action", "act_old")).toBe(true)
+  })
+
+  test("a held call answers what the CLI prints, and asking again holds the same approval", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+
+    const first = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const again = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
+
+    const body = {
+      status: "awaiting_approval",
+      approval: {
+        id: approval?.id,
+        kind: "action",
+        actionId: "sync-device",
+        subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+      },
+      message:
+        "The user approves or denies this in the conversation. Do not retry it or ask in text; end your turn.",
+    }
+    expect(await first.json()).toEqual(body)
+    expect(await again.json()).toEqual(body)
+    expect(approval).toMatchObject({
+      runId: "run-1",
+      callerRunId: "run-1",
+      requestedBy: { type: "user", id: "usr_requester" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "sync-device",
+        params: { label: "Fan" },
+        actionRunId: "act_sync",
+        effect: "external",
+      },
+    })
+    expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).total).toBe(1)
+  })
+
+  test("an approved call asked again returns its one run", async () => {
+    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
+      approvalMode: "manual",
+    })
+    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
+    if (!approval) throw new Error("Expected a held call.")
+
+    const decided = await decideAs(sixb, approval, "approve")
+    const again = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+
+    expect(decided.status).toBe(200)
+    expect(await decided.json()).toMatchObject({
+      approval: { status: "approved", outcome: { kind: "action-run", runId: "act_sync" } },
+    })
+    expect(again.status).toBe(200)
+    expect(await again.json()).toMatchObject({ id: "act_sync", status: "succeeded" })
+    expect((await storage.actionRuns.list({ projectId: PROJECT_ID })).total).toBe(1)
+  })
+
+  test("a denied call asked again is refused, and never runs", async () => {
+    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
+      approvalMode: "manual",
+    })
+    await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+    const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
+    if (!approval) throw new Error("Expected a held call.")
+
+    expect((await decideAs(sixb, approval, "deny")).status).toBe(200)
+    const again = await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+
+    expect(again.status).toBe(403)
+    expect(await again.json()).toEqual({ error: "The user denied this request. It did not run." })
+    expect(await gatedCallRan(storage, "workflow", "run_ping")).toBe(false)
+  })
+
+  test("a run id that names another held call is refused", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+
+    const other = await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_sync")
+
+    expect(other.status).toBe(409)
+    expect(await gatedCallRan(storage, "ontology action", "act_sync")).toBe(false)
+  })
+
+  test("a call held for approval must name its run", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+
+    const response = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/actions/label-device`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect((await storage.actionRuns.list({ projectId: PROJECT_ID })).total).toBe(0)
+    expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).total).toBe(0)
+  })
+
+  test("a call the route would refuse is refused, not held", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+
+    const response = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/actions/sync-device`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+          params: { label: 42 },
+          runId: "act_bad",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).total).toBe(0)
+  })
+
+  // Guard proof: hold `body.input` as it came in `prepareWorkflowCall`, without
+  // `prepareBoundWorkflowRequest`; the invalid start is held, and fails only once approved.
+  test("a workflow start is held as its run would store it, and refused when its input is not", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    const start = (input: unknown, runId: string) =>
+      app.fetch(
+        new Request(`${gatewayBaseUrl}/api/workflows/relabel-devices/runs`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input, runId }),
+        })
+      )
+
+    const invalid = await start({ label: 42 }, "run_bad")
+    const held = await start({ label: "Fan" }, "run_good")
+
+    expect(invalid.status).toBe(400)
+    expect(held.status).toBe(202)
+    expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals).toEqual([
+      expect.objectContaining({
+        call: {
+          kind: "workflow",
+          workflowId: "relabel-devices",
+          input: { label: "Fan" },
+          workflowRunId: "run_good",
+        },
+      }),
+    ])
+  })
+
+  // Guard proof: drop `approvalMode` from the child's spec in this test; the call runs.
+  test("a child's call is held for the turn that spawned it, with the child's mode", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+      executionKind: "subagent",
+      approvalMode: "manual",
+    })
+
+    const response = await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_child")
+
+    expect(response.status).toBe(202)
+    expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals).toEqual([
+      expect.objectContaining({ runId: "parent-run-1", callerRunId: "child-run-1" }),
+    ])
+    expect(await gatedCallRan(storage, "ontology action", "act_child")).toBe(false)
+  })
+
+  test("a workflow AI task runs its calls on its own", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+      executionKind: "workflow",
+    })
+
+    const response = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_task")
+
+    expect(response.status).toBe(200)
+    expect(await gatedCallRan(storage, "external action", "act_task")).toBe(true)
+  })
+
+  // Guard proof: add the decision route to SIXB_API_ROUTES with `agentApi: true` (and an
+  // `agentEffect` the gate forwards, such as `memory`); the gateway serves it, and an Agent whose
+  // requester may run the Agent approves its own call. The mode routes are PUTs, which the gateway
+  // serves none of.
+  test("the Agent cannot reach the decision route", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
+    if (!approval) throw new Error("Expected a held call.")
+    const path = `/api/agent-threads/thread-1/approvals/${approval.id}/decision`
+
+    const response = await app.fetch(
+      new Request(`${gatewayBaseUrl}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "approve" }),
+      })
+    )
+
+    // The gateway serves no such route: the request never reaches the decision handler.
+    expect(response.status).toBe(404)
+    expect(await response.text()).toBe("NOT_FOUND")
+    expect(
+      await storage.agents.approvals.getById({ projectId: PROJECT_ID, id: approval.id })
+    ).toMatchObject({ status: "pending" })
+  })
+
+  test("the generated agent CLI prints a held call and exits with code 4", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({ approvalMode: "manual" })
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
+    const baseUrl = new URL(gatewayBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+
+    try {
+      const held = await runAgentCli(baseUrl.href, [
+        "actions",
+        "request",
+        "label-device",
+        "--subject-type",
+        "device",
+        "--subject-id",
+        "fan-1",
+      ])
+
+      expect(held.exitCode).toBe(4)
+      expect(JSON.parse(held.stdout)).toMatchObject({
+        status: "awaiting_approval",
+        approval: { actionId: "label-device" },
+      })
+      expect(held.stderr).toBe("")
+    } finally {
+      listener.stop(true)
+    }
+  })
+})
+
+describe("approval mode routes", () => {
+  test("keep the requester's default and their choice in a thread, and list what waits", async () => {
+    const { app, gatewayBaseUrl, sixb } = await createGatewayRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+    const routes = asRequester(sixb)
+    const send = async (method: string, path: string, body?: unknown) => {
+      const response = await routes.handle(jsonRequest(method, path, body))
+      return { status: response.status, body: await response.json() }
+    }
+
+    expect(await send("GET", "/api/agent/preferences")).toEqual({
+      status: 200,
+      body: { approvalMode: "auto", approvalModeSource: "fallback" },
+    })
+    expect(await send("PUT", "/api/agent/preferences", { approvalMode: "manual" })).toEqual({
+      status: 200,
+      body: { approvalMode: "manual", approvalModeSource: "default" },
+    })
+    expect(await send("PUT", "/api/agent/preferences", { approvalMode: "ask" })).toMatchObject({
+      status: 422,
+    })
+    expect(
+      await send("PUT", "/api/agent-threads/thread-1/approval-mode", { approvalMode: "auto" })
+    ).toMatchObject({
+      status: 200,
+      body: { id: "thread-1", approvalMode: "auto", approvalModeSource: "thread" },
+    })
+    expect(await send("GET", "/api/agent-threads/thread-1")).toMatchObject({
+      status: 200,
+      body: { approvalMode: "auto", approvalModeSource: "thread" },
+    })
+    expect(
+      await send("PUT", "/api/agent-threads/thread-1/approval-mode", { approvalMode: null })
+    ).toMatchObject({
+      status: 200,
+      body: { approvalMode: "manual", approvalModeSource: "default" },
+    })
+
+    const waiting = await send("GET", "/api/agent-approvals?status=pending")
+    const inThread = await send("GET", "/api/agent-threads/thread-1/approvals?runId=run-1")
+    expect(waiting).toMatchObject({
+      status: 200,
+      body: {
+        total: 1,
+        approvals: [{ status: "pending", reported: false, call: { kind: "workflow" } }],
+      },
+    })
+    expect(inThread.body).toEqual(waiting.body)
+  })
+})
+
+async function requestGatedCall(
+  app: ReturnType<typeof createSixbApi>,
+  gatewayBaseUrl: string,
+  call: GatedCall,
+  runId: string
+): Promise<Response> {
+  const subject = { kind: "object", objectTypeId: "device", primaryId: "fan-1" }
+  const [path, body] =
+    call === "workflow"
+      ? ["/api/workflows/ping-devices/runs", { input: {}, runId }]
+      : call === "external action"
+        ? ["/api/actions/sync-device", { subject, params: { label: "Fan" }, runId }]
+        : ["/api/actions/label-device", { subject, runId }]
+
+  return app.fetch(
+    new Request(`${gatewayBaseUrl}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  )
+}
+
+/** Read from storage, never from the response: a held call has no run. */
+async function gatedCallRan(
+  storage: InMemoryStorage,
+  call: GatedCall,
+  runId: string
+): Promise<boolean> {
+  const run =
+    call === "workflow"
+      ? await storage.workflowRuns.getById({ projectId: PROJECT_ID, id: runId })
+      : await storage.actionRuns.getById({ projectId: PROJECT_ID, id: runId })
+  return run !== null
+}
+
+/** The decision route, called by the turn's requester in their own session. */
+function decideAs(
+  sixb: SixbHost,
+  approval: AgentApprovalRecord,
+  decision: "approve" | "deny"
+): Promise<Response> {
+  return asRequester(sixb).handle(
+    jsonRequest(
+      "POST",
+      `/api/agent-threads/${approval.threadId}/approvals/${approval.id}/decision`,
+      { decision }
+    )
+  )
+}
+
+/** The Agent routes as the turn's requester reaches them, in their own session. */
+function asRequester(sixb: SixbHost) {
+  const context: AuthorizationContext = {
+    principal: { type: "user", id: "usr_requester" },
+    sessionId: "session-agent",
+    groupIds: [agentRuntime.id],
+    roleIds: [agentRole.id],
+    grants: { ...emptyGrantIndex(), "run:agent": true },
+  }
+  const app = new Elysia()
+  app.derive(({ request }) => ({
+    sixb: bindRequestExecution(sixb, {
+      request,
+      authorization: {
+        type: "principal",
+        credential: { type: "session", id: "session-agent" },
+        context,
+      },
+    }),
+  }))
+  registerAgentRoutes(app, sixb)
+  registerAgentApprovalRoutes(app, sixb)
+  return app
+}
+
+function jsonRequest(method: string, path: string, body?: unknown): Request {
+  return new Request(`http://localhost${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+}
+
 describe("agent CLI models", () => {
   test("the generated agent CLI lists models and writes an image through the gateway", async () => {
     const png = new Uint8Array([137, 80, 78, 71])
@@ -1261,6 +1753,8 @@ async function createGatewayRuntime(
     /** Replaces how the device embedding model embeds, keeping its identity. */
     readonly embed?: EmbeddingModel["embed"]
     readonly models?: ModelCatalogInput
+    /** The turn's frozen approval mode; omitted, the turn predates approval modes. */
+    readonly approvalMode?: AgentApprovalMode
   } = {}
 ): Promise<{
   readonly app: ReturnType<typeof createSixbApi>
@@ -1275,8 +1769,8 @@ async function createGatewayRuntime(
   const sixb = new SixbHost({
     id: PROJECT_ID,
     ontology: [Contract, Device, PrivateNote],
-    actions: [labelDevice],
-    workflows: [inspectDevices],
+    actions: [labelDevice, syncDevice, notifyDevice],
+    workflows: [inspectDevices, pingDevices, relabelDevices],
     groups: [agentRuntime, noteReaders],
     roles: [agentRole, noteReaderRole],
     models: {
@@ -1475,7 +1969,7 @@ async function createGatewayRuntime(
       executionId: parentExecutionId,
       threadId,
       triggerMessageId: "msg-1",
-      spec: { model: { provider: "test", modelId: "test-model" } },
+      spec: { model: { provider: "test", modelId: "test-model" }, ...approvalModeOf(options) },
       createdAt: NOW,
     })
     await storage.agents.runs.start({
@@ -1505,6 +1999,7 @@ async function createGatewayRuntime(
         task: "Inspect devices.",
         toolNames: [],
         maxSteps: 25,
+        ...approvalModeOf(options),
       },
       maxActiveChildren: 4,
       createdAt: NOW,
@@ -1530,7 +2025,7 @@ async function createGatewayRuntime(
       executionId: agentExecutionId,
       threadId,
       triggerMessageId: "msg-1",
-      spec: { model: { provider: "test", modelId: "test-model" } },
+      spec: { model: { provider: "test", modelId: "test-model" }, ...approvalModeOf(options) },
       createdAt: NOW,
     })
     await storage.agents.runs.start({
@@ -1561,6 +2056,10 @@ async function createGatewayRuntime(
     storage,
     sixb,
   }
+}
+
+function approvalModeOf(options: { readonly approvalMode?: AgentApprovalMode }) {
+  return options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode }
 }
 
 async function createMainAgentExecution(

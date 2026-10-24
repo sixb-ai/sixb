@@ -81,6 +81,7 @@ export function normalizeDurableParts(
         return [{ kind: "step-start" }]
       case "context":
       case "continuation":
+      case "approval-outcome":
       case "provider-state":
         return []
       default:
