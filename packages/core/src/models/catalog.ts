@@ -48,11 +48,39 @@ export interface RerankingModelCatalog {
   getByRef(ref: ModelRef): RerankingModelEntry | null
 }
 
+/** The cost and strength classes a project can configure language models in. */
+export const LANGUAGE_MODEL_TIERS = ["light", "standard", "heavy"] as const
+
+export type LanguageModelTier = (typeof LANGUAGE_MODEL_TIERS)[number]
+
+export function isLanguageModelTier(value: unknown): value is LanguageModelTier {
+  return (LANGUAGE_MODEL_TIERS as readonly unknown[]).includes(value)
+}
+
+/** The tiers as errors list them: "light, standard or heavy". */
+export function formatLanguageModelTiers(): string {
+  const last = LANGUAGE_MODEL_TIERS.at(-1)
+  return `${LANGUAGE_MODEL_TIERS.slice(0, -1).join(", ")} or ${last}`
+}
+
+/** Language models by tier; each takes a model or an ordered list, whose first is the tier's. */
+export interface LanguageModelTiers {
+  readonly light?: LanguageModel | readonly LanguageModel[]
+  /** Its first model is the project default, and stands in for a tier left out. */
+  readonly standard: LanguageModel | readonly LanguageModel[]
+  readonly heavy?: LanguageModel | readonly LanguageModel[]
+}
+
 /** The configured language models, with the project default. */
 export interface LanguageModelCatalog {
   readonly default: LanguageModelEntry
+  /** The tiers the project configures, in tier order; empty when `models.language` is a list. */
+  readonly tiers: readonly LanguageModelTier[]
+  /** Configured order; with tiers, light, standard then heavy, each tier in its own order. */
   list(): readonly LanguageModelEntry[]
   getByRef(ref: LanguageModelRef): LanguageModelEntry | null
+  /** The tier's first model; a tier left out, or any tier of a list, gives the default. */
+  getByTier(tier: LanguageModelTier): LanguageModelEntry
 }
 
 /**
@@ -64,6 +92,8 @@ export interface LanguageModelCatalog {
  */
 export interface LanguageModelEntry extends LanguageModelRef {
   readonly model: LanguageModel
+  /** The tier the model is configured in; absent when `models.language` is a list. */
+  readonly tier?: LanguageModelTier
 }
 
 /** Models a project allows Sixb to use, organized by technical model kind. */
@@ -78,8 +108,11 @@ export interface ModelCatalog {
 
 export interface ModelCatalogInput {
   readonly audio?: AudioModelCatalogInput
-  /** Ordered; the first entry is the project default. */
-  readonly language?: readonly LanguageModel[]
+  /**
+   * Ordered, the first entry being the project default; or tiers, whose first `standard` model is
+   * the default.
+   */
+  readonly language?: readonly LanguageModel[] | LanguageModelTiers
   /** Ordered; the first entry is the project default decision model. */
   readonly decision?: readonly DecisionModel[]
   readonly embedding?: readonly EmbeddingModel[]
@@ -91,7 +124,11 @@ export interface ModelCatalogInput {
 
 // Only statically required inputs make their corresponding catalogs required.
 type ConfiguredModelKinds<TInput> = {
-  [Kind in keyof ModelCatalog]-?: [TInput] extends [Record<Kind, readonly unknown[]>] ? Kind : never
+  [Kind in keyof ModelCatalog]-?: [TInput] extends [
+    Record<Kind, readonly unknown[] | LanguageModelTiers>,
+  ]
+    ? Kind
+    : never
 }[keyof ModelCatalog]
 
 export type ModelCatalogFor<TInput extends ModelCatalogInput> = ModelCatalog &
@@ -154,24 +191,112 @@ function createRerankingCatalog(
 }
 
 function createLanguageCatalog(
-  models: readonly LanguageModel[] | undefined
+  input: ModelCatalogInput["language"]
 ): LanguageModelCatalog | undefined {
-  if (models === undefined) return undefined
-  if (!Array.isArray(models)) {
-    throw new RuntimeError("[Sixb] 'models.language' must be an array of Sixb language models.")
-  }
+  if (input === undefined) return undefined
 
-  const index = indexModelBindings(models, "language", (model, position) => {
-    assertValidLanguageModel(model, (detail) => invalidLanguageModel(position, detail))
-  })
-  const [defaultEntry] = index.list()
+  const configured = configuredLanguageModels(input)
+  const index = indexModelBindings(
+    configured.map(({ model }) => model),
+    "language",
+    (model, position) => {
+      const { path } = configured[position]
+      assertValidLanguageModel(model, (detail) => invalidLanguageModel(path, detail))
+    },
+    (position): Pick<LanguageModelEntry, "tier"> => {
+      const { tier } = configured[position]
+      return tier === undefined ? {} : { tier }
+    }
+  )
+  const entries = index.list()
+
+  const defaultEntry = entries.find((entry) => entry.tier === "standard") ?? entries[0]
   if (!defaultEntry) {
     throw new RuntimeError(
       "[Sixb] 'models.language' needs at least one model. Configure one or omit 'models.language'."
     )
   }
 
-  return Object.freeze({ ...index, default: defaultEntry })
+  const tiers = LANGUAGE_MODEL_TIERS.filter((tier) => entries.some((entry) => entry.tier === tier))
+
+  return Object.freeze({
+    ...index,
+    default: defaultEntry,
+    tiers: Object.freeze(tiers),
+    getByTier: (tier: LanguageModelTier) =>
+      entries.find((entry) => entry.tier === tier) ?? defaultEntry,
+  })
+}
+
+/**
+ * The model code runs: its own as given, a tier's model from the catalog, or the default. A string
+ * that is not a tier throws, since a caller's types may not have checked it.
+ */
+export function selectLanguageModel(
+  catalog: LanguageModelCatalog | undefined,
+  model: LanguageModel | LanguageModelTier | undefined
+): LanguageModel | undefined {
+  if (model === undefined) return catalog?.default.model
+  if (typeof model !== "string") return model
+
+  if (!isLanguageModelTier(model)) {
+    throw new TypeError(
+      `[Sixb] Unknown model tier '${model}'. Use ${formatLanguageModelTiers()}, or pass a model.`
+    )
+  }
+
+  return catalog?.getByTier(model).model
+}
+
+interface ConfiguredLanguageModel {
+  readonly model: LanguageModel
+  readonly tier?: LanguageModelTier
+  /** Where the model was configured, for its errors. */
+  readonly path: string
+}
+
+/** Flatten a list, or tiers in tier order, without validating the models themselves. */
+function configuredLanguageModels(
+  input: readonly LanguageModel[] | LanguageModelTiers
+): readonly ConfiguredLanguageModel[] {
+  if (Array.isArray(input)) {
+    return input.map((model, index) => ({ model, path: `models.language[${index}]` }))
+  }
+  if (typeof input !== "object" || input === null) {
+    throw new RuntimeError(
+      "[Sixb] 'models.language' must be an array of Sixb language models, or tiers: { light, standard, heavy }."
+    )
+  }
+
+  const unknown = Object.keys(input).find((key) => !isLanguageModelTier(key))
+  if (unknown !== undefined) {
+    throw new RuntimeError(
+      `[Sixb] Unknown model tier '${unknown}' in 'models.language'. Use ${formatLanguageModelTiers()}, or pass an array of models.`
+    )
+  }
+  // Array.isArray does not narrow a readonly array out of the union.
+  const tiers = input as LanguageModelTiers
+  if (tiers.standard === undefined) {
+    throw new RuntimeError(
+      "[Sixb] 'models.language' tiers need 'standard': its first model is the project default."
+    )
+  }
+
+  return LANGUAGE_MODEL_TIERS.flatMap((tier) => {
+    const models = tiers[tier]
+    if (models === undefined) return []
+    if (!Array.isArray(models)) {
+      return [{ model: models, tier, path: `models.language.${tier}` }]
+    }
+    if (models.length === 0) {
+      throw new RuntimeError(`[Sixb] 'models.language.${tier}' needs at least one model.`)
+    }
+    return models.map((model, index) => ({
+      model,
+      tier,
+      path: `models.language.${tier}[${index}]`,
+    }))
+  })
 }
 
 function createEmbeddingCatalog(
@@ -271,10 +396,8 @@ function assertModelIdentifier(
   }
 }
 
-function invalidLanguageModel(index: number, detail: string): RuntimeError {
-  return new RuntimeError(
-    `[Sixb] Invalid language model at 'models.language[${index}]': ${detail}.`
-  )
+function invalidLanguageModel(path: string, detail: string): RuntimeError {
+  return new RuntimeError(`[Sixb] Invalid language model at '${path}': ${detail}.`)
 }
 
 /** Provider-owned metadata lookup, independent from the project's configured bindings. */

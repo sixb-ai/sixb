@@ -1,6 +1,7 @@
 import type { InferSchemaOrRef, SchemaOrRef } from "../ontology"
 import type { AudioModelsRuntime } from "./audio/types"
 import type { ModelCallsRuntime } from "./calls"
+import type { LanguageModelTier } from "./catalog"
 import type { DecisionModelsRuntime } from "./decision/types"
 import type { ModelFinishReason, ModelUsage } from "./events"
 import type { ImageModelsRuntime } from "./image/types"
@@ -19,7 +20,8 @@ export type LanguageModelGenerateInput<
   TShape extends LanguageModelOutputShape | undefined = undefined,
 > = {
   readonly instructions?: string
-  readonly model?: LanguageModel
+  /** A model runs as given; a tier runs that tier's model from `models.language`. */
+  readonly model?: LanguageModel | LanguageModelTier
   readonly output?: TShape
   readonly maxOutputTokens?: number
   readonly reasoning?: ModelReasoning

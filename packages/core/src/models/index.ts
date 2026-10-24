@@ -39,6 +39,8 @@ export type {
   LanguageModelDefinitionCatalog,
   LanguageModelEntry,
   LanguageModelRef,
+  LanguageModelTier,
+  LanguageModelTiers,
   ModelCatalog,
   ModelCatalogFor,
   ModelCatalogInput,
@@ -47,7 +49,7 @@ export type {
   RerankingModelCatalog,
   RerankingModelEntry,
 } from "./catalog"
-export { createModelCatalog } from "./catalog"
+export { createModelCatalog, LANGUAGE_MODEL_TIERS } from "./catalog"
 export type { DecisionModelCatalog, DecisionModelEntry } from "./decision/catalog"
 export { DecisionModelResponseError } from "./decision/errors"
 export type { DecisionAnswerSchema, DecisionOutputShape } from "./decision/output"

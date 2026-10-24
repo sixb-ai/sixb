@@ -10,12 +10,30 @@ interface ModelEntry<TModel> extends ModelRef {
   readonly model: TModel
 }
 
+interface ModelIndex<TEntry> {
+  list(): readonly TEntry[]
+  getByRef(ref: ModelRef): TEntry | null
+}
+
 /** Private index shared by model families; default selection belongs to each family. */
 export function indexModelBindings<TModel extends ModelBinding>(
   models: readonly TModel[],
   kind: string,
   validate: (model: TModel, index: number) => void
-) {
+): ModelIndex<ModelEntry<TModel>>
+/** A family that adds its own fields to each entry, such as a language model's tier. */
+export function indexModelBindings<TModel extends ModelBinding, TFields extends object>(
+  models: readonly TModel[],
+  kind: string,
+  validate: (model: TModel, index: number) => void,
+  fields: (index: number) => TFields
+): ModelIndex<ModelEntry<TModel> & TFields>
+export function indexModelBindings<TModel extends ModelBinding>(
+  models: readonly TModel[],
+  kind: string,
+  validate: (model: TModel, index: number) => void,
+  fields?: (index: number) => object
+): ModelIndex<ModelEntry<TModel>> {
   const byRef = new Map<string, ModelEntry<TModel>>()
 
   for (const [index, model] of models.entries()) {
@@ -27,7 +45,8 @@ export function indexModelBindings<TModel extends ModelBinding>(
       )
     }
 
-    byRef.set(key, Object.freeze({ provider: model.providerId, modelId: model.modelId, model }))
+    const entry = { provider: model.providerId, modelId: model.modelId, model }
+    byRef.set(key, Object.freeze(fields ? { ...entry, ...fields(index) } : entry))
   }
 
   const entries = Object.freeze([...byRef.values()])

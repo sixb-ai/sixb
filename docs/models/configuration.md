@@ -49,6 +49,41 @@ defineAgentStep("second-opinion", {
 })
 ```
 
+### Tiers
+
+Configure models by tier instead of a list, so your code names the job rather than the model:
+
+```ts
+const flash = vercelGateway("deepseek/deepseek-v4.1-flash", { reasoning: "high" })
+const sonnet = vercelGateway("anthropic/claude-sonnet-5.5", { reasoning: "medium" })
+const opus = vercelGateway("anthropic/claude-opus-5.5", { reasoning: "high" })
+const gpt = vercelGateway("openai/gpt-5.5", {
+  description: "A second opinion, useful to compare an analysis.",
+})
+
+createSixb({
+  models: { language: { light: flash, standard: sonnet, heavy: [opus, gpt] } },
+})
+```
+
+```ts
+defineAgentStep("summarize-tickets", { model: "light", instructions })
+
+await sixb.models.language.generate({ model: "heavy", prompt })
+```
+
+The tiers are `light`, `standard` and `heavy`. Each takes a model or a list, and `standard` is
+required: its first model is the default.
+
+| `model` | Runs |
+| --- | --- |
+| A tier | That tier's first model |
+| Omitted, or a tier left out | The first `standard` model |
+| A tier, with a list configured | The first model |
+
+Every model of every tier stays in the catalog: chat users pick from all of them, and the
+delegation guide of `spawn_agent` groups them by tier.
+
 ### Name and description
 
 Give a model your own name and description with the `name` and `description` options of its
@@ -128,7 +163,8 @@ Direct generation does not require a sandbox. For a task that needs tools, use a
 
 ### Model and response controls
 
-Pass a model binding to override the default; it does not need to be in `models.language`. Use
+Pass a model binding to override the default; it does not need to be in `models.language`. A
+[tier](#tiers) such as `model: "heavy"` runs that tier's model. Use
 `reasoning` to choose a supported effort and `maxOutputTokens` to limit the response. Inside a step
 or action handler:
 

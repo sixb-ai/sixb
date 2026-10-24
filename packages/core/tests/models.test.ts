@@ -8,6 +8,7 @@ import {
   createModelCatalog,
   defineLanguageModel,
   defineLanguageModelLabel,
+  LANGUAGE_MODEL_TIERS,
   type LanguageModel,
 } from "../src/models"
 import { createTestSixb } from "../src/testing"
@@ -235,6 +236,97 @@ describe("createModelCatalog", () => {
     })
 
     expect(catalog.language.default.model.maxOutputTokens).toBe(32_000)
+  })
+
+  const flash = testModel("gateway", "deepseek/deepseek-v4.1-flash")
+  const opus = testModel("gateway", "anthropic/claude-opus-5.5")
+
+  test("lists tiers light, standard then heavy, the default being standard's first model", () => {
+    // Proven by removal: list the tiers in the order they are written, or keep the first entry
+    // as the default.
+    const catalog = createModelCatalog({
+      language: { heavy: [opus, gpt], standard: sonnet, light: flash },
+    })
+
+    expect(catalog.language.list().map(({ tier, modelId }) => [tier, modelId])).toEqual([
+      ["light", "deepseek/deepseek-v4.1-flash"],
+      ["standard", "anthropic/claude-sonnet-4.6"],
+      ["heavy", "anthropic/claude-opus-5.5"],
+      ["heavy", "openai/gpt-5.4"],
+    ])
+    expect(catalog.language.default.model).toBe(sonnet)
+    expect(catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-5.4" })).toEqual({
+      provider: "gateway",
+      modelId: "openai/gpt-5.4",
+      model: gpt,
+      tier: "heavy",
+    })
+    expect(Object.isFrozen(catalog.language.list()[0])).toBe(true)
+  })
+
+  test("names the tiers it configures, in tier order, and none for a list", () => {
+    // Proven by removal: list the tiers as written, or every tier whatever is configured.
+    const tiers = createModelCatalog({ language: { heavy: opus, standard: sonnet } })
+    const list = createModelCatalog({ language: [gpt, sonnet] })
+
+    expect(tiers.language.tiers).toEqual(["standard", "heavy"])
+    expect(list.language.tiers).toEqual([])
+  })
+
+  test("gives a tier its first model, and standard's first model to a tier left out", () => {
+    // Proven by removal: return the default for every tier, or the tier's last model.
+    const tiers = createModelCatalog({ language: { standard: [sonnet, gpt], heavy: opus } })
+
+    expect(tiers.language.getByTier("heavy").model).toBe(opus)
+    expect(tiers.language.getByTier("standard").model).toBe(sonnet)
+    expect(tiers.language.getByTier("light").model).toBe(sonnet)
+
+    // A list has no tiers: every tier gives its first model, and no entry carries a tier.
+    const list = createModelCatalog({ language: [gpt, sonnet] })
+
+    for (const tier of LANGUAGE_MODEL_TIERS) {
+      expect(list.language.getByTier(tier).model).toBe(gpt)
+    }
+    expect(list.language.list().some((entry) => "tier" in entry)).toBe(false)
+  })
+
+  // Proven by removal: drop the `standard` check (the default falls back to light), the unknown
+  // key check (`medium` is ignored), the empty tier check or the tier's path in the error.
+  test.each([
+    [
+      "tiers without standard",
+      { light: flash },
+      "[Sixb] 'models.language' tiers need 'standard': its first model is the project default.",
+    ],
+    [
+      "an unknown tier",
+      { standard: sonnet, medium: gpt },
+      "[Sixb] Unknown model tier 'medium' in 'models.language'. Use light, standard or heavy, or pass an array of models.",
+    ],
+    [
+      "an empty tier",
+      { standard: sonnet, heavy: [] },
+      "[Sixb] 'models.language.heavy' needs at least one model.",
+    ],
+    [
+      "a model in two tiers",
+      { standard: sonnet, heavy: [opus, sonnet] },
+      /Duplicate language model 'gateway\/anthropic\/claude-sonnet-4\.6'/,
+    ],
+    [
+      "an invalid model in a tier's list",
+      { standard: sonnet, heavy: [opus, { ...gpt, stream: undefined }] },
+      "[Sixb] Invalid language model at 'models.language.heavy[1]': expected 'stream' to be a function.",
+    ],
+    [
+      "an invalid model alone in a tier",
+      { standard: { ...sonnet, stream: undefined } },
+      "[Sixb] Invalid language model at 'models.language.standard': expected 'stream' to be a function.",
+    ],
+  ] as const)("rejects %s", (_case, language, error) => {
+    expect(() =>
+      createModelCatalog({ language } as unknown as Parameters<typeof createModelCatalog>[0])
+    ).toThrow(error)
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ModelCatalogInput } from "@sixb/core"
+import type { LanguageModel } from "@sixb/core"
 import {
   agent,
   can,
@@ -41,7 +41,7 @@ const model = {
   stream: async () => {
     throw new Error("Must not invoke the route test model")
   },
-} satisfies NonNullable<ModelCatalogInput["language"]>[number]
+} satisfies LanguageModel
 
 const FAILURE: SixbFailure<AgentRunFailureCode> = {
   code: "internal.unexpected",

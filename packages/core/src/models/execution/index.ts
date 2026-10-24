@@ -1,3 +1,8 @@
+export {
+  formatLanguageModelTiers,
+  isLanguageModelTier,
+  selectLanguageModel,
+} from "../catalog"
 export { resolveLanguageModel } from "../resolve"
 export { ModelUsageRecordingError } from "./errors"
 export type {

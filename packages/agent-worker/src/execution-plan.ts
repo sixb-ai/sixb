@@ -9,6 +9,7 @@ import type {
   ModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 import type { LanguageModel } from "@sixb/core/models"
 import type { ConversationAgentRunSpec, SubagentRunRecord } from "@sixb/core/storage"
 import { withBuiltInSkills } from "./skills/built-in"
@@ -109,12 +110,16 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
-  // The step's own model runs as given, listed in the catalog or not.
-  const selected = step.model ?? models?.default.model
+  // The step's own model runs as given, listed in the catalog or not; a tier's comes from it.
+  const selected = selectLanguageModel(models, step.model)
   if (selected === undefined) {
+    const reference =
+      typeof step.model === "string"
+        ? `the model of tier '${step.model}'`
+        : "the project default language model"
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve the project default language model.`,
+      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve ${reference}.`,
       { details: { workflowId, agentStepId: step.id } }
     )
   }
