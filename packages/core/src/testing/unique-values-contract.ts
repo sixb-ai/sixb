@@ -23,6 +23,7 @@ import {
   ProjectionRegistry,
   type ProjectionSourceEntry,
 } from "../materializer"
+import { UNIQUE_VALUE_KEY_VERSION } from "../ontology/unique-values"
 import { migrateStorage } from "../storage/migrations"
 import { compileSelectedObjectReadScope } from "../storage/objects"
 import type { UniqueValueRef } from "../storage/ontology"
@@ -506,6 +507,57 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
         },
         { prepared: false }
       )
+    })
+
+    // Removal proof: drop the `key_kind` comparison from the provider's prepared check (PostgreSQL's
+    // `claimPgUniqueValues`, SQLite's `assertSqliteUniquePrepared`); the write then succeeds over
+    // values built with other keys.
+    test(`${name} refuses a claim on a property prepared with keys of another kind`, async () => {
+      await withStorage(async (storage) => {
+        const textBadges = new OntologyRegistry({
+          sources: [
+            defineObjectType({
+              id: Person.id,
+              name: "Person",
+              properties: [
+                prop("id", "string", { primary: true, required: true }),
+                prop("badge", "string", { unique: true }),
+              ],
+            }),
+          ],
+        })
+        const write = () => editor(storage, textBadges).commit([create("a", { badge: "B-1" })])
+
+        await expect(write()).rejects.toThrow(
+          `[Sixb] Unique property '${Person.id}.badge' is not prepared. Run \`sixb db migrate\`.`
+        )
+
+        await migrateStorage(storage, { projectId: PROJECT, ontology: textBadges })
+        await write()
+      })
+    })
+
+    // Removal proof: drop the `key_version` comparison from the provider's prepared check; the
+    // write then succeeds over values built with stale keys.
+    test(`${name} refuses a claim on a property prepared with an older key version`, async () => {
+      await withStorage(async (storage) => {
+        await storage.ontology.uniqueValues.markPrepared({
+          projectId: PROJECT,
+          objectTypeId: Person.id,
+          propertyId: "email",
+          keyKind: "string",
+          keyVersion: UNIQUE_VALUE_KEY_VERSION - 1,
+          preparedAt: "2026-03-01T00:00:00.000Z",
+        })
+        const write = () => editor(storage).commit([create("a", { email: "a@example.com" })])
+
+        await expect(write()).rejects.toThrow(
+          `[Sixb] Unique property '${Person.id}.email' is not prepared. Run \`sixb db migrate\`.`
+        )
+
+        await migrateStorage(storage, { projectId: PROJECT, ontology })
+        await write()
+      })
     })
   }
 
