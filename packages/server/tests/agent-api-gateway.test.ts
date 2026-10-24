@@ -1524,9 +1524,10 @@ describe("agent approval gate", () => {
     ])
   })
 
-  // Guard proof: drop `approvalMode` from the child's spec in this test; the call runs.
+  // Guard proofs: drop `approvalMode` from the child's spec in this test, and the call runs; list
+  // the thread's approvals without `serializeApprovals`, and the route names no sub-agent.
   test("a child's call is held for the turn that spawned it, with the child's mode", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
       executionKind: "subagent",
       approvalMode: "manual",
     })
@@ -1538,6 +1539,13 @@ describe("agent approval gate", () => {
       expect.objectContaining({ runId: "parent-run-1", callerRunId: "child-run-1" }),
     ])
     expect(await gatedCallRan(storage, "ontology action", "act_child")).toBe(false)
+
+    const listed = await asRequester(sixb).handle(
+      jsonRequest("GET", "/api/agent-threads/thread-1/approvals")
+    )
+    expect(await listed.json()).toMatchObject({
+      approvals: [{ callerRunId: "child-run-1", caller: { runId: "child-run-1", key: "inspect" } }],
+    })
   })
 
   test("a workflow AI task runs its calls on its own", async () => {

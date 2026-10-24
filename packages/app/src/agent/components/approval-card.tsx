@@ -125,6 +125,8 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
 
   const definition = useCallDefinition(call)
   const title = definition.name
+  // A sub-agent's call says which one asked; its own card comes with the sub-agent's.
+  const caller = approval?.caller ?? reported?.caller
 
   const canDecide =
     state === "pending" && approval !== null && context?.decide !== undefined
@@ -263,6 +265,12 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
         <h3 className="mt-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-foreground">
           {title}
         </h3>
+
+        {caller ? (
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {labels.fromSubagent(caller.key)}
+          </p>
+        ) : null}
 
         {call.kind === "action" && call.subject ? <Subject subject={call.subject} /> : null}
 

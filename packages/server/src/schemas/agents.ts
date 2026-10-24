@@ -260,6 +260,15 @@ const AgentApprovalOutcomePartSchema = z.object({
   status: AgentApprovalStatusSchema.exclude(["pending"]),
   call: AgentApprovalCallSummarySchema,
   outcome: AgentApprovalOutcomeSchema.optional(),
+  /** The turn's sub-agent that made the call, when the turn did not make it itself. */
+  caller: z
+    .object({
+      runId: z.string(),
+      key: z.string(),
+      /** The message resumed the turn and the sub-agent, paused on its calls, went on. */
+      continues: z.literal(true).optional(),
+    })
+    .optional(),
 })
 
 export const AgentMessagePartSchema = z.union([

@@ -764,6 +764,49 @@ describe("an approval card", () => {
     expect(within(found).queryByRole("button", { name: "Approve" })).toBeNull()
   })
 
+  // Removal proof: drop the caller line from ApprovalCard, or `caller` from
+  // reportedApprovalOutcomes; neither the requester nor an observer reads which sub-agent asked.
+  test("a sub-agent's call says which one asked, from its record or the message that resumed", () => {
+    const fromChild = { runId: "run_child", key: "pay-suppliers" }
+    const recorded = renderTranscript([
+      approval({ callerRunId: fromChild.runId, caller: fromChild }),
+    ])
+
+    expect(
+      within(recorded.getByRole("region", { name: /^Approval request/ })).getByText(
+        "Asked by the sub-agent pay-suppliers"
+      )
+    ).toBeDefined()
+    cleanup()
+
+    const observed = renderTranscript(undefined, [
+      {
+        ...message,
+        id: "msg_3",
+        runId: null,
+        role: "user",
+        authorPrincipal: dana,
+        seq: 3,
+        createdAt: at,
+        parts: [
+          {
+            type: "approval-outcome",
+            approvalId: "apr_1",
+            status: "denied",
+            call: { kind: "action", actionId: "payInvoice", subject: payCall.subject },
+            caller: fromChild,
+          },
+        ],
+      },
+    ])
+
+    expect(
+      within(observed.getByRole("region", { name: /^Approval request/ })).getByText(
+        "Asked by the sub-agent pay-suppliers"
+      )
+    ).toBeDefined()
+  })
+
   // Removal proof: keep only pending approvals in Transcript's `unshown`; the card leaves once
   // decided.
   test("a call whose command did not name it keeps its card under its turn, once decided too", () => {
