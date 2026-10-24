@@ -484,10 +484,12 @@ export {
   step,
 } from "./migrations"
 export type {
+  CompiledConditionalObjectReadScope,
   CompiledObjectReadObjectSelection,
   CompiledObjectReadRoot,
   CompiledObjectReadStep,
   CompiledSelectedObjectReadScope,
+  ConditionalObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -508,6 +510,7 @@ export type {
   ObjectQueryCapabilityMap,
   ObjectQueryScalarOperation,
   ObjectQueryScalarOperations,
+  ObjectReadCondition,
   ObjectReadExecutionLimits,
   ObjectReadLimitMetric,
   ObjectReadLinkDefinitionSelection,
@@ -531,6 +534,7 @@ export {
   assertObjectReaderProject,
   assertObjectReadFacetCount,
   assertObjectReadOutputWithinLimit,
+  compileConditionalObjectReadScope,
   compileSelectedObjectReadScope,
   linkBatchKey,
   MAX_OBJECT_READ_FACETS,

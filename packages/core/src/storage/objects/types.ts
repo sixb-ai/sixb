@@ -183,6 +183,42 @@ export interface CompiledObjectReadStep {
   readonly propertyIds: readonly string[]
 }
 
+/**
+ * Objects narrowed by a condition on their concrete type.
+ *
+ * An object of a listed type is visible when its predicate matches it; objects of other types are
+ * unaffected. A link is visible when both its endpoints are. Hidden objects and links behave
+ * exactly like missing ones, and every read sees the live rows.
+ */
+export interface ConditionalObjectReadScope {
+  readonly kind: "conditional"
+  readonly conditions: readonly ObjectReadCondition[]
+}
+
+export interface ObjectReadCondition {
+  /** A concrete type: a condition granted on a supertype is listed once per concrete type. */
+  readonly objectTypeId: string
+  /**
+   * Validated by core as a filter over the type, with `scalarKind` resolved and `currentUser()`
+   * bound to the reader. Providers compile it with their own predicate compiler.
+   */
+  readonly predicate: ObjectQueryPredicate
+}
+
+/**
+ * Detached and deeply immutable conditions, one per concrete type, ordered by type id.
+ *
+ * Only `compileConditionalObjectReadScope` returns one, so a raw scope cannot reach a provider
+ * unchecked. The brand exists in types alone. Its key is a string, not a `unique symbol`: a
+ * symbol declared here is a different symbol in the emitted declarations, and packages that see
+ * both would find their providers incompatible.
+ */
+export interface CompiledConditionalObjectReadScope {
+  readonly "~compiledConditionalObjectReadScope": true
+  readonly kind: "conditional"
+  readonly conditions: readonly ObjectReadCondition[]
+}
+
 export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
 
 export type ObjectQueryScalarOperation = "equality" | "ordering"
