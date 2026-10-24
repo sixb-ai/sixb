@@ -35,6 +35,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals, resumeIfDecided } from "./approval-repair"
+import { createAskParentTool } from "./ask-parent-tool"
 import { prepareAgentModel } from "./context-budget"
 import {
   isPermanentAgentPreparationError,
@@ -286,6 +287,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     let environment: ConversationAgentExecutionEnvironment | null = null
     let runtime: AgentTurnRuntime | null = null
+    let delegation: SubagentCoordinator | undefined
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
@@ -334,7 +336,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
-      const delegation = new SubagentCoordinator(
+      delegation = new SubagentCoordinator(
         this.host,
         context,
         run,
@@ -371,6 +373,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         stopSignal: signal,
         runtime,
         threadContext: environment.threadContext,
+        questions: await delegation.turnQuestions(),
       })
       await this.cancelActiveSubagents(completed.id, "The parent Agent run has finished.")
       if (completed.kind === "conversation") {
@@ -432,6 +435,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     } finally {
       stopOwnershipProjection?.()
       cancel.stop()
+      delegation?.close()
       runtime?.dispose()
       await environment?.dispose()
     }
@@ -723,12 +727,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
+      // From the first message: one its parent sent while it was queued is read at its first step,
+      // and a continuation's first step reads what the runs before it left unread.
+      const inbox = new SubagentInbox(this.host.broker, run, history.messages)
       environment = await createSubagentEnvironment({
         context: executionContext,
         plan,
         run,
         thread: childThread,
         conversation,
+        frameworkTools: [createAskParentTool(inbox)],
         ...(durableExecution.requestedBy === undefined
           ? {}
           : { requestedBy: durableExecution.requestedBy }),
@@ -738,9 +746,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       await runSubagent({
         history,
-        // From the first message: one its parent sent while it was queued is read at its first step,
-        // and a continuation's first step reads what the runs before it left unread.
-        inbox: new SubagentInbox(this.host.broker, run, history.messages),
+        inbox,
         context: environment.turnContext,
         plan,
         run,

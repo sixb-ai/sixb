@@ -20,12 +20,14 @@ export function waitForAbort<T>(promise: Promise<T>, signal?: AbortSignal): Prom
   })
 }
 
-/** Wait `ms`, or until the signal aborts, rejecting with its reason. */
-export function delay(ms: number, signal: AbortSignal): Promise<void> {
+/** Wait `ms`, or until `wake` settles, or until the signal aborts, rejecting with its reason. */
+export function delay(ms: number, signal: AbortSignal, wake?: Promise<void>): Promise<void> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(finish, ms)
+    void wake?.then(finish)
     function finish(): void {
+      clearTimeout(timer)
       signal.removeEventListener("abort", abort)
       resolve()
     }

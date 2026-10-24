@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import {
   AGENT_REASONING_LEVELS,
   type AgentApprovalOutcomePart,
+  type AgentMailPart,
   type AgentMessage,
   type AgentMessagePart,
   type AgentReasoning,
@@ -56,8 +57,15 @@ import {
   listHandedSources,
   storeHandedFiles,
 } from "./child-files"
+import {
+  type ChildQuestion,
+  ChildQuestions,
+  type QuestionRef,
+  renderChildQuestions,
+} from "./child-questions"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
+import type { TurnQuestions } from "./run-agent-turn"
 import { continuationTrigger, isPausedSubagent } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -71,9 +79,6 @@ export const WAIT_POLL_MS = 250
 export const WAIT_ANSWER_MARGIN_MS = 60_000
 
 const OMIT_MODEL = "Omit model to use the project default."
-
-/** How many of a conversation's latest turns a refused `message_agent` looks through for its key. */
-const EARLIER_TURNS_SEARCHED = 20
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
 const TIERED_MODEL_CHOICE = {
@@ -111,8 +116,13 @@ export interface MessageSubagentInput {
 export interface MessageSubagentOutput {
   readonly runId: string
   readonly status: "queued" | "running"
-  /** When the child reads it: before its first step while it is queued, else before its next. */
-  readonly delivery: "first-step" | "next-step"
+  /**
+   * When the child reads it: before its first step while it is queued, else before its next.
+   * `answer`: it answers the question the child waits on, now or, once it continues, first.
+   */
+  readonly delivery: "first-step" | "next-step" | "answer"
+  /** The child of an earlier turn, paused on its question, that this answer continues. */
+  readonly continues?: string
 }
 
 /** A message the parent sent a child this turn. */
@@ -131,8 +141,10 @@ export interface WaitedSubagentResult {
    * `queued` or `running`: the turn is about to end, so the Agent answers without it.
    * `awaiting_approval`: it paused on calls that wait for the user, and continues once they decide.
    */
-  readonly status: SubagentRunRecord["status"] | "awaiting_approval"
+  readonly status: SubagentRunRecord["status"] | "awaiting_approval" | "awaiting_answer"
   readonly text?: string
+  /** The question it waits on: answer it with `message_agent` and its key. */
+  readonly question?: QuestionRef
   readonly error?: { readonly code: string; readonly message: string }
   /** Calls it made that wait for the user's approval. */
   readonly awaitingApproval?: readonly AgentChildApprovalAwaiting[]
@@ -162,8 +174,16 @@ export interface WaitedSubagentResult {
 
 type MessagesReport = Pick<WaitedSubagentResult, "unread" | "earlierAnswer" | "answerNote">
 
+/** A question a child waits on, with the key to answer it by. */
+export interface WaitedQuestion extends QuestionRef {
+  readonly key: string
+  readonly runId: string
+}
+
 export interface WaitForSubagentsOutput {
   readonly results: readonly WaitedSubagentResult[]
+  /** Every question a child of this turn waits on: `wait_agent` returns as soon as one comes. */
+  readonly questions?: readonly WaitedQuestion[]
   /** The files no earlier result held, in the order of `results`. */
   readonly files: readonly InstalledChildFile[]
   /** Why what the children published is not all in `$SIXB_ARTIFACTS`. */
@@ -180,6 +200,11 @@ export class SubagentCoordinator {
   #admissions: Promise<unknown> = Promise.resolve()
   /** What this turn sent each child, by its run id, in order. */
   readonly #sent = new Map<string, SentMessage[]>()
+  readonly #questions: ChildQuestions
+  /** The questions a `wait_agent` returned: one alone no longer stops a wait for other children. */
+  readonly #reported = new Set<string>()
+  /** What each `message_agent` that answered a question returned, by its mail id, for a replay. */
+  readonly #answers = new Map<string, MessageSubagentOutput>()
 
   constructor(
     private readonly host: AgentWorkerHost,
@@ -194,6 +219,37 @@ export class SubagentCoordinator {
       throw new Error("[SixbAgentWorker] Subagent delegation requires a language model catalog.")
     }
     this.models = models
+    this.#questions = new ChildQuestions(host.broker, context.id, parentRun.id)
+  }
+
+  /** Stop listening for the children's questions, once the turn ended. */
+  close(): void {
+    this.#questions.close()
+  }
+
+  /**
+   * How the turn hears its children's questions: those of earlier turns' children still paused on
+   * one, read after the conversation; those it has not read, before its answer ends it; and the
+   * pause, before its end, of each child still waiting on one.
+   */
+  async turnQuestions(): Promise<TurnQuestions> {
+    let waiting: readonly WaitedQuestion[] = []
+    try {
+      waiting = await this.waitingQuestions()
+    } catch (error) {
+      console.error(
+        `[SixbAgentWorker] Agent run '${this.parentRun.id}' could not read which earlier sub-agents wait on a question; it goes on without them.`,
+        error
+      )
+    }
+    return {
+      ...(waiting.length > 0 ? { waiting: renderChildQuestions(waiting, { earlier: true }) } : {}),
+      unread: async () => {
+        const unread = await this.unreadQuestions()
+        return unread.length > 0 ? renderChildQuestions(unread) : undefined
+      },
+      defer: (stopAt, signal) => this.deferOpenQuestions(stopAt, signal),
+    }
   }
 
   /** The parent's environment, started after its tools are defined and before any of them runs. */
@@ -211,30 +267,20 @@ export class SubagentCoordinator {
     const paused = await this.pausedChildrenToContinue()
     for (const { child, outcomes } of paused) {
       signal.throwIfAborted()
-      const runId = createSubagentRunId(this.parentRun.id, child.spawnKey)
       await this.clearDeadAttempts(child, signal)
-
-      const spec = this.childSpec({
-        task: child.spec.task,
-        model: child.spec.model,
-        reasoning: child.spec.reasoning,
-        files: child.spec.files,
-      })
-      const createdAt = new Date()
-      const parts = continuationTrigger({
-        outcomes,
-        paused: child,
-        createdAt,
-        timeZone: spec.timeZone ?? this.context.timeZone,
-      })
+      const { spec, continuation } = this.continuationOf(child, outcomes)
       await this.admitInTurn(() =>
-        this.admit(runId, child.spawnKey, spec, signal, {
-          thread: { id: child.threadId, create: false },
-          trigger: { id: createAgentMessageId(), parts },
-          createdAt,
-          // Each was admitted within the limit; the turn starts with all of them at once.
-          maxActiveChildren: Math.max(this.context.subagentConcurrencyPerRun, paused.length),
-        })
+        this.admit(
+          createSubagentRunId(this.parentRun.id, child.spawnKey),
+          child.spawnKey,
+          spec,
+          signal,
+          {
+            ...continuation,
+            // Each was admitted within the limit; the turn starts with all of them at once.
+            maxActiveChildren: Math.max(this.context.subagentConcurrencyPerRun, paused.length),
+          }
+        )
       )
     }
   }
@@ -354,6 +400,7 @@ export class SubagentCoordinator {
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
         "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides.",
         "A message you sent a child that it has not read is listed in its unread. When one came as it answered, earlierAnswer holds what it answered before, and text what it wrote after.",
+        "It returns as soon as a child of this turn asks you a question, listed in questions with its key, whichever children you wait for: the child waits for your answer, which you give with message_agent.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
       parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
@@ -385,6 +432,7 @@ export class SubagentCoordinator {
         "Send a message to a child agent still at work, by the key you spawned it with. It reads the message before its next step, or before its first while it is queued, and its answer accounts for it.",
         "Use it to correct its course, add information it needs, or narrow its task, instead of waiting for an answer you would discard. Then collect its answer with wait_agent as usual.",
         "A child that finished, or paused for the user's approval, cannot read one.",
+        "While a child waits on the question it asked you, your message is its answer. A child that wait_agent listed as awaiting_answer, paused on its question when an earlier turn ended, continues where it stopped with your message as its answer.",
       ].join("\n"),
       inputSchema: messageInputSchema(),
       parseInput: parseMessageInput,
@@ -411,15 +459,24 @@ export class SubagentCoordinator {
     signal.throwIfAborted()
     const key = requireNonEmpty("message_agent", input.key, "key", 128)
     const text = requireNonEmpty("message_agent", input.text, "text")
+    const sent = { id: `${this.parentRun.id}:${callId}`, text }
+    // A replay of the call that answered a question is that answer, sent once.
+    const answered = this.#answers.get(sent.id)
+    if (answered) return answered
+
     const { agents } = this.context.storage
     const projectId = this.context.id
     const child = await agents.runs.getById({
       projectId,
       id: createSubagentRunId(this.parentRun.id, key),
     })
+    if (!child) {
+      const paused = await this.pausedOnQuestion(key)
+      if (paused) return this.answerPaused(paused, key, sent, signal)
+    }
     if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
       throw new AgentToolPublicError(
-        (await this.spawnedInEarlierTurn(key))
+        (await this.latestChildUnder(key))
           ? `[SixbAgentWorker] '${key}' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then.`
           : `[SixbAgentWorker] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
       )
@@ -440,7 +497,33 @@ export class SubagentCoordinator {
       )
     }
 
-    const sent = { id: `${this.parentRun.id}:${callId}`, text }
+    // While it waits on a question the model read, the message is its answer. The question is
+    // claimed before any wait, so of two answers sent at once only the first is one.
+    await this.#questions.refresh()
+    const question = this.#questions.of(child.id)
+    if (question && status === "running" && this.#reported.has(question.id)) {
+      this.#questions.answered(question)
+      try {
+        await publishAgentMail(this.host.broker, {
+          projectId,
+          mail: {
+            ...sent,
+            fromRunId: this.parentRun.id,
+            toThreadId: child.threadId,
+            kind: "answer",
+            inReplyTo: question.id,
+            sentAt: new Date().toISOString(),
+          },
+        })
+      } catch (error) {
+        this.#questions.reopen(question)
+        throw error
+      }
+      const output = { runId: child.id, status, delivery: "answer" } as const
+      this.#answers.set(sent.id, output)
+      return output
+    }
+
     await publishAgentMail(this.host.broker, {
       projectId: this.context.id,
       mail: {
@@ -458,21 +541,238 @@ export class SubagentCoordinator {
     return { runId: child.id, status, delivery: status === "queued" ? "first-step" : "next-step" }
   }
 
-  /** Whether an earlier turn of this conversation, among its latest, spawned a child with `key`. */
-  private async spawnedInEarlierTurn(key: string): Promise<boolean> {
-    const { runs } = this.context.storage.agents
-    const projectId = this.context.id
-    const { runs: turns } = await runs.list({
-      projectId,
-      kinds: ["conversation"],
+  /** The latest child under `key` of this conversation's turns, this one's included. */
+  private async latestChildUnder(key: string): Promise<SubagentRunRecord | undefined> {
+    const [latest] = await this.context.storage.agents.runs.listThreadSubagents({
+      projectId: this.context.id,
       threadId: this.parentRun.threadId,
-      order: "desc",
-      limit: EARLIER_TURNS_SEARCHED,
+      spawnKey: key,
+      limit: 1,
     })
-    const ids = turns
-      .filter((turn) => turn.id !== this.parentRun.id)
-      .map((turn) => createSubagentRunId(turn.id, key))
-    return ids.length > 0 && (await runs.getByIds({ projectId, ids })).length > 0
+    return latest
+  }
+
+  /**
+   * The child paused on its question that a message under `key` would continue: the latest run of
+   * the latest thread under the key, or, past the continuations of it that failed or were stopped,
+   * the run they continued, so their failure does not hide the question. A later spawn under the
+   * key replaces it.
+   */
+  private async pausedOnQuestion(key: string): Promise<SubagentRunRecord | undefined> {
+    const latest = await this.latestChildUnder(key)
+    if (!latest) return undefined
+
+    const runs = await listSubagentThreadRuns(this.context.storage.agents, {
+      projectId: this.context.id,
+      threadId: latest.threadId,
+    })
+    const live = [...runs]
+      .reverse()
+      .find((run) => run.status !== "failed" && run.status !== "cancelled")
+    return live && isAwaitingAnswer(live) ? live : undefined
+  }
+
+  /** Whether a continuation went on with its parent's answer, as its trigger says. */
+  private async continuesAfterAnswer(run: SubagentRunRecord): Promise<boolean> {
+    const trigger = await this.context.storage.agents.messages.getById({
+      projectId: this.context.id,
+      id: run.triggerMessageId,
+    })
+    return trigger?.parts.some((part) => part.type === "mail" && part.kind === "answer") ?? false
+  }
+
+  private async subagentRun(id: string): Promise<SubagentRunRecord | undefined> {
+    const run = await this.context.storage.agents.runs.getById({ projectId: this.context.id, id })
+    return run?.kind === "subagent" ? run : undefined
+  }
+
+  /**
+   * The children of this conversation still paused on their question, each with it: one indexed
+   * read, which finds none in a conversation that has none, then one per key that has some.
+   */
+  async waitingQuestions(): Promise<readonly WaitedQuestion[]> {
+    const paused = await this.context.storage.agents.runs.listThreadSubagents({
+      projectId: this.context.id,
+      threadId: this.parentRun.threadId,
+      finishReason: "awaiting_answer",
+    })
+    const waiting: WaitedQuestion[] = []
+    for (const key of new Set(paused.map((run) => run.spawnKey))) {
+      const child = await this.pausedOnQuestion(key)
+      const question = child ? await this.deferredQuestionOf(child) : undefined
+      if (child && question) waiting.push({ key, runId: child.id, ...question })
+    }
+    return waiting
+  }
+
+  /**
+   * Continue a child paused on its question, as a child of this turn under the same key, with this
+   * message as the answer it reads first. Admissions go one at a time, so a second answer in the
+   * same step finds the first one's continuation and is refused.
+   */
+  private async answerPaused(
+    paused: SubagentRunRecord,
+    key: string,
+    sent: SentMessage,
+    signal: AbortSignal
+  ): Promise<MessageSubagentOutput> {
+    const question = await this.deferredQuestionOf(paused)
+    if (!question) {
+      throw new Error(
+        `[SixbAgentWorker] Subagent run '${paused.id}' paused on a question its thread does not hold.`
+      )
+    }
+    const answer: AgentMailPart = {
+      type: "mail",
+      id: sent.id,
+      from: "parent",
+      kind: "answer",
+      inReplyTo: question.id,
+      text: sent.text,
+    }
+    const runId = createSubagentRunId(this.parentRun.id, key)
+    const admitted = await this.admitInTurn(async () => {
+      if (await this.subagentRun(runId)) {
+        throw new AgentToolPublicError(
+          `[SixbAgentWorker] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent.`
+        )
+      }
+      await this.clearDeadAttempts(paused, signal)
+      const { spec, continuation } = this.continuationOf(paused, [answer])
+      return this.admit(runId, key, spec, signal, {
+        ...continuation,
+        maxActiveChildren: this.context.subagentConcurrencyPerRun,
+      })
+    })
+
+    const output: MessageSubagentOutput = {
+      runId: admitted.runId,
+      status: admitted.status === "queued" ? "queued" : "running",
+      delivery: "answer",
+      continues: paused.id,
+    }
+    this.#answers.set(sent.id, output)
+    return output
+  }
+
+  /**
+   * The question a child paused on, from its thread: the last message of the run that paused, its
+   * work since its last delivery. Only one `awaiting_answer` has one.
+   */
+  private async deferredQuestionOf(run: SubagentRunRecord): Promise<QuestionRef | undefined> {
+    if (!isAwaitingAnswer(run)) return undefined
+
+    const { messages } = await this.context.storage.agents.messages.list({
+      projectId: this.context.id,
+      threadId: run.threadId,
+      order: "desc",
+      limit: 2,
+    })
+    const work = messages.find(
+      (message) => message.runId === run.id && message.role === "assistant"
+    )
+    return work ? deferredQuestion([work]) : undefined
+  }
+
+  /**
+   * The questions of the turn's children still at work that the model has not read, marked read:
+   * its answer would otherwise end the turn without them.
+   */
+  async unreadQuestions(): Promise<readonly WaitedQuestion[]> {
+    await this.#questions.refresh()
+    const unread = (await this.askingChildren()).filter(
+      (question) => !this.#reported.has(question.id)
+    )
+    for (const question of unread) this.#reported.add(question.id)
+    return unread
+  }
+
+  /**
+   * Before the turn records its end, while it still runs: tell each child still waiting on its
+   * question that the turn ends without an answer, then wait, until `stopAt`, for each to pause on
+   * it. The turn's end cancels the children still at work, so a child it told and that has not
+   * paused yet would be stopped; while the turn runs, the repair pass leaves its children alone.
+   */
+  async deferOpenQuestions(stopAt: number, signal: AbortSignal): Promise<void> {
+    let asking: readonly WaitedQuestion[]
+    let threads: ReadonlyMap<string, string>
+    try {
+      await this.#questions.refresh()
+      asking = await this.askingChildren()
+      const runs = await this.context.storage.agents.runs.getByIds({
+        projectId: this.context.id,
+        ids: asking.map((question) => question.runId),
+      })
+      threads = new Map(
+        runs.flatMap((run) => (run.kind === "subagent" ? [[run.id, run.threadId] as const] : []))
+      )
+    } catch (error) {
+      console.error(
+        `[SixbAgentWorker] Could not read the questions of Agent run '${this.parentRun.id}'; its children asking one are cancelled with the turn.`,
+        error
+      )
+      return
+    }
+
+    const deferred: string[] = []
+    for (const question of asking) {
+      const threadId = threads.get(question.runId)
+      if (threadId === undefined) continue
+      try {
+        await publishAgentMail(this.host.broker, {
+          projectId: this.context.id,
+          mail: {
+            id: `${this.parentRun.id}:deferred:${question.id}`,
+            fromRunId: this.parentRun.id,
+            toThreadId: threadId,
+            kind: "deferred",
+            inReplyTo: question.id,
+            text: "",
+            sentAt: new Date().toISOString(),
+          },
+        })
+        deferred.push(question.runId)
+      } catch (error) {
+        console.error(
+          `[SixbAgentWorker] Could not tell subagent run '${question.runId}' that its question waits for a later turn; it is cancelled with the turn.`,
+          error
+        )
+      }
+    }
+
+    try {
+      while (deferred.length > 0 && Date.now() < stopAt) {
+        const runs = await this.context.storage.agents.runs.getByIds({
+          projectId: this.context.id,
+          ids: deferred,
+        })
+        if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
+        await delay(Math.min(WAIT_POLL_MS, stopAt - Date.now()), signal)
+      }
+    } catch (error) {
+      // The turn's interruption checks record why it stopped.
+      if (signal.aborted) return
+      throw error
+    }
+  }
+
+  /** The open questions of the turn's children still at work, each with the child's key. */
+  private async askingChildren(): Promise<readonly WaitedQuestion[]> {
+    const open = this.#questions.open()
+    if (open.length === 0) return []
+
+    const runs = await this.context.storage.agents.runs.getByIds({
+      projectId: this.context.id,
+      ids: open.map((question) => question.runId),
+    })
+    const byId = new Map(runs.map((run) => [run.id, run]))
+    return open.flatMap((question: ChildQuestion) => {
+      const run = byId.get(question.runId)
+      if (run?.kind !== "subagent" || run.parentRunId !== this.parentRun.id) return []
+      if (run.status !== "running") return []
+
+      return [{ key: run.spawnKey, runId: run.id, id: question.id, text: question.text }]
+    })
   }
 
   async spawn(input: SpawnSubagentInput, signal: AbortSignal): Promise<SpawnSubagentOutput> {
@@ -539,10 +839,11 @@ export class SubagentCoordinator {
         existing.kind === "subagent" &&
         existing.threadId !== createSubagentThreadId(this.parentRun.id, key)
       ) {
+        const after = (await this.continuesAfterAnswer(existing)) ? "your answer" : "the approval"
         throw new AgentToolPublicError(
           isTerminalSubagent(existing)
-            ? `[SixbAgentWorker] '${key}' already continued after the approval, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
-            : `[SixbAgentWorker] '${key}' is the sub-agent that continues after the approval; wait for it with wait_agent.`
+            ? `[SixbAgentWorker] '${key}' already continued after ${after}, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
+            : `[SixbAgentWorker] '${key}' is the sub-agent that continues after ${after}; wait for it with wait_agent.`
         )
       }
       if (existing.kind === "subagent" && existing.parentRunId === this.parentRun.id) {
@@ -581,6 +882,41 @@ export class SubagentCoordinator {
     return null
   }
 
+  /**
+   * The run of this turn that continues `paused` in its thread: its model, task and files, this
+   * turn's mode and deadline, and a trigger of what it goes on with (the outcomes of its calls, or
+   * its parent's answer), what came back to its sandbox and when it continues.
+   */
+  private continuationOf(
+    paused: SubagentRunRecord,
+    goesOnWith: readonly AgentMessagePart[]
+  ): {
+    readonly spec: SubagentRunSpec
+    readonly continuation: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt">
+  } {
+    const spec = this.childSpec({
+      task: paused.spec.task,
+      model: paused.spec.model,
+      reasoning: paused.spec.reasoning,
+      files: paused.spec.files,
+    })
+    const createdAt = new Date()
+    const parts = continuationTrigger({
+      goesOnWith,
+      paused,
+      createdAt,
+      timeZone: spec.timeZone ?? this.context.timeZone,
+    })
+    return {
+      spec,
+      continuation: {
+        thread: { id: paused.threadId, create: false },
+        trigger: { id: createAgentMessageId(), parts },
+        createdAt,
+      },
+    }
+  }
+
   /** A child asks no less than its turn, dates as its requester does, and ends with the turn. */
   private childSpec(input: {
     readonly task: string
@@ -617,6 +953,8 @@ export class SubagentCoordinator {
       readonly maxActiveChildren: number
     }
   ): Promise<SpawnSubagentOutput> {
+    // Before it exists, so none of its questions is missed.
+    await this.#questions.listen()
     const executionId = createSubagentExecutionId(runId)
     const execution = createInheritedAgentExecutionRecord({
       id: executionId,
@@ -710,8 +1048,15 @@ export class SubagentCoordinator {
         }
         return run
       })
+      // A child blocked on its question waits for this turn, so a new question ends any wait,
+      // and one already returned ends a wait for its own child. Without the wake, it reads them.
+      if (!this.#questions.listening) await this.#questions.refresh()
+      const asking = await this.askingChildren()
+      const asked = asking.some(
+        (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
+      )
       const remainingMs = stopAt - Date.now()
-      if (children.every(isTerminalSubagent) || remainingMs <= 0) {
+      if (children.every(isTerminalSubagent) || asked || remainingMs <= 0) {
         const awaiting = await listChildApprovalsAwaiting(this.context.storage.agents, {
           projectId: this.context.id,
           parentRunId: this.parentRun.id,
@@ -719,20 +1064,35 @@ export class SubagentCoordinator {
         })
         const delivered = await this.deliverFiles(children, signal)
         const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
+        // It lists the questions it returns first, and those its children wait on.
+        const listed = asking.filter(
+          (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
+        )
+        for (const question of asking) this.#reported.add(question.id)
+        const open = new Map(asking.map((question) => [question.runId, question]))
+        const questions = await Promise.all(
+          children.map(async (run) => open.get(run.id) ?? (await this.deferredQuestionOf(run)))
+        )
         return {
           // Each result keeps the id the Agent passed.
           results: children.map((run, index) => ({
-            ...waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id)),
+            ...waitedResult(
+              run,
+              awaiting.get(run.id),
+              delivered.byChild.get(run.id),
+              questions[index]
+            ),
             ...messages[index],
             runId: passedIds[index] ?? run.id,
           })),
+          ...(listed.length > 0 ? { questions: listed } : {}),
           files: delivered.attached,
           ...(delivered.artifactsError === undefined
             ? {}
             : { artifactsError: delivered.artifactsError }),
         }
       }
-      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
+      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal, this.#questions.nextQuestion())
     }
   }
 
@@ -825,6 +1185,12 @@ export class SubagentCoordinator {
 
     for (const child of children) {
       if (child.status !== "succeeded") continue
+      if (isAwaitingAnswer(child)) {
+        if (child.result?.files?.length) {
+          byChild.set(child.id, { note: "They come back once it continues and finishes." })
+        }
+        continue
+      }
       if (isPausedSubagent(child)) {
         if (child.result?.files?.length) {
           byChild.set(child.id, {
@@ -1185,15 +1551,51 @@ interface ChildFiles {
   readonly note?: string
 }
 
+/** A child that paused on its question when its turn ended: it continues once answered. */
+function isAwaitingAnswer(run: SubagentRunRecord): boolean {
+  return run.status === "succeeded" && run.finishReason === "awaiting_answer"
+}
+
+/**
+ * The question a run paused on: its `ask_parent` call whose answer was deferred to a later turn,
+ * which names the question's id.
+ */
+function deferredQuestion(messages: readonly AgentMessage[]): QuestionRef | undefined {
+  const asked = messages
+    .flatMap((message) => message.parts)
+    .flatMap((part) =>
+      part.type === "tool-call" &&
+      part.toolName === "ask_parent" &&
+      part.state === "output-available" &&
+      isJsonObject(part.output) &&
+      part.output.status === "deferred" &&
+      isJsonObject(part.input)
+        ? [{ input: part.input, output: part.output }]
+        : []
+    )
+    .at(-1)
+  if (!asked) return undefined
+
+  const { question: text } = asked.input
+  const { question: id } = asked.output
+  return typeof text === "string" && typeof id === "string" ? { id, text: text.trim() } : undefined
+}
+
 function waitedResult(
   run: SubagentRunRecord,
   awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined,
-  files: ChildFiles | undefined
+  files: ChildFiles | undefined,
+  question: QuestionRef | undefined
 ): WaitedSubagentResult {
   return {
     runId: run.id,
-    status: isPausedSubagent(run) ? "awaiting_approval" : run.status,
+    status: isPausedSubagent(run)
+      ? "awaiting_approval"
+      : isAwaitingAnswer(run)
+        ? "awaiting_answer"
+        : run.status,
     ...(run.result?.text ? { text: run.result.text } : {}),
+    ...(question === undefined ? {} : { question: { id: question.id, text: question.text } }),
     ...(run.error === undefined
       ? {}
       : { error: { code: run.error.code, message: run.error.message } }),

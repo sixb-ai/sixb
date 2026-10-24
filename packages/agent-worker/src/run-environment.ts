@@ -109,7 +109,7 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly run: ConversationAgentRunRecord
   /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
   readonly messages?: readonly AgentMessageRecord[]
-  /** Framework-owned tools available only to the main conversational Agent. */
+  /** Framework-owned tools of the conversational Agent: delegation. */
   readonly frameworkTools?: readonly ModelTool[]
 }
 
@@ -123,6 +123,8 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly requestedBy?: Principal
   /** Its thread's messages, whose files are projected again, and the paused run it continues. */
   readonly history: SubagentHistory
+  /** Framework-owned tools of a child: `ask_parent`. */
+  readonly frameworkTools?: readonly ModelTool[]
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -339,6 +341,7 @@ export async function createSubagentEnvironment(
     attachmentContext,
     ontologyDocs: renderRunOntologyDocs(context),
     ...(memory ? { memory } : {}),
+    frameworkTools: input.frameworkTools,
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
     onDetachedTeardown: input.onDetachedTeardown,
   })

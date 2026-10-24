@@ -710,7 +710,7 @@ describe("a message to a child at work", () => {
                 id: `${parentRunId}:future`,
                 fromRunId: parentRunId,
                 toThreadId: (await child(harness.agents, childRunId)).threadId,
-                kind: "answer",
+                kind: "handoff",
                 text: "Use the fiscal year.",
                 sentAt: new Date().toISOString(),
               },
