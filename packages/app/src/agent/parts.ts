@@ -83,7 +83,7 @@ export function normalizeDurableParts(
       case "continuation":
       case "approval-outcome":
       case "provider-state":
-      // A sub-agent's thread's: what its parent told it reads on its card.
+      // What the parent told a sub-agent: its card shows it, from the parent's own calls.
       case "mail":
         return []
       default:

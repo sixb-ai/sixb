@@ -43,6 +43,7 @@ import {
 import type { ComposerProps } from "../components/composer"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
+import type { TranscriptDelegation } from "../delegation/context"
 import { useAgentMessages } from "../i18n"
 import { knownName } from "../message-authors"
 import {
@@ -851,6 +852,14 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         (approval) => approval.status === "pending" && !transcriptApprovals.canDecide(approval)
       )
 
+  // Whoever asked for the turn a sub-agent works under, or the thread's owner, stops it.
+  const transcriptDelegation = useMemo(
+    (): TranscriptDelegation => ({
+      canStop: (runId) => canStopRun(runs.find((run) => run.id === runId) ?? null, access, user),
+    }),
+    [runs, access, user]
+  )
+
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
@@ -885,6 +894,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     continuing: composerPending,
     reconnecting,
     approvals: transcriptApprovals,
+    delegation: transcriptDelegation,
   }
 
   const modelControlsProps = canChooseModel
