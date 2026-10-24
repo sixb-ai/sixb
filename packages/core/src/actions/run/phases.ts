@@ -87,6 +87,8 @@ async function commitOnce(
   try {
     objectTarget = await loadObjectTarget({ runtime, action, run: state.run })
   } catch (error) {
+    // The subject changed while its requester's view of it was read: replay as a commit would.
+    if (isReadConflict(error)) throw error
     throw translateActionPhaseError(error, replayingEdits ? "edits" : "validation", {
       ...ids,
       signal,

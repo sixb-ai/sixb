@@ -10,11 +10,13 @@ import {
   executionRecordInputFromRuntime,
 } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
+import type { ObjectRef } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
+import { isObjectRefSchema } from "../ontology/refs"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { assertParamUsersActive } from "../shared/params/user-refs"
-import type { ActionRunRecord } from "../storage"
+import { type ActionRunRecord, ObjectNotFoundError, objectBatchKey } from "../storage"
 import {
   assertObjectReadOutputWithinLimit,
   ObjectReadLimitExceededError,
@@ -108,10 +110,12 @@ export async function requestAction(
   }
   if (authorization.type !== "delegated" && action.binding.kind === "object") {
     // Object actions require visibility of the type they are bound to, as listing them does.
-    assertAuthorized(
-      { projectId, runtimeAuthorization },
-      { kind: "object.view", objectTypeId: action.binding.objectType.id }
-    )
+    await assertTypeViewable({
+      projectId,
+      runtimeAuthorization,
+      objectReader,
+      objectTypeId: action.binding.objectType.id,
+    })
   }
 
   validateActionSubject(action, subject)
@@ -132,14 +136,27 @@ export async function requestAction(
       // A run is visible to whoever may view its subject (`viewableActionRuns`). A subtype
       // excluded from a broad grant is not visible through its parent, so admitting the request on
       // the bound type alone would run what its caller can never read back.
-      assertAuthorized(
-        { projectId, runtimeAuthorization },
-        { kind: "object.view", objectTypeId: objectType.id }
-      )
+      await assertTypeViewable({
+        projectId,
+        runtimeAuthorization,
+        objectReader,
+        objectTypeId: objectType.id,
+      })
     }
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
+
+  if (authorization.type !== "delegated") {
+    await assertNamedObjectsVisible({
+      objectReader,
+      subject,
+      paramsConfig: action.params,
+      params: actionParams,
+      pathPrefix,
+    })
+  }
+
   const runId = createActionRunId(request.runId)
 
   // `persistActionRun` checks an existing run id before creating its durable execution. Keep
@@ -193,6 +210,12 @@ export async function requestAction(
       },
     })
 
+  // The request saw its subject; the run reads it again, and must find a state its requester sees.
+  const conditioned =
+    authorization.type === "principal" &&
+    subject.kind === "object" &&
+    objectReader.viewsThroughCondition(subject.objectTypeId)
+
   const run = await executor.request({
     runId,
     payload,
@@ -200,8 +223,83 @@ export async function requestAction(
     assertCanReuse,
     signal: request.signal,
     onRequested: request.onRequested,
+    ...(conditioned
+      ? {
+          readSubjectAsRequester: ({ objectTypeId, primaryId }) =>
+            objectReader.getByPrimaryId({ objectTypeId, primaryId }),
+        }
+      : {}),
   })
   return enforceDelegatedOutputBudget(authorization, run)
+}
+
+/**
+ * A principal views a type whole, through a view grant, or through a condition its reader applies.
+ * Only the reader knows the latter, and each object the request names is then read through it.
+ */
+async function assertTypeViewable(input: {
+  readonly projectId: string
+  readonly runtimeAuthorization: SixbRuntimeContext["runtimeAuthorization"]
+  readonly objectReader: SixbRuntimeContext["objectReader"]
+  readonly objectTypeId: string
+}): Promise<void> {
+  const { objectReader, objectTypeId } = input
+
+  if (objectReader.viewsThroughCondition(objectTypeId)) {
+    await objectReader.assertViewable([objectTypeId])
+    return
+  }
+
+  assertAuthorized(input, { kind: "object.view", objectTypeId })
+}
+
+/**
+ * A principal acts only on the objects it can see. Where it views a type through a condition, the
+ * subject and each `ref()` param of that type must be visible through its reader now: one that is
+ * not is hidden or missing, and both are not found, before anything is recorded.
+ *
+ * A type it views whole is not read here. Its missing subject fails the run, and its `ref()` params
+ * are not looked up, as before conditions existed.
+ */
+async function assertNamedObjectsVisible(input: {
+  readonly objectReader: SixbRuntimeContext["objectReader"]
+  readonly subject: ActionSubject
+  readonly paramsConfig: ActionDefinition["params"]
+  readonly params: Record<string, unknown>
+  readonly pathPrefix: string
+}): Promise<void> {
+  const { objectReader, subject, params } = input
+
+  const named: { readonly ref: ObjectRef; readonly context: string }[] = []
+  if (subject.kind === "object") {
+    named.push({ ref: subject, context: "Object not found for action run" })
+  }
+  for (const [paramId, param] of Object.entries(input.paramsConfig)) {
+    const value = params[paramId]
+    if (!isObjectRefSchema(param.schema) || value === undefined || value === null) continue
+
+    named.push({
+      ref: value as ObjectRef,
+      context: `Object not found for action param '${input.pathPrefix}.${paramId}'`,
+    })
+  }
+
+  const conditioned = named.filter(({ ref }) =>
+    objectReader.viewsThroughCondition(ref.objectTypeId)
+  )
+  if (conditioned.length === 0) return
+
+  const visible = await objectReader.getByPrimaryIdBatch({
+    items: conditioned.map(({ ref }) => ({
+      objectTypeId: ref.objectTypeId,
+      primaryId: ref.primaryId,
+    })),
+  })
+
+  for (const { ref, context } of conditioned) {
+    if (visible.has(objectBatchKey(ref.objectTypeId, ref.primaryId))) continue
+    throw new ObjectNotFoundError(ref.objectTypeId, ref.primaryId, context)
+  }
 }
 
 /**

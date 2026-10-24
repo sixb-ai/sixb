@@ -6,7 +6,7 @@ import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectsRuntime } from "../../objects/execution"
 import type { SixbDefinitions } from "../../runtime/definitions"
 import type { OntologyMutationRuntime } from "../../runtime/ontology-mutations"
-import type { ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { ActionRunRecord, ActionRunStorage, ObjectRow, Storage } from "../../storage"
 import type { UsersRuntime } from "../../users"
 import type { ActionsRuntime } from "../execution"
 import type { ActionRunSignals } from "./signals"
@@ -32,7 +32,18 @@ export interface ActionRunContext {
   readonly actions: Pick<SixbDefinitions["actions"], "getById">
   /** Who started the chain of executions the run belongs to, when a principal did. */
   readonly requestedBy: AuthorizablePrincipal | undefined
+  /** Reads the subject as its requester sees it: see {@link ReadSubjectAsRequester}. */
+  readonly readSubjectAsRequester?: ReadSubjectAsRequester
 }
+
+/**
+ * Reads the run's subject through its requester's reader. Present when the requester views the
+ * subject's type only through a condition: the run then acts only on a state its requester sees.
+ */
+export type ReadSubjectAsRequester = (subject: {
+  readonly objectTypeId: string
+  readonly primaryId: string
+}) => Promise<ObjectRow | null>
 
 /**
  * A requested run that has not ended: the request it executes, under the durable execution created

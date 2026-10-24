@@ -599,6 +599,21 @@ class AuthorizedObjectReaderImpl {
     assertTargetsReadable(await this.#security.clearance.current(), targets)
   }
 
+  /**
+   * Whether this reader sees only the objects of a type that a condition matches. A write or a
+   * request that names such an object finds it through this reader first: one it cannot find is
+   * hidden or missing, and both answer alike.
+   */
+  viewsThroughCondition(objectTypeId: string): boolean {
+    return this.#security.viewsThroughCondition(objectTypeId)
+  }
+
+  /** Refuse a type this reader views neither whole nor through a condition. */
+  async assertViewable(objectTypeIds: readonly string[]): Promise<void> {
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable(objectTypeIds, clearance)
+  }
+
   /** Enforce the delegated response budget without exposing or recombining its limits. */
   assertVisibleOutputWithinLimit(value: unknown): void {
     if (this.#security.authority.type !== "delegated") return

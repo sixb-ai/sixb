@@ -77,14 +77,17 @@ export function createActionsRuntime(
       )
     }
     if (authorization.type === "unrestricted") return true
-    return (
-      isAllowed(authorization.context, { kind: "action.apply", actionId: action.id }) &&
-      (action.binding.kind === "global" ||
-        isAllowed(authorization.context, {
-          kind: "object.view",
-          objectTypeId: action.binding.objectType.id,
-        }))
-    )
+    if (!isAllowed(authorization.context, { kind: "action.apply", actionId: action.id })) {
+      return false
+    }
+    if (action.binding.kind === "global") return true
+
+    // A type viewed through a condition is viewable as the reader decides it: its requests then
+    // name objects the reader sees.
+    const objectTypeId = action.binding.objectType.id
+    return objectReader.viewsThroughCondition(objectTypeId)
+      ? getAuthorizedOntologyView(objectReader).getObjectTypeById(objectTypeId) !== null
+      : isAllowed(authorization.context, { kind: "object.view", objectTypeId })
   }
 
   const release = <T>(value: T): T => {

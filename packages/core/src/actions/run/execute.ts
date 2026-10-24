@@ -10,7 +10,12 @@ import type { ActionRunStorage, Storage } from "../../storage"
 import type { ExecutionRecord } from "../../storage/executions"
 import { runAction } from "./run-action"
 import { ActionRunSignals } from "./signals"
-import type { ActionRunContext, ActionRunOutcome, PendingActionRun } from "./types"
+import type {
+  ActionRunContext,
+  ActionRunOutcome,
+  PendingActionRun,
+  ReadSubjectAsRequester,
+} from "./types"
 
 /** What executing a stored Action run needs from its host. */
 export interface ActionRunHost extends PrimitiveExecutionHost {
@@ -25,6 +30,7 @@ export interface ExecuteActionRunInput {
   readonly execution: ExecutionRecord
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
+  readonly readSubjectAsRequester?: ReadSubjectAsRequester
 }
 
 /**
@@ -64,7 +70,7 @@ export async function executeActionRun(
       primitive: { kind: "action", id: run.actionId, runId: run.id },
     })
     return await runAction({
-      runtime: buildActionContext(host, actionRuns, bound),
+      runtime: buildActionContext(host, actionRuns, bound, input.readSubjectAsRequester),
       run,
       signals,
     })
@@ -88,7 +94,8 @@ function requireActionRunStorage(host: ActionRunHost, runId: string): ActionRunS
 function buildActionContext(
   host: ActionRunHost,
   actionRunsStorage: ActionRunStorage,
-  execution: BoundPrimitiveExecution
+  execution: BoundPrimitiveExecution,
+  readSubjectAsRequester: ReadSubjectAsRequester | undefined
 ): ActionRunContext {
   const sixb = {
     models: execution.sixb.models,
@@ -108,5 +115,6 @@ function buildActionContext(
     sixb,
     actions: host.definitions.actions,
     requestedBy: execution.sixb.execution.requestedBy,
+    ...(readSubjectAsRequester === undefined ? {} : { readSubjectAsRequester }),
   }
 }
