@@ -373,6 +373,9 @@ File: `queries/overdue.json`
 - Publishing runs each query once as its author and refuses one they could not run, naming the
   file and where in it. `page`, `vector`, and `rerank` are refused: Sixb pages the result, and a
   search would bill every reader who opens the artifact. A document holds no queries.
+- A query returns only what its author can read: one that would return a marked property they
+  are not cleared for, on its rows or on an object an `expand` attaches, or member profiles they
+  may not view, is refused. Use a `project` node to leave those properties out.
 - A version holds up to 20 queries of 64 KB each. A query returns up to 10,000 rows, and
   `truncated` says when there were more.
 - `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does

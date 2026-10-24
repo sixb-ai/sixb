@@ -5,7 +5,9 @@ import {
   AuthorizationError,
   defineMarking,
   defineObjectType,
+  link,
   prop,
+  ref,
   SixbHost,
 } from "../src"
 import { ARTIFACT_LIMITS } from "../src/artifacts/limits"
@@ -31,6 +33,25 @@ const Invoice = defineObjectType({
   ],
 })
 
+/** Who an invoice bills, and the marked tax id an expansion of it would return. */
+const Customer = defineObjectType({
+  id: "Customer",
+  name: "Customer",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string"),
+    prop("taxId", "string", { markings: [financial] }),
+  ],
+})
+
+const Billed = defineObjectType({ ...Invoice, links: [link("customer", Customer)] })
+
+/** An invoice with the member who owns it, whose profile a query may expand. */
+const Owned = defineObjectType({
+  ...Invoice,
+  properties: [...Invoice.properties, prop("owner", ref.user(), { nullable: true })],
+})
+
 type Ontology = ConstructorParameters<typeof SixbHost>[0]["ontology"]
 
 function setup(deps = createTestRuntimeDeps(), ontology: Ontology = [Invoice]) {
@@ -38,13 +59,21 @@ function setup(deps = createTestRuntimeDeps(), ontology: Ontology = [Invoice]) {
 
   const as = (
     id: string,
-    options: { readonly views?: readonly string[]; readonly cleared?: boolean } = {}
+    options: {
+      readonly views?: readonly string[]
+      readonly cleared?: boolean
+      readonly members?: boolean
+    } = {}
   ) => {
     const authorization: AuthorizationContext = {
       principal: { type: "user", id },
       groupIds: [],
       roleIds: [],
-      grants: { ...emptyGrantIndex(), "view:object": new Set(options.views ?? ["Invoice"]) },
+      grants: {
+        ...emptyGrantIndex(),
+        "view:object": new Set(options.views ?? ["Invoice"]),
+        "view:users": options.members === true,
+      },
       ...(options.cleared ? { clearances: new Set([financial.id]) } : {}),
     }
     return createTestSixb(host, { authorization })
@@ -104,7 +133,7 @@ describe("publishing a version that holds queries", () => {
   test("keeps each query among its files, as a node, a request, or a facets request", async () => {
     const { as, page } = setup()
 
-    const published = await as("alice").artifacts.create(
+    const published = await as("alice", { cleared: true }).artifacts.create(
       await page({
         open,
         "open-request": { query: open, includeTotal: true },
@@ -256,6 +285,67 @@ describe("publishing a version that holds queries", () => {
     await as("alice", { cleared: true }).artifacts.create(await page({ large }))
   })
 
+  // Guard proof: drop the assertReturnsReadable call from createArtifactQueryChecker; each of
+  // Bob's queries then publishes, and a cleared reader's rows would reach his page with amounts.
+  test("refuses a query that returns what its author is not cleared to read, naming it", async () => {
+    const { as, page } = setup(createTestRuntimeDeps(), [Billed, Customer])
+    const views = ["Invoice", "Customer"]
+    const bob = as("bob", { views })
+
+    const statuses = { kind: "project", input: open, properties: ["id", "status"] }
+    const customers = {
+      kind: "expand",
+      input: statuses,
+      expansions: [{ linkId: "customer", direction: "outgoing" }],
+    }
+
+    await expectRefused(
+      bob.artifacts.create(await page({ all: { query: open } })),
+      "[Sixb] queries/all.json: $.query: returns 'amount' on 'Invoice', which you are not cleared to read: add a \"project\" node that lists only the properties you can read."
+    )
+    await expectRefused(
+      bob.artifacts.create(await page({ amounts: { ...statuses, properties: ["id", "amount"] } })),
+      "[Sixb] queries/amounts.json: $.properties[1]: returns 'amount' on 'Invoice', which you are not cleared to read: list only the properties you can read."
+    )
+    await expectRefused(
+      bob.artifacts.create(await page({ customers })),
+      "[Sixb] queries/customers.json: $.expansions[0]: expands 'customer' to 'Customer', whose 'taxId' you are not cleared to read: an expansion returns every property, so leave it out, or read 'Customer' in a query of its own with a \"project\" node."
+    )
+
+    // Without what he cannot read, his query publishes.
+    await bob.artifacts.create(await page({ statuses }))
+
+    // Cleared, the same queries publish as they are.
+    const { version } = await as("alice", { views, cleared: true }).artifacts.create(
+      await page({ all: { query: open }, customers })
+    )
+    expect(version.files.map((file) => file.path)).toEqual([
+      "index.html",
+      "queries/all.json",
+      "queries/customers.json",
+    ])
+  })
+
+  // Guard proof: drop the assertExpandsNoUsers call from createArtifactQueryChecker; Bob's query
+  // then publishes, and a reader who views members would hand their profiles to his page.
+  test("refuses a query that expands member profiles its author may not view", async () => {
+    const { as, page } = setup(createTestRuntimeDeps(), [Owned])
+    const owners = {
+      kind: "expand",
+      input: { kind: "project", input: start, properties: ["id", "owner"] },
+      expansions: [],
+      users: ["owner"],
+    }
+
+    await expectRefused(
+      as("bob").artifacts.create(await page({ owners })),
+      "[Sixb] queries/owners.json: $.users[0]: returns the member profiles 'owner' refers to, which you are not allowed to view: leave 'owner' out of \"users\"."
+    )
+
+    // Allowed to view members, he publishes it.
+    await as("bob", { members: true }).artifacts.create(await page({ owners }))
+  })
+
   // Guard proof: return instead of throwing at the `!checker` refusal in checkArtifactQueries; the
   // version is then prepared with a query nobody checked.
   test("refuses a version with queries when nothing checks them as its author", async () => {
@@ -323,8 +413,9 @@ describe("reading a version's query", () => {
   test("leaves out what the reader is not cleared for, and refuses what they cannot view", async () => {
     const { host, as, page } = setup()
     await seedInvoices(host, 1)
-    const { artifact } = await as("bob").artifacts.create(await page({ open }))
+    const { artifact } = await as("bob", { cleared: true }).artifacts.create(await page({ open }))
 
+    // Bob is no longer cleared: his own artifact's query leaves the amount out.
     const uncleared = await as("bob").artifacts.query(artifact.id, "open")
     expect(uncleared?.kind === "objects" && uncleared.objects[0]).toMatchObject({
       properties: { id: "inv_00001", status: "open" },
