@@ -10,6 +10,7 @@ import type {
   AgentToolDefinition,
   AgentToolHandler,
   AgentToolInputSchema,
+  AgentToolResult,
   InferAgentToolInputSchema,
 } from "./types"
 import {
@@ -25,12 +26,13 @@ const normalizedAgentTools = new WeakSet<AgentToolDefinition>()
 export function createAgentToolDefinition<
   const TName extends string,
   const TInput extends AgentToolInputSchema,
+  TOutput extends ReadonlyJsonValue | AgentToolResult = ReadonlyJsonValue | AgentToolResult,
 >(definition: {
   readonly name: TName
   readonly description: string
   readonly input: TInput
-  readonly handler: AgentToolHandler<InferAgentToolInputSchema<TInput>>
-}): AgentToolDefinition<TName, TInput> {
+  readonly handler: AgentToolHandler<InferAgentToolInputSchema<TInput>, TOutput>
+}): AgentToolDefinition<TName, TInput, TOutput> {
   assertValidAgentToolName(definition.name)
   assertValidAgentToolDescription(definition.name, definition.description)
   if (typeof definition.handler !== "function") {
@@ -40,7 +42,7 @@ export function createAgentToolDefinition<
   }
 
   const input = validateAndSnapshotAgentToolInput(definition.name, definition.input)
-  const tool: AgentToolDefinition<TName, TInput> = {
+  const tool: AgentToolDefinition<TName, TInput, TOutput> = {
     kind: "agentTool",
     name: definition.name,
     description: definition.description,

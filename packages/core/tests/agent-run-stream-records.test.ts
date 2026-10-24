@@ -11,6 +11,7 @@ import {
   isAgentRunStreamEvent,
   publishAgentRunActivity,
 } from "../src/agents/streams/protocol"
+import { MODEL_UI_CHUNK_TYPES, type ModelUiChunk } from "../src/models/events"
 import type { ConversationAgentRunRecord, SubagentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")
@@ -192,6 +193,64 @@ describe("agent run stream records", () => {
     expect(Object.hasOwn(completed, "summary")).toBe(false)
   })
 
+  test("validates each UI chunk variant by the fields it requires", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      type: "agent.ui.chunk" as const,
+      projectId: "stream-records-tests",
+      runId: "agt_run_1",
+      threadId: "agt_thr_1",
+      attempt: 1,
+      occurredAt: OCCURRED_AT.toISOString(),
+      chunkIndex: 0,
+    }
+    const tool = { toolCallId: "call-1", toolName: "quote_shipping" }
+    const chunks: { readonly [TType in ModelUiChunk["type"]]: ModelUiChunk & { type: TType } } = {
+      "start-step": { type: "start-step" },
+      "text-start": { type: "text-start", id: "text" },
+      "text-delta": { type: "text-delta", id: "text", delta: "Hi" },
+      "text-end": { type: "text-end", id: "text" },
+      "reasoning-start": { type: "reasoning-start", id: "reasoning" },
+      "reasoning-delta": { type: "reasoning-delta", id: "reasoning", delta: "Hm" },
+      "reasoning-end": { type: "reasoning-end", id: "reasoning" },
+      "tool-input-start": { type: "tool-input-start", ...tool },
+      "tool-input-delta": { type: "tool-input-delta", ...tool, inputTextDelta: "{" },
+      "tool-input-available": { type: "tool-input-available", ...tool, input: null },
+      "tool-input-error": { type: "tool-input-error", ...tool, input: "{", errorText: "Bad" },
+      "tool-output-available": { type: "tool-output-available", ...tool, output: { price: 42 } },
+      "tool-output-error": { type: "tool-output-error", ...tool, errorText: "Failed" },
+      error: { type: "error", errorText: "Stream failed" },
+    }
+
+    expect(Object.keys(chunks).sort()).toEqual([...MODEL_UI_CHUNK_TYPES].sort())
+    for (const chunk of Object.values(chunks)) {
+      expect(isAgentRunStreamEvent({ ...base, chunk })).toBe(true)
+    }
+
+    // A newer producer may add optional fields to a known chunk.
+    expect(isAgentRunStreamEvent({ ...base, chunk: { ...chunks["text-end"], extra: 1 } })).toBe(
+      true
+    )
+
+    const malformed = [
+      null,
+      { id: "text", delta: "Hi" },
+      { type: "text-start" },
+      { type: "text-delta", id: "text" },
+      { type: "reasoning-delta", id: "reasoning", delta: 1 },
+      { type: "tool-input-start", toolCallId: "call-1" },
+      { type: "tool-input-delta", ...tool },
+      { type: "tool-input-available", ...tool },
+      { type: "tool-input-error", ...tool, input: "{" },
+      { type: "tool-output-available", ...tool },
+      { type: "tool-output-error", toolName: "quote_shipping", errorText: "Failed" },
+      { type: "error" },
+    ]
+    for (const chunk of malformed) {
+      expect(isAgentRunStreamEvent({ ...base, chunk })).toBe(false)
+    }
+  })
+
   test("refuses to build a finished event for a non-terminal run", () => {
     expect(() => agentRunFinishedEvent(runRecord({ status: "queued" }))).toThrow("not terminal")
     expect(() => agentRunFinishedEvent(runRecord({ status: "running" }))).toThrow("not terminal")
@@ -214,7 +273,12 @@ describe("agent run stream records", () => {
       "agt_run_1:3:started"
     )
     expect(
-      agentRunStreamIdempotencyKey({ ...base, type: "agent.ui.chunk", chunkIndex: 7, chunk: null })
+      agentRunStreamIdempotencyKey({
+        ...base,
+        type: "agent.ui.chunk",
+        chunkIndex: 7,
+        chunk: { type: "start-step" },
+      })
     ).toBe("agt_run_1:3:chunk:7")
     expect(
       agentRunStreamIdempotencyKey({

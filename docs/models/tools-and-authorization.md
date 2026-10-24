@@ -28,6 +28,13 @@ The input schema validates arguments from the model. Return JSON-compatible data
 `signal` to requests that support cancellation. Resolving a [connector](../connectors/overview.md)
 in the handler keeps its credentials on the server.
 
+What the handler returns is the tool's output: the chat saves and streams it as is, and
+`InferAgentToolOutput` gives its type to the code that renders it:
+
+```ts
+type SearchResults = InferAgentToolOutput<typeof searchKnowledge>
+```
+
 ## Use project data in a tool
 
 A tool is one specific operation that has to run on the server, such as a call to an API whose

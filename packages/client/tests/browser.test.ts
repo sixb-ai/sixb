@@ -119,7 +119,7 @@ describe("websocket URLs", () => {
 })
 
 describe("agent stream frames", () => {
-  test("parses valid records while keeping UI chunks opaque", () => {
+  test("parses valid UI chunk records", () => {
     const parsed = parseAgentRunStreamServerMessage(
       JSON.stringify({
         type: "record",
@@ -139,7 +139,7 @@ describe("agent stream frames", () => {
             attempt: 1,
             occurredAt: "2026-06-27T16:00:00.000Z",
             chunkIndex: 0,
-            chunk: { future: ["shape"] },
+            chunk: { type: "text-delta", id: "text", delta: "Hi" },
           },
         },
       })

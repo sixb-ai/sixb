@@ -44,6 +44,30 @@ function agentRecordFrame(cursor: string): string {
   })
 }
 
+function uiChunkFrame(cursor: string, chunk: Record<string, unknown>): string {
+  return JSON.stringify({
+    type: "record",
+    record: {
+      streamId: "agent-run:run-1",
+      cursor,
+      name: "agent.ui.chunk",
+      key: "run-1",
+      publishedAt: "2026-01-01T00:00:00.000Z",
+      payload: {
+        schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+        type: "agent.ui.chunk",
+        projectId: "proj",
+        runId: "run-1",
+        threadId: "thr-1",
+        attempt: 1,
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        chunkIndex: Number(cursor.slice(1)),
+        chunk,
+      },
+    },
+  })
+}
+
 function agentActivityFrame(status: "queued" | "running" | "succeeded"): string {
   return JSON.stringify({
     type: "activity",
@@ -131,6 +155,36 @@ describe("createAgentRunSocket", () => {
     if (!ws2) throw new Error("expected a reconnect")
     ws2.onopen?.()
     expect(JSON.parse(ws2.sent[0]).afterCursor).toBe("c5")
+
+    socket.close()
+  })
+
+  test("skips a chunk type from a newer server and keeps streaming", () => {
+    const received: Array<{ chunk: unknown; cursor: string }> = []
+    const errors: string[] = []
+    const socket = createAgentRunSocket({
+      runId: "run-1",
+      reconnect: false,
+      onEvent: (event, cursor) => {
+        if (event.type === "agent.ui.chunk") received.push({ chunk: event.chunk, cursor })
+      },
+      onError: (message) => errors.push(message),
+    })
+
+    const ws1 = FakeWebSocket.instances[0]
+    if (!ws1) throw new Error("expected a websocket")
+    ws1.onopen?.()
+
+    // Regression proof: validate the chunk with `isJsonValue` again in `isAgentRunStreamEvent`;
+    // the unknown chunk is then the first one delivered.
+    ws1.onmessage?.({ data: uiChunkFrame("c0", { type: "source-url", url: "https://sixb.ai" }) })
+    ws1.onmessage?.({ data: uiChunkFrame("c1", { type: "text-delta", id: "text", delta: "Hi" }) })
+
+    expect(received).toEqual([
+      { chunk: { type: "text-delta", id: "text", delta: "Hi" }, cursor: "c1" },
+    ])
+    expect(errors).toEqual([])
+    expect(ws1.closed).toBe(false)
 
     socket.close()
   })
