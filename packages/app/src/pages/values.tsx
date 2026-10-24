@@ -8,8 +8,8 @@
  * node cannot be read (an unresolved `valueTypeRef`, a field it does not name), the value is drawn
  * generically and its type is never guessed.
  */
-import { client, type GetUserResponse, getUser, objectFileContentUrl } from "@sixb/client"
-import { listObjectTypesOptions } from "@sixb/client/hooks"
+import { client, objectFileContentUrl } from "@sixb/client"
+import { listObjectTypesOptions, useUser } from "@sixb/client/hooks"
 import type { UserRef } from "@sixb/core"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import { Avatar, AvatarFallback, AvatarImage } from "@sixb/ui/components"
@@ -21,7 +21,7 @@ import {
   useLocale,
 } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { queryOptions, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Box, Download, Eye, FileIcon, UserRound } from "lucide-react"
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
@@ -607,36 +607,13 @@ function Ref({
 const USER_PROFILE_STALE_MS = 5 * 60_000
 
 /**
- * The member a user reference names, or `null` when the reader cannot see the directory or no
- * member has the id. Both are answers, cached like a profile, so a page of chips asks once per id.
- */
-export function userRefProfileQuery(userId: string) {
-  return queryOptions<GetUserResponse | null>({
-    queryKey: ["sixb", "app", "userRefProfile", userId] as const,
-    queryFn: async ({ signal }) => {
-      const { data, error, response } = await getUser({
-        path: { userId },
-        signal,
-        responseStyle: "fields",
-        throwOnError: false,
-      })
-      if (response?.status === 403 || response?.status === 404) return null
-      if (error !== undefined) throw error
-
-      return data
-    },
-    retry: false,
-    staleTime: USER_PROFILE_STALE_MS,
-  })
-}
-
-/**
  * A user reference carries only an id, so the chip names the member from the directory. Without
- * `can.view(project.users)`, or for an id no member has, it shows the id.
+ * `can.view(project.users)`, or for an id no member has, it shows the id. The lookup is the
+ * member picker's, so a page of chips asks once per member and a choice names its chip at once.
  */
 function UserRefChip({ user }: { readonly user: UserRef }) {
   const messages = useValueMessages()
-  const profile = useQuery(userRefProfileQuery(user.id)).data
+  const profile = useUser(user, { retry: false, staleTime: USER_PROFILE_STALE_MS }).data
   const icon = <UserRound className="size-3 shrink-0 text-sky-600 dark:text-sky-400" />
 
   if (!profile) {

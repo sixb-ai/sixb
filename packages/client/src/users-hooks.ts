@@ -1,7 +1,7 @@
 import type { UserRef } from "@sixb/core"
 import { queryOptions, type UseQueryResult, useQuery } from "@tanstack/react-query"
 import { useSixbProviderClient } from "./client-provider"
-import { getUserQueryKey, listUsersQueryKey } from "./generated/@tanstack/react-query.gen"
+import { listUsersQueryKey } from "./generated/@tanstack/react-query.gen"
 import type { Client } from "./generated/client"
 import { getUser, listUsers } from "./generated/sdk.gen"
 import type { GetUserResponse, ListUsersData, ListUsersResponse } from "./generated/types.gen"
@@ -35,7 +35,7 @@ export function usersQueryOptions(options: UseUsersOptions = {}) {
 
 /**
  * Query options for one member, for prefetching or `useQuery`. The data is `null` when no member
- * has this id.
+ * has this id or the reader cannot read the directory.
  */
 export function userQueryOptions(user: UserRef | string, options: UseUserOptions = {}) {
   const { client, ...extras } = options
@@ -43,9 +43,11 @@ export function userQueryOptions(user: UserRef | string, options: UseUserOptions
 
   return queryOptions<GetUserResponse | null, Error>({
     ...extras,
-    queryKey: getUserQueryKey({ path }),
+    // Not the generated `getUserQueryKey`: `getUserOptions` caches only members, never `null`.
+    queryKey: [{ _id: "user", path }] as const,
     queryFn: async ({ signal }) => {
-      // Read the status rather than throw: an unknown id is an answer, not a failure.
+      // Read the status rather than throw: a hidden or unknown member is an answer, cached as
+      // no one, not a failure each reader asks again.
       const { data, error, response } = await getUser({
         client,
         path,
@@ -53,7 +55,7 @@ export function userQueryOptions(user: UserRef | string, options: UseUserOptions
         responseStyle: "fields",
         throwOnError: false,
       })
-      if (response?.status === 404) return null
+      if (response?.status === 403 || response?.status === 404) return null
       if (error !== undefined) throw error
 
       return data
@@ -72,8 +74,8 @@ export function useUsers(options: UseUsersOptions = {}): UseQueryResult<ListUser
 }
 
 /**
- * One member of the directory, from a user reference or an id: `null` when no member has it.
- * Reading it requires `can.view(project.users)`.
+ * One member of the directory, from a user reference or an id: `null` when no member has it, or
+ * without `can.view(project.users)`.
  */
 export function useUser(
   user: UserRef | string,

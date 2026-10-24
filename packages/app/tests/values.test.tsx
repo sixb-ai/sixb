@@ -1,17 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { client, type GetUserResponse } from "@sixb/client"
+import type { GetUserResponse } from "@sixb/client"
+import { userQueryOptions } from "@sixb/client/hooks"
 import type { FileRef } from "@sixb/core/blob-storage"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import {
-  fieldRecordSchema,
-  runFileLinks,
-  userRefProfileQuery,
-  ValuePanel,
-  valueSchema,
-} from "../src/pages/values"
+import { fieldRecordSchema, runFileLinks, ValuePanel, valueSchema } from "../src/pages/values"
 
 const fileRef: FileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -123,8 +118,10 @@ describe("a recorded value", () => {
       status: "active",
     }
     const ben: GetUserResponse = { id: "usr_2", email: "ben@acme.com", status: "suspended" }
-    queryClient.setQueryData(userRefProfileQuery(ava.id).queryKey, ava)
-    queryClient.setQueryData(userRefProfileQuery(ben.id).queryKey, ben)
+    // The member picker's lookup: a member it named names the chip too. Removal proof: give the
+    // chip a query of its own and it shows the ids.
+    queryClient.setQueryData(userQueryOptions(ava.id).queryKey, ava)
+    queryClient.setQueryData(userQueryOptions(ben.id).queryKey, ben)
 
     const named = markup(<ValuePanel title="Value" value={value} schema={schema} />, queryClient)
     expect(named).toContain("Ava Martin")
@@ -134,7 +131,7 @@ describe("a recorded value", () => {
 
     // Refused or unknown: cached as no one, so the chip keeps the id without asking again.
     const refused = new QueryClient()
-    refused.setQueryData(userRefProfileQuery("usr_1").queryKey, null)
+    refused.setQueryData(userQueryOptions("usr_1").queryKey, null)
     expect(markup(<ValuePanel title="Value" value={value} schema={schema} />, refused)).toContain(
       ">usr_1<"
     )
@@ -183,30 +180,4 @@ test("keeps an integer's digits as written, and groups a decimal's", () => {
   )
   expect(html).toContain(">2026<")
   expect(html).toContain("1,234,567.5")
-})
-
-test("caches a refused or unknown user as no one, and fails on anything else", async () => {
-  // Removal proof: drop the 403 mapping in userRefProfileQuery and the first lookup rejects, so each
-  // chip that mounts asks again.
-  const original = client.getConfig()
-  const lookup = async (status: number) => {
-    client.setConfig({
-      baseUrl: "https://api.sixb.test",
-      fetch: (async (_request: Request) =>
-        Response.json({ error: "[Sixb] No." }, { status })) as typeof fetch,
-    })
-    const query = userRefProfileQuery("usr_1")
-    const queryFn = query.queryFn as unknown as (context: {
-      signal: AbortSignal
-    }) => Promise<unknown>
-    return queryFn({ signal: new AbortController().signal })
-  }
-
-  try {
-    expect(await lookup(403)).toBeNull()
-    expect(await lookup(404)).toBeNull()
-    await expect(lookup(503)).rejects.toBeDefined()
-  } finally {
-    client.setConfig({ baseUrl: original.baseUrl, fetch: original.fetch })
-  }
 })
