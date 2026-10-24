@@ -144,7 +144,10 @@ export function assertDecisionSupport(model: DecisionModel, questions: DecisionQ
   }
 }
 
-function supportsQuestion(capabilities: DecisionCapabilities, question: DecisionQuestion): boolean {
+export function supportsQuestion(
+  capabilities: DecisionCapabilities,
+  question: DecisionQuestion
+): boolean {
   if (!capabilities.questions.includes(question.type)) return false
 
   switch (question.type) {

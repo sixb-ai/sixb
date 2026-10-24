@@ -53,6 +53,9 @@ export const LANGUAGE_MODEL_TIERS = ["light", "standard", "heavy"] as const
 
 export type LanguageModelTier = (typeof LANGUAGE_MODEL_TIERS)[number]
 
+/** How likely a decision model judged each tier, each from 0 to 1. */
+export type LanguageModelTierProbabilities = Readonly<Record<LanguageModelTier, number>>
+
 export function isLanguageModelTier(value: unknown): value is LanguageModelTier {
   return (LANGUAGE_MODEL_TIERS as readonly unknown[]).includes(value)
 }

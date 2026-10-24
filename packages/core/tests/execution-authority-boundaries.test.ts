@@ -39,9 +39,9 @@ describe("execution authority boundaries", () => {
     await expect(
       requestAction(runtime, foreignExecution, { actionId: "action-1" })
     ).rejects.toThrow(expected)
-    await expect(
-      requestAgentRun(runtime, foreignExecution, undefined, { text: "hello" })
-    ).rejects.toThrow(expected)
+    await expect(requestAgentRun(runtime, foreignExecution, {}, { text: "hello" })).rejects.toThrow(
+      expected
+    )
     await expect(
       retryAgentRun(runtime, foreignExecution, undefined, {
         id: "run-1",

@@ -162,6 +162,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     requestedBy: run.requestedBy,
     status: run.status,
     model: run.spec?.model,
+    tier: run.spec?.tier,
     reasoning: run.spec?.reasoning,
     modelId: run.modelId,
     finishReason: run.finishReason,

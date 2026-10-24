@@ -3,7 +3,11 @@ import type { AgentReasoning } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
-import type { LanguageModelRef } from "../../models"
+import type {
+  LanguageModelRef,
+  LanguageModelTier,
+  LanguageModelTierProbabilities,
+} from "../../models"
 
 // ── agent_threads — one conversation with an agent ──────────────────────────────────────────────
 
@@ -285,6 +289,13 @@ export interface ConversationAgentRunRecord extends AgentRunRecordBase {
 /** Immutable, serialisable model selection and requester settings for one conversational turn. */
 export interface ConversationAgentRunSpec {
   readonly model: LanguageModelRef
+  /** With tiers, the tier of the model the turn runs on. */
+  readonly tier?: LanguageModelTier
+  /**
+   * How likely the decision model judged each tier, when Sixb picked the turn's model. Kept to
+   * calibrate the thresholds the tier is picked from (`heavy` from 0.4, `light` from 0.8).
+   */
+  readonly tierProbabilities?: LanguageModelTierProbabilities
   readonly reasoning?: AgentReasoning
   /** Canonical IANA time zone of the requester. Absent uses the project time zone. */
   readonly timeZone?: string

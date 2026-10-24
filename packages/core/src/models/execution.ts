@@ -11,7 +11,7 @@ import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } fr
 import type { ModelCallEndEvent } from "./events"
 import { registerModelExecutionBinding } from "./execution/binding"
 import { aiModelCallOutputTokenAllowance } from "./execution/model-call-admission"
-import { ModelExecutionSession } from "./execution/session"
+import type { ModelExecutionSession } from "./execution/session"
 import type {
   InferLanguageModelOutput,
   LanguageModelGenerateInput,
@@ -29,11 +29,10 @@ export function createModelsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
+  session: ModelExecutionSession,
   runs: ModelCallRunVisibility,
   blobs?: BlobStorage
 ): ModelsRuntime {
-  const session = runtime.modelExecution ?? new ModelExecutionSession(runtime, execution)
-
   function generate<const TShape extends LanguageModelOutputShape | undefined = undefined>(
     input: LanguageModelGenerateInput<TShape>
   ): Promise<
@@ -126,7 +125,7 @@ export function createModelsRuntime(
 
   const models: ModelsRuntime = {
     language: { generate },
-    decision: createDecisionRuntime(runtime, execution, catalog, session),
+    decision: createDecisionRuntime(runtime, execution, catalog, session, "models"),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
     image: createImageRuntime(runtime, execution, catalog, session, blobs),
     calls: createModelCallsRuntime(runtime, runs, execution.id),

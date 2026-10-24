@@ -40,6 +40,7 @@ export type {
   LanguageModelEntry,
   LanguageModelRef,
   LanguageModelTier,
+  LanguageModelTierProbabilities,
   LanguageModelTiers,
   ModelCatalog,
   ModelCatalogFor,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertModelAccess } from "../../authorization"
+import { assertAuthorized, assertModelAccess } from "../../authorization"
 import type { ExecutionContext } from "../../execution"
 import { cloneJsonValue } from "../../json"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -25,15 +25,27 @@ import {
   validateDecisionAnswers,
 } from "./validation"
 
+/**
+ * Who may ask: code and the API need `can.run(project.models)`; the Agent asks on a turn's behalf,
+ * which running the Agent authorizes.
+ */
+export type DecisionAccess = "models" | "agent.run"
+
 export function createDecisionRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
-  session: ModelExecutionSession
+  session: ModelExecutionSession,
+  access: DecisionAccess
 ): DecisionModelsRuntime {
+  function assertAccess(): void {
+    if (access === "agent.run") assertAuthorized(runtime, { kind: "agent.run" })
+    else assertModelAccess(runtime, execution, "models.decision.evaluate")
+  }
+
   return {
     async evaluate(input) {
-      assertModelAccess(runtime, execution, "models.decision.evaluate")
+      assertAccess()
       assertDecisionContent(input.input, "input")
       assertDecisionQuestions(input.questions)
 

@@ -11,7 +11,12 @@ import {
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
-import type { LanguageModelCatalog, LanguageModelEntry, LanguageModelRef } from "../models"
+import type {
+  LanguageModelCatalog,
+  LanguageModelEntry,
+  LanguageModelRef,
+  LanguageModelTierProbabilities,
+} from "../models"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import { resolveLanguageModel } from "../models/resolve"
 import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
@@ -37,6 +42,7 @@ import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import type { AgentMessagePart } from "./message"
+import type { TurnModelRouter } from "./model-routing"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
 import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
@@ -74,6 +80,13 @@ export interface RequestAgentRunInput {
   readonly principal?: Principal
 }
 
+/** What a turn's model is chosen from. */
+export interface AgentRequestModels {
+  readonly language?: LanguageModelCatalog
+  /** Picks the model of a turn that names none; absent without tiers and `models.decision`. */
+  readonly router?: TurnModelRouter
+}
+
 export interface RequestAgentRunResult {
   /** The durable queued run exactly as it was created (`status: "queued"`, attempt 0). */
   readonly run: ConversationAgentRunRecord
@@ -94,7 +107,7 @@ export interface RequestAgentRunResult {
 export async function requestAgentRun(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  models: LanguageModelCatalog | undefined,
+  models: AgentRequestModels,
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
   const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
@@ -105,15 +118,18 @@ export async function requestAgentRun(
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
   const trigger = triggerParts(input)
-  const continued = input.continue ? await continuedSelection(runtime, models, input) : {}
-  const spec = await resolveConversationRunSpec({
-    models,
-    input: {
-      ...input,
-      model: input.model ?? continued.model,
-      reasoning: input.reasoning ?? continued.reasoning,
-    },
-  })
+  const continued = input.continue ? await continuedSelection(runtime, models.language, input) : {}
+  const selection = {
+    model: input.model ?? continued.model,
+    reasoning: input.reasoning ?? continued.reasoning,
+  }
+  const settings = requesterSettings(input)
+
+  // Any other turn's spec is checked now, before anything is written. A routed turn holds its
+  // router until its model is picked, last.
+  const routed = routedTurn(models.router, selection, input.text)
+  const requested =
+    routed ?? (await resolveConversationRunSpec({ models: models.language, selection, settings }))
   assertAttachments(input.attachments)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
@@ -133,21 +149,35 @@ export async function requestAgentRun(
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
 
-  const { thread, createdThread } = await resolveThread(agents, {
-    projectId,
-    threadId: input.threadId,
-    title: input.title,
-    principal,
-  })
+  const existingThread = input.threadId
+    ? await agents.threads.getById({ projectId, id: input.threadId })
+    : null
+  if (existingThread) assertThreadAcceptsRun(existingThread)
 
-  assertSandboxExecutionAvailable(thread)
-  // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
-  if (thread.activeRunId !== null) {
-    throw new AgentRequestError(
-      "active_run_exists",
-      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
-    )
-  }
+  // Last before anything is written, so a message the checks above refuse never reaches the
+  // decision model. Concurrent messages to an idle thread can still each ask before one of them is
+  // refused with `active_run_exists` below.
+  const spec =
+    "router" in requested
+      ? await routedConversationRunSpec(agents, {
+          ...requested,
+          projectId,
+          threadId: existingThread?.id,
+          settings,
+          language: models.language,
+        })
+      : requested
+
+  const createdThread = existingThread === null
+  const thread =
+    existingThread ??
+    (await createThread(agents, {
+      projectId,
+      threadId: input.threadId,
+      title: input.title,
+      principal,
+    }))
+
   const triggerMessageId = input.messageId ?? createAgentMessageId()
   let run: ConversationAgentRunRecord
   try {
@@ -267,10 +297,7 @@ export async function retryAgentRun(
       triggerMessageId: failedRun.triggerMessageId,
       spec:
         failedRun.spec ??
-        (await resolveConversationRunSpec({
-          models,
-          input: {},
-        })),
+        (await resolveConversationRunSpec({ models, selection: {}, settings: {} })),
     })
   })
   await publishRunActivity(runtime, run)
@@ -296,19 +323,71 @@ async function continuedSelection(
     )
   }
   if (input.model !== undefined || input.reasoning !== undefined) return {}
-  const { runs } = await agents.runs.list({
-    projectId: runtime.projectId,
-    threadId,
-    kinds: ["conversation"],
-    order: "desc",
-    limit: 1,
-  })
-  const spec = runs[0]?.kind === "conversation" ? runs[0].spec : undefined
+  const spec = (await latestConversationRun(agents, runtime.projectId, threadId))?.spec
   if (!spec || !models?.getByRef(spec.model)) return {}
   return {
     model: spec.model,
     ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
   }
+}
+
+/** A turn Sixb picks the model of, with the words it judges. */
+interface RoutedTurn {
+  readonly router: TurnModelRouter
+  readonly text: string
+}
+
+/**
+ * Naming a model or a reasoning opts a turn out of routing: it runs that model, or the default, as
+ * chosen. A continuation has no text to judge, and keeps the cut-short turn's model.
+ */
+function routedTurn(
+  router: TurnModelRouter | undefined,
+  selection: Pick<RequestAgentRunInput, "model" | "reasoning">,
+  text: string | undefined
+): RoutedTurn | undefined {
+  if (!router || text === undefined) return undefined
+  if (selection.model !== undefined || selection.reasoning !== undefined) return undefined
+
+  return { router, text }
+}
+
+/** The spec of a turn Sixb picks the model for, compared to the thread's previous turn. */
+async function routedConversationRunSpec(
+  agents: AgentStorage,
+  input: RoutedTurn & {
+    readonly projectId: string
+    readonly threadId: string | undefined
+    readonly settings: RequesterSettings
+    readonly language: LanguageModelCatalog | undefined
+  }
+): Promise<ConversationAgentRunSpec> {
+  const previous = input.threadId
+    ? await latestConversationRun(agents, input.projectId, input.threadId)
+    : undefined
+  const choice = await input.router.choose(input.text, previous)
+
+  return resolveConversationRunSpec({
+    models: input.language,
+    selection: { model: choice.model },
+    settings: input.settings,
+    tierProbabilities: choice.tierProbabilities,
+  })
+}
+
+async function latestConversationRun(
+  agents: AgentStorage,
+  projectId: string,
+  threadId: string
+): Promise<ConversationAgentRunRecord | undefined> {
+  const { runs } = await agents.runs.list({
+    projectId,
+    threadId,
+    kinds: ["conversation"],
+    order: "desc",
+    limit: 1,
+  })
+  return runs[0]?.kind === "conversation" ? runs[0] : undefined
 }
 
 /** The words of the user, or the continuation Sixb words for them. */
@@ -339,6 +418,17 @@ function assertAttachments(attachments: readonly FileRef[] | undefined): void {
         `[Sixb] Attachment ${index} is not a valid file reference.`
       )
     }
+  }
+}
+
+function assertThreadAcceptsRun(thread: AgentThreadRecord): void {
+  assertSandboxExecutionAvailable(thread)
+  // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
+  if (thread.activeRunId !== null) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
   }
 }
 
@@ -391,7 +481,10 @@ async function assertAiLimitPreflight(
  */
 async function resolveConversationRunSpec(input: {
   readonly models?: LanguageModelCatalog
-  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning" | "timeZone" | "locale">
+  readonly selection: Pick<RequestAgentRunInput, "model" | "reasoning">
+  readonly settings: RequesterSettings
+  /** The decision model's answer, when Sixb picked the model. */
+  readonly tierProbabilities?: LanguageModelTierProbabilities
 }): Promise<ConversationAgentRunSpec> {
   if (!input.models) {
     throw new AgentRequestError(
@@ -399,7 +492,7 @@ async function resolveConversationRunSpec(input: {
       "[Sixb] Configure models.language before starting the Agent."
     )
   }
-  const selected = input.input.model ?? input.models.default
+  const selected = input.selection.model ?? input.models.default
   const model = input.models.getByRef(selected)
   if (model === null) {
     throw new AgentRequestError(
@@ -408,30 +501,43 @@ async function resolveConversationRunSpec(input: {
     )
   }
 
-  const explicitReasoning = input.input.reasoning
+  const explicitReasoning = input.selection.reasoning
   if (explicitReasoning !== undefined) {
     await assertModelSupportsReasoning(model, explicitReasoning)
   }
   const reasoning = explicitReasoning ?? model.model.defaultReasoning
-  const timeZone = requestedSetting(
-    "timeZone",
-    input.input.timeZone,
-    canonicalTimeZone,
-    "an IANA time zone"
-  )
-  const locale = requestedSetting(
-    "locale",
-    input.input.locale,
-    canonicalLocale,
-    "a BCP 47 language tag"
-  )
+  const { timeZone, locale } = input.settings
 
   return Object.freeze({
     model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
+    ...(model.tier === undefined ? {} : { tier: model.tier }),
+    ...(input.tierProbabilities === undefined
+      ? {}
+      : { tierProbabilities: Object.freeze({ ...input.tierProbabilities }) }),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(timeZone === undefined ? {} : { timeZone }),
     ...(locale === undefined ? {} : { locale }),
   })
+}
+
+/** Canonical settings of the person asking, as the run spec stores them. */
+type RequesterSettings = Pick<ConversationAgentRunSpec, "timeZone" | "locale">
+
+function requesterSettings(
+  input: Pick<RequestAgentRunInput, "timeZone" | "locale">
+): RequesterSettings {
+  const timeZone = requestedSetting(
+    "timeZone",
+    input.timeZone,
+    canonicalTimeZone,
+    "an IANA time zone"
+  )
+  const locale = requestedSetting("locale", input.locale, canonicalLocale, "a BCP 47 language tag")
+
+  return {
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+  }
 }
 
 function requestedSetting(
@@ -543,7 +649,7 @@ async function publishRunActivity(
   }
 }
 
-async function resolveThread(
+function createThread(
   agents: AgentStorage,
   params: {
     readonly projectId: string
@@ -551,24 +657,13 @@ async function resolveThread(
     readonly title?: string
     readonly principal: Principal
   }
-): Promise<{ thread: AgentThreadRecord; createdThread: boolean }> {
-  if (params.threadId) {
-    const existing = await agents.threads.getById({
-      projectId: params.projectId,
-      id: params.threadId,
-    })
-    if (existing) {
-      return { thread: existing, createdThread: false }
-    }
-  }
-
-  const thread = await agents.threads.create({
+): Promise<AgentThreadRecord> {
+  return agents.threads.create({
     id: params.threadId ?? createAgentThreadId(),
     projectId: params.projectId,
     ownerPrincipal: params.principal,
     ...(params.title === undefined ? {} : { title: params.title }),
   })
-  return { thread, createdThread: true }
 }
 
 function requireAgentStorage(runtime: SixbRuntimeContext): AgentStorage {

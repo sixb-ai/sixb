@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { decisionOutput, question, SixbHost } from "../src"
+import { AuthorizationError, emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import {
   createModelCatalog,
@@ -97,6 +98,38 @@ describe("decision evaluation", () => {
       const result = await sixb.models.decision.evaluate({ input: "", questions, model })
       expect(result.responseModelId).toBe("own-binding")
     }
+  })
+
+  test("code and the API still need can.run(project.models); running the Agent is not enough", async () => {
+    // Removal proof: pass "agent.run" instead of "models" to createDecisionRuntime in
+    // models/execution.ts; the Agent's grant answers the question.
+    let calls = 0
+    const { host, storage } = setup(
+      modelWith(async () => {
+        calls++
+        return { output }
+      })
+    )
+    await storage.auth.users.create({ projectId: host.id, id: "user", email: "user@example.test" })
+    const chatter = bindRequestExecution(host, {
+      request: new Request("http://localhost/decision"),
+      authorization: {
+        type: "principal",
+        context: {
+          principal: { type: "user", id: "user" },
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true },
+        },
+      },
+    })
+
+    const error = await chatter.models.decision
+      .evaluate({ input: "A leaking unit", questions })
+      .catch((error) => error)
+    expect(error).toBeInstanceOf(AuthorizationError)
+    expect(error.message).toContain("not allowed to call the project's models")
+    expect(calls).toBe(0)
   })
 
   test("rejects invalid questions and unsupported primitives before inference", async () => {

@@ -2,7 +2,7 @@ import { principalsEqual, type UserPrincipal } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
-import type { ModelCatalog } from "../models"
+import type { DecisionModelsRuntime, ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbDependencies } from "../runtime/sixb"
@@ -22,6 +22,7 @@ import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
 import { type AgentMemoryRuntime, createAgentMemoryRuntime } from "./memory-execution"
+import { createTurnModelRouter } from "./model-routing"
 import {
   type AgentThreadParticipantInput,
   addAgentThreadParticipants,
@@ -167,10 +168,15 @@ export function createAgentRuntime<
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models: ModelCatalog | undefined,
+  decision: DecisionModelsRuntime,
   sandbox: SixbDependencies["sandbox"] | undefined,
   security: SecurityDefinitionCatalog
 ): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
+  const turnModels = {
+    language: models?.language,
+    router: createTurnModelRouter(models, decision),
+  }
   const rule = createAgentThreadAccessRule(runtime, authority)
   const principal = rule.caller
   const allowed = () => isRuntimeAllowed(runtime, { kind: "agent.run" })
@@ -368,7 +374,7 @@ export function createAgentRuntime<
             `[Sixb] Agent thread '${input.threadId}' not found.`
           )
         }
-        const result = await requestAgentRun(runtime, execution, models?.language, {
+        const result = await requestAgentRun(runtime, execution, turnModels, {
           ...input,
           principal,
         })

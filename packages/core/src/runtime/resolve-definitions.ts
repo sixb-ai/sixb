@@ -1,6 +1,7 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinitionsInput, AgentToolDefinition } from "../agents"
+import { assertTurnModelRouting } from "../agents/model-routing"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
 import { createAgentSkillCatalog } from "../agents/skills"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
@@ -79,6 +80,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   })
 
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
+  assertTurnModelRouting(models)
   for (const type of ontology.listObjectTypes()) {
     for (const [name, profile] of Object.entries(type.search?.vectors ?? {})) {
       const registered = models?.embedding.getByRef({

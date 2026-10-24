@@ -1,5 +1,6 @@
 import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { MAX_AGENT_CONTEXT_LABEL_LENGTH } from "@sixb/core/agents/context"
+import { LANGUAGE_MODEL_TIERS } from "@sixb/core/models"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FAILURE_CODES,
@@ -330,6 +331,8 @@ export const AgentRunSchema = z.object({
   requestedBy: AgentAuthorizablePrincipalSchema.optional(),
   status: AgentRunStatusSchema,
   model: LanguageModelRefSchema.optional(),
+  /** With tiers, the tier of the model the turn runs on. */
+  tier: z.enum(LANGUAGE_MODEL_TIERS).optional(),
   reasoning: ModelReasoningSchema.optional(),
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),

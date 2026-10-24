@@ -84,6 +84,31 @@ required: its first model is the default.
 Every model of every tier stays in the catalog: chat users pick from all of them, and the
 delegation guide of `spawn_agent` groups them by tier.
 
+With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
+names none. Before the answer starts, the default decision model scores the message's tiers:
+
+| Probability | Tier |
+| --- | --- |
+| `heavy` ≥ 0.4 | `heavy` |
+| `light` ≥ 0.8 | `light` |
+| Otherwise | `standard` |
+
+Switching models drops the prompt cache, so a thread keeps its model unless the switch is free:
+
+| The tier is | Last answer under 5 minutes ago | Idle 5 minutes or more |
+| --- | --- | --- |
+| Higher | Move up | Move up |
+| The same | Stay | Stay |
+| Lower | Stay | Move down |
+
+If the decision model fails or takes over 2 seconds, the message aims for `standard`; the cache
+rule still applies, so a thread on `heavy` whose last answer is under 5 minutes old stays there.
+
+A message that names a model or a reasoning asks nothing: it runs that model, or the default, as
+chosen. A continuation keeps its answer's model, and the model never changes mid-answer. Running
+the Agent is the only permission the question needs. The question counts toward the sender's AI
+usage and limits, but not toward the run's cost.
+
 ### Name and description
 
 Give a model your own name and description with the `name` and `description` options of its

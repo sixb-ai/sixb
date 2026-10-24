@@ -117,6 +117,7 @@ describe("AuthorizedObjectReader runtime binding", () => {
       runtime,
       scope.execution,
       undefined,
+      sixb.models.decision,
       undefined,
       new SecurityRegistry({})
     )

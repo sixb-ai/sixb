@@ -11,6 +11,7 @@ import {
   AgentStorageError,
   type AgentStorageErrorCode,
   type AgentThreadParticipantRecord,
+  type ConversationAgentRunSpec,
   type CreateAgentContextCheckpointInput,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
@@ -1019,6 +1020,37 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(started.execution).toEqual(execution("exec_1"))
         expect(started.executionId).toBe("test_agent_execution:run_1")
         expect(started.startedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+      })
+    })
+
+    test("keeps a turn's tier and the probabilities Sixb picked it from", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        const spec = {
+          model: { provider: "test", modelId: "large" },
+          tier: "heavy" as const,
+          tierProbabilities: { light: 0.05, standard: 0.25, heavy: 0.7 },
+          reasoning: "high" as const,
+        }
+
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        expect((await storage.runs.getById({ projectId, id: "run_1" }))?.spec).toEqual(spec)
+
+        // Proven by removal: drop the tier checks from assertConversationAgentRunSpec.
+        for (const invalid of [
+          { ...spec, tier: "medium" },
+          { ...spec, tierProbabilities: { light: 0.3, standard: 0.7 } },
+          { ...spec, tierProbabilities: { ...spec.tierProbabilities, heavy: 1.5 } },
+        ]) {
+          await expectAgentError(
+            createRun(
+              storage,
+              fixture,
+              runInput({ id: "run_2", spec: invalid as ConversationAgentRunSpec })
+            ),
+            "invalid_input"
+          )
+        }
       })
     })
 
