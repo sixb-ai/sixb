@@ -966,7 +966,7 @@ describe("view grant conditions", () => {
     expect(() => grant.where(callback)).toThrow(message)
   })
 
-  // Reproduce: skip the validation in assertViewCondition, or check only the granted type for
+  // Reproduce: skip the validation in resolveViewCondition, or check only the granted type for
   // markings, and these reach the "not supported yet" refusal instead.
   test.each([
     [
@@ -1017,7 +1017,7 @@ describe("view grant conditions", () => {
   })
 
   // Reads do not apply conditions yet, so a valid one is refused rather than granting every note.
-  // Reproduce: drop the refusal at the end of assertViewCondition and startup succeeds.
+  // Reproduce: drop refuseViewConditions from the SixbHost constructor and startup succeeds.
   test("startup refuses a valid condition until reads enforce it", () => {
     const grant = can.view(Note).where((note) => note.p.owner.eq(currentUser()))
 

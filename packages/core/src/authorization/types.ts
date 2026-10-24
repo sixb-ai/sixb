@@ -8,6 +8,7 @@
  */
 
 import type { Principal } from "../auth/types"
+import type { ObjectQueryPredicate } from "../objects/query/ir"
 import { emptyGrantSets, type GrantKind, type SingletonGrantKind } from "./grant-kinds"
 
 /**
@@ -42,6 +43,12 @@ export interface ResolvedRole {
   readonly id: string
   readonly grantedToGroupIds: readonly string[]
   readonly grants: GrantIndex
+  /**
+   * What the role's `can.view(Type).where(...)` grants show, per concrete type: the type's
+   * conditions, combined with `or`. A type the role also views without a condition is in
+   * `grants["view:object"]` and not here. Absent means none.
+   */
+  readonly viewConditions?: ReadonlyMap<string, ObjectQueryPredicate>
   /** Marking ids this role clears. Absent means none. */
   readonly clearances?: ReadonlySet<string>
 }
@@ -53,6 +60,13 @@ export interface AuthorizationContext {
   /** Roles whose grantedTo groups intersect the principal's memberships. */
   readonly roleIds: readonly string[]
   readonly grants: GrantIndex
+  /**
+   * The object types the principal views only where a condition matches, with one condition per
+   * role that grants it. A type in `grants["view:object"]` is never here, so a check on that grant
+   * denies these types; only the authorized object reader reads them, through these conditions.
+   * Absent means none.
+   */
+  readonly viewConditions?: ReadonlyMap<string, readonly ObjectQueryPredicate[]>
   /**
    * Marking ids the principal may read, unioned from its roles. Absent means none: a context built
    * without clearances reads no marked property.

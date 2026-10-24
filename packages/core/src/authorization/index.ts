@@ -15,7 +15,11 @@ export {
 export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"
 export type { GrantKind, GrantUniverse } from "./grant-kinds"
-export { resolveAuthorizationContext, resolveRoleGrants } from "./resolve"
+export {
+  resolveAuthorizationContext,
+  resolveRoleGrants,
+  resolveRoleViewConditions,
+} from "./resolve"
 export {
   canViewActionRun,
   canViewPipelineRun,

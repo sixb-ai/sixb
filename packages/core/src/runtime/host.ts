@@ -90,6 +90,7 @@ import {
   type DatasetVersionMarkings,
   registerDatasetVersionMarkings,
 } from "../security/dataset-version-markings"
+import { refuseViewConditions } from "../security/view-conditions"
 import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
@@ -227,6 +228,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
     const definitions = resolveDefinitions(options)
+    refuseViewConditions(definitions.security.listViewConditions())
     this.definitions = definitions
     this.sandboxDefinition =
       options.sandboxes?.configuration === undefined
