@@ -193,6 +193,25 @@ describe("a duplicate unique value at write boundaries", () => {
     })
   })
 
+  // Removal proof: make `itemError` in `materializer/edits/commit.ts` always return the
+  // `validation` code; the item then fails as an uncoded `OntologyValidationError`.
+  test("a continue-mode batch item fails with object.unique_violation", async () => {
+    const sixb = createSixb()
+    await sixb.objects(Person).upsert({ properties: { id: "ada", email: "ada@example.com" } })
+
+    const [taken, free] = await sixb.objects.upsertBatch("Person", [
+      { properties: { id: "bob", email: "ada@example.com" } },
+      { properties: { id: "cleo", email: "cleo@example.com" } },
+    ])
+
+    expect(free?.ok).toBe(true)
+    expect(taken?.ok ? null : taken?.error).toMatchObject({
+      code: "object.unique_violation",
+      message,
+      details: { objectTypeId: "Person", propertyId: "email" },
+    })
+  })
+
   test("an Action run fails with object.unique_violation", async () => {
     const sixb = createSixb()
     await sixb.objects(Person).upsert({ properties: { id: "ada", email: "ada@example.com" } })

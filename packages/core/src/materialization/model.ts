@@ -289,10 +289,18 @@ export interface TelemetryAppend {
   readonly points: readonly TelemetryPointWrite[]
 }
 
-export interface MaterializationItemError {
-  readonly code: "validation"
-  readonly message: string
-}
+export type MaterializationItemError =
+  | {
+      readonly code: "validation"
+      readonly message: string
+    }
+  | {
+      /** Another object of the type holds a value the item claims. */
+      readonly code: "unique_violation"
+      readonly message: string
+      readonly objectTypeId: string
+      readonly propertyId: string
+    }
 
 export interface EffectiveObjectSnapshot {
   readonly ref: OntologyObjectRef

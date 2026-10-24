@@ -35,7 +35,7 @@ import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ObjectRow } from "../storage"
 import { ObjectError } from "./errors"
-import { uniqueViolationError } from "./unique-violation"
+import { uniqueViolationError, uniqueViolationItemError } from "./unique-violation"
 
 /** The runtime pieces one commit needs. */
 export type RuntimeMaterializerContext = Pick<SixbRuntimeContext, "projectId" | "storage">
@@ -284,6 +284,8 @@ export function toItemError(error: MaterializationItemError): Error {
   switch (error.code) {
     case "validation":
       return new OntologyValidationError(error.message)
+    case "unique_violation":
+      return uniqueViolationItemError(error)
   }
 }
 
