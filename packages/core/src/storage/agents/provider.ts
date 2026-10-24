@@ -29,6 +29,7 @@ import type {
   ListAgentApprovalsInput,
   RequestAgentApprovalInput,
   SaveAgentMemoryInput,
+  StopAgentApprovalsInput,
   SubagentRunRecord,
   SubagentRunResult,
   TransitionAgentThreadSandboxInput,
@@ -808,6 +809,89 @@ export const LIVE_AGENT_APPROVAL_STATUSES = [
   "approved",
   "denied",
 ] as const satisfies readonly AgentApprovalStatus[]
+
+/**
+ * Whether an approval keeps its run paused: still waiting, or decided and not reported to the model
+ * yet. A run finishes `awaiting_approval` only while it holds one.
+ */
+export function agentApprovalHoldsRun(approval: AgentApprovalRecord, runId: string): boolean {
+  return (
+    (approval.runId === runId || approval.callerRunId === runId) &&
+    (LIVE_AGENT_APPROVAL_STATUSES as readonly string[]).includes(approval.status) &&
+    approval.reportedInMessageId === undefined
+  )
+}
+
+/** Refuse a paused finish that holds no call, or a paused finish that did not succeed. */
+export function assertAwaitingApprovalFinish(input: {
+  readonly runId: string
+  readonly status: string
+  readonly holdsApproval: boolean
+  readonly prefix?: string
+}): void {
+  const prefix = input.prefix ?? "Sixb"
+  if (input.status !== "succeeded") {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent run '${input.runId}' can only pause for approval when it succeeds.`
+    )
+  }
+  if (!input.holdsApproval) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent run '${input.runId}' holds no call waiting for approval, so it cannot finish awaiting one.`
+    )
+  }
+}
+
+/**
+ * Whether a run can have approvals: its mode holds some calls. A turn from before approval modes,
+ * or in `auto`, holds none, and neither do its children, which copy its mode.
+ */
+export function agentRunMayHoldCalls(run: AgentRunRecord): boolean {
+  return (AGENT_HOLDING_APPROVAL_MODES as readonly unknown[]).includes(run.spec?.approvalMode)
+}
+
+/** Whether a stop request reaches this approval. */
+export function agentApprovalStops(
+  approval: AgentApprovalRecord,
+  input: StopAgentApprovalsInput
+): boolean {
+  return (
+    approval.projectId === input.projectId &&
+    approval.threadId === input.threadId &&
+    approval.reportedInMessageId === undefined &&
+    (input.runId === undefined || approval.runId === input.runId) &&
+    (input.requestedBy === undefined ||
+      (approval.requestedBy.type === input.requestedBy.type &&
+        approval.requestedBy.id === input.requestedBy.id))
+  )
+}
+
+/** Whether a repair pass has work on this approval; providers run the same filter in SQL. */
+export function agentApprovalRepairable(
+  approval: AgentApprovalRecord,
+  claimableBefore: Date
+): boolean {
+  const unfinished =
+    approval.status === "approved" &&
+    approval.outcome === undefined &&
+    (approval.executionClaimedAt ?? approval.decidedAt ?? new Date(0)) <= claimableBefore
+  const resumable =
+    (approval.status === "approved" || approval.status === "denied") &&
+    approval.reportedInMessageId === undefined &&
+    approval.turnStoppedAt === undefined
+  return unfinished || resumable
+}
+
+/** Whether an approved call without an outcome can be claimed now. */
+export function agentApprovalClaimable(approval: AgentApprovalRecord, staleBefore: Date): boolean {
+  return (
+    approval.status === "approved" &&
+    approval.outcome === undefined &&
+    (approval.executionClaimedAt ?? approval.decidedAt ?? new Date(0)) <= staleBefore
+  )
+}
 
 /** The run id the call names: unique among a thread's live approvals. */
 export function agentApprovalCallKey(call: AgentApprovalCall): string {

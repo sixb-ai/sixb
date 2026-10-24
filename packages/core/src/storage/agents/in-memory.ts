@@ -6,16 +6,22 @@ import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
 import {
   agentApprovalCallKey,
+  agentApprovalClaimable,
+  agentApprovalHoldsRun,
   agentApprovalMatches,
+  agentApprovalRepairable,
+  agentApprovalStops,
   agentContextCheckpointMatchesCreateInput,
   agentMemoryConflicts,
   agentMemoryHistoryCutoff,
+  agentRunMayHoldCalls,
   assertAgentApprovalCaller,
   assertAgentApprovalModeInput,
   assertAgentContextCheckpointAnchors,
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
+  assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
@@ -35,6 +41,7 @@ import {
 } from "./provider"
 import type {
   AddAgentThreadParticipantsInput,
+  AgentApprovalCursor,
   AgentApprovalMode,
   AgentApprovalModeStore,
   AgentApprovalOutcome,
@@ -89,6 +96,8 @@ import type {
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,
   StartAgentRunInput,
+  StopAgentApprovalsInput,
+  StopAgentApprovalsResult,
   SubagentRunRecord,
   TransitionAgentThreadSandboxInput,
 } from "./types"
@@ -631,6 +640,13 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Conversational Agent run '${run.id}' cannot persist a subagent result.`
       )
     }
+    if (input.finishReason === "awaiting_approval") {
+      assertAwaitingApprovalFinish({
+        runId: run.id,
+        status: input.status,
+        holdsApproval: holdsRun(this.state, run.projectId, run.id),
+      })
+    }
 
     const completedAt = new Date(input.completedAt ?? new Date())
     const next: AgentRunRecord = {
@@ -651,7 +667,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
     this.state.runs.set(key(input.projectId, input.id), clone(next))
 
     this.releaseThread(run, completedAt)
-    if (input.status !== "succeeded") this.cancelPendingApprovals(run)
+    this.settleApprovals(run, input, completedAt)
 
     return clone(next)
   }
@@ -725,16 +741,32 @@ class InMemoryAgentRunStore implements AgentRunStore {
     return run
   }
 
-  /** A run that failed or was cancelled takes its held calls with it. */
-  private cancelPendingApprovals(run: AgentRunRecord): void {
+  /**
+   * A turn that pauses keeps its calls for their decision. A turn that ends any other way cancels
+   * the ones still waiting, a late one included, and never resumes on the rest. A child that fails
+   * or is cancelled takes its own pending calls with it.
+   */
+  private settleApprovals(run: AgentRunRecord, input: FinishAgentRunInput, at: Date): void {
+    if (input.finishReason === "awaiting_approval" || !agentRunMayHoldCalls(run)) return
+
+    const turn = run.kind === "conversation"
+    if (!turn && input.status === "succeeded") return
     for (const [approvalKey, approval] of this.state.approvals) {
-      if (
-        approval.projectId === run.projectId &&
-        approval.status === "pending" &&
-        (approval.runId === run.id || approval.callerRunId === run.id)
-      ) {
-        this.state.approvals.set(approvalKey, { ...approval, status: "cancelled" })
-      }
+      if (approval.projectId !== run.projectId) continue
+      const ownCall = approval.runId === run.id || approval.callerRunId === run.id
+      const cancel = approval.status === "pending" && ownCall
+      const stop =
+        turn &&
+        approval.runId === run.id &&
+        approval.reportedInMessageId === undefined &&
+        approval.turnStoppedAt === undefined
+      if (!cancel && !stop) continue
+
+      this.state.approvals.set(approvalKey, {
+        ...approval,
+        ...(cancel ? { status: "cancelled" as const } : {}),
+        ...(stop ? { turnStoppedAt: new Date(at) } : {}),
+      })
     }
   }
 
@@ -1166,6 +1198,9 @@ class InMemoryAgentApprovalStore implements AgentApprovalStore {
             status: input.decision,
             decidedAt,
             decidedBy: clone(input.decidedBy),
+            ...(input.decision === "approved" && input.raisedMode !== undefined
+              ? { raisedMode: input.raisedMode }
+              : {}),
           }
     this.state.approvals.set(approvalKey, clone(next))
     return { approval: clone(next), decided: next.status === input.decision }
@@ -1214,6 +1249,90 @@ class InMemoryAgentApprovalStore implements AgentApprovalStore {
     return settled.sort(compareApprovals).map(clone)
   }
 
+  async expireDue(input: {
+    readonly projectId: string
+    readonly now: Date
+    readonly limit?: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    const due = [...this.state.approvals.values()]
+      .filter(
+        (approval) =>
+          approval.projectId === input.projectId &&
+          approval.status === "pending" &&
+          approval.expiresAt <= input.now
+      )
+      .sort(compareApprovals)
+      .slice(0, input.limit)
+
+    return due.map((approval) => {
+      const next = { ...approval, status: "expired" as const }
+      this.state.approvals.set(key(approval.projectId, approval.id), clone(next))
+      return clone(next)
+    })
+  }
+
+  async stop(input: StopAgentApprovalsInput): Promise<StopAgentApprovalsResult> {
+    const stoppedAt = new Date(input.stoppedAt ?? new Date())
+    const cancelled: AgentApprovalRecord[] = []
+    let stopped = 0
+    for (const [approvalKey, approval] of this.state.approvals) {
+      if (!agentApprovalStops(approval, input)) continue
+
+      const cancel = approval.status === "pending"
+      const stop = approval.turnStoppedAt === undefined
+      if (!cancel && !stop) continue
+      const next: AgentApprovalRecord = {
+        ...approval,
+        ...(cancel ? { status: "cancelled" as const } : {}),
+        ...(stop ? { turnStoppedAt: stoppedAt } : {}),
+      }
+      this.state.approvals.set(approvalKey, clone(next))
+      if (cancel) cancelled.push(next)
+      if (stop) stopped += 1
+    }
+    return { cancelled: cancelled.sort(compareApprovals).map(clone), stopped }
+  }
+
+  async holdsRun(input: { readonly projectId: string; readonly runId: string }): Promise<boolean> {
+    return holdsRun(this.state, input.projectId, input.runId)
+  }
+
+  async claimExecution(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly claimedAt: Date
+    readonly staleBefore: Date
+  }): Promise<AgentApprovalRecord | null> {
+    const approvalKey = key(input.projectId, input.id)
+    const approval = this.state.approvals.get(approvalKey)
+    if (!approval || !agentApprovalClaimable(approval, input.staleBefore)) return null
+
+    const next = { ...approval, executionClaimedAt: new Date(input.claimedAt) }
+    this.state.approvals.set(approvalKey, clone(next))
+    return clone(next)
+  }
+
+  async listRepairable(input: {
+    readonly projectId: string
+    readonly claimableBefore: Date
+    readonly after?: AgentApprovalCursor
+    readonly limit: number
+  }): Promise<readonly AgentApprovalRecord[]> {
+    const { after } = input
+    return [...this.state.approvals.values()]
+      .filter(
+        (approval) =>
+          approval.projectId === input.projectId &&
+          agentApprovalRepairable(approval, input.claimableBefore) &&
+          (after === undefined ||
+            approval.createdAt > after.createdAt ||
+            (approval.createdAt.getTime() === after.createdAt.getTime() && approval.id > after.id))
+      )
+      .sort(compareApprovals)
+      .slice(0, input.limit)
+      .map(clone)
+  }
+
   async markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]> {
     const marked: string[] = []
     for (const id of new Set(input.ids)) {
@@ -1222,7 +1341,8 @@ class InMemoryAgentApprovalStore implements AgentApprovalStore {
       if (
         !approval ||
         approval.threadId !== input.threadId ||
-        approval.reportedInMessageId !== undefined
+        approval.reportedInMessageId !== undefined ||
+        (input.resuming === true && approval.turnStoppedAt !== undefined)
       ) {
         continue
       }
@@ -1247,6 +1367,12 @@ class InMemoryAgentApprovalStore implements AgentApprovalStore {
     const { page, hasMore, total } = applyWindow(matching, input.offset, input.limit)
     return { approvals: page.map(clone), hasMore, total }
   }
+}
+
+function holdsRun(state: AgentStoreState, projectId: string, runId: string): boolean {
+  return [...state.approvals.values()].some(
+    (approval) => approval.projectId === projectId && agentApprovalHoldsRun(approval, runId)
+  )
 }
 
 /** Oldest first, then by id: the order every provider lists approvals in. */

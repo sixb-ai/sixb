@@ -1,5 +1,7 @@
 import {
+  agentRunMayHoldCalls,
   assertAgentRunExecution,
+  assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
@@ -28,6 +30,7 @@ import type { SQLClient, SqlParameter } from "../pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-list-query"
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
+import { pgHoldsRun } from "./approvals"
 import { type AgentRunRow, rowToRunRecord } from "./rows"
 
 const PG_RUN_ID_BATCH_SIZE = 10_000
@@ -329,6 +332,14 @@ export class PgAgentRunStore implements AgentRunStore {
           `[SixbPg] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
+      if (input.finishReason === "awaiting_approval") {
+        assertAwaitingApprovalFinish({
+          runId: input.id,
+          status: input.status,
+          holdsApproval: await pgHoldsRun(tx, input.projectId, input.id),
+          prefix: "SixbPg",
+        })
+      }
 
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
@@ -347,13 +358,8 @@ export class PgAgentRunStore implements AgentRunStore {
       `
 
       await this.releaseThread(tx, run, completedAt)
-      if (input.status !== "succeeded") {
-        // A run that failed or was cancelled takes its held calls with it.
-        await tx`
-          UPDATE agent_approvals SET status = 'cancelled'
-          WHERE project_id = ${input.projectId} AND status = 'pending'
-            AND (run_id = ${input.id} OR caller_run_id = ${input.id})
-        `
+      if (agentRunMayHoldCalls(rowToRunRecord(run))) {
+        await settleFinishedRunApprovals(tx, run.kind, input, completedAt)
       }
 
       return rowToRunRecord(row)
@@ -481,4 +487,32 @@ export class PgAgentRunStore implements AgentRunStore {
       WHERE project_id = ${run.project_id} AND id = ${run.thread_id} AND active_run_id = ${run.id}
     `
   }
+}
+
+/**
+ * A turn that pauses keeps its calls for their decision. A turn that ends any other way cancels
+ * the ones still waiting, a late one included, and never resumes on the rest. A child that fails
+ * or is cancelled takes its own pending calls with it.
+ */
+async function settleFinishedRunApprovals(
+  tx: SQLClient,
+  kind: AgentRunRecord["kind"],
+  input: FinishAgentRunInput,
+  completedAt: Date
+): Promise<void> {
+  if (input.finishReason === "awaiting_approval") return
+  const turn = kind === "conversation"
+  if (!turn && input.status === "succeeded") return
+
+  await tx`
+    UPDATE agent_approvals SET status = 'cancelled'
+    WHERE project_id = ${input.projectId} AND status = 'pending'
+      AND (run_id = ${input.id} OR caller_run_id = ${input.id})
+  `
+  if (!turn) return
+  await tx`
+    UPDATE agent_approvals SET turn_stopped_at = ${completedAt}
+    WHERE project_id = ${input.projectId} AND run_id = ${input.id}
+      AND reported_in_message_id IS NULL AND turn_stopped_at IS NULL
+  `
 }

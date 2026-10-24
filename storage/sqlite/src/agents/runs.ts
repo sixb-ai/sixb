@@ -1,6 +1,8 @@
 import type { Database } from "bun:sqlite"
 import {
+  agentRunMayHoldCalls,
   assertAgentRunExecution,
+  assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
@@ -32,6 +34,7 @@ import {
   type SqliteValue,
 } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
+import { sqliteHoldsRun } from "./approvals"
 import { type AgentRunRow, rowToRunRecord } from "./rows"
 
 const SQLITE_RUN_ID_BATCH_SIZE = 500
@@ -360,6 +363,14 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Conversational Agent run '${run.id}' cannot persist a subagent result.`
         )
       }
+      if (input.finishReason === "awaiting_approval") {
+        assertAwaitingApprovalFinish({
+          runId: input.id,
+          status: input.status,
+          holdsApproval: sqliteHoldsRun(this.db, input.projectId, input.id),
+          prefix: "SixbSqlite",
+        })
+      }
 
       this.db
         .query(
@@ -393,18 +404,41 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
 
       this.releaseThread(run, completedAt)
-      if (input.status !== "succeeded") {
-        // A run that failed or was cancelled takes its held calls with it.
-        this.db
-          .query(
-            `UPDATE agent_approvals SET status = 'cancelled'
-             WHERE project_id = ? AND status = 'pending' AND (run_id = ? OR caller_run_id = ?)`
-          )
-          .run(input.projectId, input.id, input.id)
-      }
+      if (agentRunMayHoldCalls(rowToRunRecord(run)))
+        this.settleApprovals(run.kind, input, completedAt)
 
       return this.requireRun(input.projectId, input.id)
     })()
+  }
+
+  /**
+   * A turn that pauses keeps its calls for their decision. A turn that ends any other way cancels
+   * the ones still waiting, a late one included, and never resumes on the rest. A child that fails
+   * or is cancelled takes its own pending calls with it.
+   */
+  private settleApprovals(
+    kind: AgentRunRecord["kind"],
+    input: FinishAgentRunInput,
+    completedAt: Date
+  ): void {
+    if (input.finishReason === "awaiting_approval") return
+    const turn = kind === "conversation"
+    if (!turn && input.status === "succeeded") return
+
+    this.db
+      .query(
+        `UPDATE agent_approvals SET status = 'cancelled'
+         WHERE project_id = ? AND status = 'pending' AND (run_id = ? OR caller_run_id = ?)`
+      )
+      .run(input.projectId, input.id, input.id)
+    if (!turn) return
+    this.db
+      .query(
+        `UPDATE agent_approvals SET turn_stopped_at = ?
+         WHERE project_id = ? AND run_id = ?
+           AND reported_in_message_id IS NULL AND turn_stopped_at IS NULL`
+      )
+      .run(completedAt.toISOString(), input.projectId, input.id)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentRunRecord | null> {

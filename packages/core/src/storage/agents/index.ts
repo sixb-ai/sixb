@@ -5,6 +5,7 @@ export { InMemoryAgentStorage } from "./in-memory"
 export type {
   AddAgentThreadParticipantsInput,
   AgentApprovalCall,
+  AgentApprovalCursor,
   AgentApprovalMode,
   AgentApprovalModeStore,
   AgentApprovalOutcome,
@@ -76,6 +77,8 @@ export type {
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,
   StartAgentRunInput,
+  StopAgentApprovalsInput,
+  StopAgentApprovalsResult,
   SubagentRunRecord,
   SubagentRunResult,
   SubagentRunSpec,
