@@ -167,6 +167,11 @@ export type OntologyEditCommit =
        * it as failed. Ungrouped operations keep per-operation isolation.
        */
       readonly operationGroups?: readonly (readonly string[])[]
+      /**
+       * Objects as the commit's author read them. One that changed since fails the whole commit
+       * with an `expectation` conflict, as in an atomic commit, rather than one operation.
+       */
+      readonly expectedObjects?: readonly ExpectedObjectRevision[]
     })
 
 export type ProjectionEntityRef =
