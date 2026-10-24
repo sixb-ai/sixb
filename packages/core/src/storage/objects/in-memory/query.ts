@@ -1,13 +1,6 @@
-import type {
-  ObjectQuery,
-  ObjectQueryPredicate,
-  ObjectQuerySortField,
-  QueryScalarKind,
-} from "../../../objects/query"
-import {
-  compareQueryScalarValues,
-  queryScalarValuesEqual,
-} from "../../../objects/query/scalar-values"
+import type { ObjectQuery, ObjectQuerySortField } from "../../../objects/query"
+import { matchesPredicate } from "../../../objects/query/matches-predicate"
+import { compareQueryScalarValues } from "../../../objects/query/scalar-values"
 import { vectorSources } from "../../../objects/vectors/profile"
 import type { LinkBatchKey } from "../keys"
 import {
@@ -365,99 +358,6 @@ function completeEvaluation(entries: QueryEntry[]): QueryEvaluation {
   }
 }
 
-export function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): boolean {
-  switch (predicate.op) {
-    case "and":
-      return predicate.items.every((item) => matchesPredicate(row, item))
-    case "or":
-      return predicate.items.some((item) => matchesPredicate(row, item))
-    case "not":
-      return !matchesPredicate(row, predicate.item)
-    case "constant":
-      return predicate.value
-    case "eq":
-      return queryScalarValuesEqual(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-    case "neq":
-      return !queryScalarValuesEqual(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-    case "lt":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) < 0
-      )
-    case "lte":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) <= 0
-      )
-    case "gt":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) > 0
-      )
-    case "gte":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) >= 0
-      )
-    case "in":
-      return predicate.values.some((value) =>
-        queryScalarValuesEqual(row.properties[predicate.propertyId], value, predicate.scalarKind)
-      )
-    case "exists": {
-      const exists =
-        Object.hasOwn(row.properties, predicate.propertyId) &&
-        row.properties[predicate.propertyId] !== undefined
-      return predicate.value ? exists : !exists
-    }
-    case "contains":
-      return containsValue(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-  }
-}
-
-function containsValue(
-  actual: unknown,
-  expected: unknown,
-  itemScalarKind: QueryScalarKind | undefined
-): boolean {
-  if (typeof actual === "string" && typeof expected === "string") {
-    return actual.includes(expected)
-  }
-
-  if (Array.isArray(actual)) {
-    return actual.some((item) => queryScalarValuesEqual(item, expected, itemScalarKind))
-  }
-
-  if (isPlainObject(actual) && typeof expected === "string") {
-    return Object.hasOwn(actual, expected)
-  }
-
-  return false
-}
-
 function textScore(
   row: ObjectRow,
   query: string,
@@ -776,8 +676,4 @@ function decodePageOffset(token: string | undefined): number {
     throw new Error("[Sixb] Invalid object query page token")
   }
   return offset
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

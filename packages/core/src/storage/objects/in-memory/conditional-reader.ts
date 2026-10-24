@@ -1,4 +1,5 @@
 import type { ObjectQueryPredicate } from "../../../objects/query"
+import { matchesPredicate } from "../../../objects/query/matches-predicate"
 import type {
   CompiledConditionalObjectReadScope,
   ObjectLinkRow,
@@ -6,7 +7,6 @@ import type {
   ObjectReadStorage,
   ObjectRow,
 } from "../types"
-import { matchesPredicate } from "./query"
 import type { InMemoryReadSource, InMemoryScopedReadSource } from "./read-source"
 import { createInMemoryScopedReader } from "./scoped-reader"
 
