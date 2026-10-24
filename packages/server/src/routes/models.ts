@@ -18,6 +18,7 @@ async function serializeLanguageModel(entry: LanguageModelEntry, defaultEntry: L
     provider: entry.provider,
     modelId: entry.modelId,
     isDefault: entry.provider === defaultEntry.provider && entry.modelId === defaultEntry.modelId,
+    ...(entry.tier === undefined ? {} : { tier: entry.tier }),
     ...(entry.model.defaultReasoning === undefined
       ? {}
       : { defaultReasoning: entry.model.defaultReasoning }),

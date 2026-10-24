@@ -6,6 +6,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type ModelCatalogInput,
   noopLoggerProvider,
   SixbHost,
 } from "@sixb/core"
@@ -92,7 +93,12 @@ const transcriber: TranscriptionModel = {
   transcribe: async () => ({ output: { text: "Hello there." }, usage: { audioDurationMs: 1250 } }),
 }
 
-async function setup(options: { readonly image?: readonly ImageModel[] } = {}) {
+async function setup(
+  options: {
+    readonly language?: ModelCatalogInput["language"]
+    readonly image?: readonly ImageModel[]
+  } = {}
+) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
   for (const id of ["granted", "plain"]) {
@@ -108,7 +114,7 @@ async function setup(options: { readonly image?: readonly ImageModel[] } = {}) {
     queues: new InMemoryQueues(),
     logger: noopLoggerProvider,
     models: {
-      language: [writer],
+      language: options.language ?? [writer],
       image: options.image ?? [painter("painter"), painter("sketcher")],
       audio: { speech: [voice], transcription: [transcriber] },
     },
@@ -240,5 +246,25 @@ describe("model generation routes", () => {
     })
     const failed = await image({ model: { provider: "test", modelId: "broken" } })
     expect(failed.status).toBe(502)
+  })
+
+  test("a text request may name a tier, as generate() does", async () => {
+    // Removal proof: look the tier up as a model reference; the request is rejected.
+    const editor: LanguageModel = {
+      ...writer,
+      modelId: "editor",
+      definition: defineLanguageModel({ ...writer.definition, modelId: "editor" }),
+    }
+    const { granted } = await setup({ language: { standard: writer, heavy: editor } })
+    const text = (model: string) =>
+      granted("/api/models/language/generations", { prompt: "Status?", model })
+
+    const heavy = await text("heavy")
+    expect(await heavy.response.json()).toMatchObject({ model: { modelId: "editor" } })
+
+    // A tier left out answers with the standard model; a name that is not a tier is invalid.
+    const light = await text("light")
+    expect(await light.response.json()).toMatchObject({ model: { modelId: "writer" } })
+    expect((await text("medium")).status).toBe(422)
   })
 })

@@ -155,6 +155,27 @@ describe("GET /api/models", () => {
     })
   })
 
+  test("gives each language model its tier, the default being standard's first", async () => {
+    // Removal proof: drop `tier` from serializeLanguageModel.
+    const app = createApp({
+      language: {
+        light: testModel("gateway", "flash"),
+        standard: testModel("gateway", "sonnet"),
+        heavy: [testModel("gateway", "opus")],
+      },
+    })
+    const response = await app.fetch(new Request("http://localhost/api/models"))
+    const { language } = (await response.json()) as {
+      readonly language: readonly { modelId: string; tier?: string; isDefault: boolean }[]
+    }
+
+    expect(language.map(({ modelId, tier, isDefault }) => ({ modelId, tier, isDefault }))).toEqual([
+      { modelId: "flash", tier: "light", isDefault: false },
+      { modelId: "sonnet", tier: "standard", isDefault: true },
+      { modelId: "opus", tier: "heavy", isDefault: false },
+    ])
+  })
+
   test("returns an empty catalog when no models are configured", async () => {
     const response = await createApp().fetch(new Request("http://localhost/api/models"))
     expect(response.status).toBe(200)

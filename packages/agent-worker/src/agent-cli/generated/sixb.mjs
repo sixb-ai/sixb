@@ -792,6 +792,7 @@ async function models(api, args) {
       kind,
       model: entry.modelId,
       provider: entry.provider,
+      ...entry.tier ? { tier: entry.tier } : {},
       ...entry.isDefault ? { default: true } : {},
       ...entry.description ? { description: entry.description } : {},
       price: describePrice(entry.rateCard)
