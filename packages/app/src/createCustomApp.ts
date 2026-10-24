@@ -403,10 +403,12 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             "/": spaHtmlRoute(() => internalOrigin, {
               shellRoute: privateAppShellRoute,
               transformHtml: withRuntime,
+              apiBaseUrl,
             }),
             "/*": spaHtmlRoute(() => internalOrigin, {
               shellRoute: privateAppShellRoute,
               transformHtml: withRuntime,
+              apiBaseUrl,
             }),
           },
         }) as Parameters<typeof Bun.serve>[0]
@@ -636,7 +638,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           }
 
           if (url.pathname === "/" || url.pathname === "") {
-            return htmlResponse(req, indexHtml)
+            return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
           }
 
           const resolvedPath = resolveStaticPath(outdir, url.pathname)
@@ -647,7 +649,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
             if (resolvedPath === indexPath) {
-              return htmlResponse(req, indexHtml)
+              return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
             }
             return staticFileResponse(req, resolvedPath, staticAssetHeaders(url.pathname))
           }
@@ -659,7 +661,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           const htmlFile = Bun.file(`${resolvedPath}.html`)
           if (await htmlFile.exists()) {
             if (`${resolvedPath}.html` === indexPath) {
-              return htmlResponse(req, indexHtml)
+              return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
             }
             return fileResponse(req, htmlFile)
           }
@@ -669,7 +671,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             return fileResponse(req, nestedIndexFile)
           }
 
-          return htmlResponse(req, indexHtml)
+          return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
         },
       })
 
@@ -1052,13 +1054,46 @@ function injectRuntimeConfig(
   return `${script}\n${html}`
 }
 
-function htmlResponse(request: Request, html: string): Response {
+function htmlResponse(request: Request, html: string, apiBaseUrl: string | undefined): Response {
   return new Response(request.method === "HEAD" ? null : html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      "content-security-policy": appContentSecurityPolicy(request, apiBaseUrl),
     },
   })
+}
+
+/**
+ * The policy of the app's own page: it frames only what the API serves, its artifacts' frames.
+ * A page in one reads its queries' rows as the reader; its frame opens no window, and the frame's
+ * policy keeps what it loads to its files and a few CDNs. This keeps the frame's navigations on the
+ * API's origin too, so a page's code cannot send what it reads to another site in an address.
+ *
+ * It is the only directive: what a project's own pages load is theirs, but a frame they embed from
+ * another site is refused too.
+ */
+function appContentSecurityPolicy(request: Request, apiBaseUrl: string | undefined): string {
+  return `frame-src ${frameSource(request, apiBaseUrl)}`
+}
+
+/** Where an artifact frame comes from: the API's origin, `'self'` when it is the page's own. */
+function frameSource(request: Request, apiBaseUrl: string | undefined): string {
+  const { requestOrigin, apiOrigin } = resolveOrigins(request, apiBaseUrl)
+  return apiOrigin === requestOrigin ? "'self'" : apiOrigin
+}
+
+function resolveOrigins(
+  request: Request,
+  apiBaseUrl: string | undefined
+): { readonly requestOrigin: string; readonly apiOrigin: string } {
+  const requestOrigin = new URL(request.url).origin
+  try {
+    return { requestOrigin, apiOrigin: new URL(apiBaseUrl ?? requestOrigin, requestOrigin).origin }
+  } catch {
+    // The browser client reports an invalid runtime URL. Keep the document policy fail-closed.
+    return { requestOrigin, apiOrigin: requestOrigin }
+  }
 }
 
 function sharedHtmlResponse(
@@ -1081,13 +1116,7 @@ function secureSharedHtml(
   options: { readonly apiBaseUrl?: string }
 ): { readonly html: string; readonly headers: Record<string, string> } {
   const nonce = randomBytes(18).toString("base64url")
-  const requestOrigin = new URL(request.url).origin
-  let apiOrigin = requestOrigin
-  try {
-    apiOrigin = new URL(options.apiBaseUrl ?? requestOrigin, requestOrigin).origin
-  } catch {
-    // The browser client reports an invalid runtime URL. Keep the document policy fail-closed.
-  }
+  const { requestOrigin, apiOrigin } = resolveOrigins(request, options.apiBaseUrl)
 
   const apiSources = apiOrigin === requestOrigin ? [] : [apiOrigin]
   const connectSources = ["'self'", ...apiSources]
@@ -1107,6 +1136,7 @@ function secureSharedHtml(
     `media-src ${fileSources.join(" ")}`,
     "font-src 'self' data: https:",
     `connect-src ${connectSources.join(" ")}`,
+    `frame-src ${frameSource(request, options.apiBaseUrl)}`,
     "manifest-src 'none'",
   ].join("; ")
 
@@ -1283,7 +1313,11 @@ function devServerInternalOrigin(host: string, port: number): string {
 
 function spaHtmlRoute(
   internalOrigin: () => string,
-  options: { readonly shellRoute?: string; readonly transformHtml?: (html: string) => string } = {}
+  options: {
+    readonly shellRoute?: string
+    readonly transformHtml?: (html: string) => string
+    readonly apiBaseUrl?: string
+  } = {}
 ): BunServeRoute {
   return getHeadRoute(async (request) => {
     const publicUrl = new URL(request.url)
@@ -1316,6 +1350,10 @@ function spaHtmlRoute(
     const responseHeaders = new Headers(bundleResponse.headers)
     responseHeaders.delete("content-length")
     responseHeaders.delete("etag")
+    responseHeaders.set(
+      "content-security-policy",
+      appContentSecurityPolicy(request, options.apiBaseUrl)
+    )
     if (request.method === "HEAD") {
       return new Response(null, {
         status: bundleResponse.status,

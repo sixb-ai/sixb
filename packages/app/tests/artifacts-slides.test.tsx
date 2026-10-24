@@ -189,9 +189,7 @@ describe("a deck's frame", () => {
       </QueryClientProvider>
     )
     const frame = ui.container.querySelector("iframe")
-    expect(frame?.getAttribute("sandbox")).toBe(
-      "allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals"
-    )
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts allow-modals")
     expect(frame?.getAttribute("src")).toEndWith("/api/artifact-frames/token/index.html")
     expect(frame?.getAttribute("referrerpolicy")).toBe("no-referrer")
 

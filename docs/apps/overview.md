@@ -382,6 +382,9 @@ For agent chat interfaces, use the agent components from `@sixb/app`.
 Place images, fonts, and other static files in `app/public/`. Reference them from the root:
 `app/public/logo.svg` is available at `/logo.svg`.
 
+A page frames only what the API serves, where artifacts open: an `<iframe>` of another site, such
+as a video player, is refused.
+
 Continue with [Querying data](querying-data.md) and [Running actions](actions.md) to connect your
 pages to the domain model. See [Deployment](../deployment/overview.md#start-services) when you are
 ready to build and serve the app in production.

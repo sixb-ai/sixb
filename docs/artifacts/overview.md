@@ -251,7 +251,8 @@ previous and next, an overview of every slide, and present, where the slide fill
   `--chart-5`, `--font-sans`, …). A deck's own CSS overrides the kit and the theme.
 - Slides open in a sandboxed frame from a short-lived link. A deck runs its own scripts, but it
   can't read the app's cookies or call the API as the reader, and it loads only its own files and a
-  few public CDNs (jsDelivr, cdnjs, unpkg, and Google Fonts).
+  few public CDNs (jsDelivr, cdnjs, unpkg, and Google Fonts). It opens no windows and never leaves
+  its frame: a link to a web page opens in a new tab when the reader follows it.
 - A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
   `<sixb-embed src="artifact:…#chart=revenue">` shows another artifact on a slide: a chart, a
   range, a section, or a slide of another deck, drawn by the app over the slide at the size the

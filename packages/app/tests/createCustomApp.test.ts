@@ -191,6 +191,31 @@ describe("createCustomApp.start", () => {
     }
   })
 
+  test("lets the app's page frame only the API, where artifact frames come from", async () => {
+    // A page in a frame reads rows as its reader. Its frame opens no window, so the one way left
+    // to send them elsewhere is to load another site's address in the frame itself: this policy
+    // refuses that navigation. Reproduce by dropping the policy from htmlResponse.
+    const app = await createCustomApp({ rootDir: tempRoot })
+    const split = await app.start({ host: "127.0.0.1", port: 0, apiBaseUrl: "https://api.test/v1" })
+    const same = await app.start({ host: "127.0.0.1", port: 0 })
+
+    try {
+      for (const route of ["/", "/dashboard/devices", "/index.html"]) {
+        const response = await fetch(`http://127.0.0.1:${split.port}${route}`)
+        expect(response.headers.get("content-security-policy"), route).toBe(
+          "frame-src https://api.test"
+        )
+      }
+
+      // Served beside the app, the API is the page's own origin.
+      const response = await fetch(`http://127.0.0.1:${same.port}/`, { method: "HEAD" })
+      expect(response.headers.get("content-security-policy")).toBe("frame-src 'self'")
+    } finally {
+      await split.stop()
+      await same.stop()
+    }
+  })
+
   // Regression proof: drop the `/__sixb/assets/` branch from start() and the icon request is
   // answered as a missing asset.
   test("serves the built-in pages' connector icons from the package", async () => {
@@ -330,6 +355,8 @@ describe("createCustomApp.start", () => {
       expect(csp).toContain("frame-ancestors 'none'")
       expect(csp).toContain("form-action 'none'")
       expect(csp).toContain("manifest-src 'none'")
+      // It frames the artifact frames the API serves, and nothing else.
+      expect(csp).toContain("frame-src https://api.example.test;")
 
       const head = await fetch(`http://127.0.0.1:${port}/shared/shr_1/`, { method: "HEAD" })
       expect(head.status).toBe(200)
@@ -369,8 +396,11 @@ describe("createCustomApp.start", () => {
         ).status
       ).toBe(404)
 
+      // The app's own page restricts only where its frames go: see the next test.
       const ordinary = await fetch(`http://127.0.0.1:${port}/`)
-      expect(ordinary.headers.get("content-security-policy")).toBeNull()
+      expect(ordinary.headers.get("content-security-policy")).toBe(
+        "frame-src https://api.example.test"
+      )
     } finally {
       await server.stop()
     }
@@ -445,6 +475,9 @@ describe("createCustomApp.dev", () => {
       })
       expect(proxied.status).toBe(200)
       expect(await proxied.text()).toContain('<div id="root"></div>')
+      // In development too, the page frames only the API's artifact frames: here, its own origin.
+      // Reproduce by dropping the policy from spaHtmlRoute.
+      expect(proxied.headers.get("content-security-policy")).toBe("frame-src 'self'")
     } finally {
       await server?.stop()
       if (previous === undefined) delete process.env.SIXB_PUBLIC_TEST_KEY
