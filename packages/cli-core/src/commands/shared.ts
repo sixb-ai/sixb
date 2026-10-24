@@ -55,13 +55,7 @@ export function singleFileOption(args: readonly string[], command: string): stri
 }
 
 export async function readJson(source: string): Promise<unknown> {
-  let text: string
-  try {
-    text = source === "-" ? await readStdin() : await readFile(source, "utf8")
-  } catch (error) {
-    if (isFileError(error, "ENOENT")) fail(`JSON file '${source}' does not exist.`)
-    throw error
-  }
+  const text = await readText(source, "JSON file")
   try {
     return JSON.parse(text)
   } catch {
@@ -71,6 +65,16 @@ export async function readJson(source: string): Promise<unknown> {
         : `JSON file '${source}' is not valid JSON.`,
       "invalid_json"
     )
+  }
+}
+
+/** A file's text, or standard input's when the source is `-`. */
+export async function readText(source: string, noun: string): Promise<string> {
+  try {
+    return source === "-" ? await readStdin() : await readFile(source, "utf8")
+  } catch (error) {
+    if (isFileError(error, "ENOENT")) fail(`${noun} '${source}' does not exist.`)
+    throw error
   }
 }
 

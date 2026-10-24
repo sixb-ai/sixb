@@ -278,7 +278,7 @@ Options:
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
-  sixb models text "<prompt>" [--model <model>] [--instructions <text>]
+  sixb models text "<prompt>"|--file <path|-> [--model <tier|model>] [--instructions <text>]
                    [--max-output-tokens <n>] [--reasoning <level>]
   sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
                     [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
@@ -292,6 +292,9 @@ Options:
 <model> is a model id, or provider:model-id when two providers share one; without --model, the
 kind's default answers. \`list\` shows each model's kind, default, description and price; \`get\`
 adds the sizes, voices and other options a request can use. Prices are in USD.
+
+\`text\` also takes a tier (light, standard or heavy) for --model, and reads a long prompt from
+--file: a path, or - for standard input.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a

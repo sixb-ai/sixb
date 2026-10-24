@@ -4,6 +4,7 @@ import type { ApiClient } from "../api-client"
 import { enumValue, integerInRange, isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
+import { readText } from "./shared"
 
 export const MODEL_KINDS = ["language", "image", "speech", "transcription"] as const
 export type ModelKind = (typeof MODEL_KINDS)[number]
@@ -149,14 +150,16 @@ async function generateText(api: ApiClient, args: readonly string[]): Promise<vo
       "--instructions": "string",
       "--max-output-tokens": "string",
       "--reasoning": "string",
+      "--file": "string",
     },
     "models text",
-    1
+    [0, 1]
   )
+  const prompt = await readPrompt(positionals[0], options["--file"])
   const maxOutputTokens = options["--max-output-tokens"]
   const result = (await api.post("/api/models/language/generations", {
-    ...(await modelRef(api, options["--model"], "language")),
-    prompt: positionals[0],
+    ...(await languageModelRef(api, options["--model"])),
+    prompt,
     ...(options["--instructions"] === undefined ? {} : { instructions: options["--instructions"] }),
     ...(maxOutputTokens === undefined
       ? {}
@@ -296,6 +299,39 @@ async function modelRef(
     kind
   )
   return { model: { provider: entry.provider, modelId: entry.modelId } }
+}
+
+// The tiers of `models.language`, restated: this package depends on no other Sixb package.
+const LANGUAGE_TIERS = ["light", "standard", "heavy"] as const
+
+/**
+ * A text request's --model: a tier goes to the server as is, which answers with that tier's model,
+ * or the default when the project configures no such tier. Anything else names a model.
+ */
+async function languageModelRef(
+  api: ApiClient,
+  reference: string | undefined
+): Promise<{ model?: string | { provider: string; modelId: string } }> {
+  const tier = LANGUAGE_TIERS.find((candidate) => candidate === reference)
+  if (tier !== undefined) return { model: tier }
+  return modelRef(api, reference, "language")
+}
+
+/** The prompt given as an argument, or read from --file: a path, or - for standard input. */
+async function readPrompt(
+  argument: string | undefined,
+  source: string | undefined
+): Promise<string> {
+  if (argument !== undefined && source !== undefined) {
+    fail("models text takes its prompt as an argument or from --file, not both.")
+  }
+
+  const prompt = source === undefined ? argument : await readText(source, "Prompt file")
+  if (prompt === undefined) {
+    fail('models text requires a prompt: "<prompt>", or --file <path|-> to read it.')
+  }
+  if (!prompt.trim()) fail("The prompt is empty.")
+  return prompt
 }
 
 function requireOutput(output: string | undefined, command: string): string {

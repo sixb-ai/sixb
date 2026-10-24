@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Readable } from "node:stream"
 import { createInstanceApiClient } from "../src"
 import { describeCost, describePrice, findModel, models } from "../src/commands/models"
 import type { CliError } from "../src/output"
@@ -258,6 +259,23 @@ function serveFiles(bodies: readonly Uint8Array<ArrayBuffer>[]) {
   }
 }
 
+/** The body of the last text generation the stub API received. */
+function lastGeneration(): unknown {
+  return received.filter((request) => request.path === "/api/models/language/generations").at(-1)
+    ?.body
+}
+
+/** Run `body` with `text` as standard input, as `echo text | sixb ...` would give it. */
+async function withStdin<T>(text: string, body: () => Promise<T>): Promise<T> {
+  const stdin = Object.getOwnPropertyDescriptor(process, "stdin")
+  Object.defineProperty(process, "stdin", { value: Readable.from([text]), configurable: true })
+  try {
+    return await body()
+  } finally {
+    if (stdin) Object.defineProperty(process, "stdin", stdin)
+  }
+}
+
 async function temporary(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "sixb-models-cli-"))
   directories.push(directory)
@@ -359,6 +377,56 @@ describe("models generation", () => {
     ).toEqual({ prompt: "Status?", maxOutputTokens: 20 })
     expect(await run(["transcribe", audio])).toMatchObject({ text: "Hello there." })
     expect(received.find((request) => request.path === "/api/files")?.type).toBe("audio/mpeg")
+  })
+
+  test("text takes a tier for --model, and the server picks the tier's model", async () => {
+    // Removal proof: look every --model up in the catalog; 'light' names no model and fails.
+    routes["POST /api/models/language/generations"] = () => Response.json(call({ text: "Fine." }))
+
+    await run(["text", "Status?", "--model", "light"])
+    expect(lastGeneration()).toEqual({ model: "light", prompt: "Status?" })
+    // The project's catalog decides what a tier it lacks answers with, so the CLI never reads it.
+    expect(received.some((request) => request.path === "/api/models")).toBe(false)
+
+    await run(["text", "Status?", "--model", "anthropic/claude-sonnet-5-5"])
+    expect(lastGeneration()).toEqual({
+      model: { provider: "vercel-ai-gateway", modelId: "anthropic/claude-sonnet-5-5" },
+      prompt: "Status?",
+    })
+  })
+
+  test("text reads a long prompt from a file or standard input", async () => {
+    // Removal proof: drop --file from models text; the option is unknown.
+    const directory = await temporary()
+    const notes = join(directory, "notes.md")
+    const missing = join(directory, "missing.md")
+    await Bun.write(notes, "# Q3\nRevenue rose 4%.\n")
+    routes["POST /api/models/language/generations"] = () => Response.json(call({ text: "Fine." }))
+    const prompt = () => (lastGeneration() as { prompt?: string } | undefined)?.prompt
+
+    await run(["text", "--file", notes])
+    expect(prompt()).toBe("# Q3\nRevenue rose 4%.\n")
+
+    await withStdin("Summarize:\nRevenue rose 4%.", () => run(["text", "--file", "-"]))
+    expect(prompt()).toBe("Summarize:\nRevenue rose 4%.")
+
+    const failure = (args: readonly string[]) =>
+      run(args).then(
+        () => undefined,
+        (error: CliError) => error.body.message
+      )
+    expect(await failure(["text", "Status?", "--file", notes])).toBe(
+      "models text takes its prompt as an argument or from --file, not both."
+    )
+    expect(await failure(["text"])).toBe(
+      'models text requires a prompt: "<prompt>", or --file <path|-> to read it.'
+    )
+    expect(await failure(["text", "--file", missing])).toBe(
+      `Prompt file '${missing}' does not exist.`
+    )
+    expect(await withStdin(" \n", () => failure(["text", "--file", "-"]))).toBe(
+      "The prompt is empty."
+    )
   })
 
   test("calls files shows a call's files, or downloads them again", async () => {
