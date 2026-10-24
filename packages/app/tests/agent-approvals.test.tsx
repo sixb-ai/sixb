@@ -10,8 +10,9 @@ import {
   type AgentApproval,
   heldCallsInOutput,
   isApprovalOutcomeMessage,
-  nextApprovalMode,
+  toggledApprovalMode,
 } from "../src/agent/approvals"
+import { type BashTool, BashToolView } from "../src/agent/bash/bash-tool-view"
 import { createLiveRunState } from "../src/agent/live-run"
 import type { AgentMessage } from "../src/agent/types"
 import { Transcript } from "../src/index"
@@ -254,9 +255,13 @@ interface Scenario {
   approvals: AgentApproval[]
   /** Calls waiting for the reader, across their threads. */
   waiting: AgentApproval[]
+  /** The reader's other threads. */
+  threads?: readonly Record<string, unknown>[]
   decided: AgentApproval
   /** The turn the decision resumes, when it is the last. */
   resumed?: Record<string, unknown>
+  /** Why the turn could not resume, when it could not. */
+  refused?: { status: "refused"; code: string; message: string; retrying: boolean }
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -285,7 +290,8 @@ function api(scenario: Scenario, requests: string[]) {
       })
     }
     if (path === "/api/agent-threads") {
-      return Response.json({ threads: [], hasMore: false, total: 0 })
+      const own = url.searchParams.get("sharedWithMe") === "true" ? [] : (scenario.threads ?? [])
+      return Response.json({ threads: own, hasMore: false, total: own.length })
     }
     if (path === "/api/agent-threads/thr_1") return Response.json(scenario.thread)
     if (path === "/api/agent-threads/thr_1/approval-mode") {
@@ -325,6 +331,7 @@ function api(scenario: Scenario, requests: string[]) {
       return Response.json({
         approval: scenario.decided,
         ...(scenario.resumed ? { run: scenario.resumed } : {}),
+        ...(scenario.refused ? { resume: scenario.refused } : {}),
       })
     }
     if (path === "/api/object-types") return Response.json([])
@@ -426,28 +433,34 @@ describe("the approval mode chip", () => {
   })
 
   // Removal proof: drop the Shift+Tab branch from the composer's handleKeyDown; nothing is sent.
-  test("Shift+Tab in the message cycles the mode and says so", async () => {
+  // Drop `value.length === 0` from it; typing then no longer lets Shift+Tab move focus back.
+  test("Shift+Tab in an empty message switches between Manual and Accept edits, and says so", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
     await view.findByRole("button", { name: "Approval mode: Manual. Change it" })
     const input = view.getByRole("textbox", { name: "Message" })
+    const modeSaves = () => requests.filter((entry) => entry.includes("/approval-mode"))
 
     fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
     await waitFor(() =>
-      expect(requests).toContain(
-        'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"accept-edits"}'
-      )
+      expect(modeSaves()).toEqual([
+        'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"accept-edits"}',
+      ])
     )
     expect(view.getByText("Approval mode: Accept edits")).toBeDefined()
 
+    // Never on to Auto: back to Manual.
     fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
-    await waitFor(() =>
-      expect(requests).toContain(
-        'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"auto"}'
-      )
+    await waitFor(() => expect(modeSaves()).toHaveLength(2))
+    expect(modeSaves()[1]).toBe(
+      'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"manual"}'
     )
-    // Tab alone still moves focus on: it changes nothing.
+
+    // With a message typed, Shift+Tab moves focus back as everywhere else, and Tab moves it on.
+    type(input, "Pay it")
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
     fireEvent.keyDown(input, { key: "Tab" })
-    expect(requests.filter((entry) => entry.includes("/approval-mode"))).toHaveLength(2)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(modeSaves()).toHaveLength(2)
   })
 
   test("offers to make the mode the reader's default", async () => {
@@ -457,7 +470,7 @@ describe("the approval mode chip", () => {
     await view.findByRole("button", { name: /^Approval mode: Accept edits/ })
 
     fireEvent.click(view.getByRole("button", { name: /^Approval mode: Accept edits/ }))
-    fireEvent.click(await view.findByRole("button", { name: "Use for new conversations" }))
+    fireEvent.click(await view.findByRole("button", { name: "Use as my default" }))
 
     await waitFor(() =>
       expect(requests).toContain('PUT /api/agent/preferences {"approvalMode":"accept-edits"}')
@@ -473,14 +486,15 @@ describe("an approval card", () => {
     const found = within(await card(view))
     expect(found.getByText("Waiting for your approval")).toBeDefined()
     expect(found.getByRole("heading", { name: "Pay invoice" })).toBeDefined()
-    expect(found.getByText("Paid On")).toBeDefined()
+    expect(found.getByText("Paid on")).toBeDefined()
+    expect(found.getByText("ach")).toBeDefined()
     expect(found.getByText("Reaches an external system, then updates your data")).toBeDefined()
     expect(found.getByRole("button", { name: "Approve" })).toBeDefined()
     expect(found.getByRole("button", { name: "Deny" })).toBeDefined()
-    expect(found.getByRole("button", { name: "Always allow in this thread" })).toBeDefined()
+    expect(found.getByRole("button", { name: "Always allow · switches to Auto" })).toBeDefined()
     // The turn is paused, not finished: the composer says how to move on.
     expect(view.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
-      "Approve above, or reply to skip"
+      "Approve above, or reply instead"
     )
   })
 
@@ -504,22 +518,48 @@ describe("an approval card", () => {
     expect(await view.findByRole("status", { name: "Agent is working" })).toBeDefined()
   })
 
-  test("always allow approves and raises the reader's mode in the thread", async () => {
-    const { view, requests } = renderChat("dana")
+  // Removal proof: drop the `alsoApproved` count from the card; the sibling call goes unmentioned.
+  test("always allow says what it switches to and what else it approves, then confirms", async () => {
+    const sibling = approval({ id: "apr_2", call: { ...payCall, actionRunId: "act_pay_2" } })
+    const { view, requests } = renderChat("dana", { approvals: [approval(), sibling] })
 
-    fireEvent.click(
-      within(await card(view)).getByRole("button", { name: "Always allow in this thread" })
-    )
+    // The sibling's command named no card: it gets its own, under the turn.
+    const [first] = await view.findAllByRole("region", { name: /^Approval request/ })
+    if (!first) throw new Error("No card.")
+    const found = within(first)
+    const always = found.getByRole("button", { name: "Always allow · switches to Auto" })
+    expect(found.getByText("Also approves 1 other request waiting in this reply.")).toBeDefined()
+
+    fireEvent.click(always)
 
     await waitFor(() =>
       expect(requests).toContain(
         'POST /api/agent-threads/thr_1/approvals/apr_1/decision {"decision":"approve","always":true}'
       )
     )
+    expect(await view.findByText("You're now in Auto in this conversation.")).toBeDefined()
   })
 
-  // Removal proof: drop `refreshApprovals(event.threadId)` from the activity handler; the card
-  // keeps its buttons.
+  // Removal proof: drop the `resume` branch of the card's `then`; the card says nothing of it.
+  test("a decision whose turn could not resume says so on the card", async () => {
+    const { view } = renderChat("dana", {
+      refused: {
+        status: "refused",
+        code: "sandbox_execution_unavailable",
+        message: "[Sixb] The sandbox needs recovering.",
+        retrying: false,
+      },
+    })
+
+    fireEvent.click(within(await card(view)).getByRole("button", { name: "Approve" }))
+
+    expect(await view.findByText("Approved · Ran")).toBeDefined()
+    expect(
+      view.getByText("The agent couldn't continue. Send a message to pick up from here.")
+    ).toBeDefined()
+  })
+
+  // Removal proof: drop `onApprovalActivity` from the activity stream; the card keeps its buttons.
   test("a decision made elsewhere reaches the card live", async () => {
     const { view, state } = renderChat("dana")
     const activity = await subscribeActivity()
@@ -566,6 +606,10 @@ describe("an approval card", () => {
     ).toBeDefined()
     expect(found.queryByRole("button", { name: "Approve" })).toBeNull()
     expect(found.queryByRole("button", { name: "Deny" })).toBeNull()
+    // Sending sets Dana's request aside: Sam is told before he does.
+    expect(
+      view.getByText("Sending now sets aside Dana Reyes's request waiting for approval.")
+    ).toBeDefined()
   })
 
   test.each([
@@ -593,13 +637,28 @@ describe("an approval card", () => {
       "Approved, but it failed",
     ],
     ["denied", approval({ status: "denied", decidedAt: at }), "Denied · Didn't run"],
-    ["superseded", approval({ status: "superseded", decidedAt: at }), "Skipped"],
+    ["superseded", approval({ status: "superseded", decidedAt: at }), "Set aside"],
     ["cancelled", approval({ status: "cancelled", decidedAt: at }), "Stopped"],
     ["expired", approval({ status: "expired", decidedAt: at }), "Expired"],
-    // A copy of the conversation shows the call, but holds no approval for it.
-    ["elsewhere", null, "Asked in another conversation. It isn't decided here."],
+    [
+      "lost",
+      approval({
+        status: "approved",
+        decidedAt: at,
+        outcome: {
+          kind: "error",
+          error: {
+            code: "agent.approval_authority_lost",
+            message: "[Sixb] The sign-in ended.",
+            retryable: false,
+            at,
+          },
+        },
+      }),
+      "Approved, but it didn't run",
+    ],
   ] as const)("reads as %s after a reload", (state, record, label) => {
-    const view = renderTranscript(record === null ? [] : [record])
+    const view = renderTranscript([record])
 
     const found = view.getByRole("region", { name: /^Approval request/ })
     expect(found.getAttribute("data-approval-state")).toBe(state)
@@ -607,6 +666,23 @@ describe("an approval card", () => {
     expect(within(found).queryByRole("button", { name: "Approve" }) !== null).toBe(
       state === "pending"
     )
+  })
+
+  // Removal proof: drop ApprovalCard's early return for a call with no record; the copy shows a card
+  // nobody can answer.
+  test("a held call the thread holds no record of, as in a copy, shows no card", () => {
+    const view = renderTranscript([])
+
+    expect(view.queryByRole("region", { name: /^Approval request/ })).toBeNull()
+  })
+
+  // Removal proof: return the bare ToolLine for a held command; its output can't be opened.
+  test("a held command keeps its output view, headed by what it waits for", () => {
+    const view = render(<BashToolView tool={heldBash() as BashTool} />)
+
+    fireEvent.click(view.getByRole("button", { name: /Waiting for approval/ }))
+    fireEvent.click(view.getByRole("button", { name: "View raw" }))
+    expect(view.getByText(/"status":"awaiting_approval"/)).toBeDefined()
   })
 
   test("a transcript read without its approvals, as an observer's, only says what was asked", () => {
@@ -617,10 +693,71 @@ describe("an approval card", () => {
     expect(within(found).getByText("Asked for approval")).toBeDefined()
     expect(within(found).queryByRole("button")).toBeNull()
   })
+
+  // Removal proof: give the cards an empty `outcomes` map in Transcript; the observer reads "Asked".
+  test("an observer reads how a call ended from the message that resumed its turn", () => {
+    const view = renderTranscript(undefined, [
+      {
+        ...message,
+        id: "msg_3",
+        runId: null,
+        role: "user",
+        authorPrincipal: dana,
+        seq: 3,
+        createdAt: at,
+        parts: [
+          {
+            type: "approval-outcome",
+            approvalId: "apr_1",
+            status: "approved",
+            call: { kind: "action", actionId: "payInvoice", subject: payCall.subject },
+            outcome: { kind: "action-run", runId: "act_pay", status: "succeeded" },
+          },
+        ],
+      },
+    ])
+
+    const found = view.getByRole("region", { name: /^Approval request/ })
+    expect(found.getAttribute("data-approval-state")).toBe("ran")
+    expect(within(found).getByRole("link", { name: "View run" })).toBeDefined()
+    expect(within(found).queryByRole("button", { name: "Approve" })).toBeNull()
+  })
+
+  // Removal proof: keep only pending approvals in Transcript's `unshown`; the card leaves once
+  // decided.
+  test("a call whose command did not name it keeps its card under its turn, once decided too", () => {
+    const [question, answer] = conversation()
+    const view = renderTranscript(
+      [ran],
+      [],
+      [question, { ...answer, parts: [{ type: "text", text: "I'll send an ACH payment." }] }]
+    )
+
+    const found = view.getByRole("region", { name: /^Approval request/ })
+    expect(found.getAttribute("data-approval-state")).toBe("ran")
+  })
 })
 
 describe("the thread list", () => {
-  // Removal proof: drop `waitingApprovals` from ConversationPanel's switcher; no badge shows.
+  // Removal proof: drop `waitingRows` from the switcher; the waiting thread sits among the others.
+  test("puts the conversations waiting for the reader first", async () => {
+    const older = "2026-10-20T09:00:00.000Z"
+    const { view } = renderChat("dana", {
+      waiting: [approval({ id: "apr_2", threadId: "thr_2" })],
+      threads: [
+        thread({ id: "thr_3", title: "Q3 software spend", updatedAt: at }),
+        thread({ id: "thr_2", title: "Approve Halvorsen", updatedAt: older }),
+      ],
+    })
+
+    fireEvent.click(await view.findByRole("button", { name: /1 conversation waiting/ }))
+    const dialog = within(await view.findByRole("dialog"))
+    const section = dialog.getByRole("region", { name: "Waiting for you" })
+    expect(within(section).getByRole("button", { name: /^Approve Halvorsen/ })).toBeDefined()
+    expect(within(section).queryByRole("button", { name: /^Q3 software spend/ })).toBeNull()
+  })
+
+  // Removal proof: drop `waitingThreadIds` from ConversationPanel's switcher; no badge shows.
   test("counts the other conversations waiting for the reader, and marks them", async () => {
     const waiting = [
       approval({ id: "apr_2", threadId: "thr_2" }),
@@ -643,7 +780,7 @@ describe("the thread list", () => {
     ).toBeDefined()
   })
 
-  // Removal proof: drop `refreshApprovals(event.threadId)` from the activity handler; no badge.
+  // Removal proof: drop `onApprovalActivity` from the activity stream; no badge.
   test("a call held in another conversation counts as it arrives", async () => {
     const { view, state } = renderChat("dana", { approvals: [], runs: [], messages: [] })
     const activity = await subscribeActivity()
@@ -693,10 +830,10 @@ describe("held calls in a command's output", () => {
     expect(heldCallsInOutput({ stdout: "awaiting_approval", exitCode: 4 })).toEqual([])
   })
 
-  test("Shift+Tab cycles the modes from the strictest", () => {
-    expect(nextApprovalMode("manual")).toBe("accept-edits")
-    expect(nextApprovalMode("accept-edits")).toBe("auto")
-    expect(nextApprovalMode("auto")).toBe("manual")
+  test("Shift+Tab never reaches Auto", () => {
+    expect(toggledApprovalMode("manual")).toBe("accept-edits")
+    expect(toggledApprovalMode("accept-edits")).toBe("manual")
+    expect(toggledApprovalMode("auto")).toBe("manual")
   })
 
   test("the message that resumes a turn is not shown", () => {
@@ -717,7 +854,11 @@ describe("held calls in a command's output", () => {
 })
 
 /** The transcript alone, with the thread's approvals, or none at all as an observer reads it. */
-function renderTranscript(approvals: AgentApproval[] | undefined) {
+function renderTranscript(
+  approvals: AgentApproval[] | undefined,
+  extra: readonly Record<string, unknown>[] = [],
+  base: readonly Record<string, unknown>[] = conversation()
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setConfig({
     fetch: Object.assign(async () => Response.json({ error: "Not found" }, { status: 404 }), {
@@ -730,7 +871,7 @@ function renderTranscript(approvals: AgentApproval[] | undefined) {
       <MemoryRouter>
         <Transcript
           threadId="thr_1"
-          messages={conversation() as unknown as AgentMessage[]}
+          messages={[...base, ...extra] as unknown as AgentMessage[]}
           live={createLiveRunState(null)}
           {...(approvals === undefined
             ? {}
@@ -740,7 +881,7 @@ function renderTranscript(approvals: AgentApproval[] | undefined) {
                   loaded: true,
                   canDecide: () => true,
                   requesterName: () => "Dana Reyes",
-                  decide: async () => {},
+                  decide: async (decided) => ({ approval: decided }),
                 },
               })}
         />

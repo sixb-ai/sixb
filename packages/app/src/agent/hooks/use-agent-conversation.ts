@@ -32,7 +32,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
 import {
   type AgentApproval,
+  type AgentApprovalDecided,
   type AgentApprovalDecision,
+  AgentApprovalDecisionError,
   type AgentApprovalDecisionFailure,
   type AgentApprovalMode,
   isAwaitingApproval,
@@ -176,13 +178,6 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     ])
   const activityStream = useAgentActivityStream({
     onActivity: (event) => {
-      // A held call changed: its card, and the thread list's count of what waits for the reader.
-      // Its turn's runs follow from their own events.
-      if (event.type === "agent.approval.activity") {
-        void refreshApprovals(event.threadId)
-        return
-      }
-
       // Someone else's turn in a shared conversation shows only through this feed: read the open
       // thread again so its run is followed live. A run the view already follows streams itself.
       if (event.threadId === threadId && event.runId !== activeRunId) {
@@ -192,6 +187,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
       void refreshThreads()
     },
+    // A held call changed: its card, and the thread list's count of what waits for the reader. Its
+    // turn's runs follow from their own events.
+    onApprovalActivity: (event) => void refreshApprovals(event.threadId),
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
@@ -303,23 +301,38 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
   })
-  const approvals = useMemo(
-    () => (threadId !== null ? (approvalsQuery.data?.approvals ?? []) : []),
-    [threadId, approvalsQuery.data]
-  )
+  // The list is oldest first: past one page, the calls still waiting are read on their own, so the
+  // newest always have their record.
+  const pendingHereQuery = useQuery({
+    ...listAgentThreadApprovalsOptions({
+      path: { threadId: threadId ?? "" },
+      query: { ...THREAD_APPROVALS_QUERY, status: "pending" },
+    }),
+    enabled: threadId !== null && approvalsQuery.data?.hasMore === true,
+    refetchInterval: recoveryPollMs,
+  })
+  const approvals = useMemo(() => {
+    if (threadId === null) return []
+    const read = approvalsQuery.data?.approvals ?? []
+    const known = new Set(read.map((approval) => approval.id))
+    const pending = (pendingHereQuery.data?.approvals ?? []).filter(
+      (approval) => !known.has(approval.id)
+    )
+    return pending.length === 0 ? read : [...read, ...pending]
+  }, [threadId, approvalsQuery.data, pendingHereQuery.data])
   const pendingApprovalsQuery = useQuery({
     ...listAgentApprovalsOptions({ query: PENDING_APPROVALS_QUERY }),
     refetchInterval: recoveryPollMs,
     retry: false,
   })
-  /** Calls waiting for the reader, by thread. */
-  const waitingApprovals = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const approval of pendingApprovalsQuery.data?.approvals ?? []) {
-      counts.set(approval.threadId, (counts.get(approval.threadId) ?? 0) + 1)
-    }
-    return counts as ReadonlyMap<string, number>
-  }, [pendingApprovalsQuery.data])
+  /** The threads where a call waits for the reader. */
+  const waitingThreadIds = useMemo(
+    () =>
+      new Set(
+        (pendingApprovalsQuery.data?.approvals ?? []).map((approval) => approval.threadId)
+      ) as ReadonlySet<string>,
+    [pendingApprovalsQuery.data]
+  )
 
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUser | null>(null)
@@ -334,7 +347,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     nonce: number
   }>({ text: "", attachments: [], context: [], nonce: 0 })
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
-  const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {})
+  const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {
+    throw new AgentApprovalDecisionError("failed")
+  })
   // The mode the chip shows while a new conversation has no thread to keep it in yet, or until the
   // thread confirms a change.
   const [chosenApprovalMode, setChosenApprovalMode] = useState<{
@@ -396,19 +411,25 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
-  const saveThreadApprovalMode = useMutation(setAgentThreadApprovalModeMutation())
-  const savePreferences = useMutation(updateAgentPreferencesMutation())
+  // Each runs after the one before, so the last choice is the one the server keeps.
+  const saveThreadApprovalMode = useMutation({
+    ...setAgentThreadApprovalModeMutation(),
+    scope: { id: "agent-thread-approval-mode" },
+  })
+  const savePreferences = useMutation({
+    ...updateAgentPreferencesMutation(),
+    scope: { id: "agent-preferences" },
+  })
 
   const preferencesQuery = useQuery({ ...getAgentPreferencesOptions(), retry: false })
   const defaultApprovalMode = preferencesQuery.data?.approvalMode
   const chosenHere =
     chosenApprovalMode && chosenApprovalMode.threadId === threadId ? chosenApprovalMode.mode : null
   // The thread read alone carries the reader's mode in it; a new conversation starts on their
-  // default. Unknown until either loads: the chip waits for it.
+  // default. Unknown until either loads: the chip waits, and a message sent meanwhile carries no
+  // mode, so the server picks the reader's own instead of a default shown by mistake.
   const approvalMode: AgentApprovalMode | undefined =
-    chosenHere ??
-    (threadId !== null ? threadQuery.data?.approvalMode : undefined) ??
-    defaultApprovalMode
+    chosenHere ?? (threadId !== null ? threadQuery.data?.approvalMode : defaultApprovalMode)
 
   const presentation = presentActiveTurn({
     activeRunId,
@@ -490,7 +511,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       const newThreadId = createdThreadId
       // A mode chosen before the thread existed is the reader's choice in it from now on.
       if (chosenHere !== null && chosenHere !== defaultApprovalMode) {
-        void keepThreadApprovalMode(newThreadId, chosenHere).catch(() => undefined)
+        keepThreadApprovalMode(newThreadId, chosenHere).catch(() =>
+          setSendError({ threadId: newThreadId, failure: "approvalMode" })
+        )
       }
       const response = await sendWithRequesterSettings((settings) =>
         postMessage.mutateAsync({
@@ -566,7 +589,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         queryKey: getAgentThreadQueryKey({ path: { threadId } }),
       }),
       queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
-      refreshApprovals(threadId),
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadApprovalsQueryKey({ path: { threadId } }),
+      }),
     ])
 
   const keepThreadApprovalMode = async (threadId: string, mode: AgentApprovalMode) => {
@@ -585,16 +610,15 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     setChosenApprovalMode({ threadId, mode })
     if (threadId === null) return
 
-    keepThreadApprovalMode(threadId, mode)
-      .then(() =>
-        setChosenApprovalMode((current) =>
-          current?.threadId === threadId && current.mode === mode ? null : current
-        )
+    // Saves run one after the other: until the last choice is saved, the chip keeps showing it.
+    const settle = () =>
+      setChosenApprovalMode((current) =>
+        current?.threadId === threadId && current.mode === mode ? null : current
       )
+    keepThreadApprovalMode(threadId, mode)
+      .then(settle)
       .catch(() => {
-        setChosenApprovalMode((current) =>
-          current?.threadId === threadId && current.mode === mode ? null : current
-        )
+        settle()
         setSendError({ threadId, failure: "approvalMode" })
       })
   }
@@ -623,7 +647,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
    * runs before this resolves, and the card shows how it ended; the decision that settles the
    * turn's last call resumes it, and the conversation follows the new turn under the cards.
    */
-  const decide = async (approval: AgentApproval, decision: AgentApprovalDecision) => {
+  const decide = async (
+    approval: AgentApproval,
+    decision: AgentApprovalDecision
+  ): Promise<AgentApprovalDecided> => {
     try {
       const response = await decideApproval.mutateAsync({
         path: { threadId: approval.threadId, approvalId: approval.id },
@@ -647,10 +674,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
       // "Always allow" raised the reader's mode here.
       if (decision.always) setChosenApprovalMode(null)
+      return response
     } catch (error) {
-      throw decisionFailure(error)
+      throw new AgentApprovalDecisionError(decisionFailure(error))
     } finally {
       void refreshThread(approval.threadId)
+      void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
     }
   }
 
@@ -790,6 +819,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         approval.runId === latestRun?.id &&
         transcriptApprovals.canDecide(approval)
     )
+  // Any message sets aside the calls still waiting in the thread, whoever asked for them: say so
+  // before someone else's request is lost to it.
+  const othersWaiting = isRunning
+    ? undefined
+    : approvals.find(
+        (approval) => approval.status === "pending" && !transcriptApprovals.canDecide(approval)
+      )
 
   const transcriptProps: TranscriptProps = {
     threadId,
@@ -846,7 +882,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     onSend: send,
     error: currentSendError ?? undefined,
     disabled: (isRunning && answeringName === null) || Boolean(sandboxRecovery),
-    hint: answeringName ? agentMessages.sharing.answering(answeringName) : undefined,
+    hint: answeringName
+      ? agentMessages.sharing.answering(answeringName)
+      : othersWaiting
+        ? agentMessages.approvals.setsAside(transcriptApprovals.requesterName(othersWaiting))
+        : undefined,
     pending: composerPending,
     running: isRunning,
     stopping,
@@ -936,18 +976,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     continueAfterTimeout,
     /** The thread's held calls, oldest first; the transcript shows each as a card. */
     approvals,
-    /** Approve or deny a held call; see {@link TranscriptApprovals.decide}. */
+    /** Whether the reader decides on a held call: only whoever asked for its turn does. */
+    canDecide: transcriptApprovals.canDecide,
+    /**
+     * Approve or deny a held call. It resolves once decided, the approved call having run; it
+     * rejects with an `AgentApprovalDecisionError` when nothing was decided.
+     */
     decide,
-    /** The newest turn waits for the reader's decision. */
-    awaitingApproval,
-    /** Calls waiting for the reader, by thread, across their conversations. */
-    waitingApprovals,
     /** What the reader's next turns may change without asking; unknown until it loads. */
     approvalMode,
     setApprovalMode,
-    /** The reader's mode in conversations where they chose none. */
-    defaultApprovalMode,
-    setDefaultApprovalMode,
+    /** The threads where a call waits for the reader's decision. */
+    waitingThreadIds,
     /** Spread into `<Transcript>`. */
     transcriptProps,
     /** Spread into `<Composer>`, then add the page's own props such as `placeholder`. */
@@ -960,10 +1000,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 /** Why a turn did not start or stop, or the mode did not change, as the composer tells it. */
 type TurnFailure = "send" | "busy" | "sandbox" | "retry" | "stop" | "approvalMode"
 
-/** Why a decision did not go through. A 429 means it stands: the call ran, the resume waits. */
+/** Why a decision did not go through. Once the call ran, the decision stands and never throws. */
 function decisionFailure(error: unknown): AgentApprovalDecisionFailure {
   if (!isSixbApiError(error)) return "failed"
-  if (error.status === 429) return "limit"
   if (error.code === "approval_expired") return "expired"
   if (error.code === "approval_not_pending") return "decided"
 

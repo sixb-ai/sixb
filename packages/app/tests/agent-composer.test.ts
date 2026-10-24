@@ -58,13 +58,15 @@ describe("Composer", () => {
     expect(html).toContain('data-approval-mode="accept-edits"')
     expect(html).toContain('aria-label="Approval mode: Accept edits. Change it"')
     expect(html).toContain('aria-keyshortcuts="Shift+Tab"')
+    // A phone keeps a short name beside the icon.
+    expect(html).toContain(">Edits</span>")
     // Without a way to change it, as in a page that never wired it, there is no chip.
     expect(renderComposer({ approvalMode: "auto" })).not.toContain("data-approval-mode")
   })
 
   test("tells how to answer a turn that waits for the reader's approval", () => {
     expect(renderComposer({ awaitingApproval: true })).toContain(
-      'placeholder="Approve above, or reply to skip"'
+      'placeholder="Approve above, or reply instead"'
     )
     expect(renderComposer({ placeholder: "Ask about invoices" })).toContain(
       'placeholder="Ask about invoices"'

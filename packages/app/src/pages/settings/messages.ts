@@ -80,8 +80,9 @@ export const en = {
     signOutFailed: "Could not sign out.",
     approvals: "When the agent changes things",
     approvalsDescription:
-      "What the agent may do without asking you, in conversations where you choose nothing else. Switch in any conversation from the chip under the message box, or with Shift+Tab.",
-    approvalsSaved: "Saved. New conversations use it.",
+      "What the agent may do without asking you, in conversations where you haven't chosen a mode. Switch in any conversation from the chip under the message box.",
+    approvalsShortcut: "Shift+Tab in an empty message switches between Manual and Accept edits.",
+    approvalsSaved: "Saved. Conversations where you haven't chosen a mode use it.",
     approvalsSaveFailed: "Could not save your choice.",
   },
   sessions: {
@@ -456,8 +457,10 @@ export const fr: Translation<SettingsMessages> = {
     signOutFailed: "Impossible de se déconnecter.",
     approvals: "Quand l’agent modifie quelque chose",
     approvalsDescription:
-      "Ce que l’agent peut faire sans vous demander, dans les conversations où vous ne choisissez rien d’autre. Changez-le dans n’importe quelle conversation depuis le bouton sous la zone de message, ou avec Maj+Tab.",
-    approvalsSaved: "Enregistré. Les nouvelles conversations l’utilisent.",
+      "Ce que l’agent peut faire sans vous demander, dans les conversations où vous n’avez pas choisi de mode. Changez-le dans n’importe quelle conversation depuis le bouton sous la zone de message.",
+    approvalsShortcut:
+      "Maj+Tab dans un message vide alterne entre Manuel et Modifications acceptées.",
+    approvalsSaved: "Enregistré. Les conversations où vous n’avez pas choisi de mode l’utilisent.",
     approvalsSaveFailed: "Impossible d’enregistrer votre choix.",
   },
   sessions: {

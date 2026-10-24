@@ -14,6 +14,7 @@ import { Check, ChevronDown, type LucideIcon, PencilLine, ShieldCheck, Zap } fro
 import { useId, useState } from "react"
 import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
+import { moveRadioFocus } from "../utils/radio-group"
 
 export const APPROVAL_MODE_ICONS: Readonly<Record<AgentApprovalMode, LucideIcon>> = {
   manual: ShieldCheck,
@@ -66,7 +67,7 @@ export function ApprovalModeChip({
       className={cn(
         "flex h-9 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium outline-none transition-colors",
         "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
-        "disabled:cursor-default disabled:opacity-60 max-sm:w-9 max-sm:justify-center max-sm:px-0",
+        "disabled:cursor-default disabled:opacity-60 max-sm:gap-1 max-sm:px-2",
         open && "bg-muted text-foreground",
         mode === "auto" &&
           "bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
@@ -74,6 +75,7 @@ export function ApprovalModeChip({
     >
       <Icon className="size-4 shrink-0" aria-hidden="true" />
       <span className="max-sm:hidden">{label}</span>
+      <span className="sm:hidden">{messages.modes[mode].short}</span>
       <ChevronDown className="size-3.5 shrink-0 opacity-60 max-sm:hidden" aria-hidden="true" />
     </button>
   )
@@ -102,7 +104,7 @@ export function ApprovalModeChip({
           <DrawerContent className="max-h-[85dvh]">
             <div className="px-4 pt-3 pb-1">
               <DrawerTitle className="text-base">{messages.title}</DrawerTitle>
-              <DrawerDescription className="sr-only">{messages.shortcut}</DrawerDescription>
+              <DrawerDescription className="sr-only">{messages.title}</DrawerDescription>
             </div>
             <div className="pb-[max(0.75rem,env(safe-area-inset-bottom))]">{menu}</div>
           </DrawerContent>
@@ -150,7 +152,12 @@ function ApprovalModeMenu({
 
   return (
     <>
-      <div role="radiogroup" aria-label={messages.title} className="space-y-0.5 p-1.5">
+      <div
+        role="radiogroup"
+        aria-label={messages.title}
+        onKeyDown={(event) => moveRadioFocus(event)}
+        className="space-y-0.5 p-1.5"
+      >
         {AGENT_APPROVAL_MODES.map((option) => {
           const Icon = APPROVAL_MODE_ICONS[option]
           const selected = option === mode
@@ -161,6 +168,7 @@ function ApprovalModeMenu({
               type="button"
               role="radio"
               aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
               aria-describedby={descriptionId}
               onClick={() => onChoose(option)}
               className={cn(

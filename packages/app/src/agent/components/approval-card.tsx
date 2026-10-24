@@ -27,16 +27,21 @@ import { useValueTypes, ValueTree, valueSchema } from "../../pages/values"
 import {
   type AgentApproval,
   type AgentApprovalDecision,
+  AgentApprovalDecisionError,
   type AgentApprovalDecisionFailure,
   alwaysAllowMode,
+  approvalModeAllows,
   type HeldCall,
-  useTranscriptApprovals,
+  useApprovalCards,
 } from "../approvals"
 import { capitalize, humanize } from "../bash/interpret"
 import { formatRelativeTime } from "../format"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { objectContextTitleQuery } from "../object-context-title"
+import { samePrincipal } from "../sharing"
+
+const DAY_MS = 24 * 60 * 60 * 1_000
 
 /** The cards of the calls a turn held, one under the other. */
 export function ApprovalCards({ calls }: { readonly calls: readonly HeldCall[] }) {
@@ -67,41 +72,53 @@ type CardCall =
     }
 
 /**
- * What the card says about the call: waiting, decided, or set aside. `unknown` is a held call
- * whose record is still loading; `asked` one in a transcript read without records (an observed
- * one); `elsewhere` one the thread does not hold, such as in a copy of the conversation.
+ * What the card says about the call. `unknown` is a held call whose record is still loading; `asked`
+ * one in a transcript read without records whose outcome no message reported yet (an observer's);
+ * `lost` an approved call that could not run because the sign-in behind it ended.
  */
 type CardState =
   | "pending"
   | "running"
   | "ran"
   | "failed"
+  | "lost"
   | "denied"
   | "superseded"
   | "cancelled"
   | "expired"
-  | "elsewhere"
   | "unknown"
   | "asked"
+
+/** What the card adds once a decision went through: the mode it raised, or why the turn waits. */
+type DecisionNotice = { readonly tone: "info" | "warning"; readonly text: string }
 
 /**
  * One call the agent made that waits for, or waited for, its requester: what it does, to which
  * record, with which values, and whether it stays in the project's data. Whoever asked for the turn
- * approves or denies it here; everyone else reads it, and who decides.
+ * approves or denies it here; everyone else reads it, and who decides. A call the thread holds no
+ * record of shows only when a message reported how it ended.
  */
 export function ApprovalCard({ held }: { readonly held: HeldCall }) {
   const messages = useAgentMessages()
   const labels = messages.approvals
   const locale = useLocale()
-  const hintId = useId()
+  const alsoId = useId()
   const statusRef = useRef<HTMLParagraphElement>(null)
-  const context = useTranscriptApprovals()
+  const { approvals: context, outcomes } = useApprovalCards()
   const approval = context?.approvals.find((candidate) => candidate.id === held.id) ?? null
+  const reported = approval ? undefined : outcomes.get(held.id)
   const call = cardCall(held, approval)
-  const state = cardState(approval, context?.loaded ?? false, context !== null)
+  const state: CardState = approval
+    ? stateOf(approval.status, approval.outcome)
+    : reported
+      ? stateOf(reported.status, reported.outcome)
+      : context
+        ? "unknown"
+        : "asked"
 
   const [deciding, setDeciding] = useState<"approve" | "always" | "deny" | null>(null)
   const [failure, setFailure] = useState<AgentApprovalDecisionFailure | null>(null)
+  const [notice, setNotice] = useState<DecisionNotice | null>(null)
   const [showInput, setShowInput] = useState(false)
 
   const definition = useCallDefinition(call)
@@ -116,6 +133,29 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
   const waiting = state === "pending" || state === "unknown"
   const open = waiting || (approval !== null && showInput)
   const when = approval ? (approval.decidedAt ?? approval.createdAt) : undefined
+  const expiredDays = approval
+    ? Math.round((Date.parse(approval.expiresAt) - Date.parse(approval.createdAt)) / DAY_MS)
+    : 7
+
+  // "Always allow" raises the requester's mode here, and approves the turn's other waiting calls
+  // that mode runs: the button says both before anyone presses it.
+  const alwaysMode = approval ? alwaysAllowMode(approval.call) : null
+  const alwaysModeLabel = alwaysMode ? messages.approvalModes.modes[alwaysMode].label : ""
+  const alsoApproved =
+    approval && alwaysMode
+      ? (context?.approvals ?? []).filter(
+          (other) =>
+            other.id !== approval.id &&
+            other.runId === approval.runId &&
+            other.status === "pending" &&
+            samePrincipal(other.requestedBy, approval.requestedBy) &&
+            approvalModeAllows(alwaysMode, other.call)
+        ).length
+      : 0
+
+  // A reported outcome with no record is only read here: and with no record, the card is dropped
+  // once the list says the thread holds none.
+  if (!approval && !reported && context?.loaded) return null
 
   const decide = (choice: "approve" | "always" | "deny") => {
     if (!approval || !context?.decide || deciding) return
@@ -128,20 +168,29 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
 
     setDeciding(choice)
     setFailure(null)
+    setNotice(null)
     context
       .decide(approval, decision)
-      .catch((error: unknown) => setFailure(isDecisionFailure(error) ? error : "failed"))
+      .then((decided) => {
+        const resume = decided.resume
+        if (resume) {
+          setNotice({
+            tone: "warning",
+            text: resume.retrying ? labels.resume.retrying : labels.resume.refused,
+          })
+        } else if (choice === "always") {
+          setNotice({ tone: "info", text: labels.modeRaised(alwaysModeLabel) })
+        }
+      })
+      .catch((error: unknown) =>
+        setFailure(error instanceof AgentApprovalDecisionError ? error.code : "failed")
+      )
       .finally(() => {
         setDeciding(null)
         // The buttons are gone: keep the reader's place on the card, which now says how it ended.
         requestAnimationFrame(() => statusRef.current?.focus())
       })
   }
-
-  const alwaysMode = approval ? alwaysAllowMode(approval.call) : null
-  const alwaysHint = alwaysMode
-    ? labels.alwaysAllowHint(messages.approvalModes.modes[alwaysMode].label)
-    : undefined
 
   return (
     <section
@@ -177,20 +226,27 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
 
         {call.kind === "action" && call.subject ? <Subject subject={call.subject} /> : null}
 
-        {waiting || approval === null ? null : (
-          <Outcome approval={approval} state={state} messages={messages}>
-            <button
-              type="button"
-              aria-expanded={showInput}
-              onClick={() => setShowInput((value) => !value)}
-              className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <ChevronRight
-                className={cn("size-3.5 transition-transform", showInput && "rotate-90")}
-                aria-hidden="true"
-              />
-              {showInput ? labels.hideInput : labels.showInput}
-            </button>
+        {waiting || state === "asked" ? null : (
+          <Outcome
+            state={state}
+            outcome={approval?.outcome ?? reported?.outcome}
+            expiredDays={expiredDays}
+            messages={messages}
+          >
+            {approval ? (
+              <button
+                type="button"
+                aria-expanded={showInput}
+                onClick={() => setShowInput((value) => !value)}
+                className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              >
+                <ChevronRight
+                  className={cn("size-3.5 transition-transform", showInput && "rotate-90")}
+                  aria-hidden="true"
+                />
+                {showInput ? labels.hideInput : labels.showInput}
+              </button>
+            ) : null}
           </Outcome>
         )}
       </div>
@@ -204,45 +260,48 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
       {waiting ? <Effect call={call} external={definition.external} messages={messages} /> : null}
 
       {canDecide ? (
-        <div className="grid grid-cols-2 gap-2 border-t border-border/60 px-4 py-3 sm:flex sm:items-center sm:px-5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={deciding !== null}
-            onClick={() => decide("deny")}
-            className="h-10 text-muted-foreground hover:text-foreground sm:h-8"
-          >
-            {deciding === "deny" ? <Spinner className="size-3.5" /> : null}
-            {deciding === "deny" ? labels.denying : labels.deny}
-          </Button>
-          <span className="hidden sm:block sm:flex-1" />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={deciding !== null}
-            onClick={() => decide("always")}
-            title={alwaysHint}
-            aria-describedby={hintId}
-            className="order-last col-span-2 h-10 sm:order-none sm:h-8"
-          >
-            {deciding === "always" ? <Spinner className="size-3.5" /> : null}
-            {labels.alwaysAllow}
-          </Button>
-          <span id={hintId} className="sr-only">
-            {alwaysHint}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            disabled={deciding !== null}
-            onClick={() => decide("approve")}
-            className="h-10 sm:h-8 sm:px-4"
-          >
-            {deciding === "approve" ? <Spinner className="size-3.5" /> : null}
-            {deciding === "approve" ? labels.approving : labels.approve}
-          </Button>
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("deny")}
+              className="h-10 text-muted-foreground hover:text-foreground sm:h-8"
+            >
+              {deciding === "deny" ? <Spinner className="size-3.5" /> : null}
+              {deciding === "deny" ? labels.denying : labels.deny}
+            </Button>
+            <span className="hidden sm:block sm:flex-1" />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("always")}
+              aria-describedby={alsoApproved > 0 ? alsoId : undefined}
+              className="order-last col-span-2 h-10 sm:order-none sm:h-8"
+            >
+              {deciding === "always" ? <Spinner className="size-3.5" /> : null}
+              {labels.alwaysAllow(alwaysModeLabel)}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("approve")}
+              className="h-10 sm:h-8 sm:px-4"
+            >
+              {deciding === "approve" ? <Spinner className="size-3.5" /> : null}
+              {deciding === "approve" ? labels.approving : labels.approve}
+            </Button>
+          </div>
+          {alsoApproved > 0 ? (
+            <p id={alsoId} className="mt-2 text-xs text-muted-foreground sm:text-right">
+              {labels.alwaysAllowAlso(alsoApproved)}
+            </p>
+          ) : null}
         </div>
       ) : state === "pending" && requester !== null ? (
         <p className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
@@ -250,13 +309,22 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
         </p>
       ) : null}
 
+      {notice ? (
+        <p
+          role="status"
+          className={cn(
+            "border-t border-border/60 px-4 py-2.5 text-xs sm:px-5",
+            notice.tone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-foreground"
+          )}
+        >
+          {notice.text}
+        </p>
+      ) : null}
+
       {failure ? (
         <p
           role="alert"
-          className={cn(
-            "border-t border-border/60 px-4 py-2.5 text-xs sm:px-5",
-            failure === "limit" ? "text-amber-700 dark:text-amber-400" : "text-destructive"
-          )}
+          className="border-t border-border/60 px-4 py-2.5 text-xs text-destructive sm:px-5"
         >
           {labels.failures[failure]}
         </p>
@@ -335,6 +403,8 @@ function statusOf(
       return { Icon: CircleCheck, label: `${labels.approved} · ${labels.ran}`, tone: "done" }
     case "failed":
       return { Icon: CircleAlert, label: labels.failed, tone: "error" }
+    case "lost":
+      return { Icon: CircleAlert, label: labels.notRun, tone: "error" }
     case "denied":
       return {
         Icon: CircleSlash,
@@ -347,8 +417,6 @@ function statusOf(
       return { Icon: CircleOff, label: labels.cancelled, tone: "muted" }
     case "expired":
       return { Icon: Clock3, label: labels.expired, tone: "muted" }
-    case "elsewhere":
-      return { Icon: CirclePause, label: labels.elsewhere, tone: "muted" }
     case "asked":
       return { Icon: CirclePause, label: labels.askedForApproval, tone: "muted" }
   }
@@ -427,23 +495,34 @@ function CallInput({
         return (
           <Fragment key={key}>
             <dt className="min-w-0 break-words text-muted-foreground">
-              {definition.labels?.[key] ?? humanizeIdentifier(key)}
+              {definition.labels?.[key] ?? sentence(key)}
             </dt>
             <dd className="min-w-0 text-foreground">
-              <ValueTree
-                value={item}
-                schema={
-                  definition.fields && field !== undefined
-                    ? valueSchema(fieldSchemaOf(field), valueTypes)
-                    : undefined
-                }
-              />
+              {isEnumSchema(fieldSchemaOf(field)) && typeof item === "string" ? (
+                // A declared choice, shown as the code it is rather than as prose.
+                <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tracking-wide uppercase">
+                  {item}
+                </span>
+              ) : (
+                <ValueTree
+                  value={item}
+                  schema={
+                    definition.fields && field !== undefined
+                      ? valueSchema(fieldSchemaOf(field), valueTypes)
+                      : undefined
+                  }
+                />
+              )}
             </dd>
           </Fragment>
         )
       })}
     </dl>
   )
+}
+
+function isEnumSchema(schema: unknown): boolean {
+  return typeof schema === "object" && schema !== null && Reflect.get(schema, "type") === "enum"
 }
 
 /** A declared field: a bare schema, or a field config carrying one. */
@@ -500,16 +579,18 @@ function Effect({
 
 /** How a decided call ended, then a way to its values and to the run it started. */
 function Outcome({
-  approval,
   state,
+  outcome,
+  expiredDays,
   messages,
   children,
 }: {
-  readonly approval: AgentApproval
   readonly state: CardState
+  readonly outcome: AgentApproval["outcome"]
+  readonly expiredDays: number
   readonly messages: AgentMessages
-  /** The disclosure of the call's values. */
-  readonly children: ReactNode
+  /** The disclosure of the call's values, when the card has them. */
+  readonly children?: ReactNode
 }) {
   const labels = messages.approvals
   const detail =
@@ -518,34 +599,42 @@ function Outcome({
       : state === "cancelled"
         ? labels.cancelledDetail
         : state === "expired"
-          ? labels.expiredDetail
-          : state === "failed"
-            ? failureMessage(approval)
-            : null
+          ? labels.expiredDetail(expiredDays)
+          : state === "lost"
+            ? labels.authorityLost
+            : state === "failed"
+              ? failureMessage(outcome)
+              : null
 
-  const outcome = approval.outcome
   const runLink =
     outcome?.kind === "action-run"
       ? actionRunHref(outcome.runId)
       : outcome?.kind === "workflow-run"
         ? workflowRunHref(outcome.runId)
         : null
+  if (!detail && !runLink && !children) return null
 
   return (
     <div className="mt-2.5 space-y-1.5 text-xs text-muted-foreground">
-      {detail ? <p className={cn(state === "failed" && "text-destructive")}>{detail}</p> : null}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {children}
-        {runLink ? (
-          <Link
-            to={runLink}
-            className="inline-flex items-center gap-0.5 rounded-sm font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
-          >
-            {labels.viewRun}
-            <ArrowUpRight className="size-3" aria-hidden="true" />
-          </Link>
-        ) : null}
-      </div>
+      {detail ? (
+        <p className={cn((state === "failed" || state === "lost") && "text-destructive")}>
+          {detail}
+        </p>
+      ) : null}
+      {children || runLink ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          {children}
+          {runLink ? (
+            <Link
+              to={runLink}
+              className="inline-flex items-center gap-0.5 rounded-sm font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              {labels.viewRun}
+              <ArrowUpRight className="size-3" aria-hidden="true" />
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -555,8 +644,7 @@ function sentence(id: string): string {
   return capitalize(humanize(id)) || id
 }
 
-function failureMessage(approval: AgentApproval): string | null {
-  const outcome = approval.outcome
+function failureMessage(outcome: AgentApproval["outcome"]): string | null {
   if (outcome?.kind === "action-run") return outcome.error?.message ?? null
   if (outcome?.kind === "error") return outcome.error.message
   return null
@@ -611,7 +699,7 @@ function useCallDefinition(call: CardCall): CallDefinition {
       name: sentence(action.name || action.id),
       fields: Object.fromEntries(action.params.map((param) => [param.id, param.schema])),
       labels: Object.fromEntries(
-        action.params.map((param) => [param.id, humanizeIdentifier(param.name || param.id)])
+        action.params.map((param) => [param.id, sentence(param.name || param.id)])
       ),
       schemas: action.params.map((param) => param.schema),
       external: action.phases.writeback || action.phases.effects,
@@ -647,31 +735,16 @@ function cardCall(held: HeldCall, approval: AgentApproval | null): CardCall {
     : { kind: "workflow", workflowId: held.workflowId }
 }
 
-function cardState(
-  approval: AgentApproval | null,
-  loaded: boolean,
-  hasRecords: boolean
-): CardState {
-  if (!hasRecords) return "asked"
-  if (!approval) return loaded ? "elsewhere" : "unknown"
-
-  switch (approval.status) {
-    case "pending":
-      return "pending"
-    case "approved": {
-      const outcome = approval.outcome
-      if (!outcome) return "running"
-      if (outcome.kind === "error") return "failed"
-      if (outcome.kind === "action-run" && outcome.status === "failed") return "failed"
-      return "ran"
-    }
-    default:
-      return approval.status
+/** What a call's status and outcome say about it, from its record or its reported outcome. */
+function stateOf(
+  status: AgentApproval["status"],
+  outcome: AgentApproval["outcome"]
+): Exclude<CardState, "unknown" | "asked"> {
+  if (status !== "approved") return status
+  if (!outcome) return "running"
+  if (outcome.kind === "error") {
+    return outcome.error.code === "agent.approval_authority_lost" ? "lost" : "failed"
   }
-}
-
-const DECISION_FAILURES: ReadonlySet<string> = new Set(["limit", "expired", "decided", "failed"])
-
-function isDecisionFailure(value: unknown): value is AgentApprovalDecisionFailure {
-  return typeof value === "string" && DECISION_FAILURES.has(value)
+  if (outcome.kind === "action-run" && outcome.status === "failed") return "failed"
+  return "ran"
 }

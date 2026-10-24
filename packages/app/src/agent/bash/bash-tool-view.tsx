@@ -96,17 +96,21 @@ export function BashToolView({ tool }: { tool: BashTool }) {
 
   const running = tool.state === "input-available"
 
-  // A call held for approval did not fail: it waits, and its card, under the work, answers it.
+  // A call held for approval did not fail: it waits, and its card, under the work, answers it. The
+  // command keeps its output view, headed by what waits.
   const held = tool.state === "output-available" ? heldCallsInOutput(tool.output) : []
-  if (held.length > 0) {
-    const first = held[0]
-    const detail = first?.kind === "action" ? humanize(first.actionId) : humanize(first?.workflowId)
-    return <ToolLine icon={CirclePause} label={messages.bash.heldForApproval} detail={detail} />
-  }
-
-  const isError = tool.state === "output-error" || (parsed !== null && !parsed.ok)
-  const description = describeBash(intent, parsed, messages)
-  const Icon = ICONS[description.icon]
+  const first = held[0]
+  const isError =
+    held.length === 0 && (tool.state === "output-error" || (parsed !== null && !parsed.ok))
+  const described = describeBash(intent, parsed, messages)
+  const description = first
+    ? {
+        ...described,
+        title: messages.bash.heldForApproval,
+        detail: humanize(first.kind === "action" ? first.actionId : first.workflowId),
+      }
+    : described
+  const Icon = first ? CirclePause : ICONS[description.icon]
   const label = running ? description.runningTitle : description.title
 
   // A failed command reads as a quiet, neutral step — same calm marker as any other tool line, no
@@ -163,7 +167,7 @@ export function BashToolView({ tool }: { tool: BashTool }) {
 
   // These answer fully from the headline (and we never expose internal skill docs), so they render
   // as a plain one-line marker with no disclosure.
-  if (intent.kind === "read-skill" || isLeafResult(intent, running)) {
+  if (!first && (intent.kind === "read-skill" || isLeafResult(intent, running))) {
     return (
       <ToolLine
         icon={Icon}
