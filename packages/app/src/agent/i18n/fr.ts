@@ -735,6 +735,11 @@ export const fr: Translation<AgentMessages> = {
     showInput: "Voir les détails",
     hideInput: "Masquer les détails",
     viewRun: "Voir l’exécution",
+    stopWaiting: "Ne plus attendre",
+    stoppingWaiting: "Arrêt…",
+    stopWaitingHint:
+      "Met de côté toutes les demandes que cette réponse attend. Elle ne reprendra pas.",
+    stopFailed: "Impossible d’arrêter l’attente. Réessayez.",
     open: (name) => `Ouvrir ${name}`,
     resume: {
       retrying: "L’agent reprendra dès que possible.",

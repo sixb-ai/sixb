@@ -198,6 +198,13 @@ export interface TranscriptApprovals {
   readonly canDecide: (approval: AgentApproval) => boolean
   /** Who decides on it, by name, for the others. */
   readonly requesterName: (approval: AgentApproval) => string
+  /**
+   * Whether the reader may stop the turn paused on this call: its requester, or the thread's owner.
+   * Stopping sets all of the turn's waiting calls aside, and the turn does not resume.
+   */
+  readonly canStop?: (approval: AgentApproval) => boolean
+  /** Stop the paused turn; rejects when it could not. */
+  readonly stop?: (approval: AgentApproval) => Promise<void>
   /** Rejects with an {@link AgentApprovalDecisionError} when nothing was decided. */
   readonly decide?: (
     approval: AgentApproval,

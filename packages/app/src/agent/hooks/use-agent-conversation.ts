@@ -347,6 +347,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     nonce: number
   }>({ text: "", attachments: [], context: [], nonce: 0 })
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
+  const stopRef = useRef<(approval: AgentApproval) => Promise<void>>(async () => {})
   const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {
     throw new AgentApprovalDecisionError("failed")
   })
@@ -794,8 +795,25 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         !presentation.hasProgress)) &&
     canRetryRun(presentation.run, user)
 
+  /**
+   * Stop a turn paused on held calls, as Stop does a running one: its waiting calls are set aside,
+   * and it does not resume. The cards follow from the approval events.
+   */
+  const stopWaiting = async (approval: AgentApproval) => {
+    try {
+      await cancelRun.mutateAsync({
+        path: { threadId: approval.threadId },
+        body: { runId: approval.runId },
+      })
+    } finally {
+      void refreshThread(approval.threadId)
+      void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
+    }
+  }
+
   // Every card reads this: it changes with the approvals and the people, not with each stream chunk.
   decideRef.current = decide
+  stopRef.current = stopWaiting
   const approvalsLoaded = approvalsQuery.isSuccess
   const transcriptApprovals = useMemo((): TranscriptApprovals => {
     const me = userPrincipal(user)
@@ -807,6 +825,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       requesterName: (approval) =>
         knownName(approval.requestedBy, thread, authors) ?? approval.requestedBy.id,
       decide: (approval, decision) => decideRef.current(approval, decision),
+      // Whoever asked for the turn, or the thread's owner, as for a running answer.
+      canStop: (approval) =>
+        me === null ||
+        samePrincipal(approval.requestedBy, me) ||
+        (thread !== null && samePrincipal(thread.ownerPrincipal, me)),
+      stop: (approval) => stopRef.current(approval),
     }
   }, [approvals, approvalsLoaded, user, thread, authors])
   // The newest turn paused on calls the reader decides: the composer says how to move on.

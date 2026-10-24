@@ -120,6 +120,8 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
   const [failure, setFailure] = useState<AgentApprovalDecisionFailure | null>(null)
   const [notice, setNotice] = useState<DecisionNotice | null>(null)
   const [showInput, setShowInput] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [stopFailed, setStopFailed] = useState(false)
 
   const definition = useCallDefinition(call)
   const title = definition.name
@@ -129,6 +131,14 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
       ? context.canDecide(approval)
       : false
   const requester = approval && context ? context.requesterName(approval) : null
+  // Stopping applies to the whole paused turn: its first waiting card offers it.
+  const canStop =
+    state === "pending" &&
+    approval !== null &&
+    context?.stop !== undefined &&
+    (context.canStop?.(approval) ?? false) &&
+    context.approvals.find((other) => other.runId === approval.runId && other.status === "pending")
+      ?.id === approval.id
   // A waiting call shows what it runs with; a decided one keeps it a click away.
   const waiting = state === "pending" || state === "unknown"
   const open = waiting || (approval !== null && showInput)
@@ -156,6 +166,19 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
   // A reported outcome with no record is only read here: and with no record, the card is dropped
   // once the list says the thread holds none.
   if (!approval && !reported && context?.loaded) return null
+
+  const stopWaiting = () => {
+    if (!approval || !context?.stop || stopping) return
+    setStopping(true)
+    setStopFailed(false)
+    context
+      .stop(approval)
+      .catch(() => setStopFailed(true))
+      .finally(() => {
+        setStopping(false)
+        requestAnimationFrame(() => statusRef.current?.focus())
+      })
+  }
 
   const decide = (choice: "approve" | "always" | "deny") => {
     if (!approval || !context?.decide || deciding) return
@@ -214,9 +237,26 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
             messages={messages}
           />
           {when ? (
-            <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
+            <span
+              className={cn(
+                "ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground",
+                // On a phone, Stop waiting needs the room more than the time does.
+                canStop && "max-sm:hidden"
+              )}
+            >
               {formatRelativeTime(when, locale, messages.time)}
             </span>
+          ) : null}
+          {canStop ? (
+            <button
+              type="button"
+              onClick={stopWaiting}
+              disabled={stopping || deciding !== null}
+              title={labels.stopWaitingHint}
+              className="-my-1 -mr-1.5 shrink-0 rounded-md max-sm:ml-auto px-1.5 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+            >
+              {stopping ? labels.stoppingWaiting : labels.stopWaiting}
+            </button>
           ) : null}
         </div>
 
@@ -281,7 +321,7 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
               disabled={deciding !== null}
               onClick={() => decide("always")}
               aria-describedby={alsoApproved > 0 ? alsoId : undefined}
-              className="order-last col-span-2 h-10 sm:order-none sm:h-8"
+              className="order-last col-span-2 h-auto min-h-10 py-2 leading-tight whitespace-normal sm:order-none sm:min-h-8 sm:py-1.5"
             >
               {deciding === "always" ? <Spinner className="size-3.5" /> : null}
               {labels.alwaysAllow(alwaysModeLabel)}
@@ -318,6 +358,15 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
           )}
         >
           {notice.text}
+        </p>
+      ) : null}
+
+      {stopFailed ? (
+        <p
+          role="alert"
+          className="border-t border-border/60 px-4 py-2.5 text-xs text-destructive sm:px-5"
+        >
+          {labels.stopFailed}
         </p>
       ) : null}
 
