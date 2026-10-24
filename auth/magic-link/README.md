@@ -42,10 +42,10 @@ Delivery is yours: the strategy renders the message and expects you to send it. 
 
 ## Names
 
-When a link creates an account, the confirmation page asks the new member for their name. They can
-leave it empty and set it later in Settings › Personal. A link that signs in an existing member
-never changes their name. Someone who opens their own link in the browser that requested it skips
-the confirmation page, so they set their name in Settings.
+When a link creates an account, the confirmation page asks the new member for their name, even in
+the browser that requested the link. They can leave it empty and set it later in Settings ›
+Personal. A link that signs in an existing member never changes their name, and opened in the
+browser that requested it, it skips the confirmation page.
 
 ## Rate limiting is per email
 
