@@ -1,3 +1,4 @@
+import { heldCallsInOutput } from "./approvals"
 import {
   classifyCommand,
   coerceBashInput,
@@ -41,6 +42,9 @@ function toolProgressLabel(tool: NormalizedTool, messages: AgentMessages): strin
   }
   if (tool.toolName === "bash") {
     if (tool.state === "input-streaming") return messages.bash.preparing
+    if (tool.state === "output-available" && heldCallsInOutput(tool.output).length > 0) {
+      return messages.bash.heldForApproval
+    }
     const input = coerceBashInput(tool.input)
     const command = input?.command ?? tool.inputText ?? ""
     const intent = classifyCommand(command)

@@ -33,6 +33,7 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
+import { type AgentApprovalMode, nextApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef, LanguageModel } from "../types"
@@ -42,6 +43,7 @@ import {
   findAgentContextMention,
   removeAgentContextMention,
 } from "../utils/context-mention"
+import { ApprovalModeChip } from "./approval-mode-chip"
 import { ContextChips } from "./context-chips"
 import { ContextPicker } from "./context-picker"
 import { ModelControls } from "./model-controls"
@@ -93,6 +95,18 @@ export interface ComposerProps {
   readonly ambientContext?: readonly AgentContextInput[]
   /** Scope drag/drop and overlays to an embedded panel instead of the whole viewport. */
   readonly compact?: boolean
+  /**
+   * What the agent may change without asking in the reader's next turns. With
+   * {@link onApprovalModeChange}, the composer shows it as a chip, and Shift+Tab in the input
+   * cycles it.
+   */
+  readonly approvalMode?: AgentApprovalMode
+  /** The reader's mode for new conversations, which the chip's menu offers to change. */
+  readonly defaultApprovalMode?: AgentApprovalMode
+  readonly onApprovalModeChange?: (mode: AgentApprovalMode) => void
+  readonly onMakeApprovalModeDefault?: (mode: AgentApprovalMode) => void
+  /** A turn waits for the reader's approval: the input says how to answer it or move on. */
+  readonly awaitingApproval?: boolean
 }
 
 type ComposerAttachment =
@@ -153,6 +167,11 @@ export function Composer({
   draftNonce,
   ambientContext = [],
   compact = false,
+  approvalMode,
+  defaultApprovalMode,
+  onApprovalModeChange,
+  onMakeApprovalModeDefault,
+  awaitingApproval = false,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -166,6 +185,8 @@ export function Composer({
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
   const [activeContextResult, setActiveContextResult] = useState(0)
   const [draggingFiles, setDraggingFiles] = useState(false)
+  // Said once the mode changes from the keyboard, where the chip itself may be out of sight.
+  const [modeAnnouncement, setModeAnnouncement] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -503,8 +524,30 @@ export function Composer({
     })
   }
 
+  const changeApprovalMode = (mode: AgentApprovalMode) => {
+    onApprovalModeChange?.(mode)
+    setModeAnnouncement(
+      agentMessages.approvalModes.changed(agentMessages.approvalModes.modes[mode].label)
+    )
+  }
+
   // Enter sends; Cmd/Ctrl+Enter and Shift+Enter insert a newline (and let the field grow).
+  // Shift+Tab cycles the approval mode, as in a terminal agent; Tab still moves focus on.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === "Tab" &&
+      event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      mention === null &&
+      approvalMode !== undefined &&
+      onApprovalModeChange
+    ) {
+      event.preventDefault()
+      changeApprovalMode(nextApprovalMode(approvalMode))
+      return
+    }
     if (mention) {
       if (event.key === "Escape") {
         event.preventDefault()
@@ -626,7 +669,11 @@ export function Composer({
               onKeyDown={handleKeyDown}
               disabled={disabled}
               rows={1}
-              placeholder={placeholder ?? messages.placeholder}
+              placeholder={
+                awaitingApproval
+                  ? agentMessages.approvals.composerPlaceholder
+                  : (placeholder ?? messages.placeholder)
+              }
               aria-label={messages.message}
               className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
             />
@@ -653,6 +700,14 @@ export function Composer({
             >
               <Plus className="size-5" />
             </button>
+            {approvalMode !== undefined && onApprovalModeChange ? (
+              <ApprovalModeChip
+                mode={approvalMode}
+                defaultMode={defaultApprovalMode}
+                onChange={changeApprovalMode}
+                onMakeDefault={onMakeApprovalModeDefault}
+              />
+            ) : null}
             <span className="min-w-0 flex-1" />
             {onSelectModel && onSelectReasoning ? (
               <ModelControls
@@ -708,6 +763,9 @@ export function Composer({
             )}
           </div>
         </div>
+        <span className="sr-only" aria-live="polite">
+          {modeAnnouncement}
+        </span>
         {statusHint ? (
           <p
             className={cn(

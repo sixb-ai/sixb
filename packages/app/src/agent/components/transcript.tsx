@@ -9,9 +9,18 @@ import {
   MessageScrollerViewport,
 } from "@sixb/ui/components"
 import { memo, useMemo } from "react"
+import {
+  heldCallIdsInMessages,
+  heldCallOf,
+  heldCallsInParts,
+  isApprovalOutcomeMessage,
+  type TranscriptApprovals,
+  TranscriptApprovalsContext,
+} from "../approvals"
 import { hasLiveContent, type LiveRunState } from "../live-run"
 import { authorKey, useMessageAuthors } from "../message-authors"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
+import { ApprovalCards } from "./approval-card"
 import { ContextChips } from "./context-chips"
 import {
   AuthorLine,
@@ -52,9 +61,22 @@ export interface TranscriptProps {
   readonly continuing?: boolean
   /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
   readonly reconnecting?: boolean
+  /**
+   * The thread's calls held for approval. Each shows as a card under the work that made it, which
+   * its requester answers; without them, the cards say only what the agent asked.
+   */
+  readonly approvals?: TranscriptApprovals
 }
 
-export function Transcript({
+export function Transcript(props: TranscriptProps) {
+  return (
+    <TranscriptApprovalsContext.Provider value={props.approvals ?? null}>
+      <TranscriptView {...props} />
+    </TranscriptApprovalsContext.Provider>
+  )
+}
+
+function TranscriptView({
   threadId,
   messages,
   live,
@@ -73,11 +95,35 @@ export function Transcript({
   retrying,
   continuing,
   reconnecting,
+  approvals,
 }: TranscriptProps) {
   const authors = useMessageAuthors()
 
+  // The message Sixb writes to resume a turn says only how its calls ended, which their cards
+  // show: leaving it out keeps the resumed answer right under the one it continues.
+  const shownMessages = useMemo(
+    () => messages.filter((message) => !isApprovalOutcomeMessage(message)),
+    [messages]
+  )
+
+  // A call is answered on the card under the work that made it. One whose command output does not
+  // name it, such as output sent elsewhere, still waits: its card closes the transcript.
+  const unshownPending = useMemo(() => {
+    const pending = approvals?.approvals.filter((approval) => approval.status === "pending") ?? []
+    if (pending.length === 0) return []
+
+    const shown = new Set([
+      ...heldCallIdsInMessages(messages),
+      ...heldCallsInParts(live.parts).map((call) => call.id),
+    ])
+    return pending.filter((approval) => !shown.has(approval.id)).map(heldCallOf)
+  }, [approvals, messages, live.parts])
+
   // Messages one person sends in a row name them once; an answer in between names them again.
-  const { continuedIds, lastUserAuthor } = useMemo(() => userMessageRuns(messages), [messages])
+  const { continuedIds, lastUserAuthor } = useMemo(
+    () => userMessageRuns(shownMessages),
+    [shownMessages]
+  )
   const pendingContinues = authors?.reader !== undefined && lastUserAuthor === authors.reader.key
 
   // Keep the live row until the finalized assistant message is present in durable state, so the
@@ -114,12 +160,12 @@ export function Transcript({
       !shouldAnchorCurrentTurn
     )
       return null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") return messages[i].id
+    for (let i = shownMessages.length - 1; i >= 0; i--) {
+      if (shownMessages[i].role === "user") return shownMessages[i].id
     }
     return null
   }, [
-    messages,
+    shownMessages,
     pendingUserText,
     pendingUserAttachments.length,
     pendingUserContext.length,
@@ -138,18 +184,23 @@ export function Transcript({
             aria-busy={live.active || showThinking}
             className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
           >
-            {messages.map((message, index) => (
+            {shownMessages.map((message, index) => (
               <TranscriptMessage
                 key={message.id}
                 message={message}
                 continued={continuedIds.has(message.id)}
                 scrollAnchor={message.id === anchoredUserMessageId}
                 // Only the newest answer can be continued; older ones keep their notice alone.
-                {...(index === messages.length - 1 && onContinue
+                {...(index === shownMessages.length - 1 && onContinue
                   ? { onContinue, continuing: Boolean(continuing) }
                   : {})}
               />
             ))}
+            {unshownPending.length > 0 ? (
+              <MessageScrollerItem messageId="approvals">
+                <ApprovalCards calls={unshownPending} />
+              </MessageScrollerItem>
+            ) : null}
             {pendingUserText ||
             pendingUserAttachments.length > 0 ||
             pendingUserContext.length > 0 ? (

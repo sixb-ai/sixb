@@ -1,10 +1,17 @@
-import { isSixbApiError } from "@sixb/client"
+import { isSixbApiError, type ListAgentThreadApprovalsResponse } from "@sixb/client"
 import {
   cancelAgentRunMutation,
   createAgentThreadMutation,
+  decideAgentApprovalMutation,
   getAgentOptions,
+  getAgentPreferencesOptions,
+  getAgentPreferencesQueryKey,
   getAgentThreadOptions,
   getAgentThreadQueryKey,
+  listAgentApprovalsOptions,
+  listAgentApprovalsQueryKey,
+  listAgentThreadApprovalsOptions,
+  listAgentThreadApprovalsQueryKey,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
@@ -15,12 +22,22 @@ import {
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
   retryAgentRunMutation,
+  setAgentThreadApprovalModeMutation,
+  updateAgentPreferencesMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
+import {
+  type AgentApproval,
+  type AgentApprovalDecision,
+  type AgentApprovalDecisionFailure,
+  type AgentApprovalMode,
+  isAwaitingApproval,
+  type TranscriptApprovals,
+} from "../approvals"
 import type { ComposerProps } from "../components/composer"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
@@ -48,8 +65,10 @@ import {
   isShared,
   personName,
   requestedBySomeoneElse,
+  samePrincipal,
   threadAccess,
   threadOwner,
+  userPrincipal,
 } from "../sharing"
 import { THREAD_PAGE_SIZE } from "../thread-navigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
@@ -57,6 +76,11 @@ import { useThreadStream } from "./use-thread-stream"
 
 interface PendingSend {
   readonly run: AgentRun
+  /**
+   * Keep the turn's user message at the top while it answers. A resumed turn has none to show: it
+   * continues under the card that resumed it, where the reader already is.
+   */
+  readonly anchor: boolean
 }
 
 interface PendingUser {
@@ -71,6 +95,12 @@ const THREAD_LIST_QUERY = {
   limit: String(THREAD_PAGE_SIZE),
   order: "desc" as const,
 }
+
+/** Enough of a thread's held calls for every card: a turn holds a few, and a thread few turns. */
+const THREAD_APPROVALS_QUERY = { limit: "200" }
+
+/** The calls waiting for the reader across threads, for the thread list. */
+const PENDING_APPROVALS_QUERY = { status: "pending" as const, limit: "200" }
 
 /** The conversations others shared with the reader: one page, newest first. */
 const SHARED_THREAD_LIST_QUERY = {
@@ -114,6 +144,11 @@ export type ConversationComposerProps = Pick<
   | "draftAttachments"
   | "draftContext"
   | "draftNonce"
+  | "approvalMode"
+  | "defaultApprovalMode"
+  | "onApprovalModeChange"
+  | "onMakeApprovalModeDefault"
+  | "awaitingApproval"
 >
 
 export type AgentConversation = ReturnType<typeof useAgentConversation>
@@ -132,8 +167,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const modelsQuery = useQuery(listModelsOptions())
   const refreshThreads = () =>
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
+  const refreshApprovals = (threadId: string) =>
+    Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadApprovalsQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() }),
+    ])
   const activityStream = useAgentActivityStream({
     onActivity: (event) => {
+      // A held call changed: its card, and the thread list's count of what waits for the reader.
+      // Its turn's runs follow from their own events.
+      if (event.type === "agent.approval.activity") {
+        void refreshApprovals(event.threadId)
+        return
+      }
+
       // Someone else's turn in a shared conversation shows only through this feed: read the open
       // thread again so its run is followed live. A run the view already follows streams itself.
       if (event.threadId === threadId && event.runId !== activeRunId) {
@@ -144,7 +193,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       void refreshThreads()
     },
     // On every (re)subscription: catch up with what changed while the socket was away.
-    onSubscribed: () => void (threadId === null ? refreshThreads() : refreshThread(threadId)),
+    onSubscribed: () => {
+      void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
+      void (threadId === null ? refreshThreads() : refreshThread(threadId))
+    },
   })
 
   // The project activity feed is primary. Poll only as a focus-aware recovery path while the
@@ -243,6 +295,32 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
   const latestRun = runs[0] ?? null
 
+  const approvalsQuery = useQuery({
+    ...listAgentThreadApprovalsOptions({
+      path: { threadId: threadId ?? "" },
+      query: THREAD_APPROVALS_QUERY,
+    }),
+    enabled: threadId !== null,
+    refetchInterval: recoveryPollMs,
+  })
+  const approvals = useMemo(
+    () => (threadId !== null ? (approvalsQuery.data?.approvals ?? []) : []),
+    [threadId, approvalsQuery.data]
+  )
+  const pendingApprovalsQuery = useQuery({
+    ...listAgentApprovalsOptions({ query: PENDING_APPROVALS_QUERY }),
+    refetchInterval: recoveryPollMs,
+    retry: false,
+  })
+  /** Calls waiting for the reader, by thread. */
+  const waitingApprovals = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const approval of pendingApprovalsQuery.data?.approvals ?? []) {
+      counts.set(approval.threadId, (counts.get(approval.threadId) ?? 0) + 1)
+    }
+    return counts as ReadonlyMap<string, number>
+  }, [pendingApprovalsQuery.data])
+
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUser | null>(null)
   const [sendError, setSendError] = useState<{
@@ -256,6 +334,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     nonce: number
   }>({ text: "", attachments: [], context: [], nonce: 0 })
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
+  const decideRef = useRef<NonNullable<TranscriptApprovals["decide"]>>(async () => {})
+  // The mode the chip shows while a new conversation has no thread to keep it in yet, or until the
+  // thread confirms a change.
+  const [chosenApprovalMode, setChosenApprovalMode] = useState<{
+    readonly threadId: string | null
+    readonly mode: AgentApprovalMode
+  } | null>(null)
 
   const pendingRun =
     pendingSend && threadId !== null && pendingSend.run.threadId === threadId
@@ -310,6 +395,20 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
+  const decideApproval = useMutation(decideAgentApprovalMutation())
+  const saveThreadApprovalMode = useMutation(setAgentThreadApprovalModeMutation())
+  const savePreferences = useMutation(updateAgentPreferencesMutation())
+
+  const preferencesQuery = useQuery({ ...getAgentPreferencesOptions(), retry: false })
+  const defaultApprovalMode = preferencesQuery.data?.approvalMode
+  const chosenHere =
+    chosenApprovalMode && chosenApprovalMode.threadId === threadId ? chosenApprovalMode.mode : null
+  // The thread read alone carries the reader's mode in it; a new conversation starts on their
+  // default. Unknown until either loads: the chip waits for it.
+  const approvalMode: AgentApprovalMode | undefined =
+    chosenHere ??
+    (threadId !== null ? threadQuery.data?.approvalMode : undefined) ??
+    defaultApprovalMode
 
   const presentation = presentActiveTurn({
     activeRunId,
@@ -348,6 +447,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     )
   }
 
+  // The turn runs in the mode the chip shows, whatever another device chose since.
+  const turnApprovalMode = approvalMode === undefined ? {} : { approvalMode }
+
   const send = async (
     text: string,
     attachments: readonly AgentFileRef[],
@@ -363,7 +465,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         const response = await sendWithRequesterSettings((settings) =>
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
-            body: messageBody(text, attachments, context, modelSelection.request, settings),
+            body: {
+              ...messageBody(text, attachments, context, modelSelection.request, settings),
+              ...turnApprovalMode,
+            },
           })
         )
         recordAcceptedSend(response.run)
@@ -383,13 +488,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       createdThreadId = created.thread.id
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
       const newThreadId = createdThreadId
+      // A mode chosen before the thread existed is the reader's choice in it from now on.
+      if (chosenHere !== null && chosenHere !== defaultApprovalMode) {
+        void keepThreadApprovalMode(newThreadId, chosenHere).catch(() => undefined)
+      }
       const response = await sendWithRequesterSettings((settings) =>
         postMessage.mutateAsync({
           path: { threadId: newThreadId },
-          body: messageBody(text, attachments, context, modelSelection.request, settings),
+          body: {
+            ...messageBody(text, attachments, context, modelSelection.request, settings),
+            ...turnApprovalMode,
+          },
         })
       )
       recordAcceptedSend(response.run)
+      // The next new conversation starts from the default again.
+      setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
       onThreadCreated(createdThreadId)
     } catch (error) {
@@ -415,7 +529,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   }
 
   const recordAcceptedSend = (run: AgentRun) => {
-    setPendingSend({ run })
+    setPendingSend({ run, anchor: true })
     setPendingUser((current) =>
       current && current.threadId === run.threadId
         ? { ...current, messageId: run.triggerMessageId }
@@ -429,7 +543,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       { path: { threadId, runId: failedRun.id } },
       {
         onSuccess: (response) => {
-          setPendingSend({ run: response.run })
+          setPendingSend({ run: response.run, anchor: true })
           void refreshThread(threadId)
         },
         onError: () => {
@@ -452,7 +566,93 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         queryKey: getAgentThreadQueryKey({ path: { threadId } }),
       }),
       queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+      refreshApprovals(threadId),
     ])
+
+  const keepThreadApprovalMode = async (threadId: string, mode: AgentApprovalMode) => {
+    const updated = await saveThreadApprovalMode.mutateAsync({
+      path: { threadId },
+      body: { approvalMode: mode },
+    })
+    queryClient.setQueryData(getAgentThreadQueryKey({ path: { threadId } }), updated)
+  }
+
+  /**
+   * What the reader's next turns here may change without asking. In a thread it is kept as their
+   * own choice there, on every device; in a new conversation, until its first message makes one.
+   */
+  const setApprovalMode = (mode: AgentApprovalMode) => {
+    setChosenApprovalMode({ threadId, mode })
+    if (threadId === null) return
+
+    keepThreadApprovalMode(threadId, mode)
+      .then(() =>
+        setChosenApprovalMode((current) =>
+          current?.threadId === threadId && current.mode === mode ? null : current
+        )
+      )
+      .catch(() => {
+        setChosenApprovalMode((current) =>
+          current?.threadId === threadId && current.mode === mode ? null : current
+        )
+        setSendError({ threadId, failure: "approvalMode" })
+      })
+  }
+
+  /** The reader's mode in conversations where they chose none, new ones included. */
+  const setDefaultApprovalMode = (mode: AgentApprovalMode) => {
+    savePreferences.mutate(
+      { body: { approvalMode: mode } },
+      {
+        onSuccess: (preferences) => {
+          queryClient.setQueryData(getAgentPreferencesQueryKey(), preferences)
+          // The open thread follows the new default unless the reader chose a mode there.
+          if (threadId !== null) {
+            void queryClient.invalidateQueries({
+              queryKey: getAgentThreadQueryKey({ path: { threadId } }),
+            })
+          }
+        },
+        onError: () => setSendError({ threadId, failure: "approvalMode" }),
+      }
+    )
+  }
+
+  /**
+   * Approve or deny a held call as the reader, who must have asked for its turn. An approved call
+   * runs before this resolves, and the card shows how it ended; the decision that settles the
+   * turn's last call resumes it, and the conversation follows the new turn under the cards.
+   */
+  const decide = async (approval: AgentApproval, decision: AgentApprovalDecision) => {
+    try {
+      const response = await decideApproval.mutateAsync({
+        path: { threadId: approval.threadId, approvalId: approval.id },
+        body: decision,
+      })
+      queryClient.setQueryData<ListAgentThreadApprovalsResponse>(
+        listAgentThreadApprovalsOptions({
+          path: { threadId: approval.threadId },
+          query: THREAD_APPROVALS_QUERY,
+        }).queryKey,
+        (current) =>
+          current && {
+            ...current,
+            approvals: current.approvals.map((entry) =>
+              entry.id === response.approval.id ? response.approval : entry
+            ),
+          }
+      )
+      if (response.run && response.run.threadId === threadId) {
+        setPendingSend({ run: response.run, anchor: false })
+      }
+      // "Always allow" raised the reader's mode here.
+      if (decision.always) setChosenApprovalMode(null)
+    } catch (error) {
+      throw decisionFailure(error)
+    } finally {
+      void refreshThread(approval.threadId)
+    }
+  }
 
   // Sixb writes the continuation for the model, with the cut-short turn's model and reasoning; the
   // transcript shows no message for it.
@@ -463,7 +663,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       const response = await sendWithRequesterSettings((settings) =>
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
-      setPendingSend({ run: response.run })
+      setPendingSend({ run: response.run, anchor: true })
       await refreshThread(threadId)
     } catch (error) {
       setSendError({ threadId, failure: sendFailure(error) })
@@ -533,12 +733,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       ? 1
       : 0)
   const anchorCurrentTurn = Boolean(
-    (pendingUser && pendingUser.threadId === threadId) || pendingRun
+    (pendingUser && pendingUser.threadId === threadId) || (pendingRun && pendingSend?.anchor)
   )
   const composerPending = postMessage.isPending || createThread.isPending
   const currentSendError =
     sendError && sendError.threadId === threadId
-      ? failureMessage(sendError.failure, requestedBySomeoneElse(activeRun, user), labels)
+      ? failureMessage(
+          sendError.failure,
+          requestedBySomeoneElse(activeRun, user),
+          labels,
+          agentMessages.approvalModes.saveFailed
+        )
       : null
   const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
   const canStop = canStopRun(activeRun, access, user)
@@ -559,6 +764,32 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
         !presentation.hasProgress)) &&
     canRetryRun(presentation.run, user)
+
+  // Every card reads this: it changes with the approvals and the people, not with each stream chunk.
+  decideRef.current = decide
+  const approvalsLoaded = approvalsQuery.isSuccess
+  const transcriptApprovals = useMemo((): TranscriptApprovals => {
+    const me = userPrincipal(user)
+    return {
+      approvals,
+      loaded: approvalsLoaded,
+      // Without a signed-in user the app acts for the project, which asked for every turn.
+      canDecide: (approval) => me === null || samePrincipal(approval.requestedBy, me),
+      requesterName: (approval) =>
+        knownName(approval.requestedBy, thread, authors) ?? approval.requestedBy.id,
+      decide: (approval, decision) => decideRef.current(approval, decision),
+    }
+  }, [approvals, approvalsLoaded, user, thread, authors])
+  // The newest turn paused on calls the reader decides: the composer says how to move on.
+  const awaitingApproval =
+    !isRunning &&
+    isAwaitingApproval(latestRun) &&
+    approvals.some(
+      (approval) =>
+        approval.status === "pending" &&
+        approval.runId === latestRun?.id &&
+        transcriptApprovals.canDecide(approval)
+    )
 
   const transcriptProps: TranscriptProps = {
     threadId,
@@ -593,6 +824,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     retrying: retryRun.isPending,
     continuing: composerPending,
     reconnecting,
+    approvals: transcriptApprovals,
   }
 
   const modelControlsProps = canChooseModel
@@ -624,6 +856,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     draftAttachments: draftReseed.attachments,
     draftContext: draftReseed.context,
     draftNonce: draftReseed.nonce,
+    approvalMode,
+    defaultApprovalMode,
+    onApprovalModeChange: setApprovalMode,
+    onMakeApprovalModeDefault: setDefaultApprovalMode,
+    awaitingApproval,
   }
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
@@ -697,6 +934,20 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     stop,
     retry,
     continueAfterTimeout,
+    /** The thread's held calls, oldest first; the transcript shows each as a card. */
+    approvals,
+    /** Approve or deny a held call; see {@link TranscriptApprovals.decide}. */
+    decide,
+    /** The newest turn waits for the reader's decision. */
+    awaitingApproval,
+    /** Calls waiting for the reader, by thread, across their conversations. */
+    waitingApprovals,
+    /** What the reader's next turns may change without asking; unknown until it loads. */
+    approvalMode,
+    setApprovalMode,
+    /** The reader's mode in conversations where they chose none. */
+    defaultApprovalMode,
+    setDefaultApprovalMode,
     /** Spread into `<Transcript>`. */
     transcriptProps,
     /** Spread into `<Composer>`, then add the page's own props such as `placeholder`. */
@@ -706,8 +957,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   }
 }
 
-/** Why a turn did not start or stop, as the composer tells it. */
-type TurnFailure = "send" | "busy" | "sandbox" | "retry" | "stop"
+/** Why a turn did not start or stop, or the mode did not change, as the composer tells it. */
+type TurnFailure = "send" | "busy" | "sandbox" | "retry" | "stop" | "approvalMode"
+
+/** Why a decision did not go through. A 429 means it stands: the call ran, the resume waits. */
+function decisionFailure(error: unknown): AgentApprovalDecisionFailure {
+  if (!isSixbApiError(error)) return "failed"
+  if (error.status === 429) return "limit"
+  if (error.code === "approval_expired") return "expired"
+  if (error.code === "approval_not_pending") return "decided"
+
+  return "failed"
+}
 
 /** A message that did not go out: another answer holds the thread, the sandbox is away, or else. */
 function sendFailure(error: unknown): TurnFailure {
@@ -725,7 +986,8 @@ function sendFailure(error: unknown): TurnFailure {
 function failureMessage(
   failure: TurnFailure,
   someoneElseAnswers: boolean,
-  labels: ReturnType<typeof useAgentMessages>["chat"]
+  labels: ReturnType<typeof useAgentMessages>["chat"],
+  approvalModeFailed: string
 ): string {
   switch (failure) {
     case "busy":
@@ -736,6 +998,8 @@ function failureMessage(
       return labels.retryFailed
     case "stop":
       return labels.stopFailed
+    case "approvalMode":
+      return approvalModeFailed
     default:
       return labels.sendFailed
   }

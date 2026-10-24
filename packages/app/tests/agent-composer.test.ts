@@ -51,6 +51,26 @@ describe("Composer", () => {
     expect(html).toContain('aria-label="Choose model and reasoning effort"')
   })
 
+  test("shows the approval mode as a chip once the conversation can change it", () => {
+    // Removal proof: drop the chip from the toolbar; the mode is named nowhere.
+    const html = renderComposer({ approvalMode: "accept-edits", onApprovalModeChange: () => {} })
+
+    expect(html).toContain('data-approval-mode="accept-edits"')
+    expect(html).toContain('aria-label="Approval mode: Accept edits. Change it"')
+    expect(html).toContain('aria-keyshortcuts="Shift+Tab"')
+    // Without a way to change it, as in a page that never wired it, there is no chip.
+    expect(renderComposer({ approvalMode: "auto" })).not.toContain("data-approval-mode")
+  })
+
+  test("tells how to answer a turn that waits for the reader's approval", () => {
+    expect(renderComposer({ awaitingApproval: true })).toContain(
+      'placeholder="Approve above, or reply to skip"'
+    )
+    expect(renderComposer({ placeholder: "Ask about invoices" })).toContain(
+      'placeholder="Ask about invoices"'
+    )
+  })
+
   test("keeps send errors within the input width", () => {
     // Moving the error outside the composer's width constraint reproduces the misalignment.
     const nodes = elements(parseFragment(renderComposer({ error: "Send failed." })))

@@ -9,7 +9,7 @@ import {
 } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { History, LoaderCircle, Plus, Search, X } from "lucide-react"
+import { CirclePause, History, LoaderCircle, Plus, Search, X } from "lucide-react"
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
 import { PersonAvatar } from "../../artifacts/person-avatar"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
@@ -31,6 +31,7 @@ export interface SharedThreadList {
 }
 
 const NO_SHARED_THREADS: SharedThreadList = { threads: [], total: 0 }
+const NO_WAITING_APPROVALS: ReadonlyMap<string, number> = new Map()
 
 export interface AgentThreadSwitcherProps {
   readonly agentName: string
@@ -42,6 +43,8 @@ export interface AgentThreadSwitcherProps {
    */
   readonly sharedThreads?: SharedThreadList
   readonly runningThreadCount?: number
+  /** Calls waiting for the reader's approval, by thread: each row says so, and the button counts them. */
+  readonly waitingApprovals?: ReadonlyMap<string, number>
   readonly threadsError?: string | null
   readonly hasMoreThreads?: boolean
   readonly loadingMoreThreads?: boolean
@@ -57,6 +60,7 @@ export function AgentThreadSwitcher({
   threads,
   sharedThreads,
   runningThreadCount = 0,
+  waitingApprovals = NO_WAITING_APPROVALS,
   threadsError,
   hasMoreThreads,
   loadingMoreThreads,
@@ -65,7 +69,9 @@ export function AgentThreadSwitcher({
   onSelectThread,
   onNewThread,
 }: AgentThreadSwitcherProps) {
-  const messages = useAgentMessages().threads
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.threads
+  const approvalMessages = agentMessages.approvals
   const shared = sharedThreads ?? NO_SHARED_THREADS
   const canShare = sharedThreads !== undefined
   const [open, setOpen] = useState(false)
@@ -100,10 +106,20 @@ export function AgentThreadSwitcher({
   )
   const archivedCount = shownThreads.filter((thread) => thread.status === "archived").length
   const currentTitle = agentThreadTitle(currentThread, messages)
-  const historyLabel =
+  // The open conversation shows its own cards: the button counts the others that wait.
+  const waitingElsewhere = [...waitingApprovals.keys()].filter(
+    (threadId) => threadId !== currentThread?.id
+  ).length
+  const waitingLabel =
+    waitingElsewhere > 0 ? approvalMessages.waitingThreads(waitingElsewhere) : null
+  const historyLabel = [
     runningThreadCount > 0
       ? messages.runningHistory(runningThreadCount, currentTitle)
-      : messages.historyCurrent(currentTitle)
+      : messages.historyCurrent(currentTitle),
+    waitingLabel,
+  ]
+    .filter(Boolean)
+    .join(". ")
 
   // The list shown says its own errors and pages.
   const list =
@@ -154,9 +170,21 @@ export function AgentThreadSwitcher({
           variant="ghost"
           size="icon-lg"
           aria-label={historyLabel}
-          title={runningThreadCount > 0 ? messages.running(runningThreadCount) : messages.history}
-          className="[&_svg]:size-5"
+          title={
+            waitingLabel ??
+            (runningThreadCount > 0 ? messages.running(runningThreadCount) : messages.history)
+          }
+          className="relative [&_svg]:size-5"
         >
+          {waitingElsewhere > 0 ? (
+            <span
+              data-waiting-approval-count={waitingElsewhere}
+              aria-hidden="true"
+              className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums ring-2 ring-background"
+            >
+              {waitingElsewhere > 9 ? "9+" : waitingElsewhere}
+            </span>
+          ) : null}
           {runningThreadCount > 0 ? (
             <span
               data-active-thread-count={runningThreadCount}
@@ -248,6 +276,7 @@ export function AgentThreadSwitcher({
                 thread={currentVisible}
                 selected
                 shared={filter === "shared"}
+                waiting={waitingApprovals.has(currentVisible.id)}
                 onSelect={selectThread}
               />
             </ThreadSwitcherSection>
@@ -261,6 +290,7 @@ export function AgentThreadSwitcher({
                   thread={thread}
                   selected={thread.id === currentThread?.id}
                   shared={filter === "shared"}
+                  waiting={waitingApprovals.has(thread.id)}
                   onSelect={selectThread}
                 />
               ))}
@@ -344,12 +374,15 @@ function ThreadSwitcherRow({
   thread,
   selected,
   shared = false,
+  waiting = false,
   onSelect,
 }: {
   thread: AgentThread
   selected: boolean
   /** Someone else's conversation: the row names its owner. */
   shared?: boolean
+  /** A call in it waits for the reader's approval. */
+  waiting?: boolean
   onSelect: (threadId: string) => void
 }) {
   const agentMessages = useAgentMessages()
@@ -370,7 +403,12 @@ function ThreadSwitcherRow({
       data-thread-option=""
       onClick={() => onSelect(thread.id)}
       aria-current={selected ? "page" : undefined}
-      aria-label={[title, selected ? messages.currentState : null, meta || null]
+      aria-label={[
+        title,
+        selected ? messages.currentState : null,
+        waiting ? agentMessages.approvals.threadWaiting : null,
+        meta || null,
+      ]
         .filter(Boolean)
         .join(", ")}
       className={cn(
@@ -382,6 +420,13 @@ function ThreadSwitcherRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{title}</span>
         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+          {waiting ? (
+            <span className="mr-1 inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+              <CirclePause className="size-3" aria-hidden="true" />
+              {agentMessages.approvals.threadWaiting}
+              <span className="font-normal text-muted-foreground">·</span>
+            </span>
+          ) : null}
           {shared
             ? messages.sharedBy(owner, thread.messageCount)
             : messages.messages(thread.messageCount)}
