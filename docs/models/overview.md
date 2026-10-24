@@ -193,7 +193,8 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
   with `finishReason: "awaiting_approval"`, and keeps that finish reason; it holds no worker
   meanwhile. Once every call it held is decided, even days later, a new turn continues it with the
   same model and reasoning, and the agent reads how each call ended. Its mode is the paused turn's,
-  raised only by `always: true` on one of its calls. `decide` returns that turn as `run`.
+  raised only by `always: true` on one of its calls, and lowered to the sender's choice in the
+  conversation if they made it stricter meanwhile. `decide` returns that turn as `run`.
 - **`decide` stands once the call ran.** If the turn cannot resume, `resume` says why
   (`{ status: "refused", code, message, retrying }`). With `retrying`, as after an AI limit, Sixb
   resumes the turn once it can; otherwise the next message reports the calls.

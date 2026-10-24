@@ -640,13 +640,17 @@ async function pausedTurn(
   host: Host,
   requester: Requester,
   requestedBy: typeof alice | typeof bob,
-  options: { readonly threadId?: string; readonly calls?: readonly AgentApprovalCall[] } = {}
+  options: {
+    readonly threadId?: string
+    readonly calls?: readonly AgentApprovalCall[]
+    readonly approvalMode?: "manual" | "accept-edits"
+  } = {}
 ) {
   const agents = requireAgentStorage(host)
   const { run } = await requester.agent.runs.request({
     ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
     text: "Mark INV-2041 paid",
-    approvalMode: "manual",
+    approvalMode: options.approvalMode ?? "manual",
     timeZone: "Europe/Paris",
     locale: "fr-FR",
   })
@@ -979,7 +983,7 @@ describe("a turn paused on held calls", () => {
 
   // Guard proof: resume with the requester's thread choice, raised or not (the old
   // `resumedApprovalMode`); the turn resumes `auto`, looser than the message asked.
-  test("resumes with exactly the mode it paused with, whatever the thread's choice", async () => {
+  test("resumes with the mode it paused with when the thread's choice is looser", async () => {
     const { host } = setup()
     const owner = await signedIn(host, alice.id)
     await createTestInvoice(host)
@@ -991,6 +995,26 @@ describe("a turn paused on held calls", () => {
     })
 
     expect(paused.spec?.approvalMode).toBe("manual")
+    expect(run?.spec?.approvalMode).toBe("manual")
+  })
+
+  // Guard proof: drop the `chosen` comparison from `resumedApprovalMode`; the turn resumes in
+  // `accept-edits` although its requester switched to `manual` while it waited.
+  test("resumes with the requester's stricter choice made while it waited", async () => {
+    const { host } = setup()
+    const owner = await signedIn(host, alice.id)
+    await createTestInvoice(host)
+    const { run: paused, approvals } = await pausedTurn(host, owner, alice, {
+      calls: [{ ...heldCall, effect: "external" }],
+      approvalMode: "accept-edits",
+    })
+    await owner.agent.threads.setApprovalMode(paused.threadId, "manual")
+
+    const { run } = await owner.agent.approvals.decide(approvals[0]?.id ?? "", {
+      decision: "approve",
+    })
+
+    expect(paused.spec?.approvalMode).toBe("accept-edits")
     expect(run?.spec?.approvalMode).toBe("manual")
   })
 
