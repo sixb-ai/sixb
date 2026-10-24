@@ -4,6 +4,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
+- **Releases** — list a repository's releases, get one by tag
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
 
@@ -31,7 +32,7 @@ export const githubConnector = defineConnector(
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
 
 **Token permissions** (fine-grained PAT): `Metadata: read` and `Issues: read & write` for
-repository and issue APIs. Organization people APIs require `Members: read`. Public user profiles
+repository and issue APIs. Releases need `Contents: read`. Organization people APIs require `Members: read`. Public user profiles
 and public organization membership can be queried without that organization permission, but private
 membership visibility depends on the authenticated user's organization access.
 
@@ -89,6 +90,8 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).issues.comments.get()` | `GET /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.update()` | `PATCH /repos/{owner}/{repo}/issues/comments/{id}` |
 | `gh.repo({ owner, repo }).issues.comments.delete()` | `DELETE /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.repo({ owner, repo }).releases.list()` | `GET /repos/{owner}/{repo}/releases`        |
+| `gh.repo({ owner, repo }).releases.getByTag(tag)` | `GET /repos/{owner}/{repo}/releases/tags/{tag}` |
 | `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
 | `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
 | `gh.users.getAuthenticated()`             | `GET /user`                                      |
@@ -128,7 +131,14 @@ const comment = await repo.issues.comments.create(issue.number, { body: "Investi
 await repo.issues.comments.update(comment.id, { body: "Fixed." })
 await repo.issues.comments.delete(comment.id)
 await repo.issues.update(issue.number, { body: "Updated", state: "closed" })
+
+const releases = await repo.releases.list({ pageSize: 50, signal })
+const release = await repo.releases.getByTag("v1.2.0")
 ```
+
+Release calls accept a `signal` to abort the request. `releases.list()` returns
+newest first and includes drafts only when the token can push to the repository;
+`getByTag()` never returns a draft (GitHub answers 404, thrown as `GitHubApiError`).
 
 Repository list options follow GitHub's two endpoint shapes. Authenticated-user
 repository calls support `visibility`, `affiliation`, `type`, `sort`,
