@@ -144,6 +144,9 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
   minute before the turn's time is up, the agent stops waiting and answers with what the others
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
+- **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
+  its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
+  with its files, and the agent gets its answer.
 - It cannot delegate again or start a workflow. Its model calls count toward the user's
   [AI usage](./usage-and-limits.md), and toward the `usage` and `cost` of the turn that started
   it. So does a workflow the agent's tools started, even for what it spends after the turn ends, as
@@ -242,9 +245,13 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
   its calls. A turn that fails or is stopped while running cancels its own.
 - If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
   run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
-- **A sub-agent asks with its turn's mode.** When one of its calls waits, it ends its work and
-  says so. The call waits on the turn that started it, which pauses on it once the sub-agent has
-  finished, as on one of its own.
+- **A sub-agent asks with its turn's mode.** When one of its calls waits, the sub-agent pauses
+  after that step, and the call waits on the turn that started it. Its card says which sub-agent
+  asked; over HTTP, the approval's `caller`. The turn pauses once none of its other sub-agents is
+  still at work, and a turn that pauses on its own call waits for them first too. When it resumes,
+  the sub-agent continues first, in its thread, from how its calls ended; deciding while the
+  turn still runs takes effect once it pauses. A new message instead of a decision continues no
+  sub-agent.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
 Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,
