@@ -64,6 +64,13 @@ interface ModelLoopOptions {
    * there, before the next provider call. Its tool results are the last thing the loop produced.
    */
   readonly pauseAfterStep?: (step: ModelStep) => boolean | Promise<boolean>
+  /**
+   * Asked when the model answers without local tools and a step is left, once `onStepEnd` settled.
+   * Messages it returns follow that answer in one more step, instead of the loop ending on it.
+   */
+  readonly beforeComplete?: (
+    step: ModelStep
+  ) => readonly ModelMessage[] | undefined | Promise<readonly ModelMessage[] | undefined>
   readonly generateCallId?: () => string
 }
 
@@ -306,6 +313,25 @@ export async function runModelLoop(
       const step = modelStep(response, responseId, response.content, cost)
       steps.push(step)
       await input.onStepEnd?.(step)
+
+      // An answer cut short by the output limit ends the loop as it is.
+      const canContinue = response.finishReason !== "length" && stepIndex + 1 < input.maxSteps
+      let followUp: readonly ModelMessage[] | undefined
+      try {
+        followUp = canContinue ? await input.beforeComplete?.(step) : undefined
+      } catch (error) {
+        if (!input.signal.aborted && !isAbortError(error)) throw error
+        return { status: "aborted", steps, partialContent: [] }
+      }
+      if (followUp?.length) {
+        messages = [
+          ...requestMessages,
+          { role: "assistant", content: response.content },
+          ...followUp,
+        ]
+        continue
+      }
+
       if (input.output) {
         const text = responseText(response)
         if (response.finishReason !== "stop") {

@@ -1011,6 +1011,73 @@ describe("runModelLoop", () => {
     expect(asked).toBe(0)
   })
 
+  // Guard proof: drop the `beforeComplete` check from the answer branch of `runModelLoop`; the
+  // loop completes with the first answer after one call.
+  test("adds a step after an answer when beforeComplete has messages for it", async () => {
+    const requests: (readonly ModelMessage[])[] = []
+    const answers = ["draft", "final"]
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        requests.push(request.messages)
+        const text = answers[requests.length - 1] ?? "extra"
+        return streamFromArray([
+          { type: "stream-start" },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: text },
+          { type: "text-end", id: "t" },
+          finish(),
+        ])
+      },
+    })
+    const followUp: ModelMessage = { role: "user", content: [{ type: "text", text: "Also X." }] }
+    let asked = 0
+
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+      beforeComplete: () => {
+        asked += 1
+        return asked === 1 ? [followUp] : undefined
+      },
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "final" })
+    expect(result.steps).toHaveLength(2)
+    expect(asked).toBe(2)
+    expect(requests[1]).toEqual([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "draft" }] },
+      followUp,
+    ])
+  })
+
+  test("is not asked for more after the last step", async () => {
+    let asked = 0
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [
+          { type: "stream-start" },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "done" },
+          { type: "text-end", id: "t" },
+          finish(),
+        ],
+      ]),
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+      maxSteps: 1,
+      signal: new AbortController().signal,
+      beforeComplete: () => {
+        asked += 1
+        return [{ role: "user", content: [{ type: "text", text: "More." }] }]
+      },
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "done" })
+    expect(asked).toBe(0)
+  })
+
   test("returns coherent partial text when aborted mid-stream", async () => {
     const abort = new AbortController()
     const model = new MockLanguageModel({
