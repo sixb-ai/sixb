@@ -47,7 +47,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 
 | Builder | Allows |
 | --- | --- |
-| `can.view(Invoice)` | Read objects, their telemetry, and related events. Also accepts dataset definitions. |
+| `can.view(Invoice)` | Read objects, their telemetry, and related events. Also accepts dataset definitions. Add [`.where()`](#grant-only-some-objects) to grant only some objects. |
 | `can.edit(Invoice)` | Create, update, delete, and restore objects, and change their relationships. |
 | `can.append(Sensor)` | Append telemetry without granting read access. |
 | `can.apply(markPaid)` | Request an action. |
@@ -79,6 +79,58 @@ Use `.except([Definition])` to exclude definitions from a selector. A query is d
 
 Object writes require both `can.view(Type)` and `can.edit(Type)`. Relationship writes need edit access to the source and view access to the target. `can.view(Type)` includes its subtypes; edit and telemetry-append grants cover only the types explicitly selected.
 
+## Grant only some objects
+
+Add `.where()` to `can.view(Type)` to grant only the objects that match. It takes the same
+predicates as a [query](../objects/querying.md#filter-objects), including
+[`currentUser()`](../objects/querying.md#match-the-reading-user):
+
+```ts
+// security/roles/staff-access.ts
+import { can, currentUser, defineRole } from "@sixb/core"
+import { Invoice } from "../../ontology/invoice"
+import { Note } from "../../ontology/note"
+import { staff } from "../groups/staff"
+
+export const staffAccess = defineRole("staff-access", {
+  grantedTo: [staff],
+  grants: [
+    can.view(Invoice).where((invoice) => invoice.p.status.neq("draft")),
+    can.view(Note).where((note) => note.p.owner.eq(currentUser())),
+  ],
+})
+```
+
+A member sees an object when any of their roles shows it: someone in both `staff` and
+`finance-team` sees every invoice, because [`finance-access`](#define-a-role) views them all. The
+condition covers subtypes too, and [markings](markings.md) still redact what it shows. In a
+condition, `currentUser()` is the member the role applies to. For a service account it matches no
+one, even an agent's account working for a user.
+
+A hidden object behaves like a missing one, everywhere it could appear:
+
+| Surface | With an object the reader cannot see |
+| --- | --- |
+| Get, list, query, count, facets, search | Missing: `get` returns `null`, HTTP answers `404`, pages and totals leave it out. |
+| Links and expansions | Never reach it. |
+| Events | Not delivered. An update that hides an object sends that reader nothing, so their copy stays stale until they read it again. Deleting an object they saw sends them its deletion and the links it removed. |
+| Telemetry and files | Return nothing, as for a missing object. |
+| Action requests | A hidden subject or `ref()` parameter is not found (`404`). |
+| Action runs and rule matches | Shown while their object is visible. On such a type, list them for one object: a listing that names no object leaves them out. |
+| Writes with `can.edit` | Deleting or linking it fails as for a missing object. Writing its id, or a [unique](../ontology/properties.md#unique-values) value it holds, fails as taken (`409`): the writer learns the value exists. |
+
+Limits:
+
+- A condition reads the type's own properties, never its links. Each property it reads needs
+  `query: { searchable: true, filterable: true }`.
+- It cannot read a marked property, and cannot order text (`lt`, `gte`…): use `eq`, `neq`, `in` or
+  `contains`. Sixb rejects these at startup, and checks each condition against your object storage.
+- A reader who sees a type only through a condition cannot restore objects of that type or see its
+  projection runs. They can issue a [share link](shared-access.md) on an object they see, but not
+  one whose selected links reach that type.
+- Actions and workflows run [trusted](#permissions-during-execution): conditions do not apply in
+  their handlers, and an action can create an object its requester cannot see.
+
 ## Choose who sees the app's sections
 
 Every signed-in member opens the project's app. Roles decide what each member can read and do in
@@ -90,7 +142,7 @@ the API still checks each request against the caller's grants.
 
 Requests from an app or API are checked against the caller's grants. An action or workflow, once admitted, runs your registered server code with trusted access to the project. It does not inherit the caller's resource restrictions inside its handlers.
 
-Treat permission to run a command as permission to perform the changes that command allows. Validate its inputs and enforce any record-specific business restrictions in your code. Ordinary object grants cover a whole type, not selected rows.
+Treat permission to run a command as permission to perform the changes that command allows. Validate its inputs and enforce any record-specific business restrictions in your code.
 
 Agents, and the project tools they call, use the agent's execution permissions. See [AI](../models/overview.md#control-access), [tools](../models/tools-and-authorization.md#use-project-data-in-a-tool), and [AI workflow tasks](../workflows/overview.md#add-an-ai-task).
 
