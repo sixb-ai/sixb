@@ -59,6 +59,11 @@ interface ModelLoopOptions {
   readonly onEvent?: (event: ModelUiChunk) => void | Promise<void>
   readonly onModelCallEnd?: (event: ModelCallEndEvent) => void | Promise<void>
   readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
+  /**
+   * Asked after each step that ran local tools, once `onStepEnd` settled: `true` ends the loop
+   * there, before the next provider call. Its tool results are the last thing the loop produced.
+   */
+  readonly pauseAfterStep?: (step: ModelStep) => boolean | Promise<boolean>
   readonly generateCallId?: () => string
 }
 
@@ -94,6 +99,15 @@ export type ModelLoopResult<TOutput = string> =
       readonly partialContent: readonly ModelAssistantPart[]
     }
 
+/** What a loop given `pauseAfterStep` returns: it may also stop after a step that ran tools. */
+export type PausableModelLoopResult<TOutput = string> =
+  | ModelLoopResult<TOutput>
+  /** `pauseAfterStep` stopped the loop after the last of these steps. */
+  | {
+      readonly status: "paused"
+      readonly steps: readonly ModelStep[]
+    }
+
 interface CompletedResponse {
   readonly providerIds?: import("../models/events").ModelProviderIds
   readonly content: readonly ModelAssistantPart[]
@@ -122,11 +136,14 @@ interface ParsedToolCall {
  * metadata. Trace adapters may project these results directly; storage owns write validation.
  */
 export function runModelLoop<TOutput = string>(
+  input: RunModelLoopInput<TOutput> & Required<Pick<ModelLoopOptions, "pauseAfterStep">>
+): Promise<PausableModelLoopResult<TOutput>>
+export function runModelLoop<TOutput = string>(
   input: RunModelLoopInput<TOutput>
 ): Promise<ModelLoopResult<TOutput>>
 export async function runModelLoop(
   input: RunModelLoopInput<unknown>
-): Promise<ModelLoopResult<unknown>> {
+): Promise<PausableModelLoopResult<unknown>> {
   assertLoopInput(input)
   const tools = indexTools(input.tools ?? [])
   const toolSpecifications = [...tools.values()].map<ModelToolSpecification>((tool) => ({
@@ -337,6 +354,9 @@ export async function runModelLoop(
         steps,
         partialContent: [],
       }
+    }
+    if (await input.pauseAfterStep?.(step)) {
+      return { status: "paused", steps }
     }
 
     const assistantContent = response.content.filter(
