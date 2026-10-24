@@ -1,5 +1,5 @@
 import type { CsvTable } from "./csv"
-import { formulaDependencies, parseFormula } from "./formula/parser"
+import { formulaReferences, parseFormula } from "./formula/parser"
 import type { ArtifactQueryProperty, ArtifactQuerySchema } from "./queries"
 import {
   NUMERIC_COLUMN_TYPES,
@@ -242,7 +242,7 @@ export function liveSheetTable(
     })
   )
 
-  lockComputed(layout, locked)
+  lockComputed(layout, rows.length, locked)
   return { table: { header: columns.map((column) => column.name), rows: tableRows }, locked }
 }
 
@@ -294,26 +294,49 @@ function cellText(value: unknown): string {
 
 /**
  * Locks each computed cell that reads a locked one, through as many computed columns as read each
- * other: a formula over a value the reader may not see would show what it computes without it.
+ * other: a formula over a value the reader may not see would show what it computes without it. A
+ * formula that reads a column whole, as `SUM([Amount])` does, reads every row's value: one locked
+ * cell in that column locks it on every row.
  */
-function lockComputed(layout: LiveSheetLayout, locked: Map<number, Set<number>>): void {
+function lockComputed(
+  layout: LiveSheetLayout,
+  rowCount: number,
+  locked: Map<number, Set<number>>
+): void {
   const indexOf = new Map(layout.columns.map((column, index) => [column.name, index]))
+  const indexes = (names: ReadonlySet<string>) =>
+    [...names].map((name) => indexOf.get(name)).filter((read) => read !== undefined)
+
   const computed = layout.columns.flatMap((column, index) => {
     const formula = column.from ? undefined : layout.sheet.columns[column.name]?.formula
     if (!formula) return []
 
-    const reads = [...formulaDependencies(parseFormula(formula))]
-      .map((name) => indexOf.get(name))
-      .filter((read) => read !== undefined)
-    return [{ index, reads }]
+    const { row, whole } = formulaReferences(parseFormula(formula))
+    return [{ index, row: indexes(row), whole: indexes(whole) }]
   })
   if (computed.length === 0) return
 
-  for (const cells of locked.values()) {
-    for (let changed = true; changed; ) {
-      changed = false
-      for (const { index, reads } of computed) {
-        if (cells.has(index) || !reads.some((read) => cells.has(read))) continue
+  for (let changed = true; changed; ) {
+    changed = false
+
+    const anywhere = new Set<number>()
+    for (const cells of locked.values()) for (const column of cells) anywhere.add(column)
+
+    for (const { index, whole } of computed) {
+      if (!whole.some((read) => anywhere.has(read))) continue
+
+      for (let row = 0; row < rowCount; row += 1) {
+        const cells = locked.get(row) ?? new Set<number>()
+        if (cells.has(index)) continue
+        cells.add(index)
+        locked.set(row, cells)
+        changed = true
+      }
+    }
+
+    for (const cells of locked.values()) {
+      for (const { index, row } of computed) {
+        if (cells.has(index) || !row.some((read) => cells.has(read))) continue
         cells.add(index)
         changed = true
       }
