@@ -5,6 +5,7 @@ import type {
   CompleteAuthSessionInput,
   CompleteSignInResult,
   ListAuthUsersInput,
+  UpdateAuthUserResult,
   UserRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
@@ -14,6 +15,20 @@ export interface AuthStorageContractSuiteOptions<TStorage extends AuthStorage = 
   readonly createStorage: () => TStorage | Promise<TStorage>
   /** Optional cleanup invoked after every test case. */
   readonly teardown?: (storage: TStorage) => void | Promise<void>
+  /**
+   * Locks a user's row as a concurrent writer would, for stores whose updates can run side by side.
+   * Without it, concurrent updates run unforced, which is enough for a store that serializes them.
+   */
+  readonly holdUser?: (
+    storage: TStorage,
+    user: { readonly projectId: string; readonly id: string }
+  ) => Promise<AuthUserHold>
+}
+
+export interface AuthUserHold {
+  /** Resolves once `count` writers wait on the hold, or once `competing` settles without waiting. */
+  readonly waitForWaiters: (count: number, competing: Promise<unknown>) => Promise<void>
+  readonly release: () => Promise<void>
 }
 
 const projectId = "project-a"
@@ -143,6 +158,14 @@ async function signInWithOidcProfile(
   })
 }
 
+/** Two concurrent updates of one user, in the order they committed: the later found the earlier. */
+function inCommitOrder(
+  a: UpdateAuthUserResult,
+  b: UpdateAuthUserResult
+): readonly [UpdateAuthUserResult, UpdateAuthUserResult] {
+  return Bun.deepEquals(b.previousUser, a.user) ? [a, b] : [b, a]
+}
+
 /**
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
@@ -161,6 +184,33 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
     } finally {
       await options.teardown?.(storage)
     }
+  }
+
+  /**
+   * Runs two updates of usr_1 at once. With a hold, both wait behind it, the first queued first,
+   * so each reads only after the other could have written.
+   */
+  const race = async (
+    storage: TStorage,
+    first: () => Promise<UpdateAuthUserResult>,
+    second: () => Promise<UpdateAuthUserResult>
+  ): Promise<UpdateAuthUserResult[]> => {
+    const hold = await options.holdUser?.(storage, { projectId, id: "usr_1" })
+    if (!hold) return Promise.all([first(), second()])
+
+    let updates: Promise<UpdateAuthUserResult>[] = []
+    try {
+      const a = first()
+      updates = [a]
+      await hold.waitForWaiters(1, a)
+
+      const b = second()
+      updates = [a, b]
+      await hold.waitForWaiters(2, b)
+    } finally {
+      await hold.release()
+    }
+    return Promise.all(updates)
   }
 
   describe(label, () => {
@@ -424,6 +474,77 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await expectAuthError(
           storage.users.updateStatus({ projectId, id: "usr_missing", status: "active" }),
           "missing_user"
+        )
+      })
+    })
+
+    // To see this fail on PostgreSQL, pass `forUpdate: false` to `getUserRowById` in
+    // `updateStatus` (`storage/pg/src/auth-storage/users.ts`): both changes then report Ava active.
+    test("chains the previous users of concurrent status changes", async () => {
+      await withStorage(async (storage) => {
+        const ava = await createUser(storage)
+
+        const [a, b] = await race(
+          storage,
+          () =>
+            storage.users.updateStatus({
+              projectId,
+              id: "usr_1",
+              status: "suspended",
+              updatedAt: at("2026-05-14T10:01:00.000Z"),
+            }),
+          () =>
+            storage.users.updateStatus({
+              projectId,
+              id: "usr_1",
+              status: "active",
+              updatedAt: at("2026-05-14T10:02:00.000Z"),
+            })
+        )
+
+        const [first, second] = inCommitOrder(a, b)
+        expect(first.previousUser).toEqual(ava)
+        expect(second.previousUser).toEqual(first.user)
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(
+          second.user
+        )
+      })
+    })
+
+    // To see this fail on PostgreSQL, pass `forUpdate: false` to `getUserRowById` in
+    // `updateProfile` (`storage/pg/src/auth-storage/users.ts`): the second update then reports
+    // Ava unnamed.
+    test("chains the previous users of concurrent profile updates, keeping both fields", async () => {
+      await withStorage(async (storage) => {
+        const ava = await createUser(storage)
+
+        const [a, b] = await race(
+          storage,
+          () =>
+            storage.users.updateProfile({
+              projectId,
+              id: "usr_1",
+              displayName: "Ava Lovelace",
+              updatedAt: at("2026-05-14T10:01:00.000Z"),
+            }),
+          () =>
+            storage.users.updateProfile({
+              projectId,
+              id: "usr_1",
+              avatarUrl: "https://acme.com/ava.png",
+              updatedAt: at("2026-05-14T10:02:00.000Z"),
+            })
+        )
+
+        const [first, second] = inCommitOrder(a, b)
+        expect(first.previousUser).toEqual(ava)
+        expect(second.previousUser).toEqual(first.user)
+        expect(second.user).toMatchObject({
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://acme.com/ava.png",
+        })
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(
+          second.user
         )
       })
     })

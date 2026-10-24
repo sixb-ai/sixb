@@ -60,13 +60,14 @@ export async function disposeTestStorage(storage: PostgresStorage): Promise<void
 }
 
 /**
- * Resolves once a connection to the database is blocked on a lock, or once `competing` (the
- * operation expected to block) settles without blocking: the point a concurrency test waits for
- * before releasing the transaction that holds the lock.
+ * Resolves once `waiters` connections to the database are blocked on a lock, or once `competing`
+ * (the operation expected to block) settles without blocking: the point a concurrency test waits
+ * for before releasing the transaction that holds the lock.
  */
 export async function waitForLockWait(
   connectionString: string,
-  competing: Promise<unknown>
+  competing: Promise<unknown>,
+  waiters = 1
 ): Promise<void> {
   let settled = false
   competing.then(
@@ -80,8 +81,10 @@ export async function waitForLockWait(
         SELECT count(*)::int AS waiting FROM pg_stat_activity
         WHERE datname = current_database() AND wait_event_type = 'Lock'
       `
-      if ((row?.waiting ?? 0) > 0) return
-      if (Date.now() > deadline) throw new Error("[SixbPg] No session waited on a lock within 10s.")
+      if ((row?.waiting ?? 0) >= waiters) return
+      if (Date.now() > deadline) {
+        throw new Error(`[SixbPg] ${waiters} sessions did not wait on a lock within 10s.`)
+      }
     }
   } finally {
     await sql.end()

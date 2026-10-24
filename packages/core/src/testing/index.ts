@@ -49,6 +49,7 @@ export {
 } from "./artifact-storage-contract"
 export {
   type AuthStorageContractSuiteOptions,
+  type AuthUserHold,
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"
 export {
