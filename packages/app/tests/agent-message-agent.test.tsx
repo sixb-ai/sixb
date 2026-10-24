@@ -63,9 +63,22 @@ describe("a message the Agent sends a child", () => {
     expect(view.container.textContent).not.toContain("message_agent")
   })
 
-  test("says which child it is messaging while the call runs", () => {
-    const tool: NormalizedTool = { toolName: "message_agent", state: "input-available", input }
+  // Removal proof: drop the output-error branch of describeMessageAgent; a refused message reads
+  // as one still being sent. Drop the empty-key branch; the label reads "Messaging ".
+  test("says which child it is messaging, that it told it, or that it could not", () => {
+    const label = (tool: NormalizedTool) => latestWorkLabel([{ kind: "tool", tool }])
 
-    expect(latestWorkLabel([{ kind: "tool", tool }])).toBe("Messaging compare-suppliers")
+    expect(label({ toolName: "message_agent", state: "input-streaming", input: {} })).toBe(
+      "Writing to a sub-agent"
+    )
+    expect(label({ toolName: "message_agent", state: "input-available", input })).toBe(
+      "Messaging compare-suppliers"
+    )
+    expect(label({ toolName: "message_agent", state: "output-available", input })).toBe(
+      "Told compare-suppliers"
+    )
+    expect(
+      label({ toolName: "message_agent", state: "output-error", input, errorText: "Ended." })
+    ).toBe("Could not message compare-suppliers")
   })
 })
