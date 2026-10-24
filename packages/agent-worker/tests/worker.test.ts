@@ -7763,8 +7763,9 @@ describe("AgentWorker", () => {
   })
 
   test("delegates to a tier's model", async () => {
-    // Removal proof: drop the tier branch from SubagentCoordinator.resolveModel; the tier is
-    // looked up as a model reference and the spawn fails.
+    // Removal proofs: drop the tier branch from SubagentCoordinator.resolveModel; the tier is
+    // looked up as a model reference and the spawn fails. Drop `tier` from childSpec; the child
+    // no longer says which tier it runs on.
     let childRunId = ""
     const parentCalls: LanguageModelRequest[] = []
     const heavyModel = new WorkerTestModel({
@@ -7805,7 +7806,10 @@ describe("AgentWorker", () => {
       expect(parent.status).toBe("succeeded")
       expect(child).toMatchObject({
         status: "succeeded",
-        spec: { model: { provider: "gateway", modelId: "anthropic/claude-opus-5.5" } },
+        spec: {
+          model: { provider: "gateway", modelId: "anthropic/claude-opus-5.5" },
+          tier: "heavy",
+        },
       })
 
       // Only configured tiers are offered, ahead of the exact references.

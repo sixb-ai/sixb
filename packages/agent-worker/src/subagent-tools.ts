@@ -786,7 +786,7 @@ export class SubagentCoordinator {
       : undefined
     const runId = createSubagentRunId(this.parentRun.id, key)
     const specWith = (files: readonly SubagentRunFile[] | undefined) =>
-      this.childSpec({ task, model, reasoning, files })
+      this.childSpec({ task, model, tier: model.tier, reasoning, files })
 
     // One admission at a time: only this turn adds children to it, so admission's answer is known
     // before any file is read, and a refused spawn reads and stores none.
@@ -897,6 +897,7 @@ export class SubagentCoordinator {
     const spec = this.childSpec({
       task: paused.spec.task,
       model: paused.spec.model,
+      tier: paused.spec.tier,
       reasoning: paused.spec.reasoning,
       files: paused.spec.files,
     })
@@ -921,10 +922,11 @@ export class SubagentCoordinator {
   private childSpec(input: {
     readonly task: string
     readonly model: LanguageModelRef
+    readonly tier: LanguageModelTier | undefined
     readonly reasoning: AgentReasoning | undefined
     readonly files: readonly SubagentRunFile[] | undefined
   }): SubagentRunSpec {
-    const { task, model, reasoning, files } = input
+    const { task, model, tier, reasoning, files } = input
     const { approvalMode, timeZone, locale } = this.parentRun.spec ?? {}
     return {
       model: { provider: model.provider, modelId: model.modelId },
@@ -932,6 +934,7 @@ export class SubagentCoordinator {
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
       maxSteps: this.context.defaultMaxSteps,
       deadline: this.parentDeadline.toISOString(),
+      ...(tier === undefined ? {} : { tier }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
       ...(timeZone === undefined ? {} : { timeZone }),
