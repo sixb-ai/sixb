@@ -4,6 +4,13 @@
 paths. The selected reader holds its traversal-budget probe and terminal statements on one WAL
 snapshot. SQL must filter by those relations before ranking or limiting results.
 
+A conditional scope needs no traversal: `_sixb_scope_objects` keeps an object of a conditioned type
+while its condition matches, and `_sixb_scope_links` a link while each conditioned endpoint is such an
+object. Both are `NOT MATERIALIZED`, so statements keep their index seeks and `LIMIT`. A statement
+that reads one type (`start`, `list` of one type, `getByPrimaryId`) reads the stored table with that
+type's own condition instead: the disjunction over every conditioned type would keep unconditioned
+types off covering indexes and the condition out of reach of an index.
+
 SQLite flattens CTEs. Expose identity columns from the grant/visible relation and put authorized
 parents before indexed lookups with `CROSS JOIN`; exposing stored identities can cause a full
 grant scan per traversed edge. The query-plan regression test checks those lookups.

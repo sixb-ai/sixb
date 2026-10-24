@@ -26,6 +26,7 @@ import {
   compileObjectQuery,
   type SqliteObjectQuerySource,
   type SqliteValue,
+  sqliteObjectsOfType,
 } from "./query-compiler"
 import type { SqliteSelectedObjectReadSource } from "./read-scope"
 import {
@@ -150,10 +151,10 @@ export class SqliteObjectReader {
     primaryId: string
   }): ObjectRow | null {
     const source = this.source
-    const objectsTable = source.objectsTable
+    const objects = sqliteObjectsOfType(source, params.objectTypeId)
     const statement = source.wrapStatement(
-      `SELECT * FROM ${objectsTable} WHERE project_id = ? AND object_type_id = ? AND primary_id = ?`,
-      [params.projectId, params.objectTypeId, params.primaryId]
+      `SELECT * FROM ${objects.table} WHERE project_id = ? AND object_type_id = ? AND primary_id = ? ${objects.filter}`,
+      [params.projectId, params.objectTypeId, params.primaryId, ...objects.args]
     )
     const row = this.db.query(statement.sql).get(...statement.args) as DatabaseRow | null
 
@@ -429,17 +430,19 @@ export class SqliteObjectReader {
     total: number
   } {
     const source = this.source
-    let query = `SELECT * FROM ${source.objectsTable} WHERE project_id = ?`
-    const args: (string | number | null)[] = [params.projectId]
+    const typed =
+      typeof params.objectTypeId === "string"
+        ? sqliteObjectsOfType(source, params.objectTypeId)
+        : { table: source.objectsTable, filter: "", args: [] }
+    let query = `SELECT * FROM ${typed.table} WHERE project_id = ?`
+    const args: SqliteValue[] = [params.projectId]
 
-    if (params.objectTypeId) {
-      if (typeof params.objectTypeId === "string") {
-        query += " AND object_type_id = ?"
-        args.push(params.objectTypeId)
-      } else {
-        query += ` AND object_type_id IN (${params.objectTypeId.map(() => "?").join(", ")})`
-        args.push(...params.objectTypeId)
-      }
+    if (typeof params.objectTypeId === "string") {
+      query += ` AND object_type_id = ? ${typed.filter}`
+      args.push(params.objectTypeId, ...typed.args)
+    } else if (params.objectTypeId !== undefined) {
+      query += ` AND object_type_id IN (${params.objectTypeId.map(() => "?").join(", ")})`
+      args.push(...params.objectTypeId)
     }
 
     if (params.primaryIdPrefix) {
