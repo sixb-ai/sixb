@@ -256,19 +256,26 @@ export async function listTurnApprovals(
 
 /**
  * The mode a resumed turn runs with: the paused turn's, raised only by "Always allow" on one of its
- * own calls. A choice made elsewhere in the thread never reaches it, and nothing lowers it.
+ * own calls, and lowered to the requester's choice in the thread when that is stricter. A user who
+ * tightens the mode while a turn waits gets it at the resume; a looser choice never reaches it.
  */
 export function resumedApprovalMode(
   paused: AgentApprovalMode,
-  approvals: readonly AgentApprovalRecord[]
+  approvals: readonly AgentApprovalRecord[],
+  /** The requester's own choice in the thread, `null` when they made none. */
+  chosen: AgentApprovalMode | null
 ): AgentApprovalMode {
-  return approvals.reduce<AgentApprovalMode>(
+  const raised = approvals.reduce<AgentApprovalMode>(
     (mode, { raisedMode }) =>
       raisedMode !== undefined && APPROVAL_MODE_RANK[raisedMode] > APPROVAL_MODE_RANK[mode]
         ? raisedMode
         : mode,
     paused
   )
+
+  return chosen !== null && APPROVAL_MODE_RANK[chosen] < APPROVAL_MODE_RANK[raised]
+    ? chosen
+    : raised
 }
 
 /**

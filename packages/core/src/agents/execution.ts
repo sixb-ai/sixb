@@ -576,7 +576,12 @@ export function createAgentRuntime<
 
       const approvalMode = resumedApprovalMode(
         agentRunApprovalMode(run),
-        await listTurnApprovals(agents, { projectId: runtime.projectId, runId: run.id })
+        await listTurnApprovals(agents, { projectId: runtime.projectId, runId: run.id }),
+        await agents.approvalModes.getForThread({
+          projectId: runtime.projectId,
+          threadId: run.threadId,
+          principal,
+        })
       )
       const resumed = await resumeAgentTurn(runtime, execution, models?.language, run, {
         approvalMode,
