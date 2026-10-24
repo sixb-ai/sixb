@@ -68,8 +68,7 @@ function bindPredicate(
 
 // Without a user, a predicate is rewritten into a constant built from its own property, because
 // the query IR has no constant predicate. Comparing with a reserved user id instead would be
-// unsafe: auth strategies choose user ids, so any id could one day name a real user. When object
-// policies (#185) add explicit constant predicates to the IR, they can replace these rewrites.
+// unsafe: auth strategies choose user ids, so any id could one day name a real user.
 //
 // No property is both present and absent, so every provider evaluates that conjunction to false
 // on any row, and the disjunction to true.
