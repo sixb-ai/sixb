@@ -1,4 +1,9 @@
-import { createSixbError, type SixbCodedError, withFailureMessage } from "../errors/internal"
+import {
+  createSixbError,
+  type SixbCodedError,
+  type SixbErrorOptions,
+  withFailureMessage,
+} from "../errors/internal"
 import type { ReadonlyJsonValue } from "../json"
 import { UniqueValueViolationError } from "../materialization/errors"
 
@@ -13,12 +18,33 @@ export function uniqueViolationError(
 ): SixbCodedError | undefined {
   if (!(error instanceof UniqueValueViolationError)) return undefined
 
-  const coded = createSixbError("object.unique_violation", error.message, {
+  return codedUniqueViolation(error, {
     cause: error,
     details: details ?? { objectTypeId: error.objectTypeId, propertyId: error.propertyId },
   })
+}
+
+/** The same coded error for a batch item that a continue-mode commit refused. */
+export function uniqueViolationItemError(item: UniqueViolation): SixbCodedError {
+  return codedUniqueViolation(item, {
+    details: { objectTypeId: item.objectTypeId, propertyId: item.propertyId },
+  })
+}
+
+interface UniqueViolation {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly message: string
+}
+
+function codedUniqueViolation(
+  violation: UniqueViolation,
+  options: SixbErrorOptions
+): SixbCodedError {
+  const coded = createSixbError("object.unique_violation", violation.message, options)
+
   return withFailureMessage(
     coded,
-    `Property '${error.objectTypeId}.${error.propertyId}' is unique.`
+    `Property '${violation.objectTypeId}.${violation.propertyId}' is unique.`
   )
 }

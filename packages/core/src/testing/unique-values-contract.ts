@@ -308,11 +308,16 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
         create("e", { email: "e@example.com" }),
       ])
 
-      const message = `[Sixb] Another '${Person.id}' object already has this 'email'.`
+      const refused = {
+        code: "unique_violation" as const,
+        message: `[Sixb] Another '${Person.id}' object already has this 'email'.`,
+        objectTypeId: Person.id,
+        propertyId: "email",
+      }
       expect(result.outcomes.map((outcome) => (outcome.ok ? "ok" : outcome.error))).toEqual([
         "ok",
-        { code: "validation", message },
-        { code: "validation", message },
+        refused,
+        refused,
         "ok",
       ])
       expect(await emails(storage, ["b", "c", "d", "e"])).toEqual([

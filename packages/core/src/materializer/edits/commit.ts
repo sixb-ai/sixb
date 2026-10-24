@@ -1,9 +1,11 @@
 import {
   MaterializationConflictError,
   MaterializationValidationError,
+  UniqueValueViolationError,
 } from "../../materialization/errors"
 import type {
   EditCommitResult,
+  MaterializationItemError,
   OntologyEditCommit,
   OntologyEditOperation,
   OntologyMaterializationOrigin,
@@ -322,7 +324,7 @@ function applyOneEditOperation(
   } catch (error) {
     if (!isRecoverableEditValidation(command.input, error)) throw error
     undoEditJournal(journal)
-    return { id: operation.id, ok: false, error: { code: "validation", message: error.message } }
+    return { id: operation.id, ok: false, error: itemError(error) }
   }
 }
 
@@ -356,11 +358,11 @@ function applyEditOperationGroup(
     } catch (error) {
       if (!isRecoverableEditValidation(command.input, error)) throw error
       undoEditJournal(journal)
-      return failedEditGroup(group, error.message)
+      return failedEditGroup(group, itemError(error))
     }
     if (!outcome.ok) {
       undoEditJournal(journal)
-      return failedEditGroup(group, outcome.error.message)
+      return failedEditGroup(group, outcome.error)
     }
     applied.push(outcome)
   }
@@ -372,7 +374,7 @@ function applyEditOperationGroup(
     } catch (error) {
       if (!isRecoverableEditValidation(command.input, error)) throw error
       undoEditJournal(journal)
-      return failedEditGroup(group, error.message)
+      return failedEditGroup(group, itemError(error))
     }
   }
   return applied
@@ -381,13 +383,22 @@ function applyEditOperationGroup(
 /** Reports every id in a rolled-back group as failed, so no position looks applied. */
 function failedEditGroup(
   group: readonly OntologyEditOperation[],
-  message: string
+  error: MaterializationItemError
 ): OntologyOperationOutcome[] {
-  return group.map((operation) => ({
-    id: operation.id,
-    ok: false as const,
-    error: { code: "validation" as const, message },
-  }))
+  return group.map((operation) => ({ id: operation.id, ok: false as const, error }))
+}
+
+/** Keeps a unique collision recognizable, as the same refusal is from a single write. */
+function itemError(error: MaterializationValidationError): MaterializationItemError {
+  if (error instanceof UniqueValueViolationError) {
+    return {
+      code: "unique_violation",
+      message: error.message,
+      objectTypeId: error.objectTypeId,
+      propertyId: error.propertyId,
+    }
+  }
+  return { code: "validation", message: error.message }
 }
 
 function isRecoverableEditValidation(
