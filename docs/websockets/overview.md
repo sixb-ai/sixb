@@ -108,6 +108,8 @@ Subscribe to one run:
 
 The server sends retained output followed by live `record` frames, plus a `run.snapshot` frame with the current run. Supply `afterCursor` to resume. If retained output no longer covers that cursor, the server resumes from the earliest available output and acknowledges a null cursor.
 
+A sub-agent's run streams the same way to the owner and participants of its conversation, its `run.snapshot` with `kind: "subagent"` and the `parentRunId` of the turn it works under. Observers poll instead.
+
 Send `replay` with a run ID, optional cursor, and `limit` to read a bounded page. `subscribe.activity` selects project agent activity instead of an individual run. A socket has one active subscription.
 
 React apps can use `useAgentRunStream` from `@sixb/client/hooks` instead of handling these messages directly.
