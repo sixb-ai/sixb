@@ -98,10 +98,7 @@ export function SessionsSection() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{allMessages.common.cancel}</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-white hover:bg-destructive/90"
-                onClick={() => signOutEverywhere.mutate({})}
-              >
+              <AlertDialogAction variant="destructive" onClick={() => signOutEverywhere.mutate({})}>
                 {messages.signOutEverywhere}
               </AlertDialogAction>
             </AlertDialogFooter>

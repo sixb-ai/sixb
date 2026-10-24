@@ -43,6 +43,7 @@ export {
 } from "./pages/section-page"
 export { SettingsDevelopersPage } from "./pages/settings/developers"
 export { SettingsMembersPage } from "./pages/settings/members"
+export { SettingsMemoryPage } from "./pages/settings/memory"
 export { SettingsPersonalPage } from "./pages/settings/personal"
 export { SettingsServiceAccountsPage } from "./pages/settings/service-accounts"
 export { SectionsProvider } from "./sections/sections"

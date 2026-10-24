@@ -65,3 +65,24 @@ export class AgentRequestError extends Error {
     super(message)
   }
 }
+
+export type AgentMemoryErrorCode =
+  | "invalid_repo"
+  | "invalid_save"
+  | "not_allowed"
+  | "storage_unavailable"
+
+/**
+ * Raised by `sixb.agent.memory`. Callers branch on `code`; the message says what to change, so the
+ * HTTP layer can hand it to the Agent as it is.
+ */
+export class AgentMemoryError extends Error {
+  readonly name = "AgentMemoryError"
+
+  constructor(
+    readonly code: AgentMemoryErrorCode,
+    message: string
+  ) {
+    super(message)
+  }
+}

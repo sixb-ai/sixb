@@ -15,6 +15,13 @@ const SECTION_TOASTER = "sixb-sections"
 export const notify = {
   success: (message: string) => toast.success(message, { toasterId: SECTION_TOASTER }),
   error: (message: string) => toast.error(message, { toasterId: SECTION_TOASTER }),
+  /** A done change with a way to take it back, such as a deleted entry, shown long enough to. */
+  undoable: (message: string, undo: { readonly label: string; readonly onUndo: () => void }) =>
+    toast.success(message, {
+      toasterId: SECTION_TOASTER,
+      duration: 8000,
+      action: { label: undo.label, onClick: undo.onUndo },
+    }),
 }
 
 export interface SectionPageProps {

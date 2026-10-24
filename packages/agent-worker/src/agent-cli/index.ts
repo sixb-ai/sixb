@@ -10,6 +10,7 @@ import {
   runInstanceCli,
   writeText,
 } from "@sixb/cli-core"
+import { memory } from "./commands/memory"
 import { context, doctor } from "./commands/system"
 
 async function main(args: readonly string[]): Promise<void> {
@@ -20,6 +21,7 @@ async function main(args: readonly string[]): Promise<void> {
   }
   if (command === "doctor") return doctor(rest, sandboxMode())
   if (command === "context") return context(rest)
+  if (command === "memory") return memory(rest, sandboxMode())
   if (!isInstanceCommand(command)) fail(`Unknown command '${command}'. Run 'sixb --help'.`)
 
   await runInstanceCli({ args, mode: sandboxMode() })

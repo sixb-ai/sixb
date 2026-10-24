@@ -22,6 +22,7 @@ export interface AgentReference {
   readonly kind: "agent"
   readonly usage: AgentUsageReference
   readonly threads: AgentThreadsReference
+  readonly memory: AgentMemoryReference
 }
 
 /** Project-wide AI accounting and limit capability, independent of permission to run the Agent. */
@@ -32,6 +33,11 @@ export interface AgentUsageReference {
 /** Every user's conversations with the Agent, as `can.observe(agent.threads)` reads them. */
 export interface AgentThreadsReference {
   readonly kind: "agentThreads"
+}
+
+/** The project's shared Agent memory, which every conversation reads. */
+export interface AgentMemoryReference {
+  readonly kind: "agentMemory"
 }
 
 /** Public metadata for the project's conversational Agent. */

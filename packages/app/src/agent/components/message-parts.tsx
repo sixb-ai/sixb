@@ -1,11 +1,12 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, FileX, Wrench } from "lucide-react"
+import { BookmarkCheck, ChevronRight, FileX, Wrench } from "lucide-react"
 import { memo, useState } from "react"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { latestWorkLabel } from "../activity-label"
 import { ArtifactCards } from "../artifact-card"
 import { generatedMedia } from "../bash/bash-tool-view"
+import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedPart, NormalizedTool } from "../parts"
@@ -80,6 +81,10 @@ export function AssistantBody({
   blocks.push(<AnswerToolViews key="answer-tools" parts={parts} />)
   const artifacts = turnArtifacts(parts)
   if (artifacts.length > 0) blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} />)
+  // Saving is work the reply keeps quiet about; what was remembered is the user's to see.
+  savedMemories(parts).forEach((save, index) => {
+    blocks.push(<SavedToMemory key={`memory:${index}`} {...save} />)
+  })
   // Said where the card would be, whatever the answer claims. A live turn may still retry.
   if (!live) {
     for (const title of unpublishedTitles(parts)) {
@@ -88,6 +93,22 @@ export function AssistantBody({
   }
 
   return <div className="flex flex-col gap-3">{blocks}</div>
+}
+
+function SavedToMemory({ repo, message }: { repo: "user" | "project"; message: string }) {
+  const messages = useAgentMessages().memory
+  return (
+    <p
+      className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground"
+      role="status"
+    >
+      <BookmarkCheck className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="shrink-0">{messages.saved(repo === "project")}</span>
+      <span className="min-w-0 truncate text-muted-foreground/70" title={message}>
+        · {message}
+      </span>
+    </p>
+  )
 }
 
 function NotPublished({ title }: { title: string }) {

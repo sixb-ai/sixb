@@ -119,6 +119,10 @@ export const OPENAPI_TAGS = {
     name: "Agent Runs",
     description: "Agent run state and cancellation",
   },
+  agentMemory: {
+    name: "Agent Memory",
+    description: "What the Agent remembers across conversations",
+  },
   files: {
     name: "Files",
     description: "File uploads and file references",

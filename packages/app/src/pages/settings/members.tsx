@@ -48,7 +48,6 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Ban,
@@ -557,10 +556,7 @@ export function SettingsMembersPage() {
               <AlertDialogFooter>
                 <AlertDialogCancel>{allMessages.common.cancel}</AlertDialogCancel>
                 <AlertDialogAction
-                  className={cn(
-                    pendingAction.type === "suspend" &&
-                      "bg-destructive text-white hover:bg-destructive/90"
-                  )}
+                  variant={pendingAction.type === "suspend" ? "destructive" : "default"}
                   onClick={confirmAction}
                 >
                   {pendingAction.type === "suspend"

@@ -109,6 +109,8 @@ const CLI_API_ROUTES = [
   "POST /api/models/audio/transcriptions",
   "GET /api/ai/model-calls/:callId/files",
   "GET /api/ai/model-calls/:callId/files/content",
+  "GET /api/agent-memory/:repo",
+  "POST /api/agent-memory/:repo/revisions",
 ] as const
 
 const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([

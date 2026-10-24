@@ -34,7 +34,8 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import type { AgentContextBudget } from "./context-budget"
-import { prepareAgentConversationContext } from "./context-compaction"
+import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
+import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
 import { assertExecutionOwned, isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -45,10 +46,12 @@ import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
   AGENT_ARTIFACTS_MANIFEST,
+  type PrepareAgentSandboxApiContextInput,
   prepareAgentSandboxApiContext,
 } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
+import { MEMORY_SKILL } from "./skills/built-in"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import {
   NO_TOOL_ATTACHMENTS,
@@ -141,6 +144,11 @@ export async function createConversationAgentEnvironment(
       })
     : ephemeralRunSandbox({ context })
   let environment: AgentExecutionEnvironment | undefined
+  // The prompt shows memory as of the thread's start or its latest compaction (see
+  // loadConversationMemory).
+  const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
+  const loadMemory: LoadConversationMemory = (checkpoint) =>
+    loadConversationMemory({ sixb: context.sixb, asOf: checkpoint?.createdAt ?? threadCreatedAt })
   try {
     const ontologyDocs = renderRunOntologyDocs(context)
     // Resolve application access before any compaction model call. Once acquired, this
@@ -162,15 +170,21 @@ export async function createConversationAgentEnvironment(
             },
           },
           frameworkTools: input.frameworkTools,
+          loadMemory,
         })
       : undefined
-    const [messages, inlineImages] = await Promise.all([
+    const [messages, inlineImages, memory] = await Promise.all([
       prepared?.threadContext.retainedMessages ??
         input.messages ??
         context.storage.agents.messages
           .list({ projectId: context.id, threadId: run.threadId, order: "asc" })
           .then((history) => history.messages),
       modelSupportsInlineImages(plan.model),
+      prepared
+        ? prepared.memory
+        : context.storage.agents.checkpoints
+            .getLatest({ projectId: context.id, threadId: run.threadId })
+            .then(loadMemory),
     ])
     const attachmentContext = await prepareAgentAttachments({
       projectId: context.id,
@@ -209,6 +223,7 @@ export async function createConversationAgentEnvironment(
       attachmentContext,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
+      ...(memory ? { memory } : {}),
       onDetachedTeardown: input.onDetachedTeardown,
     })
     return { ...environment, threadContext: prepared?.threadContext }
@@ -378,6 +393,8 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
    * runs return text.
    */
   readonly publishing?: { readonly owner: Principal; readonly executionToken: string }
+  /** A conversation's memory: installed in the sandbox and shown in the prompt. */
+  readonly memory?: ConversationMemory
 }
 
 /**
@@ -486,9 +503,11 @@ async function startAgentEnvironment(
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
     attachmentContext,
-    skills: plan.skills,
+    // The memory section names the memory skill; other runs never see it.
+    skills: input.memory ? [...plan.skills, MEMORY_SKILL] : plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
     ...(installedArtifacts ? { artifacts: installedArtifacts } : {}),
+    ...(input.memory ? { memory: input.memory.repos } : {}),
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -529,6 +548,7 @@ async function startAgentEnvironment(
         requester: context.requester,
       }),
       ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
+      ...(input.memory ? { memory: input.memory.prompt } : {}),
     })
   } catch (error) {
     // Provisioning has started: give back what it acquires, or the sandbox outlives the run.
@@ -627,6 +647,7 @@ interface ProvisionSandboxInput {
   readonly ontologyFiles: RenderedOntologyDocs["files"]
   /** The conversation's artifacts, read while the sandbox starts. */
   readonly artifacts?: Promise<MaterializedArtifacts>
+  readonly memory?: PrepareAgentSandboxApiContextInput["memory"]
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredRunSandbox> {
@@ -645,6 +666,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredR
       skills,
       ontologyFiles,
       ...(input.artifacts ? { artifacts: await input.artifacts } : {}),
+      ...(input.memory ? { memory: input.memory } : {}),
     })
     await assertAgentRuntimeProfile({
       sandbox,

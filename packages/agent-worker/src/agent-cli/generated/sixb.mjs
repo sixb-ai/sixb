@@ -1916,8 +1916,296 @@ function createInstanceApiClient(mode) {
     unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and gateway." : "Run 'sixb status' to verify the current profile."
   });
 }
+// src/agent-cli/commands/memory.ts
+import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
+import { dirname as dirname3, join as join3 } from "node:path";
+
+// src/agent-runtime/memory.ts
+import { createHash } from "node:crypto";
+var AGENT_MEMORY_MANIFEST = "context/memory.json";
+var AGENT_MEMORY_ENTRY = "MEMORY.md";
+var AGENT_MEMORY_STARTER = `# Memory
+
+`;
+function agentMemoryFileHash(contents) {
+  return createHash("sha256").update(contents).digest("hex");
+}
+
+// src/agent-cli/commands/memory.ts
+var HELP = `Usage:
+  sixb memory save <repo> -m <message>   Save local edits as one revision
+  sixb memory pull [repo]                Bring the local copy up to the latest revision
+
+<repo> is user or project. Files live under $SIXB_MEMORY_DIR/<repo>/.
+
+A save is rejected for files another conversation changed since they were loaded. Their
+current contents are written next to yours as <file>.theirs: merge each into its file, delete
+it, then save again. Changes others made to other files are brought in by save and pull.`;
+var THEIRS = ".theirs";
+var CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again.";
+async function memory(args, mode) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || rest.some(isHelp))
+    return writeText(HELP);
+  const local = localMemory();
+  if (sub === "save")
+    return save(local, rest, mode);
+  if (sub === "pull")
+    return pull(local, rest, mode);
+  fail(`Unknown memory command '${sub}'. Run 'sixb memory --help'.`);
+}
+async function save(local, args, mode) {
+  const { repo, message } = parseSaveArgs(args);
+  const manifest = await local.readManifest();
+  const loaded = manifest.repos[repo];
+  if (!loaded)
+    fail(`Memory repo '${repo}' is not installed.`, "invalid_arguments", `Run 'sixb memory pull ${repo}'.`);
+  const files = await local.readRepo(repo);
+  const unresolved = [...files.keys()].filter((path) => path.endsWith(THEIRS));
+  if (unresolved.length > 0) {
+    fail(`Resolve ${unresolved.join(", ")} first.`, "unresolved_conflicts", CONFLICT_HINT);
+  }
+  const changes = [...new Set([...files.keys(), ...Object.keys(loaded.files)])].sort().flatMap((path) => {
+    const contents = files.get(path);
+    const changed = (contents === undefined ? undefined : agentMemoryFileHash(contents)) !== loaded.files[path];
+    return changed ? [{ path, contents: contents ?? null }] : [];
+  });
+  if (changes.length === 0) {
+    return writeJson({
+      repo,
+      saved: false,
+      changed: [],
+      hint: "No file changed since it was loaded."
+    });
+  }
+  const api = createInstanceApiClient(mode);
+  let saved;
+  try {
+    saved = asRecord2(await api.post(`/api/agent-memory/${repo}/revisions`, {
+      baseRevision: loaded.revision,
+      message,
+      changes
+    }));
+  } catch (error) {
+    if (!(error instanceof CliError) || error.body.status !== 409)
+      throw error;
+    const { revision, conflicts } = await update(local, repo, manifest, await fetchRepo(api, repo));
+    process.exitCode = 1;
+    return writeJson({ repo, saved: false, revision, conflicts, hint: CONFLICT_HINT });
+  }
+  const savedFiles = { ...loaded.files };
+  for (const change of changes) {
+    if (change.contents === null)
+      delete savedFiles[change.path];
+    else
+      savedFiles[change.path] = agentMemoryFileHash(change.contents);
+  }
+  const after = {
+    repos: { ...manifest.repos, [repo]: { ...loaded, files: savedFiles } }
+  };
+  const { revision, conflicts } = await update(local, repo, after, await fetchRepo(api, repo));
+  const warnings = Array.isArray(saved.warnings) ? saved.warnings : [];
+  writeJson({
+    repo,
+    saved: true,
+    revision,
+    changed: changes.map((change) => change.path),
+    ...warnings.length > 0 ? { warnings } : {},
+    ...conflicts.length > 0 ? { conflicts, hint: CONFLICT_HINT } : {}
+  });
+}
+async function pull(local, args, mode) {
+  if (args.length > 1)
+    fail("Invalid arguments for 'memory pull'.");
+  const manifest = await local.readManifest();
+  const repos = args[0] === undefined ? installedRepos(manifest) : [parseRepo(args[0])];
+  if (repos.length === 0) {
+    fail("No memory repo is installed.", "invalid_arguments", "Run 'sixb memory pull user'.");
+  }
+  const api = createInstanceApiClient(mode);
+  let current = manifest;
+  for (const repo of repos) {
+    const result = await update(local, repo, current, await fetchRepo(api, repo));
+    current = result.manifest;
+    writeJson({
+      repo,
+      revision: result.revision,
+      updated: result.updated,
+      conflicts: result.conflicts,
+      ...result.conflicts.length > 0 ? { hint: CONFLICT_HINT } : {}
+    });
+  }
+}
+async function update(local, repo, manifest, remote) {
+  const base = manifest.repos[repo]?.files ?? {};
+  const files = await local.readRepo(repo);
+  const updated = [];
+  const conflicts = [];
+  for (const path of [
+    ...new Set([...files.keys(), ...remote.files.keys(), ...Object.keys(base)])
+  ].sort()) {
+    if (path.endsWith(THEIRS))
+      continue;
+    const mine = files.get(path);
+    const theirs = remote.files.get(path);
+    const mineHash = mine === undefined ? undefined : agentMemoryFileHash(mine);
+    const theirsHash = theirs === undefined ? undefined : agentMemoryFileHash(theirs);
+    if (theirsHash === base[path] || theirsHash === mineHash)
+      continue;
+    if (mineHash === base[path]) {
+      await local.write(repo, path, theirs);
+      updated.push(path);
+    } else if (theirs === undefined) {
+      conflicts.push({ path, theirs: null });
+    } else {
+      await local.write(repo, `${path}${THEIRS}`, theirs);
+      conflicts.push({ path, theirs: `${path}${THEIRS}` });
+    }
+  }
+  if (!remote.files.has(AGENT_MEMORY_ENTRY) && !(await local.readRepo(repo)).has(AGENT_MEMORY_ENTRY)) {
+    await local.write(repo, AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER);
+  }
+  const next = {
+    repos: {
+      ...manifest.repos,
+      [repo]: {
+        revision: remote.revision,
+        files: Object.fromEntries([...remote.files].map(([path, contents]) => [path, agentMemoryFileHash(contents)]))
+      }
+    }
+  };
+  await local.writeManifest(next);
+  return { manifest: next, revision: remote.revision, updated, conflicts };
+}
+async function fetchRepo(api, repo) {
+  const body = asRecord2(await api.get(`/api/agent-memory/${repo}`));
+  const files = Array.isArray(body.files) ? body.files.map(asRecord2) : null;
+  if (typeof body.revision !== "number" || !files?.every((file) => typeof file.path === "string" && typeof file.contents === "string")) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid memory repo." }, EXIT_API);
+  }
+  return {
+    revision: body.revision,
+    files: new Map(files.map((file) => [String(file.path), String(file.contents)]))
+  };
+}
+function localMemory() {
+  const root = process.env.SIXB_MEMORY_DIR;
+  const contextDir = process.env.SIXB_CONTEXT_DIR;
+  if (!root || !contextDir) {
+    fail("Agent memory is not available in this run.", "runtime_unavailable");
+  }
+  const manifestPath = join3(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"));
+  const fileOf = (repo, path) => join3(root, repo, ...path.split("/"));
+  return {
+    async readManifest() {
+      let text;
+      try {
+        text = await readFile3(manifestPath, "utf8");
+      } catch (error) {
+        if (isFileError(error, "ENOENT"))
+          return { repos: {} };
+        throw error;
+      }
+      try {
+        return parseManifest(JSON.parse(text));
+      } catch {
+        fail(`Memory manifest '${manifestPath}' is not valid.`, "invalid_json");
+      }
+    },
+    async writeManifest(manifest) {
+      await mkdir2(dirname3(manifestPath), { recursive: true });
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}
+`);
+    },
+    async readRepo(repo) {
+      const files = new Map;
+      const walk = async (directory, prefix) => {
+        let entries;
+        try {
+          entries = await readdir(directory);
+        } catch (error) {
+          if (isFileError(error, "ENOENT"))
+            return;
+          throw error;
+        }
+        for (const name of entries) {
+          const path = prefix ? `${prefix}/${name}` : name;
+          const stats = await lstat(join3(directory, name));
+          if (stats.isDirectory())
+            await walk(join3(directory, name), path);
+          else if (stats.isFile())
+            files.set(path, await readFile3(join3(directory, name), "utf8"));
+          else
+            fail(`Memory file '${repo}/${path}' is not a regular file.`);
+        }
+      };
+      await walk(join3(root, repo), "");
+      return files;
+    },
+    async write(repo, path, contents) {
+      const file = fileOf(repo, path);
+      if (contents === undefined) {
+        await rm2(file, { force: true });
+        return;
+      }
+      await mkdir2(dirname3(file), { recursive: true });
+      await writeFile(file, contents);
+    }
+  };
+}
+function parseSaveArgs(args) {
+  const positionals = [];
+  let message;
+  for (let index = 0;index < args.length; index++) {
+    const argument = args[index] ?? "";
+    if (argument === "-m" || argument === "--message") {
+      if (message !== undefined)
+        fail(`${argument} may only be provided once.`);
+      message = args[++index];
+      if (!message)
+        fail(`${argument} requires a value.`);
+    } else if (argument.startsWith("-")) {
+      fail(`Unknown memory save option '${argument}'.`);
+    } else {
+      positionals.push(argument);
+    }
+  }
+  if (positionals.length !== 1)
+    fail("Invalid arguments for 'memory save'.");
+  if (message === undefined || message.trim().length === 0) {
+    fail("memory save requires -m <what you learned>.");
+  }
+  return { repo: parseRepo(positionals[0] ?? ""), message };
+}
+function parseRepo(value) {
+  if (value === "user" || value === "project")
+    return value;
+  fail(`Unknown memory repo '${value}'. Use 'user' or 'project'.`);
+}
+function installedRepos(manifest) {
+  return ["user", "project"].filter((repo) => manifest.repos[repo] !== undefined);
+}
+function parseManifest(value) {
+  const repos = asRecord2(asRecord2(value).repos);
+  const parsed = {};
+  for (const repo of ["user", "project"]) {
+    if (repos[repo] === undefined)
+      continue;
+    const entry = asRecord2(repos[repo]);
+    const files = asRecord2(entry.files);
+    if (typeof entry.revision !== "number" || !Object.values(files).every((digest) => typeof digest === "string")) {
+      throw new Error("invalid memory manifest");
+    }
+    parsed[repo] = {
+      revision: entry.revision,
+      files
+    };
+  }
+  return { repos: parsed };
+}
+
 // src/agent-cli/commands/system.ts
-import { readFile as readFile3 } from "node:fs/promises";
+import { readFile as readFile4 } from "node:fs/promises";
 
 // src/agent-runtime/profile.ts
 var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
@@ -1951,7 +2239,7 @@ async function context(args) {
     fail("SIXB_RUN_CONTEXT is not set.");
   let text;
   try {
-    text = await readFile3(path, "utf8");
+    text = await readFile4(path, "utf8");
   } catch (error) {
     if (isFileError(error, "ENOENT"))
       fail(`Run context '${path}' does not exist.`);
@@ -1982,6 +2270,8 @@ async function main(args) {
     return doctor(rest, sandboxMode());
   if (command === "context")
     return context(rest);
+  if (command === "memory")
+    return memory(rest, sandboxMode());
   if (!isInstanceCommand(command))
     fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   await runInstanceCli({ args, mode: sandboxMode() });

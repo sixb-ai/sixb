@@ -3,6 +3,7 @@ import {
   Activity,
   AudioLines,
   BarChart3,
+  Bookmark,
   BookOpen,
   Boxes,
   ChevronRight,
@@ -69,6 +70,7 @@ const ICONS: Record<BashIcon, LucideIcon> = {
   audio: AudioLines,
   transcript: Quote,
   model: Sparkles,
+  memory: Bookmark,
   terminal: Terminal,
 }
 
@@ -105,6 +107,11 @@ export function BashToolView({ tool }: { tool: BashTool }) {
         <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
           <Icon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate font-medium">{label}</span>
+          {description.detail ? (
+            <span className="min-w-0 shrink truncate text-muted-foreground/60">
+              {description.detail}
+            </span>
+          ) : null}
           <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
         </CollapsibleTrigger>
         <CollapsibleContent>
@@ -262,7 +269,7 @@ function BashResult({
     ) : null
   }
 
-  if (intent.kind === "generic" || intent.kind === "compound") {
+  if (intent.kind === "generic" || intent.kind === "compound" || intent.kind === "memory") {
     return <GenericCommandView parsed={parsed} command={command} />
   }
   if (intent.kind === "read-skill") return <StructuredDataView parsed={parsed} />

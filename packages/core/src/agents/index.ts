@@ -160,6 +160,7 @@ export type { AgentToolCatalog } from "./tool-catalog"
 export { isAgentToolResult } from "./tool-result"
 export type {
   AgentDescriptor,
+  AgentMemoryReference,
   AgentReasoning,
   AgentReference,
   AgentThreadsReference,

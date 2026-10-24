@@ -605,9 +605,113 @@ export interface AgentContextCheckpointStore {
   }): Promise<AgentContextCheckpointRecord | null>
 }
 
+// ── Memory ──────────────────────────────────────────────────────────────────────────────────────
+
+/** One file of a memory repo, at its path from the repo root. */
+export interface AgentMemoryFile {
+  readonly path: string
+  readonly contents: string
+}
+
+/** A memory repo as of its latest revision. */
+export interface AgentMemoryRepoRecord {
+  /** 0 before the first save. */
+  readonly revision: number
+  /** Ordered by path. */
+  readonly files: readonly AgentMemoryFile[]
+}
+
+/** One change of a save: the file's new contents, or `null` to delete it. */
+export interface AgentMemoryChange {
+  readonly path: string
+  readonly contents: string | null
+}
+
+export interface SaveAgentMemoryInput {
+  readonly projectId: string
+  /** `user:<userId>` or `project`. */
+  readonly repoId: string
+  /** The revision the caller loaded. */
+  readonly baseRevision: number
+  readonly message: string
+  readonly author: Principal
+  /** The conversation the save came from, `/agents/<threadId>`. */
+  readonly source?: string
+  readonly changes: readonly AgentMemoryChange[]
+  readonly createdAt?: Date
+}
+
+export type SaveAgentMemoryResult =
+  | { readonly saved: true; readonly revision: number }
+  | {
+      readonly saved: false
+      /** The repo's latest revision. */
+      readonly revision: number
+      /** Files in `changes` that another save changed after `baseRevision`, as they are now. */
+      readonly conflicts: readonly AgentMemoryChange[]
+    }
+
+/** One save: who made it, why, and which paths it wrote. A revision never changes. */
+export interface AgentMemoryRevisionRecord {
+  readonly revision: number
+  readonly message: string
+  readonly author: Principal
+  readonly source?: string
+  /** Ordered by path. */
+  readonly changes: readonly { readonly path: string; readonly deleted: boolean }[]
+  readonly createdAt: Date
+}
+
+export interface ListAgentMemoryRevisionsInput {
+  readonly projectId: string
+  readonly repoId: string
+  readonly limit?: number
+  readonly offset?: number
+}
+
+export interface ListAgentMemoryRevisionsResult {
+  /** Newest first. */
+  readonly revisions: readonly AgentMemoryRevisionRecord[]
+  readonly hasMore: boolean
+  readonly total: number
+}
+
+/**
+ * Memory repos as append-only revisions: a save inserts one revision and the files it wrote, and
+ * never updates a row. Paths, sizes and who may save are decided in Core before a call reaches
+ * storage.
+ */
+export interface AgentMemoryStore {
+  /**
+   * The repo at its latest revision, or with `asOf` at the latest revision saved by then, and with
+   * `revision` at the latest up to that one: revision 0 and no files when none was. File versions
+   * pruned from the history are missing from it.
+   */
+  get(input: {
+    readonly projectId: string
+    readonly repoId: string
+    readonly asOf?: Date
+    readonly revision?: number
+  }): Promise<AgentMemoryRepoRecord>
+  /**
+   * In one transaction: reports a conflict when a path in `changes` was written after
+   * `baseRevision`, or when the repo is behind `baseRevision` because it was deleted; otherwise
+   * stores the next revision. The same transaction removes file versions older than
+   * {@link AGENT_MEMORY_HISTORY_DAYS} days that are not their path's latest.
+   */
+  save(input: SaveAgentMemoryInput): Promise<SaveAgentMemoryResult>
+  listRevisions(input: ListAgentMemoryRevisionsInput): Promise<ListAgentMemoryRevisionsResult>
+  /** Deletes the repo with its history. */
+  delete(input: { readonly projectId: string; readonly repoId: string }): Promise<void>
+}
+
+/** How long a file version that is not its path's latest stays in a repo's history. */
+export const AGENT_MEMORY_HISTORY_DAYS = 90
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly runs: AgentRunStore
   readonly messages: AgentMessageStore
   readonly checkpoints: AgentContextCheckpointStore
+  readonly memory: AgentMemoryStore
 }
