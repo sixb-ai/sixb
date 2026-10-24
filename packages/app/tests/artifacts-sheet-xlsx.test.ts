@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { parseCsv, parseFormula, parseWorkbook, type Workbook } from "@sixb/core/artifacts"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
 import { formulaToA1, workbookXlsx } from "../src/artifacts/renderers/sheet/xlsx"
+import { UNZIP, unzip } from "./helpers/unzip"
 
 const workbook = (() => {
   const parsed = parseWorkbook(
@@ -79,7 +80,6 @@ const margins = sheetModel(
   )
 )
 
-const unzip = Bun.which("unzip")
 let directory = ""
 let file = ""
 
@@ -92,26 +92,12 @@ afterAll(async () => {
   await rm(directory, { recursive: true, force: true })
 })
 
-/** Runs unzip with a bound, as a child process: its output, or why it failed. */
-async function run(...args: string[]): Promise<string> {
-  const child = Bun.spawn([unzip ?? "unzip", ...args], { stdout: "pipe", stderr: "pipe" })
-  const timer = setTimeout(() => child.kill(), 10_000)
-  const [out, err, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
-  clearTimeout(timer)
-  if (code !== 0) throw new Error(`unzip ${args.join(" ")} exited ${code}: ${err || out}`)
-  return out
-}
-
-describe.skipIf(!unzip)("a workbook as .xlsx", () => {
+describe.skipIf(!UNZIP)("a workbook as .xlsx", () => {
   test("is an archive whose every entry is intact", async () => {
-    const report = await run("-t", file)
+    const report = await unzip("-t", file)
     expect(report).toContain("No errors detected")
     // Bun has CompressionStream, as browsers do: the parts are deflated, not stored.
-    expect(await run("-v", file)).toContain("Defl:N")
+    expect(await unzip("-v", file)).toContain("Defl:N")
     for (const part of [
       "[Content_Types].xml",
       "_rels/.rels",
@@ -127,7 +113,7 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
   })
 
   test("names its sheets as Excel takes them", async () => {
-    const book = await run("-p", file, "xl/workbook.xml")
+    const book = await unzip("-p", file, "xl/workbook.xml")
     expect(book).toContain('<sheet name="Summary" sheetId="1" r:id="rId1"/>')
     expect(book).toContain(
       '<sheet name="Q3  plan  draft  with a name lo" sheetId="2" r:id="rId2"/>'
@@ -135,8 +121,8 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
   })
 
   test("types each column's values in its format, and keeps what is no value as text", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet1.xml")
-    const styles = await run("-p", file, "xl/styles.xml")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet1.xml")
+    const styles = await unzip("-p", file, "xl/styles.xml")
     expect(styles).toContain('formatCode="&quot;$&quot;#,##0"')
     expect(styles).toContain('formatCode="0.0%"')
     expect(styles).toContain('formatCode="yyyy-mm-dd"')
@@ -152,19 +138,19 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
   })
 
   test("bolds the header, freezes what the sheet froze, and keeps its widths", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet1.xml")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet1.xml")
     expect(sheet).toContain('<c r="A1" s="1" t="inlineStr">')
     expect(sheet).toContain(
       '<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>'
     )
     // 145 pixels is 20 characters of Excel's default font.
     expect(sheet).toContain('<col min="1" max="1" width="20" customWidth="1"/>')
-    expect(await run("-p", file, "xl/worksheets/sheet2.xml")).not.toContain("<pane")
+    expect(await unzip("-p", file, "xl/worksheets/sheet2.xml")).not.toContain("<pane")
   })
 
   test("links web addresses, and leaves artifact addresses as text", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet1.xml")
-    const links = await run("-p", file, "xl/worksheets/_rels/sheet1.xml.rels")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet1.xml")
+    const links = await unzip("-p", file, "xl/worksheets/_rels/sheet1.xml.rels")
     expect(sheet).toContain('<hyperlinks><hyperlink ref="E2" r:id="rId1"/></hyperlinks>')
     expect(links).toContain(
       'Target="https://northline.example/q4?a=1&amp;b=2" TargetMode="External"'
@@ -174,8 +160,8 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
   })
 
   test("totals with formulas a filter in Excel keeps right, and styles compact and signed", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet3.xml")
-    const styles = await run("-p", file, "xl/styles.xml")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet3.xml")
+    const styles = await unzip("-p", file, "xl/styles.xml")
     // Under the data, bold: "Total" in the first column without one, then SUBTOTAL formulas
     // with their values. Reproduce with SUM in place of SUBTOTAL(109): Excel's filter
     // would leave the hidden rows in the total.
@@ -190,11 +176,11 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
       /<xf numFmtId="\d+" fontId="1" [^>]*applyNumberFormat="1" applyFont="1"\/>/
     )
     // A sheet without totals has no totals row.
-    expect(await run("-p", file, "xl/worksheets/sheet1.xml")).not.toContain("SUBTOTAL")
+    expect(await unzip("-p", file, "xl/worksheets/sheet1.xml")).not.toContain("SUBTOTAL")
   })
 
   test("writes checkboxes as booleans and highlights as conditional formats", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet3.xml")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet3.xml")
     expect(sheet).toContain('<c r="D2" t="b"><v>1</v></c>')
     expect(sheet).toContain('<c r="D3" t="b"><v>0</v></c>')
     expect(sheet).toContain(
@@ -208,7 +194,7 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
   })
 
   test("writes computed cells as A1 formulas, with the values the grid shows", async () => {
-    const sheet = await run("-p", file, "xl/worksheets/sheet4.xml")
+    const sheet = await unzip("-p", file, "xl/worksheets/sheet4.xml")
     expect(sheet).toMatch(/<c r="D2" s="\d+"><f>\(B2-C2\)\/B2<\/f><v>0.35<\/v><\/c>/)
     expect(sheet).toContain('<c r="D4" t="e"><f>(B4-C4)/B4</f><v>#DIV/0!</v></c>')
     expect(sheet).toMatch(/<c r="E2" s="\d+"><f>B2\/SUM\(\$B\$2:\$B\$4\)<\/f><v>0.7<\/v><\/c>/)
