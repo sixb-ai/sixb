@@ -88,6 +88,9 @@ When it matches no one, `eq`, `in`, and `contains` match no objects, and `neq` m
 object. Over HTTP and in `sixb objects query`, write it `{ "type": "currentUser" }`. It only
 exists in queries: a write cannot store it.
 
+A [role's condition](../auth/authorization.md#grant-only-some-objects) can use it too, to decide
+which objects each user can read at all.
+
 ## Search text
 
 `search()` searches the object's `search.defaultText` fields. Each field needs
