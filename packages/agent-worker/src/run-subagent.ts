@@ -38,7 +38,7 @@ export async function runSubagent(input: {
       withCurrentTime(
         { role: "user", content: [{ type: "text", text: run.spec.task }] },
         run.createdAt,
-        context.projectTimeZone
+        plan.timeZone ?? context.projectTimeZone
       ),
     ],
     tools: context.tools,
@@ -65,7 +65,9 @@ export async function runSubagent(input: {
       `The subagent's model reached its output limit before finishing its answer. ${remedy}`
     )
   }
-  const parts = agentTraceFromModelSteps(generation.steps, {
+  // The parent reads the child's answer, not the narration of the steps that led to it.
+  const finalStep = generation.steps.slice(-1)
+  const parts = agentTraceFromModelSteps(finalStep, {
     parentRunId: run.parentRunId,
     runId: run.id,
   })

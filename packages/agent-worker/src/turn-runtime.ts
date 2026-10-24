@@ -12,6 +12,8 @@ export interface AgentTurnRuntime {
   readonly sourceSignal: AbortSignal
   /** Complete run signal, including the one wall-clock deadline shared by preflight and generation. */
   readonly signal: AbortSignal
+  /** When `signal` times out. */
+  readonly deadline: Date
   readonly usageRecorder: AiModelCallRecorder
   readonly timedOut: () => boolean
   /** Surface ownership, accounting, timeout, or cancellation before another durable action. */
@@ -29,6 +31,8 @@ export function createAgentTurnRuntime(input: {
   readonly run: AgentRunRecord
   readonly signal: AbortSignal
   readonly execution: ExecutionRecord
+  /** A child's: its parent's. The run times out there if its own budget from now ends later. */
+  readonly deadline?: Date
 }): AgentTurnRuntime {
   const modelCallLimits = createAiModelCallLimitController({
     storage: input.context.storage,
@@ -48,14 +52,19 @@ export function createAgentTurnRuntime(input: {
   const timeout = new AbortController()
   const ended = new AbortController()
   let timedOut = false
+
+  const remainingMs = (input.deadline?.getTime() ?? Number.POSITIVE_INFINITY) - Date.now()
+  const timeoutMs = Math.max(0, Math.min(input.context.turnTimeoutMs, remainingMs))
+  const deadline = new Date(Date.now() + timeoutMs)
   const timer = setTimeout(() => {
     timedOut = true
     timeout.abort()
-  }, input.context.turnTimeoutMs)
+  }, timeoutMs)
 
   return {
     sourceSignal: input.signal,
     signal: AbortSignal.any([input.signal, timeout.signal, ended.signal]),
+    deadline,
     usageRecorder,
     timedOut: () => timedOut,
     assertCanContinue() {
@@ -64,7 +73,7 @@ export function createAgentTurnRuntime(input: {
       }
       usageRecorder.assertHealthy()
       if (timedOut) {
-        throw new AgentTurnTimeoutError(input.run.id, input.context.turnTimeoutMs)
+        throw new AgentTurnTimeoutError(input.run.id, timeoutMs)
       }
       input.signal.throwIfAborted()
     },

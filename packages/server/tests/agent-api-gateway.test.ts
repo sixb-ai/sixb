@@ -547,6 +547,36 @@ describe("agent API gateway", () => {
     await expect((await save("project")).json()).resolves.toMatchObject({ code: "not_allowed" })
   })
 
+  test("lets a child agent read its conversation's memory and save none of it", async () => {
+    // Reproduce by dropping the child's memory check in handleAgentApiGatewayRequest: the save
+    // then lands in the requester's repo, with no conversation as its source.
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+      executionKind: "subagent",
+    })
+
+    const read = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`))
+    expect(read.status).toBe(200)
+    await expect(read.json()).resolves.toMatchObject({ repo: "user", revision: 0 })
+
+    const saved = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/agent-memory/user/revisions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseRevision: 0,
+          message: "Remember invoices are reported excluding VAT",
+          changes: [{ path: "MEMORY.md", contents: "# Memory\n" }],
+        }),
+      })
+    )
+    expect(saved.status).toBe(403)
+    await expect(saved.json()).resolves.toEqual({ error: "Child agents cannot save Agent memory." })
+    expect(
+      (await storage.agents.memory.get({ projectId: PROJECT_ID, repoId: "user:usr_requester" }))
+        .revision
+    ).toBe(0)
+  })
+
   test("gives workflow agent nodes no memory", async () => {
     // Reproduce by dropping the Agent memory check in handleAgentApiGatewayRequest: the node's
     // service account then reaches the project's memory through can.run(agent).

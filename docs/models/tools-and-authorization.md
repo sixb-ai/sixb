@@ -66,7 +66,7 @@ export const extractDocument = defineAgentTool("extract_document")
 | Run | Permissions |
 | --- | --- |
 | Chat | The signed-in user's. |
-| Child agent (delegation is currently disabled) | The parent chat's user's. |
+| [Sub-agent](./overview.md#it-delegates) | The parent chat's user's. |
 | Workflow AI task | Those granted through the step's `groups`. |
 
 An action a tool requests runs at once, whatever the user's

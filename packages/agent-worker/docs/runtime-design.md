@@ -114,37 +114,35 @@ app data is through that gateway — there is no open internet. See
 
 ## Child agents
 
-Delegation is temporarily disabled: the Agent does not receive `spawn_agent` or `wait_agent`.
-The child runtime is retained for later re-enablement.
-
-When enabled, the Agent can delegate focused tasks to headless child agents and choose any language
-model configured in `models.language`, continue working after a child starts, and wait only when it
-needs the result. Children are created at runtime; no extra
-project configuration is required.
+The Agent can delegate focused tasks to headless child agents with `spawn_agent`, on a tier or any
+language model configured in `models.language`, keep working after a child starts, and collect
+results with `wait_agent` only when it needs them. Children are created at runtime; no extra
+project configuration is required. The conversation rules say when to delegate: independent,
+heavier investigations that can run in parallel, never a lookup or a second opinion.
 
 Each child:
 
-- inherits and independently revalidates the parent's durable authority;
-- receives all project tools plus an isolated sandbox and scoped Sixb API access;
-- owns a durable run, usage records, stream, and isolated sandbox, but no conversation thread;
-- is cancelled if its parent finishes while it is still active.
+- inherits and independently revalidates the parent's durable authority, and its approval mode;
+- receives all project tools plus an isolated, blank sandbox and scoped Sixb API access;
+- knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
+  time zone and locale, and the memory, which it reads and the gateway refuses to let it save;
+- gets the conversation prompt's data rules, never its rules for talking to the user;
+- publishes artifacts into its parent's thread as its own run, so a retry of the parent removes
+  them with the parent's own;
+- owns a durable run, usage records and stream, but no conversation thread;
+- stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
+  the parent's deadline, which its spec carries, so its wait in the queue counts against it.
 
-Up to four children may be active per parent run. They execute on a separate worker lane so waiting
-parents cannot consume their capacity. Child agents cannot delegate again or start workflows in
-this first version.
+Up to four children may be active per parent run. They execute on a separate worker lane, sized by
+`subagentConcurrency`, so waiting parents cannot consume their capacity. Child agents cannot
+delegate again or start workflows.
 
-When several models are configured, the Agent sees the default, capabilities, and context limits
-declared by their providers when available. Prices and runtime speed are not guessed;
-the default remains the fallback when there is no clear reason to select another model.
+The delegation guide lists each model from its configured definition, never its provider catalog,
+so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
+are not guessed.
 
 ## Child runs
 
-Delegation tools are temporarily unavailable to the conversational Agent. The retained child-run
-protocol is described below for existing runs and future re-enablement.
-
-Child events are recorded in the broker, but V1 does not expose their streams through the client
-API. The parent receives their durable results through `wait_agent`.
-
-Child file references remain part of that result's JSON: they are not automatically mounted in
-the parent's sandbox or published as conversation attachments. Accessing child files and choosing
-which deliverables to show the user are separate concerns.
+Child events are recorded in the broker, but the client API does not expose their streams. The
+parent receives their durable results through `wait_agent`: each child's final answer, the text of
+its last step. A child's files stay in its sandbox, except the artifacts it publishes.

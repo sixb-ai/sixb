@@ -321,11 +321,14 @@ export async function retryAgentRun(
       threadId: failedRun.threadId,
       runId: failedRun.id,
     })
-    // What the failed turn published goes with what it said, so the retry starts clean.
-    await tx.artifacts?.deleteVersionsByOrigin({
-      projectId: runtime.projectId,
-      runId: failedRun.id,
-    })
+    // What the failed turn published goes with what it said, so the retry starts clean. Its
+    // children published into the thread too, each as its own run.
+    const artifacts = tx.artifacts
+    if (artifacts) {
+      for (const publishedBy of [failedRun.id, ...(await childRunIds(agents, failedRun))]) {
+        await artifacts.deleteVersionsByOrigin({ projectId: runtime.projectId, runId: publishedBy })
+      }
+    }
     await tx.executions.create(durableExecution)
     return agents.runs.create({
       id: runId,
@@ -512,6 +515,26 @@ async function resumedConversationRunSpec(
           },
         })
   return Object.freeze({ ...kept, approvalMode })
+}
+
+/** Every child a turn spawned, whatever its status. */
+async function childRunIds(
+  agents: AgentStorage,
+  parent: ConversationAgentRunRecord
+): Promise<string[]> {
+  const ids: string[] = []
+  for (;;) {
+    const page = await agents.runs.list({
+      projectId: parent.projectId,
+      kinds: ["subagent"],
+      parentRunId: parent.id,
+      order: "asc",
+      limit: 100,
+      offset: ids.length,
+    })
+    ids.push(...page.runs.map((run) => run.id))
+    if (!page.hasMore || page.runs.length === 0) return ids
+  }
 }
 
 /**

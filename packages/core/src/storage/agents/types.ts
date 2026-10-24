@@ -320,6 +320,14 @@ export interface SubagentRunSpec {
   readonly maxSteps: number
   /** The parent turn's mode, copied when the child was admitted. Absent: `auto`. */
   readonly approvalMode?: AgentApprovalMode
+  /**
+   * ISO time the parent turn times out at. The child's wall clock ends there, so its wait in the
+   * queue counts against it. Absent on children admitted before it: the worker's turn timeout.
+   */
+  readonly deadline?: string
+  /** The parent turn's requester settings. Absent uses the project's. */
+  readonly timeZone?: string
+  readonly locale?: string
 }
 
 /** Durable child output returned to its parent by `wait_agent`. */

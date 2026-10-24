@@ -68,6 +68,7 @@ import {
 } from "./run-environment"
 import { runSubagent } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
+import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
   AgentExecutionContext,
@@ -80,7 +81,7 @@ import { executeWorkflowAgentNode } from "./workflow-node-execution"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
-const SUBAGENT_CONCURRENCY = 4
+const DEFAULT_SUBAGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const MAX_TIMER_DURATION_MS = 2_147_483_647
 /** Request paths publish their own jobs; this pass only repairs a publication or cancel they lost. */
@@ -152,7 +153,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
-    this.subagentWorker = new SubagentQueueWorker(this, host, leaseMs)
+    this.subagentWorker = new SubagentQueueWorker(
+      this,
+      host,
+      leaseMs,
+      options.subagentConcurrency ?? DEFAULT_SUBAGENT_CONCURRENCY
+    )
   }
 
   override async start(): Promise<void> {
@@ -322,8 +328,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
-      // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
+      const frameworkTools = await new SubagentCoordinator(
+        this.host,
+        context,
+        run,
+        prepared.execution,
+        runtime.deadline
+      ).createTools()
       environment = await createConversationAgentEnvironment({
+        frameworkTools,
         thread: prepared.thread,
         ...(prepared.execution.requestedBy === undefined
           ? {}
@@ -609,6 +622,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         models: this.host.definitions.models?.language,
         tools: this.host.definitions.tools,
         skills: this.host.definitions.agent.skills,
+        ...(this.host.definitions.agent.instructions === undefined
+          ? {}
+          : { projectInstructions: this.host.definitions.agent.instructions }),
         sandboxModels: listSandboxModels(this.host.definitions.models),
       })
       const durableExecution = await context.storage.executions.getById({
@@ -645,15 +661,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         runId: queuedRun.id,
         authorization,
       })
+      const thread = await context.storage.agents.threads.getById({
+        projectId: context.id,
+        id: currentParent.threadId,
+      })
       const prepared = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
       preparationComplete = true
       await context.streamSink.publishStarted(run)
+      // The parent's deadline, not one from now: a child that waited in the queue has less left.
       runtime = createAgentTurnRuntime({
         context: executionContext,
         run,
         signal: turnSignal,
         execution: durableExecution,
+        ...(run.spec.deadline === undefined ? {} : { deadline: new Date(run.spec.deadline) }),
       })
       bindAgentModelExecution(executionContext.sixb, {
         signal: runtime.signal,
@@ -663,7 +685,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         plan,
         run,
-        signal: turnSignal,
+        thread,
+        ...(durableExecution.requestedBy === undefined
+          ? {}
+          : { requestedBy: durableExecution.requestedBy }),
+        signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       await runSubagent({ context: environment.turnContext, plan, run, runtime })
@@ -1184,14 +1210,15 @@ class SubagentQueueWorker extends QueueWorker<SubagentQueueJob, typeof AGENT_RUN
   constructor(
     private readonly owner: AgentWorker,
     host: AgentWorkerHost,
-    leaseMs: number
+    leaseMs: number,
+    concurrency: number
   ) {
     super({
       projectId: host.id,
       queue: host.queues.agentChildren,
       failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `subagent-worker-${host.id}`,
-      claimLimit: SUBAGENT_CONCURRENCY,
+      claimLimit: concurrency,
       leaseMs,
     })
   }

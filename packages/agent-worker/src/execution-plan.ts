@@ -15,9 +15,6 @@ import type { LanguageModel } from "@sixb/core/models"
 import type { ConversationAgentRunSpec, SubagentRunRecord } from "@sixb/core/storage"
 import { withBuiltInSkills } from "./skills/built-in"
 
-const SUBAGENT_INSTRUCTIONS =
-  "Complete the delegated task autonomously and return a concise result to the parent Agent."
-
 /**
  * Fully resolved inputs shared by the agent execution engines.
  *
@@ -194,14 +191,16 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
 }
 
 /**
- * Restore a headless child from the immutable model and tool selection captured at admission. It
- * receives every project skill, like its parent conversation.
+ * Restore a headless child from the immutable model and tool selection captured at admission. Like
+ * its parent conversation, it receives every project skill, the worker's built-in skills, the
+ * project's `SIXB.md` instructions, and its requester's settings.
  */
 export function resolveSubagentExecutionPlan(input: {
   readonly run: SubagentRunRecord
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
+  readonly projectInstructions?: string
   readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { run, models } = input
@@ -226,13 +225,16 @@ export function resolveSubagentExecutionPlan(input: {
     return definition
   })
 
+  const { reasoning, timeZone, locale } = run.spec
   return Object.freeze({
     model,
-    instructions: SUBAGENT_INSTRUCTIONS,
+    ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: Object.freeze(tools),
-    skills: input.skills.list(),
+    skills: withBuiltInSkills(input.skills.list()),
     maxSteps: run.spec.maxSteps,
-    ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
     ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
 }

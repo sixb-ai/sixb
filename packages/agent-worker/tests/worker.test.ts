@@ -424,27 +424,6 @@ function answerModel(
   })
 }
 
-/** Exercise the retained delegation engine without re-enabling the production tool surface. */
-function injectDelegationForTest(host: AgentWorkerHost) {
-  const createEnvironment = agentEnvironment.createConversationAgentEnvironment
-  return spyOn(agentEnvironment, "createConversationAgentEnvironment").mockImplementation(
-    async (input) => {
-      const execution = await host.storage.executions.getById({
-        projectId: host.id,
-        id: input.run.executionId,
-      })
-      if (!execution) throw new Error("Expected parent execution")
-      const frameworkTools = await new SubagentCoordinator(
-        host,
-        input.context,
-        input.run,
-        execution
-      ).createTools()
-      return createEnvironment({ ...input, frameworkTools })
-    }
-  )
-}
-
 function delegatingParentModel(input: {
   readonly childRunId: () => string
   readonly childModel: { readonly provider: string; readonly modelId: string } | "heavy"
@@ -1934,6 +1913,53 @@ async function requestAgentAs(
       credential: { type: "session", id: sessionId },
     },
   }).agent.runs.request(input)
+}
+
+/**
+ * A turn running elsewhere and the children it spawned, before any worker runs them: only the
+ * children's deliveries run in the test.
+ */
+async function spawnChildOfRunningTurn(
+  sixb: TestSixb,
+  request: Parameters<AgentRuntime["runs"]["request"]>[0],
+  input: { readonly deadline?: Date; readonly keys?: readonly string[] } = {}
+) {
+  const storage = agentStorageOf(sixb)
+  const requested = await requestAgent(sixb, request)
+  const [parentJob] = await sixb.queues.agents.claim({ projectId: PROJECT_ID, workerId: "parent" })
+  if (!parentJob) throw new Error("Expected the parent job")
+  await sixb.queues.agents.complete({
+    projectId: PROJECT_ID,
+    jobId: parentJob.job.id,
+    leaseId: parentJob.leaseId,
+  })
+  const parent = requireConversationRun(
+    await storage.runs.start({
+      projectId: PROJECT_ID,
+      id: requested.run.id,
+      execution: freshTestExecution(),
+    })
+  )
+  const execution = await sixb.storage.executions.getById({
+    projectId: PROJECT_ID,
+    id: parent.executionId,
+  })
+  if (!execution) throw new Error("Expected the turn's execution.")
+
+  const coordinator = new SubagentCoordinator(
+    sixb,
+    await buildAgentWorkerContext(sixb),
+    parent,
+    execution,
+    input.deadline ?? new Date(Date.now() + 60_000)
+  )
+  const children = []
+  for (const key of input.keys ?? ["research"]) {
+    children.push(
+      await coordinator.spawn({ key, task: `Research ${key}.` }, new AbortController().signal)
+    )
+  }
+  return { parent, children }
 }
 
 function freshTestExecution() {
@@ -3627,8 +3653,8 @@ describe("AgentWorker", () => {
       completion.restore()
     }
   })
-  test("keeps delegation tools unavailable to the conversational Agent", async () => {
-    // Regression proof: restore SubagentCoordinator injection in the worker; this fails.
+  test("gives the conversational Agent its delegation tools", async () => {
+    // Regression proof: drop the SubagentCoordinator injection in the worker; this fails.
     let toolNames: readonly string[] = []
     const sixb = buildSixb(
       answerModel((names) => {
@@ -3644,9 +3670,9 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       await completion.wait()
-      expect(toolNames).toEqual(expect.arrayContaining(["echo", "read", "view_file", "bash"]))
-      expect(toolNames).not.toContain("spawn_agent")
-      expect(toolNames).not.toContain("wait_agent")
+      expect(toolNames).toEqual(
+        expect.arrayContaining(["echo", "read", "view_file", "bash", "spawn_agent", "wait_agent"])
+      )
       expect(
         await agentStorageOf(sixb).runs.getById({
           projectId: PROJECT_ID,
@@ -7433,7 +7459,6 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
-    const delegation = injectDelegationForTest(sixb)
     // wait_agent polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
@@ -7565,7 +7590,6 @@ describe("AgentWorker", () => {
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
-      delegation.mockRestore()
     }
   })
 
@@ -7599,7 +7623,6 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
-    const delegation = injectDelegationForTest(sixb)
     // wait_agent polls the child every 250ms: drive that with fake time.
     jest.useFakeTimers()
     try {
@@ -7632,7 +7655,6 @@ describe("AgentWorker", () => {
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
-      delegation.mockRestore()
     }
   })
 
@@ -7662,7 +7684,8 @@ describe("AgentWorker", () => {
       sixb,
       await buildAgentWorkerContext(sixb),
       parent,
-      execution
+      execution,
+      new Date(Date.now() + 60_000)
     )
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
@@ -7671,6 +7694,370 @@ describe("AgentWorker", () => {
 
     const stored = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
     expect(stored?.kind === "subagent" ? stored.spec.approvalMode : null).toBe("accept-edits")
+  })
+
+  test("a child knows the project as its conversation does, and none of the chat's rules", async () => {
+    // Removal proof: drop `projectInstructions` from the child's plan, its ontology docs or memory
+    // from createSubagentEnvironment, or its requester's settings from the spawned spec; this fails.
+    let request: LanguageModelRequest | undefined
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        request ??= options
+        return answerStream("Rooms are booked by the hour.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectInstructions: "Revenue means netRevenue.",
+      ontology: [MeetingRoom],
+      ontologyDocs: {
+        modules: [{ path: "rooms/meeting-room.ts", objectTypeIds: ["MeetingRoom"] }],
+        docs: [],
+        scripts: [],
+      },
+    })
+    await agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: "project",
+      baseRevision: 0,
+      message: "Remember",
+      author: REQUESTER,
+      changes: [{ path: "MEMORY.md", contents: "# Ours\n- Quarters start in February\n" }],
+    })
+    const {
+      children: [child],
+    } = await spawnChildOfRunningTurn(sixb, {
+      text: "Delegate.",
+      timeZone: "Europe/Paris",
+      locale: "fr-FR",
+    })
+    if (!child) throw new Error("Expected the child.")
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const run = await waitForTerminalRun(agentStorageOf(sixb), child.runId)
+      expect(run).toMatchObject({
+        status: "succeeded",
+        spec: { timeZone: "Europe/Paris", locale: "fr-FR" },
+      })
+
+      const system = systemPromptOf(request?.messages)
+      expect(system).toContain(
+        "<agent_instructions>\nRevenue means netRevenue.\n</agent_instructions>"
+      )
+      expect(system).toContain(
+        ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
+      )
+      expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
+      expect(system).toContain(
+        '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
+      )
+      expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
+      expect(system).not.toContain("Speak like a helpful teammate")
+      expect(system).not.toContain("sixb memory save")
+      // The task is dated as its requester reads the time.
+      expect(JSON.stringify(request?.messages.at(-1))).toContain(
+        renderCurrentTime(run.createdAt, "Europe/Paris")
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("a child publishes into its parent's thread and answers once; a retry takes it back", async () => {
+    // Removal proofs: drop `publishing` from createSubagentEnvironment, and nothing is published;
+    // build the child's result from every step again, and its narration reaches the parent; drop
+    // the children from retryAgentRun's cleanup, and the child's artifact outlives the retry.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    let childCall = 0
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async () => {
+        childCall += 1
+        if (childCall === 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "narration" },
+            { type: "text-delta", id: "narration", delta: "Let me draft the review first." },
+            { type: "text-end", id: "narration" },
+            {
+              type: "tool-call",
+              toolCallId: "draft",
+              toolName: "bash",
+              input: JSON.stringify({ command: "write-q3-review" }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        if (childCall === 2) {
+          return toolCallStream("publish", "publish_artifact", {
+            path: "work/q3-review",
+            kind: "document",
+            title: "Q3 review",
+          })
+        }
+        return answerStream("The Q3 review is published.")
+      },
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (options) => {
+        parentCalls.push(options)
+        if (parentCalls.length === 1) {
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "q3-review",
+            task: "Write the Q3 review and publish it.",
+            model: { provider: childModel.providerId, modelId: childModel.modelId },
+          })
+        }
+        if (parentCalls.length === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+        }
+        if (parentCalls.length === 3) {
+          throw createSixbError("agent.execution_failed", "[test] The provider failed mid-turn.")
+        }
+        return answerStream("Retried.")
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Write the Q3 review." })
+    childRunId = createSubagentRunId(requested.run.id, "q3-review")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent of a publishing child terminal"
+      )
+      expect(parent.status).toBe("failed")
+
+      const artifact = await onlyArtifact(sixb)
+      const thread = await storage.threads.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.threadId,
+      })
+      const version = await artifactStorageOf(sixb).getVersion({
+        projectId: PROJECT_ID,
+        artifactId: artifact.id,
+        version: 1,
+      })
+      if (!thread) throw new Error("Expected the thread.")
+      expect(artifact.owner).toEqual(thread.ownerPrincipal)
+      expect(version?.origin).toEqual({ threadId: requested.run.threadId, runId: childRunId })
+      expect(
+        await artifactStorageOf(sixb).listThreadIds({ projectId: PROJECT_ID, id: artifact.id })
+      ).toEqual([requested.run.threadId])
+
+      // The parent reads the child's answer, not how it got there.
+      const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      expect(child?.kind === "subagent" ? child.result : null).toEqual({
+        text: "The Q3 review is published.",
+      })
+      const waited = JSON.stringify(parentCalls[2]?.messages)
+      expect(waited).toContain("The Q3 review is published.")
+      expect(waited).not.toContain("Let me draft the review first.")
+
+      await createTestSixb(sixb).agent.runs.retry(requested.run.id)
+      expect(
+        await artifactStorageOf(sixb).get({ projectId: PROJECT_ID, id: artifact.id })
+      ).toBeNull()
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test.each([
+    "cancelled",
+    "timed out",
+  ] as const)("stops a running child when its parent is %s", async (ending) => {
+    // Removal proof: the turn records its own cancel or timeout, then cancels its children. Drop
+    // that cancelActiveSubagents call in AgentWorker.execute and either the child's watch on its
+    // parent's cancel (cancelled) or its inherited deadline (timed out): the child runs on.
+    let childStarted = false
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "blocking-child",
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] })
+            childStarted = true
+            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            if (options.signal?.aborted) abort()
+            else options.signal?.addEventListener("abort", abort, { once: true })
+          },
+        }),
+      }),
+    })
+    let childRunId = ""
+    let parentCall = 0
+    // The parent works a while before it delegates, so the child's own budget would outlive it.
+    let delegate!: () => void
+    const delegating = new Promise<void>((resolve) => {
+      delegate = resolve
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "waiting-parent",
+      stream: async () => {
+        parentCall += 1
+        if (parentCall === 1) await delegating
+        return parentCall === 1
+          ? toolCallStream("spawn", "spawn_agent", {
+              key: "background-work",
+              task: "Keep researching until stopped.",
+              model: { provider: childModel.providerId, modelId: childModel.modelId },
+            })
+          : toolCallStream(`wait-${parentCall}`, "wait_agent", { runIds: [childRunId] })
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Research in the background." })
+    childRunId = createSubagentRunId(requested.run.id, "background-work")
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 10_000 }))
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      await underFakeTime(() => parentCall === 1, "parent model started", 0)
+      jest.advanceTimersByTime(5_000)
+      delegate()
+      await underFakeTime(() => childStarted, "child model started")
+      if (ending === "cancelled") {
+        await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: requested.run.id })
+      }
+      const [parent, child] = await underFakeTime(async () => {
+        const runs = await Promise.all([
+          terminalRun(storage, requested.run.id),
+          terminalRun(storage, childRunId),
+        ])
+        return runs.every(Boolean) ? runs : null
+      }, `parent ${ending} and child stopped`)
+
+      expect(parent).toMatchObject(
+        ending === "cancelled"
+          ? { status: "cancelled" }
+          : { status: "failed", finishReason: "timeout" }
+      )
+      expect(child?.status).not.toBe("succeeded")
+      // It stops with its parent, not at the next repair pass.
+      expect(
+        (child?.completedAt?.getTime() ?? 0) - (parent?.completedAt?.getTime() ?? 0)
+      ).toBeLessThan(1_000)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("a child's wait in the queue counts against its parent's deadline", async () => {
+    // Removal proof: create the child's runtime without `deadline` in executeSubagent; it gets the
+    // worker's ten minutes from its start and outlives its parent.
+    const model = new WorkerTestModel({
+      modelId: "blocking-child",
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] })
+            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            if (options.signal?.aborted) abort()
+            else options.signal?.addEventListener("abort", abort, { once: true })
+          },
+        }),
+      }),
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      const deadline = new Date(Date.now() + 5_000)
+      const {
+        children: [spawned],
+      } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." }, { deadline })
+      if (!spawned) throw new Error("Expected the child.")
+      expect(
+        await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
+      ).toMatchObject({ spec: { deadline: deadline.toISOString() } })
+
+      // The child waits in the queue for 3 of its parent's 5 seconds.
+      jest.advanceTimersByTime(3_000)
+      await worker.start()
+      const child = await underFakeTime(
+        () => terminalRun(storage, spawned.runId),
+        "child at its parent's deadline"
+      )
+
+      expect(child).toMatchObject({ status: "failed", finishReason: "timeout" })
+      expect(child.completedAt?.getTime()).toBeGreaterThanOrEqual(deadline.getTime())
+      expect(child.completedAt?.getTime()).toBeLessThan(deadline.getTime() + 1_000)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("runs as many children at once as the worker's subagent concurrency allows", async () => {
+    // Removal proof: give the child lane a claim limit of 4 again; the other child starts while
+    // the held one is still running.
+    let releaseHeld!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseHeld = resolve
+    })
+    let heldTask: string | undefined
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        const task = JSON.stringify(options.messages.at(-1))
+        if (heldTask === undefined) {
+          heldTask = task
+          await held
+        }
+        return answerStream("Done.")
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const { children } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Delegate twice." },
+      { keys: ["first", "second"] }
+    )
+    const worker = new AgentWorker(sixb, workerOptions({ subagentConcurrency: 1 }))
+    await worker.start()
+    try {
+      await waitFor(() => heldTask !== undefined, { label: "a child model call" })
+      releaseHeld()
+      const runs = await Promise.all(
+        children.map((child) => waitForTerminalRun(storage, child.runId))
+      )
+      expect(runs.map((run) => run.status)).toEqual(["succeeded", "succeeded"])
+
+      const heldKey = heldTask?.includes("Research first.") ? "first" : "second"
+      const heldRun = runs.find((run) => run.kind === "subagent" && run.spawnKey === heldKey)
+      const otherRun = runs.find((run) => run !== heldRun)
+      expect(otherRun?.startedAt?.getTime()).toBeGreaterThanOrEqual(
+        heldRun?.completedAt?.getTime() ?? Number.POSITIVE_INFINITY
+      )
+    } finally {
+      releaseHeld()
+      await worker.stop()
+    }
   })
 
   // Regression proof: restore the reclaim in terminalizeSubagentDeliveryFailure; it steals the
@@ -7717,7 +8104,8 @@ describe("AgentWorker", () => {
       sixb,
       await buildAgentWorkerContext(sixb),
       parent,
-      execution
+      execution,
+      new Date(Date.now() + 60_000)
     )
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
@@ -7869,7 +8257,8 @@ describe("AgentWorker", () => {
       sixb,
       await buildAgentWorkerContext(sixb),
       parent,
-      execution
+      execution,
+      new Date(Date.now() + 60_000)
     )
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
@@ -7933,7 +8322,6 @@ describe("AgentWorker", () => {
     const requested = await requestAgent(sixb, { text: "Delegate this research task." })
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions())
-    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       await waitFor(
@@ -7953,7 +8341,6 @@ describe("AgentWorker", () => {
       expect(waited).not.toContain("Partial")
     } finally {
       await worker.stop()
-      delegation.mockRestore()
     }
   })
 
@@ -8003,7 +8390,6 @@ describe("AgentWorker", () => {
     const requested = await requestAgent(sixb, { text: "Delegate this task." })
     const worker = new AgentWorker(sixb, workerOptions())
 
-    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       await waitFor(
@@ -8035,7 +8421,6 @@ describe("AgentWorker", () => {
       expect(sandboxes.sandboxes).toHaveLength(1)
     } finally {
       await worker.stop()
-      delegation.mockRestore()
     }
   })
 
@@ -8101,7 +8486,6 @@ describe("AgentWorker", () => {
     const childRunId = createSubagentRunId(requested.run.id, "background-work")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
-    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       const [parent, child] = await Promise.all([
@@ -8143,7 +8527,6 @@ describe("AgentWorker", () => {
       ).toHaveLength(0)
     } finally {
       await worker.stop()
-      delegation.mockRestore()
     }
   })
 

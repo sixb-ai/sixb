@@ -120,6 +120,24 @@ Each save is a revision with the agent's own description of what it learned. `ME
 most 16 KB, any other file 256 KB, and each memory 4 MB in all. Earlier versions of a file are
 kept for 90 days.
 
+## It delegates
+
+When a request splits into independent investigations, the chat agent can hand each one to a
+sub-agent, let them work in parallel, and answer from what they return. It does not delegate a
+simple lookup; for a second opinion it [asks another model](./configuration.md#call-models-over-the-api).
+
+- **A sub-agent works for the same user**, with their permissions and
+  [approval mode](#approve-what-the-agent-changes), on the [tier](./configuration.md#tiers) or the
+  model whose [description](./configuration.md#name-and-description) fits its task.
+- **It knows the project, not the conversation.** It gets `SIXB.md`, the ontology reference files,
+  the user's time zone and language, and the memory, which it reads but never saves to. It sees only
+  the task the agent writes, and answers the agent, not the user.
+- **What it publishes lands in the conversation**, like the agent's own
+  [artifacts](../artifacts/overview.md).
+- **It stops with the turn that started it**, whether the turn ends, is stopped or times out. It
+  cannot delegate again or start a workflow. Its model calls count toward the user's
+  [AI usage](./usage-and-limits.md).
+
 ## Control access
 
 The agent's access depends on where it runs:
@@ -213,6 +231,8 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
   its calls. A turn that fails or is stopped while running cancels its own.
 - If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
   run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
+- **A sub-agent asks with its turn's mode.** When one of its calls waits, it ends its work and
+  reports what it was about to do; the call waits on the turn that started it.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
 Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,

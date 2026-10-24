@@ -31,6 +31,7 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
 import { agentToolErrorText } from "./model-adapters"
+import { renderModelLine } from "./model-lines"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
 const MAX_ACTIVE_SUBAGENTS = 4
@@ -84,7 +85,9 @@ export class SubagentCoordinator {
     private readonly host: AgentWorkerHost,
     private readonly context: AgentWorkerContext,
     private readonly parentRun: ConversationAgentRunRecord,
-    private readonly parentExecution: ExecutionRecord
+    private readonly parentExecution: ExecutionRecord,
+    /** When the parent turn times out: no child outlives it. */
+    private readonly parentDeadline: Date
   ) {
     const models = host.definitions.models?.language
     if (!models) {
@@ -142,15 +145,18 @@ export class SubagentCoordinator {
       parent: this.parentExecution,
       runId,
     })
-    // A child asks no less than its turn: it inherits the turn's approval mode.
-    const approvalMode = this.parentRun.spec?.approvalMode
+    // A child asks no less than its turn, dates as its requester does, and ends with the turn.
+    const { approvalMode, timeZone, locale } = this.parentRun.spec ?? {}
     const spec = {
       model: { provider: model.provider, modelId: model.modelId },
       task,
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
       maxSteps: this.context.defaultMaxSteps,
+      deadline: this.parentDeadline.toISOString(),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
+      ...(timeZone === undefined ? {} : { timeZone }),
+      ...(locale === undefined ? {} : { locale }),
     }
 
     let run: SubagentRunRecord
@@ -266,13 +272,13 @@ export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
     if (details.length === 0 || (details.length === 1 && details[0] === "default"))
       details.push("metadata unavailable")
 
-    // A provider's catalog text may span lines; each model keeps to one.
-    const name = metadata.name === undefined ? "" : ` ${oneLine(metadata.name)}`
-    const description =
-      metadata.description === undefined ? "" : `: ${oneLine(metadata.description)}`
-    const line = `${formatModelRef(entry)}${name} (${details.join("; ")})${description}`
-
-    return entry.tier === undefined ? `- ${line}` : `${entry.tier.padEnd(10)}${line}`
+    return renderModelLine({
+      ...(entry.tier === undefined ? {} : { tier: entry.tier }),
+      reference: formatModelRef(entry),
+      ...(metadata.name === undefined ? {} : { name: metadata.name }),
+      details: `(${details.join("; ")})`,
+      ...(metadata.description === undefined ? {} : { description: metadata.description }),
+    })
   })
 
   const { tiers } = models
@@ -294,10 +300,6 @@ function modelChoice(models: LanguageModelCatalog): typeof LISTED_MODEL_CHOICE {
 
 function formatModelRef({ provider, modelId }: LanguageModelRef): string {
   return JSON.stringify({ provider, modelId })
-}
-
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim()
 }
 
 function sameModel(
