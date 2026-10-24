@@ -9,7 +9,8 @@ import type { ExecutionContext } from "../execution/types"
 import { assertValidFileRefs } from "../ontology/validation"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { dispatchWorkflowRun } from "./run-dispatch"
-import type { WorkflowDefinition, WorkflowRunSource } from "./types"
+import { snapshotWorkflowInput } from "./snapshot"
+import type { WorkflowDefinition, WorkflowIOSnapshot, WorkflowRunSource } from "./types"
 
 export interface WorkflowRunRequestOptions {
   readonly input?: Readonly<Record<string, unknown>>
@@ -45,13 +46,7 @@ export async function requestWorkflowRun(
   workflow: WorkflowDefinition,
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
-  resolveExecutionScopeAuthorization(runtime.projectId, {
-    execution,
-    authorization: runtime.runtimeAuthorization,
-  })
-  assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
-  // Only caller input: automatic runs carry stored data, which may predate the rule.
-  assertValidFileRefs(options.input, `Workflow "${workflow.id}" input`)
+  admitWorkflowRequest(runtime, execution, workflow, options.input)
   return dispatchWorkflowRun({
     errorReporterHost: runtime,
     projectId: runtime.projectId,
@@ -78,4 +73,47 @@ export async function requestWorkflowRun(
       })
     },
   })
+}
+
+/** A workflow start as it would run: authorized, with its input as the run would snapshot it. */
+export interface PreparedWorkflowRequest {
+  readonly workflowId: string
+  readonly input: WorkflowIOSnapshot
+}
+
+/**
+ * Admit a workflow start without starting it: the checks `requestWorkflowRun` applies, and the
+ * input snapshot the run would store. The agent API gateway prepares the starts it holds for
+ * approval.
+ */
+export function prepareWorkflowRequest(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  workflow: WorkflowDefinition,
+  input: Readonly<Record<string, unknown>> = {}
+): PreparedWorkflowRequest {
+  admitWorkflowRequest(runtime, execution, workflow, input)
+  return {
+    workflowId: workflow.id,
+    input: snapshotWorkflowInput({
+      workflow,
+      value: input,
+      valueTypesById: runtime.ontology.getValueTypesById(),
+    }),
+  }
+}
+
+function admitWorkflowRequest(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  workflow: WorkflowDefinition,
+  input: Readonly<Record<string, unknown>> | undefined
+): void {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
+  // Only caller input: automatic runs carry stored data, which may predate the rule.
+  assertValidFileRefs(input, `Workflow "${workflow.id}" input`)
 }

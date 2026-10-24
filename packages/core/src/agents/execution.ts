@@ -1,6 +1,7 @@
 import { principalsEqual, type UserPrincipal } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { canInheritAgentRequestAuthorization } from "../execution/agent"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { DecisionModelsRuntime, ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
@@ -9,7 +10,12 @@ import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
+  AgentApprovalMode,
+  AgentApprovalRecord,
+  AgentStorage,
   ConversationAgentRunRecord,
+  ListAgentApprovalsInput,
+  ListAgentApprovalsResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
   ListAgentThreadsInput,
@@ -17,6 +23,16 @@ import type {
 } from "../storage/agents"
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
+import { getAgentApprovalExecutor } from "./approval-executor"
+import {
+  approvalModeAllows,
+  assertAgentApprovalMode,
+  decideAgentApproval,
+  defaultAgentApprovalMode,
+  leastApprovalModeAllowing,
+  type ResolvedAgentApprovalMode,
+  resolveAgentApprovalMode,
+} from "./approvals"
 import { cancelAgentRun } from "./cancel"
 import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
@@ -84,7 +100,62 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
     /** Who else reads the conversation and talks in it. */
     readonly participants: AgentThreadParticipantsRuntime
+    /**
+     * The caller's mode in a thread they read, and where it comes from: their choice there, else
+     * their default, else the fallback.
+     */
+    getApprovalMode(threadId: string): Promise<ResolvedAgentApprovalMode | null>
+    /**
+     * Choose the caller's own mode for their next turns in a thread; `null` follows their default
+     * again. Others keep theirs.
+     */
+    setApprovalMode(
+      threadId: string,
+      mode: AgentApprovalMode | null
+    ): Promise<ResolvedAgentApprovalMode>
   }
+
+/**
+ * The calls the Agent held for approval. Whoever reads a thread reads its approvals; only whoever
+ * asked for the turn decides, since the call runs with their rights.
+ */
+export interface AgentApprovalsRuntime {
+  /**
+   * A thread's approvals, oldest first; without `threadId`, the caller's own in the threads they
+   * can open.
+   */
+  list(input?: ListExecutionAgentApprovalsInput): Promise<ListAgentApprovalsResult>
+  getById(approvalId: string): Promise<AgentApprovalRecord | null>
+  /**
+   * Approve or deny a pending call. An approved call runs now, and the approval comes back with its
+   * outcome; the model reads it at the start of the thread's next message. `always` also sets the
+   * caller's mode in the thread to the least that runs such a call without asking.
+   */
+  decide(approvalId: string, input: DecideExecutionAgentApprovalInput): Promise<AgentApprovalRecord>
+}
+
+export type ListExecutionAgentApprovalsInput = Omit<
+  ListAgentApprovalsInput,
+  "projectId" | "requestedBy" | "reported"
+>
+
+export interface DecideExecutionAgentApprovalInput {
+  readonly decision: "approve" | "deny"
+  readonly always?: boolean
+}
+
+/** The caller's own Agent settings. */
+export interface AgentPreferences {
+  /** The mode of the caller's turns in threads where they chose none. */
+  readonly approvalMode: AgentApprovalMode
+  /** `fallback` until the caller chooses a default. */
+  readonly approvalModeSource: "default" | "fallback"
+}
+
+export interface AgentPreferencesRuntime {
+  get(): Promise<AgentPreferences>
+  update(input: { readonly approvalMode?: AgentApprovalMode }): Promise<AgentPreferences>
+}
 
 /**
  * Participants read the whole conversation, its files and its live stream, and send messages that
@@ -160,6 +231,8 @@ export type AgentRuntime<TParams extends Record<string, unknown> = Record<string
   /** Other users' conversations, read-only, with `can.observe(agent.threads)`. */
   readonly observed: ObservedAgentThreadsRuntime
   readonly memory: AgentMemoryRuntime
+  readonly approvals: AgentApprovalsRuntime
+  readonly preferences: AgentPreferencesRuntime
 }
 
 export function createAgentRuntime<
@@ -246,9 +319,176 @@ export function createAgentRuntime<
     )
   }
 
+  const requireAgents = (): AgentStorage => {
+    const storage = runtime.storage.agents
+    if (!storage) {
+      throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    }
+    return storage
+  }
+
+  /** Settings belong to whoever calls: a shared link or a delegated execution has none. */
+  const settingsPrincipal = () => {
+    if (authority.type === "denied" || authority.type === "delegated") {
+      throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+    }
+    return principal
+  }
+
+  const getVisibleApproval = async (approvalId: string): Promise<AgentApprovalRecord | null> => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
+    const approval = await runtime.storage.agents?.approvals.getById({
+      projectId: runtime.projectId,
+      id: approvalId,
+    })
+    return approval && (await rule.read(approval.threadId)) ? approval : null
+  }
+
+  const getThreadApprovalMode = async (
+    threadId: string
+  ): Promise<ResolvedAgentApprovalMode | null> => {
+    if (!(await getVisibleThreadRecord(threadId))) return null
+    return resolveAgentApprovalMode(requireAgents(), {
+      projectId: runtime.projectId,
+      principal: settingsPrincipal(),
+      threadId,
+    })
+  }
+
+  const setThreadApprovalMode = async (
+    threadId: string,
+    mode: AgentApprovalMode | null
+  ): Promise<ResolvedAgentApprovalMode> => {
+    if (mode !== null) assertAgentApprovalMode(mode)
+    if (!(await getVisibleThreadRecord(threadId))) {
+      throw new AgentRequestError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${threadId}' not found.`
+      )
+    }
+    const agents = requireAgents()
+    const scope = { projectId: runtime.projectId, principal: settingsPrincipal() }
+    await agents.approvalModes.setForThread({ ...scope, threadId, mode })
+    return resolveAgentApprovalMode(agents, { ...scope, threadId })
+  }
+
+  /** The caller's own approvals, in the threads they can still open. */
+  const listOwnApprovals = async (
+    storage: AgentStorage,
+    { limit, offset = 0, ...input }: ListExecutionAgentApprovalsInput
+  ): Promise<ListAgentApprovalsResult> => {
+    const { approvals } = await storage.approvals.list({
+      ...input,
+      projectId: runtime.projectId,
+      requestedBy: principal,
+    })
+    const readable = new Map<string, Promise<boolean>>()
+    const canRead = (threadId: string) => {
+      const known = readable.get(threadId)
+      if (known) return known
+      const read = rule.read(threadId).then((thread) => thread !== null)
+      readable.set(threadId, read)
+      return read
+    }
+
+    const visible: AgentApprovalRecord[] = []
+    for (const approval of approvals) {
+      if (await canRead(approval.threadId)) visible.push(approval)
+    }
+    const end = limit === undefined ? visible.length : offset + limit
+    return {
+      approvals: visible.slice(offset, end),
+      hasMore: end < visible.length,
+      total: visible.length,
+    }
+  }
+
+  const approvals: AgentApprovalsRuntime = {
+    list: async (input = {}) => {
+      const none = { approvals: [], hasMore: false, total: 0 }
+      if (authority.type === "denied" || authority.type === "delegated") return none
+      const storage = runtime.storage.agents
+      if (!storage) return none
+
+      if (input.threadId === undefined) return listOwnApprovals(storage, input)
+      if (!(await getVisibleThreadRecord(input.threadId))) return none
+      return storage.approvals.list({ ...input, projectId: runtime.projectId })
+    },
+    getById: getVisibleApproval,
+    decide: async (approvalId, input) => {
+      const approval = await getVisibleApproval(approvalId)
+      if (!approval) {
+        throw new AgentRequestError(
+          "approval_not_found",
+          `[Sixb] Agent approval '${approvalId}' was not found.`
+        )
+      }
+
+      // The call runs with the deciding request's authority: it must be one a turn can inherit.
+      if (!canInheritAgentRequestAuthorization(runtime.runtimeAuthorization)) {
+        throw new AgentRequestError(
+          "authority_not_inheritable",
+          "[Sixb] Deciding on an Agent call requires an authenticated user request or disabled authorization."
+        )
+      }
+
+      const decided = await decideAgentApproval(
+        requireAgents(),
+        getAgentApprovalExecutor(runtime),
+        {
+          approval,
+          decision: input.decision === "approve" ? "approved" : "denied",
+          decidedBy: principal,
+          decider: { execution, authorization: runtime.runtimeAuthorization },
+        }
+      )
+      if (input.always === true && decided.status === "approved") {
+        await allowAlways(decided)
+      }
+      return decided
+    },
+  }
+
+  /**
+   * "Always allow": the caller's thread mode rises to the least that runs such a call, unless what
+   * they chose already runs it. The fallback is no choice: it would hide the raise.
+   */
+  const allowAlways = async (approval: AgentApprovalRecord): Promise<void> => {
+    const current = await getThreadApprovalMode(approval.threadId)
+    const chosen = current?.approvalModeSource === "fallback" ? undefined : current?.approvalMode
+    if (chosen !== undefined && approvalModeAllows(chosen, approval.call)) return
+
+    await setThreadApprovalMode(approval.threadId, leastApprovalModeAllowing(approval.call))
+  }
+
+  const preferences: AgentPreferencesRuntime = {
+    get: async () => {
+      const { approvalMode, approvalModeSource } = await defaultAgentApprovalMode(requireAgents(), {
+        projectId: runtime.projectId,
+        principal: settingsPrincipal(),
+      })
+      return {
+        approvalMode,
+        approvalModeSource: approvalModeSource === "default" ? "default" : "fallback",
+      }
+    },
+    update: async (input) => {
+      if (input.approvalMode !== undefined) {
+        await requireAgents().approvalModes.setDefault({
+          projectId: runtime.projectId,
+          principal: settingsPrincipal(),
+          mode: assertAgentApprovalMode(input.approvalMode),
+        })
+      }
+      return preferences.get()
+    },
+  }
+
   return {
     get: getAgent,
     memory: createAgentMemoryRuntime(runtime),
+    approvals,
+    preferences,
     threads: {
       recreateSandbox: async (threadId, input) => {
         const readable = await rule.read(threadId)
@@ -359,6 +599,8 @@ export function createAgentRuntime<
           addAgentThreadParticipants(runtime, rule, security, threadId, users),
         remove: (threadId, user) => removeAgentThreadParticipant(runtime, rule, threadId, user),
       },
+      getApprovalMode: getThreadApprovalMode,
+      setApprovalMode: setThreadApprovalMode,
     },
     runs: {
       request: async (input) => {

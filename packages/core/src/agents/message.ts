@@ -1,6 +1,11 @@
 import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
 import type { ProviderData } from "../models"
+import type {
+  AgentApprovalCall,
+  AgentApprovalOutcome,
+  AgentApprovalStatus,
+} from "../storage/agents/types"
 import type { AgentContextPart } from "./context/entries"
 
 /**
@@ -68,6 +73,24 @@ export interface AgentContinuationPart {
   readonly type: "continuation"
 }
 
+/**
+ * How a call the Agent made in an earlier turn ended, once its requester decided on it or it was
+ * set aside. Sixb writes it at the start of the next user message; chats show no text for it.
+ */
+export interface AgentApprovalOutcomePart {
+  readonly type: "approval-outcome"
+  readonly approvalId: string
+  readonly status: Exclude<AgentApprovalStatus, "pending">
+  readonly call: AgentApprovalCallSummary
+  /** What the approved call gave, when it ran. */
+  readonly outcome?: AgentApprovalOutcome
+}
+
+/** The call an approval held, as the model asked for it, without its params. */
+export type AgentApprovalCallSummary =
+  | Pick<Extract<AgentApprovalCall, { readonly kind: "action" }>, "kind" | "actionId" | "subject">
+  | Pick<Extract<AgentApprovalCall, { readonly kind: "workflow" }>, "kind" | "workflowId">
+
 /** Ordered, hidden provider state required to replay a model response losslessly. */
 export interface AgentProviderStatePart {
   readonly type: "provider-state"
@@ -93,6 +116,7 @@ export type AgentMessagePart =
   | AgentFilePart
   | AgentContextPart
   | AgentContinuationPart
+  | AgentApprovalOutcomePart
   | AgentToolCallPart
   | AgentProviderStatePart
 

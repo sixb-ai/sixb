@@ -9,6 +9,7 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models"
+import { approvalOutcomeInstruction } from "./approval-outcome"
 import { serializeAgentContextForModel } from "./context-model"
 import type {
   AgentFilePart,
@@ -133,6 +134,10 @@ function userModelMessage<TMessage extends AgentMessage>(
   message.parts.forEach((part, partIndex) => {
     if (part.type === "continuation") {
       content.push({ type: "text", text: AGENT_CONTINUATION_INSTRUCTION })
+      return
+    }
+    if (part.type === "approval-outcome") {
+      content.push({ type: "text", text: `${approvalOutcomeInstruction(part)}\n\n` })
       return
     }
     if (part.type === "text") {

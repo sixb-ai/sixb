@@ -17,6 +17,7 @@ import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { assertParamUsersActive } from "../shared/params/user-refs"
 import { type ActionRunRecord, ObjectNotFoundError, objectBatchKey } from "../storage"
+import type { ActionRunParams } from "../storage/action-runs/types"
 import {
   assertObjectReadOutputWithinLimit,
   ObjectReadLimitExceededError,
@@ -74,89 +75,10 @@ export async function requestAction(
   execution: ExecutionContext,
   input: RequestActionInput
 ): Promise<ActionRunRecord> {
-  // Capture the three process-local capabilities before caller-owned request getters can run.
-  const projectId = runtime.projectId
-  const runtimeAuthorization = runtime.runtimeAuthorization
-  const objectReader = runtime.objectReader
-  const request = snapshotActionRequest(input)
-  const authorization = resolveExecutionScopeAuthorization(projectId, {
-    execution,
-    authorization: runtimeAuthorization,
-  })
-  const subject = request.subject
-  const delegatedSubject =
-    authorization.type === "delegated"
-      ? assertDelegatedActionTarget({
-          authorization,
-          actionId: request.actionId,
-          subject,
-        })
-      : undefined
-  const action = getActionDefinition(runtime, request.actionId)
+  const admitted = await admitActionRequest(runtime, execution, input)
+  const { projectId, runtimeAuthorization, objectReader, authorization, request } = admitted
+  const { action, subject, pathPrefix, actionParams } = admitted
   const actionId = action.id
-  const rawParams = request.params
-
-  if (authorization.type === "delegated") {
-    await admitDelegatedObjectAction({
-      objectReader,
-      runtimeAuthorization,
-      execution,
-      authorization,
-      action,
-      subject: delegatedSubject!,
-    })
-  } else {
-    assertAuthorized({ projectId, runtimeAuthorization }, { kind: "action.apply", actionId })
-  }
-  if (authorization.type !== "delegated" && action.binding.kind === "object") {
-    // Object actions require visibility of the type they are bound to, as listing them does.
-    await assertTypeViewable({
-      projectId,
-      runtimeAuthorization,
-      objectReader,
-      objectTypeId: action.binding.objectType.id,
-    })
-  }
-
-  validateActionSubject(action, subject)
-
-  // A run names its subject: a principal cannot request one on a type it cannot read. The action
-  // itself runs as trusted code.
-  if (authorization.type !== "delegated" && subject.kind === "object") {
-    await objectReader.assertReadable({ objectTypeIds: [subject.objectTypeId] })
-  }
-
-  let pathPrefix = action.id
-  let objectType: ObjectTypeWithPropertyTokens | null = null
-
-  if (isObjectActionDefinition(action)) {
-    objectType = resolveObjectActionSubject({ runtime, action, subject })
-    pathPrefix = `${objectType.id}.${action.id}`
-    if (authorization.type !== "delegated") {
-      // A run is visible to whoever may view its subject (`viewableActionRuns`). A subtype
-      // excluded from a broad grant is not visible through its parent, so admitting the request on
-      // the bound type alone would run what its caller can never read back.
-      await assertTypeViewable({
-        projectId,
-        runtimeAuthorization,
-        objectReader,
-        objectTypeId: objectType.id,
-      })
-    }
-  }
-
-  const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
-
-  if (authorization.type !== "delegated") {
-    await assertNamedObjectsVisible({
-      objectReader,
-      subject,
-      paramsConfig: action.params,
-      params: actionParams,
-      pathPrefix,
-    })
-  }
-
   const runId = createActionRunId(request.runId)
 
   // `persistActionRun` checks an existing run id before creating its durable execution. Keep
@@ -231,6 +153,146 @@ export async function requestAction(
       : {}),
   })
   return enforceDelegatedOutputBudget(authorization, run)
+}
+
+/** An Action request as it would run: admitted, and its params normalized. */
+export interface PreparedActionRequest {
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly params: ActionRunParams
+  /** `external` when the Action has a writeback or effects: it reaches beyond Sixb. */
+  readonly effect: "ontology" | "external"
+}
+
+/**
+ * Admit an Action request without running it: the checks and the params `requestAction` applies
+ * before anything is persisted. The agent API gateway prepares the calls it holds for approval.
+ */
+export async function prepareActionRequest(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: Pick<RequestActionInput, "actionId" | "subject" | "params">
+): Promise<PreparedActionRequest> {
+  const { action, subject, actionParams } = await admitActionRequest(runtime, execution, input)
+
+  return {
+    actionId: action.id,
+    subject,
+    params: actionParams,
+    effect:
+      action.phases.writeback !== undefined || action.phases.effects !== undefined
+        ? "external"
+        : "ontology",
+  }
+}
+
+/**
+ * Who may request the Action on this subject, and its normalized params, with the capabilities the
+ * request runs with. Persists nothing.
+ */
+async function admitActionRequest(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  input: RequestActionInput
+) {
+  // Capture the three process-local capabilities before caller-owned request getters can run.
+  const projectId = runtime.projectId
+  const runtimeAuthorization = runtime.runtimeAuthorization
+  const objectReader = runtime.objectReader
+  const request = snapshotActionRequest(input)
+  const authorization = resolveExecutionScopeAuthorization(projectId, {
+    execution,
+    authorization: runtimeAuthorization,
+  })
+  const subject = request.subject
+  const delegatedSubject =
+    authorization.type === "delegated"
+      ? assertDelegatedActionTarget({
+          authorization,
+          actionId: request.actionId,
+          subject,
+        })
+      : undefined
+  const action = getActionDefinition(runtime, request.actionId)
+  const rawParams = request.params
+
+  if (authorization.type === "delegated") {
+    await admitDelegatedObjectAction({
+      objectReader,
+      runtimeAuthorization,
+      execution,
+      authorization,
+      action,
+      subject: delegatedSubject!,
+    })
+  } else {
+    assertAuthorized(
+      { projectId, runtimeAuthorization },
+      { kind: "action.apply", actionId: action.id }
+    )
+  }
+  if (authorization.type !== "delegated" && action.binding.kind === "object") {
+    // Object actions require visibility of the type they are bound to, as listing them does.
+    await assertTypeViewable({
+      projectId,
+      runtimeAuthorization,
+      objectReader,
+      objectTypeId: action.binding.objectType.id,
+    })
+  }
+
+  validateActionSubject(action, subject)
+
+  // A run names its subject: a principal cannot request one on a type it cannot read. The action
+  // itself runs as trusted code.
+  if (authorization.type !== "delegated" && subject.kind === "object") {
+    await objectReader.assertReadable({ objectTypeIds: [subject.objectTypeId] })
+  }
+
+  let pathPrefix = action.id
+  if (isObjectActionDefinition(action)) {
+    const objectType: ObjectTypeWithPropertyTokens = resolveObjectActionSubject({
+      runtime,
+      action,
+      subject,
+    })
+    pathPrefix = `${objectType.id}.${action.id}`
+    if (authorization.type !== "delegated") {
+      // A run is visible to whoever may view its subject (`viewableActionRuns`). A subtype
+      // excluded from a broad grant is not visible through its parent, so admitting the request on
+      // the bound type alone would run what its caller can never read back.
+      await assertTypeViewable({
+        projectId,
+        runtimeAuthorization,
+        objectReader,
+        objectTypeId: objectType.id,
+      })
+    }
+  }
+
+  const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
+
+  if (authorization.type !== "delegated") {
+    await assertNamedObjectsVisible({
+      objectReader,
+      subject,
+      paramsConfig: action.params,
+      params: actionParams,
+      pathPrefix,
+    })
+  }
+
+  return {
+    projectId,
+    runtimeAuthorization,
+    objectReader,
+    authorization,
+    request,
+    action,
+    subject,
+    pathPrefix,
+    actionParams,
+  }
 }
 
 /**

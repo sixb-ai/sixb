@@ -16,9 +16,12 @@ export {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
   createAgentApiGatewayCapability,
+  findAgentApiRoute,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
+export type { AgentApprovalHold } from "./approvals"
+export { agentRunApprovalMode, approvalCallSummary, holdAgentApprovalCall } from "./approvals"
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,
@@ -92,6 +95,8 @@ export {
 } from "./ids"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
+  type AgentApprovalCallSummary,
+  type AgentApprovalOutcomePart,
   type AgentContinuationPart,
   type AgentFilePart,
   type AgentMessage,
@@ -120,6 +125,13 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export type {
+  AgentRunExecutionScope,
+  AgentRunScopeAuthority,
+  AgentRunScopeErrorCode,
+  AgentRunScopeHost,
+} from "./run-scope"
+export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,

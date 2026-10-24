@@ -63,6 +63,7 @@ export type {
   WorkflowRunView,
   WorkflowsRuntime,
 } from "../workflows/execution"
+export { prepareBoundActionRequest, prepareBoundWorkflowRequest } from "./preparation"
 export type { AuthorizationRef, ExecutionContext } from "./types"
 
 export type RequestExecutionAuthorization =

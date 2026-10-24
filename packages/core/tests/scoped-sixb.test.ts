@@ -1385,9 +1385,11 @@ describe("bound Sixb surface", () => {
     )
     expect(Object.keys(scoped.rules).sort()).toEqual(["getById", "list", "states"])
     expect(Object.keys(scoped.agent).sort()).toEqual([
+      "approvals",
       "get",
       "memory",
       "observed",
+      "preferences",
       "runs",
       "threads",
     ])

@@ -142,12 +142,15 @@ export class SubagentCoordinator {
       parent: this.parentExecution,
       runId,
     })
+    // A child asks no less than its turn: it inherits the turn's approval mode.
+    const approvalMode = this.parentRun.spec?.approvalMode
     const spec = {
       model: { provider: model.provider, modelId: model.modelId },
       task,
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
       maxSteps: this.context.defaultMaxSteps,
       ...(reasoning === undefined ? {} : { reasoning }),
+      ...(approvalMode === undefined ? {} : { approvalMode }),
     }
 
     let run: SubagentRunRecord

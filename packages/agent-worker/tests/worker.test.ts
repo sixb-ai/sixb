@@ -7636,6 +7636,43 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Regression proof: drop `approvalMode` from the child spec in `SubagentCoordinator.spawn`; the
+  // child has none, and the gateway lets it run what its turn would have held.
+  test("a child inherits its turn's approval mode", async () => {
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgentAs(sixb, REQUESTER, {
+      text: "Delegate a task.",
+      approvalMode: "accept-edits",
+    })
+    const parent = requireConversationRun(
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+    )
+    const execution = await sixb.storage.executions.getById({
+      projectId: PROJECT_ID,
+      id: parent.executionId,
+    })
+    if (!execution) throw new Error("Expected the turn's execution.")
+
+    const coordinator = new SubagentCoordinator(
+      sixb,
+      await buildAgentWorkerContext(sixb),
+      parent,
+      execution
+    )
+    const child = await coordinator.spawn(
+      { key: "review", task: "Review the result." },
+      new AbortController().signal
+    )
+
+    const stored = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
+    expect(stored?.kind === "subagent" ? stored.spec.approvalMode : null).toBe("accept-edits")
+  })
+
   // Regression proof: restore the reclaim in terminalizeSubagentDeliveryFailure; it steals the
   // newer child's token when the former delivery learns that its inherited session was revoked.
   test.each([

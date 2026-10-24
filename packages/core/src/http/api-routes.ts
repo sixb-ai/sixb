@@ -19,9 +19,20 @@ export interface SixbApiRoute {
   readonly accessToken: boolean
   /** The route is proxied by the agent API gateway (a strict subset of the accessToken routes). */
   readonly agentApi: boolean
+  /**
+   * What the route changes when the Agent calls it, for every `agentApi` route but a GET. The
+   * gateway holds `action` and `workflow` calls for the requester's approval when their mode asks.
+   */
+  readonly agentEffect?: AgentApiEffect
   /** The canonical handler may run under an explicitly selected shared session. */
   readonly sharedSession?: boolean
 }
+
+/**
+ * `read` changes nothing (a read sent as POST); `memory` writes the Agent's own notes; `file` stores
+ * a blob nothing points at yet; `model` costs what AI limits already bound.
+ */
+export type AgentApiEffect = "read" | "action" | "workflow" | "memory" | "file" | "model"
 
 export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
   {
@@ -160,6 +171,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -168,6 +180,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/links",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -176,6 +189,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/count",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -184,6 +198,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/exists",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -192,6 +207,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/facets",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -209,6 +225,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/by/:propertyId",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   // The four write routes. Bearer-capable because their execution facade enforces authorization
@@ -250,6 +267,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/telemetry/history",
     accessToken: true,
     agentApi: true,
+    agentEffect: "read",
     sharedSession: true,
   },
   {
@@ -310,6 +328,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/actions/:actionId",
     accessToken: true,
     agentApi: true,
+    agentEffect: "action",
     sharedSession: true,
   },
   {
@@ -318,6 +337,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/files",
     accessToken: true,
     agentApi: true,
+    agentEffect: "file",
   },
   {
     operationId: "listActionRuns",
@@ -368,6 +388,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/workflows/:workflowId/runs",
     accessToken: true,
     agentApi: true,
+    agentEffect: "workflow",
   },
   {
     operationId: "listWorkflowRuns",
@@ -461,6 +482,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/agent-memory/:repo/revisions",
     accessToken: true,
     agentApi: true,
+    agentEffect: "memory",
   },
   {
     operationId: "deleteAgentMemory",
@@ -678,6 +700,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/models/language/generations",
     accessToken: true,
     agentApi: true,
+    agentEffect: "model",
   },
   {
     operationId: "generateImages",
@@ -685,6 +708,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/models/image/generations",
     accessToken: true,
     agentApi: true,
+    agentEffect: "model",
   },
   {
     operationId: "generateSpeech",
@@ -692,6 +716,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/models/audio/speech",
     accessToken: true,
     agentApi: true,
+    agentEffect: "model",
   },
   {
     operationId: "transcribeAudio",
@@ -699,6 +724,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/models/audio/transcriptions",
     accessToken: true,
     agentApi: true,
+    agentEffect: "model",
   },
   {
     operationId: "getAiAccountingOverview",
@@ -786,12 +812,25 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
   },
 ]
 
-// Enforce the subset invariant at module load: a gateway-proxied route must also be a bearer route,
-// or the gateway would expose a surface the access-token boundary does not recognize.
-for (const route of SIXB_API_ROUTES) {
-  if (route.agentApi && !route.accessToken) {
-    throw new Error(
-      `[Sixb] agent API route '${route.method} ${route.path}' must also be an access-token route.`
-    )
+/**
+ * The table's invariants, enforced at module load. A gateway-proxied route must also be a bearer
+ * route, or the gateway would expose a surface the access-token boundary does not recognize. A
+ * gateway-proxied route that can change state names what it changes, so a route added later cannot
+ * skip the approval gate by accident.
+ */
+export function assertSixbApiRoutes(routes: readonly SixbApiRoute[]): void {
+  for (const route of routes) {
+    if (route.agentApi && !route.accessToken) {
+      throw new Error(
+        `[Sixb] agent API route '${route.method} ${route.path}' must also be an access-token route.`
+      )
+    }
+    if (route.agentApi && route.method !== "GET" && route.agentEffect === undefined) {
+      throw new Error(
+        `[Sixb] agent API route '${route.method} ${route.path}' must declare its agentEffect.`
+      )
+    }
   }
 }
+
+assertSixbApiRoutes(SIXB_API_ROUTES)

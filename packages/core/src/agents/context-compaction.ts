@@ -1,6 +1,7 @@
 import { stableJsonStringify } from "../json"
 import type { AgentMessageRecord } from "../storage/agents/types"
 import { AGENT_CONTINUATION_INSTRUCTION } from "./adapters"
+import { approvalOutcomeInstruction } from "./approval-outcome"
 import type { AgentMessage, AgentMessagePart } from "./message"
 
 export const AGENT_CONTEXT_ESTIMATOR_VERSION = 1 as const
@@ -148,6 +149,9 @@ function estimateMessageTokens(
       case "continuation":
         tokens += textTokens(AGENT_CONTINUATION_INSTRUCTION)
         break
+      case "approval-outcome":
+        tokens += textTokens(approvalOutcomeInstruction(part))
+        break
       case "context":
         tokens += textTokens(stableJsonStringify(part.context))
         break
@@ -205,6 +209,8 @@ function serializeSummaryPart(
       return []
     case "continuation":
       return [`${indent}<continuation_request />`]
+    case "approval-outcome":
+      return [`${indent}${escapeXml(approvalOutcomeInstruction(part))}`]
     case "context":
       return part.context.kind === "object"
         ? [
