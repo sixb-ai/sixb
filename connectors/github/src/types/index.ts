@@ -53,10 +53,18 @@ export type {
 } from "./members"
 export type { GitHubConnectorOptions } from "./options"
 export type {
+  CreateReleaseInput,
+  GenerateReleaseNotesInput,
   GitHubRelease,
   GitHubReleaseAsset,
+  GitHubReleaseNotes,
+  ListReleaseAssetsOptions,
   ListReleasesOptions,
+  RepositoryReleaseAssetsApi,
   RepositoryReleasesApi,
+  UpdateReleaseAssetInput,
+  UpdateReleaseInput,
+  UploadReleaseAssetInput,
 } from "./releases"
 export type {
   AuthenticatedUserRepositoriesApi,
