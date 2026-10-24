@@ -5,6 +5,7 @@ import { UserProfileSchema } from "./auth"
 import {
   AiUsageLimitErrorResponseSchema,
   codedErrorResponseSchema,
+  ErrorResponseSchema,
   JsonValueSchema,
   jsonValueOpenApiOverride,
   RedactionsSchema,
@@ -953,6 +954,16 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
     discriminator: { propertyName: "kind" },
   },
 }
+
+/** A unique-property lookup's 404. Only the one that found no holder carries the code. */
+export const ObjectLookupNotFoundResponseSchema = ErrorResponseSchema.extend({
+  code: z
+    .enum(["object.not_found"])
+    .optional()
+    .describe(
+      "`object.not_found` when no object visible to the caller holds the value. Other 404s, such as an unknown type, have no code."
+    ),
+})
 
 /** A write would give a unique property's value to a second object of the type. */
 export const UniqueViolationErrorResponseSchema = codedErrorResponseSchema([

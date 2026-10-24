@@ -1468,7 +1468,7 @@ function parseJsonValue(text) {
   }
 }
 function isObjectNotFound(error) {
-  return error instanceof CliError && error.body.status === 404 && error.body.message === "Object not found";
+  return error instanceof CliError && error.body.status === 404 && error.body.code === "object.not_found";
 }
 async function objectsSearch(api, args) {
   if (requestsHelp(args))

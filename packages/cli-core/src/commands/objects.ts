@@ -196,9 +196,7 @@ function parseJsonValue(text: string): unknown {
 /** The route's own answer when no visible object holds the value. */
 function isObjectNotFound(error: unknown): boolean {
   return (
-    error instanceof CliError &&
-    error.body.status === 404 &&
-    error.body.message === "Object not found"
+    error instanceof CliError && error.body.status === 404 && error.body.code === "object.not_found"
   )
 }
 

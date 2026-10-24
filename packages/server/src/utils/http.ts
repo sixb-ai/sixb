@@ -30,6 +30,7 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "connector.revocation_pending": 409,
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
+  "object.not_found": 404,
   "object.unique_violation": 409,
   "runtime.stopping": 503,
   "ai.usage_limit_exceeded": 429,

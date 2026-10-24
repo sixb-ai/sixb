@@ -7,6 +7,7 @@ import {
   type ObjectRef,
   type SixbHostView,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
@@ -30,6 +31,7 @@ import { FileContentQuerySchema } from "../schemas/files"
 import {
   GetObjectByUniquePropertyBodySchema,
   ObjectListResponseSchema,
+  ObjectLookupNotFoundResponseSchema,
   ObjectParamsSchema,
   ObjectQueryCountRequestSchema,
   ObjectQueryExistsRequestSchema,
@@ -61,6 +63,11 @@ const ObjectFileContentQuerySchema = ObjectFileContentRouteQuerySchema.extend({
     .min(1)
     .regex(/^\/properties(?:\/|$)/, "Object file content paths must start with /properties/"),
 })
+
+/** The lookup's failure when no object visible to the caller holds the value. */
+function noHolderError() {
+  return createSixbError("object.not_found", "Object not found")
+}
 
 function serializeObject(row: {
   score?: number
@@ -915,10 +922,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
 
         try {
           const row = await sixb.objects.getBy(params.objectTypeId, params.propertyId, body.value)
-          if (!row) {
-            set.status = 404
-            return { error: "Object not found" }
-          }
+          if (!row) return handleRouteError(noHolderError(), set)
 
           return serializeObject(row)
         } catch (error) {
@@ -927,8 +931,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           // A type the caller cannot view looks missing, like `getObject`. On a type it views, the
           // refusal depends only on the request, as for a filter on a marked property.
           if (!sixb.objects.getTypeById(params.objectTypeId)) {
-            set.status = 404
-            return { error: "Object not found" }
+            return handleRouteError(noHolderError(), set)
           }
 
           set.status = 403
@@ -942,7 +945,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           200: TwinObjectSchema,
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: ObjectLookupNotFoundResponseSchema,
         },
         detail: {
           summary: "Get object by a unique property",

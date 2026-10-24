@@ -66,10 +66,22 @@ describe("objects().getBy()", () => {
 
   test("resolves null when no object is found", async () => {
     const { client } = createTestClient(() =>
-      Response.json({ error: "Object not found" }, { status: 404 })
+      Response.json({ error: "Object not found", code: "object.not_found" }, { status: 404 })
     )
 
     expect(await objects(Person, { client }).getBy(Person.p.email, "nobody@example.com")).toBeNull()
+  })
+
+  // Removal proof: compare `body.error` with "Object not found" in `isObjectNotFound`
+  // (`src/query.ts`); this 404 then resolves null.
+  test("recognizes the lookup's 404 by its code, not its message", async () => {
+    const { client } = createTestClient(() =>
+      Response.json({ error: "Object not found" }, { status: 404 })
+    )
+
+    await expect(
+      objects(Person, { client }).getBy(Person.p.email, "nobody@example.com")
+    ).rejects.toBeInstanceOf(SixbApiError)
   })
 
   test("rejects a refused lookup and a 404 the route did not answer", async () => {
