@@ -1657,9 +1657,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           // holds the preimage of the URL's `requester` hash, so it may sign in
           // straight from the navigation. Scanners and other browsers get the
           // confirmation page; POST /auth/callback completes the sign-in there.
+          // A link that creates the account always shows it, to ask for a name.
           const requesterHash = url.searchParams.get("requester")?.trim()
           const pendingSecret = getCookie(request, MAGIC_LINK_PENDING_COOKIE_NAME)?.trim()
           if (
+            !firstSignIn &&
             requesterHash &&
             pendingSecret &&
             matchesMagicLinkRequester(pendingSecret, requesterHash)
@@ -1767,6 +1769,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           magicLinkId,
           token,
           displayName: body.displayName,
+          // A link that creates the account is confirmed here even in the browser that asked for it.
+          clearPendingCookie: getCookie(request, MAGIC_LINK_PENDING_COOKIE_NAME) !== undefined,
           authRedirectHint,
         })
       },

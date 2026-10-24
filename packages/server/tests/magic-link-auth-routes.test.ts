@@ -186,7 +186,8 @@ async function signIn(
 async function confirmWithName(
   app: ReturnType<typeof createSixbApi>,
   link: URL,
-  displayName: string
+  displayName: string,
+  cookie?: string
 ): Promise<Response> {
   const body = new URLSearchParams({
     magicLinkId: link.searchParams.get("magicLinkId") ?? "",
@@ -196,7 +197,11 @@ async function confirmWithName(
   return app.fetch(
     new Request(new URL("/auth/callback", link).toString(), {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: link.origin },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: link.origin,
+        ...(cookie ? { cookie } : {}),
+      },
       body,
       redirect: "manual",
     })
@@ -548,10 +553,11 @@ describe("magic-link auth routes", () => {
   })
 
   test("a rate-limited resend keeps the pending cookie for the delivered link", async () => {
-    const { app, messages } = createRuntime({
+    const { app, messages, storage } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
       rateLimit: { perMinute: 1 },
     })
+    await storage.auth.users.create({ projectId, id: "usr_founder", email: "founder@acme.com" })
 
     const first = await postSignIn(app, { email: "founder@acme.com" })
     const pending = cookieValue(first.headers.get("set-cookie"), "sixb_pending")
@@ -613,9 +619,10 @@ describe("magic-link auth routes", () => {
   })
 
   test("same-device fast path signs in straight from the emailed link", async () => {
-    const { app, messages } = createRuntime({
+    const { app, messages, storage } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
     })
+    await storage.auth.users.create({ projectId, id: "usr_founder", email: "founder@acme.com" })
 
     const signIn = await postSignIn(app, { email: "founder@acme.com" })
     const pendingCookie = cookieValue(signIn.headers.get("set-cookie"), "sixb_pending")
@@ -639,6 +646,39 @@ describe("magic-link auth routes", () => {
     const setCookie = callback.headers.get("set-cookie")
     expect(cookieValue(setCookie, "sixb_session_app")).toContain(".")
     expect(setCookie).toContain("sixb_pending=;")
+  })
+
+  // To see this fail, drop `!firstSignIn` from the fast path's condition in GET /auth/callback: the
+  // founder is then signed in from the navigation, without a name. Drop `clearPendingCookie` from
+  // POST /auth/callback, and the confirmation leaves the pending cookie behind.
+  test("a link that creates the account asks for a name in the browser that requested it", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+
+    const signIn = await postSignIn(app, { email: "founder@acme.com" })
+    const pendingCookie = cookieValue(signIn.headers.get("set-cookie"), "sixb_pending")
+    const link = linkFromLatestMessage(messages)
+
+    const page = await app.fetch(
+      new Request(link.toString(), {
+        headers: { cookie: `sixb_pending=${pendingCookie}` },
+        redirect: "manual",
+      })
+    )
+    expect(page.status).toBe(200)
+    expect(page.headers.get("set-cookie")).toBeNull()
+    expect(await page.text()).toContain('name="displayName"')
+
+    const confirmed = await confirmWithName(
+      app,
+      link,
+      "Ada Founder",
+      `sixb_pending=${pendingCookie}`
+    )
+    expect(confirmed.status).toBe(303)
+    expect(confirmed.headers.get("set-cookie")).toContain("sixb_pending=;")
+    await expect(
+      storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+    ).resolves.toMatchObject({ displayName: "Ada Founder" })
   })
 
   // A direct 3xx after a cross-site navigation drops SameSite=Strict cookies on
