@@ -1,4 +1,4 @@
-import type { AgentApprovalOutcomePart, AgentMessagePart } from "@sixb/core"
+import type { AgentMessagePart } from "@sixb/core"
 import { listSubagentThreadRuns } from "@sixb/core/internal/agents"
 import type {
   AgentMessageRecord,
@@ -9,9 +9,10 @@ import type {
 } from "@sixb/core/storage"
 import { renderCurrentTime } from "./agent-prompt"
 
-// A child that paused on its held calls continues, once they are decided, as the next run of its
-// thread under the turn that resumes: the same key, model and task. Its history is its thread, and
-// the outcomes of its calls are the message that starts the run.
+// A child that paused continues as the next run of its thread under a later turn: once its held
+// calls are decided, in the turn that resumes, or once its parent answers the question it paused
+// on, in the turn the parent answers it. The same key, model and task. Its history is its thread,
+// and what it goes on with is the message that starts the run.
 
 /** What a child run reads of its thread: its messages, and the paused run it continues. */
 export interface SubagentHistory {
@@ -56,19 +57,19 @@ export function isPausedSubagent(run: SubagentRunRecord): boolean {
 }
 
 /**
- * The message a continuation starts with: how each of its calls ended, as its own, what came back
- * to its new sandbox, and when it continues. It stays in the thread, so a later continuation
- * replays the same bytes.
+ * The message a continuation starts with: how each of its calls ended, as its own, or its parent's
+ * answer to its question, what came back to its new sandbox, and when it continues. It stays in
+ * the thread, so a later continuation replays the same bytes.
  */
 export function continuationTrigger(input: {
-  /** As the child reads them: without their caller. */
-  readonly outcomes: readonly AgentApprovalOutcomePart[]
+  /** The outcomes as the child reads them, without their caller, or the answer's `mail` part. */
+  readonly goesOnWith: readonly AgentMessagePart[]
   readonly paused: SubagentRunRecord
   readonly createdAt: Date
   readonly timeZone: string
 }): readonly AgentMessagePart[] {
   return [
-    ...input.outcomes,
+    ...input.goesOnWith,
     { type: "text", text: sandboxRestarted(input.paused) },
     { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.timeZone)}` },
   ]

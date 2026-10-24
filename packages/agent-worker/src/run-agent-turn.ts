@@ -60,6 +60,21 @@ export interface RunAgentTurnInput {
   readonly conversation?: ConversationReaders
   /** Preflight's retained projection, avoiding a second storage read in the worker path. */
   readonly threadContext?: LoadedAgentThreadModelContext
+  /** What the turn's children ask it, when it can delegate. */
+  readonly questions?: TurnQuestions
+}
+
+/** How a turn hears the questions its children ask, and leaves them waiting when it ends. */
+export interface TurnQuestions {
+  /** Read after the conversation: children of earlier turns still waiting on their question. */
+  readonly waiting?: string
+  /** The questions the model has not read yet, read in one more step when it answers. */
+  unread(): Promise<string | undefined>
+  /**
+   * Before the turn records its end: each child still waiting on its question pauses on it, and
+   * the turn waits until it has, until `stopAt`. Only then can its end cancel the others.
+   */
+  defer(stopAt: number, signal: AbortSignal): Promise<void>
 }
 
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
@@ -238,12 +253,31 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
             content: context.systemPrompt,
           },
           ...modelMessages,
+          ...(input.questions?.waiting
+            ? [
+                {
+                  role: "user" as const,
+                  content: [{ type: "text" as const, text: input.questions.waiting }],
+                },
+              ]
+            : []),
         ],
         tools,
         ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
         maxSteps,
         finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
+        // A child's question the model has not read comes before its answer ends the turn.
+        ...(input.questions === undefined
+          ? {}
+          : {
+              beforeComplete: async () => {
+                const unread = await input.questions?.unread()
+                return unread
+                  ? [{ role: "user", content: [{ type: "text", text: unread }] }]
+                  : undefined
+              },
+            }),
         signal: abortSignal,
         onModelCallEnd: usageRecorder.onModelCallEnd,
         onEvent: async (chunk) => {
@@ -284,6 +318,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         parts: interruptedParts,
       })
     }
+
+    // A child waiting on its question pauses on it while the turn still runs: a waiting child
+    // would hold the wait below forever, and the turn's end cancels the children still at work.
+    await input.questions?.defer(runtime.deadline.getTime() - PAUSE_WAIT_MARGIN_MS, abortSignal)
 
     // A call held after the last step that ran tools, by a command left running in the sandbox or
     // by a child, pauses the turn too. Its end cancels the children still at work, so it first

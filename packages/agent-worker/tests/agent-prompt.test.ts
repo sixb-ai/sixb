@@ -324,7 +324,7 @@ describe("agent system prompt", () => {
 
     expect(prompt).toContain("headless child agent")
     expect(prompt).toContain("Never spawn another agent or start a workflow")
-    expect(prompt).toContain("Do not ask a follow-up question")
+    expect(prompt).not.toContain("Do not ask a follow-up question")
     expect(prompt).not.toContain("ask for approval")
     expect(prompt).toContain("everything the parent Agent needs")
     // A child publishes only what its task asks for, and names it for the parent to show.
@@ -413,6 +413,26 @@ describe("agent system prompt", () => {
     expect(child).toContain("each message comes as a <sixb_parent_message> block")
     expect(child).not.toContain("message_agent")
     expect(parent).not.toContain("<sixb_parent_message>")
+  })
+
+  test("tells a child when to ask its parent, and the Agent how to answer it", () => {
+    // Removal proof: drop the ask_parent rule from SUBAGENT_RULES, or the question rule from
+    // CONVERSATION_RULES; its line fails.
+    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
+    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
+
+    expect(child).toContain(
+      "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask_parent"
+    )
+    expect(child).toContain("otherwise make a reasonable assumption, say it in your result")
+    expect(child).toContain("continue later with its answer as a <sixb_parent_answer> block")
+    expect(parent).toContain(
+      "Answer it with message_agent and its key from what you know, the conversation and the project's data"
+    )
+    expect(parent).toContain(
+      "Only when the answer is the user's to give, ask the user in your answer and end your turn"
+    )
+    expect(parent).not.toContain("ask_parent")
   })
 
   test("tells the Agent when to delegate and when one generation is enough", () => {

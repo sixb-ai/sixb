@@ -16,6 +16,7 @@ import {
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
+import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -54,7 +55,10 @@ export async function runSubagent(input: {
   readonly work?: SubagentWork
   /** Where it finds the files its parent handed over, and leaves the ones it returns. */
   readonly runFiles: AgentRunFiles
-  /** What its parent sends it while it runs: it reads it before its next step. */
+  /**
+   * What its parent sends it while it runs, read before its next step, and the questions it asks,
+   * through the inbox's `ask_parent` among its tools.
+   */
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime, inbox } = input
@@ -101,8 +105,10 @@ export async function runSubagent(input: {
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) => context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
     // The approval records decide, never the prompt or the tool output: a held call stops the
-    // child after that step, whatever its model would do next.
-    pauseAfterStep: () => holdsSubagentCalls(context, run),
+    // child after that step, whatever its model would do next. So does a question its parent's
+    // turn ended without answering.
+    pauseAfterStep: async () =>
+      inbox.deferred !== undefined || (await holdsSubagentCalls(context, run)),
   })
   const work = subagentWorkMessages(generation, run, inbox.deliveries)
   if (input.work) input.work.messages = work
@@ -127,6 +133,8 @@ async function settleSubagent(
   input: Omit<Parameters<typeof finishSubagent>[0], "finishReason" | "text"> & {
     readonly generation: PausableModelLoopResult
     readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
+    /** Whether the child paused on its question. */
+    readonly inbox: SubagentInbox
     /** After how many steps it read its parent's last message. */
     readonly lastMessageAt: number
   }
@@ -136,9 +144,19 @@ async function settleSubagent(
   if (generation.status === "aborted")
     throw new DOMException("Subagent stream was aborted.", "AbortError")
 
-  // A call held after its last step, by a command left running in the sandbox, pauses it too.
-  const paused = generation.status === "paused" || (await holdsSubagentCalls(input.context, run))
-  if (paused) return finishSubagent({ ...input, finishReason: "awaiting_approval" })
+  // A call held after its last step, by a command left running in the sandbox, pauses it too. A
+  // held call wins over a question: only a decision continues it, and it can ask again then.
+  const asked = input.inbox.deferred !== undefined
+  const held =
+    (generation.status === "paused" && !asked) || (await holdsSubagentCalls(input.context, run))
+  if (held) {
+    // Its question then goes unanswered: the decision continues it.
+    const work = asked ? unansweredQuestion(input.work) : input.work
+    return finishSubagent({ ...input, work, finishReason: "awaiting_approval" })
+  }
+  if (generation.status === "paused" || asked) {
+    return finishSubagent({ ...input, finishReason: "awaiting_answer" })
+  }
 
   // The parent would read a cut-short answer as complete: it gets the cause instead.
   if (generation.finishReason === "length") {

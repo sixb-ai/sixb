@@ -181,6 +181,7 @@ export {
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
   agentRunFinishedEvent,
+  agentRunInboxStreamId,
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
