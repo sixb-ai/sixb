@@ -4,6 +4,7 @@ import { BookmarkCheck, ChevronRight, FileX, Wrench } from "lucide-react"
 import { memo, useState } from "react"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { latestWorkLabel } from "../activity-label"
+import { heldCallsInParts } from "../approvals"
 import { ArtifactCards } from "../artifact-card"
 import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
@@ -15,6 +16,7 @@ import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-status"
+import { ApprovalCards } from "./approval-card"
 import { FileAttachmentCard } from "./file-attachment-card"
 import { WebSources } from "./web-sources"
 
@@ -24,7 +26,8 @@ import { WebSources } from "./web-sources"
  * long chain of thinking and tool calls reads as one quiet line above the answer instead of a stack
  * of separate dropdowns. What the turn published closes the body as one row of cards, while each
  * publish keeps its row in the work; the project's tool views placed in the answer come just
- * before, the same way. `step-start` markers are intentionally skipped.
+ * before, the same way. A call held for the user's approval shows as a card right under the work
+ * that made it, where the reader decides on it. `step-start` markers are intentionally skipped.
  */
 export function AssistantBody({
   parts,
@@ -54,6 +57,8 @@ export function AssistantBody({
     // A run of only step boundaries has nothing to show.
     if (work.every((part) => part.kind === "step-start")) return
     blocks.push(<WorkGroup key={`block-${key++}`} parts={work} inProgress={inProgress} />)
+    const held = heldCallsInParts(work)
+    if (held.length > 0) blocks.push(<ApprovalCards key={`approvals-${key++}`} calls={held} />)
   }
 
   parts.forEach((part) => {

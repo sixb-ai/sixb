@@ -7,6 +7,7 @@ import {
   BookOpen,
   Boxes,
   ChevronRight,
+  CirclePause,
   FileText,
   FolderGit2,
   Hash,
@@ -19,6 +20,7 @@ import {
   Zap,
 } from "lucide-react"
 import { useState } from "react"
+import { heldCallsInOutput } from "../approvals"
 import { ActivityStatusText } from "../components/activity-status"
 import { useAgentMessages } from "../i18n"
 import {
@@ -29,6 +31,7 @@ import {
   coerceBashOutput,
   commandPreview,
   describeBash,
+  humanize,
   type ModelMedia,
   modelMedia,
   type ParsedBashOutput,
@@ -92,6 +95,15 @@ export function BashToolView({ tool }: { tool: BashTool }) {
   const parsed = coerceBashOutput(tool.output)
 
   const running = tool.state === "input-available"
+
+  // A call held for approval did not fail: it waits, and its card, under the work, answers it.
+  const held = tool.state === "output-available" ? heldCallsInOutput(tool.output) : []
+  if (held.length > 0) {
+    const first = held[0]
+    const detail = first?.kind === "action" ? humanize(first.actionId) : humanize(first?.workflowId)
+    return <ToolLine icon={CirclePause} label={messages.bash.heldForApproval} detail={detail} />
+  }
+
   const isError = tool.state === "output-error" || (parsed !== null && !parsed.ok)
   const description = describeBash(intent, parsed, messages)
   const Icon = ICONS[description.icon]

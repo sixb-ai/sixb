@@ -1,15 +1,23 @@
 import {
+  getAgentOptions,
+  getAgentPreferencesOptions,
+  getAgentPreferencesQueryKey,
   getAuthAccessManagementOptionsOptions,
   getAuthProfileOptions,
   getAuthProfileQueryKey,
   getAuthSessionQueryKey,
+  updateAgentPreferencesMutation,
   updateAuthProfileMutation,
 } from "@sixb/client/hooks"
 import { Button, Input, ThemePicker } from "@sixb/ui/components"
 import { useOptionalTheme } from "@sixb/ui/hooks"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Loader2, LogOut, Pencil } from "lucide-react"
 import { type SubmitEvent, useEffect, useMemo, useRef, useState } from "react"
+import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../../agent/approvals"
+import { APPROVAL_MODE_ICONS } from "../../agent/components/approval-mode-chip"
+import { useAgentMessages } from "../../agent/i18n"
 import { useCurrentUser, useSignOut } from "../../session"
 import { notify, SectionPage } from "../section-page"
 import { apiErrorMessage, PageSection, Panel } from "../section-ui"
@@ -18,8 +26,8 @@ import { useSettingsMessages } from "./messages"
 import { SessionsSection } from "./sessions"
 
 /**
- * Settings › Personal: who you are in this project, your groups, how the app looks, and where
- * you're signed in.
+ * Settings › Personal: who you are in this project, your groups, how the app looks, what the agent
+ * may change without asking, and where you're signed in.
  */
 export function SettingsPersonalPage() {
   const messages = useSettingsMessages().personal
@@ -140,6 +148,7 @@ export function SettingsPersonalPage() {
           <ThemePicker labels className="self-start" />
         </PageSection>
       ) : null}
+      <ApprovalModeSection />
       <SessionsSection />
     </SectionPage>
   )
@@ -210,5 +219,87 @@ function NameForm({
         </Button>
       </div>
     </form>
+  )
+}
+
+/**
+ * Your approval mode where you choose none: new conversations, and those you never switched. Shown
+ * only in a project with an agent; a choice saves at once.
+ */
+function ApprovalModeSection() {
+  const messages = useSettingsMessages().personal
+  const modes = useAgentMessages().approvalModes.modes
+  const queryClient = useQueryClient()
+  const agent = useQuery({ ...getAgentOptions(), retry: false, staleTime: 5 * 60_000 })
+  const preferences = useQuery({
+    ...getAgentPreferencesOptions(),
+    enabled: agent.data !== undefined,
+    retry: false,
+  })
+
+  const save = useMutation({
+    ...updateAgentPreferencesMutation(),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(getAgentPreferencesQueryKey(), updated)
+      notify.success(messages.approvalsSaved)
+    },
+    onError: (error) => notify.error(apiErrorMessage(error, messages.approvalsSaveFailed)),
+  })
+  if (!agent.data || !preferences.data) return null
+
+  // The mode being saved shows at once; a failure puts the saved one back.
+  const current: AgentApprovalMode =
+    save.isPending && save.variables
+      ? save.variables.body.approvalMode
+      : preferences.data.approvalMode
+
+  return (
+    <PageSection title={messages.approvals} description={messages.approvalsDescription}>
+      <Panel>
+        <div role="radiogroup" aria-label={messages.approvals} className="divide-y divide-border">
+          {AGENT_APPROVAL_MODES.map((mode) => {
+            const Icon = APPROVAL_MODE_ICONS[mode]
+            const selected = mode === current
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={save.isPending}
+                onClick={() => {
+                  if (!selected) save.mutate({ body: { approvalMode: mode } })
+                }}
+                className="flex w-full items-center gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset disabled:cursor-default"
+              >
+                <span
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground [&_svg]:size-4",
+                    mode === "auto" && "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                  )}
+                >
+                  <Icon aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[0.8125rem] font-medium">{modes[mode].label}</span>
+                  <span className="block text-[0.8125rem] leading-5 text-muted-foreground">
+                    {modes[mode].description}
+                  </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    selected ? "border-primary" : "border-input"
+                  )}
+                >
+                  {selected ? <span className="size-2 rounded-full bg-primary" /> : null}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </Panel>
+    </PageSection>
   )
 }

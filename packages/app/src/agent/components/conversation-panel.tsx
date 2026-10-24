@@ -26,6 +26,8 @@ export interface ConversationPanelProps {
   readonly sharedThreads?: SharedThreadList
   /** Runs active across the threads visible to this agent surface. */
   readonly runningThreadCount: number
+  /** Calls waiting for the reader's approval, by thread. */
+  readonly waitingApprovals?: ReadonlyMap<string, number>
   readonly threadsError?: string | null
   readonly hasMoreThreads?: boolean
   readonly loadingMoreThreads?: boolean
@@ -51,6 +53,7 @@ export function ConversationPanel({
   agentThreads,
   sharedThreads,
   runningThreadCount,
+  waitingApprovals,
   threadsError,
   hasMoreThreads,
   loadingMoreThreads,
@@ -95,6 +98,7 @@ export function ConversationPanel({
       threads={agentThreads}
       sharedThreads={sharedThreads}
       runningThreadCount={runningThreadCount}
+      waitingApprovals={waitingApprovals}
       threadsError={threadsError}
       hasMoreThreads={hasMoreThreads}
       loadingMoreThreads={loadingMoreThreads}

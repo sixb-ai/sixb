@@ -78,6 +78,11 @@ export const en = {
     signOut: "Sign out",
     signingOut: "Signing out…",
     signOutFailed: "Could not sign out.",
+    approvals: "When the agent changes things",
+    approvalsDescription:
+      "What the agent may do without asking you, in conversations where you choose nothing else. Switch in any conversation from the chip under the message box, or with Shift+Tab.",
+    approvalsSaved: "Saved. New conversations use it.",
+    approvalsSaveFailed: "Could not save your choice.",
   },
   sessions: {
     title: "Sessions",
@@ -449,6 +454,11 @@ export const fr: Translation<SettingsMessages> = {
     signOut: "Se déconnecter",
     signingOut: "Déconnexion…",
     signOutFailed: "Impossible de se déconnecter.",
+    approvals: "Quand l’agent modifie quelque chose",
+    approvalsDescription:
+      "Ce que l’agent peut faire sans vous demander, dans les conversations où vous ne choisissez rien d’autre. Changez-le dans n’importe quelle conversation depuis le bouton sous la zone de message, ou avec Maj+Tab.",
+    approvalsSaved: "Enregistré. Les nouvelles conversations l’utilisent.",
+    approvalsSaveFailed: "Impossible d’enregistrer votre choix.",
   },
   sessions: {
     title: "Sessions",

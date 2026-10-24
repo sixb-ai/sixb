@@ -426,6 +426,7 @@ export const fr: Translation<AgentMessages> = {
       running: (action) =>
         action ? `Examen de l’action ${quoted(action)}` : "Examen d’une action",
     },
+    heldForApproval: "En attente d’approbation",
     requestAction: {
       title: (action) =>
         action ? `Action ${quoted(action)} exécutée` : "Action demandée exécutée",
@@ -664,6 +665,76 @@ export const fr: Translation<AgentMessages> = {
     removed: (name) => `${name} ne fait plus partie de la conversation`,
     left: "Vous avez quitté la conversation",
     copied: "Copiée dans vos conversations",
+  },
+  approvalModes: {
+    title: "Quand l’agent modifie quelque chose",
+    chip: (mode) => `Mode d’approbation : ${mode}. Le changer`,
+    changed: (mode) => `Mode d’approbation : ${mode}`,
+    shortcut: "Maj+Tab pour changer",
+    modes: {
+      manual: { label: "Manuel", description: "Demande avant chaque modification" },
+      "accept-edits": {
+        label: "Modifications acceptées",
+        description:
+          "Modifie vos données sans demander. Demande avant de contacter d’autres systèmes",
+      },
+      auto: { label: "Auto", description: "Fait toutes les modifications sans demander" },
+    },
+    makeDefault: "Utiliser pour les nouvelles conversations",
+    isDefault: "Votre choix par défaut pour les nouvelles conversations",
+    saveFailed: "Impossible de changer ce que l’agent peut faire. Réessayez.",
+  },
+  approvals: {
+    card: (title) => `Demande d’approbation : ${title}`,
+    waitingYou: "En attente de votre approbation",
+    waitingOther: (name) => `En attente de ${name}`,
+    onlyRequester: (name) =>
+      `Seul·e ${name} peut l’approuver : la demande s’exécute avec ses accès.`,
+    approve: "Approuver",
+    approving: "Approbation…",
+    deny: "Refuser",
+    denying: "Refus…",
+    alwaysAllow: "Toujours autoriser dans cette conversation",
+    alwaysAllowShort: "Toujours autoriser",
+    alwaysAllowHint: (mode) => `Approuve cette demande et passe en mode ${mode} ici`,
+    approved: "Approuvé",
+    approvedBy: (name) => `Approuvé par ${name}`,
+    ran: "Exécuté",
+    running: "Exécution…",
+    failed: "Approuvé, mais en échec",
+    denied: "Refusé",
+    deniedDetail: "Non exécuté",
+    superseded: "Ignoré",
+    supersededDetail: "Un nouveau message l’a mis de côté. Rien n’a été exécuté.",
+    cancelled: "Arrêté",
+    cancelledDetail: "La réponse a été arrêtée. Rien n’a été exécuté.",
+    expired: "Expiré",
+    expiredDetail: "Personne n’a décidé en 7 jours. Rien n’a été exécuté.",
+    elsewhere: "Demandé dans une autre conversation. La décision ne se prend pas ici.",
+    askedForApproval: "Approbation demandée",
+    started: "Démarré",
+    effects: {
+      ontology: "Les modifications restent dans vos données",
+      external: "Contacte un système externe, puis met à jour vos données",
+      workflow: (name) => `Démarre le workflow ${quoted(name)}`,
+    },
+    noInput: "Aucun détail à vérifier",
+    input: "Détails",
+    showInput: "Voir les détails",
+    hideInput: "Masquer les détails",
+    viewRun: "Voir l’exécution",
+    open: (name) => `Ouvrir ${name}`,
+    failures: {
+      limit:
+        "Approuvé et exécuté. L’agent reprendra quand votre limite d’usage de l’IA se réinitialisera.",
+      expired: "Cette demande a expiré avant votre décision. Redemandez à l’agent.",
+      decided: "Cette demande a déjà été tranchée.",
+      failed: "Impossible d’enregistrer votre décision. Réessayez.",
+    },
+    composerPlaceholder: "Décidez ci-dessus, ou répondez pour passer",
+    waitingThreads: (waiting) =>
+      `${count(waiting, "conversation")} en attente de votre approbation`,
+    threadWaiting: "En attente de vous",
   },
   observed: {
     readOnly:

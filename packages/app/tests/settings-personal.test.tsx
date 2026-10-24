@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { client, type GetAuthProfileResponse, type GetAuthSessionResponse } from "@sixb/client"
 import {
+  getAgentOptions,
+  getAgentPreferencesQueryKey,
   getAuthAccessManagementOptionsQueryKey,
   getAuthProfileQueryKey,
   getAuthSessionQueryKey,
@@ -70,7 +72,10 @@ function profileOf(
   }
 }
 
-function renderPersonal(profile?: GetAuthProfileResponse) {
+function renderPersonal(
+  profile?: GetAuthProfileResponse,
+  agent?: { readonly approvalMode: "manual" | "accept-edits" | "auto" }
+) {
   // Cached answers never go stale, so the page only fetches what a test changes.
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
@@ -79,6 +84,14 @@ function renderPersonal(profile?: GetAuthProfileResponse) {
   if (profile) queryClient.setQueryData(getAuthProfileQueryKey(), profile)
   queryClient.setQueryData(getAuthAccessManagementOptionsQueryKey(), { groups: [] })
   queryClient.setQueryData(listAuthSessionsQueryKey(), { sessions: [] })
+  // Without an agent, the page has no approval mode to offer.
+  queryClient.setQueryData(getAgentOptions().queryKey, agent ? { name: "Sixb" } : null)
+  if (agent) {
+    queryClient.setQueryData(getAgentPreferencesQueryKey(), {
+      approvalMode: agent.approvalMode,
+      approvalModeSource: "fallback",
+    })
+  }
 
   return render(
     <QueryClientProvider client={queryClient}>
@@ -191,4 +204,33 @@ test("an avatar that does not load shows the initials", () => {
 
   expect(view.container.querySelector("img")).toBeNull()
   expect(view.getByText("MR")).toBeDefined()
+})
+
+describe("what the agent may change, on Settings › Personal", () => {
+  // Removal proof: drop ApprovalModeSection from the page; the radios are gone.
+  test("you choose your default, and it saves at once", async () => {
+    const sent: unknown[] = []
+    answerWith(async (request) => {
+      sent.push(await request.json())
+      return Response.json({ approvalMode: "auto", approvalModeSource: "default" })
+    })
+    const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
+
+    const group = view.getByRole("radiogroup", { name: "When the agent changes things" })
+    expect(view.getByRole("radio", { name: /^Manual/ }).getAttribute("aria-checked")).toBe("true")
+    expect(group).toBeDefined()
+
+    fireEvent.click(view.getByRole("radio", { name: /^Auto/ }))
+
+    await waitFor(() =>
+      expect(view.getByRole("radio", { name: /^Auto/ }).getAttribute("aria-checked")).toBe("true")
+    )
+    expect(sent).toEqual([{ approvalMode: "auto" }])
+  })
+
+  test("is not offered in a project without an agent", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    expect(view.queryByRole("radiogroup", { name: "When the agent changes things" })).toBeNull()
+  })
 })
