@@ -159,6 +159,13 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
+- **The conversation's owner and participants see its sub-agents**, live or once they ended:
+  `GET /api/agent-threads/:threadId/children` lists them (`?runId=` for those one turn spawned),
+  each with its thread, runs, status, usage and cost; its thread's messages are what it did. A
+  paused one says what it waits for (`awaiting`: your decisions, its turn's resume, or the answer
+  to its question), or why it will not continue (`ended`). Observers read them through
+  `/api/observed-agent-threads`, by polling. Whoever asked for the turn, or the conversation's
+  owner, can stop one at work: `POST /api/agent-runs/:runId/cancel` with its `activeRunId`.
 - It cannot delegate again or start a workflow. Its model calls count toward the user's
   [AI usage](./usage-and-limits.md), and toward the `usage` and `cost` of the turn that started
   it. So does a workflow the agent's tools started, even for what it spends after the turn ends, as

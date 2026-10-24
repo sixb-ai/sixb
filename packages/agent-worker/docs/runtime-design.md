@@ -288,11 +288,13 @@ question and its replies travel through the same inboxes as messages (`src/subag
 
 ## Child runs
 
-Child events are recorded in the broker, but the client API does not expose their streams. The
-parent receives their durable results through `wait_agent`: each child's final answer, the text it
-wrote after its last local tool call, else its last text. `wait_agent` returns
-`WAIT_ANSWER_MARGIN_MS` (a minute) before the parent's deadline, children still at work reported
-`queued` or `running`, so the parent answers before it times out.
+Child events are recorded in the broker, and reach whoever reads the conversation: the API lists
+its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by
+`threads.listChildren`), and `/ws/agents` streams a child's run as a turn's. The parent
+receives their durable results through `wait_agent`: each child's final answer, the text it wrote
+after its last local tool call, else its last text. `wait_agent` returns `WAIT_ANSWER_MARGIN_MS` (a
+minute) before the parent's deadline, children still at work reported `queued` or `running`, so the
+parent answers before it times out.
 
 Files travel through blob storage, never through the model (`src/child-files.ts`):
 
