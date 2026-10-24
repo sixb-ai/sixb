@@ -13,6 +13,8 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "view_file",
   "spawn_agent",
   "wait_agent",
+  "message_agent",
+  "ask_parent",
   "publish_artifact",
   "publish_artifact_version",
 ] as const

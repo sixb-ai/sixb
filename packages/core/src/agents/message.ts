@@ -101,6 +101,20 @@ export type AgentApprovalCallSummary =
   | Pick<Extract<AgentApprovalCall, { readonly kind: "action" }>, "kind" | "actionId" | "subject">
   | Pick<Extract<AgentApprovalCall, { readonly kind: "workflow" }>, "kind" | "workflowId">
 
+/**
+ * A message a sub-agent read before its next step: today, its parent steering it. Sixb writes it in
+ * the sub-agent's thread, where the child read it; the model reads it as data from the sender,
+ * never from the user.
+ */
+export interface AgentMailPart {
+  readonly type: "agent-message"
+  /** The mail's id, the same in the sender's and the reader's records. */
+  readonly id: string
+  readonly from: "parent"
+  readonly kind: "message"
+  readonly text: string
+}
+
 /** Ordered, hidden provider state required to replay a model response losslessly. */
 export interface AgentProviderStatePart {
   readonly type: "provider-state"
@@ -127,6 +141,7 @@ export type AgentMessagePart =
   | AgentContextPart
   | AgentContinuationPart
   | AgentApprovalOutcomePart
+  | AgentMailPart
   | AgentToolCallPart
   | AgentProviderStatePart
 

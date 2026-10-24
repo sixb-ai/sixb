@@ -122,6 +122,7 @@ export {
   type AgentApprovalOutcomePart,
   type AgentContinuationPart,
   type AgentFilePart,
+  type AgentMailPart,
   type AgentMessage,
   type AgentMessagePart,
   type AgentMessagePartType,
@@ -165,6 +166,7 @@ export type {
 } from "./skills"
 export type {
   AgentCompactionFailureCode,
+  AgentMail,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
@@ -181,10 +183,13 @@ export {
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  agentThreadInboxStreamId,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   isAgentRunStreamEvent,
+  publishAgentMail,
   publishAgentRunCancel,
   publishAgentRunFinished,
+  readAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
 export { listSubagentThreadRuns } from "./subagent-runs"
