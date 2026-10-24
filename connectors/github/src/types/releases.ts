@@ -9,6 +9,18 @@ export interface ListReleasesOptions extends GitHubPaginationOptions, GitHubRequ
 
 export interface ListReleaseAssetsOptions extends GitHubPaginationOptions, GitHubRequestOptions {}
 
+/** The reactions GitHub accepts on a release. */
+export type GitHubReleaseReactionContent = "+1" | "laugh" | "heart" | "hooray" | "rocket" | "eyes"
+
+export interface ListReleaseReactionsOptions extends GitHubPaginationOptions, GitHubRequestOptions {
+  /** Only return reactions of this type. */
+  readonly content?: GitHubReleaseReactionContent
+}
+
+export interface CreateReleaseReactionInput {
+  readonly content: GitHubReleaseReactionContent
+}
+
 export interface CreateReleaseInput {
   readonly tagName: string
   /** Branch or commit SHA the tag is created from when it does not exist yet. */
@@ -102,6 +114,14 @@ export interface GitHubRelease {
   readonly discussion_url?: string
 }
 
+export interface GitHubReleaseReaction {
+  readonly id: number
+  readonly node_id: string
+  readonly user: GitHubUser | null
+  readonly content: GitHubReleaseReactionContent
+  readonly created_at: string
+}
+
 export interface GitHubReleaseNotes {
   readonly name: string
   readonly body: string
@@ -126,10 +146,32 @@ export interface RepositoryReleaseAssetsApi {
     options?: GitHubRequestOptions
   ): Promise<GitHubReleaseAsset>
   delete(assetId: number, options?: GitHubRequestOptions): Promise<void>
+  /**
+   * Download the asset's file. The response streams the bytes; read it with `.bytes()`,
+   * `.arrayBuffer()` or `.body`. GitHub redirects to signed storage, which is fetched without the
+   * token.
+   */
+  download(assetId: number, options?: GitHubRequestOptions): Promise<Response>
+}
+
+export interface RepositoryReleaseReactionsApi {
+  /** List one page of reactions on a release. */
+  list(
+    releaseId: number,
+    options?: ListReleaseReactionsOptions
+  ): Promise<GitHubPage<GitHubReleaseReaction>>
+  /** React to a release. Reacting twice with the same content returns the existing reaction. */
+  create(
+    releaseId: number,
+    input: CreateReleaseReactionInput,
+    options?: GitHubRequestOptions
+  ): Promise<GitHubReleaseReaction>
+  delete(releaseId: number, reactionId: number, options?: GitHubRequestOptions): Promise<void>
 }
 
 export interface RepositoryReleasesApi {
   readonly assets: RepositoryReleaseAssetsApi
+  readonly reactions: RepositoryReleaseReactionsApi
   /**
    * List one page of this repository's releases, newest first. Drafts are included only when the
    * token has push access to the repository.

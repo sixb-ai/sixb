@@ -4,7 +4,7 @@ A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
 - **Repositories** — list authenticated-user/org repositories, get a repository
 - **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
-- **Releases** — list/get/create/update/delete releases, generate release notes, manage assets
+- **Releases** — list/get/create/update/delete releases, generate release notes, manage and download assets, react
 - **People** — query users, organization members, memberships, outside collaborators, and invitations
 - **Webhooks** — receive GitHub events through one inbound route
 
@@ -104,6 +104,10 @@ The client is scoped by GitHub resource:
 | `gh.repo({ owner, repo }).releases.assets.upload(release)` | `POST {release.upload_url}` |
 | `gh.repo({ owner, repo }).releases.assets.update(id)` | `PATCH /repos/{owner}/{repo}/releases/assets/{id}` |
 | `gh.repo({ owner, repo }).releases.assets.delete(id)` | `DELETE /repos/{owner}/{repo}/releases/assets/{id}` |
+| `gh.repo({ owner, repo }).releases.assets.download(id)` | `GET /repos/{owner}/{repo}/releases/assets/{id}` (`application/octet-stream`) |
+| `gh.repo({ owner, repo }).releases.reactions.list(releaseId)` | `GET /repos/{owner}/{repo}/releases/{id}/reactions` |
+| `gh.repo({ owner, repo }).releases.reactions.create(releaseId)` | `POST /repos/{owner}/{repo}/releases/{id}/reactions` |
+| `gh.repo({ owner, repo }).releases.reactions.delete(releaseId, id)` | `DELETE /repos/{owner}/{repo}/releases/{id}/reactions/{reaction_id}` |
 | `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
 | `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
 | `gh.users.getAuthenticated()`             | `GET /user`                                      |
@@ -152,6 +156,10 @@ const release = await repo.releases.create({
 })
 await repo.releases.assets.upload(release, { name: "app.zip", data: await Bun.file("app.zip").bytes() })
 await repo.releases.update(release.id, { draft: false })
+await repo.releases.reactions.create(release.id, { content: "rocket" })
+
+const file = await repo.releases.assets.download(release.assets[0]!.id)
+await Bun.write("app.zip", file)
 ```
 
 Release calls accept a `signal` to abort the request. `releases.list()` returns
@@ -159,7 +167,9 @@ newest first and includes drafts only when the token can push to the repository;
 `getByTag()` and `getLatest()` never return a draft (GitHub answers 404, thrown as
 `GitHubApiError`), and `getLatest()` skips prereleases. `assets.upload()` posts to the
 release's `upload_url` and refuses one outside the configured GitHub host, since the
-token goes with it.
+token goes with it. `assets.download()` returns a streaming `Response`; when GitHub redirects
+to its file storage, the redirect is followed without the token. Releases accept the
+reactions `+1`, `laugh`, `heart`, `hooray`, `rocket` and `eyes`.
 
 Repository list options follow GitHub's two endpoint shapes. Authenticated-user
 repository calls support `visibility`, `affiliation`, `type`, `sort`,

@@ -224,6 +224,13 @@ describe("github connector", () => {
       "/repos/acme/web/releases/7/assets",
       { per_page: "50" },
     ],
+    [
+      "repo().releases.reactions.list",
+      (client: GitHubClient) =>
+        client.repo(webRepo).releases.reactions.list(7, { content: "rocket", pageSize: 50 }),
+      "/repos/acme/web/releases/7/reactions",
+      { content: "rocket", per_page: "50" },
+    ],
   ] as const)("%s maps its filters and returns GitHub's items", async (_name, list, path, query) => {
     const calls = record(() => json(listItems))
     const client = await connect()
@@ -400,6 +407,20 @@ describe("github connector", () => {
       "/repos/acme/web/releases/assets/99",
       undefined,
     ],
+    [
+      "repo().releases.reactions.create",
+      (c) => c.repo(webRepo).releases.reactions.create(7, { content: "heart" }),
+      "POST",
+      "/repos/acme/web/releases/7/reactions",
+      { content: "heart" },
+    ],
+    [
+      "repo().releases.reactions.delete",
+      (c) => c.repo(webRepo).releases.reactions.delete(7, 5),
+      "DELETE",
+      "/repos/acme/web/releases/7/reactions/5",
+      undefined,
+    ],
   ]
 
   test.each(requests)("%s sends its documented request", async (_name, run, method, path, body) => {
@@ -487,6 +508,9 @@ describe("github connector", () => {
     await expect(releases.get(0)).rejects.toThrow("releaseId must be a positive integer")
     await expect(releases.assets.list(0)).rejects.toThrow("releaseId must be a positive integer")
     await expect(releases.assets.get(0)).rejects.toThrow("assetId must be a positive integer")
+    await expect(releases.reactions.delete(7, 0)).rejects.toThrow(
+      "reactionId must be a positive integer"
+    )
 
     expect(calls).toHaveLength(0)
   })
@@ -514,6 +538,10 @@ describe("github connector", () => {
     ],
     ["assets.update", (r, signal) => r.assets.update(99, { label: "a" }, { signal })],
     ["assets.delete", (r, signal) => r.assets.delete(99, { signal })],
+    ["assets.download", (r, signal) => r.assets.download(99, { signal })],
+    ["reactions.list", (r, signal) => r.reactions.list(7, { signal })],
+    ["reactions.create", (r, signal) => r.reactions.create(7, { content: "+1" }, { signal })],
+    ["reactions.delete", (r, signal) => r.reactions.delete(7, 5, { signal })],
   ]
 
   // Reproduce: drop `signal` from one method's request init in resources/releases.ts; its row
@@ -548,6 +576,42 @@ describe("github connector", () => {
     expect(calls[0]?.rawBody).toBe(data)
     expect(calls[1]?.headers.get("content-type")).toBe("application/zip")
     expect(asset).toEqual({ id: 1, name: "app.zip" } as never)
+  })
+
+  // Reproduce: fetch the redirect through `context.http.get` instead of plain fetch; the second
+  // request then carries the token.
+  test("downloads an asset from GitHub's storage redirect without the token", async () => {
+    const storage = "https://objects.githubusercontent.com/assets/99?sig=abc"
+    const calls = record((_, index) =>
+      index === 1
+        ? new Response(null, { status: 302, headers: { location: storage } })
+        : new Response(new Uint8Array([1, 2, 3]))
+    )
+    const assets = (await connect()).repo(webRepo).releases.assets
+
+    const response = await assets.download(99)
+
+    expect(calls[0]?.url.pathname).toBe("/repos/acme/web/releases/assets/99")
+    expect(calls[0]?.headers.get("accept")).toBe("application/octet-stream")
+    expect(calls[0]?.headers.get("authorization")).toBe("Bearer t")
+    expect(calls[1]?.url.href).toBe(storage)
+    expect(calls[1]?.headers.get("authorization")).toBeNull()
+    expect([...(await response.bytes())]).toEqual([1, 2, 3])
+  })
+
+  test("downloads an asset GitHub serves directly, and throws on a refused download", async () => {
+    const calls = record((_, index) =>
+      index === 1 ? new Response("bytes") : new Response("expired", { status: 403 })
+    )
+    const assets = (await connect()).repo(webRepo).releases.assets
+
+    const direct = await assets.download(99)
+    const refused: unknown = await assets.download(99).catch((caught) => caught)
+
+    expect(calls).toHaveLength(2)
+    expect(await direct.text()).toBe("bytes")
+    expect(refused).toBeInstanceOf(GitHubApiError)
+    expect(refused).toMatchObject({ status: 403 })
   })
 
   test("uploads only to the configured GitHub host", async () => {
