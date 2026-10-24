@@ -59,7 +59,8 @@ import {
 } from "./frame"
 import { SheetGrid, type SheetGridEditor, type SheetGridStatus } from "./grid"
 import { cellInputText, parseCellInput } from "./input"
-import { lockedColumns, type SheetModel } from "./model"
+import { hiddenProperties } from "./locked"
+import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
 import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
 import { liveSheetErrorText, useSheetModel, useWorkbook } from "./workbook"
@@ -549,12 +550,13 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
 }
 
 /**
- * Above a live sheet with values the reader may not see: which columns, and that it is a
- * permission they can ask for, said once where each lock only says it on hover.
+ * Above a live sheet with values the reader may not see: which properties, and that it is a
+ * permission they can ask for, said once where each lock only says it on hover. A computed column
+ * is no permission to ask for: the properties it reads are named.
  */
 function LockedNotice({ model }: { readonly model: SheetModel }) {
   const messages = useArtifactMessages().sheet
-  const columns = useMemo(() => lockedColumns(model), [model])
+  const columns = useMemo(() => hiddenProperties(model), [model])
   if (columns.length === 0) return null
 
   return (

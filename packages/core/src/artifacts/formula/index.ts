@@ -33,6 +33,7 @@ export {
   type FormulaOperator,
   FormulaSyntaxError,
   formulaDependencies,
+  formulaReferences,
   parseFormula,
   renameColumnReferences,
 } from "./parser"
