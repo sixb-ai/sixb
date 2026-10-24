@@ -59,22 +59,22 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
-- Delegation tools (`spawn_agent`, `wait_agent`) are temporarily not injected into conversations.
-  The coordinator and child execution lane remain implemented and tested.
-- The retained `spawn_agent` tool advertises exact `{ provider, modelId }` pairs from the project
-  catalog, with available pricing and context metadata. For example, Gateway uses
-  `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
-  restricts selection to configured pairs; the worker rechecks them before creating a child.
-  Omitting `model` uses the first configured language model.
+- Conversations get `spawn_agent` and `wait_agent`. `spawn_agent` takes a tier or one of the exact
+  `{ provider, modelId }` pairs of the project catalog, for example
+  `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. Its guide
+  lists each model from its configured definition: name, description, context limits and
+  capabilities, never a price, which is not known. The schema restricts selection to configured
+  pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
+  `wait_agent` returns each child's final answer: the text of its last step.
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
-  never from the worker's filesystem: conversations receive `SIXB.md` as their instructions and
-  every skill in `definitions.agent.skills`; a workflow agent step receives only the skills it selects;
-  subagents receive every skill and their own instructions.
-- Conversation and workflow-agent runs render one ontology reference doc per object type their
-  execution can see, from its authorized view, flagging marked properties it is not cleared for,
-  and install them with the project's other `ontology/` docs and scripts under `SIXB_ONTOLOGY_DIR`.
-  Runs with the same view (visible types, restricted properties, requestable actions) share one
-  rendering. Only a conversation's prompt lists the files, as a tree; past 150 files the tree shows
+  never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
+  instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only
+  the skills it selects.
+- Every agent run renders one ontology reference doc per object type its execution can see, from
+  its authorized view, flagging marked properties it is not cleared for, and installs them with the
+  project's other `ontology/` docs and scripts under `SIXB_ONTOLOGY_DIR`. Runs with the same view
+  (visible types, restricted properties, requestable actions) share one rendering. A
+  conversation's and a child's prompt list the files, as a tree; past 150 files the tree shows
   folders with file counts. A workflow step's own instructions can point to them.
 - Reasoning supports `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
   and `max`. The chat picker uses the configured model's catalog-supported levels. Sixb's native
@@ -193,7 +193,8 @@ The terminal run state is stored on the run record:
   model never invokes a sandbox tool; in-flight inference is aborted with the original failure reported
 - Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
   assistant message before the thread is released. This controlled limit is not emitted as an
-  unhandled runtime failure
+  unhandled runtime failure. A child times out at its parent's deadline, its wait in the queue
+  included
 - User cancel during a turn: `cancelled`
 - Step limit reached before an answer: `succeeded` with `finishReason: "tool-calls"` and a
   `step_limit_reached` diagnostic
@@ -225,8 +226,9 @@ The terminal run state is stored on the run record:
   ontology, object, telemetry, file publication, action, and workflow routes from the run execution
   token and restored execution authority; no bearer token is exposed to the sandbox.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
-  to `8`. Headless children use a separate four-job lane so waiting parents cannot consume their
-  capacity.
+  to `8`.
+- `subagentConcurrency`: maximum number of child agents this worker executes at once, on a lane of
+  their own so waiting parents cannot consume their capacity; defaults to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.

@@ -103,6 +103,14 @@ async function handleAgentApiGatewayRequest(input: {
   if (authState.agentExecution.kind === "workflow" && matchesAgentMemory(upstreamPath)) {
     return jsonError(403, "Workflow agent nodes have no Agent memory.")
   }
+  // A child reads what its parent's conversation remembers; only the conversation saves to it.
+  if (
+    authState.agentExecution.kind === "subagent" &&
+    input.request.method !== "GET" &&
+    matchesAgentMemory(upstreamPath)
+  ) {
+    return jsonError(403, "Child agents cannot save Agent memory.")
+  }
 
   // Others read a shared conversation: whoever sends the turn, their own memory stays out of it.
   // Anything but the project's exact path is refused, as a route parameter is percent-decoded.

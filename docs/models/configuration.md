@@ -82,9 +82,10 @@ required: its first model is the default.
 | A tier, with a list configured | The first model |
 
 Every model of every tier stays in the catalog. The Agent sees them grouped by tier, for
-[`sixb models text`](#call-models-over-the-api) and in the delegation guide of `spawn_agent`. With
-tiers, the chat offers no model choice or reasoning control; without a
-[decision model](#decision-models), every message runs on `standard`.
+[`sixb models text`](#call-models-over-the-api) and when it [delegates](./overview.md#it-delegates):
+it picks a tier, or a model whose description fits the task. With tiers, the chat offers no model
+choice or reasoning control; without a [decision model](#decision-models), every message runs on
+`standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
 names none. Before the answer starts, the default decision model scores the message's tiers:
@@ -124,8 +125,8 @@ const gptModel = vercelGateway("openai/gpt-5.5", {
 ```
 
 They show in the chat's model picker, in the models the Agent can ask for a second opinion, and in
-the delegation guide of `spawn_agent`. Each replaces the provider's own text; without them, the
-provider's name and description apply.
+the models it can [delegate](./overview.md#it-delegates) to. Each replaces the provider's own text;
+without them, the provider's name and description apply.
 
 ### Default reasoning
 

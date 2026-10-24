@@ -110,6 +110,10 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: SubagentRunRecord
+  /** The parent's thread: what the child publishes lands there. Absent, it publishes nothing. */
+  readonly thread?: AgentThreadRecord | null
+  /** Who asked for the parent turn: what the child publishes is theirs. */
+  readonly requestedBy?: Principal
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -216,6 +220,7 @@ export async function createConversationAgentEnvironment(
       ...(input.thread && run.execution
         ? {
             publishing: {
+              threadId: input.thread.id,
               owner: input.thread.ownerPrincipal,
               author: input.requestedBy ?? input.thread.ownerPrincipal,
               executionToken: run.execution.token,
@@ -248,24 +253,39 @@ export async function createConversationAgentEnvironment(
   }
 }
 
-/** Build an isolated environment for one fresh, headless child Agent. */
+/**
+ * Build an isolated environment for one fresh, headless child Agent. It knows the project as its
+ * parent does (ontology docs, memory to read) and publishes into its parent's thread, as its own run.
+ */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run } = input
+  const { context, plan, run, thread } = input
   const execution = run.execution
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
+  const memory = await loadConversationMemory({ sixb: context.sixb, asOf: run.createdAt })
 
   return startAgentEnvironment({
     mode: "subagent",
     sandbox: ephemeralRunSandbox({ context }),
+    sandboxSignal: input.signal,
     context,
     plan,
     runId: run.id,
     parentRunId: run.parentRunId,
     toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
+    ...(thread
+      ? {
+          publishing: {
+            threadId: thread.id,
+            owner: thread.ownerPrincipal,
+            author: input.requestedBy ?? thread.ownerPrincipal,
+            executionToken: execution.token,
+          },
+        }
+      : {}),
     toolAttachments: NO_TOOL_ATTACHMENTS,
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
@@ -274,6 +294,8 @@ export async function createSubagentEnvironment(
       executionToken: execution.token,
     }),
     attachmentContext: emptyAttachmentContext(context.id),
+    ontologyDocs: renderRunOntologyDocs(context),
+    ...(memory ? { memory } : {}),
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
     onDetachedTeardown: input.onDetachedTeardown,
   })
@@ -393,20 +415,21 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  /** Installed under `$SIXB_ONTOLOGY_DIR`; only a conversation's prompt lists them. */
+  /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
   readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
   /**
-   * A conversation publishes artifacts as the thread's owner and edits them from storage; other
-   * runs return text.
+   * A conversation, or a child of one, publishes artifacts into the thread as the thread's owner
+   * and edits them from storage; other runs return text.
    */
   readonly publishing?: {
+    readonly threadId: string
     readonly owner: Principal
     readonly author: Principal
     readonly executionToken: string
   }
-  /** A conversation's memory: installed in the sandbox and shown in the prompt. */
+  /** A conversation's memory, or a child's to read: installed in the sandbox and in the prompt. */
   readonly memory?: ConversationMemory
 }
 
@@ -480,10 +503,11 @@ async function startAgentEnvironment(
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
   const artifactStorage = context.storage.artifacts
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
-  if (input.publishing && threadId && artifactStorage) {
+  const { publishing } = input
+  if (publishing && artifactStorage) {
     // Read concurrently with sandbox creation; both run while the model starts.
     installedArtifacts = materializeThreadArtifacts({
-      threadId,
+      threadId: publishing.threadId,
       // As the requester: the turn installs nothing they could not read themselves.
       artifacts: context.sixb.artifacts,
       blobStorage: context.blobStorage,
@@ -499,9 +523,9 @@ async function startAgentEnvironment(
       artifacts: artifactStorage,
       reader: context.sixb.artifacts,
       blobStorage: context.blobStorage,
-      run: { id: runId, threadId, executionToken: input.publishing.executionToken },
-      owner: input.publishing.owner,
-      author: input.publishing.author,
+      run: { id: runId, threadId: publishing.threadId, executionToken: publishing.executionToken },
+      owner: publishing.owner,
+      author: publishing.author,
       budget: fileBudget,
       resolveSandbox,
       installed: installedArtifacts,
@@ -517,8 +541,8 @@ async function startAgentEnvironment(
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
     attachmentContext,
-    // The memory section names the memory skill; other runs never see it.
-    skills: input.memory ? [...plan.skills, MEMORY_SKILL] : plan.skills,
+    // A conversation's memory section names the memory skill; other runs never see it.
+    skills: input.memory && mode === "conversation" ? [...plan.skills, MEMORY_SKILL] : plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
     ...(installedArtifacts ? { artifacts: installedArtifacts } : {}),
     ...(input.memory ? { memory: input.memory.repos } : {}),
@@ -551,7 +575,7 @@ async function startAgentEnvironment(
       instructions: plan.instructions,
       skills: plan.skills,
       // Workflow prompts are kept lean: their steps get the files without the index.
-      ...(mode === "conversation" && input.ontologyDocs
+      ...(mode !== "workflow-task" && input.ontologyDocs
         ? { ontologyIndex: input.ontologyDocs.index }
         : {}),
       sandboxResetAt: workspace?.resetAt,

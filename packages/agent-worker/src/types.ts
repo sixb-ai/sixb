@@ -136,6 +136,11 @@ export interface AgentWorkerOptions {
   readonly apiBaseUrl?: string
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
+  /**
+   * Maximum number of child agents this worker executes at once, on a lane of their own so
+   * waiting parents never hold their slots. Defaults to 4.
+   */
+  readonly subagentConcurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
   /** Framework model step cap per turn. Defaults to 100. */
