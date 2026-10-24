@@ -1108,6 +1108,8 @@ function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): bool
       return predicate.items.some((item) => matchesPredicate(row, item))
     case "not":
       return !matchesPredicate(row, predicate.item)
+    case "constant":
+      return predicate.value
     case "eq":
       return queryScalarValuesEqual(
         row.properties[predicate.propertyId],

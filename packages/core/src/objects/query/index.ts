@@ -40,6 +40,7 @@ export type {
   ObjectQueryPage,
   ObjectQueryPredicate,
   ObjectQueryPredicateComparison,
+  ObjectQueryPredicateConstant,
   ObjectQueryPredicateContains,
   ObjectQueryPredicateExists,
   ObjectQueryPredicateGroup,

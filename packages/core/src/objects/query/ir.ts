@@ -197,6 +197,7 @@ export type ObjectQueryPredicate =
   | ObjectQueryPredicateIn
   | ObjectQueryPredicateExists
   | ObjectQueryPredicateContains
+  | ObjectQueryPredicateConstant
 
 export interface ObjectQueryPredicateGroup {
   op: "and" | "or"
@@ -239,6 +240,17 @@ export interface ObjectQueryPredicateContains {
    * authored by callers. String substring and map key matches carry none.
    */
   scalarKind?: QueryScalarKind
+}
+
+/**
+ * Matches every row or none, reading no property.
+ *
+ * Core-produced, never authored: binding a query can settle a predicate before storage runs it,
+ * and a literal lets the database planner skip the scan. The HTTP schema does not accept it.
+ */
+export interface ObjectQueryPredicateConstant {
+  op: "constant"
+  value: boolean
 }
 
 export type ObjectQuerySortField =

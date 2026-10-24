@@ -1467,6 +1467,8 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       const item = compilePredicate(predicate.item)
       return negatePredicate(item)
     }
+    case "constant":
+      return { sql: predicate.value ? "true" : "false", args: [] }
     case "eq":
       return predicate.scalarKind === "decimal"
         ? compileDecimalEqualityPredicate(predicate.propertyId, "eq", predicate.value)

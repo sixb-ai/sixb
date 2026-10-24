@@ -40,6 +40,7 @@ function bindPredicate(
     case "not":
       return { ...predicate, item: bindPredicate(predicate.item, user) }
     case "exists":
+    case "constant":
       return predicate
     case "in": {
       if (!predicate.values.some(isCurrentUser)) return predicate

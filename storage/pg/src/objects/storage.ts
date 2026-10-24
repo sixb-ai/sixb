@@ -71,6 +71,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     in: true,
     exists: true,
     contains: true,
+    constant: true,
   },
   sortKinds: {
     property: true,
