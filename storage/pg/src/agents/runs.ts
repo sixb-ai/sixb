@@ -1,11 +1,11 @@
 import {
   agentRunMayHoldCalls,
   assertAgentRunExecution,
+  assertAgentRunFinishPayload,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateSubagentRunInput,
-  assertSubagentRunResult,
   assertSubagentThreadTakesRun,
   newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
@@ -26,6 +26,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
   type SubagentRunRecord,
@@ -332,24 +333,7 @@ export class PgAgentRunStore implements AgentRunStore {
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
 
-      if (input.status === "succeeded" && run.kind === "subagent") {
-        assertSubagentRunResult(
-          input.result,
-          run.id,
-          "SixbPg",
-          input.finishReason === "awaiting_approval"
-        )
-      }
-      if (
-        input.status === "succeeded" &&
-        run.kind === "conversation" &&
-        input.result !== undefined
-      ) {
-        throw new AgentStorageError(
-          "invalid_input",
-          `[SixbPg] Conversational Agent run '${run.id}' cannot persist a subagent result.`
-        )
-      }
+      assertAgentRunFinishPayload(run.kind, input, run.id, "SixbPg")
 
       if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
@@ -423,6 +407,30 @@ export class PgAgentRunStore implements AgentRunStore {
     return ids.flatMap((id) => {
       const run = byId.get(id)
       return run ? [run] : []
+    })
+  }
+
+  async listThreadSubagents(
+    input: ListThreadSubagentsInput
+  ): Promise<readonly SubagentRunRecord[]> {
+    // Reached through the turns of the conversation, by thread, then each turn's children by key
+    // or, for a finish reason, by `idx_agent_runs_paused_on_question`.
+    const rows = await this.sql<AgentRunRow[]>`
+      SELECT child.* FROM agent_runs turn
+      JOIN agent_runs child
+        ON child.project_id = turn.project_id AND child.parent_run_id = turn.id
+      WHERE turn.project_id = ${input.projectId}
+        AND turn.thread_id = ${input.threadId}
+        AND child.kind = 'subagent'
+        ${input.spawnKey === undefined ? this.sql`` : this.sql`AND child.spawn_key = ${input.spawnKey}`}
+        ${input.finishReason === undefined ? this.sql`` : this.sql`AND child.finish_reason = ${input.finishReason}`}
+      ORDER BY COALESCE(turn.started_at, turn.created_at) DESC, turn.id DESC,
+        child.created_at DESC, child.id DESC
+      LIMIT ${input.limit ?? 100}
+    `
+    return rows.flatMap((row) => {
+      const run = rowToRunRecord(row)
+      return run.kind === "subagent" ? [run] : []
     })
   }
 

@@ -38118,6 +38118,7 @@
                             "timeout",
                             "interrupted",
                             "awaiting_approval",
+                            "awaiting_answer",
                             "error",
                             "other",
                             "unknown"
@@ -38897,6 +38898,7 @@
                             "timeout",
                             "interrupted",
                             "awaiting_approval",
+                            "awaiting_answer",
                             "error",
                             "other",
                             "unknown"
@@ -39373,6 +39375,7 @@
                             "timeout",
                             "interrupted",
                             "awaiting_approval",
+                            "awaiting_answer",
                             "error",
                             "other",
                             "unknown"
@@ -39912,6 +39915,7 @@
                               "timeout",
                               "interrupted",
                               "awaiting_approval",
+                              "awaiting_answer",
                               "error",
                               "other",
                               "unknown"
@@ -40331,6 +40335,7 @@
                         "timeout",
                         "interrupted",
                         "awaiting_approval",
+                        "awaiting_answer",
                         "error",
                         "other",
                         "unknown"
@@ -42424,6 +42429,7 @@
                             "timeout",
                             "interrupted",
                             "awaiting_approval",
+                            "awaiting_answer",
                             "error",
                             "other",
                             "unknown"
@@ -45016,6 +45022,7 @@
                               "timeout",
                               "interrupted",
                               "awaiting_approval",
+                              "awaiting_answer",
                               "error",
                               "other",
                               "unknown"

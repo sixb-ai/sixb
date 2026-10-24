@@ -70,6 +70,7 @@ export type {
   ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
+  ListThreadSubagentsInput,
   MarkAgentApprovalsReportedInput,
   ReclaimAgentRunInput,
   RemoveAgentThreadParticipantInput,

@@ -8,6 +8,7 @@ import {
   type AgentStorageErrorCode,
   type RequestAgentApprovalInput,
 } from "../storage/agents"
+import type { ListThreadSubagentsInput } from "../storage/agents/types"
 import type { AuthStorage } from "../storage/auth"
 import type { ExecutionStorage } from "../storage/executions"
 import type { Storage } from "../storage/types"
@@ -482,6 +483,114 @@ export function runAgentApprovalStorageContractSuite<
       })
     })
 
+    test("a child pauses on its question before it answers; a turn never does", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await startChild(storage)
+
+        // Only a child has a parent to wait for.
+        await expectAgentError(
+          storage.agents.runs.finish({
+            projectId,
+            id: "run_1",
+            executionToken: "token_1",
+            status: "succeeded",
+            finishReason: "awaiting_answer",
+          }),
+          "invalid_input"
+        )
+        // Paused on its question, it has not answered yet.
+        const finished = await storage.agents.runs.finish({
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          finishReason: "awaiting_answer",
+          result: { text: "" },
+        })
+
+        expect(finished).toMatchObject({
+          status: "succeeded",
+          finishReason: "awaiting_answer",
+          result: { text: "" },
+        })
+        expect(await storage.agents.runs.getById({ projectId, id: "child_1" })).toEqual(finished)
+      })
+    })
+
+    test("lists a conversation's children by key or finish reason, the latest turn's first", async () => {
+      await withStorage(async (storage) => {
+        const t1 = new Date(t0.getTime() + 60_000)
+        const childOf = async (id: string, parentRunId: string, token: string, key: string) => {
+          await createTestAgentExecution(storage, {
+            projectId,
+            runId: id,
+            sourceExecutionId: `test_agent_execution:${parentRunId}`,
+          })
+          await storage.agents.runs.createSubagent({
+            ...childInput(id),
+            parentRunId,
+            parentExecutionToken: token,
+            spawnKey: key,
+          })
+          await storage.agents.runs.start({
+            projectId,
+            id,
+            execution: {
+              token: "child_token",
+              queueLeaseExpiresAt: new Date(t1.getTime() + 60_000),
+            },
+            startedAt: t0,
+          })
+        }
+        const finishChild = (id: string, finishReason: "stop" | "awaiting_answer") =>
+          storage.agents.runs.finish({
+            projectId,
+            id,
+            executionToken: "child_token",
+            status: "succeeded",
+            finishReason,
+            result: { text: finishReason === "stop" ? "Done." : "" },
+          })
+
+        // The first turn's West pauses on its question; East answers.
+        await startTurn(storage)
+        await childOf("child_west", "run_1", "token_1", "west")
+        await childOf("child_east", "run_1", "token_1", "east")
+        await finishChild("child_west", "awaiting_answer")
+        await finishChild("child_east", "stop")
+        await finishTurn(storage, "succeeded")
+        // The next turn spawns West again.
+        await createTestAgentExecution(storage, { projectId, runId: "run_3" })
+        await storage.agents.runs.create({ ...runInput("run_3"), createdAt: t1 })
+        await storage.agents.runs.start({
+          projectId,
+          id: "run_3",
+          execution: { token: "token_3", queueLeaseExpiresAt: new Date(t1.getTime() + 60_000) },
+          startedAt: t1,
+        })
+        await childOf("child_later", "run_3", "token_3", "west")
+        // Another conversation's West is never listed.
+        await startTurn(storage, { threadId: "thr_2", runId: "run_2", token: "token_2" })
+        await childOf("child_west_elsewhere", "run_2", "token_2", "west")
+        await finishChild("child_west_elsewhere", "awaiting_answer")
+
+        const listed = (input: Omit<ListThreadSubagentsInput, "projectId" | "threadId">) =>
+          storage.agents.runs.listThreadSubagents({ projectId, threadId: "thr_1", ...input })
+        const ids = async (input: Omit<ListThreadSubagentsInput, "projectId" | "threadId">) =>
+          (await listed(input)).map((run) => run.id)
+
+        expect(await ids({ spawnKey: "west" })).toEqual(["child_later", "child_west"])
+        expect(await ids({ spawnKey: "west", limit: 1 })).toEqual(["child_later"])
+        expect(await ids({ finishReason: "awaiting_answer" })).toEqual(["child_west"])
+        // Within a turn, the latest admitted first; at the same time, by id.
+        expect(await ids({})).toEqual(["child_later", "child_west", "child_east"])
+        expect(await ids({ spawnKey: "north" })).toEqual([])
+        // Each child is read with the thread it works in.
+        expect((await listed({ spawnKey: "east" }))[0]?.threadId).toBe("child_thread_child_east")
+      })
+    })
+
     test("a turn pauses for approval only while it holds a call", async () => {
       await withStorage(async (storage) => {
         await startTurn(storage)
@@ -940,19 +1049,15 @@ async function startTurn(
   })
 }
 
-async function startChild(storage: AgentApprovalStorageContractStorage): Promise<void> {
-  await createTestAgentExecution(storage, {
+/** A child of the first turn, in a thread of its own. */
+function childInput(id: string) {
+  return {
+    id,
     projectId,
-    runId: "child_1",
-    sourceExecutionId: "test_agent_execution:run_1",
-  })
-  await storage.agents.runs.createSubagent({
-    id: "child_1",
-    projectId,
-    executionId: "test_agent_execution:child_1",
+    executionId: `test_agent_execution:${id}`,
     parentRunId: "run_1",
     parentExecutionToken: "token_1",
-    spawnKey: "pay-invoices",
+    spawnKey: id === "child_1" ? "pay-invoices" : `pay-invoices-${id}`,
     spec: {
       model: { provider: "test", modelId: "small" },
       task: "Pay the overdue invoices.",
@@ -960,11 +1065,23 @@ async function startChild(storage: AgentApprovalStorageContractStorage): Promise
       maxSteps: 10,
       approvalMode: "manual",
     },
-    thread: { id: "child_thread_1", create: true },
-    trigger: { id: "child_task_1", parts: [{ type: "text", text: "Pay the overdue invoices." }] },
+    thread: { id: `child_thread_${id}`, create: true },
+    trigger: {
+      id: `child_task_${id}`,
+      parts: [{ type: "text", text: "Pay the overdue invoices." }],
+    },
     maxActiveChildren: 4,
     createdAt: t0,
+  } as const
+}
+
+async function startChild(storage: AgentApprovalStorageContractStorage): Promise<void> {
+  await createTestAgentExecution(storage, {
+    projectId,
+    runId: "child_1",
+    sourceExecutionId: "test_agent_execution:run_1",
   })
+  await storage.agents.runs.createSubagent(childInput("child_1"))
   await storage.agents.runs.start({
     projectId,
     id: "child_1",

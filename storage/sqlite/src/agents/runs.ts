@@ -2,11 +2,11 @@ import type { Database } from "bun:sqlite"
 import {
   agentRunMayHoldCalls,
   assertAgentRunExecution,
+  assertAgentRunFinishPayload,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateSubagentRunInput,
-  assertSubagentRunResult,
   assertSubagentThreadTakesRun,
   newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
@@ -27,6 +27,7 @@ import {
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
+  type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
   type SubagentRunRecord,
@@ -388,24 +389,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
-      if (input.status === "succeeded" && run.kind === "subagent") {
-        assertSubagentRunResult(
-          input.result,
-          run.id,
-          "SixbSqlite",
-          input.finishReason === "awaiting_approval"
-        )
-      }
-      if (
-        input.status === "succeeded" &&
-        run.kind === "conversation" &&
-        input.result !== undefined
-      ) {
-        throw new AgentStorageError(
-          "invalid_input",
-          `[SixbSqlite] Conversational Agent run '${run.id}' cannot persist a subagent result.`
-        )
-      }
+      assertAgentRunFinishPayload(run.kind, input, run.id, "SixbSqlite")
       if (input.finishReason === "awaiting_approval") {
         assertAwaitingApprovalFinish({
           runId: input.id,
@@ -515,6 +499,41 @@ export class SqliteAgentRunStore implements AgentRunStore {
     return ids.flatMap((id) => {
       const run = byId.get(id)
       return run ? [run] : []
+    })
+  }
+
+  async listThreadSubagents(
+    input: ListThreadSubagentsInput
+  ): Promise<readonly SubagentRunRecord[]> {
+    // Reached through the turns of the conversation, by thread, then each turn's children by key
+    // or, for a finish reason, by `idx_agent_runs_paused_on_question`.
+    const filters: string[] = []
+    const args: SqliteValue[] = [input.projectId, input.threadId]
+    if (input.spawnKey !== undefined) {
+      filters.push("AND child.spawn_key = ?")
+      args.push(input.spawnKey)
+    }
+    if (input.finishReason !== undefined) {
+      filters.push("AND child.finish_reason = ?")
+      args.push(input.finishReason)
+    }
+    args.push(input.limit ?? 100)
+
+    const rows = this.db
+      .query(
+        `SELECT child.* FROM agent_runs turn
+         JOIN agent_runs child
+           ON child.project_id = turn.project_id AND child.parent_run_id = turn.id
+         WHERE turn.project_id = ? AND turn.thread_id = ? AND child.kind = 'subagent'
+           ${filters.join(" ")}
+         ORDER BY COALESCE(turn.started_at, turn.created_at) DESC, turn.id DESC,
+           child.created_at DESC, child.id DESC
+         LIMIT ?`
+      )
+      .all(...args) as AgentRunRow[]
+    return rows.flatMap((row) => {
+      const run = rowToRunRecord(row)
+      return run.kind === "subagent" ? [run] : []
     })
   }
 
