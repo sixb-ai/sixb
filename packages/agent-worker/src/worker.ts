@@ -738,7 +738,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       await runSubagent({
         history,
-        // From the first message: one its parent sent while it was queued is read at its first step.
+        // From the first message: one its parent sent while it was queued is read at its first step,
+        // and a continuation's first step reads what the runs before it left unread.
         inbox: new SubagentInbox(this.host.broker, run, history.messages),
         context: environment.turnContext,
         plan,

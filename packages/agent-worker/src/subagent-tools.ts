@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util"
 import {
   AGENT_REASONING_LEVELS,
   type AgentApprovalOutcomePart,
+  type AgentMessage,
+  type AgentMessagePart,
   type AgentReasoning,
   AgentToolPublicError,
   type AgentToolResult,
@@ -69,6 +71,9 @@ export const WAIT_POLL_MS = 250
 export const WAIT_ANSWER_MARGIN_MS = 60_000
 
 const OMIT_MODEL = "Omit model to use the project default."
+
+/** How many of a conversation's latest turns a refused `message_agent` looks through for its key. */
+const EARLIER_TURNS_SEARCHED = 20
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
 const TIERED_MODEL_CHOICE = {
@@ -144,9 +149,18 @@ export interface WaitedSubagentResult {
   }[]
   /** Why its files are not listed: they did not come back, could not be copied, or wait. */
   readonly filesNote?: string
-  /** What this turn sent it that it ended without reading. */
+  /** What this turn sent it that it has not read: a paused child reads it if it continues. */
   readonly unread?: readonly SentMessage[]
+  /**
+   * What it answered before a message of yours came, which its `text`, written after, replaces.
+   * Set when it answered again.
+   */
+  readonly earlierAnswer?: string
+  /** Why its `text` does not account for your last message, when it did not answer again. */
+  readonly answerNote?: string
 }
+
+type MessagesReport = Pick<WaitedSubagentResult, "unread" | "earlierAnswer" | "answerNote">
 
 export interface WaitForSubagentsOutput {
   readonly results: readonly WaitedSubagentResult[]
@@ -339,7 +353,7 @@ export class SubagentCoordinator {
         "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
         "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides.",
-        "A message you sent a child that it ended without reading is listed in its unread.",
+        "A message you sent a child that it has not read is listed in its unread. When one came as it answered, earlierAnswer holds what it answered before, and text what it wrote after.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
       parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
@@ -374,8 +388,8 @@ export class SubagentCoordinator {
       ].join("\n"),
       inputSchema: messageInputSchema(),
       parseInput: parseMessageInput,
-      execute: async (value, { signal, toolCallId }) => {
-        const output = await this.message(value, toolCallId, signal)
+      execute: async (value, { signal, callId, toolCallId }) => {
+        const output = await this.message(value, `${callId}:${toolCallId}`, signal)
         assertJsonValue(output)
         return output
       },
@@ -385,27 +399,36 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Write a message to a child's inbox, its thread's. Its id is this turn's tool call, so a replay
-   * of the call is the same message and the child reads it once.
+   * Write a message to a child's inbox, its thread's. Its id names this turn, the model call and
+   * the tool call in it, so a replay of the call is the same message and the child reads it once,
+   * while two calls never share one, whatever ids the provider gives its tool calls.
    */
   async message(
     input: MessageSubagentInput,
-    toolCallId: string,
+    callId: string,
     signal: AbortSignal
   ): Promise<MessageSubagentOutput> {
     signal.throwIfAborted()
     const key = requireNonEmpty("message_agent", input.key, "key", 128)
     const text = requireNonEmpty("message_agent", input.text, "text")
-    const child = await this.context.storage.agents.runs.getById({
-      projectId: this.context.id,
+    const { agents } = this.context.storage
+    const projectId = this.context.id
+    const child = await agents.runs.getById({
+      projectId,
       id: createSubagentRunId(this.parentRun.id, key),
     })
     if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
       throw new AgentToolPublicError(
-        `[SixbAgentWorker] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
+        (await this.spawnedInEarlierTurn(key))
+          ? `[SixbAgentWorker] '${key}' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then.`
+          : `[SixbAgentWorker] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
       )
     }
-    if (isPausedSubagent(child)) {
+    // Once its call is filed it pauses at the end of its step, before it would read a message.
+    if (
+      isPausedSubagent(child) ||
+      (await agents.approvals.holdsRun({ projectId, runId: child.id }))
+    ) {
       throw new AgentToolPublicError(
         `[SixbAgentWorker] '${key}' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change.`
       )
@@ -417,7 +440,7 @@ export class SubagentCoordinator {
       )
     }
 
-    const sent = { id: `${this.parentRun.id}:${toolCallId}`, text }
+    const sent = { id: `${this.parentRun.id}:${callId}`, text }
     await publishAgentMail(this.host.broker, {
       projectId: this.context.id,
       mail: {
@@ -433,6 +456,23 @@ export class SubagentCoordinator {
     this.#sent.set(child.id, toChild)
 
     return { runId: child.id, status, delivery: status === "queued" ? "first-step" : "next-step" }
+  }
+
+  /** Whether an earlier turn of this conversation, among its latest, spawned a child with `key`. */
+  private async spawnedInEarlierTurn(key: string): Promise<boolean> {
+    const { runs } = this.context.storage.agents
+    const projectId = this.context.id
+    const { runs: turns } = await runs.list({
+      projectId,
+      kinds: ["conversation"],
+      threadId: this.parentRun.threadId,
+      order: "desc",
+      limit: EARLIER_TURNS_SEARCHED,
+    })
+    const ids = turns
+      .filter((turn) => turn.id !== this.parentRun.id)
+      .map((turn) => createSubagentRunId(turn.id, key))
+    return ids.length > 0 && (await runs.getByIds({ projectId, ids })).length > 0
   }
 
   async spawn(input: SpawnSubagentInput, signal: AbortSignal): Promise<SpawnSubagentOutput> {
@@ -678,12 +718,12 @@ export class SubagentCoordinator {
           childRunIds: runIds,
         })
         const delivered = await this.deliverFiles(children, signal)
-        const unread = await Promise.all(children.map((run) => this.unreadBy(run)))
+        const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
         return {
           // Each result keeps the id the Agent passed.
           results: children.map((run, index) => ({
             ...waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id)),
-            ...unread[index],
+            ...messages[index],
             runId: passedIds[index] ?? run.id,
           })),
           files: delivered.attached,
@@ -697,26 +737,32 @@ export class SubagentCoordinator {
   }
 
   /**
-   * What an ended child did not read of what this turn sent it: its thread holds each message it
-   * read. A failed child's failure is what the parent acts on.
+   * What became of what this turn sent an ended child, from its thread, which holds each message
+   * it read: those it did not read, and, when one came as it answered, the answer it gave before.
+   * A failed child's failure is what the parent acts on.
    */
-  private async unreadBy(
-    run: SubagentRunRecord
-  ): Promise<{ readonly unread?: readonly SentMessage[] }> {
+  private async messagesTo(run: SubagentRunRecord): Promise<MessagesReport> {
     const sent = this.#sent.get(run.id)
     if (!sent || !isTerminalSubagent(run) || run.status === "failed") return {}
 
     const { messages } = await this.context.storage.agents.messages.list({
       projectId: this.context.id,
       threadId: run.threadId,
+      order: "asc",
     })
     const read = new Set(
       messages.flatMap((message) =>
-        message.parts.flatMap((part) => (part.type === "agent-message" ? [part.id] : []))
+        message.parts.flatMap((part) => (part.type === "mail" ? [part.id] : []))
       )
     )
     const unread = sent.filter((message) => !read.has(message.id))
-    return unread.length > 0 ? { unread } : {}
+    return {
+      ...(unread.length > 0 ? { unread } : {}),
+      ...answerBeforeLateMessage(
+        messages.filter((message) => message.runId === run.id),
+        run.result?.text ?? ""
+      ),
+    }
   }
 
   /**
@@ -1083,6 +1129,49 @@ function publicSpawnError(error: unknown, key: string, maxActive: number): unkno
     default:
       return error
   }
+}
+
+/**
+ * When a message came as the child answered (`afterAnswer`), the answer it gave before: kept for
+ * the parent beside the one it wrote after, which may only amend it. If it wrote none after, its
+ * answer is the one before, and the parent is told it predates the message.
+ */
+function answerBeforeLateMessage(
+  transcript: readonly AgentMessage[],
+  answer: string
+): Pick<WaitedSubagentResult, "earlierAnswer" | "answerNote"> {
+  const isLate = (message: AgentMessage) =>
+    message.parts.some((part) => part.type === "mail" && part.afterAnswer === true)
+  const late = transcript.map(isLate).lastIndexOf(true)
+  const before = late > 0 ? transcript[late - 1] : undefined
+  if (before?.role !== "assistant") return {}
+
+  const earlier = answerOfSteps(before.parts)
+  if (!earlier) return {}
+  return earlier === answer
+    ? {
+        answerNote:
+          "It wrote this answer before your last message came, and did not answer again after reading it.",
+      }
+    : { earlierAnswer: earlier }
+}
+
+/** The text written after the last local tool call of these steps, as a child's answer is. */
+function answerOfSteps(parts: readonly AgentMessagePart[]): string {
+  const steps: AgentMessagePart[][] = []
+  for (const part of parts) {
+    if (part.type === "step-start" || steps.length === 0) steps.push([])
+    if (part.type !== "step-start") steps.at(-1)?.push(part)
+  }
+  const ranTools = steps.map((step) =>
+    step.some((part) => part.type === "tool-call" && part.providerExecuted !== true)
+  )
+  return steps
+    .slice(ranTools.lastIndexOf(true) + 1)
+    .flat()
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n")
+    .trim()
 }
 
 function isTerminalSubagent(

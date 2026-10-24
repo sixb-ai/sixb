@@ -141,7 +141,7 @@ function userModelMessage<TMessage extends AgentMessage>(
       content.push({ type: "text", text: `${approvalOutcomeInstruction(part)}\n\n` })
       return
     }
-    if (part.type === "agent-message") {
+    if (part.type === "mail") {
       content.push({ type: "text", text: agentMailInstruction(part) })
       return
     }

@@ -294,7 +294,9 @@ export async function subscribeAgentRunCancel(
 // A per-thread channel a sub-agent's runs read at each step boundary: today, its parent steering
 // it. The sender is a run and the recipient a sub-agent's thread, so every run of the child reads
 // the same inbox. Its durable record is the sender's tool call and the reader's thread, which keeps
-// each `agent-message` part where the child read it, so the stream keeps it a day.
+// each `mail` part where the child read it. The stream outlives the turn only so that a child
+// paused on a held call, which a later turn continues once the user decides, can still be given
+// what it did not read: it keeps mail as long as an approval waits, and a day more.
 
 export type AgentThreadInboxStreamId = `agents.threads.${string}.inbox`
 
@@ -304,11 +306,19 @@ export function agentThreadInboxStreamId(threadId: string): AgentThreadInboxStre
 
 const AGENT_MAIL_RECORD = "agent.mail"
 
-const AGENT_THREAD_INBOX_RETENTION = { maxAgeMs: 24 * 60 * 60 * 1000, maxRecords: 1_000 } as const
+const AGENT_THREAD_INBOX_RETENTION = {
+  // An approval waits at most 7 days (`AGENT_APPROVAL_TTL_MS`).
+  maxAgeMs: 8 * 24 * 60 * 60 * 1000,
+  maxRecords: 1_000,
+} as const
 
 export function agentThreadInboxStreamDefinition(threadId: string): BrokerStreamDefinition {
   return { id: agentThreadInboxStreamId(threadId), retention: AGENT_THREAD_INBOX_RETENTION }
 }
+
+/** The kinds of mail this version writes and understands. */
+export const AGENT_MAIL_KINDS = ["message"] as const
+export type AgentMailKind = (typeof AGENT_MAIL_KINDS)[number]
 
 /** One message from a run to a sub-agent's thread. */
 export interface AgentMail {
@@ -316,18 +326,30 @@ export interface AgentMail {
   readonly id: string
   readonly fromRunId: string
   readonly toThreadId: string
-  readonly kind: "message"
+  readonly kind: AgentMailKind
+  /** What the reader's model reads, whatever the kind: a reader that does not know it reads this. */
   readonly text: string
   readonly sentAt: string
 }
 
-function isAgentMail(value: unknown): value is AgentMail {
+/**
+ * Mail as a reader finds it. Its kind may be one a newer sender writes: the reader delivers its
+ * text as a message rather than skipping it, so no reader's cursor passes mail it never delivered.
+ */
+export type ReceivedAgentMail = Omit<AgentMail, "kind"> & { readonly kind: string }
+
+export function isKnownAgentMailKind(kind: string): kind is AgentMailKind {
+  return (AGENT_MAIL_KINDS as readonly string[]).includes(kind)
+}
+
+function isReceivedAgentMail(value: unknown): value is ReceivedAgentMail {
   return (
     isPlainRecord(value) &&
     typeof value.id === "string" &&
     typeof value.fromRunId === "string" &&
     typeof value.toThreadId === "string" &&
-    value.kind === "message" &&
+    typeof value.kind === "string" &&
+    value.kind.length > 0 &&
     typeof value.text === "string" &&
     typeof value.sentAt === "string"
   )
@@ -359,14 +381,15 @@ export async function publishAgentMail(
 }
 
 /**
- * Read a thread's mail after `afterCursor`, or from the start, every page of it. A record that is
- * not mail to this thread is skipped. Carry the returned cursor to the next read.
+ * Read a thread's mail after `afterCursor`, or from the start, every page of it. Carry the returned
+ * cursor to the next read. A record that is not mail at all (no envelope, no text) cannot be
+ * delivered: it is reported and passed, never silently.
  */
 export async function readAgentMail(
   broker: Broker,
   params: { readonly projectId: string; readonly threadId: string; readonly afterCursor?: string }
-): Promise<{ readonly mail: readonly AgentMail[]; readonly cursor?: string }> {
-  const mail: AgentMail[] = []
+): Promise<{ readonly mail: readonly ReceivedAgentMail[]; readonly cursor?: string }> {
+  const mail: ReceivedAgentMail[] = []
   let cursor = params.afterCursor
 
   for (;;) {
@@ -377,9 +400,13 @@ export async function readAgentMail(
       ...(cursor === undefined ? {} : { afterCursor: cursor }),
     })
     for (const record of page.records) {
-      if (isAgentMail(record.payload) && record.payload.toThreadId === params.threadId) {
-        mail.push(record.payload)
+      if (!isReceivedAgentMail(record.payload)) {
+        console.error(
+          `[Sixb] Agent thread '${params.threadId}' inbox record '${record.cursor}' is not mail; it is skipped.`
+        )
+        continue
       }
+      if (record.payload.toThreadId === params.threadId) mail.push(record.payload)
     }
 
     const previous = cursor
