@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  compileConditionalObjectReadScope,
   compileSelectedObjectReadScope,
   type ObjectReadStorage,
   type ObjectStorage,
@@ -32,15 +33,21 @@ class TestStream {
 }
 
 describe("storage operation scope", () => {
-  test("fails closed when object storage omits the selected-read factory", () => {
-    const malformed = { createSelectedReadScope: undefined } as unknown as ObjectStorage
-
-    expect(() =>
-      createObjectOperationScope(
-        malformed,
-        createStorageOperationScope(async (run) => run())
-      )
-    ).toThrow("must implement ObjectReadScopeFactory")
+  test("fails closed when object storage omits a scoped-read factory", () => {
+    const factory = () => {
+      throw new Error("unreachable")
+    }
+    for (const malformed of [
+      { createSelectedReadScope: undefined, createConditionalReadScope: factory },
+      { createSelectedReadScope: factory, createConditionalReadScope: undefined },
+    ]) {
+      expect(() =>
+        createObjectOperationScope(
+          malformed as unknown as ObjectStorage,
+          createStorageOperationScope(async (run) => run())
+        )
+      ).toThrow("must implement ObjectReadScopeFactory")
+    }
   })
 
   // An unwrapped store skips the provider's lock: on SQLite its writes can land inside another
@@ -228,6 +235,31 @@ describe("storage operation scope", () => {
     await expect(
       Promise.resolve().then(() => read({ projectId: input.projectId }))
     ).rejects.toMatchObject({ code: "transaction_inactive" })
+  })
+
+  test("guards conditional readers like selected ones", async () => {
+    const storage = new InMemoryStorage()
+    const input = {
+      projectId: "operation-scope-project",
+      scope: compileConditionalObjectReadScope({ kind: "conditional", conditions: [] }),
+    }
+    let escapedReader: ObjectReadStorage | undefined
+
+    await storage.transaction(async (tx) => {
+      expect(() => storage.objects.createConditionalReadScope(input)).toThrow(
+        "use the provided tx storage"
+      )
+
+      escapedReader = tx.objects.createConditionalReadScope(input)
+      expect(await escapedReader.list({ projectId: input.projectId })).toMatchObject({ total: 0 })
+    })
+
+    if (!escapedReader) throw new Error("Expected the transaction reader to be captured.")
+    const reader = escapedReader
+    const read = await Promise.resolve()
+      .then(() => reader.list({ projectId: input.projectId }))
+      .catch((error: unknown) => error)
+    expect(read).toMatchObject({ code: "transaction_inactive" })
   })
 })
 

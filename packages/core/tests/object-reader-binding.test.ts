@@ -987,6 +987,9 @@ function createReadStorage(options?: {
       if (options?.selectedReader) return options.selectedReader
       throw new Error("createSelectedReadScope must not be called for existing authorities")
     },
+    createConditionalReadScope() {
+      throw new Error("createConditionalReadScope must not be called for existing authorities")
+    },
     async listIncidentLinksBatch() {
       return []
     },

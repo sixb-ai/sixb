@@ -7,14 +7,7 @@ import type {
   ObjectRow,
 } from "../types"
 import { fullLinkRowKey, rowIdentityKey, rowIdentityKeyParts, sourceLinkBucketKey } from "./keys"
-import type { InMemoryReadSource } from "./read-source"
-
-export interface InMemoryReadUniverse extends InMemoryReadSource {
-  readonly objects: ReadonlyMap<string, ObjectRow>
-  readonly links: ReadonlyMap<string, ObjectLinkRow>
-  readonly linksBySource: ReadonlyMap<string, readonly ObjectLinkRow[]>
-  readonly objectProperties: ReadonlyMap<string, ReadonlySet<string>>
-}
+import type { InMemoryReadSource, InMemoryScopedReadSource } from "./read-source"
 
 interface InMemoryReadPlan {
   readonly roots: readonly CompiledObjectReadRoot[]
@@ -52,7 +45,7 @@ export function resolveSelectedReadUniverse(
   source: InMemoryReadSource,
   plan: InMemoryReadPlan,
   limits: ObjectReadExecutionLimits
-): InMemoryReadUniverse {
+): InMemoryScopedReadSource {
   // Reachability stays path-sensitive until every finite selection step has run. The final
   // object/link universes union exact identities only after that traversal, so the same type
   // reached through another branch cannot inherit nested link authority.
@@ -145,7 +138,7 @@ function createReadUniverse(
   objects: ReadonlyMap<string, ObjectRow>,
   links: ReadonlyMap<string, ObjectLinkRow>,
   objectProperties: ReadonlyMap<string, ReadonlySet<string>>
-): InMemoryReadUniverse {
+): InMemoryScopedReadSource {
   const projectId = source.projectId
   const linksBySource = new Map<string, ObjectLinkRow[]>()
   for (const link of links.values()) {
@@ -156,16 +149,15 @@ function createReadUniverse(
   }
   return {
     projectId,
-    objects,
-    links,
-    linksBySource,
-    objectProperties,
+    selectsProperty: (objectTypeId, primaryId, propertyId) =>
+      objectProperties.get(rowIdentityKeyParts(objectTypeId, primaryId))?.has(propertyId) ?? false,
     getVector: (ref, profile) => {
       const key = rowIdentityKeyParts(ref.objectTypeId, ref.primaryId)
       if (!objects.has(key)) return undefined
       const value = source.getVector?.(ref, profile)
       return value?.source.every((id) => objectProperties.get(key)?.has(id)) ? value : undefined
     },
+    allObjects: () => objects.values(),
     objectsOfType: (objectTypeId) =>
       [...objects.values()].filter((row) => row.objectTypeId === objectTypeId),
     getObject: (objectTypeId, primaryId) =>

@@ -114,6 +114,7 @@ export {
   type MaterializerStorageContractProvider,
   runMaterializerStorageContractSuite,
 } from "./materializer-storage-contract"
+export { runConditionalObjectReadScopeContractSuite } from "./object-conditional-read-scope-contract"
 export {
   type ObjectQueryProviderContractSuiteOptions,
   objectQueryContractOntology,

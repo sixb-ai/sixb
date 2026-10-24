@@ -269,7 +269,7 @@ export function createOntologyOperationScope<T extends OntologyStorage>(
   }) as T
 }
 
-/** Keep synchronously created selected readers inside the provider's root operation scope. */
+/** Keep synchronously created scoped readers inside the provider's root operation scope. */
 export function createObjectOperationScope<T extends ObjectStorage>(
   target: T,
   scope: StorageOperationScope
@@ -279,6 +279,10 @@ export function createObjectOperationScope<T extends ObjectStorage>(
     createSelectedReadScope: (params) => {
       scope.assertAvailable()
       return createGuardedObjectReadStorage(factory.createSelectedReadScope(params), scope)
+    },
+    createConditionalReadScope: (params) => {
+      scope.assertAvailable()
+      return createGuardedObjectReadStorage(factory.createConditionalReadScope(params), scope)
     },
   }) as T
 }
