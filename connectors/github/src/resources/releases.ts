@@ -2,6 +2,7 @@ import type { GitHubHttpContext } from "../http"
 import {
   applyPaging,
   assertNonEmpty,
+  GitHubApiError,
   pathId,
   pathPart,
   readJson,
@@ -14,13 +15,17 @@ import {
 import type { GitHubPage, GitHubRepositoryTarget, GitHubRequestOptions } from "../types/common"
 import type {
   CreateReleaseInput,
+  CreateReleaseReactionInput,
   GenerateReleaseNotesInput,
   GitHubRelease,
   GitHubReleaseAsset,
   GitHubReleaseNotes,
+  GitHubReleaseReaction,
   ListReleaseAssetsOptions,
+  ListReleaseReactionsOptions,
   ListReleasesOptions,
   RepositoryReleaseAssetsApi,
+  RepositoryReleaseReactionsApi,
   RepositoryReleasesApi,
   UpdateReleaseAssetInput,
   UpdateReleaseInput,
@@ -38,6 +43,7 @@ export function createRepositoryReleasesApi(
 
   return {
     assets: createRepositoryReleaseAssetsApi(context, path),
+    reactions: createRepositoryReleaseReactionsApi(context, path),
 
     async list(options?: ListReleasesOptions): Promise<GitHubPage<GitHubRelease>> {
       const params = new URLSearchParams()
@@ -189,6 +195,73 @@ function createRepositoryReleaseAssetsApi(
         })
       )
     },
+
+    async download(assetId: number, options?: GitHubRequestOptions): Promise<Response> {
+      const response = await context.http.get(assetPath(assetsPath, assetId), {
+        headers: { accept: "application/octet-stream" },
+        redirect: "manual",
+        signal: options?.signal,
+      })
+
+      const location = isRedirect(response.status) ? response.headers.get("location") : null
+      if (!location) return readContent(response)
+
+      // The redirect points to storage signed for this one download. It goes through plain fetch
+      // so the token is not sent with it: the storage would reject a second credential, and the
+      // token has no business leaving GitHub.
+      await response.body?.cancel()
+      return readContent(
+        await fetch(new URL(location, context.apiBaseUrl), { signal: options?.signal })
+      )
+    },
+  }
+}
+
+function createRepositoryReleaseReactionsApi(
+  context: GitHubHttpContext,
+  releasesPath: string
+): RepositoryReleaseReactionsApi {
+  const reactionsPath = (releaseId: number) => `${releasePath(releasesPath, releaseId)}/reactions`
+
+  return {
+    async list(
+      releaseId: number,
+      options?: ListReleaseReactionsOptions
+    ): Promise<GitHubPage<GitHubReleaseReaction>> {
+      const params = new URLSearchParams()
+      applyPaging(params, options)
+      if (options?.content) params.set("content", options.content)
+      const path = withQuery(reactionsPath(releaseId), params)
+      return readPage<GitHubReleaseReaction>(
+        await context.http.get(resolvePagePath(path, options), { signal: options?.signal }),
+        context.apiBaseUrl
+      )
+    },
+
+    async create(
+      releaseId: number,
+      input: CreateReleaseReactionInput,
+      options?: GitHubRequestOptions
+    ): Promise<GitHubReleaseReaction> {
+      return readJson<GitHubReleaseReaction>(
+        await context.http.post(
+          reactionsPath(releaseId),
+          { content: input.content },
+          { signal: options?.signal }
+        )
+      )
+    },
+
+    async delete(
+      releaseId: number,
+      reactionId: number,
+      options?: GitHubRequestOptions
+    ): Promise<void> {
+      const path = `${reactionsPath(releaseId)}/${pathId(reactionId, "reactionId")}`
+      return readNoContent(
+        await context.http.request(path, { method: "DELETE", signal: options?.signal })
+      )
+    },
   }
 }
 
@@ -211,6 +284,17 @@ function releasePath(releasesPath: string, releaseId: number): string {
 
 function assetPath(assetsPath: string, assetId: number): string {
   return `${assetsPath}/${pathId(assetId, "assetId")}`
+}
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+async function readContent(response: Response): Promise<Response> {
+  if (!response.ok) {
+    throw new GitHubApiError(response.status, await response.text().catch(() => ""))
+  }
+  return response
 }
 
 /**

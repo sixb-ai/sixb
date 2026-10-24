@@ -54,13 +54,18 @@ export type {
 export type { GitHubConnectorOptions } from "./options"
 export type {
   CreateReleaseInput,
+  CreateReleaseReactionInput,
   GenerateReleaseNotesInput,
   GitHubRelease,
   GitHubReleaseAsset,
   GitHubReleaseNotes,
+  GitHubReleaseReaction,
+  GitHubReleaseReactionContent,
   ListReleaseAssetsOptions,
+  ListReleaseReactionsOptions,
   ListReleasesOptions,
   RepositoryReleaseAssetsApi,
+  RepositoryReleaseReactionsApi,
   RepositoryReleasesApi,
   UpdateReleaseAssetInput,
   UpdateReleaseInput,
