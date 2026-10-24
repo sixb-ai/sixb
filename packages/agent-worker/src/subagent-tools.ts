@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import {
   AGENT_REASONING_LEVELS,
+  type AgentApprovalOutcomePart,
   type AgentReasoning,
   AgentToolPublicError,
   type AgentToolResult,
@@ -21,6 +22,7 @@ import {
   dispatchQueuedSubagentRuns,
   isAgentToolResult,
   listChildApprovalsAwaiting,
+  listSubagentThreadRuns,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
@@ -33,12 +35,14 @@ import {
 } from "@sixb/core/models"
 import type {
   ConversationAgentRunRecord,
+  CreateSubagentRunInput,
   ExecutionRecord,
   SubagentRunFile,
   SubagentRunRecord,
   SubagentRunSpec,
 } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
+import { delay } from "./abort"
 import { renderHandedFiles } from "./agent-prompt"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import {
@@ -51,9 +55,11 @@ import {
 } from "./child-files"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
+import { continuationTrigger, isPausedSubagent } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
-const WAIT_POLL_MS = 250
+/** How often a wait for children reads their runs. */
+export const WAIT_POLL_MS = 250
 /**
  * How long before its turn's deadline `wait_agent` stops waiting, so the Agent still answers with
  * what its children found. A last step without tools takes seconds on a light model and up to about
@@ -97,8 +103,11 @@ export interface WaitForSubagentsInput {
 
 export interface WaitedSubagentResult {
   readonly runId: string
-  /** `queued` or `running`: the turn is about to end, so the Agent answers without it. */
-  readonly status: SubagentRunRecord["status"]
+  /**
+   * `queued` or `running`: the turn is about to end, so the Agent answers without it.
+   * `awaiting_approval`: it paused on calls that wait for the user, and continues once they decide.
+   */
+  readonly status: SubagentRunRecord["status"] | "awaiting_approval"
   readonly text?: string
   readonly error?: { readonly code: string; readonly message: string }
   /** Calls it made that wait for the user's approval. */
@@ -155,6 +164,131 @@ export class SubagentCoordinator {
     this.#runFiles = runFiles
   }
 
+  /**
+   * When this turn resumes a paused one, continue each child that paused on its held calls: the
+   * next run of its thread, under this turn and the same key, with the paused child's model, task
+   * and files, and this turn's mode and deadline. The outcomes of its calls start the run. Admitting
+   * it again finds it, so a retry of this turn, under its own id, admits its own.
+   */
+  async continuePausedChildren(signal: AbortSignal): Promise<void> {
+    const paused = await this.pausedChildrenToContinue()
+    for (const { child, outcomes } of paused) {
+      signal.throwIfAborted()
+      const runId = createSubagentRunId(this.parentRun.id, child.spawnKey)
+      await this.clearDeadAttempts(child, signal)
+
+      const spec = this.childSpec({
+        task: child.spec.task,
+        model: child.spec.model,
+        reasoning: child.spec.reasoning,
+        files: child.spec.files,
+      })
+      const createdAt = new Date()
+      const parts = continuationTrigger({
+        outcomes,
+        paused: child,
+        createdAt,
+        timeZone: spec.timeZone ?? this.context.timeZone,
+      })
+      await this.admitInTurn(() =>
+        this.admit(runId, child.spawnKey, spec, signal, {
+          thread: { id: child.threadId, create: false },
+          trigger: { id: createAgentMessageId(), parts },
+          createdAt,
+          // Each was admitted within the limit; the turn starts with all of them at once.
+          maxActiveChildren: Math.max(this.context.subagentConcurrencyPerRun, paused.length),
+        })
+      )
+    }
+  }
+
+  /**
+   * Remove from a paused child's thread what the runs after its pause did under an earlier attempt
+   * of this resume, which failed: this turn continues the paused child again, as a retried turn
+   * replays from its trigger. A run still stopping is waited for, until shortly before this turn's
+   * deadline.
+   */
+  private async clearDeadAttempts(paused: SubagentRunRecord, signal: AbortSignal): Promise<void> {
+    const { agents } = this.context.storage
+    const projectId = this.context.id
+    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
+
+    for (;;) {
+      const runs = await listSubagentThreadRuns(agents, { projectId, threadId: paused.threadId })
+      const pausedAt = runs.findIndex((run) => run.id === paused.id)
+      const dead = (pausedAt < 0 ? [] : runs.slice(pausedAt + 1)).filter(
+        (run) => run.parentRunId !== this.parentRun.id
+      )
+      const stopping = dead.filter((run) => !isTerminalSubagent(run))
+      if (stopping.length === 0) {
+        for (const run of dead) {
+          await agents.messages.deleteByRunId({
+            projectId,
+            threadId: paused.threadId,
+            runId: run.id,
+          })
+        }
+        return
+      }
+
+      const remainingMs = stopAt - Date.now()
+      if (remainingMs <= 0) {
+        throw new Error(
+          `[SixbAgentWorker] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
+        )
+      }
+      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
+    }
+  }
+
+  /**
+   * The children this turn continues: those its trigger, a resume, reported as continuing, as the
+   * model reads it. The approvals, not the message, say which calls are the child's and that this
+   * message reported them, and the child must still be paused on them.
+   */
+  private async pausedChildrenToContinue(): Promise<
+    readonly {
+      readonly child: SubagentRunRecord
+      readonly outcomes: readonly AgentApprovalOutcomePart[]
+    }[]
+  > {
+    const { agents } = this.context.storage
+    const projectId = this.context.id
+    const trigger = await agents.messages.getById({
+      projectId,
+      id: this.parentRun.triggerMessageId,
+    })
+    if (!trigger) return []
+
+    const parts = trigger.parts.filter(
+      (part): part is AgentApprovalOutcomePart => part.type === "approval-outcome"
+    )
+    const callerIds = [
+      ...new Set(parts.flatMap((part) => (part.caller?.continues ? [part.caller.runId] : []))),
+    ]
+    if (callerIds.length === 0) return []
+
+    const continuing = []
+    for (const child of await agents.runs.getByIds({ projectId, ids: callerIds })) {
+      if (child.kind !== "subagent" || !isPausedSubagent(child)) continue
+
+      const { approvals } = await agents.approvals.list({ projectId, runId: child.parentRunId })
+      const reported = new Set(
+        approvals
+          .filter(
+            (approval) =>
+              approval.callerRunId === child.id && approval.reportedInMessageId === trigger.id
+          )
+          .map((approval) => approval.id)
+      )
+      const outcomes = parts
+        .filter((part) => reported.has(part.approvalId))
+        .map(({ caller: _caller, ...outcome }) => outcome)
+      if (outcomes.length > 0) continuing.push({ child, outcomes })
+    }
+    return continuing
+  }
+
   async createTools(): Promise<readonly ModelTool[]> {
     const spawn: ModelTool<SpawnSubagentInput> = {
       name: "spawn_agent",
@@ -181,6 +315,7 @@ export class SubagentCoordinator {
       description: [
         "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
+        "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
       parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
@@ -268,6 +403,17 @@ export class SubagentCoordinator {
       runs.getById({ projectId: this.context.id, id: this.parentRun.id }),
     ])
     if (existing) {
+      // A continuation works in the thread of the turn that spawned it, never this turn's.
+      if (
+        existing.kind === "subagent" &&
+        existing.threadId !== createSubagentThreadId(this.parentRun.id, key)
+      ) {
+        throw new AgentToolPublicError(
+          isTerminalSubagent(existing)
+            ? `[SixbAgentWorker] '${key}' already continued after the approval, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
+            : `[SixbAgentWorker] '${key}' is the sub-agent that continues after the approval; wait for it with wait_agent.`
+        )
+      }
       if (existing.kind === "subagent" && existing.parentRunId === this.parentRun.id) {
         return existing
       }
@@ -307,7 +453,7 @@ export class SubagentCoordinator {
   /** A child asks no less than its turn, dates as its requester does, and ends with the turn. */
   private childSpec(input: {
     readonly task: string
-    readonly model: ReturnType<SubagentCoordinator["resolveModel"]>
+    readonly model: LanguageModelRef
     readonly reasoning: AgentReasoning | undefined
     readonly files: readonly SubagentRunFile[] | undefined
   }): SubagentRunSpec {
@@ -327,11 +473,18 @@ export class SubagentCoordinator {
     }
   }
 
+  /**
+   * Admit a child of this turn. A spawned child works in a thread of its own, which starts with its
+   * task and its files; a continuation goes into its thread with the outcomes it continues with.
+   */
   private async admit(
     runId: string,
     key: string,
     spec: SubagentRunSpec,
-    signal: AbortSignal
+    signal: AbortSignal,
+    continuation?: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt"> & {
+      readonly maxActiveChildren: number
+    }
   ): Promise<SpawnSubagentOutput> {
     const executionId = createSubagentExecutionId(runId)
     const execution = createInheritedAgentExecutionRecord({
@@ -356,18 +509,19 @@ export class SubagentCoordinator {
           parentExecutionToken: requiredExecutionToken(this.parentRun),
           spawnKey: key,
           spec,
-          // The child works in a thread of its own, which starts with its task and its files.
-          thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
-          trigger: {
-            id: createAgentMessageId(),
-            parts: [
-              { type: "text", text: spec.task },
-              ...(spec.files === undefined
-                ? []
-                : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
-            ],
-          },
-          maxActiveChildren: this.context.subagentConcurrencyPerRun,
+          ...(continuation ?? {
+            thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
+            trigger: {
+              id: createAgentMessageId(),
+              parts: [
+                { type: "text", text: spec.task },
+                ...(spec.files === undefined
+                  ? []
+                  : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
+              ],
+            },
+            maxActiveChildren: this.context.subagentConcurrencyPerRun,
+          }),
         })
       })
     } catch (error) {
@@ -398,7 +552,11 @@ export class SubagentCoordinator {
   }
 
   async wait(input: WaitForSubagentsInput, signal: AbortSignal): Promise<WaitForSubagentsOutput> {
-    const runIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
+    const passedIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
+    // A child of an earlier turn is waited for as the child of this one that continues it, else
+    // as it ended.
+    const runIds = await Promise.all(passedIds.map((runId) => this.continuedChildId(runId)))
+    const earlierTurns = await this.earlierTurnsOf(runIds)
     // The Agent answers before its turn times out, with or without the children still at work.
     const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
     for (;;) {
@@ -408,11 +566,15 @@ export class SubagentCoordinator {
         ids: runIds,
       })
       const byId = new Map(runs.map((run) => [run.id, run]))
-      const children = runIds.map((runId) => {
+      const children = runIds.map((runId, index) => {
         const run = byId.get(runId)
-        if (!run || run.kind !== "subagent" || run.parentRunId !== this.parentRun.id) {
+        if (
+          !run ||
+          run.kind !== "subagent" ||
+          (run.parentRunId !== this.parentRun.id && !earlierTurns.has(run.parentRunId))
+        ) {
           throw new AgentToolPublicError(
-            `[SixbAgentWorker] '${runId}' is not a child of the current Agent run.`
+            `[SixbAgentWorker] '${passedIds[index]}' is not a child of the current Agent run.`
           )
         }
         return run
@@ -426,17 +588,59 @@ export class SubagentCoordinator {
         })
         const delivered = await this.deliverFiles(children, signal)
         return {
-          results: children.map((run) =>
-            waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id))
-          ),
+          // Each result keeps the id the Agent passed.
+          results: children.map((run, index) => ({
+            ...waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id)),
+            runId: passedIds[index] ?? run.id,
+          })),
           files: delivered.attached,
           ...(delivered.artifactsError === undefined
             ? {}
             : { artifactsError: delivered.artifactsError }),
         }
       }
-      await waitDelay(Math.min(WAIT_POLL_MS, remainingMs), signal)
+      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
     }
+  }
+
+  /**
+   * The run a child of an earlier turn is waited for as: its thread's latest, the one that continues
+   * it when this turn resumes its pause; else `runId` itself.
+   */
+  private async continuedChildId(runId: string): Promise<string> {
+    const { runs } = this.context.storage.agents
+    const projectId = this.context.id
+    const waited = await runs.getById({ projectId, id: runId })
+    if (waited?.kind !== "subagent" || waited.parentRunId === this.parentRun.id) return runId
+
+    const latest = await listSubagentThreadRuns(this.context.storage.agents, {
+      projectId,
+      threadId: waited.threadId,
+    })
+    return latest.at(-1)?.id ?? runId
+  }
+
+  /** Which parents of these children are earlier turns of this turn's conversation. */
+  private async earlierTurnsOf(runIds: readonly string[]): Promise<ReadonlySet<string>> {
+    const { runs } = this.context.storage.agents
+    const projectId = this.context.id
+    const children = await runs.getByIds({ projectId, ids: runIds })
+    const parentIds = children.flatMap((run) =>
+      run.kind === "subagent" && run.parentRunId !== this.parentRun.id ? [run.parentRunId] : []
+    )
+    if (parentIds.length === 0) return new Set()
+
+    const parents = await runs.getByIds({ projectId, ids: parentIds })
+    return new Set(
+      parents
+        .filter(
+          (parent) =>
+            parent.kind === "conversation" &&
+            parent.threadId === this.parentRun.threadId &&
+            parent.createdAt <= this.parentRun.createdAt
+        )
+        .map((parent) => parent.id)
+    )
   }
 
   /**
@@ -459,6 +663,14 @@ export class SubagentCoordinator {
 
     for (const child of children) {
       if (child.status !== "succeeded") continue
+      if (isPausedSubagent(child)) {
+        if (child.result?.files?.length) {
+          byChild.set(child.id, {
+            note: "They come back if it continues once the user decides, when it finishes.",
+          })
+        }
+        continue
+      }
       const { files: outputs = [], filesError } = child.result ?? {}
       if (filesError) byChild.set(child.id, { note: filesError })
 
@@ -754,7 +966,7 @@ function waitedResult(
 ): WaitedSubagentResult {
   return {
     runId: run.id,
-    status: run.status,
+    status: isPausedSubagent(run) ? "awaiting_approval" : run.status,
     ...(run.result?.text ? { text: run.result.text } : {}),
     ...(run.error === undefined
       ? {}
@@ -801,22 +1013,6 @@ function duplicateKey(key: string): AgentToolPublicError {
 
 function errorMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).replace(/^\[\w+\] /, "")
-}
-
-function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted()
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(finish, ms)
-    function finish(): void {
-      signal.removeEventListener("abort", abort)
-      resolve()
-    }
-    function abort(): void {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }
-    signal.addEventListener("abort", abort, { once: true })
-  })
 }
 
 function parseSpawnInput(value: unknown): SpawnSubagentInput {

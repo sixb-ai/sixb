@@ -1134,6 +1134,7 @@ export type {
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentApprovalCaller,
   AgentApprovalCallSummary,
   AgentApprovalOutcomePart,
   AgentContextEntryInput,

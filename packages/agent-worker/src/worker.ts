@@ -71,6 +71,7 @@ import {
 } from "./run-environment"
 import { runSubagent, type SubagentWork, subagentWorkMessage } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
+import { loadSubagentHistory } from "./subagent-continuation"
 import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
@@ -357,6 +358,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       delegation.attach(environment.runFiles)
+      // A resumed turn's paused children go on first, as the model reads that they do.
+      await delegation.continuePausedChildren(runtime.signal)
       runtime.assertCanContinue()
       const completed = await runAgentTurn({
         context: environment.turnContext,
@@ -704,6 +707,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const prepared = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
+      const history = await loadSubagentHistory(context.storage.agents, run, childThread)
       preparationComplete = true
       await context.streamSink.publishStarted(run)
       // The parent's deadline, not one from now: a child that waited in the queue has less left.
@@ -727,10 +731,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         ...(durableExecution.requestedBy === undefined
           ? {}
           : { requestedBy: durableExecution.requestedBy }),
+        history,
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       await runSubagent({
+        history,
         context: environment.turnContext,
         plan,
         run,

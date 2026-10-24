@@ -84,6 +84,16 @@ export interface AgentApprovalOutcomePart {
   readonly call: AgentApprovalCallSummary
   /** What the approved call gave, when it ran. */
   readonly outcome?: AgentApprovalOutcome
+  /** The turn's sub-agent that made the call, when the turn did not make it itself. */
+  readonly caller?: AgentApprovalCaller
+}
+
+/** A turn's sub-agent that made a call: its run, and the key it was spawned with. */
+export interface AgentApprovalCaller {
+  readonly runId: string
+  readonly key: string
+  /** The message resumes the turn and the sub-agent paused on its calls: it goes on. */
+  readonly continues?: true
 }
 
 /** The call an approval held, as the model asked for it, without its params. */

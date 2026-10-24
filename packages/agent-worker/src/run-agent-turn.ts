@@ -1,6 +1,7 @@
 import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
 import {
   createAgentMessageId,
+  hasActiveChildren,
   type PausableModelLoopResult,
   runModelLoop,
   toModelMessages,
@@ -17,6 +18,7 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
+import { delay } from "./abort"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
 import {
   attachmentKey,
@@ -32,6 +34,7 @@ import { type ConversationReaders, loadConversationAuthors } from "./message-aut
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
+import { WAIT_POLL_MS } from "./subagent-tools"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
@@ -247,8 +250,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           await context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
         },
         // The approval records decide, never the tool output: the model can send a command's
-        // output elsewhere, or print one of its own.
-        pauseAfterStep: () => holdsApproval(agents, run),
+        // output elsewhere, or print one of its own. A held call waits for the children still
+        // at work: pausing ends the turn, and that would cancel them.
+        pauseAfterStep: () => turnPausesOnHeldCalls(agents, run),
       })
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
@@ -282,7 +286,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
 
     // A call held after the last step that ran tools, by a command left running in the sandbox or
-    // by a child, pauses the turn too.
+    // by a child, pauses the turn too. Its end cancels the children still at work, so it first
+    // waits for them: one that holds a call pauses by itself instead of being stopped.
+    if (result.status === "paused" || (await holdsApproval(agents, run))) {
+      await waitForChildren(agents, run, runtime.deadline, abortSignal)
+    }
+    const interruptedWhileWaiting = await finalizeIfInterrupted()
+    if (interruptedWhileWaiting) return interruptedWhileWaiting
+
     const finishReason =
       result.status === "paused" || (await holdsApproval(agents, run))
         ? "awaiting_approval"
@@ -331,10 +342,37 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
 /**
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
- * waiting, or decided and not reported to the model yet. A child's counts once the child has ended.
+ * waiting, or decided and not reported to the model yet, its children's included.
  */
 function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): Promise<boolean> {
-  return turnPausesOnHeldCalls(agents, run)
+  return agents.approvals.holdsRun({ projectId: run.projectId, runId: run.id })
+}
+
+/**
+ * How long before its deadline a pausing turn stops waiting for its children: enough to record its
+ * pause, which then cancels those still at work.
+ */
+export const PAUSE_WAIT_MARGIN_MS = 10_000
+
+/** Wait until none of the turn's children is queued or running, or its deadline nears. */
+async function waitForChildren(
+  agents: AgentStorage,
+  run: ConversationAgentRunRecord,
+  deadline: Date,
+  signal: AbortSignal
+): Promise<void> {
+  const stopAt = deadline.getTime() - PAUSE_WAIT_MARGIN_MS
+  while (await hasActiveChildren(agents, run)) {
+    const remainingMs = stopAt - Date.now()
+    if (remainingMs <= 0) return
+    try {
+      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
+    } catch (error) {
+      // The turn's interruption checks record why it stopped, with what it wrote.
+      if (signal.aborted) return
+      throw error
+    }
+  }
 }
 
 /**

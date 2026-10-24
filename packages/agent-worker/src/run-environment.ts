@@ -54,6 +54,7 @@ import {
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
+import { type SubagentHistory, subagentSandboxFiles } from "./subagent-continuation"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import {
   handedToolAttachments,
@@ -120,6 +121,8 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly conversation?: AgentThreadRecord | null
   /** Who asked for the parent turn: what the child publishes is theirs. */
   readonly requestedBy?: Principal
+  /** Its thread's messages, whose files are projected again, and the paused run it continues. */
+  readonly history: SubagentHistory
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -272,19 +275,36 @@ export async function createSubagentEnvironment(
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
-  const [memory, attachmentContext] = await Promise.all([
+  const files = subagentSandboxFiles(run, input.history.paused)
+  const history = input.history.messages
+  const [memory, handedContext, historyContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
     loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt }),
-    run.spec.files?.length
+    files.length
       ? prepareHandedFiles({
           projectId: context.id,
           parentRunId: run.parentRunId,
-          files: run.spec.files,
+          files,
           blobStorage: context.blobStorage,
           signal: input.signal,
         })
       : emptyAttachmentContext(context.id),
+    history.length && context.apiBaseUrl
+      ? prepareAgentAttachments({
+          projectId: context.id,
+          // Its messages are its thread's, so their files are read there.
+          threadId: input.thread.id,
+          messages: history,
+          blobStorage: context.blobStorage,
+          apiBaseUrl: context.apiBaseUrl,
+          inlineImages: modelSupportsInlineImages(plan.model),
+          signal: input.signal,
+        })
+      : undefined,
   ])
+  const attachmentContext = historyContext
+    ? mergeAttachmentContexts(handedContext, historyContext)
+    : handedContext
 
   return startAgentEnvironment({
     mode: "subagent",
@@ -307,7 +327,7 @@ export async function createSubagentEnvironment(
         }
       : {}),
     toolAttachments: handedToolAttachments({
-      files: run.spec.files ?? [],
+      files,
       blobStorage: context.blobStorage,
     }),
     apiBaseUrl: createAgentApiGatewayBaseUrl({
@@ -713,6 +733,35 @@ function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntology
   const oldest = views.keys().next().value
   if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
   return rendered
+}
+
+/** The handed files' context, with what a continuation's history showed its tools. */
+function mergeAttachmentContexts(
+  handed: PreparedAgentAttachmentContext,
+  history: PreparedAgentAttachmentContext
+): PreparedAgentAttachmentContext {
+  const manifest = (json: string) => JSON.parse(json) as { readonly attachments?: unknown[] }
+  const handedManifest = manifest(handed.manifestJson)
+  return {
+    entries: [...handed.entries, ...history.entries],
+    promptTextByPartKey: new Map([...handed.promptTextByPartKey, ...history.promptTextByPartKey]),
+    modelFileDataByPartKey: new Map([
+      ...handed.modelFileDataByPartKey,
+      ...history.modelFileDataByPartKey,
+    ]),
+    sandboxFiles: [...handed.sandboxFiles, ...history.sandboxFiles],
+    manifestJson: JSON.stringify(
+      {
+        ...handedManifest,
+        attachments: [
+          ...(handedManifest.attachments ?? []),
+          ...(manifest(history.manifestJson).attachments ?? []),
+        ],
+      },
+      null,
+      2
+    ),
+  }
 }
 
 function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentContext {

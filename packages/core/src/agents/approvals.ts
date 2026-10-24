@@ -13,7 +13,11 @@ import { agentApprovalHoldsRun, isAgentApprovalMode } from "../storage/agents/pr
 import { AGENT_APPROVAL_MODES } from "../storage/agents/types"
 import type { AgentApprovalDecider, AgentApprovalExecutor } from "./approval-executor"
 import { AgentRequestError } from "./errors"
-import type { AgentApprovalCallSummary, AgentApprovalOutcomePart } from "./message"
+import type {
+  AgentApprovalCaller,
+  AgentApprovalCallSummary,
+  AgentApprovalOutcomePart,
+} from "./message"
 import { publishAgentApprovalActivity } from "./streams/protocol"
 
 /**
@@ -291,9 +295,9 @@ export function turnResumeReadiness(approvals: readonly AgentApprovalRecord[]): 
 }
 
 /**
- * Whether a conversation turn pauses on the calls it holds. A call a child holds counts once the
- * child has ended: until children pause themselves, a child still queued or running finishes on its
- * own and reports its held call through `wait_agent`, and pausing the turn now would cancel it.
+ * Whether a conversation turn pauses after a step on the calls it holds. Its own call pauses it
+ * after the step that made it. A child's waits for the children still at work: the turn's end
+ * would cancel them, and a child that holds a call pauses by itself.
  */
 export async function turnPausesOnHeldCalls(
   agents: AgentStorage,
@@ -306,12 +310,22 @@ export async function turnPausesOnHeldCalls(
     agentApprovalHoldsRun(approval, runId)
   )
   if (held.some((approval) => approval.callerRunId === runId)) return true
+  return !(await hasActiveChildren(agents, run))
+}
 
-  const callers = await agents.runs.getByIds({
-    projectId,
-    ids: [...new Set(held.map((approval) => approval.callerRunId))],
+/** Whether any child of the turn is queued or running. */
+export async function hasActiveChildren(
+  agents: AgentStorage,
+  run: { readonly projectId: string; readonly id: string }
+): Promise<boolean> {
+  const active = await agents.runs.list({
+    projectId: run.projectId,
+    kinds: ["subagent"],
+    parentRunId: run.id,
+    statuses: ["queued", "running"],
+    limit: 1,
   })
-  return callers.some((caller) => caller.status !== "queued" && caller.status !== "running")
+  return active.total > 0
 }
 
 /** The calls a conversation turn held, its children's included. */
@@ -406,16 +420,67 @@ export async function reportSettledAgentApprovals(
   const marked = new Set(
     await agents.approvals.markReported({ ...input, ids: reportable.map(({ id }) => id) })
   )
-  return reportable.filter(({ id }) => marked.has(id)).map(approvalOutcomePart)
+  const reported = reportable.filter(({ id }) => marked.has(id))
+  const callers = await agentApprovalCallers(agents, input.projectId, reported)
+  return reported.map((approval) => {
+    const caller = callers.get(approval.callerRunId)
+    // Only a resume continues a child, and only one that paused on its calls.
+    const continues = input.resuming === true && caller?.paused === true
+    return approvalOutcomePart(
+      approval,
+      caller && { runId: caller.runId, key: caller.key, ...(continues ? { continues } : {}) }
+    )
+  })
 }
 
-function approvalOutcomePart(approval: AgentApprovalRecord): AgentApprovalOutcomePart {
+/** A sub-agent that made a call: its run, its key, and whether it paused on its calls. */
+export interface AgentApprovalCallerRun {
+  readonly runId: string
+  readonly key: string
+  readonly paused: boolean
+}
+
+/** The sub-agents that made some of these calls, by run id. A turn's own calls have none. */
+export async function agentApprovalCallers(
+  agents: AgentStorage,
+  projectId: string,
+  approvals: readonly AgentApprovalRecord[]
+): Promise<ReadonlyMap<string, AgentApprovalCallerRun>> {
+  const ids = approvals
+    .filter((approval) => approval.callerRunId !== approval.runId)
+    .map((approval) => approval.callerRunId)
+  if (ids.length === 0) return new Map()
+
+  const runs = await agents.runs.getByIds({ projectId, ids })
+  return new Map(
+    runs.flatMap((run) =>
+      run.kind === "subagent"
+        ? [
+            [
+              run.id,
+              {
+                runId: run.id,
+                key: run.spawnKey,
+                paused: run.status === "succeeded" && run.finishReason === "awaiting_approval",
+              },
+            ] as const,
+          ]
+        : []
+    )
+  )
+}
+
+function approvalOutcomePart(
+  approval: AgentApprovalRecord,
+  caller: AgentApprovalCaller | undefined
+): AgentApprovalOutcomePart {
   return {
     type: "approval-outcome",
     approvalId: approval.id,
     status: approval.status === "pending" ? "superseded" : approval.status,
     call: approvalCallSummary(approval.call),
     ...(approval.outcome === undefined ? {} : { outcome: approval.outcome }),
+    ...(caller === undefined ? {} : { caller }),
   }
 }
 

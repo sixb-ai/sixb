@@ -1,0 +1,100 @@
+import type { AgentApprovalOutcomePart, AgentMessagePart } from "@sixb/core"
+import { listSubagentThreadRuns } from "@sixb/core/internal/agents"
+import type {
+  AgentMessageRecord,
+  AgentStorage,
+  AgentThreadRecord,
+  SubagentRunFile,
+  SubagentRunRecord,
+} from "@sixb/core/storage"
+import { renderCurrentTime } from "./agent-prompt"
+
+// A child that paused on its held calls continues, once they are decided, as the next run of its
+// thread under the turn that resumes: the same key, model and task. Its history is its thread, and
+// the outcomes of its calls are the message that starts the run.
+
+/** What a child run reads of its thread: its messages, and the paused run it continues. */
+export interface SubagentHistory {
+  readonly messages: readonly AgentMessageRecord[]
+  /** The run of the thread that paused on its held calls, when this run continues it. */
+  readonly paused?: SubagentRunRecord
+}
+
+/** The child's thread as its run starts: its messages, and the paused run before it, if any. */
+export async function loadSubagentHistory(
+  agents: AgentStorage,
+  run: SubagentRunRecord,
+  thread: AgentThreadRecord
+): Promise<SubagentHistory> {
+  const [{ messages }, paused] = await Promise.all([
+    agents.messages.list({ projectId: run.projectId, threadId: thread.id, order: "asc" }),
+    latestPausedRun(agents, run),
+  ])
+
+  return { messages, ...(paused ? { paused } : {}) }
+}
+
+/**
+ * The run of the thread a continuation goes on from: the latest that succeeded, as only a child
+ * paused on its calls succeeds without ending its thread.
+ */
+async function latestPausedRun(
+  agents: AgentStorage,
+  run: SubagentRunRecord
+): Promise<SubagentRunRecord | undefined> {
+  const runs = await listSubagentThreadRuns(agents, {
+    projectId: run.projectId,
+    threadId: run.threadId,
+  })
+  const previous = runs.filter((each) => each.status === "succeeded").at(-1)
+  return previous && isPausedSubagent(previous) ? previous : undefined
+}
+
+/** A child that paused on its held calls: it continues once they are decided. */
+export function isPausedSubagent(run: SubagentRunRecord): boolean {
+  return run.status === "succeeded" && run.finishReason === "awaiting_approval"
+}
+
+/**
+ * The message a continuation starts with: how each of its calls ended, as its own, what came back
+ * to its new sandbox, and when it continues. It stays in the thread, so a later continuation
+ * replays the same bytes.
+ */
+export function continuationTrigger(input: {
+  /** As the child reads them: without their caller. */
+  readonly outcomes: readonly AgentApprovalOutcomePart[]
+  readonly paused: SubagentRunRecord
+  readonly createdAt: Date
+  readonly timeZone: string
+}): readonly AgentMessagePart[] {
+  return [
+    ...input.outcomes,
+    { type: "text", text: sandboxRestarted(input.paused) },
+    { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.timeZone)}` },
+  ]
+}
+
+function sandboxRestarted(paused: SubagentRunRecord): string {
+  const outputsError = paused.result?.filesError
+  return outputsError === undefined
+    ? "Your sandbox restarted: the files you were handed and your out/ are back; nothing else is."
+    : `Your sandbox restarted: the files you were handed are back, but not your out/, which could not be kept (${outputsError}). Nothing else is.`
+}
+
+/**
+ * The files a child finds in its sandbox: those its parent handed over, and for a continuation
+ * what the paused run left in `out/`, given back there. An output wins over a handed file at its
+ * path, as the paused run's copy was the latest.
+ */
+export function subagentSandboxFiles(
+  run: SubagentRunRecord,
+  paused: SubagentRunRecord | undefined
+): readonly SubagentRunFile[] {
+  const outputs = (paused?.result?.files ?? []).map((file) => ({
+    ...file,
+    path: `out/${file.path}`,
+  }))
+  const restored = new Set(outputs.map((file) => file.path))
+
+  return [...(run.spec.files ?? []).filter((file) => !restored.has(file.path)), ...outputs]
+}
