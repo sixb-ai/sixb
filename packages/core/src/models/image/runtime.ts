@@ -207,17 +207,11 @@ function selectModel(
   catalog: ModelCatalog | undefined,
   requested: ImageModel | undefined
 ): ImageModel {
-  if (!catalog && requested) return requested
-
-  // The catalog owns the binding, even when a caller supplies another object with the same ID.
-  const models = catalog?.image
-  const selected = requested
-    ? models?.getByRef({ provider: requested.providerId, modelId: requested.modelId })?.model
-    : models?.default.model
-
+  // A model the caller passes runs as given, listed or not; the catalog supplies the default.
+  const selected = requested ?? catalog?.image?.default.model
   if (!selected) {
     throw new Error(
-      "[SixbModels] Configure the selected model in models.image, or supply a model when no catalog is configured."
+      "[SixbModels] Configure models.image in createSixb() or supply a model to generate()."
     )
   }
 

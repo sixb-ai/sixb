@@ -199,18 +199,20 @@ describe("image generation", () => {
     expect(received).toEqual([{ data: PNG, mediaType: "image/png" }])
   })
 
-  test("uses the configured binding and validates catalog shape", async () => {
+  test("runs a passed model as given, whether or not the catalog lists it", async () => {
+    // Proven by removal: look the passed model up in models.image again; the same-id binding
+    // returns the catalog's two images and the unlisted one is refused.
     const { sixb } = await setup()
-    const impostor = createImageModel(async () => {
-      throw new Error("impostor")
-    })
+    const oneImage = async () => ({ output: { images: [{ data: PNG, mediaType: "image/png" }] } })
+    const ownBinding = createImageModel(oneImage)
+    const unlisted = { ...createImageModel(oneImage, { modelId: "unlisted" }), modelId: "unlisted" }
 
-    expect(
-      (await sixb.models.image.generate({ prompt: "a fox", model: impostor })).files
-    ).toHaveLength(2)
-    await expect(
-      sixb.models.image.generate({ prompt: "a fox", model: { ...impostor, modelId: "other" } })
-    ).rejects.toThrow("Configure")
+    for (const model of [ownBinding, unlisted]) {
+      expect((await sixb.models.image.generate({ prompt: "a fox", model })).files).toHaveLength(1)
+    }
+  })
+
+  test("validates catalog shape", () => {
     expect(() => createModelCatalog({ image: [] })).toThrow("at least one")
     expect(() =>
       createModelCatalog({ image: [createImageModel(undefined, { maxImagesPerCall: 0 })] })

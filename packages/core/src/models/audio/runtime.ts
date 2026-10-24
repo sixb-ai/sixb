@@ -111,16 +111,11 @@ function selectModel(
   catalog: ModelCatalog | undefined,
   requested: TranscriptionModel | undefined
 ): TranscriptionModel {
-  if (!catalog && requested) return requested
-
-  const transcribers = catalog?.audio?.transcription
-  const selected = requested
-    ? transcribers?.getByRef({ provider: requested.providerId, modelId: requested.modelId })?.model
-    : transcribers?.default.model
-
+  // A model the caller passes runs as given, listed or not; the catalog supplies the default.
+  const selected = requested ?? catalog?.audio?.transcription?.default.model
   if (!selected) {
     throw new Error(
-      "[SixbModels] Configure the selected model in models.audio.transcription, or supply a model when no catalog is configured."
+      "[SixbModels] Configure models.audio.transcription in createSixb() or supply a model to transcribe()."
     )
   }
 

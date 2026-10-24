@@ -169,17 +169,11 @@ function selectModel(
   catalog: ModelCatalog | undefined,
   requested: SpeechModel | undefined
 ): SpeechModel {
-  if (!catalog && requested) return requested
-
-  // The catalog owns the binding, even when a caller supplies another object with the same ID.
-  const models = catalog?.audio?.speech
-  const selected = requested
-    ? models?.getByRef({ provider: requested.providerId, modelId: requested.modelId })?.model
-    : models?.default.model
-
+  // A model the caller passes runs as given, listed or not; the catalog supplies the default.
+  const selected = requested ?? catalog?.audio?.speech?.default.model
   if (!selected) {
     throw new Error(
-      "[SixbModels] Configure the selected model in models.audio.speech, or supply a model when no catalog is configured."
+      "[SixbModels] Configure models.audio.speech in createSixb() or supply a model to speak()."
     )
   }
 

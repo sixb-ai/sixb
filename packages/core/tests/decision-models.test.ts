@@ -82,18 +82,21 @@ describe("decision evaluation", () => {
     })
   })
 
-  test("selects the configured binding, never an impostor with the same identity", async () => {
+  test("runs a passed model as given, whether or not the catalog lists it", async () => {
+    // Proven by removal: look the passed model up in models.decision again; the same-id binding
+    // reports the catalog's response model and the unlisted one is refused.
     const { sixb } = setup()
-    const impostor = modelWith(async () => {
-      throw new Error("impostor")
-    })
-    expect(
-      (await sixb.models.decision.evaluate({ input: "", questions, model: impostor })).output
-    ).toEqual(output)
-    const unknown = { ...impostor, modelId: "unknown" }
-    await expect(
-      sixb.models.decision.evaluate({ input: "", questions, model: unknown })
-    ).rejects.toThrow("not configured")
+    const ownBinding = modelWith(async () => ({ output, responseModelId: "own-binding" }))
+    const unlisted = {
+      ...ownBinding,
+      modelId: "unlisted",
+      definition: { ...ownBinding.definition, modelId: "unlisted" },
+    }
+
+    for (const model of [ownBinding, unlisted]) {
+      const result = await sixb.models.decision.evaluate({ input: "", questions, model })
+      expect(result.responseModelId).toBe("own-binding")
+    }
   })
 
   test("rejects invalid questions and unsupported primitives before inference", async () => {

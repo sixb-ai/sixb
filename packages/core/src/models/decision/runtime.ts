@@ -109,27 +109,13 @@ function resolveDecisionModel(
   catalog: ModelCatalog | undefined,
   requested: DecisionModel | undefined
 ): DecisionModel {
-  if (!requested) {
-    const model = catalog?.decision?.default.model
-    if (!model) {
-      throw new Error("[SixbModels] Configure models.decision or supply a model to evaluate().")
-    }
-    return model
+  // A model the caller passes runs as given, listed or not; the catalog supplies the default.
+  const selected = requested ?? catalog?.decision?.default.model
+  if (!selected) {
+    throw new Error("[SixbModels] Configure models.decision or supply a model to evaluate().")
   }
 
-  if (!catalog) return requested
-
-  // The catalog owns the binding, even when a caller supplies another object with the same ID.
-  const entry = catalog.decision?.getByRef({
-    provider: requested.providerId,
-    modelId: requested.modelId,
-  })
-  if (!entry) {
-    throw new Error(
-      `[SixbModels] Model '${requested.providerId}/${requested.modelId}' is not configured in models.decision.`
-    )
-  }
-  return entry.model
+  return selected
 }
 
 async function admitDecisionCall(

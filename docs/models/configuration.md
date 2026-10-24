@@ -39,7 +39,8 @@ reasoning effort their selected model supports. An [AI workflow step](../workflo
 can select a model and reasoning effort through its `model` and `reasoning` options.
 
 A model your code passes runs as given, with its own options, whether or not `models.language`
-lists it. The catalog is what chat users, the Agent and the API choose from:
+lists it; decision, audio and image models work the same way. The catalog is what chat users, the
+Agent and the API choose from, and supplies the default when no model is passed:
 
 ```ts
 defineAgentStep("second-opinion", {
@@ -178,7 +179,8 @@ export const sixb = createSixb({
 })
 ```
 
-The first decision model is the default. Decision models need neither a language model nor a sandbox.
+The first decision model is the default; pass `model` to `evaluate()` to run another one, listed or
+not. Decision models need neither a language model nor a sandbox.
 
 ### Define questions
 
@@ -291,7 +293,8 @@ export const transcribe = defineWorkflowStep("transcribe")
 The file must already exist in the project's blob storage, with an `audio/*` media type.
 Sixb verifies its size and digest before sending it. Supported encodings and provider limits
 depend on the selected model; Sixb does not transcode files or extract audio from video.
-Pass a configured `model` to override the default, or an `AbortSignal` as `signal` to cancel.
+Pass a `model` to override the default, listed in `models.audio.transcription` or not, or an
+`AbortSignal` as `signal` to cancel.
 
 The result contains `output.text`, `usage`, `cost`, and `callId`. Audio-only projects need
 neither a language model nor a sandbox. Calls use the same [accounting and limits](./usage-and-limits.md#audio-transcription)
@@ -340,7 +343,7 @@ property or show it in a page like any other file.
 | `quality`, `style` | Model-specific settings, such as `low` or `vector_illustration`. |
 | `seed` | Repeat a result, where the model supports it. |
 | `images` | Reference images, as `FileRef`s with an `image/*` media type, to edit or vary. |
-| `model`, `signal` | Override the default model, or cancel the call. |
+| `model`, `signal` | Override the default model, listed in `models.image` or not, or cancel the call. |
 
 Settings a model ignores come back in `warnings`. Each call is priced by the size, quality and
 style it requested and the number of images returned, and uses the same
@@ -369,8 +372,8 @@ const { file, cost } = await sixb.models.audio.speak({
 ```
 
 `file` is the generated audio as a `FileRef` in the project's blob storage. A request without a `voice` uses the voice
-the binding sets, so you can switch models without changing calls. You can also pass
-`instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
+the binding sets, so you can switch models without changing calls. Pass `model` to run another
+one, listed or not. You can also pass `instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
 never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
 
 ## Call models over the API
