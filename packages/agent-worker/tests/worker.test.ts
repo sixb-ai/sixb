@@ -305,6 +305,8 @@ async function terminalAgentNode(runs: WorkflowRunStorage, nodeRunId: string) {
   return node && node.status !== "queued" && node.status !== "running" ? node : null
 }
 
+const ACME_CSV = "quarter,revenue,margin\nQ2,1200,15%\nQ3,1100,12%\n"
+
 const Q3_REVIEW_MARKDOWN =
   "# Q3 review\n\nRestorations within SLA rose to 94%.\n\n## Regions\n\nNorth led.\n"
 
@@ -1173,6 +1175,33 @@ class RecordingSandbox implements Sandbox {
       this.writeWorkingFile("work/q3-review/document.md", Q3_REVIEW_MARKDOWN)
       this.writeWorkingFile("work/q3-review/.draft-notes", "not for the reader")
       return { exitCode: 0, stdout: "wrote work/q3-review", stderr: "", durationMs: 1 }
+    }
+    if (command === "bash" && script === "write-handoff-files") {
+      this.writeWorkingFile("reports/acme.csv", ACME_CSV)
+      this.writeWorkingFile("reports/notes/summary.md", "# Acme\n\nMargins fell.\n")
+      this.files.set(join(this.workingDirectory, "out", "logo.png"), TEST_PNG_BYTES)
+      this.writeWorkingFile("out/brief.txt", "Brief v1\n")
+      for (let index = 0; index < 51; index += 1) {
+        this.writeWorkingFile(`reports/daily/${index}.csv`, `day,${index}\n`)
+      }
+      this.files.set(
+        join(this.workingDirectory, "reports", "scan.bin"),
+        new Uint8Array(25 * 1024 * 1024 + 1)
+      )
+      return { exitCode: 0, stdout: "wrote reports", stderr: "", durationMs: 1 }
+    }
+    if (command === "bash" && script === "write-many-outputs") {
+      for (let index = 0; index < 51; index += 1) {
+        this.writeWorkingFile(`out/daily/${index}.csv`, `day,${index}\n`)
+      }
+      return { exitCode: 0, stdout: "wrote out", stderr: "", durationMs: 1 }
+    }
+    if (command === "bash" && script === "write-child-outputs") {
+      this.files.set(join(this.workingDirectory, "out", "margins.png"), TEST_PNG_BYTES)
+      this.writeWorkingFile("out/tables/margins.csv", "quarter,margin\nQ3,12%\n")
+      this.writeWorkingFile("out/brief.txt", "Brief v2\n")
+      this.writeWorkingFile("scratch/draft.md", "not for the parent")
+      return { exitCode: 0, stdout: "wrote out", stderr: "", durationMs: 1 }
     }
     if (command === "bash" && script === 'cat "$SIXB_ATTACHMENTS"') {
       return {
@@ -7868,7 +7897,9 @@ describe("AgentWorker", () => {
   test("a child publishes into its parent's thread and answers once; a retry takes it back", async () => {
     // Removal proofs: drop `publishing` from createSubagentEnvironment, and nothing is published;
     // build the child's result from every step again, and its narration reaches the parent; drop
-    // the children from retryAgentRun's cleanup, and the child's artifact outlives the retry.
+    // installArtifactsFrom from SubagentCoordinator.installOutputs, and the parent's
+    // $SIXB_ARTIFACTS never lists the child's artifact; drop the children from retryAgentRun's
+    // cleanup, and the child's artifact outlives the retry.
     let childRunId = ""
     const parentCalls: LanguageModelRequest[] = []
     let childCall = 0
@@ -7923,7 +7954,8 @@ describe("AgentWorker", () => {
         return answerStream("Retried.")
       },
     })
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
       models: { language: [parentModel, childModel] },
     })
     attachSixbErrorReporter(sixb, () => {})
@@ -7968,10 +8000,327 @@ describe("AgentWorker", () => {
       expect(waited).toContain("The Q3 review is published.")
       expect(waited).not.toContain("Let me draft the review first.")
 
+      // Once wait_agent returns, the parent's sandbox holds the child's artifact like its own.
+      const parentSandbox = sandboxes.sandboxes[0]
+      if (!parentSandbox) throw new Error("Expected the parent's sandbox.")
+      const inParent = (path: string) =>
+        new TextDecoder().decode(
+          parentSandbox.files.get(join(parentSandbox.workingDirectory, path))
+        )
+      expect(JSON.parse(inParent(".sixb/agent/context/artifacts.json"))).toMatchObject({
+        artifacts: [
+          {
+            id: artifact.id,
+            version: 1,
+            pinned: `artifact:${artifact.id}@1`,
+            directory: `.sixb/agent/artifacts/${artifact.id}`,
+          },
+        ],
+      })
+      expect(inParent(`.sixb/agent/artifacts/${artifact.id}/document.md`)).toBe(Q3_REVIEW_MARKDOWN)
+
       await createTestSixb(sixb).agent.runs.retry(requested.run.id)
       expect(
         await artifactStorageOf(sixb).get({ projectId: PROJECT_ID, id: artifact.id })
       ).toBeNull()
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("hands a child files at their paths and gets back what it writes to out/", async () => {
+    // Removal proofs: leave `files` out of the child's spec in SubagentCoordinator.admit, and the
+    // child's sandbox lacks reports/acme.csv; drop storeChildOutputs from runSubagent, and
+    // wait_agent lists nothing and the parent's sandbox holds no chart; skip nothing in
+    // storeChildOutputs, and the logo the parent handed over comes back to it; skip by size
+    // instead of digest there, and the brief the child rewrote stays behind.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async (options) => {
+        childCalls.push(options)
+        if (childCalls.length === 1) {
+          return toolCallStream("chart", "bash", { command: "write-child-outputs" })
+        }
+        return answerStream("Acme's margin fell to 12%; the chart and table are in out/.")
+      },
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (options) => {
+        parentCalls.push(options)
+        if (parentCalls.length === 1) {
+          return toolCallStream("reports", "bash", { command: "write-handoff-files" })
+        }
+        if (parentCalls.length === 2) {
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "acme-review",
+            task: "Chart Acme's margins from the P&L.",
+            model: { provider: childModel.providerId, modelId: childModel.modelId },
+            files: ["reports/acme.csv", "reports/notes", "out/logo.png", "out/brief.txt"],
+          })
+        }
+        if (parentCalls.length === 3) {
+          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+        }
+        return answerStream("Acme's margin fell to 12%.")
+      },
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Review Acme's margins." })
+    childRunId = createSubagentRunId(requested.run.id, "acme-review")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent of a child with files terminal"
+      )
+      expect(parent.status).toBe("succeeded")
+      const [parentSandbox, childSandbox] = sandboxes.sandboxes
+      if (!parentSandbox || !childSandbox) throw new Error("Expected two sandboxes.")
+      const inChild = (path: string) =>
+        childSandbox.files.get(join(childSandbox.workingDirectory, path))
+      const inParent = (path: string) =>
+        parentSandbox.files.get(join(parentSandbox.workingDirectory, path))
+
+      // The child finds each file at the parent's path, and its task says where they are.
+      const handed = [
+        "out/brief.txt",
+        "out/logo.png",
+        "reports/acme.csv",
+        "reports/notes/summary.md",
+      ]
+      expect(new TextDecoder().decode(inChild("reports/acme.csv"))).toBe(ACME_CSV)
+      expect(inChild("reports/notes/summary.md")).toBeDefined()
+      expect(inChild("out/logo.png")).toEqual(TEST_PNG_BYTES)
+      const task = JSON.stringify(childCalls[0]?.messages.at(-1))
+      expect(task).toContain("Chart Acme's margins from the P&L.")
+      expect(task).toContain(`- reports/acme.csv (text/csv, ${ACME_CSV.length} bytes)`)
+      expect(task).toContain("- reports/notes/summary.md (")
+      const manifest = JSON.parse(
+        new TextDecoder().decode(inChild(".sixb/agent/context/attachments.json"))
+      ) as { readonly attachments: readonly { readonly sandboxPath: string }[] }
+      expect(manifest.attachments.map((entry) => entry.sandboxPath).sort()).toEqual(handed)
+
+      // What it wrote to out/ comes back under the parent's directory for it, and nothing else.
+      const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      if (child?.kind !== "subagent") throw new Error("Expected the child run.")
+      expect(child.spec.files?.map((file) => file.path).sort()).toEqual(handed)
+      // The brief it rewrote comes back, though its size did not change; the logo it left does not.
+      expect(child.result?.files?.map((file) => file.path)).toEqual([
+        "brief.txt",
+        "margins.png",
+        "tables/margins.csv",
+      ])
+      expect(inParent(".sixb/agent/children/acme-review/margins.png")).toEqual(TEST_PNG_BYTES)
+      expect(
+        new TextDecoder().decode(inParent(".sixb/agent/children/acme-review/tables/margins.csv"))
+      ).toBe("quarter,margin\nQ3,12%\n")
+      expect(inParent(".sixb/agent/children/acme-review/logo.png")).toBeUndefined()
+      expect(inParent(".sixb/agent/children/acme-review/draft.md")).toBeUndefined()
+
+      const waited = JSON.stringify(parentCalls[3]?.messages)
+      for (const listed of [
+        { path: ".sixb/agent/children/acme-review/margins.png", sizeBytes: TEST_PNG_BYTES.length },
+        { path: ".sixb/agent/children/acme-review/tables/margins.csv", sizeBytes: 22 },
+      ]) {
+        expect(waited).toContain(JSON.stringify(listed).slice(1, -1))
+      }
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test.each([
+    ["a missing file", "reports/missing.csv", "'reports/missing.csv': file does not exist"],
+    [
+      "a path outside the sandbox",
+      "../elsewhere/acme.csv",
+      "'../elsewhere/acme.csv': path must stay inside the sandbox working directory",
+    ],
+    [
+      "the run's own context",
+      ".sixb/agent/context/run.json",
+      "'.sixb/agent/context/run.json': it is part of the run context Sixb installs under .sixb/agent.",
+    ],
+    ["too many files", "reports/daily", "51 files; a child receives at most 50."],
+    [
+      "a file too large",
+      "reports/scan.bin",
+      "'reports/scan.bin': it holds more than 25 MB, the most a file handed to a child may hold",
+    ],
+  ])("refuses to hand a child %s, saying why", async (_case, path, reason) => {
+    // Removal proofs: drop assertHandable, and the parent's run context reaches the child; drop the
+    // count or size checks of storeHandedFiles, and the child is admitted with the files.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (options) => {
+        parentCalls.push(options)
+        if (parentCalls.length === 1) {
+          return toolCallStream("reports", "bash", { command: "write-handoff-files" })
+        }
+        if (parentCalls.length === 2) {
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "acme-review",
+            task: "Review Acme.",
+            files: [path],
+          })
+        }
+        return answerStream("I could not hand the file over.")
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Review Acme." })
+    childRunId = createSubagentRunId(requested.run.id, "acme-review")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent refused a hand-over terminal"
+      )
+      expect(parent.status).toBe("succeeded")
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toBeNull()
+      expect(JSON.stringify(parentCalls[2]?.messages.at(-1))).toContain(
+        `[SixbAgentWorker] spawn_agent cannot hand over ${reason}`
+      )
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("fails a child whose out/ holds more than comes back, saying what to do", async () => {
+    // Removal proof: drop the count check from storeChildOutputs, and the child succeeds with
+    // 51 files.
+    let childRunId = ""
+    let childCall = 0
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async () => {
+        childCall += 1
+        if (childCall === 1) {
+          return toolCallStream("daily", "bash", { command: "write-many-outputs" })
+        }
+        return answerStream("The daily tables are in out/daily.")
+      },
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Tabulate each day." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent of a child with too many files terminal"
+      )
+      expect(await terminalRun(storage, childRunId)).toMatchObject({
+        status: "failed",
+        error: {
+          code: "agent.execution_failed",
+          message:
+            "Agent execution failed. The subagent could not return its files. It left more than 50 files in out/; at most 50 files of 25 MB, 100 MB in all, come back to its parent. Spawn it again with a task that writes fewer or smaller files to out/.",
+        },
+      })
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("a child that does not finish returns no files", async () => {
+    // Removal proof: store the outputs in runSubagent before its output-limit check, and the chart
+    // of a child that failed is stored, though its parent never gets it.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    let childCall = 0
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async () => {
+        childCall += 1
+        if (childCall === 1) {
+          return toolCallStream("chart", "bash", { command: "write-child-outputs" })
+        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "The chart is in" },
+          { type: "text-end", id: "child-answer" },
+          finish("length"),
+        ])
+      },
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Chart Acme's margins." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent of a child cut short terminal"
+      )
+      expect(parent.status).toBe("succeeded")
+      expect(await terminalRun(storage, childRunId)).toMatchObject({ status: "failed" })
+
+      const chartBlob = `blob_${new Bun.CryptoHasher("sha256").update(TEST_PNG_BYTES).digest("hex")}`
+      expect(await sixb.blobStorage.stat(chartBlob)).toBeNull()
+      const parentSandbox = sandboxes.sandboxes[0]
+      expect(
+        [...(parentSandbox?.files.keys() ?? [])].filter((path) =>
+          path.includes(".sixb/agent/children")
+        )
+      ).toEqual([])
+      const waited = JSON.stringify(
+        parentCalls[2]?.messages.filter((message) => message.role === "tool").at(-1)
+      )
+      expect(waited).toContain("reached its output limit")
+      expect(waited).not.toContain("children")
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
@@ -12453,11 +12802,13 @@ describe("agent tools act as the requester", () => {
       nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
       errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
     })
-    // The environment reads only the run's identity and execution token, and its thread's.
+    // The environment reads only the run's identity, execution token and handed files, and its
+    // thread's.
     const childRun = {
       id: "child-run",
       parentRunId: "parent-run",
       execution,
+      spec: {},
     } as unknown as SubagentRunRecord
     const childThread = {
       id: "child-thread",

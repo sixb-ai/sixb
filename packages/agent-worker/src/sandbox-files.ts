@@ -169,7 +169,49 @@ export async function readSandboxFile(
   if (!Number.isInteger(sizeBytes) || sizeBytes < 0 || bytes.byteLength !== sizeBytes) {
     throw new SandboxFileError("changed", "file changed while it was being read")
   }
-  return new Uint8Array(bytes)
+  // A view, not a copy: a large file is held once more already, as the base64 it came as.
+  return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+}
+
+/** What a path names once its symbolic links are followed. */
+export type SandboxPathEntry =
+  | {
+      readonly kind: "file" | "directory"
+      /** Absolute, every symbolic link along it followed. */
+      readonly realPath: string
+    }
+  | { readonly kind: "missing" }
+  | { readonly kind: "link" }
+
+/**
+ * Follow the symbolic links along `path`, an absolute path as `resolveSandboxPath` returns it, to
+ * where it really is. A path that is itself a link is reported as one, as reads refuse it.
+ */
+export async function resolveSandboxEntry(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & { readonly path: string }
+): Promise<SandboxPathEntry> {
+  const result = await runScript(handle, RESOLVE_SANDBOX_PATH_SCRIPT, input, {
+    SIXB_RESOLVE_PATH_B64: Buffer.from(input.path, "utf-8").toString("base64"),
+  })
+  if (result.exitCode !== 0) {
+    throw new SandboxFileError(
+      "failed",
+      `path could not be resolved (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+
+  const [kind = "", realPathBase64] = result.stdout.trim().split("\n")
+  if (kind === "missing") return { kind }
+  if (kind === "link") return { kind }
+  const realPath = realPathBase64 ? decodeBase64Text(realPathBase64) : null
+  if ((kind !== "file" && kind !== "directory") || !realPath?.startsWith("/")) {
+    throw new SandboxFileError(
+      "failed",
+      `path could not be resolved (${result.stdout.slice(0, 200)})`
+    )
+  }
+  return { kind, realPath }
 }
 
 async function runScript(
@@ -224,6 +266,26 @@ find "$dir" -type f -print0 | while IFS= read -r -d '' path; do
   rel64="$(printf '%s' "$rel" | base64 | tr -d '\\n')"
   printf '%s\\t%s\\n' "$size" "$rel64"
 done`
+
+// Prints what the path is, then where it really is as base64. `cd -P` follows every link along it.
+const RESOLVE_SANDBOX_PATH_SCRIPT = `# sixb-resolve-sandbox-path
+set -eu
+path="$(printf '%s' "\${SIXB_RESOLVE_PATH_B64:?}" | base64 -d)"
+if [ -L "$path" ]; then
+  printf 'link\\n'
+  exit 0
+fi
+if [ -d "$path" ]; then
+  kind=directory
+  real="$(cd -P -- "$path" && pwd -P)"
+elif [ -f "$path" ]; then
+  kind=file
+  real="$(cd -P -- "$(dirname -- "$path")" && pwd -P)/$(basename -- "$path")"
+else
+  printf 'missing\\n'
+  exit 0
+fi
+printf '%s\\n%s\\n' "$kind" "$(printf '%s' "$real" | base64 | tr -d '\\n')"`
 
 // Prints the file's size on the first line and its bytes as base64 on the second, so the caller
 // can tell a file that changed between the two reads.

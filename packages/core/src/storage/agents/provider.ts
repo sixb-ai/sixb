@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../../agents/ids"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
+import { isFileRef } from "../../blob-storage/validation"
 import { isJsonObject, isPlainRecord } from "../../json"
 import { isLanguageModelTier, LANGUAGE_MODEL_TIERS } from "../../models/catalog"
 import { isModelReasoning } from "../../models/language-model"
@@ -30,6 +31,7 @@ import type {
   RequestAgentApprovalInput,
   SaveAgentMemoryInput,
   StopAgentApprovalsInput,
+  SubagentRunFile,
   SubagentRunRecord,
   SubagentRunResult,
   TransitionAgentThreadSandboxInput,
@@ -500,6 +502,8 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
   }
   assertApprovalModeField(input.spec.approvalMode, "Subagent run", prefix)
 
+  assertSubagentRunFiles(input.spec.files, "spec.files", prefix)
+
   if (input.spec.toolNames.some((name) => !name.trim())) {
     throw new AgentStorageError(
       "invalid_input",
@@ -620,6 +624,48 @@ export function assertSubagentRunResult(
       "invalid_input",
       `[${prefix}] Succeeded subagent run '${runId}' requires text.`
     )
+  }
+  assertSubagentRunFiles(result.files, "result.files", prefix)
+  if (
+    result.filesError !== undefined &&
+    (typeof result.filesError !== "string" || !result.filesError.trim() || result.files?.length)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run '${runId}' result.filesError must say why it returned no files.`
+    )
+  }
+}
+
+/** Each file a parent and its child exchange: a safe relative path, once, and a valid FileRef. */
+function assertSubagentRunFiles(
+  files: readonly SubagentRunFile[] | undefined,
+  field: string,
+  prefix: string
+): void {
+  if (files === undefined) return
+
+  if (!Array.isArray(files)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run ${field} must be a list.`
+    )
+  }
+
+  const paths = new Set<string>()
+  for (const file of files) {
+    const segments: readonly string[] = typeof file?.path === "string" ? file.path.split("/") : []
+    const safe =
+      segments.length > 0 &&
+      !file.path.includes("\0") &&
+      segments.every((segment) => segment !== "" && segment !== "." && segment !== "..")
+    if (!safe || paths.has(file.path) || !isFileRef(file.fileRef)) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Subagent run ${field} must hold unique relative paths, each with a valid FileRef.`
+      )
+    }
+    paths.add(file.path)
   }
 }
 

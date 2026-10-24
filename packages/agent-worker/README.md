@@ -70,7 +70,11 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
   Each child works in a thread of its own, which holds its task and then its work.
   `wait_agent` returns each child's final answer, the text it wrote after its last local tool call
-  (else its last text), and the calls it made that wait for approval. It returns a minute before
+  (else its last text), and the calls it made that wait for approval. `spawn_agent`'s `files` copy
+  paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
+  back under `.sixb/agent/children/<key>/`, listed by `wait_agent`, and what it published is
+  installed in the parent's `$SIXB_ARTIFACTS` (see
+  [runtime design](./docs/runtime-design.md#child-runs)). It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their

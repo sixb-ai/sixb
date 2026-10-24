@@ -228,6 +228,57 @@ export async function materializeThreadArtifacts(input: {
   )
 }
 
+/**
+ * Install the latest version of each thread artifact one of `runIds` published a version of, in
+ * place of the copy the run holds: a parent turn sees what its children published like its own,
+ * whoever published since. One that cannot be installed does not stop the others; the error at the
+ * end names each.
+ */
+export async function installArtifactsPublishedBy(input: {
+  readonly installed: InstalledArtifacts
+  readonly threadId: string
+  readonly artifacts: Pick<ArtifactsRuntime, "list" | "getVersion" | "listVersions">
+  readonly blobStorage: BlobStorage
+  readonly sandbox: Sandbox
+  readonly runIds: readonly string[]
+  readonly signal: AbortSignal
+}): Promise<void> {
+  const runIds = new Set(input.runIds)
+  const { artifacts } = await input.artifacts.list({
+    threadId: input.threadId,
+    limit: MATERIALIZE_MAX_ARTIFACTS,
+  })
+
+  const failed: string[] = []
+  // Oldest first: each install lists its artifact first, so the newest ends up first.
+  for (const artifact of [...artifacts].reverse()) {
+    input.signal.throwIfAborted()
+    if (input.installed.versionOf(artifact.id) === artifact.latestVersion) continue
+
+    try {
+      const versions = await input.artifacts.listVersions(artifact.id, {
+        limit: artifact.latestVersion,
+      })
+      const published = versions?.versions.some(
+        (version) => version.origin !== undefined && runIds.has(version.origin.runId)
+      )
+      if (!published) continue
+
+      const version = await input.artifacts.getVersion(artifact.id, artifact.latestVersion)
+      if (!version) continue
+      const files = await readArtifactVersionFiles(input.blobStorage, version, input.signal)
+      await input.installed.replace(input.sandbox, { artifact, version }, files, input.signal)
+    } catch (error) {
+      input.signal.throwIfAborted()
+      console.warn(`[SixbAgentWorker] Could not install artifact '${artifact.id}':`, error)
+      failed.push(artifact.id)
+    }
+  }
+  if (failed.length > 0) {
+    throw new Error(`[SixbAgentWorker] Could not install artifacts ${failed.join(", ")}.`)
+  }
+}
+
 function manifestEntry(
   artifact: Pick<ArtifactRecord, "id" | "kind">,
   version: ArtifactVersionRecord,
@@ -309,7 +360,7 @@ export async function readArtifactVersionFiles(
 }
 
 /** A blob's bytes. Reading stops when the run is cancelled. */
-async function readBlob(
+export async function readBlob(
   blobStorage: BlobStorage,
   blobId: string,
   signal: AbortSignal

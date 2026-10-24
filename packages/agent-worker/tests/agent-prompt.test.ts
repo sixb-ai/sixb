@@ -409,6 +409,21 @@ describe("agent system prompt", () => {
     )
   })
 
+  test("tells a parent and its child how they hand each other files", () => {
+    // Removal proof: drop either rule; its line fails.
+    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
+    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
+
+    expect(parent).toContain(
+      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back under .sixb/agent/children/<key>/ for this turn, listed by wait_agent, and what it publishes is in $SIXB_ARTIFACTS once wait_agent returns."
+    )
+    expect(child).toContain(
+      "The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most 50 files of 25 MB, 100 MB in all."
+    )
+    expect(child).toContain("Files outside out/ are lost when the task ends.")
+    expect(child).not.toContain("Hand a child")
+  })
+
   test("does not advertise a skill catalog when no skills are installed", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

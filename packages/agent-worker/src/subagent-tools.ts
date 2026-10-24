@@ -31,9 +31,19 @@ import {
 import type {
   ConversationAgentRunRecord,
   ExecutionRecord,
+  SubagentRunFile,
   SubagentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
+import { renderHandedFiles } from "./agent-prompt"
+import { SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
+import {
+  type AgentRunWorkspace,
+  CHILD_FILES_DIRECTORY,
+  installChildOutputs,
+  type ListedChildFile,
+  storeHandedFiles,
+} from "./child-files"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
@@ -66,6 +76,8 @@ export interface SpawnSubagentInput {
   readonly task: string
   readonly model?: LanguageModelRef | LanguageModelTier
   readonly reasoning?: AgentReasoning
+  /** Files and directories in the parent's sandbox, copied into the child's at the same paths. */
+  readonly files?: readonly string[]
 }
 
 export interface SpawnSubagentOutput {
@@ -86,11 +98,16 @@ export interface WaitedSubagentResult {
   readonly error?: { readonly code: string; readonly message: string }
   /** Calls it made that wait for the user's approval. */
   readonly awaitingApproval?: readonly AgentChildApprovalAwaiting[]
+  /** What it wrote under `out/`, now in the parent's sandbox. */
+  readonly files?: readonly ListedChildFile[]
 }
 
 /** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
 export class SubagentCoordinator {
   private readonly models: LanguageModelCatalog
+  #workspace: AgentRunWorkspace | undefined
+  /** Children whose files are in the parent's sandbox already, with their listing. */
+  readonly #installed = new Map<string, readonly ListedChildFile[]>()
 
   constructor(
     private readonly host: AgentWorkerHost,
@@ -107,6 +124,11 @@ export class SubagentCoordinator {
     this.models = models
   }
 
+  /** The parent's environment, started after its tools are defined and before any of them runs. */
+  attach(workspace: AgentRunWorkspace): void {
+    this.#workspace = workspace
+  }
+
   async createTools(): Promise<readonly ModelTool[]> {
     const spawn: ModelTool<SpawnSubagentInput> = {
       name: "spawn_agent",
@@ -116,6 +138,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
+        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back under ${CHILD_FILES_DIRECTORY}/<key>/ when it finishes, and wait_agent lists it.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
@@ -130,7 +153,7 @@ export class SubagentCoordinator {
     const wait: ModelTool<WaitForSubagentsInput> = {
       name: "wait_agent",
       description: [
-        "Wait for previously spawned child agents and return their final text or failure. Pass every run id whose result is needed.",
+        "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, now in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
@@ -151,6 +174,29 @@ export class SubagentCoordinator {
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
     const reasoning = input.reasoning ?? model.model.defaultReasoning
+    const handed = input.files?.length
+      ? await storeHandedFiles({ workspace: this.workspace(), paths: input.files, signal })
+      : undefined
+    try {
+      return await this.admit({ key, task, model, reasoning, files: handed?.files }, signal)
+    } catch (error) {
+      // Nothing was admitted, so the files do not count against the run.
+      handed?.release()
+      throw error
+    }
+  }
+
+  private async admit(
+    input: {
+      readonly key: string
+      readonly task: string
+      readonly model: ReturnType<SubagentCoordinator["resolveModel"]>
+      readonly reasoning: AgentReasoning | undefined
+      readonly files: readonly SubagentRunFile[] | undefined
+    },
+    signal: AbortSignal
+  ): Promise<SpawnSubagentOutput> {
+    const { key, task, model, reasoning, files } = input
     const runId = createSubagentRunId(this.parentRun.id, key)
     const executionId = createSubagentExecutionId(runId)
     const execution = createInheritedAgentExecutionRecord({
@@ -170,6 +216,7 @@ export class SubagentCoordinator {
       ...(approvalMode === undefined ? {} : { approvalMode }),
       ...(timeZone === undefined ? {} : { timeZone }),
       ...(locale === undefined ? {} : { locale }),
+      ...(files === undefined ? {} : { files }),
     }
 
     let run: SubagentRunRecord
@@ -188,9 +235,17 @@ export class SubagentCoordinator {
           parentExecutionToken: requiredExecutionToken(this.parentRun),
           spawnKey: key,
           spec,
-          // The child works in a thread of its own, which starts with its task.
+          // The child works in a thread of its own, which starts with its task and its files.
           thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
-          trigger: { id: createAgentMessageId(), parts: [{ type: "text", text: task }] },
+          trigger: {
+            id: createAgentMessageId(),
+            parts: [
+              { type: "text", text: task },
+              ...(files === undefined
+                ? []
+                : [{ type: "text" as const, text: renderHandedFiles(files) }]),
+            ],
+          },
           maxActiveChildren: this.context.subagentConcurrencyPerRun,
         })
       })
@@ -251,10 +306,55 @@ export class SubagentCoordinator {
           parentRunId: this.parentRun.id,
           childRunIds: runIds,
         })
-        return { results: children.map((run) => waitedResult(run, awaiting.get(run.id))) }
+        const files = await this.installOutputs(children, signal)
+        return {
+          results: children.map((run) =>
+            waitedResult(run, awaiting.get(run.id), files.get(run.id))
+          ),
+        }
       }
       await waitDelay(Math.min(WAIT_POLL_MS, remainingMs), signal)
     }
+  }
+
+  /**
+   * Copy what each finished child wrote under `out/` into the parent's sandbox, once, and install
+   * what the children published in its `$SIXB_ARTIFACTS`, as the parent's own.
+   */
+  private async installOutputs(
+    children: readonly SubagentRunRecord[],
+    signal: AbortSignal
+  ): Promise<ReadonlyMap<string, readonly ListedChildFile[]>> {
+    for (const child of children) {
+      const files = child.status === "succeeded" ? child.result?.files : undefined
+      if (!files?.length || this.#installed.has(child.id)) continue
+
+      const listed = await installChildOutputs({
+        workspace: this.workspace(),
+        key: child.spawnKey,
+        files,
+        signal,
+      })
+      this.#installed.set(child.id, listed)
+    }
+
+    try {
+      await this.#workspace?.installArtifactsFrom?.(
+        children.map((child) => child.id),
+        signal
+      )
+    } catch (error) {
+      if (signal.aborted) throw error
+      console.warn("[SixbAgentWorker] Could not install the artifacts of a child agent:", error)
+    }
+    return this.#installed
+  }
+
+  private workspace(): AgentRunWorkspace {
+    if (!this.#workspace) {
+      throw new Error("[SixbAgentWorker] Delegation tools ran before their run's environment.")
+    }
+    return this.#workspace
   }
 
   private resolveModel(ref: LanguageModelRef | LanguageModelTier | undefined) {
@@ -369,6 +469,15 @@ function spawnInputSchema(models: LanguageModelCatalog): JsonObject {
           },
         ],
       },
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: SANDBOX_ATTACHMENT_LIMITS.maxFiles,
+        uniqueItems: true,
+        items: { type: "string", minLength: 1 },
+        description:
+          "Paths of files or directories in your sandbox, such as an attachment from $SIXB_ATTACHMENTS or out/chart.png.",
+      },
     },
     required: ["key", "task"],
     additionalProperties: false,
@@ -473,7 +582,8 @@ function isTerminalSubagent(
 
 function waitedResult(
   run: SubagentRunRecord,
-  awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined
+  awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined,
+  files: readonly ListedChildFile[] | undefined
 ): WaitedSubagentResult {
   return {
     runId: run.id,
@@ -483,6 +593,7 @@ function waitedResult(
       ? {}
       : { error: { code: run.error.code, message: run.error.message } }),
     ...(awaitingApproval?.length ? { awaitingApproval } : {}),
+    ...(files?.length ? { files } : {}),
   }
 }
 
@@ -505,10 +616,10 @@ function waitDelay(ms: number, signal: AbortSignal): Promise<void> {
 function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (
     !isJsonObject(value) ||
-    Object.keys(value).some((key) => !["key", "task", "model", "reasoning"].includes(key))
+    Object.keys(value).some((key) => !["key", "task", "model", "reasoning", "files"].includes(key))
   ) {
     throw new AgentToolPublicError(
-      "[SixbAgentWorker] spawn_agent expects key, task, and optional model/reasoning."
+      "[SixbAgentWorker] spawn_agent expects key, task, and optional model/reasoning/files."
     )
   }
   const key = requireNonEmpty("spawn_agent", value.key, "key", 128)
@@ -538,12 +649,30 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (value.reasoning !== undefined && !isModelReasoning(value.reasoning)) {
     throw new AgentToolPublicError("[SixbAgentWorker] spawn_agent reasoning is invalid.")
   }
+  const files = parseSpawnFiles(value.files)
   return {
     key,
     task,
     ...(model === undefined ? {} : { model }),
     ...(value.reasoning === undefined ? {} : { reasoning: value.reasoning }),
+    ...(files === undefined ? {} : { files }),
   }
+}
+
+function parseSpawnFiles(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined
+
+  const { maxFiles } = SANDBOX_ATTACHMENT_LIMITS
+  if (!Array.isArray(value) || value.length > maxFiles) {
+    throw new AgentToolPublicError(
+      `[SixbAgentWorker] spawn_agent files must be a list of at most ${maxFiles} sandbox paths.`
+    )
+  }
+  const files = value.map((path) => requireNonEmpty("spawn_agent", path, "files entry"))
+  if (new Set(files).size !== files.length) {
+    throw new AgentToolPublicError("[SixbAgentWorker] spawn_agent files must not repeat a path.")
+  }
+  return files.length > 0 ? files : undefined
 }
 
 function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInput {

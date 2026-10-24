@@ -127,10 +127,6 @@ export async function prepareAgentSandboxApiContext(
       path: attachmentsManifestPath,
       contents: input.attachments?.manifestJson ?? emptyManifestJson(),
     },
-    ...(input.attachments?.sandboxFiles.map((file) => ({
-      path: join(input.sandbox.workingDirectory, file.path),
-      contents: file.bytes,
-    })) ?? []),
     ...(input.artifacts
       ? [
           { path: artifactsManifestPath, contents: input.artifacts.manifestJson },
@@ -143,6 +139,11 @@ export async function prepareAgentSandboxApiContext(
     ...(input.memory
       ? memoryFiles(memoryDir, join(contextDir, AGENT_MEMORY_MANIFEST), input.memory)
       : []),
+    // Last: a file a parent handed its child from its own copy of an artifact keeps its changes.
+    ...(input.attachments?.sandboxFiles.map((file) => ({
+      path: join(input.sandbox.workingDirectory, file.path),
+      contents: file.bytes,
+    })) ?? []),
   ])
 
   return {

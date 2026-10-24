@@ -332,13 +332,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
-      const frameworkTools = await new SubagentCoordinator(
+      const delegation = new SubagentCoordinator(
         this.host,
         context,
         run,
         prepared.execution,
         runtime.deadline
-      ).createTools()
+      )
+      const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({
         frameworkTools,
         thread: prepared.thread,
@@ -355,6 +356,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
+      delegation.attach(environment.workspace)
       runtime.assertCanContinue()
       const completed = await runAgentTurn({
         context: environment.turnContext,
@@ -735,6 +737,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         thread: childThread,
         runtime,
         work,
+        workspace: environment.workspace,
       })
     } catch (error) {
       if (isLostExecution(error, signal)) return

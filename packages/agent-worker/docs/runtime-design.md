@@ -129,6 +129,8 @@ Each child:
 - gets the conversation prompt's data rules, never its rules for talking to the user;
 - publishes artifacts into its conversation (`conversationThreadId`) as its own run, so a retry of
   the parent removes them with the parent's own;
+- gets the files its parent passed in `spawn_agent`'s `files`, at their paths in the parent's
+  sandbox, listed in its task and in `$SIXB_ATTACHMENTS`, and returns what it writes to `out/`;
 - works in a thread of its own, its run's `threadId`, beside a durable run, usage records and
   stream (see [Child threads](#child-threads));
 - stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
@@ -154,8 +156,26 @@ Child events are recorded in the broker, but the client API does not expose thei
 parent receives their durable results through `wait_agent`: each child's final answer, the text it
 wrote after its last local tool call, else its last text. `wait_agent` returns
 `WAIT_ANSWER_MARGIN_MS` (a minute) before the parent's deadline, children still at work reported
-`queued` or `running`, so the parent answers before it times out. A child's files stay in its
-sandbox, except the artifacts it publishes.
+`queued` or `running`, so the parent answers before it times out.
+
+Files travel through blob storage, never through the model (`src/child-files.ts`):
+
+- **To the child.** `spawn_agent` reads each path from the parent's sandbox before admission and
+  stores it against the parent's run file budget; the FileRefs go in the child's spec, so a replayed
+  spawn key with the same files is the same child. A missing path, one outside the working
+  directory, the run's own context under `.sixb/agent` (its API address among it), or files past the
+  attachment limits (50 files of 25 MB, 100 MB in all) refuse the spawn with the reason. The child's
+  environment writes them at the same relative paths, after its own artifacts, so a copy the parent
+  edited keeps its changes.
+- **Back to the parent.** A child that succeeds stores what it wrote to `out/` in its result, except
+  a file it was handed there and left unchanged, against its own run budget. Past the same limits it
+  fails instead, saying so: a part of its files would pass for all of them. A child that fails, is
+  cancelled, times out or is interrupted returns none, as it returns no answer.
+- **In the parent.** `wait_agent` copies a finished child's files under
+  `.sixb/agent/children/<key>/` (a key that is not a safe path segment gets a hash suffix) and lists
+  them with their sizes. Like the rest of `.sixb/agent`, they last for the turn; the child's run
+  keeps them. It also installs the latest version of what the waited children published in the
+  parent's `$SIXB_ARTIFACTS`, so the parent revises a child's artifact as its own.
 
 ## Child threads
 
@@ -165,7 +185,7 @@ conversation, the turn that spawned it and its key. Its id is
 
 | Moment | What is written |
 | --- | --- |
-| `spawn_agent` | `runs.createSubagent`, in one transaction: the thread (owned by the conversation's owner), its task as a user message with the run's id, and the queued run as the thread's active run. A replay with the same key writes nothing more |
+| `spawn_agent` | `runs.createSubagent`, in one transaction: the thread (owned by the conversation's owner), its task and the list of files handed to it as a user message with the run's id, and the queued run as the thread's active run. A replay with the same key writes nothing more |
 | the child runs | its request is the thread's messages; the task closes with the thread's creation time, so each run of the child replays the same bytes. Memory is read as of the same time |
 | the child finishes | its work as one assistant message, in the transaction of `runs.finish`, which releases the thread. A failed or stopped child keeps what it did, as an interrupted turn does |
 

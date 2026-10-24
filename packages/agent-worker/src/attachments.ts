@@ -20,6 +20,16 @@ const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
 const TEXT_INLINE_TOTAL_MAX_BYTES = 200 * 1024
 const MAX_ASSISTANT_ATTACHMENTS = 50
 
+/**
+ * How many files, and bytes, a sandbox receives of a run's attachments: also what a parent Agent
+ * and its child hand each other.
+ */
+export const SANDBOX_ATTACHMENT_LIMITS = {
+  maxFiles: MAX_ASSISTANT_ATTACHMENTS,
+  fileMaxBytes: DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes,
+  totalMaxBytes: DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxTotalMaxBytes,
+} as const
+
 export interface PreparedAgentAttachmentContext {
   readonly entries: readonly PreparedAgentAttachment[]
   readonly promptTextByPartKey: ReadonlyMap<string, string>

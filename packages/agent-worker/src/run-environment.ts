@@ -24,6 +24,7 @@ import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   type InstalledArtifacts,
+  installArtifactsPublishedBy,
   type MaterializedArtifacts,
   materializeThreadArtifacts,
 } from "./artifacts/materialize"
@@ -33,6 +34,7 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import { type AgentRunWorkspace, prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
 import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
@@ -69,6 +71,8 @@ import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
+  /** The run's sandbox and file budget, for the files a parent and its children hand each other. */
+  readonly workspace: AgentRunWorkspace
   /** Confirm preservation before recording success, cancellation or failure. Idempotent. */
   beforeFinalize(): Promise<void>
   dispose(): Promise<void>
@@ -257,7 +261,8 @@ export async function createConversationAgentEnvironment(
 
 /**
  * Build an isolated environment for one fresh, headless child Agent. It knows the project as its
- * parent does (ontology docs, memory to read) and publishes into its conversation, as its own run.
+ * parent does (ontology docs, memory to read), holds the files its parent handed over at their
+ * paths, and publishes into its conversation, as its own run.
  */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
@@ -267,8 +272,19 @@ export async function createSubagentEnvironment(
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
-  // As of the thread's start, as a conversation's: each run of the child reads the same memory.
-  const memory = await loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt })
+  const [memory, attachmentContext] = await Promise.all([
+    // As of the thread's start, as a conversation's: each run of the child reads the same memory.
+    loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt }),
+    run.spec.files?.length
+      ? prepareHandedFiles({
+          projectId: context.id,
+          parentRunId: run.parentRunId,
+          files: run.spec.files,
+          blobStorage: context.blobStorage,
+          signal: input.signal,
+        })
+      : emptyAttachmentContext(context.id),
+  ])
 
   return startAgentEnvironment({
     mode: "subagent",
@@ -297,7 +313,7 @@ export async function createSubagentEnvironment(
       runId: run.id,
       executionToken: execution.token,
     }),
-    attachmentContext: emptyAttachmentContext(context.id),
+    attachmentContext,
     ontologyDocs: renderRunOntologyDocs(context),
     ...(memory ? { memory } : {}),
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
@@ -604,8 +620,32 @@ async function startAgentEnvironment(
   }
 
   const beforeFinalize = () => sandbox.beforeFinalize?.() ?? Promise.resolve()
+  const artifacts =
+    publishing && installedArtifacts
+      ? { threadId: publishing.threadId, installed: installedArtifacts }
+      : undefined
+  const workspace: AgentRunWorkspace = {
+    sandbox: resolveSandbox,
+    blobStorage: context.blobStorage,
+    budget: fileBudget,
+    ...(artifacts
+      ? {
+          installArtifactsFrom: async (runIds, signal) =>
+            installArtifactsPublishedBy({
+              installed: await artifacts.installed,
+              threadId: artifacts.threadId,
+              artifacts: context.sixb.artifacts,
+              blobStorage: context.blobStorage,
+              sandbox: (await ready).sandbox,
+              runIds,
+              signal,
+            }),
+        }
+      : {}),
+  }
   return {
     beforeFinalize,
+    workspace,
     turnContext: {
       environmentFailureSignal: input.failureSignal,
       ...(sandbox.beforeFinalize ? { beforeFinalize } : {}),
