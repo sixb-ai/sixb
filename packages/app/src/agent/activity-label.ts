@@ -6,6 +6,7 @@ import {
   describeBash,
   humanize,
 } from "./bash/interpret"
+import { describeDelegationTool } from "./delegation/interpret"
 import { type AgentMessages, en } from "./i18n/en"
 import { childQuestions, describeMessageAgent } from "./message-agent/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
@@ -21,7 +22,7 @@ export function latestWorkLabel(
 ): string {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index]
-    if (part?.kind === "tool") return toolProgressLabel(part.tool, messages)
+    if (part?.kind === "tool") return toolProgressLabel(part.tool, parts, messages)
     // `reasoning-start` has no text. Keep the pre-token "Thinking" label through that lifecycle
     // chunk so the first reasoning delta does not look like a new row mounting.
     if (part?.kind === "reasoning") return messages.activity.thinking
@@ -29,7 +30,11 @@ export function latestWorkLabel(
   return messages.activity.working
 }
 
-function toolProgressLabel(tool: NormalizedTool, messages: AgentMessages): string {
+function toolProgressLabel(
+  tool: NormalizedTool,
+  parts: readonly NormalizedPart[],
+  messages: AgentMessages
+): string {
   if (tool.toolName === "web_fetch") {
     const domain = webFetchUrl(tool.input)?.hostname.replace(/^www\./, "") ?? messages.web.webPage
     if (tool.state === "output-error") return messages.web.readFailed(domain)
@@ -66,6 +71,8 @@ function toolProgressLabel(tool: NormalizedTool, messages: AgentMessages): strin
   if (tool.toolName === "message_agent") return describeMessageAgent(tool, messages).running
   const [question] = childQuestions(tool)
   if (question) return messages.activity.agentAsks(question.key, question.text)
+  const delegation = describeDelegationTool(tool, parts, messages)
+  if (delegation) return delegation.running
   if (isPublishTool(tool.toolName)) {
     const title = publishTitle(tool)
     if (tool.state === "output-error") return messages.artifacts.publishFailed(title)

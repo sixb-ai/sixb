@@ -19,6 +19,14 @@ import {
   reportedApprovalOutcomes,
   type TranscriptApprovals,
 } from "../approvals"
+import { DelegationCardsContext, type TranscriptDelegation } from "../delegation/context"
+import {
+  delegationTools,
+  delegationTurns,
+  readThreadDelegation,
+  type ThreadDelegation,
+} from "../delegation/interpret"
+import { heldInCard } from "../delegation/model"
 import { hasLiveContent, type LiveRunState } from "../live-run"
 import { authorKey, useMessageAuthors } from "../message-authors"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
@@ -69,24 +77,48 @@ export interface TranscriptProps {
    * report of how each ended.
    */
   readonly approvals?: TranscriptApprovals
+  /**
+   * What the reader may do with the sub-agents the agent delegated to, each a card under the work
+   * that spawned it. Without it, as for an observer, the cards only read.
+   */
+  readonly delegation?: TranscriptDelegation
 }
 
 export function Transcript(props: TranscriptProps) {
-  const { approvals, messages } = props
+  const { approvals, messages, live, threadId, delegation: actions } = props
   const cards = useMemo(
     () => ({ approvals: approvals ?? null, outcomes: reportedApprovalOutcomes(messages) }),
     [approvals, messages]
   )
 
+  // The turn streaming now changes with every chunk; its delegation calls far less often.
+  const turns = useMemo(() => delegationTurns(messages), [messages])
+  // Once its answer is stored, the turn that streamed is read from it, never twice.
+  const stored = live.runId !== null && messages.some((message) => message.runId === live.runId)
+  const liveTools = stored ? [] : delegationTools(live.parts)
+  const liveSignature = JSON.stringify(liveTools.map((tool) => [tool.toolName, tool.state]))
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the tools
+  const delegation = useMemo(
+    () => readThreadDelegation([...turns, { runId: live.runId, tools: liveTools }]),
+    [turns, live.runId, liveSignature]
+  )
+  const children = useMemo(
+    () => ({ threadId, delegation, liveRunId: live.active ? live.runId : null, actions }),
+    [threadId, delegation, live.active, live.runId, actions]
+  )
+
   return (
     <ApprovalCardsContext.Provider value={cards}>
-      <TranscriptView {...props} />
+      <DelegationCardsContext.Provider value={children}>
+        <TranscriptView {...props} threadDelegation={delegation} />
+      </DelegationCardsContext.Provider>
     </ApprovalCardsContext.Provider>
   )
 }
 
 function TranscriptView({
   threadId,
+  threadDelegation,
   messages,
   live,
   pendingUserText,
@@ -105,7 +137,7 @@ function TranscriptView({
   continuing,
   reconnecting,
   approvals,
-}: TranscriptProps) {
+}: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   const authors = useMessageAuthors()
 
   // The message Sixb writes to resume a turn says only how its calls ended, which their cards
@@ -131,6 +163,8 @@ function TranscriptView({
     const trailing: HeldCall[] = []
     for (const approval of all) {
       if (shown.has(approval.id)) continue
+      // A sub-agent's call shows in its card when the turn that spawned it holds it.
+      if (heldInCard(approval, threadDelegation)) continue
       if (!answered.has(approval.runId)) {
         trailing.push(heldCallOf(approval))
         continue
@@ -138,7 +172,7 @@ function TranscriptView({
       byRun.set(approval.runId, [...(byRun.get(approval.runId) ?? []), heldCallOf(approval)])
     }
     return { byRun, trailing }
-  }, [approvals, messages, live.parts])
+  }, [approvals, messages, live.parts, threadDelegation])
   // The last message of each turn, where its unshown calls go.
   const lastOfRun = useMemo(() => {
     const last = new Map<string, string>()

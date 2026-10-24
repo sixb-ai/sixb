@@ -1,8 +1,10 @@
 import {
   client,
+  getAgentChildFileContent,
   getAgentMessageFileContent,
   getAiModelCallFileContent,
   getArtifactFileContent,
+  getObservedAgentChildFileContent,
   getObservedAgentMessageFileContent,
 } from "@sixb/client"
 import { useArtifactMessages } from "./messages"
@@ -99,6 +101,51 @@ export function messageFileSource(input: {
         signal,
       })
       return response.data
+    },
+  }
+}
+
+/**
+ * A file of one run of a sub-agent: one it was handed (`/handedFiles/0/fileRef`) or one the run
+ * returned (`/files/1/fileRef`). What a tool showed it is a file of its thread's messages.
+ */
+export function childFileSource(input: {
+  /** The sub-agent's thread. */
+  readonly threadId: string
+  /** The run of it the file is of. */
+  readonly runId: string
+  readonly path: string
+  readonly fileRef: ViewerFileRef
+  /** Read through the observer's routes: the conversation is someone else's. */
+  readonly observed?: boolean
+  readonly baseUrl?: string
+}): FileSource {
+  const thread = encodeURIComponent(input.threadId)
+  const routePath = input.observed
+    ? `/api/observed-agent-threads/${thread}/child-files/content`
+    : `/api/agent-threads/${thread}/child-files/content`
+  const url = (disposition: "inline" | "attachment") =>
+    contentUrl(routePath, { run: input.runId, path: input.path, disposition }, input.baseUrl)
+  return {
+    id: `child:${input.runId}${input.path}`,
+    fileRef: input.fileRef,
+    name: input.fileRef.fileName?.trim() ?? "",
+    inlineUrl: url("inline"),
+    downloadUrl: url("attachment"),
+    queryKey: ["child-file", input.threadId, input.runId, input.path, input.fileRef.digest],
+    load: async (signal) => {
+      const query = { run: input.runId, path: input.path, disposition: "inline" as const }
+      const options = {
+        path: { threadId: input.threadId },
+        query,
+        parseAs: "blob" as const,
+        throwOnError: true as const,
+        signal,
+      }
+      const response = input.observed
+        ? await getObservedAgentChildFileContent(options)
+        : await getAgentChildFileContent(options)
+      return response.data as Blob
     },
   }
 }

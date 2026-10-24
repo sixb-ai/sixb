@@ -9,6 +9,8 @@ import { ArtifactCards } from "../artifact-card"
 import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
+import { ChildCards } from "../delegation/child-cards"
+import { describeDelegationTool, spawnedChildren } from "../delegation/interpret"
 import { useAgentMessages } from "../i18n"
 import { childQuestions, describeMessageAgent } from "../message-agent/interpret"
 import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
@@ -28,15 +30,22 @@ import { WebSources } from "./web-sources"
  * of separate dropdowns. What the turn published closes the body as one row of cards, while each
  * publish keeps its row in the work; the project's tool views placed in the answer come just
  * before, the same way. A call held for the user's approval shows as a card right under the work
- * that made it, where the reader decides on it. `step-start` markers are intentionally skipped.
+ * that made it, where the reader decides on it, and so does each sub-agent the work spawned.
+ * `step-start` markers are intentionally skipped.
  */
 export function AssistantBody({
   parts,
   live = false,
+  nested = false,
 }: {
   parts: readonly NormalizedPart[]
   /** True while this body is driven by an in-flight run, so its headline shows live progress. */
   live?: boolean
+  /**
+   * A sub-agent's work inside its card: its work reads open, and its calls held for approval are
+   * on the card already.
+   */
+  nested?: boolean
 }) {
   const blocks: React.ReactNode[] = []
   let textBuffer: string[] = []
@@ -48,7 +57,7 @@ export function AssistantBody({
     const text = textBuffer.join("")
     textBuffer = []
     if (!text.trim()) return
-    blocks.push(<TextBlock key={`block-${key++}`} text={text} />)
+    blocks.push(<TextBlock key={`block-${key++}`} text={text} nested={nested} />)
   }
 
   const flushWork = (inProgress: boolean) => {
@@ -57,9 +66,15 @@ export function AssistantBody({
     workBuffer = []
     // A run of only step boundaries has nothing to show.
     if (work.every((part) => part.kind === "step-start")) return
-    blocks.push(<WorkGroup key={`block-${key++}`} parts={work} inProgress={inProgress} />)
+    blocks.push(
+      <WorkGroup key={`block-${key++}`} parts={work} inProgress={inProgress} nested={nested} />
+    )
+    if (nested) return
+
     const held = heldCallsInParts(work)
     if (held.length > 0) blocks.push(<ApprovalCards key={`approvals-${key++}`} calls={held} />)
+    const spawned = spawnedChildren(work)
+    if (spawned.length > 0) blocks.push(<ChildCards key={`children-${key++}`} spawned={spawned} />)
   }
 
   parts.forEach((part) => {
@@ -128,8 +143,13 @@ function NotPublished({ title }: { title: string }) {
 }
 
 // A reply can show or link to an artifact; the panel around the conversation says where it opens.
-const TextBlock = memo(function TextBlock({ text }: { text: string }) {
-  return <ReferencingMarkdown className="prose-chat">{text}</ReferencingMarkdown>
+const TextBlock = memo(function TextBlock({ text, nested }: { text: string; nested: boolean }) {
+  return (
+    // `.prose` sets its own size outside Tailwind's layers: only an important size wins over it.
+    <ReferencingMarkdown className={cn("prose-chat", nested && "text-sm! leading-relaxed!")}>
+      {text}
+    </ReferencingMarkdown>
+  )
 })
 
 const FileBlock = memo(function FileBlock({
@@ -149,12 +169,15 @@ const FileBlock = memo(function FileBlock({
 function WorkGroup({
   parts,
   inProgress,
+  nested = false,
 }: {
   parts: readonly NormalizedPart[]
   inProgress: boolean
+  /** Inside a sub-agent's card, where the reader asked to see its work: open, without a scroll. */
+  nested?: boolean
 }) {
   const messages = useAgentMessages()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(nested)
   const sources = collectWebSources(parts)
   const searches = parts.flatMap((part) =>
     part.kind === "tool" && part.tool.toolName === "web_search" ? [part.tool] : []
@@ -195,13 +218,18 @@ function WorkGroup({
         <ChevronRight className="size-4 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="scrollbar-thin mt-2 ml-1.5 flex max-h-[min(24rem,50vh)] flex-col gap-3 overflow-y-auto overscroll-contain border-l-2 border-border py-0.5 pr-2 pl-3">
+        <div
+          className={cn(
+            "mt-2 ml-1.5 flex flex-col gap-3 border-l-2 border-border py-0.5 pr-2 pl-3",
+            !nested && "scrollbar-thin max-h-[min(24rem,50vh)] overflow-y-auto overscroll-contain"
+          )}
+        >
           {parts.map((part, index) => {
             if (part.kind === "reasoning") {
               return <GroupReasoning key={index} text={part.text} streaming={part.streaming} />
             }
             if (part.kind === "tool") {
-              return <ToolCallRow key={index} tool={part.tool} />
+              return <ToolCallRow key={index} tool={part.tool} parts={parts} />
             }
             return null
           })}
@@ -245,25 +273,46 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
  * inspector. All keep their bodies borderless and inline so an expanded result flows within the
  * group rather than reading as a nested dropdown.
  */
-function ToolCallRow({ tool }: { tool: NormalizedTool }) {
+function ToolCallRow({
+  tool,
+  parts,
+}: {
+  tool: NormalizedTool
+  /** The rest of its work, which names the children a wait is for. */
+  parts: readonly NormalizedPart[]
+}) {
   const view = useAgentToolView(tool.toolName)
   if (view?.placement === "work") {
-    return <ProjectToolView view={view} tool={tool} fallback={<BuiltInToolRow tool={tool} />} />
+    return (
+      <ProjectToolView
+        view={view}
+        tool={tool}
+        fallback={<BuiltInToolRow tool={tool} parts={parts} />}
+      />
+    )
   }
-  return <BuiltInToolRow tool={tool} />
+  return <BuiltInToolRow tool={tool} parts={parts} />
 }
 
-function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
+function BuiltInToolRow({
+  tool,
+  parts,
+}: {
+  tool: NormalizedTool
+  parts: readonly NormalizedPart[]
+}) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.activity
   const builtIn = builtInToolView(tool)
   if (builtIn !== null) return builtIn
 
+  // A delegation reads as what it does: the cards under the work say the rest, never its JSON.
+  const delegation = describeDelegationTool(tool, parts, agentMessages)
   const isError = tool.state === "output-error"
-  const hasInput = tool.input !== undefined || Boolean(tool.inputText)
-  const hasOutput = tool.state === "output-available" && tool.output !== undefined
+  const hasInput = !delegation && (tool.input !== undefined || Boolean(tool.inputText))
+  const hasOutput = !delegation && tool.state === "output-available" && tool.output !== undefined
   const files = tool.files ?? []
-  const expandable = hasInput || hasOutput || isError || files.length > 0
+  const expandable = hasInput || hasOutput || (isError && !delegation) || files.length > 0
   // A wait that a child's question ended reads as the question, one row for each.
   const [question, ...otherQuestions] = childQuestions(tool)
   const title =
@@ -271,7 +320,7 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
       ? describeMessageAgent(tool, agentMessages).title
       : question
         ? messages.agentAsks(question.key, question.text)
-        : tool.toolName
+        : (delegation?.title ?? tool.toolName)
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.
@@ -283,7 +332,15 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
           className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground disabled:cursor-default disabled:hover:text-muted-foreground"
         >
           <Wrench className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate font-medium">{title}</span>
+          <span
+            className={cn(
+              "min-w-0 font-medium",
+              // A sub-agent's question reads in full.
+              tool.toolName === "ask_parent" ? "text-left break-words" : "truncate"
+            )}
+          >
+            {title}
+          </span>
           <ToolStatus state={tool.state} />
           {expandable ? (
             <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
@@ -307,7 +364,7 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
               ))}
             </div>
           ) : null}
-          {isError ? (
+          {isError && !delegation ? (
             <JsonViewer label={messages.details} value={tool.errorText || messages.toolFailed} />
           ) : null}
         </CollapsibleContent>

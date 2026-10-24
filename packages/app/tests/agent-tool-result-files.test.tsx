@@ -34,12 +34,12 @@ const chart: AgentFileRef = {
   mediaType: "image/png",
 }
 
-/** A child's answer and its chart, as wait_agent saves them. */
+/** A project tool's answer and its chart, as a rich result. */
 const waited: AgentMessagePart = {
   type: "tool-call",
-  toolCallId: "call-wait",
-  toolName: "wait_agent",
-  input: { runIds: ["agt_run_child"] },
+  toolCallId: "call-margins",
+  toolName: "chart_margins",
+  input: { quarter: "Q3" },
   state: "output-available",
   output: {
     kind: "agentToolResult",
@@ -79,7 +79,7 @@ describe("a tool's files in the work trace", () => {
       </QueryClientProvider>
     )
     // Open the turn's work, then the call.
-    for (const label of ["Worked", "wait_agent"]) {
+    for (const label of ["Worked", "chart_margins"]) {
       const trigger = view
         .getAllByRole("button")
         .find((button) => button.textContent?.includes(label))

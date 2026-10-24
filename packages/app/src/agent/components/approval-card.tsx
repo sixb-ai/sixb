@@ -35,6 +35,7 @@ import {
   useApprovalCards,
 } from "../approvals"
 import { capitalize, humanize } from "../bash/interpret"
+import { useDelegationCards } from "../delegation/context"
 import { formatRelativeTime } from "../format"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
@@ -96,15 +97,23 @@ type DecisionNotice = { readonly tone: "info" | "warning"; readonly text: string
  * One call the agent made that waits for, or waited for, its requester: what it does, to which
  * record, with which values, and whether it stays in the project's data. Whoever asked for the turn
  * approves or denies it here; everyone else reads it, and who decides. A call the thread holds no
- * record of shows only when a message reported how it ended.
+ * record of shows only when a message reported how it ended. `inCard`: it sits in the card of the
+ * sub-agent that made it, which names it already.
  */
-export function ApprovalCard({ held }: { readonly held: HeldCall }) {
+export function ApprovalCard({
+  held,
+  inCard = false,
+}: {
+  readonly held: HeldCall
+  readonly inCard?: boolean
+}) {
   const messages = useAgentMessages()
   const labels = messages.approvals
   const locale = useLocale()
   const alsoId = useId()
   const statusRef = useRef<HTMLParagraphElement>(null)
   const { approvals: context, outcomes } = useApprovalCards()
+  const delegationCards = useDelegationCards()
   const approval = context?.approvals.find((candidate) => candidate.id === held.id) ?? null
   const reported = approval ? undefined : outcomes.get(held.id)
   const call = cardCall(held, approval)
@@ -133,8 +142,11 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
       ? context.canDecide(approval)
       : false
   const requester = approval && context ? context.requesterName(approval) : null
-  // Stopping applies to the whole paused turn: its first waiting card offers it.
+  // Stopping applies to the whole paused turn: its first waiting card offers it. A turn still at
+  // work is not paused, even when one of its sub-agents waits: stopping it there would end it.
+  const turnAtWork = approval !== null && delegationCards?.liveRunId === approval.runId
   const canStop =
+    !turnAtWork &&
     state === "pending" &&
     approval !== null &&
     context?.stop !== undefined &&
@@ -222,11 +234,19 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
       aria-label={labels.card(title)}
       aria-busy={deciding !== null}
       data-approval-state={state}
+      data-approval-id={held.id}
+      // A sub-agent's card brings the reader here when the call waits under a later turn.
+      tabIndex={-1}
       className={cn(
-        "min-w-0 overflow-hidden rounded-2xl border bg-card text-card-foreground",
+        "min-w-0 overflow-hidden border bg-card text-card-foreground",
+        inCard ? "rounded-xl" : "rounded-2xl",
         canDecide
-          ? "border-amber-500/35 shadow-[0_0_0_4px_rgb(245_158_11/0.06),0_1px_2px_0_rgb(0_0_0/0.04)]"
-          : "border-border shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
+          ? inCard
+            ? "border-amber-500/35"
+            : "border-amber-500/35 shadow-[0_0_0_4px_rgb(245_158_11/0.06),0_1px_2px_0_rgb(0_0_0/0.04)]"
+          : inCard
+            ? "border-border"
+            : "border-border shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
       )}
     >
       <div className="px-4 pt-3 pb-3.5 sm:px-5">
@@ -237,8 +257,10 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
             requester={requester}
             canDecide={canDecide}
             messages={messages}
+            // Its sub-agent's card says already that it waits: said once, for a screen reader.
+            quiet={inCard && state === "pending"}
           />
-          {when ? (
+          {when && !(inCard && state === "pending" && !canStop) ? (
             <span
               className={cn(
                 "ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground",
@@ -262,11 +284,18 @@ export function ApprovalCard({ held }: { readonly held: HeldCall }) {
           ) : null}
         </div>
 
-        <h3 className="mt-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-foreground">
+        <h3
+          className={cn(
+            "text-[15px]",
+            // Waiting in its sub-agent's card, the card says so: the title leads.
+            inCard && state === "pending" && !canStop ? "mt-0" : "mt-2",
+            "leading-snug font-semibold tracking-[-0.01em] text-foreground"
+          )}
+        >
           {title}
         </h3>
 
-        {caller ? (
+        {caller && !inCard ? (
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
             {labels.fromSubagent(caller.key)}
           </p>
@@ -396,6 +425,7 @@ function StatusLine({
   requester,
   canDecide,
   messages,
+  quiet = false,
 }: {
   /** Where focus goes once a decision removes the buttons. */
   readonly focusRef: Ref<HTMLParagraphElement>
@@ -403,6 +433,8 @@ function StatusLine({
   readonly requester: string | null
   readonly canDecide: boolean
   readonly messages: AgentMessages
+  /** Read to a screen reader only. */
+  readonly quiet?: boolean
 }) {
   const labels = messages.approvals
   const { Icon, label, tone } = statusOf(state, requester, canDecide, messages)
@@ -414,6 +446,7 @@ function StatusLine({
       role="status"
       className={cn(
         "flex min-w-0 items-center gap-1.5 rounded-sm text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        quiet && "sr-only",
         tone === "waiting" && "text-amber-700 dark:text-amber-400",
         tone === "done" && "text-emerald-700 dark:text-emerald-400",
         tone === "error" && "text-destructive",
