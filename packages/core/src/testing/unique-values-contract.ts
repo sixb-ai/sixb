@@ -430,6 +430,31 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
         expect(await person(storage, "b")).toBeNull()
       })
     })
+
+    // The backfill read `a` before the write gave its value up. Removal proof: drop the
+    // `isolation: "serializable"` of the backfill in `prepareUniqueProperties`, and `a` keeps
+    // holding the value; set `MAX_PREPARATION_ATTEMPTS` to 1, and the preparation fails. Its one
+    // retry waits the preparation's first backoff, 50 ms.
+    test(`${name} prepares a property again when a write commits during its backfill`, async () => {
+      await withStorage(
+        async (storage) => {
+          await migrateStorage(storage, { projectId: PROJECT, ontology: plainOntology })
+          await editor(storage, plainOntology).commit([create("a", { email: "a@example.com" })])
+
+          const paused = pauseBeforeUniqueValueInsert(storage)
+          const preparing = migrateStorage(paused.storage, { projectId: PROJECT, ontology })
+          await paused.reached
+
+          await editor(storage).commit([unsetEmail("a")])
+          paused.release()
+          await preparing
+
+          expect(await holderOf(storage, "email", "a@example.com")).toBeNull()
+          await editor(storage).commit([create("b", { email: "a@example.com" })])
+        },
+        { prepared: false }
+      )
+    })
   }
 
   test(`${name} fails a publication whose objects share a value and keeps the previous one`, async () => {
@@ -705,6 +730,17 @@ function setEmail(primaryId: string, email: string): OntologyEditOperation {
   }
 }
 
+function unsetEmail(primaryId: string): OntologyEditOperation {
+  return {
+    id: `unset-${primaryId}`,
+    kind: "object.patch",
+    ref: personRef(primaryId),
+    set: {},
+    unset: ["email"],
+    reset: [],
+  }
+}
+
 function person(storage: Storage, primaryId: string) {
   return storage.objects.getByPrimaryId({ projectId: PROJECT, ...personRef(primaryId) })
 }
@@ -784,6 +820,51 @@ async function publish(
       yield* values
     })(),
   })
+}
+
+/** The same storage, whose first backfill waits before it inserts the values it read. */
+function pauseBeforeUniqueValueInsert(storage: Storage) {
+  const reached = Promise.withResolvers<void>()
+  const released = Promise.withResolvers<void>()
+  let paused = false
+
+  const transaction: Storage["transaction"] = (run, options) =>
+    storage.transaction((tx) => {
+      const uniqueValues = new Proxy(tx.ontology.uniqueValues, {
+        get(store, key) {
+          const value = Reflect.get(store, key, store)
+          if (key !== "insert" || paused) {
+            return typeof value === "function" ? value.bind(store) : value
+          }
+
+          return async (...args: Parameters<typeof store.insert>) => {
+            paused = true
+            reached.resolve()
+            await released.promise
+            return store.insert(...args)
+          }
+        },
+      })
+      const ontologyStorage = new Proxy(tx.ontology, {
+        get: (store, key) =>
+          key === "uniqueValues" ? uniqueValues : Reflect.get(store, key, store),
+      })
+      return run(
+        new Proxy(tx, {
+          get: (store, key) =>
+            key === "ontology" ? ontologyStorage : Reflect.get(store, key, store),
+        })
+      )
+    }, options)
+
+  const proxied = new Proxy(storage, {
+    get(target, property) {
+      if (property === "transaction") return transaction
+      const value = Reflect.get(target, property, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+  return { storage: proxied, reached: reached.promise, release: () => released.resolve() }
 }
 
 /** The same storage, whose transactions wait before they finalize until released. */
