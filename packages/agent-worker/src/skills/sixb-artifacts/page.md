@@ -153,7 +153,8 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   keeps values in memory, so a page that uses them checks as it runs. The reader can clear them
   with *Reset page data* in the viewer.
 - A link to another artifact (`<a href="artifact:…">`) opens it beside the conversation; a link to
-  a web page opens in a new tab.
+  a web page opens in a new tab. Open pages with links: the frame can't open windows
+  (`window.open`) or go to another address itself.
 - `<sixb-embed src="artifact:…#chart=revenue"></sixb-embed>` shows another artifact on the page: a
   chart, a range, a section, a slide (see `references.md`). Size the box with CSS like any block;
   it is the column's width and 16:9 unless you say otherwise. The app draws the artifact over it,

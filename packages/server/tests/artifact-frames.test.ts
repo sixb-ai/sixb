@@ -262,7 +262,10 @@ describe("a deck's frame", () => {
       expect(response.status).toBe(status)
       // Every response carries the policy, 404s included.
       const policy = response.headers.get("content-security-policy") ?? ""
-      expect(policy).toContain("sandbox allow-scripts")
+      // Its page reads rows as the reader, and opens no window to take them elsewhere: the app
+      // opens its web links. Reproduce by putting `allow-popups` back in the frame's policy.
+      expect(policy).toContain("sandbox allow-scripts allow-modals")
+      expect(policy).not.toContain("allow-popups")
       expect(policy).not.toContain("allow-same-origin")
       expect(policy).toContain(`script-src ${base} 'unsafe-inline'`)
       expect(policy).toContain("frame-ancestors 'self' http://app.localhost")
@@ -345,7 +348,7 @@ describe("a deck's frame", () => {
 
   test("opens only in a frame, never as a page of its own", async () => {
     // Reproduce by dropping the sec-fetch-dest check from the frame route: the deck opens as a page
-    // on the API's origin, where its sandbox still lets it show dialogs and open windows.
+    // on the API's origin, where its sandbox still lets it show dialogs.
     const { app, frame } = await deck()
     const page = await app.fetch(
       new Request(url(`${frame.path}index.html`), { headers: { "sec-fetch-dest": "document" } })

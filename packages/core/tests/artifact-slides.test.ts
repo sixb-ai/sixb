@@ -359,6 +359,91 @@ describe("the frame runtime", () => {
     expect(new Set([before.a, before.b, after.c]).size).toBe(3)
   })
 
+  test("leaves the page only through the app, which opens what the reader follows", () => {
+    // The frame opens no window and navigates nowhere but the frames' origin: a link out goes to
+    // the app as a message. Reproduce by giving a web link `target="_blank"` again in the
+    // runtime's click handler, as it once did: nothing is posted, and the frame tries to open it.
+    let click: ((event: unknown) => void) | undefined
+    const posted: Record<string, unknown>[] = []
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: () => {},
+      postMessage: (message: Record<string, unknown>) => posted.push(message),
+    }
+    window.parent = window
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "complete",
+      baseURI: "https://api.sixb.test/api/artifact-frames/token/index.html",
+      body: null,
+      addEventListener: (name: string, listener: (event: unknown) => void) => {
+        if (name === "click") click = listener
+      },
+      querySelectorAll: () => [],
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, () => 0)
+
+    /** A click on a link to `href`, as the runtime hears it: what it posts, and if it stops it. */
+    const follow = (href: string, handled = false) => {
+      posted.length = 0
+      const link = { getAttribute: () => href }
+      const event = {
+        target: { closest: () => link },
+        defaultPrevented: handled,
+        stopped: false,
+        preventDefault() {
+          this.stopped = true
+        },
+      }
+      click?.(event)
+      const sent = posted.flatMap((message) => parseFrameEvent(message) ?? [])
+      return { sent, stopped: event.stopped }
+    }
+
+    expect(follow("https://example.com/report?q=1")).toEqual({
+      sent: [
+        {
+          protocol: FRAME_PROTOCOL,
+          event: "link",
+          params: { url: "https://example.com/report?q=1" },
+        },
+      ],
+      stopped: true,
+    })
+    // A file of the page is a web page too, at the frame's address.
+    expect(follow("notes.html").sent).toEqual([
+      {
+        protocol: FRAME_PROTOCOL,
+        event: "link",
+        params: { url: "https://api.sixb.test/api/artifact-frames/token/notes.html" },
+      },
+    ])
+    expect(follow("artifact:art_0123456789").sent).toEqual([
+      { protocol: FRAME_PROTOCOL, event: "open", params: { address: "artifact:art_0123456789" } },
+    ])
+
+    // Any other address goes nowhere, in the frame or out of it.
+    for (const href of ["mailto:ops@example.com", "javascript:void 0", "data:text/html,hi"]) {
+      expect(follow(href), href).toEqual({ sent: [], stopped: true })
+    }
+
+    // A link within the page, or one the page's own script handled, is the page's.
+    expect(follow("#totals")).toEqual({ sent: [], stopped: false })
+    expect(follow("https://example.com", true)).toEqual({ sent: [], stopped: false })
+  })
+
   test("reads its layout from the tag the frame injects it with", () => {
     // Reproduce by renaming the attribute on either side: every page lays out as a deck.
     expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
@@ -402,6 +487,9 @@ describe("a frame's events", () => {
     expect(event("open", { address: "artifact:art_0123456789" })?.params).toEqual({
       address: "artifact:art_0123456789",
     })
+    expect(event("link", { url: "https://example.com/a?b=1" })?.params).toEqual({
+      url: "https://example.com/a?b=1",
+    })
     expect(
       event("embeds", {
         embeds: [{ id: 1, address: "artifact:art_0123456789#1", rect, scale: 0.5 }],
@@ -427,6 +515,11 @@ describe("a frame's events", () => {
       ["key", { key: "q" }],
       ["open", { address: 42 }],
       ["open", { address: `artifact:${"a".repeat(3000)}` }],
+      // The app opens only a web page: reproduce by accepting any address in parseFrameEvent.
+      ["link", { url: "javascript:alert(1)" }],
+      ["link", { url: "data:text/html,hi" }],
+      ["link", { url: "/relative" }],
+      ["link", { url: `https://example.com/${"a".repeat(9000)}` }],
       ["embeds", { embeds: "all" }],
       ["embeds", { embeds: [{ id: 1, address: "artifact:art_0123456789", rect, scale: 0 }] }],
       [
