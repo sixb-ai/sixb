@@ -447,7 +447,7 @@ function injectDelegationForTest(host: AgentWorkerHost) {
 
 function delegatingParentModel(input: {
   readonly childRunId: () => string
-  readonly childModel: { readonly provider: string; readonly modelId: string }
+  readonly childModel: { readonly provider: string; readonly modelId: string } | "heavy"
   readonly onCall?: (options: LanguageModelRequest) => void
 }): WorkerTestModel {
   let call = 0
@@ -7555,6 +7555,73 @@ describe("AgentWorker", () => {
             },
           },
         ],
+      })
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+      delegation.mockRestore()
+    }
+  })
+
+  test("delegates to a tier's model", async () => {
+    // Removal proof: drop the tier branch from SubagentCoordinator.resolveModel; the tier is
+    // looked up as a model reference and the spawn fails.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const heavyModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "anthropic/claude-opus-5.5",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "The delegated fact is 42." },
+          { type: "text-end", id: "child-answer" },
+          finish("stop"),
+        ]),
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: "heavy",
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: { standard: parentModel, heavy: heavyModel } },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
+
+    const delegation = injectDelegationForTest(sixb)
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent delegating to a tier terminal"
+      )
+      const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+
+      expect(parent.status).toBe("succeeded")
+      expect(child).toMatchObject({
+        status: "succeeded",
+        spec: { model: { provider: "gateway", modelId: "anthropic/claude-opus-5.5" } },
+      })
+
+      // Only configured tiers are offered, ahead of the exact references.
+      const spawnTool = parentCalls[0]?.tools?.find((tool) => tool.name === "spawn_agent")
+      expect(spawnTool?.inputSchema).toMatchObject({
+        properties: {
+          model: {
+            anyOf: [
+              { type: "string", enum: ["standard", "heavy"] },
+              { properties: { modelId: { enum: ["parent-model"] } } },
+              { properties: { modelId: { enum: ["anthropic/claude-opus-5.5"] } } },
+            ],
+          },
+        },
       })
     } finally {
       await stopUnderFakeTime(worker)
