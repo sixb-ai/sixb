@@ -42,8 +42,8 @@ export interface ObjectReaderDelegation {
  * whether an object type or a link is viewable.
  *
  * A type a principal views only through a condition is viewable here, and nowhere else: the
- * reader's storage shows only the objects the condition matches. A check that answers for an
- * object without reading it through that storage asks for `everyObject`, which such a type fails.
+ * reader's storage shows only the objects the condition matches. A check that answers for one
+ * object of such a type reads that object through the same storage.
  */
 export class ObjectReaderSecurity {
   /** The registered authority the reader is bound to. */
@@ -124,11 +124,7 @@ export class ObjectReaderSecurity {
     Object.freeze(this)
   }
 
-  assertObjectTypesViewable(
-    objectTypeIds: readonly string[],
-    clearance: Clearance,
-    options: { readonly everyObject?: boolean } = {}
-  ): void {
+  assertObjectTypesViewable(objectTypeIds: readonly string[], clearance: Clearance): void {
     if (this.delegation) {
       for (const objectTypeId of new Set(objectTypeIds)) {
         if (this.delegation.objectTypeIds.has(objectTypeId)) continue
@@ -138,7 +134,7 @@ export class ObjectReaderSecurity {
         )
       }
     } else {
-      this.assertObjectTypesGranted(objectTypeIds, clearance, options)
+      this.assertObjectTypesGranted(objectTypeIds, clearance)
     }
 
     if (!clearance) return
@@ -152,15 +148,11 @@ export class ObjectReaderSecurity {
   /**
    * Refuse a type a principal holds no view grant for, before its clearance is applied to what it
    * reads. A type viewed through a condition passes while the clearance shows every property the
-   * condition reads, unless the check asks for `everyObject`.
+   * condition reads.
    */
-  assertObjectTypesGranted(
-    objectTypeIds: readonly string[],
-    clearance: Clearance,
-    options: { readonly everyObject?: boolean } = {}
-  ): void {
+  assertObjectTypesGranted(objectTypeIds: readonly string[], clearance: Clearance): void {
     for (const objectTypeId of new Set(objectTypeIds)) {
-      if (options.everyObject || !this.#conditionProperties.has(objectTypeId)) {
+      if (!this.#conditionProperties.has(objectTypeId)) {
         assertAuthorized(this.runtime, { kind: "object.view", objectTypeId })
         continue
       }
@@ -170,6 +162,11 @@ export class ObjectReaderSecurity {
       const unreadable = this.#unreadableCondition(objectTypeId, clearance)
       if (unreadable) throw unreadableError(unreadable)
     }
+  }
+
+  /** Whether the principal views this type only through a condition, which decides per object. */
+  viewsThroughCondition(objectTypeId: string): boolean {
+    return this.#conditionProperties.has(objectTypeId)
   }
 
   isObjectTypeGranted(objectTypeId: string, clearance: Clearance): boolean {
