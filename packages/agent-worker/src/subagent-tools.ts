@@ -1,7 +1,9 @@
+import { isDeepStrictEqual } from "node:util"
 import {
   AGENT_REASONING_LEVELS,
   type AgentReasoning,
   AgentToolPublicError,
+  type AgentToolResult,
   type LanguageModelCatalog,
   type LanguageModelRef,
   type LanguageModelTier,
@@ -17,6 +19,7 @@ import {
   createSubagentRunId,
   createSubagentThreadId,
   dispatchQueuedSubagentRuns,
+  isAgentToolResult,
   listChildApprovalsAwaiting,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
@@ -33,20 +36,22 @@ import type {
   ExecutionRecord,
   SubagentRunFile,
   SubagentRunRecord,
+  SubagentRunSpec,
 } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
 import { renderHandedFiles } from "./agent-prompt"
-import { SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
+import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import {
-  type AgentRunWorkspace,
   CHILD_FILES_DIRECTORY,
+  handedFileRefs,
+  type InstalledChildFile,
   installChildOutputs,
-  type ListedChildFile,
+  listHandedSources,
   storeHandedFiles,
 } from "./child-files"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
-import type { AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
 const WAIT_POLL_MS = 250
 /**
@@ -98,16 +103,37 @@ export interface WaitedSubagentResult {
   readonly error?: { readonly code: string; readonly message: string }
   /** Calls it made that wait for the user's approval. */
   readonly awaitingApproval?: readonly AgentChildApprovalAwaiting[]
-  /** What it wrote under `out/`, now in the parent's sandbox. */
-  readonly files?: readonly ListedChildFile[]
+  /**
+   * What it wrote under `out/`, by path there, and where each is in the parent's sandbox this
+   * turn. The first result that lists them holds them as files, which later turns find in
+   * `$SIXB_ATTACHMENTS` by their `logicalPath`, `<key>/<path>`.
+   */
+  readonly files?: readonly {
+    readonly path: string
+    readonly sandboxPath: string
+    readonly sizeBytes: number
+    readonly mediaType?: string
+  }[]
+  /** Why its files are not listed: they did not come back, could not be copied, or wait. */
+  readonly filesNote?: string
+}
+
+export interface WaitForSubagentsOutput {
+  readonly results: readonly WaitedSubagentResult[]
+  /** The files no earlier result held, in the order of `results`. */
+  readonly files: readonly InstalledChildFile[]
+  /** Why what the children published is not all in `$SIXB_ARTIFACTS`. */
+  readonly artifactsError?: string
 }
 
 /** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
 export class SubagentCoordinator {
   private readonly models: LanguageModelCatalog
-  #workspace: AgentRunWorkspace | undefined
-  /** Children whose files are in the parent's sandbox already, with their listing. */
-  readonly #installed = new Map<string, readonly ListedChildFile[]>()
+  #runFiles: AgentRunFiles | undefined
+  /** Children whose files are in the parent's sandbox, and in the result that first listed them. */
+  readonly #installed = new Map<string, readonly InstalledChildFile[]>()
+  /** The spawn being admitted: only this turn adds children to it. */
+  #admissions: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly host: AgentWorkerHost,
@@ -125,8 +151,8 @@ export class SubagentCoordinator {
   }
 
   /** The parent's environment, started after its tools are defined and before any of them runs. */
-  attach(workspace: AgentRunWorkspace): void {
-    this.#workspace = workspace
+  attach(runFiles: AgentRunFiles): void {
+    this.#runFiles = runFiles
   }
 
   async createTools(): Promise<readonly ModelTool[]> {
@@ -138,7 +164,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
-        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back under ${CHILD_FILES_DIRECTORY}/<key>/ when it finishes, and wait_agent lists it.`,
+        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes, under ${CHILD_FILES_DIRECTORY}/<key>/ this turn.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
@@ -153,16 +179,31 @@ export class SubagentCoordinator {
     const wait: ModelTool<WaitForSubagentsInput> = {
       name: "wait_agent",
       description: [
-        "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, now in your sandbox. Pass every run id whose result is needed.",
+        "Wait for previously spawned child agents and return their final text or failure, and the files each wrote to out/, each with its path in your sandbox. Pass every run id whose result is needed.",
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
       parseInput: (value) => parseWaitInput(value, this.context.subagentConcurrencyPerRun),
+      // A rich result, so its files reach later turns through $SIXB_ATTACHMENTS and the work trace.
       execute: async (value, { signal }) => {
-        const output = await this.wait(value, signal)
+        const { files, ...answer } = await this.wait(value, signal)
+        const output: AgentToolResult = {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: JSON.stringify(answer) },
+            ...files.map(({ fileRef }) => ({ type: "file" as const, fileRef })),
+          ],
+        }
         assertJsonValue(output)
         return output
       },
+      // The answer lists each file's path this turn; the Agent reads the ones it needs.
+      toModelOutput: (output) => ({
+        type: "text",
+        value: isAgentToolResult(output)
+          ? output.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+          : JSON.stringify(output),
+      }),
       errorText: agentToolErrorText,
     }
     return [spawn, wait]
@@ -174,39 +215,105 @@ export class SubagentCoordinator {
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
     const reasoning = input.reasoning ?? model.model.defaultReasoning
-    const handed = input.files?.length
-      ? await storeHandedFiles({ workspace: this.workspace(), paths: input.files, signal })
+    const sources = input.files?.length
+      ? await listHandedSources({ files: this.runFiles(), paths: input.files, signal })
       : undefined
-    try {
-      return await this.admit({ key, task, model, reasoning, files: handed?.files }, signal)
-    } catch (error) {
-      // Nothing was admitted, so the files do not count against the run.
-      handed?.release()
-      throw error
-    }
+    const runId = createSubagentRunId(this.parentRun.id, key)
+    const specWith = (files: readonly SubagentRunFile[] | undefined) =>
+      this.childSpec({ task, model, reasoning, files })
+
+    // One admission at a time: only this turn adds children to it, so admission's answer is known
+    // before any file is read, and a refused spawn reads and stores none.
+    return this.admitInTurn(async () => {
+      const existing = await this.admissionOf(runId, key)
+      if (existing) {
+        // The same child only if everything is the same, the files' bytes too.
+        const files =
+          sources && sameSpecBesidesFiles(existing.spec, specWith(undefined), sources)
+            ? await handedFileRefs({ files: this.runFiles(), sources, signal })
+            : undefined
+        const spec = specWith(files)
+        if (!isDeepStrictEqual(existing.spec, spec)) throw duplicateKey(key)
+        return this.admit(runId, key, spec, signal)
+      }
+
+      const stored = sources
+        ? await storeHandedFiles({ files: this.runFiles(), sources, signal })
+        : undefined
+      try {
+        return await this.admit(runId, key, specWith(stored?.files), signal)
+      } catch (error) {
+        // Nothing was admitted, so the files do not count against the run.
+        stored?.release()
+        throw error
+      }
+    })
   }
 
-  private async admit(
-    input: {
-      readonly key: string
-      readonly task: string
-      readonly model: ReturnType<SubagentCoordinator["resolveModel"]>
-      readonly reasoning: AgentReasoning | undefined
-      readonly files: readonly SubagentRunFile[] | undefined
-    },
-    signal: AbortSignal
-  ): Promise<SpawnSubagentOutput> {
-    const { key, task, model, reasoning, files } = input
-    const runId = createSubagentRunId(this.parentRun.id, key)
-    const executionId = createSubagentExecutionId(runId)
-    const execution = createInheritedAgentExecutionRecord({
-      id: executionId,
-      parent: this.parentExecution,
-      runId,
+  private admitInTurn<T>(admission: () => Promise<T>): Promise<T> {
+    const admitted = this.#admissions.then(admission)
+    this.#admissions = admitted.catch(() => {})
+    return admitted
+  }
+
+  /**
+   * What admission will answer, read before the files the child is handed: the child already
+   * spawned with this key, else nothing once checked that the turn may spawn another.
+   */
+  private async admissionOf(runId: string, key: string): Promise<SubagentRunRecord | null> {
+    const { runs } = this.context.storage.agents
+    const maxActive = this.context.subagentConcurrencyPerRun
+    const [existing, parent] = await Promise.all([
+      runs.getById({ projectId: this.context.id, id: runId }),
+      runs.getById({ projectId: this.context.id, id: this.parentRun.id }),
+    ])
+    if (existing) {
+      if (existing.kind === "subagent" && existing.parentRunId === this.parentRun.id) {
+        return existing
+      }
+      throw duplicateKey(key)
+    }
+
+    if (parent?.status !== "running") {
+      throw publicSpawnError(
+        new AgentStorageError("invalid_state", "Parent ended."),
+        key,
+        maxActive
+      )
+    }
+    if (parent.execution?.token !== requiredExecutionToken(this.parentRun)) {
+      throw new AgentStorageError(
+        "execution_lost",
+        `[SixbAgentWorker] Parent Agent run '${parent.id}' is no longer owned by this execution.`
+      )
+    }
+    const active = await runs.list({
+      projectId: this.context.id,
+      kinds: ["subagent"],
+      parentRunId: this.parentRun.id,
+      statuses: ["queued", "running"],
+      limit: 1,
     })
-    // A child asks no less than its turn, dates as its requester does, and ends with the turn.
+    if (active.total >= maxActive) {
+      throw publicSpawnError(
+        new AgentStorageError("active_child_limit", "Active child limit."),
+        key,
+        maxActive
+      )
+    }
+    return null
+  }
+
+  /** A child asks no less than its turn, dates as its requester does, and ends with the turn. */
+  private childSpec(input: {
+    readonly task: string
+    readonly model: ReturnType<SubagentCoordinator["resolveModel"]>
+    readonly reasoning: AgentReasoning | undefined
+    readonly files: readonly SubagentRunFile[] | undefined
+  }): SubagentRunSpec {
+    const { task, model, reasoning, files } = input
     const { approvalMode, timeZone, locale } = this.parentRun.spec ?? {}
-    const spec = {
+    return {
       model: { provider: model.provider, modelId: model.modelId },
       task,
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
@@ -218,6 +325,20 @@ export class SubagentCoordinator {
       ...(locale === undefined ? {} : { locale }),
       ...(files === undefined ? {} : { files }),
     }
+  }
+
+  private async admit(
+    runId: string,
+    key: string,
+    spec: SubagentRunSpec,
+    signal: AbortSignal
+  ): Promise<SpawnSubagentOutput> {
+    const executionId = createSubagentExecutionId(runId)
+    const execution = createInheritedAgentExecutionRecord({
+      id: executionId,
+      parent: this.parentExecution,
+      runId,
+    })
 
     let run: SubagentRunRecord
     try {
@@ -240,10 +361,10 @@ export class SubagentCoordinator {
           trigger: {
             id: createAgentMessageId(),
             parts: [
-              { type: "text", text: task },
-              ...(files === undefined
+              { type: "text", text: spec.task },
+              ...(spec.files === undefined
                 ? []
-                : [{ type: "text" as const, text: renderHandedFiles(files) }]),
+                : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
             ],
           },
           maxActiveChildren: this.context.subagentConcurrencyPerRun,
@@ -276,10 +397,7 @@ export class SubagentCoordinator {
     }
   }
 
-  async wait(
-    input: WaitForSubagentsInput,
-    signal: AbortSignal
-  ): Promise<{ readonly results: readonly WaitedSubagentResult[] }> {
+  async wait(input: WaitForSubagentsInput, signal: AbortSignal): Promise<WaitForSubagentsOutput> {
     const runIds = normalizeRunIds(input.runIds, this.context.subagentConcurrencyPerRun)
     // The Agent answers before its turn times out, with or without the children still at work.
     const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
@@ -306,11 +424,15 @@ export class SubagentCoordinator {
           parentRunId: this.parentRun.id,
           childRunIds: runIds,
         })
-        const files = await this.installOutputs(children, signal)
+        const delivered = await this.deliverFiles(children, signal)
         return {
           results: children.map((run) =>
-            waitedResult(run, awaiting.get(run.id), files.get(run.id))
+            waitedResult(run, awaiting.get(run.id), delivered.byChild.get(run.id))
           ),
+          files: delivered.attached,
+          ...(delivered.artifactsError === undefined
+            ? {}
+            : { artifactsError: delivered.artifactsError }),
         }
       }
       await waitDelay(Math.min(WAIT_POLL_MS, remainingMs), signal)
@@ -319,42 +441,82 @@ export class SubagentCoordinator {
 
   /**
    * Copy what each finished child wrote under `out/` into the parent's sandbox, once, and install
-   * what the children published in its `$SIXB_ARTIFACTS`, as the parent's own.
+   * what the children published in its `$SIXB_ARTIFACTS`, as the parent's own. A result holds at
+   * most the attachment limits of new files, a child's whole or not at all; a child that does not
+   * fit, or whose files cannot be copied, says so, and its files come with a later wait.
    */
-  private async installOutputs(
+  private async deliverFiles(
     children: readonly SubagentRunRecord[],
     signal: AbortSignal
-  ): Promise<ReadonlyMap<string, readonly ListedChildFile[]>> {
-    for (const child of children) {
-      const files = child.status === "succeeded" ? child.result?.files : undefined
-      if (!files?.length || this.#installed.has(child.id)) continue
+  ): Promise<{
+    readonly byChild: ReadonlyMap<string, ChildFiles>
+    readonly attached: readonly InstalledChildFile[]
+    readonly artifactsError?: string
+  }> {
+    const byChild = new Map<string, ChildFiles>()
+    const attached: InstalledChildFile[] = []
+    let attachedBytes = 0
 
-      const listed = await installChildOutputs({
-        workspace: this.workspace(),
-        key: child.spawnKey,
-        files,
-        signal,
-      })
-      this.#installed.set(child.id, listed)
+    for (const child of children) {
+      if (child.status !== "succeeded") continue
+      const { files: outputs = [], filesError } = child.result ?? {}
+      if (filesError) byChild.set(child.id, { note: filesError })
+
+      const installed = this.#installed.get(child.id)
+      if (installed) {
+        byChild.set(child.id, { files: installed })
+        continue
+      }
+      if (outputs.length === 0) continue
+
+      const bytes = outputs.reduce((sum, file) => sum + file.fileRef.sizeBytes, 0)
+      const { maxFiles, totalMaxBytes } = SANDBOX_ATTACHMENT_LIMITS
+      const fits =
+        attached.length + outputs.length <= maxFiles && attachedBytes + bytes <= totalMaxBytes
+      if (!fits && attached.length > 0) {
+        byChild.set(child.id, {
+          note: `Its ${outputs.length} files did not fit in this result, which holds at most ${maxFiles} files, ${formatBytes(totalMaxBytes)} in all. Wait for this child again to get them.`,
+        })
+        continue
+      }
+
+      try {
+        const copied = await installChildOutputs({
+          files: this.runFiles(),
+          key: child.spawnKey,
+          outputs,
+          signal,
+        })
+        this.#installed.set(child.id, copied)
+        attached.push(...copied)
+        attachedBytes += bytes
+        byChild.set(child.id, { files: copied })
+      } catch (error) {
+        if (signal.aborted) throw error
+        byChild.set(child.id, {
+          note: `Its files could not be copied into your sandbox (${errorMessage(error)}). Wait for this child again to retry.`,
+        })
+      }
     }
 
+    let artifactsError: string | undefined
     try {
-      await this.#workspace?.installArtifactsFrom?.(
+      await this.#runFiles?.installArtifactsFrom(
         children.map((child) => child.id),
         signal
       )
     } catch (error) {
       if (signal.aborted) throw error
-      console.warn("[SixbAgentWorker] Could not install the artifacts of a child agent:", error)
+      artifactsError = `What these children published could not all be installed in $SIXB_ARTIFACTS (${errorMessage(error)}). The addresses in their answers still work.`
     }
-    return this.#installed
+    return { byChild, attached, ...(artifactsError === undefined ? {} : { artifactsError }) }
   }
 
-  private workspace(): AgentRunWorkspace {
-    if (!this.#workspace) {
+  private runFiles(): AgentRunFiles {
+    if (!this.#runFiles) {
       throw new Error("[SixbAgentWorker] Delegation tools ran before their run's environment.")
     }
-    return this.#workspace
+    return this.#runFiles
   }
 
   private resolveModel(ref: LanguageModelRef | LanguageModelTier | undefined) {
@@ -580,10 +742,15 @@ function isTerminalSubagent(
   return run.status !== "queued" && run.status !== "running"
 }
 
+interface ChildFiles {
+  readonly files?: readonly InstalledChildFile[]
+  readonly note?: string
+}
+
 function waitedResult(
   run: SubagentRunRecord,
   awaitingApproval: readonly AgentChildApprovalAwaiting[] | undefined,
-  files: readonly ListedChildFile[] | undefined
+  files: ChildFiles | undefined
 ): WaitedSubagentResult {
   return {
     runId: run.id,
@@ -593,8 +760,47 @@ function waitedResult(
       ? {}
       : { error: { code: run.error.code, message: run.error.message } }),
     ...(awaitingApproval?.length ? { awaitingApproval } : {}),
-    ...(files?.length ? { files } : {}),
+    ...(files?.files?.length
+      ? {
+          files: files.files.map(({ path, sandboxPath, fileRef }) => ({
+            path,
+            sandboxPath,
+            sizeBytes: fileRef.sizeBytes,
+            ...(fileRef.mediaType === undefined ? {} : { mediaType: fileRef.mediaType }),
+          })),
+        }
+      : {}),
+    ...(files?.note === undefined ? {} : { filesNote: files.note }),
   }
+}
+
+/** Whether a spawn under a key in use may be its replay, before reading its files' bytes. */
+function sameSpecBesidesFiles(
+  existing: SubagentRunSpec,
+  spec: SubagentRunSpec,
+  sources: readonly { readonly path: string; readonly sizeBytes?: number }[]
+): boolean {
+  const { files: existingFiles = [], ...existingRest } = existing
+  const { files: _files, ...rest } = spec
+  return (
+    isDeepStrictEqual(existingRest, rest) &&
+    existingFiles.length === sources.length &&
+    existingFiles.every(
+      (file, index) =>
+        file.path === sources[index]?.path &&
+        (sources[index]?.sizeBytes ?? file.fileRef.sizeBytes) === file.fileRef.sizeBytes
+    )
+  )
+}
+
+function duplicateKey(key: string): AgentToolPublicError {
+  return new AgentToolPublicError(
+    `[SixbAgentWorker] spawn_agent key '${key}' was already used with different inputs.`
+  )
+}
+
+function errorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/^\[\w+\] /, "")
 }
 
 function waitDelay(ms: number, signal: AbortSignal): Promise<void> {

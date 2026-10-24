@@ -28,6 +28,7 @@ import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { StreamSink } from "./stream-sink"
+import type { AgentFileBudget } from "./tools/tool-files"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
 export type AgentWorkerStorage = Storage & {
@@ -158,4 +159,21 @@ export interface AgentWorkerOptions {
    * Defaults to 10 minutes.
    */
   readonly turnTimeoutMs?: number
+}
+
+/**
+ * A run's sandbox and its stored files, as its framework tools use them: a parent hands files to
+ * its children and gets theirs back, a child returns what it wrote.
+ */
+export interface AgentRunFiles {
+  sandbox(): Promise<AgentSandboxHandle>
+  readonly blobStorage: BlobStorage
+  /** Shared with every other file the run stores. */
+  readonly budget: AgentFileBudget
+  /**
+   * Install the latest version of each artifact these runs published in the thread in the run's
+   * `$SIXB_ARTIFACTS`; nothing for a run that installs no artifacts. Throws, naming them, when
+   * some could not be installed.
+   */
+  installArtifactsFrom(runIds: readonly string[], signal: AbortSignal): Promise<void>
 }

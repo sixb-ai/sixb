@@ -134,8 +134,9 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   the task the agent writes, and answers the agent, not the user.
 - **Files go both ways.** The agent hands it files from its own sandbox, such as an attachment,
   and the sub-agent finds them at the same paths. What the sub-agent writes to `out/` comes back
-  to the agent when it finishes, for the rest of the turn: up to 50 files of 25 MB, 100 MB in all.
-  A sub-agent that fails or is stopped returns none.
+  to the agent when it finishes, up to 50 files of 25 MB, 100 MB in all, and stays in the
+  conversation's files, shown in the agent's work. Past those limits only its answer comes back,
+  with why; a sub-agent that fails or is stopped returns none.
 - **What it publishes lands in the conversation**, like the agent's own
   [artifacts](../artifacts/overview.md), and the agent can revise it in the same turn.
 - **Its work is a thread you can open**: its task, then what it did, read by whoever reads the

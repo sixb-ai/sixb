@@ -356,7 +356,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
-      delegation.attach(environment.workspace)
+      delegation.attach(environment.runFiles)
       runtime.assertCanContinue()
       const completed = await runAgentTurn({
         context: environment.turnContext,
@@ -737,7 +737,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         thread: childThread,
         runtime,
         work,
-        workspace: environment.workspace,
+        runFiles: environment.runFiles,
       })
     } catch (error) {
       if (isLostExecution(error, signal)) return

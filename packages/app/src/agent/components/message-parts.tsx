@@ -10,7 +10,7 @@ import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
-import type { NormalizedPart, NormalizedTool } from "../parts"
+import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
 import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
@@ -260,7 +260,8 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
-  const expandable = hasInput || hasOutput || isError
+  const files = tool.files ?? []
+  const expandable = hasInput || hasOutput || isError || files.length > 0
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.
@@ -282,7 +283,20 @@ function BuiltInToolRow({ tool }: { tool: NormalizedTool }) {
           {hasInput ? (
             <JsonViewer label={messages.input} value={tool.input ?? tool.inputText} />
           ) : null}
-          {hasOutput ? <JsonViewer label={messages.output} value={tool.output} /> : null}
+          {hasOutput ? (
+            <JsonViewer label={messages.output} value={toolResultValue(tool.output)} />
+          ) : null}
+          {files.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {files.map((file, index) => (
+                <FileAttachmentCard
+                  key={`${file.fileRef.blobId}:${index}`}
+                  fileRef={file.fileRef}
+                  source={file.source}
+                />
+              ))}
+            </div>
+          ) : null}
           {isError ? (
             <JsonViewer label={messages.details} value={tool.errorText || messages.toolFailed} />
           ) : null}

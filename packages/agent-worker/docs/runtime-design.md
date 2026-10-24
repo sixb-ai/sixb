@@ -160,22 +160,33 @@ wrote after its last local tool call, else its last text. `wait_agent` returns
 
 Files travel through blob storage, never through the model (`src/child-files.ts`):
 
-- **To the child.** `spawn_agent` reads each path from the parent's sandbox before admission and
-  stores it against the parent's run file budget; the FileRefs go in the child's spec, so a replayed
-  spawn key with the same files is the same child. A missing path, one outside the working
-  directory, the run's own context under `.sixb/agent` (its API address among it), or files past the
-  attachment limits (50 files of 25 MB, 100 MB in all) refuse the spawn with the reason. The child's
-  environment writes them at the same relative paths, after its own artifacts, so a copy the parent
-  edited keeps its changes.
+- **To the child.** `spawn_agent` first checks each path without reading it: where it really leads,
+  every symbolic link followed, must stay in the working directory and outside the run's own
+  context under `.sixb/agent` (its API address among it), and the files must fit the attachment
+  limits (50 files of 25 MB, 100 MB in all). Spawns of one turn are then admitted one at a time,
+  and only that turn adds children to its run, so the parent's state, the active-child limit and a
+  key used with other inputs are read before any file is: a refused spawn reads and stores none.
+  The files are then read and stored one at a time, against the parent's run file budget, and
+  their FileRefs go in the child's spec, so a replayed key with the same files is the same child.
+  The child's environment writes them at the same relative paths, after its own artifacts, so a
+  copy the parent edited keeps its changes; its project tools open them by that path.
 - **Back to the parent.** A child that succeeds stores what it wrote to `out/` in its result, except
-  a file it was handed there and left unchanged, against its own run budget. Past the same limits it
-  fails instead, saying so: a part of its files would pass for all of them. A child that fails, is
-  cancelled, times out or is interrupted returns none, as it returns no answer.
-- **In the parent.** `wait_agent` copies a finished child's files under
-  `.sixb/agent/children/<key>/` (a key that is not a safe path segment gets a hash suffix) and lists
-  them with their sizes. Like the rest of `.sixb/agent`, they last for the turn; the child's run
-  keeps them. It also installs the latest version of what the waited children published in the
-  parent's `$SIXB_ARTIFACTS`, so the parent revises a child's artifact as its own.
+  a file it was handed there and left unchanged, against a budget of its own, apart from what it
+  published. Past the same limits none comes back and the result's `filesError` says why and what
+  to do; its answer still does. A child that fails, is cancelled, times out or is interrupted
+  returns none, as it returns no answer.
+- **In the parent.** `wait_agent` returns a rich tool result (`{ kind: "agentToolResult" }`): the
+  children's results as JSON text, then each file as a file part. The JSON lists each child's files
+  by their path in `out/` and their `sandboxPath` this turn, under `.sixb/agent/children/<key>/`
+  (a key that is not a safe path segment gets a hash suffix), where `wait_agent` copies them, one
+  at a time, since the result's files reach `$SIXB_ATTACHMENTS` only in later turns. Each file part
+  names its child: its `logicalPath` is `<key>/<path>` and its `fileName` is unique, so later
+  turns and the app pair them without their order. A child's files are in the first result that
+  lists them, and a result holds at most the attachment limits of them, whole children only: one
+  that does not fit, or whose files cannot be copied, says so in `filesNote` and comes with the
+  next wait. It also installs the latest version of each artifact the waited children published a
+  version of in the parent's `$SIXB_ARTIFACTS`, so the parent revises it as its own, and says in
+  `artifactsError` when one could not be.
 
 ## Child threads
 

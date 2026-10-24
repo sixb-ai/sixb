@@ -10,13 +10,13 @@ import {
   type SubagentRunRecord,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
-import { type AgentRunWorkspace, storeChildOutputs } from "./child-files"
+import { storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnRuntime } from "./turn-runtime"
-import type { AgentTurnContext } from "./types"
+import type { AgentRunFiles, AgentTurnContext } from "./types"
 
 /**
  * What a child did so far, kept in its thread however its run ends: a failed or stopped child
@@ -41,7 +41,7 @@ export async function runSubagent(input: {
   /** Filled once the model loop returns, for the worker to keep when the run fails afterwards. */
   readonly work?: SubagentWork
   /** Where it finds the files its parent handed over, and leaves the ones it returns. */
-  readonly workspace: AgentRunWorkspace
+  readonly runFiles: AgentRunFiles
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime } = input
   const executionToken = run.execution?.token
@@ -97,11 +97,9 @@ export async function runSubagent(input: {
   }
   const text = subagentResult(generation.steps, run)
   // Only a child that finished returns files: an unfinished one's would pass for complete.
-  const files = await storeChildOutputs({
-    workspace: input.workspace,
+  const outputs = await storeChildOutputs({
+    files: input.runFiles,
     handed: run.spec.files ?? [],
-    runId: run.id,
-    parentRunId: run.parentRunId,
     signal: abortSignal,
   })
   runtime.assertCanContinue()
@@ -115,7 +113,11 @@ export async function runSubagent(input: {
       status: "succeeded",
       modelId: plan.model.modelId,
       finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
-      result: { text, ...(files.length > 0 ? { files } : {}) },
+      result: {
+        text,
+        ...(outputs.files.length > 0 ? { files: outputs.files } : {}),
+        ...(outputs.error === undefined ? {} : { filesError: outputs.error }),
+      },
     },
   })
   if (finalized.kind !== "subagent") {

@@ -745,6 +745,9 @@ function attachmentPromptText(
     `name="${escapeXmlAttribute(entry.fileName)}"`,
     `mediaType="${escapeXmlAttribute(entry.mediaType)}"`,
     `sizeBytes="${entry.sizeBytes}"`,
+    ...(entry.fileRef.logicalPath
+      ? [`logicalPath="${escapeXmlAttribute(entry.fileRef.logicalPath)}"`]
+      : []),
     `contentUrl="${escapeXmlAttribute(entry.contentUrl)}"`,
     ...(entry.sandboxPath ? [`sandboxPath="${escapeXmlAttribute(entry.sandboxPath)}"`] : []),
   ].join(" ")
@@ -763,6 +766,7 @@ function manifestEntry(entry: PreparedAgentAttachment) {
     fileName: entry.fileName,
     mediaType: entry.mediaType,
     sizeBytes: entry.sizeBytes,
+    ...(entry.fileRef.logicalPath ? { logicalPath: entry.fileRef.logicalPath } : {}),
     digest: entry.fileRef.digest,
     contentPath: entry.contentPath,
     contentUrl: entry.contentUrl,
@@ -888,7 +892,7 @@ function escapeXmlAttribute(value: string): string {
     .replace(/>/g, "&gt;")
 }
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`

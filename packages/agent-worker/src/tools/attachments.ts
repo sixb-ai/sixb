@@ -1,7 +1,7 @@
 import { type AgentToolAttachments, AgentToolPublicError, type BlobStorage } from "@sixb/core"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
-import type { AgentStorage } from "@sixb/core/storage"
+import type { AgentStorage, SubagentRunFile } from "@sixb/core/storage"
 import { attachmentKeyMessageId, findMessageAttachment } from "../attachments"
 import { workflowInputFileRefs } from "../workflow-input-attachments"
 
@@ -46,11 +46,19 @@ export function workflowInputToolAttachments(input: {
   }
 }
 
-/** A child Agent receives a task, not files. */
-export const NO_TOOL_ATTACHMENTS: AgentToolAttachments = {
-  async open(key) {
-    throw unknownAttachment(key)
-  },
+/** A child Agent's attachments: the files its parent handed over, by their path such as `q3.pdf`. */
+export function handedToolAttachments(input: {
+  readonly files: readonly SubagentRunFile[]
+  readonly blobStorage: AttachmentBlobStorage
+}): AgentToolAttachments {
+  const fileRefs = new Map(input.files.map((file) => [file.path, file.fileRef]))
+  return {
+    async open(key) {
+      const fileRef = fileRefs.get(key)
+      if (!fileRef) throw unknownAttachment(key)
+      return openFileRef(input.blobStorage, fileRef)
+    },
+  }
 }
 
 function unknownAttachment(key: string): AgentToolPublicError {
