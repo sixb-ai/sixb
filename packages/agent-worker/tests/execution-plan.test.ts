@@ -158,7 +158,7 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
     expect(plan.maxSteps).toBe(25)
   })
 
-  test("applies the selected catalog model's default reasoning unless the step sets one", () => {
+  test("applies the project default model's default reasoning unless the step sets one", () => {
     // Proven by removal: drop `?? selected.defaultReasoning` from the workflow step plan.
     const model = new WorkerTestModel({ modelId: "default-model", defaultReasoning: "medium" })
     const entry: LanguageModelEntry = { provider: model.providerId, modelId: model.modelId, model }
@@ -178,10 +178,43 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       })
 
     expect(plan({ instructions: "Review." }).reasoning).toBe("medium")
-    // The catalog's binding decides, even when the step names the model with another binding.
-    const sameModel = new WorkerTestModel({ modelId: "default-model" })
-    expect(plan({ instructions: "Review.", model: sameModel }).reasoning).toBe("medium")
     expect(plan({ instructions: "Review.", reasoning: "high" }).reasoning).toBe("high")
+  })
+
+  test("runs the step's own model as given, whether or not the catalog lists it", () => {
+    // Proven by removal: resolve an explicit step model through `models.getByRef` again.
+    const listed = new WorkerTestModel({ modelId: "default-model", defaultReasoning: "medium" })
+    const entry: LanguageModelEntry = {
+      provider: listed.providerId,
+      modelId: listed.modelId,
+      model: listed,
+    }
+    const models: LanguageModelCatalog = {
+      default: entry,
+      list: () => [entry],
+      getByRef: (ref) =>
+        ref.provider === entry.provider && ref.modelId === entry.modelId ? entry : null,
+    }
+    const plan = (model: WorkerTestModel) =>
+      resolveWorkflowAgentStepExecutionPlan({
+        workflowId: "triage",
+        step: workflowStep({ instructions: "Review.", model }),
+        models,
+        tools: toolCatalog([]),
+        skills: skillCatalog([]),
+        defaultMaxSteps: 25,
+      })
+
+    // Same identity as the catalog entry, other options: the step's binding and its default run.
+    const sameId = new WorkerTestModel({ modelId: "default-model", defaultReasoning: "low" })
+    const own = plan(sameId)
+    expect(own.model).toBe(sameId)
+    expect(own.reasoning).toBe("low")
+
+    const unlisted = new WorkerTestModel({ modelId: "second-opinion" })
+    const outside = plan(unlisted)
+    expect(outside.model).toBe(unlisted)
+    expect(outside).not.toHaveProperty("reasoning")
   })
 
   test("resolves only the tools and skills selected by the workflow step", () => {

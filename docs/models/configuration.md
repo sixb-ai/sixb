@@ -38,6 +38,16 @@ The first language model is the default. Chat users can choose from this catalog
 reasoning effort their selected model supports. An [AI workflow step](../workflows/overview.md#add-an-ai-task)
 can select a model and reasoning effort through its `model` and `reasoning` options.
 
+A model your code passes runs as given, with its own options, whether or not `models.language`
+lists it. The catalog is what chat users, the Agent and the API choose from:
+
+```ts
+defineAgentStep("second-opinion", {
+  model: vercelGateway("openai/gpt-5.5"),
+  instructions: "Review the draft and list its weakest claims.",
+})
+```
+
 ### Default reasoning
 
 Give a model a default reasoning effort with the `reasoning` option of its binding:
@@ -50,10 +60,10 @@ createSixb({ models: { language: [glmModel, openaiModel] } })
 
 Sixb applies it whenever this model runs without an explicit choice: chat messages, AI workflow
 steps, and `generate()` calls. Without one, the provider's own default applies. An explicit
-`reasoning` always wins. Sixb checks the level against the capabilities the provider declares at
-startup; if the provider later reports that the model does not support it, the call falls back to
-the provider default. A provider you write yourself sets the level as `defaultReasoning` on the
-`LanguageModel` it returns.
+`reasoning` always wins. Sixb checks the level of each model in `models.language` against the
+capabilities the provider declares at startup; if the provider later reports that the model does
+not support it, the call falls back to the provider default. A provider you write yourself sets
+the level as `defaultReasoning` on the `LanguageModel` it returns.
 
 The default is an effort level. An AI workflow step can instead set its own `reasoning` to a level
 or a token budget such as `{ budgetTokens: 4096 }`; Sixb checks it against the step's model the same
@@ -102,8 +112,9 @@ Direct generation does not require a sandbox. For a task that needs tools, use a
 
 ### Model and response controls
 
-Pass a configured model binding to override the default. Use `reasoning` to choose a supported
-effort and `maxOutputTokens` to limit the response. Inside a step or action handler:
+Pass a model binding to override the default; it does not need to be in `models.language`. Use
+`reasoning` to choose a supported effort and `maxOutputTokens` to limit the response. Inside a step
+or action handler:
 
 ```ts
 import { anthropicModel } from "../../lib/models"

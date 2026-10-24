@@ -782,6 +782,40 @@ describe("SixbHost workflow registration", () => {
     expect(() => host("high")).toThrow(/reasoning effort 'high' is not supported/)
   })
 
+  test("accepts an agent step's own model outside the catalog and checks its reasoning", () => {
+    // Proven by removal: reject an explicit step model that 'models.language' does not list.
+    const reviewer: LanguageModel = {
+      ...testModel("test", "reviewer-model"),
+      definition: {
+        kind: "language",
+        providerId: "test",
+        modelId: "reviewer-model",
+        capabilities: { reasoning: { efforts: ["low"] } },
+      },
+    }
+    const host = (reasoning?: AgentReasoning) =>
+      new SixbHost({
+        ontology: [Transaction, Invoice],
+        models: { language: [workflowModel] },
+        workflows: [
+          withStep(
+            "second-opinion-workflow",
+            resolveStep("second-opinion", {
+              model: reviewer,
+              ...(reasoning === undefined ? {} : { reasoning }),
+            })
+          ),
+        ],
+        ...createTestRuntimeDeps(),
+      })
+
+    expect(() => host()).not.toThrow()
+    expect(() => host("low")).not.toThrow()
+    expect(() => host("high")).toThrow(
+      /agent step "second-opinion" cannot use its reasoning with language model "test\/reviewer-model"/
+    )
+  })
+
   test("rejects agent-step skills that are not unique names", () => {
     const define = (skills: unknown) =>
       defineAgentStep("bad-skills", {
@@ -809,20 +843,6 @@ describe("SixbHost workflow registration", () => {
       error: WorkflowDefinitionError,
       message:
         "Workflow \"missing-model-workflow\" agent step \"missing-model\" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().",
-    },
-    {
-      name: "an explicit agent-step model outside the project catalog",
-      options: {
-        models: { language: [workflowModel] },
-        workflows: [
-          withStep(
-            "unknown-model-workflow",
-            resolveStep("unknown-model", { model: testModel("test", "unavailable-model") })
-          ),
-        ],
-      },
-      error: WorkflowDefinitionError,
-      message: 'uses unknown language model "test/unavailable-model"',
     },
     {
       name: "an agent-step tool outside the project catalog",

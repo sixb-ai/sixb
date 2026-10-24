@@ -166,22 +166,29 @@ describe("language generation", () => {
     expect(calls.items[0]?.cost).toMatchObject({ status: "rated", money: { amountNanos: "18000" } })
   })
 
-  test("uses the configured binding for overrides and permits explicit models without a catalog", async () => {
+  test("runs an explicit model as given, whether or not the catalog lists it", async () => {
+    // Proven by removal: look the explicit model up in models.language again.
     const first = fakeModel()
     const second = fakeModel({ modelId: "second", text: "Second" })
-    const impostor = fakeModel({ modelId: "second", text: "Wrong binding" })
+    const ownBinding = fakeModel({ modelId: "second", text: "Own binding" })
+    const unlisted = fakeModel({ modelId: "unlisted", text: "Unlisted" })
     const { sixb } = setup([first.model, second.model])
     expect(
-      (await sixb.models.language.generate({ model: impostor.model, prompt: "Hi" })).output
-    ).toBe("Second")
-    expect(impostor.requests).toHaveLength(0)
+      (await sixb.models.language.generate({ model: ownBinding.model, prompt: "Hi" })).output
+    ).toBe("Own binding")
+
+    // Its own cost estimator prices the call.
+    const outside = await sixb.models.language.generate({ model: unlisted.model, prompt: "Hi" })
+    expect(outside).toMatchObject({ output: "Unlisted", cost: { status: "rated" } })
+    expect(second.requests).toHaveLength(0)
     expect(first.requests).toHaveLength(0)
+
     expect(
       (await setup().sixb.models.language.generate({ model: first.model, prompt: "Hi" })).output
     ).toBe("Hello")
   })
 
-  test("applies a catalog model's default reasoning only when the call omits one", async () => {
+  test("applies a model's own default reasoning only when the call omits one", async () => {
     // Proven by removal: pass `input.reasoning` instead of the resolved reasoning to the loop.
     const first = fakeModel()
     const second = fakeModel({ modelId: "second" })
@@ -191,6 +198,13 @@ describe("language generation", () => {
     await sixb.models.language.generate({ model: second.model, prompt: "Hi" })
     expect(first.requests.map((request) => request.reasoning)).toEqual(["low", "provider-default"])
     expect(second.requests[0]?.reasoning).toBeUndefined()
+
+    // The same model with another binding runs with that binding's default, not the catalog's.
+    await sixb.models.language.generate({
+      model: { ...second.model, defaultReasoning: "high" },
+      prompt: "Hi",
+    })
+    expect(second.requests[1]?.reasoning).toBe("high")
   })
 
   test("applies a catalog model's output limit only when the call omits one", async () => {
@@ -202,7 +216,7 @@ describe("language generation", () => {
     expect(first.requests.map((request) => request.maxOutputTokens)).toEqual([600, 800])
   })
 
-  test("embedding-only catalogs reject language generation before inference", async () => {
+  test("embedding-only catalogs run language generation only with an explicit model", async () => {
     const { model, requests } = fakeModel()
     const host = new SixbHost({
       id: "embedding-only",
@@ -234,22 +248,16 @@ describe("language generation", () => {
     await expect(sixb.models.language.generate({ prompt: "Hi" })).rejects.toThrow(
       "Configure models.language"
     )
-    await expect(sixb.models.language.generate({ prompt: "Hi", model })).rejects.toThrow(
-      "not configured"
-    )
     expect(requests).toHaveLength(0)
+    expect((await sixb.models.language.generate({ prompt: "Hi", model })).output).toBe("Hello")
   })
 
-  test("rejects missing models, unknown overrides, and conflicting inputs before inference", async () => {
+  test("rejects missing models and conflicting inputs before inference", async () => {
     const known = fakeModel()
-    const unknown = fakeModel({ modelId: "unknown" })
     await expect(setup().sixb.models.language.generate({ prompt: "Hi" })).rejects.toThrow(
       "Configure models.language"
     )
     const { sixb } = setup([known.model])
-    await expect(
-      sixb.models.language.generate({ model: unknown.model, prompt: "Hi" })
-    ).rejects.toThrow("not configured")
     // @ts-expect-error runtime validation also protects JavaScript callers
     await expect(sixb.models.language.generate({ prompt: "Hi", messages: [] })).rejects.toThrow(
       "exactly one"
@@ -258,7 +266,6 @@ describe("language generation", () => {
       sixb.models.language.generate({ prompt: "Hi", maxOutputTokens: 0 })
     ).rejects.toThrow("positive safe integer")
     expect(known.requests).toHaveLength(0)
-    expect(unknown.requests).toHaveLength(0)
   })
 
   test("preserves existing message order and applies the caller's stricter ceiling", async () => {

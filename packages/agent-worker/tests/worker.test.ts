@@ -646,9 +646,12 @@ function structuredAnswerModel(): WorkerTestModel {
   })
 }
 
-function trackedStructuredAnswerModel(onCall: (phase: "research" | "finalize") => void) {
+function trackedStructuredAnswerModel(
+  onCall: (phase: "research" | "finalize") => void,
+  modelId = "workflow-model"
+) {
   return new WorkerTestModel({
-    modelId: "catalog-workflow-model",
+    modelId,
     generate: async (request) => {
       onCall(request.responseFormat?.type === "json" ? "finalize" : "research")
       expect(request.maxOutputTokens).toBe(16_384)
@@ -5565,14 +5568,21 @@ describe("AgentWorker", () => {
     expect(enqueued).toEqual([])
   })
 
-  // Regression proof: prepare the definition's model instead of the catalog binding in worker.start.
-  test("executes workflow tasks with the authoritative model from the project catalog", async () => {
+  // Regression proof: resolve an explicit step model through the catalog in the execution plan.
+  test.each([
+    ["the catalog's binding with the same id", "workflow-model"],
+    ["a catalog that does not list it", "chat-model"],
+  ])("executes a workflow task with its own model over %s", async (_, catalogModelId) => {
     const declaredCalls: string[] = []
     const catalogCalls: string[] = []
+    const catalogModel = trackedStructuredAnswerModel(
+      (phase) => catalogCalls.push(phase),
+      catalogModelId
+    )
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
       model: trackedStructuredAnswerModel((phase) => declaredCalls.push(phase)),
-      models: { language: [trackedStructuredAnswerModel((phase) => catalogCalls.push(phase))] },
-      runId: "workflow-catalog-model",
+      models: { language: [catalogModel] },
+      runId: `workflow-own-model-${catalogModelId}`,
     })
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -5582,11 +5592,11 @@ describe("AgentWorker", () => {
           const current = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
           return current?.status === "succeeded" ? current : null
         },
-        { label: "catalog-backed workflow agent node" }
+        { label: "workflow agent node with its own model" }
       )
-      expect(execution.modelId).toBe("catalog-workflow-model")
-      expect(declaredCalls).toEqual([])
-      expect(catalogCalls).toEqual(["research", "finalize"])
+      expect(execution.modelId).toBe("workflow-model")
+      expect(declaredCalls).toEqual(["research", "finalize"])
+      expect(catalogCalls).toEqual([])
     } finally {
       await worker.stop()
     }
