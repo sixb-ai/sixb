@@ -32,6 +32,7 @@ const catalog = {
   language: [
     entry("anthropic/claude-sonnet-5-5", {
       isDefault: true,
+      tier: "standard",
       rateCard: { currency: "USD", input: "3", output: "15" },
     }),
     entry("google/gemini-3.1-flash-lite-image"),
@@ -131,6 +132,23 @@ describe("models", () => {
       {
         kind: "image",
         model: "example/unpriced",
+        provider: "vercel-ai-gateway",
+        price: "price unknown",
+      },
+    ])
+    // Removal proof: drop the tier from the listed row.
+    expect(await run(["list", "--kind", "language"])).toEqual([
+      {
+        kind: "language",
+        model: "anthropic/claude-sonnet-5-5",
+        provider: "vercel-ai-gateway",
+        tier: "standard",
+        default: true,
+        price: "$3 input · $15 output per 1M tokens",
+      },
+      {
+        kind: "language",
+        model: "google/gemini-3.1-flash-lite-image",
         provider: "vercel-ai-gateway",
         price: "price unknown",
       },

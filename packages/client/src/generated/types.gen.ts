@@ -3766,10 +3766,14 @@ export type HeadAiModelCallFileContentResponses = {
 
 export type GenerateTextData = {
   body: {
-    model?: {
-      provider: string
-      modelId: string
-    }
+    model?:
+      | {
+          provider: string
+          modelId: string
+        }
+      | "light"
+      | "standard"
+      | "heavy"
     prompt: string
     instructions?: string
     maxOutputTokens?: number
@@ -15996,6 +16000,7 @@ export type ListModelsResponses = {
       provider: string
       modelId: string
       isDefault: boolean
+      tier?: "light" | "standard" | "heavy"
       name: string
       description?: string
       publisher: {

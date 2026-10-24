@@ -444,7 +444,8 @@ POST /api/models/audio/transcriptions   { audio }
 ```
 
 Each body takes an optional `model: { provider, modelId }`; without one, the kind's default
-answers. Reference images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files).
+answers. A text request's `model` can also be a [tier](#tiers), such as `"light"`. Reference
+images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files).
 The response carries the `callId`, the `model` that answered, `usage` and `cost`, plus `text` or
 `files`:
 
@@ -509,7 +510,7 @@ Anyone else gets `null`, or a 404 from the API. Seeing a call in
 ## List the catalog
 
 `GET /api/models` and `sixb models list` show every configured model by kind, with its default,
-description, the options a request can use, and its price:
+tier, description, the options a request can use, and its price:
 
 ```bash
 sixb models list --kind image

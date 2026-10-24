@@ -1,6 +1,8 @@
-import type { SixbHostView } from "@sixb/core"
+import type { LanguageModelCatalog, LanguageModelTier, SixbHostView } from "@sixb/core"
 import type { FileRef } from "@sixb/core/blob-storage/server"
+import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 import {
+  type LanguageModel,
   type ModelCallCost,
   ModelProviderError,
   ModelStreamError,
@@ -57,6 +59,18 @@ function selectBinding<TModel>(
   const entry = ref ? catalog?.getByRef(ref) : catalog?.default
   if (!entry) throw new UnknownModelError(kind, ref)
   return entry
+}
+
+/** The requested binding, or a tier's model as `generate({ model: tier })` selects it. */
+function selectLanguageBinding(
+  catalog: LanguageModelCatalog | undefined,
+  model: ModelRef | LanguageModelTier | undefined
+): LanguageModel {
+  if (typeof model !== "string") return selectBinding(catalog, "language", model).model
+
+  const selected = selectLanguageModel(catalog, model)
+  if (!selected) throw new UnknownModelError("language", undefined)
+  return selected
 }
 
 function result(
@@ -122,9 +136,9 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
         const { body, request, set } = context
         try {
           const sixb = requireRequestSixb(context)
-          const entry = selectBinding(catalog()?.language, "language", body.model)
+          const model = selectLanguageBinding(catalog()?.language, body.model)
           const call = await sixb.models.language.generate({
-            model: entry.model,
+            model,
             prompt: body.prompt,
             ...(body.instructions === undefined ? {} : { instructions: body.instructions }),
             ...(body.maxOutputTokens === undefined
@@ -134,7 +148,7 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
             signal: request.signal,
           })
           return TextGenerationSchema.parse({
-            ...result(entry, call),
+            ...result({ provider: model.providerId, modelId: model.modelId }, call),
             text: call.output,
             finishReason: call.finishReason,
           })

@@ -1,4 +1,4 @@
-import { MODEL_REASONING_LEVELS } from "@sixb/core/models"
+import { LANGUAGE_MODEL_TIERS, MODEL_REASONING_LEVELS } from "@sixb/core/models"
 import { z } from "zod"
 import { FileRefSchema } from "./files"
 
@@ -63,6 +63,8 @@ export const LanguageModelSchema = LanguageModelRefSchema.extend({
    * there is no separate Sixb model id.
    */
   isDefault: z.boolean(),
+  /** The tier the project configures this model in; absent when its models are a list. */
+  tier: z.enum(LANGUAGE_MODEL_TIERS).optional(),
   name: z.string().min(1),
   description: z.string().min(1).optional(),
   publisher: z.object({
@@ -185,6 +187,8 @@ const GenerationResultBase = z.object({
 })
 
 export const TextGenerationBodySchema = GenerationBodyBase.extend({
+  /** Omit for the default model; a tier answers with that tier's model. */
+  model: z.union([LanguageModelRefSchema, z.enum(LANGUAGE_MODEL_TIERS)]).optional(),
   prompt: z.string().trim().min(1),
   instructions: z.string().optional(),
   maxOutputTokens: z.number().int().positive().optional(),

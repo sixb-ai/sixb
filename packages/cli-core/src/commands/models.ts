@@ -33,6 +33,7 @@ interface CatalogEntry {
   readonly provider: string
   readonly modelId: string
   readonly isDefault: boolean
+  readonly tier?: string
   readonly name?: string
   readonly description?: string
   readonly rateCard?: RateCard
@@ -62,6 +63,7 @@ export async function models(api: ApiClient, args: readonly string[]): Promise<v
           kind,
           model: entry.modelId,
           provider: entry.provider,
+          ...(entry.tier ? { tier: entry.tier } : {}),
           ...(entry.isDefault ? { default: true } : {}),
           ...(entry.description ? { description: entry.description } : {}),
           price: describePrice(entry.rateCard),

@@ -11383,19 +11383,27 @@
                 "type": "object",
                 "properties": {
                   "model": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "minLength": 1
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["provider", "modelId"],
+                        "additionalProperties": false
                       },
-                      "modelId": {
+                      {
                         "type": "string",
-                        "minLength": 1
+                        "enum": ["light", "standard", "heavy"]
                       }
-                    },
-                    "required": ["provider", "modelId"],
-                    "additionalProperties": false
+                    ]
                   },
                   "prompt": {
                     "type": "string",
@@ -11447,19 +11455,27 @@
                 "type": "object",
                 "properties": {
                   "model": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "minLength": 1
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["provider", "modelId"],
+                        "additionalProperties": false
                       },
-                      "modelId": {
+                      {
                         "type": "string",
-                        "minLength": 1
+                        "enum": ["light", "standard", "heavy"]
                       }
-                    },
-                    "required": ["provider", "modelId"],
-                    "additionalProperties": false
+                    ]
                   },
                   "prompt": {
                     "type": "string",
@@ -11511,19 +11527,27 @@
                 "type": "object",
                 "properties": {
                   "model": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "minLength": 1
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["provider", "modelId"],
+                        "additionalProperties": false
                       },
-                      "modelId": {
+                      {
                         "type": "string",
-                        "minLength": 1
+                        "enum": ["light", "standard", "heavy"]
                       }
-                    },
-                    "required": ["provider", "modelId"],
-                    "additionalProperties": false
+                    ]
                   },
                   "prompt": {
                     "type": "string",
@@ -46547,6 +46571,10 @@
                           },
                           "isDefault": {
                             "type": "boolean"
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": ["light", "standard", "heavy"]
                           },
                           "name": {
                             "type": "string",
