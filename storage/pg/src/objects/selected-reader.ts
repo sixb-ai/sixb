@@ -4,19 +4,14 @@ import type {
   ObjectReadExecutionLimits,
   ObjectReadStorage,
 } from "@sixb/core/storage"
-import {
-  assertObjectReaderProject,
-  assertObjectReadFacetCount,
-  assertObjectReadOutputWithinLimit,
-  ObjectReadLimitExceededError,
-  snapshotObjectReadExecutionLimits,
-} from "@sixb/core/storage"
+import { ObjectReadLimitExceededError, snapshotObjectReadExecutionLimits } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { type PgStoreClient, runPgRepeatableReadTransaction } from "../transactions"
 import { compilePgSelectedObjectReadSource, type PgSelectedObjectReadSource } from "./read-scope"
+import { PgObjectReader } from "./reader"
+import { createPgScopedReader } from "./scoped-reader"
 
-import { assertLinkQueryLimit, PgObjectReader } from "./reader"
-
+/** Keep the traversal probe and every terminal statement on one repeatable-read snapshot. */
 export function createPgSelectedReader(
   sql: PgStoreClient,
   params: {
@@ -33,78 +28,19 @@ export function createPgSelectedReader(
     params.scope,
     limits.maxTraversalFacts
   )
-  const assertProject = (actualProjectId: string): void =>
-    assertObjectReaderProject(projectId, actualProjectId)
-  const read = <T>(run: (reader: PgObjectReader) => Promise<T>): Promise<T> =>
-    runPgRepeatableReadTransaction(sql, async (tx) => {
-      await assertTraversalBudget(tx, source, limits.maxTraversalFacts)
-      const value = await run(new PgObjectReader(tx, source))
-      assertObjectReadOutputWithinLimit(value, limits)
-      return value
-    })
-  const readMap = <TKey, TValue>(
-    run: (reader: PgObjectReader) => Promise<Map<TKey, TValue>>
-  ): Promise<Map<TKey, TValue>> =>
-    runPgRepeatableReadTransaction(sql, async (tx) => {
-      await assertTraversalBudget(tx, source, limits.maxTraversalFacts)
-      const value = await run(new PgObjectReader(tx, source))
-      assertObjectReadOutputWithinLimit([...value.entries()], limits)
-      return value
-    })
 
-  return Object.freeze({
-    queryCapabilities,
-    queryObjects: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.queryObjects(input))
+  return createPgScopedReader(
+    {
+      projectId,
+      read: (run) =>
+        runPgRepeatableReadTransaction(sql, async (tx) => {
+          await assertTraversalBudget(tx, source, limits.maxTraversalFacts)
+          return run(new PgObjectReader(tx, source))
+        }),
+      limits,
     },
-    countObjects: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.countObjects(input))
-    },
-    existsObjects: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.existsObjects(input))
-    },
-    facetObjects: async (input) => {
-      assertProject(input.projectId)
-      assertObjectReadFacetCount(input.facets.length)
-      return read((reader) => reader.facetObjects(input))
-    },
-    getByPrimaryId: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.getByPrimaryId(input))
-    },
-    getByUniqueValue: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.getByUniqueValue(input))
-    },
-    selectsObjectProperties: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.selectsObjectProperties(input))
-    },
-    listLinks: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.listLinks(input))
-    },
-    getByPrimaryIdBatch: async (input) => {
-      assertProject(input.projectId)
-      return readMap((reader) => reader.getByPrimaryIdBatch(input))
-    },
-    listLinksBatch: async (input) => {
-      assertProject(input.projectId)
-      return readMap((reader) => reader.listLinksBatch(input))
-    },
-    queryLinks: async (input) => {
-      assertProject(input.projectId)
-      assertLinkQueryLimit(input.limit)
-      return read((reader) => reader.queryLinks(input))
-    },
-    list: async (input) => {
-      assertProject(input.projectId)
-      return read((reader) => reader.list(input))
-    },
-  } satisfies ObjectReadStorage)
+    queryCapabilities
+  )
 }
 
 async function assertTraversalBudget(

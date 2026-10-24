@@ -181,6 +181,12 @@ export interface PgObjectQuerySource {
   readonly objectsTable: string
   readonly linksTable: string
   readonly objectPropertyPermissionsTable?: string
+  /**
+   * Where to read one concrete type's objects, when the source can say it more precisely than
+   * `objectsTable`: a table and that type's own filter over its `properties`. A statement that
+   * reads a single type then holds the filter as a top-level condition, which an index can serve.
+   */
+  objectsOfType?(objectTypeId: string): PgTypedObjects
   /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
   wrapStatement(
     sql: string,
@@ -190,6 +196,26 @@ export interface PgObjectQuerySource {
     readonly args: unknown[]
   }
   wrapQuery(query: CompiledPgObjectQuery): CompiledPgObjectQuery
+}
+
+export interface PgTypedObjects {
+  readonly table: string
+  readonly filter?: { readonly sql: string; readonly args: readonly unknown[] }
+}
+
+/** The table and `AND ...` filter a statement reads one type's objects with. */
+export function pgObjectsOfType(
+  source: PgObjectQuerySource,
+  objectTypeId: string
+): { table: string; filter: string; args: readonly unknown[] } {
+  const typed = source.objectsOfType?.(objectTypeId)
+  if (!typed) return { table: source.objectsTable, filter: "", args: [] }
+
+  return {
+    table: typed.table,
+    filter: typed.filter ? `AND (${typed.filter.sql})` : "",
+    args: typed.filter?.args ?? [],
+  }
 }
 
 /** Prefix an optional query source, then assign PostgreSQL positional placeholders. */
@@ -462,10 +488,11 @@ function compileStart(
   }
 
   const order = compileOrder(identityOrderFields())
+  const objects = pgObjectsOfType(ctx.source, query.objectTypeId)
   const sql = `
     SELECT *, properties AS _cursor_properties
-    FROM ${ctx.source.objectsTable}
-    WHERE project_id = ? AND object_type_id = ?
+    FROM ${objects.table}
+    WHERE project_id = ? AND object_type_id = ? ${objects.filter}
     ${ctx.startPredicate ? `AND (${ctx.startPredicate})` : ""}
     ${ctx.unordered ? "" : `ORDER BY ${order.sql}`}
     ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}
@@ -473,9 +500,9 @@ function compileStart(
 
   return {
     sql,
-    args: [projectId, query.objectTypeId, ...(ctx.unordered ? [] : order.args)],
-    totalSql: `SELECT COUNT(*)::bigint AS total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
-    totalArgs: [projectId, query.objectTypeId],
+    args: [projectId, query.objectTypeId, ...objects.args, ...(ctx.unordered ? [] : order.args)],
+    totalSql: `SELECT COUNT(*)::bigint AS total FROM ${objects.table} WHERE project_id = ? AND object_type_id = ? ${objects.filter}`,
+    totalArgs: [projectId, query.objectTypeId, ...objects.args],
     order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -1239,13 +1266,14 @@ function compileAggregateStart(
     throw new Error("[SixbPg] PostgreSQL object storage does not support start.includeSubtypes")
   }
 
+  const objects = pgObjectsOfType(source, query.objectTypeId)
   return {
     sql: `
       SELECT project_id, object_type_id, primary_id, properties
-      FROM ${source.objectsTable}
-      WHERE project_id = ? AND object_type_id = ?
+      FROM ${objects.table}
+      WHERE project_id = ? AND object_type_id = ? ${objects.filter}
     `,
-    args: [projectId, query.objectTypeId],
+    args: [projectId, query.objectTypeId, ...objects.args],
   }
 }
 
@@ -1452,7 +1480,8 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
   }
 }
 
-function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
+/** Compile a predicate over the unqualified `properties` column of the relation it filters. */
+export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
   switch (predicate.op) {
     case "and":
     case "or": {
