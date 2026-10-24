@@ -103,8 +103,8 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
 
 - Read the project's objects live, not a copy: declare a query as `queries/<name>.json` beside
   `index.html` (`queries.md` says how to write one) and read it with `sixb.query("<name>")`. Each
-  reader runs it with their own rights as the page opens, so its numbers are current and never
-  show what that reader can't see. The page can't reach the API any other way.
+  reader runs it with their own rights as the page opens, so its rows are current and hold only
+  what that reader may see. The page can't reach the API any other way.
 
   ```js
   // In <script type="module">, which can await at its top.
@@ -112,7 +112,7 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   status.textContent = "Loading invoices…"
   try {
     const { objects, total, truncated } = await sixb.query("overdue")
-    // objects: [{ primaryId, objectTypeId, properties: { amount: 1200, … } }, …]
+    // objects: [{ primaryId, objectTypeId, properties: { amount: 1200, … }, redactions? }, …]
     // A facets query resolves to { kind: "facets", total, facets }.
     render(objects)
     status.textContent = truncated ? `The first ${objects.length} of ${total}` : ""
@@ -124,6 +124,11 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   Draw a loading state until it answers and an error state when it rejects: its message says why,
   such as a type the reader can't view. A query takes no parameters: filter, sort, and group its
   rows in the page as the reader changes the controls.
+
+  A value the reader isn't cleared for is missing from `properties` and listed in the row's
+  `redactions` (`{ amount: { reason: "missing_clearance" } }`): a permission they lack. Show it as
+  locked, with that reason ("You don't have permission to see Amount"), never as 0 or empty, and
+  never total, chart, or compare over it: a figure that reads it is locked too.
 - Copy values into JSON files beside the page only when `queries.md` says to copy, such as a
   snapshot or figures the user gave you, and read them with `fetch("data/regions.json")`.
 - Load a library from a CDN, by exact version, when it does real work: ECharts for interactive

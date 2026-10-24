@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -826,6 +826,96 @@ describe("the sixb-artifacts skill's examples", () => {
     }
   })
 })
+
+describe("the sixb-artifacts skill's live page", () => {
+  afterEach(() => setSystemTime())
+
+  test("shows a value the reader may not see as locked, and totals nothing over it", async () => {
+    // The page example the Agent copies for live rows: an amount the reader isn't cleared for is
+    // in the row's `redactions`, not its `properties`. Reproduce by computing collections-desk's
+    // outstanding amount as `(amount ?? 0) - (paid ?? 0)` for every row again: the tile adds the
+    // hidden amount as 0, and its row reads $0.
+    const skill = BUILT_IN_SKILLS.find((candidate) => candidate.name === "sixb-artifacts")
+    const html = String(
+      skill?.files.find((file) => file.path === "examples/page/collections-desk/index.html")
+        ?.contents
+    )
+    const script = /<script type="module">([\s\S]*)<\/script>/.exec(html)?.[1] ?? ""
+    const page = fakePage()
+
+    const invoice = (number: string, properties: Record<string, unknown>) => ({
+      primaryId: number,
+      objectTypeId: "Invoice",
+      properties: { number, dueDate: "2026-09-01", paid: 0, ...properties },
+    })
+    const objects = [
+      invoice("INV-1", { amount: 1000 }),
+      { ...invoice("INV-2", {}), redactions: { amount: { reason: "missing_clearance" } } },
+    ]
+    const sixb = { query: async () => ({ kind: "objects", objects, total: 2, truncated: false }) }
+
+    setSystemTime(new Date("2026-10-23T12:00:00.000Z"))
+    const run = Object.getPrototypeOf(async () => {}).constructor("sixb", "document", script)
+    await run(sixb, page.document)
+
+    const money = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    })
+    expect(page.byId("outstanding").textContent).toBe("Locked")
+    expect(page.byId("outstanding-locked").textContent).toBe(
+      "You don't have permission to see Amount"
+    )
+    expect(page.byId("rows").children.map((row) => row.children.at(-1)?.textContent)).toEqual([
+      money.format(1000),
+      "Locked",
+    ])
+    // What reads no amount still counts every row.
+    expect(page.byId("count").textContent).toBe("2")
+  })
+})
+
+/** Just enough of a document for the example's script: elements by id, and the age chips. */
+function fakePage() {
+  class Element {
+    textContent = ""
+    className = ""
+    title = ""
+    innerHTML = ""
+    value = ""
+    children: Element[] = []
+    readonly classes = new Set<string>()
+    readonly classList = {
+      add: (name: string) => this.classes.add(name),
+      contains: (name: string) => this.classes.has(name),
+      toggle: (name: string, on: boolean) =>
+        on ? this.classes.add(name) : this.classes.delete(name),
+    }
+    append(child: Element) {
+      this.children.push(child)
+    }
+    replaceChildren(...children: Element[]) {
+      this.children = children
+    }
+    addEventListener() {}
+  }
+
+  const elements = new Map<string, Element>()
+  const byId = (id: string) => {
+    const known = elements.get(id) ?? new Element()
+    elements.set(id, known)
+    return known
+  }
+  const chip = Object.assign(new Element(), { value: "0" })
+  const document = {
+    querySelector: (selector: string) =>
+      selector.startsWith("#") ? byId(selector.slice(1)) : chip,
+    querySelectorAll: () => [chip],
+    createElement: () => new Element(),
+  }
+  return { document, byId }
+}
 
 describe("materializeThreadArtifacts", () => {
   test("installs the thread's latest versions, newest first, within the byte budget", async () => {
