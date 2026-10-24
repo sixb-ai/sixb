@@ -16,6 +16,7 @@ export type {
   ExecuteObjectQueryInput,
   ExecuteObjectQueryResult,
   QueryExecutorOptions,
+  ReadableObjectTypes,
 } from "./executor"
 export {
   countObjects,

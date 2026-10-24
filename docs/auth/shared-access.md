@@ -35,6 +35,8 @@ Nested relationships stay private unless selected too. These grants do not give 
 
 Add `can.share(invoiceShare)` to the issuer's [role](authorization.md). It permits issuing, listing, and revoking links for this definition; it does not grant access to invoice data by itself.
 
+The issuer must also see the target when issuing the link: a target their [condition](authorization.md#grant-only-some-objects) hides is not found (`404`). The link then holds its own grants and keeps showing the target, even once it stops matching that condition. A selected link keeps showing whatever it reaches, so the issuer must view each type the selected links reach without a condition. Sixb refuses to issue it otherwise (`403`).
+
 ```ts
 import { can, defineRole } from "@sixb/core"
 import { Invoice } from "../../ontology/invoice"

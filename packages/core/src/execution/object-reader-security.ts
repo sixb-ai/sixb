@@ -1,7 +1,9 @@
-import { assertAuthorized, isAllowed } from "../authorization"
+import { assertAuthorized, assertRuntimeAuthorizationBound, isAllowed } from "../authorization"
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
-import { unreadableError } from "../objects/property-clearance"
+import { type Unreadable, unreadableError } from "../objects/property-clearance"
+import { bindCurrentUserPredicate } from "../objects/query/current-user"
+import type { ObjectQueryPredicate } from "../objects/query/ir"
 import {
   createSelectedObjectQueryAdmission,
   type SelectedObjectQueryAdmission,
@@ -9,7 +11,12 @@ import {
 import type { OntologyRegistry } from "../ontology"
 import type { UserRef } from "../ontology/user-ref"
 import type { AppliedMarkings } from "../security/applied-markings"
-import type { CompiledObjectReadStep, ObjectLinkRow } from "../storage"
+import type {
+  CompiledConditionalObjectReadScope,
+  CompiledObjectReadStep,
+  ObjectLinkRow,
+} from "../storage"
+import { compileConditionalObjectReadScope } from "../storage/objects/read-scope"
 import type { resolveExecutionScopeAuthorization } from "./authorization"
 import { type Clearance, ObjectReaderClearance } from "./object-reader-clearance"
 import type { AuthorizablePrincipal, RuntimeAuthorization } from "./types"
@@ -31,7 +38,12 @@ export interface ObjectReaderDelegation {
 
 /**
  * Who reads, and what it may read: the exact execution authority, the selection a delegated one
- * carries, and its clearance. It decides whether an object type or a link is viewable.
+ * carries, the conditions a principal reads some types through, and its clearance. It decides
+ * whether an object type or a link is viewable.
+ *
+ * A type a principal views only through a condition is viewable here, and nowhere else: the
+ * reader's storage shows only the objects the condition matches. A check that answers for an
+ * object without reading it through that storage asks for `everyObject`, which such a type fails.
  */
 export class ObjectReaderSecurity {
   /** The registered authority the reader is bound to. */
@@ -44,6 +56,10 @@ export class ObjectReaderSecurity {
   readonly clearance: ObjectReaderClearance
   /** The user `currentUser()` stands for in this reader's queries; absent when no user reads. */
   readonly requestingUser?: UserRef
+  /** What the reader's storage reads through: present when a principal views a type under one. */
+  readonly conditionalScope?: CompiledConditionalObjectReadScope
+  /** The properties each conditioned type's condition reads, which its clearance must show. */
+  readonly #conditionProperties: ReadonlyMap<string, readonly string[]>
 
   constructor(input: {
     readonly authorization: RuntimeAuthorization
@@ -74,6 +90,31 @@ export class ObjectReaderSecurity {
       })
     }
 
+    const conditions = authority.type === "principal" ? authority.context.viewConditions : undefined
+    this.#conditionProperties = new Map(
+      [...(conditions ?? [])].map(([objectTypeId, predicates]) => [
+        objectTypeId,
+        [...new Set(predicates.flatMap(propertiesReadBy))],
+      ])
+    )
+
+    if (authority.type === "principal" && conditions && conditions.size > 0) {
+      // A reader sees an object any of its conditions matches. In a condition, `currentUser()` is
+      // the principal the grant was resolved for, when it is a user: never the user who requested
+      // the execution, which an agent's service account runs for. Otherwise it is no one.
+      const principal = authority.context.principal
+      const grantee: UserRef | undefined =
+        principal.type === "user" ? { type: "user", id: principal.id } : undefined
+
+      this.conditionalScope = compileConditionalObjectReadScope({
+        kind: "conditional",
+        conditions: [...conditions].map(([objectTypeId, predicates]) => ({
+          objectTypeId,
+          predicate: bindCurrentUserPredicate(anyOf(predicates), grantee),
+        })),
+      })
+    }
+
     this.clearance = new ObjectReaderClearance({
       ontology: input.ontology,
       clearances: clearancesForAuthority(authority),
@@ -83,7 +124,11 @@ export class ObjectReaderSecurity {
     Object.freeze(this)
   }
 
-  assertObjectTypesViewable(objectTypeIds: readonly string[], clearance: Clearance): void {
+  assertObjectTypesViewable(
+    objectTypeIds: readonly string[],
+    clearance: Clearance,
+    options: { readonly everyObject?: boolean } = {}
+  ): void {
     if (this.delegation) {
       for (const objectTypeId of new Set(objectTypeIds)) {
         if (this.delegation.objectTypeIds.has(objectTypeId)) continue
@@ -93,9 +138,7 @@ export class ObjectReaderSecurity {
         )
       }
     } else {
-      for (const objectTypeId of new Set(objectTypeIds)) {
-        assertAuthorized(this.runtime, { kind: "object.view", objectTypeId })
-      }
+      this.assertObjectTypesGranted(objectTypeIds, clearance, options)
     }
 
     if (!clearance) return
@@ -106,10 +149,42 @@ export class ObjectReaderSecurity {
     }
   }
 
+  /**
+   * Refuse a type a principal holds no view grant for, before its clearance is applied to what it
+   * reads. A type viewed through a condition passes while the clearance shows every property the
+   * condition reads, unless the check asks for `everyObject`.
+   */
+  assertObjectTypesGranted(
+    objectTypeIds: readonly string[],
+    clearance: Clearance,
+    options: { readonly everyObject?: boolean } = {}
+  ): void {
+    for (const objectTypeId of new Set(objectTypeIds)) {
+      if (options.everyObject || !this.#conditionProperties.has(objectTypeId)) {
+        assertAuthorized(this.runtime, { kind: "object.view", objectTypeId })
+        continue
+      }
+
+      assertRuntimeAuthorizationBound(this.runtime)
+
+      const unreadable = this.#unreadableCondition(objectTypeId, clearance)
+      if (unreadable) throw unreadableError(unreadable)
+    }
+  }
+
+  isObjectTypeGranted(objectTypeId: string, clearance: Clearance): boolean {
+    if (this.delegation) return this.delegation.objectTypeIds.has(objectTypeId)
+
+    if (this.#conditionProperties.has(objectTypeId)) {
+      return this.#unreadableCondition(objectTypeId, clearance) === undefined
+    }
+
+    return isAllowed(this.runtime.authorization, { kind: "object.view", objectTypeId })
+  }
+
   isObjectTypeViewable(objectTypeId: string, clearance: Clearance): boolean {
     if (clearance?.unreadableType(objectTypeId)) return false
-    if (this.delegation) return this.delegation.objectTypeIds.has(objectTypeId)
-    return isAllowed(this.runtime.authorization, { kind: "object.view", objectTypeId })
+    return this.isObjectTypeGranted(objectTypeId, clearance)
   }
 
   isLinkViewable(link: ObjectLinkRow, clearance: Clearance): boolean {
@@ -123,6 +198,51 @@ export class ObjectReaderSecurity {
 
     return this.delegation?.linkDefinitions.has(delegatedLinkDefinitionKey(link)) ?? true
   }
+
+  #unreadableCondition(objectTypeId: string, clearance: Clearance): Unreadable | undefined {
+    const propertyIds = this.#conditionProperties.get(objectTypeId)
+    return propertyIds && unreadableConditionOf(objectTypeId, propertyIds, clearance)
+  }
+}
+
+/**
+ * Which objects match a condition would reveal a property the reader cannot read, so a clearance
+ * that hides one, a marking applied by a dataset version included, hides the whole type.
+ */
+function unreadableConditionOf(
+  objectTypeId: string,
+  propertyIds: readonly string[],
+  clearance: Clearance
+): Unreadable | undefined {
+  for (const propertyId of propertyIds) {
+    const marking = clearance?.missingMarking(objectTypeId, propertyId)
+    if (marking === undefined) continue
+
+    return {
+      marking,
+      message: `[Sixb] Cannot read '${objectTypeId}': the condition it is viewed through reads '${objectTypeId}.${propertyId}', which requires clearance for marking '${marking}'.`,
+    }
+  }
+
+  return undefined
+}
+
+function propertiesReadBy(predicate: ObjectQueryPredicate): readonly string[] {
+  switch (predicate.op) {
+    case "and":
+    case "or":
+      return predicate.items.flatMap(propertiesReadBy)
+    case "not":
+      return propertiesReadBy(predicate.item)
+    case "constant":
+      return []
+    default:
+      return [predicate.propertyId]
+  }
+}
+
+function anyOf(predicates: readonly ObjectQueryPredicate[]): ObjectQueryPredicate {
+  return predicates.length === 1 ? predicates[0]! : { op: "or", items: predicates }
 }
 
 /**

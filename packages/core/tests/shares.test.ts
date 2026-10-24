@@ -8,6 +8,7 @@ import {
   defineObjectType,
   defineRole,
   defineShare,
+  link,
   ObjectNotFoundError,
   objectRef,
   prop,
@@ -19,16 +20,17 @@ import {
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-const Report = defineObjectType({
-  id: "report",
-  name: "Report",
-  properties: [prop("id", "string", { required: true, primary: true })],
-})
-
 const Other = defineObjectType({
   id: "other",
   name: "Other",
   properties: [prop("id", "string", { required: true, primary: true })],
+})
+
+const Report = defineObjectType({
+  id: "report",
+  name: "Report",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link("sources", Other)],
 })
 
 const acknowledge = defineAction("acknowledge-report")
@@ -41,13 +43,23 @@ const PublishedReport = defineShare("published-report", {
   grants: ({ target }) => [can.view(target), can.apply(acknowledge).on(target)],
 })
 
+const SourcedReport = defineShare("sourced-report", {
+  target: Report,
+  grants: ({ target }) => [can.view(target).withLinks([Report.l.sources])],
+})
+
 const publishers = defineGroup("publishers")
 const viewers = defineGroup("viewers")
 const shareOnly = defineGroup("share-only")
+const sourceViewers = defineGroup("source-viewers")
 
 const publisher = defineRole("report.publisher", {
   grantedTo: [publishers],
-  grants: [can.view(Report), can.share(PublishedReport)],
+  grants: [can.view(Report), can.share(PublishedReport), can.share(SourcedReport)],
+})
+const sourceViewer = defineRole("source.viewer", {
+  grantedTo: [sourceViewers],
+  grants: [can.view(Other)],
 })
 const viewer = defineRole("report.viewer", {
   grantedTo: [viewers],
@@ -63,9 +75,9 @@ function createHost() {
     id: "project-1",
     ontology: [Report, Other],
     actions: [acknowledge],
-    shares: [PublishedReport],
-    groups: [publishers, viewers, shareOnly],
-    roles: [publisher, viewer, shareManagerWithoutView],
+    shares: [PublishedReport, SourcedReport],
+    groups: [publishers, viewers, shareOnly, sourceViewers],
+    roles: [publisher, viewer, shareManagerWithoutView, sourceViewer],
     ...createTestRuntimeDeps(),
   })
 }
@@ -222,6 +234,30 @@ describe("Share lifecycle", () => {
       ShareError
     )
     expect(unrestricted.shares.listDefinitions()).toEqual([])
+  })
+
+  // Reproduce: drop the linked-type check from shares/execution.ts; the publisher, who cannot
+  // read sources, shares a report with the sources it links to.
+  test("requires a whole view of every type the Share's links reach", async () => {
+    const host = createHost()
+    await createTestSixb(host).objects.upsert(Report.id, { id: "report-1" })
+    const input = {
+      target: objectRef(Report, "report-1"),
+      destinationPath: "/reports/report-1",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    }
+
+    const denial = await principalSixb(host, [publishers.id])
+      .shares.issue(SourcedReport, input)
+      .catch((error) => error)
+    expect(denial).toBeInstanceOf(AuthorizationError)
+    expect(denial).toMatchObject({ grantKey: "view:object:other" })
+
+    const invitation = await principalSixb(host, [publishers.id, sourceViewers.id]).shares.issue(
+      SourcedReport,
+      input
+    )
+    expect(invitation.grant.definitionId).toBe(SourcedReport.id)
   })
 
   test("validates target existence, exact type, expiry, destination, and definition id", async () => {

@@ -28,7 +28,7 @@ import {
 } from "../objects/query"
 import { createClearanceQueryAdmission } from "../objects/query/clearance-admission"
 import { ObjectQueryValidationError } from "../objects/query/errors"
-import { validateObjectFacetRequests } from "../objects/query/executor"
+import { type QueryExecutorOptions, validateObjectFacetRequests } from "../objects/query/executor"
 import type { ObjectQuery } from "../objects/query/ir"
 import { assertLinkQueryReadable } from "../objects/query/link-query-clearance"
 import { preflightObjectQueryLinks } from "../objects/query/links"
@@ -61,7 +61,7 @@ import { assertObjectReadOutputWithinLimit, MAX_OBJECT_READ_FACETS } from "../st
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
 import type { Clearance, EventSources } from "./object-reader-clearance"
 import { ObjectReaderOntology } from "./object-reader-ontology"
-import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
+import { ObjectReaderSecurity } from "./object-reader-security"
 import { attachUserProfiles } from "./object-reader-users"
 import type { ExecutionScope } from "./types"
 import { uniqueLookupKey } from "./unique-lookup"
@@ -245,7 +245,9 @@ class AuthorizedObjectReaderImpl {
       propertyId: input.propertyId,
     })
     const clearance = await this.#security.clearance.current()
-    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance, {
+      everyObject: true,
+    })
 
     if (hidesProperty(request, clearance)) return false
     if (this.#security.authority.type !== "delegated") return true
@@ -269,7 +271,8 @@ class AuthorizedObjectReaderImpl {
     const clearance = await this.#security.clearance.current()
     this.#security.assertObjectTypesViewable(
       request.items.map((item) => item.objectTypeId),
-      clearance
+      clearance,
+      { everyObject: true }
     )
     const selected =
       this.#security.authority.type === "delegated"
@@ -624,12 +627,30 @@ class AuthorizedObjectReaderImpl {
       embeddingModels: this.#models.embedding,
       rerankingModels: this.#models.reranking,
       storage: this.#storage,
-      runtimeAuthorization: this.#security.runtime.runtimeAuthorization,
-      ...(this.#security.runtime.authorization === undefined
-        ? {}
-        : { authorization: this.#security.runtime.authorization }),
+      ...this.#queryAuthorization(clearance),
       ...(admission === undefined ? {} : { admission }),
       requestingUser: this.#security.requestingUser,
+    }
+  }
+
+  /**
+   * A principal's queries read the types this reader's security grants, including those its
+   * storage reads through a condition, which no view grant holds.
+   */
+  #queryAuthorization(
+    clearance: Clearance
+  ): Pick<QueryExecutorOptions, "readableObjectTypes" | "runtimeAuthorization"> {
+    const runtimeAuthorization = this.#security.runtime.runtimeAuthorization
+    if (this.#security.authority.type !== "principal") return { runtimeAuthorization }
+
+    const security = this.#security
+    return {
+      runtimeAuthorization,
+      readableObjectTypes: Object.freeze({
+        assert: (objectTypeIds: readonly string[]) =>
+          security.assertObjectTypesGranted(objectTypeIds, clearance),
+        has: (objectTypeId: string) => security.isObjectTypeGranted(objectTypeId, clearance),
+      }),
     }
   }
 
@@ -731,17 +752,18 @@ export function createAuthorizedObjectReader(input: {
   const scope = captureExecutionScope(input.scope)
   const projectId = scope.execution.projectId
   const authority = resolveExecutionScopeAuthorization(projectId, scope)
-  const storage = objectStorageForAuthority(authority, input.objectStorage)
+  const security = new ObjectReaderSecurity({
+    authorization: scope.authorization,
+    authority,
+    projectId,
+    ontology: input.ontology,
+    ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
+    requestedBy: scope.execution.requestedBy,
+  })
+  const storage = objectStorageForAuthority(security, input.objectStorage)
   const reader = new AuthorizedObjectReaderImpl(readerConstructionKey, {
-    ontology: new ObjectReaderOntology(input.ontology, authority),
-    security: new ObjectReaderSecurity({
-      authorization: scope.authorization,
-      authority,
-      projectId,
-      ontology: input.ontology,
-      ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
-      requestedBy: scope.execution.requestedBy,
-    }),
+    ontology: new ObjectReaderOntology(input.ontology, security),
+    security,
     models: Object.freeze({
       ...(input.embeddingModels === undefined ? {} : { embedding: input.embeddingModels }),
       ...(input.rerankingModels === undefined ? {} : { reranking: input.rerankingModels }),
@@ -814,11 +836,19 @@ function hidesProperty(
 }
 
 function objectStorageForAuthority(
-  authority: ResolvedExecutionAuthority,
+  security: ObjectReaderSecurity,
   objectStorage: ObjectStorage
 ): ObjectReadStorage {
+  const authority = security.authority
+
   switch (authority.type) {
     case "principal":
+      return security.conditionalScope
+        ? objectStorage.createConditionalReadScope({
+            projectId: authority.projectId,
+            scope: security.conditionalScope,
+          })
+        : objectStorage
     case "unrestricted":
       return objectStorage
     case "delegated":
