@@ -181,6 +181,46 @@ export function approvalCallSummary(call: AgentApprovalCall): AgentApprovalCallS
     : { kind: "workflow", workflowId: call.workflowId }
 }
 
+/** A call a child made that waits for its turn's requester. */
+export interface AgentChildApprovalAwaiting {
+  readonly approvalId: string
+  readonly call: AgentApprovalCallSummary
+}
+
+/**
+ * The calls each of a turn's children made that still wait for the turn's requester: they are
+ * held on the turn, and name the child that asked.
+ */
+export async function listChildApprovalsAwaiting(
+  agents: AgentStorage,
+  input: {
+    readonly projectId: string
+    readonly parentRunId: string
+    readonly childRunIds: readonly string[]
+  }
+): Promise<ReadonlyMap<string, readonly AgentChildApprovalAwaiting[]>> {
+  const children = new Set(input.childRunIds)
+  const byChild = new Map<string, AgentChildApprovalAwaiting[]>()
+  for (let offset = 0; ; ) {
+    const page = await agents.approvals.list({
+      projectId: input.projectId,
+      runId: input.parentRunId,
+      statuses: ["pending"],
+      limit: 100,
+      offset,
+    })
+    for (const approval of page.approvals) {
+      if (!children.has(approval.callerRunId)) continue
+
+      const awaiting = byChild.get(approval.callerRunId) ?? []
+      awaiting.push({ approvalId: approval.id, call: approvalCallSummary(approval.call) })
+      byChild.set(approval.callerRunId, awaiting)
+    }
+    offset += page.approvals.length
+    if (!page.hasMore || page.approvals.length === 0) return byChild
+  }
+}
+
 /**
  * In the transaction that admits a thread's next message: set its pending approvals aside, and
  * return one part per approval that left `pending` and no message reported yet, for the message to

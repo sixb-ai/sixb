@@ -523,7 +523,12 @@ async function startAgentEnvironment(
       artifacts: artifactStorage,
       reader: context.sixb.artifacts,
       blobStorage: context.blobStorage,
-      run: { id: runId, threadId: publishing.threadId, executionToken: publishing.executionToken },
+      run: {
+        id: runId,
+        threadId: publishing.threadId,
+        executionToken: publishing.executionToken,
+        ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
+      },
       owner: publishing.owner,
       author: publishing.author,
       budget: fileBudget,

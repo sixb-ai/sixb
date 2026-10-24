@@ -55,6 +55,7 @@ import {
   createAgentRunId,
   createSubagentRunId,
   ensureManagedAgentExecutionIdentity,
+  holdAgentApprovalCall,
   isAgentToolResult,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
@@ -127,7 +128,7 @@ import {
   createWorkflowAgentNodeEnvironment,
 } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
-import { SubagentCoordinator } from "../src/subagent-tools"
+import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
 import { createAgentTurnRuntime } from "../src/turn-runtime"
 import type {
   AgentExecutionContext,
@@ -340,6 +341,20 @@ async function onlyArtifact(sixb: TestSixb | undefined): Promise<ArtifactRecord>
 
 async function waitForTerminalRun(storage: AgentStorage, runId: string) {
   return waitFor(() => terminalRun(storage, runId), { label: `run ${runId} terminal` })
+}
+
+/** A model stream that only ends when its call is aborted. */
+function untilAborted(options: LanguageModelRequest) {
+  return {
+    stream: new ReadableStream<WorkerTestStreamEvent>({
+      start(controller) {
+        controller.enqueue({ type: "stream-start", warnings: [] })
+        const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+        if (options.signal?.aborted) abort()
+        else options.signal?.addEventListener("abort", abort, { once: true })
+      },
+    }),
+  }
 }
 
 function stream(chunks: WorkerTestStreamEvent[]) {
@@ -1850,6 +1865,7 @@ async function buildAgentWorkerContext(
     recoverAiModelCall: recoverAiModelCall(sixb),
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
+    subagentConcurrencyPerRun: 4,
     locale: sixb.locale,
     timeZone: sixb.timeZone,
   }
@@ -1959,7 +1975,7 @@ async function spawnChildOfRunningTurn(
       await coordinator.spawn({ key, task: `Research ${key}.` }, new AbortController().signal)
     )
   }
-  return { parent, children }
+  return { parent, children, coordinator }
 }
 
 function freshTestExecution() {
@@ -7888,17 +7904,10 @@ describe("AgentWorker", () => {
     const childModel = new WorkerTestModel({
       providerId: "child-provider",
       modelId: "blocking-child",
-      stream: async (options) => ({
-        stream: new ReadableStream<WorkerTestStreamEvent>({
-          start(controller) {
-            controller.enqueue({ type: "stream-start", warnings: [] })
-            childStarted = true
-            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.signal?.aborted) abort()
-            else options.signal?.addEventListener("abort", abort, { once: true })
-          },
-        }),
-      }),
+      stream: async (options) => {
+        childStarted = true
+        return untilAborted(options)
+      },
     })
     let childRunId = ""
     let parentCall = 0
@@ -7910,16 +7919,21 @@ describe("AgentWorker", () => {
     const parentModel = new WorkerTestModel({
       providerId: "parent-provider",
       modelId: "waiting-parent",
-      stream: async () => {
+      stream: async (options) => {
         parentCall += 1
-        if (parentCall === 1) await delegating
-        return parentCall === 1
-          ? toolCallStream("spawn", "spawn_agent", {
-              key: "background-work",
-              task: "Keep researching until stopped.",
-              model: { provider: childModel.providerId, modelId: childModel.modelId },
-            })
-          : toolCallStream(`wait-${parentCall}`, "wait_agent", { runIds: [childRunId] })
+        if (parentCall === 1) {
+          await delegating
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "background-work",
+            task: "Keep researching until stopped.",
+            model: { provider: childModel.providerId, modelId: childModel.modelId },
+          })
+        }
+        if (parentCall === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+        }
+        // Told the child is still at work, the parent works on until its turn ends.
+        return untilAborted(options)
       },
     })
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
@@ -7928,7 +7942,7 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Research in the background." })
     childRunId = createSubagentRunId(requested.run.id, "background-work")
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 10_000 }))
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 90_000 }))
 
     jest.useFakeTimers()
     try {
@@ -7940,13 +7954,17 @@ describe("AgentWorker", () => {
       if (ending === "cancelled") {
         await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: requested.run.id })
       }
-      const [parent, child] = await underFakeTime(async () => {
-        const runs = await Promise.all([
-          terminalRun(storage, requested.run.id),
-          terminalRun(storage, childRunId),
-        ])
-        return runs.every(Boolean) ? runs : null
-      }, `parent ${ending} and child stopped`)
+      const [parent, child] = await underFakeTime(
+        async () => {
+          const runs = await Promise.all([
+            terminalRun(storage, requested.run.id),
+            terminalRun(storage, childRunId),
+          ])
+          return runs.every(Boolean) ? runs : null
+        },
+        `parent ${ending} and child stopped`,
+        100
+      )
 
       expect(parent).toMatchObject(
         ending === "cancelled"
@@ -7958,6 +7976,66 @@ describe("AgentWorker", () => {
       expect(
         (child?.completedAt?.getTime() ?? 0) - (parent?.completedAt?.getTime() ?? 0)
       ).toBeLessThan(1_000)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  test("wait_agent returns before its turn's deadline, with the children still at work", async () => {
+    // Removal proof: drop the deadline from SubagentCoordinator.wait; it waits until the turn
+    // times out, and the parent never answers.
+    let childRunId = ""
+    const parentCalls: { readonly at: number; readonly request: LanguageModelRequest }[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "blocking-child",
+      stream: async (options) => untilAborted(options),
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "waiting-parent",
+      stream: async (options) => {
+        parentCalls.push({ at: Date.now(), request: options })
+        if (parentCalls.length === 1) {
+          return toolCallStream("spawn", "spawn_agent", {
+            key: "slow",
+            task: "Research slowly.",
+            model: { provider: childModel.providerId, modelId: childModel.modelId },
+          })
+        }
+        if (parentCalls.length === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+        }
+        return answerStream("Here is what I have so far.")
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Research slowly." })
+    childRunId = createSubagentRunId(requested.run.id, "slow")
+    const turnTimeoutMs = 2 * WAIT_ANSWER_MARGIN_MS
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent answering without its child",
+        100
+      )
+
+      expect(parent.status).toBe("succeeded")
+      const answeredAt = parentCalls[2]?.at ?? Number.POSITIVE_INFINITY
+      const deadline = (parent.startedAt?.getTime() ?? 0) + turnTimeoutMs
+      expect(answeredAt).toBeGreaterThanOrEqual(deadline - WAIT_ANSWER_MARGIN_MS)
+      expect(answeredAt).toBeLessThan(deadline - WAIT_ANSWER_MARGIN_MS + 1_000)
+      expect(JSON.stringify(parentCalls[2]?.request.messages.at(-1))).toContain(
+        `"results":[{"runId":"${childRunId}","status":"running"}]`
+      )
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
@@ -8012,6 +8090,69 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("lets one turn keep as many children at work as the worker's per-run limit allows", async () => {
+    // Removal proof: pass a fixed 4 as maxActiveChildren in SubagentCoordinator.spawn again; the
+    // second child is admitted.
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "blocking-child",
+      stream: async (options) => untilAborted(options),
+    })
+    const parentCalls: LanguageModelRequest[] = []
+    const spawn = (key: string) => ({
+      type: "tool-call" as const,
+      toolCallId: `spawn-${key}`,
+      toolName: "spawn_agent",
+      input: JSON.stringify({
+        key,
+        task: `Research ${key}.`,
+        model: { provider: childModel.providerId, modelId: childModel.modelId },
+      }),
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (options) => {
+        parentCalls.push(options)
+        return parentCalls.length === 1
+          ? stream([
+              { type: "stream-start", warnings: [] },
+              spawn("first"),
+              spawn("second"),
+              finish("tool-calls"),
+            ])
+          : answerStream("Started one.")
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const requested = await requestAgent(sixb, { text: "Research twice." })
+    const worker = new AgentWorker(sixb, workerOptions({ subagentConcurrencyPerRun: 1 }))
+    await worker.start()
+    try {
+      const parent = await waitForTerminalRun(agentStorageOf(sixb), requested.run.id)
+
+      expect(parent.status).toBe("succeeded")
+      expect(JSON.stringify(parentCalls[1]?.messages)).toContain(
+        "The current Agent run already has 1 active children."
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("rejects a child limit that is not a positive integer", () => {
+    const sixb = buildSixb(answerModel())
+
+    for (const value of [0, -1, 1.5]) {
+      expect(
+        () => new AgentWorker(sixb, workerOptions({ subagentConcurrencyPerRun: value }))
+      ).toThrow("Agent worker option subagentConcurrencyPerRun must be a positive integer.")
+      expect(() => new AgentWorker(sixb, workerOptions({ subagentConcurrency: value }))).toThrow()
+    }
+  })
+
   test("runs as many children at once as the worker's subagent concurrency allows", async () => {
     // Removal proof: give the child lane a claim limit of 4 again; the other child starts while
     // the held one is still running.
@@ -8060,12 +8201,100 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Regression proof: restore the reclaim in terminalizeSubagentDeliveryFailure; it steals the
-  // newer child's token when the former delivery learns that its inherited session was revoked.
+  test("tells the parent which of a child's calls wait for the user's approval", async () => {
+    // Removal proof: leave `awaitingApproval` out of waitedResult; the parent reads a finished child
+    // and never learns its call is held on the turn.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const {
+      children: [spawned],
+      coordinator,
+    } = await spawnChildOfRunningTurn(sixb, { text: "Close the month.", approvalMode: "manual" })
+    if (!spawned) throw new Error("Expected the child.")
+    const execution = freshTestExecution()
+    const child = await storage.runs.start({ projectId: PROJECT_ID, id: spawned.runId, execution })
+    const hold = await holdAgentApprovalCall(storage, {
+      projectId: PROJECT_ID,
+      run: child,
+      call: { kind: "workflow", workflowId: "close-month", input: {}, workflowRunId: "run_close" },
+    })
+    if (hold.kind !== "held") throw new Error("Expected the call to be held.")
+    await storage.runs.finish({
+      projectId: PROJECT_ID,
+      id: child.id,
+      executionToken: execution.token,
+      status: "succeeded",
+      result: { text: "Closing the month awaits the user's approval." },
+    })
+
+    const { results } = await coordinator.wait({ runIds: [child.id] }, new AbortController().signal)
+
+    expect(results).toEqual([
+      {
+        runId: child.id,
+        status: "succeeded",
+        text: "Closing the month awaits the user's approval.",
+        awaitingApproval: [
+          { approvalId: hold.approval.id, call: { kind: "workflow", workflowId: "close-month" } },
+        ],
+      },
+    ])
+  })
+
+  test("ends a child found running on redelivery as interrupted, once its lease lapses", async () => {
+    // Removal proof: drop the `running` branch in executeSubagent, and the redelivery replays the
+    // child: its model runs again. Drop its lease check, and it ends before its owner's lease does.
+    const model = answerModel()
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const modelCalls = spyOn(model, "stream")
+
+    jest.useFakeTimers()
+    try {
+      const {
+        children: [spawned],
+      } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+      if (!spawned) throw new Error("Expected the child.")
+      // A delivery started the child, then died: its job comes back while its lease may still run.
+      const leaseExpiresAt = new Date(Date.now() + 30_000)
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: spawned.runId,
+        execution: { token: createAgentRunExecutionToken(), queueLeaseExpiresAt: leaseExpiresAt },
+      })
+
+      await worker.start()
+      const child = await underFakeTime(
+        () => terminalRun(storage, spawned.runId),
+        "redelivered child terminal"
+      )
+
+      expect(child).toMatchObject({
+        status: "cancelled",
+        finishReason: "interrupted",
+        attempt: 2,
+        error: {
+          message: expect.stringContaining(
+            "Spawn it again with a new key if its answer is still needed"
+          ),
+        },
+      })
+      expect(child.completedAt?.getTime()).toBeGreaterThanOrEqual(leaseExpiresAt.getTime())
+      expect(modelCalls).not.toHaveBeenCalled()
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+      modelCalls.mockRestore()
+    }
+  })
+
+  // A child whose inherited session was revoked fails before its model. A delivery that took the
+  // child over during that check keeps it: the failing delivery writes nothing with a stale token.
   test.each([
     false,
     true,
-  ])("fences a revoked child redelivery (concurrent takeover: %s)", async (takeover) => {
+  ])("fences a revoked child's delivery (concurrent takeover: %s)", async (takeover) => {
     const model = answerModel()
     const sixb = buildSixb(model)
     attachSixbErrorReporter(sixb, () => {})
@@ -8111,11 +8340,6 @@ describe("AgentWorker", () => {
       { key: "review", task: "Review the result." },
       new AbortController().signal
     )
-    await storage.runs.start({
-      projectId: PROJECT_ID,
-      id: child.runId,
-      execution: freshTestExecution(),
-    })
     await auth.sessions.revoke({
       projectId: PROJECT_ID,
       id: execution.authorizationRef.credential.id,
@@ -8167,7 +8391,7 @@ describe("AgentWorker", () => {
       expect(run).toMatchObject(
         takeover
           ? { status: "running", execution: { token: takeoverToken } }
-          : { status: "failed", attempt: 2 }
+          : { status: "failed", attempt: 1 }
       )
       expect(modelCalls).not.toHaveBeenCalled()
       expect(await storage.runs.getById({ projectId: PROJECT_ID, id: parent.id })).toMatchObject({
@@ -8339,6 +8563,46 @@ describe("AgentWorker", () => {
       const waited = JSON.stringify(parentCalls[2]?.messages.at(-1))
       expect(waited).toContain(JSON.stringify(message).slice(1, -1))
       expect(waited).not.toContain("Partial")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("tells the parent what to do about a subagent that gave no answer", async () => {
+    // Removal proof: fail an empty answer with a bare `createSixbError` again; the parent then
+    // reads "Agent execution failed." and nothing it can act on.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "zai/glm-5.3-flash",
+      stream: async () => stream([{ type: "stream-start", warnings: [] }, finish("stop")]),
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await waitForTerminalRun(storage, requested.run.id)
+      const message =
+        "Agent execution failed. The subagent finished without an answer. Spawn it again with a task that says what its answer must contain."
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "failed",
+        error: { code: "agent.execution_failed", message },
+      })
+      expect(JSON.stringify(parentCalls[2]?.messages.at(-1))).toContain(
+        JSON.stringify(message).slice(1, -1)
+      )
     } finally {
       await worker.stop()
     }

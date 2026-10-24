@@ -65,7 +65,9 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   lists each model from its configured definition: name, description, context limits and
   capabilities, never a price, which is not known. The schema restricts selection to configured
   pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
-  `wait_agent` returns each child's final answer: the text of its last step.
+  `wait_agent` returns each child's final answer, the text it wrote after its last local tool call
+  (else its last text), and the calls it made that wait for approval. It returns a minute before
+  the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
   instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only
@@ -205,12 +207,13 @@ The terminal run state is stored on the run record:
 - Worker shutdown during a conversation turn: `cancelled` with `finishReason: "interrupted"`,
   coherent partial work kept as the assistant message so the user can continue from it
 - Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced
-- Conversation turn found `running` on redelivery (its worker crashed or lost the queue lease):
-  `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. The turn
-  already streamed and billed its model calls, so it is retried only on request
-  (`POST .../runs/:runId/retry`). Subagents and workflow agent nodes are replayed instead. A run
-  whose projected queue lease has not lapsed is still owned by a live delivery: a duplicate job
-  leaves it alone and is retried once that lease runs out
+- Conversation turn or child found `running` on redelivery (its worker crashed or lost the queue
+  lease): `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. It
+  already billed its model calls and may have run actions or published, so a turn is retried only
+  on request (`POST .../runs/:runId/retry`) and a child only if its parent spawns it again.
+  Workflow agent nodes are replayed instead. A run whose projected queue lease has not lapsed is
+  still owned by a live delivery: a duplicate job leaves it alone and is retried once that lease
+  runs out
 - Preparation dependency failure (storage, model catalog) before the first model call: retried in
   place with a short backoff, never through a redelivery
 - Finalization storage failure: job is retried up to a bounded attempt limit; if finalization still
@@ -229,6 +232,8 @@ The terminal run state is stored on the run record:
   to `8`.
 - `subagentConcurrency`: maximum number of child agents this worker executes at once, on a lane of
   their own so waiting parents cannot consume their capacity; defaults to `4`.
+- `subagentConcurrencyPerRun`: maximum number of child agents one conversation turn keeps queued or
+  running at once, across workers; defaults to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.

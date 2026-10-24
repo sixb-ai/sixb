@@ -547,6 +547,34 @@ describe("agent API gateway", () => {
     await expect((await save("project")).json()).resolves.toMatchObject({ code: "not_allowed" })
   })
 
+  test("refuses a child agent once its parent run has ended", async () => {
+    // Reproduce by dropping the parent check in handleAgentApiGatewayRequest: the child still reads
+    // the project, and could still change it, after its turn has ended.
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+      executionKind: "subagent",
+    })
+    const read = () => app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    expect((await read()).status).toBe(200)
+
+    const execution = {
+      token: createAgentRunExecutionToken(),
+      queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+    }
+    await storage.agents.runs.reclaim({ projectId: PROJECT_ID, id: "parent-run-1", execution })
+    await storage.agents.runs.finish({
+      projectId: PROJECT_ID,
+      id: "parent-run-1",
+      executionToken: execution.token,
+      status: "cancelled",
+    })
+
+    const refused = await read()
+    expect(refused.status).toBe(409)
+    await expect(refused.json()).resolves.toEqual({
+      error: "The child agent's parent run has ended.",
+    })
+  })
+
   test("lets a child agent read its conversation's memory and save none of it", async () => {
     // Reproduce by dropping the child's memory check in handleAgentApiGatewayRequest: the save
     // then lands in the requester's repo, with no conversation as its source.

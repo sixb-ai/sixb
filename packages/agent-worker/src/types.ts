@@ -78,6 +78,8 @@ export interface AgentWorkerContext {
   readonly recoverAiModelCall: RecoverAiModelCall
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
+  /** How many children one conversation turn may have queued or running at once. */
+  readonly subagentConcurrencyPerRun: number
   /** Project locale and time zone, for runs that do not carry the requester's own. */
   readonly locale: string
   readonly timeZone: string
@@ -141,6 +143,11 @@ export interface AgentWorkerOptions {
    * waiting parents never hold their slots. Defaults to 4.
    */
   readonly subagentConcurrency?: number
+  /**
+   * Maximum number of child agents one conversation turn may have queued or running at once,
+   * across every worker. Defaults to 4.
+   */
+  readonly subagentConcurrencyPerRun?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
   /** Framework model step cap per turn. Defaults to 100. */

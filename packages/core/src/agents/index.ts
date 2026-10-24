@@ -23,7 +23,7 @@ export {
 export type { AgentApprovalResume } from "./approval-continuation"
 export { resumeDecidedAgentTurn } from "./approval-continuation"
 export { getAgentApprovalExecutor } from "./approval-executor"
-export type { AgentApprovalHold } from "./approvals"
+export type { AgentApprovalHold, AgentChildApprovalAwaiting } from "./approvals"
 export {
   AGENT_APPROVAL_EXECUTION_LEASE_MS,
   agentRunApprovalMode,
@@ -31,6 +31,7 @@ export {
   approvalCallSummary,
   holdAgentApprovalCall,
   isAwaitingApprovalRun,
+  listChildApprovalsAwaiting,
   listTurnApprovals,
   stopAgentTurn,
   turnResumeReadiness,
