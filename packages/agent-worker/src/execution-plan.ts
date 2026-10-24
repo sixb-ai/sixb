@@ -109,15 +109,12 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
-  const selected = resolveWorkflowAgentStepModel(step, models)
-  if (selected === null) {
-    const reference =
-      step.model === undefined
-        ? "the project default language model"
-        : `language model '${step.model.providerId}/${step.model.modelId}'`
+  // The step's own model runs as given, listed in the catalog or not.
+  const selected = step.model ?? models?.default.model
+  if (selected === undefined) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve ${reference}.`,
+      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve the project default language model.`,
       { details: { workflowId, agentStepId: step.id } }
     )
   }
@@ -200,16 +197,4 @@ export function resolveSubagentExecutionPlan(input: {
     ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
     ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
-}
-
-/** The catalog's binding is the configured one, default reasoning included. */
-function resolveWorkflowAgentStepModel(
-  step: AgentStepDefinition,
-  models: LanguageModelCatalog | undefined
-): LanguageModel | null {
-  if (step.model === undefined) return models?.default.model ?? null
-  if (models === undefined) return step.model
-  return (
-    models.getByRef({ provider: step.model.providerId, modelId: step.model.modelId })?.model ?? null
-  )
 }

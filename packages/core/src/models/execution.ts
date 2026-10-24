@@ -48,20 +48,11 @@ export function createModelsRuntime(
     const messages = generationMessages(input)
     const signal = session.signal(input.signal)
     signal.throwIfAborted()
-    // The catalog's binding is the configured one, default reasoning included.
-    const selected = input.model
-      ? catalog
-        ? catalog.language?.getByRef({
-            provider: input.model.providerId,
-            modelId: input.model.modelId,
-          })?.model
-        : input.model
-      : catalog?.language?.default.model
+    // An explicit model runs as given, listed or not; the catalog only supplies the default.
+    const selected = input.model ?? catalog?.language?.default.model
     if (!selected) {
       throw new Error(
-        input.model
-          ? `[SixbModels] Model '${input.model.providerId}/${input.model.modelId}' is not configured in models.language.`
-          : "[SixbModels] Configure models.language in createSixb() or supply a model to generate()."
+        "[SixbModels] Configure models.language in createSixb() or supply a model to generate()."
       )
     }
     const output =
@@ -74,8 +65,8 @@ export function createModelsRuntime(
       input.reasoning
     )
     if (reasoningIssue) throw new UnsupportedModelFeatureError(`[SixbModels] ${reasoningIssue}.`)
-    // The default was checked against the capabilities known at startup; like any request, a level
-    // the resolved model turns out not to support falls back to the provider default.
+    // A catalog model's default was checked against the capabilities known at startup; like any
+    // request, a level the resolved model turns out not to support falls back to the provider default.
     const reasoning = input.reasoning ?? selected.defaultReasoning
     if (output && model.definition.capabilities.nativeStructuredOutput === false) {
       throw new UnsupportedModelFeatureError(

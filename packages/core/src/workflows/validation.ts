@@ -190,14 +190,6 @@ function validateWorkflowAgentStepRuntimeReferences(
       `Workflow "${workflowId}" agent step "${step.id}" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().`
     )
   }
-  if (step.model !== undefined && options.models !== undefined) {
-    const ref = { provider: step.model.providerId, modelId: step.model.modelId }
-    if (options.models.language?.getByRef(ref) == null) {
-      throw new WorkflowDefinitionError(
-        `Workflow "${workflowId}" agent step "${step.id}" uses unknown language model "${ref.provider}/${ref.modelId}". Add it to 'models.language' in createSixb().`
-      )
-    }
-  }
   // Same rule as a catalog default: checked against the capabilities the model declares, so an
   // effort or token budget outside them fails at startup rather than on the step's first run.
   const model = step.model ?? options.models?.language?.default?.model
