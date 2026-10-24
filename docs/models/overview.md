@@ -247,6 +247,9 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |
 | `useRegisteredAgentContext` | The context open pages set with `useAgentContext` |
 
+With [tiers](./configuration.md#tiers), the chat offers no model choice: show your own picker only
+when `conversation.canChooseModel`.
+
 Types such as `AgentThread`, `AgentMessage` and `AgentFileRef` are exported alongside them.
 
 ## Share a conversation

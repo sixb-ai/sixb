@@ -27,11 +27,11 @@ import type { TranscriptProps } from "../components/transcript"
 import { useAgentMessages } from "../i18n"
 import { knownName } from "../message-authors"
 import {
+  hasTiers,
   type ModelPreference,
   preferenceWithoutReasoning,
   preferenceWithReasoning,
   resolveModelSelection,
-  sixbPicksModel,
 } from "../model-selection"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
 import {
@@ -186,6 +186,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
   const [modelPreference, setModelPreference] = useState(readModelPreference)
   const modelSelection = resolveModelSelection(models, modelPreference)
+  // With tiers, the chat offers no model choice. Until the catalog loads, a choice is offered.
+  const canChooseModel = !hasTiers(models)
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
   const threads = useMemo(
@@ -593,10 +595,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     reconnecting,
   }
 
-  // With tiers, the chat offers no model choice: the composer has no model controls.
-  const modelControlsProps = sixbPicksModel(models)
-    ? {}
-    : {
+  const modelControlsProps = canChooseModel
+    ? {
         models,
         selectedModel,
         selectedReasoning,
@@ -608,6 +608,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         usingDefaultModel: modelSelection.request === undefined,
         onResetModelSelection: resetModelSelection,
       }
+    : {}
 
   const composerProps: ConversationComposerProps = {
     onSend: send,
@@ -645,6 +646,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     selectedModel,
     selectedReasoning,
     usingDefaultModel: modelSelection.request === undefined,
+    /** False with tiers: the chat offers no model choice, so show no model picker. */
+    canChooseModel,
     selectModel,
     selectReasoning,
     resetReasoning,

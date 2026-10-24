@@ -18,8 +18,11 @@ export interface ResolvedModelSelection {
   readonly request?: ModelPreference
 }
 
-/** A project that configures tiers offers no model choice in chat. */
-export function sixbPicksModel(models: readonly LanguageModel[]): boolean {
+/**
+ * With tiers, the chat offers no model choice: a decision model picks each message's model, and
+ * without one every message runs on `standard`.
+ */
+export function hasTiers(models: readonly LanguageModel[]): boolean {
   return models.some((model) => model.tier !== undefined)
 }
 
@@ -49,7 +52,7 @@ export function resolveModelSelection(
   models: readonly LanguageModel[],
   preference: ModelPreference | null
 ): ResolvedModelSelection {
-  if (sixbPicksModel(models)) return {}
+  if (hasTiers(models)) return {}
 
   const chosen = preference?.model
   const preferred = chosen
