@@ -326,6 +326,8 @@ fleet-planner/
   - It resolves to what `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`
     returns: rows as `POST /api/objects/query` returns them, or `{ kind: "facets", total, facets }`.
     A query the reader can't run, or one the version doesn't hold, rejects with the API's error.
+  - A value the reader isn't cleared for is missing from a row's `properties` and listed in its
+    `redactions`. Show it as locked, as a live sheet does, and lock any total that reads it.
   - A query takes no parameters: the page filters and sorts its rows. Decks and canvas boards read
     queries the same way.
 - `window.sixb.state` keeps JSON values for each reader, across the page's versions, so a
