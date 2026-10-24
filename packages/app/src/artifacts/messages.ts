@@ -4,6 +4,11 @@ import { defineMessages, type MessageTree, type Translation } from "@sixb/ui/lib
 const number = (value: number) => value.toLocaleString("en")
 const numberFr = (value: number) => value.toLocaleString("fr")
 
+// What a reader does about a value a live sheet locks: it is a permission they lack, which an admin
+// of the project can give.
+const ASK_FOR_ACCESS = "Ask an admin of the project for access."
+const ASK_FOR_ACCESS_FR = "Demandez l’accès à un administrateur du projet."
+
 /** Source catalog of the artifact viewer. */
 export const en = {
   kinds: {
@@ -202,6 +207,7 @@ export const en = {
     sheets: (count: number) => (count === 1 ? "1 sheet" : `${number(count)} sheets`),
     charts: (count: number) => (count === 1 ? "1 chart" : `${number(count)} charts`),
     rows: (count: number) => (count === 1 ? "1 row" : `${number(count)} rows`),
+    live: "Live data",
     sections: (count: number) => (count === 1 ? "1 section" : `${number(count)} sections`),
     slides: (count: number) => (count === 1 ? "1 slide" : `${number(count)} slides`),
     boards: (count: number) => (count === 1 ? "1 board" : `${number(count)} boards`),
@@ -300,6 +306,7 @@ export const en = {
     csvDetail: (rows?: number) =>
       rows === undefined ? "CSV" : `${rows === 1 ? "1 row" : `${number(rows)} rows`} · CSV`,
     rows: (count: number) => (count === 1 ? "1 row" : `${number(count)} rows`),
+    firstRows: (count: number) => `First ${number(count)} rows`,
     frozenRows: (count: number) => (count === 1 ? "Row 1 frozen" : `Rows 1–${count} frozen`),
     sum: "Sum",
     average: "Average",
@@ -376,6 +383,23 @@ export const en = {
     empty: "This sheet has no rows.",
     loadFailed: "This sheet could not be read.",
     tooLarge: "This sheet is too large to show here",
+    locked: (column: string) => `You don't have permission to see ${column}. ${ASK_FOR_ACCESS}`,
+    lockedComputed: (column: string, sources: readonly string[]) =>
+      `${column} is computed from ${sources.join(", ")}, which you don't have permission to see. ${ASK_FOR_ACCESS}`,
+    lockedTotal: (column: string) =>
+      `You don't have permission to see all of ${column}, so its total is hidden. ${ASK_FOR_ACCESS}`,
+    lockedTotalComputed: (column: string, sources: readonly string[]) =>
+      `The total of ${column} is hidden: it is computed from ${sources.join(", ")}, which you don't have permission to see. ${ASK_FOR_ACCESS}`,
+    lockedFigures: (columns: readonly string[]) =>
+      `You don't have permission to see some of the selected values: ${columns.join(", ")}. ${ASK_FOR_ACCESS}`,
+    chartLocked: (columns: readonly string[]) =>
+      `You don't have permission to see ${columns.join(", ")}, which this chart draws. ${ASK_FOR_ACCESS}`,
+    lockedNotice: (columns: readonly string[]) =>
+      `Some values are hidden: you don't have permission to see ${columns.join(", ")}. ${ASK_FOR_ACCESS}`,
+    askForAccess: ASK_FOR_ACCESS,
+    queryForbidden: "You don't have access to the data this sheet shows.",
+    queryInvalid: "This sheet's query no longer matches the project's data",
+    queryFailed: "This sheet's data could not be read.",
     types: {
       text: "Text",
       number: "Number",
@@ -615,6 +639,7 @@ export const fr: Translation<ArtifactMessages> = {
     sheets: (count) => (count === 1 ? "1 feuille" : `${numberFr(count)} feuilles`),
     charts: (count) => (count === 1 ? "1 graphique" : `${numberFr(count)} graphiques`),
     rows: (count) => (count === 1 ? "1 ligne" : `${numberFr(count)} lignes`),
+    live: "Données en direct",
     sections: (count) => (count === 1 ? "1 section" : `${numberFr(count)} sections`),
     slides: (count) => (count === 1 ? "1 diapositive" : `${numberFr(count)} diapositives`),
     boards: (count) => (count === 1 ? "1 planche" : `${numberFr(count)} planches`),
@@ -717,6 +742,7 @@ export const fr: Translation<ArtifactMessages> = {
     csvDetail: (rows) =>
       rows === undefined ? "CSV" : `${rows === 1 ? "1 ligne" : `${numberFr(rows)} lignes`} · CSV`,
     rows: (count) => (count === 1 ? "1 ligne" : `${numberFr(count)} lignes`),
+    firstRows: (count) => `${numberFr(count)} premières lignes`,
     frozenRows: (count) => (count === 1 ? "Ligne 1 figée" : `Lignes 1 à ${count} figées`),
     sum: "Somme",
     average: "Moyenne",
@@ -793,6 +819,23 @@ export const fr: Translation<ArtifactMessages> = {
     empty: "Cette feuille n’a aucune ligne.",
     loadFailed: "Impossible de lire cette feuille.",
     tooLarge: "Cette feuille est trop volumineuse pour s’afficher ici",
+    locked: (column) => `Vous n’avez pas l’autorisation de voir ${column}. ${ASK_FOR_ACCESS_FR}`,
+    lockedComputed: (column, sources) =>
+      `${column} est calculé à partir de ${sources.join(", ")}, que vous n’avez pas l’autorisation de voir. ${ASK_FOR_ACCESS_FR}`,
+    lockedTotal: (column) =>
+      `Vous n’avez pas l’autorisation de voir toutes les valeurs de ${column} : son total est masqué. ${ASK_FOR_ACCESS_FR}`,
+    lockedTotalComputed: (column, sources) =>
+      `Le total de ${column} est masqué : il est calculé à partir de ${sources.join(", ")}, que vous n’avez pas l’autorisation de voir. ${ASK_FOR_ACCESS_FR}`,
+    lockedFigures: (columns) =>
+      `Vous n’avez pas l’autorisation de voir certaines des valeurs sélectionnées : ${columns.join(", ")}. ${ASK_FOR_ACCESS_FR}`,
+    chartLocked: (columns) =>
+      `Vous n’avez pas l’autorisation de voir ${columns.join(", ")}, que ce graphique trace. ${ASK_FOR_ACCESS_FR}`,
+    lockedNotice: (columns) =>
+      `Certaines valeurs sont masquées : vous n’avez pas l’autorisation de voir ${columns.join(", ")}. ${ASK_FOR_ACCESS_FR}`,
+    askForAccess: ASK_FOR_ACCESS_FR,
+    queryForbidden: "Vous n’avez pas accès aux données de cette feuille.",
+    queryInvalid: "La requête de cette feuille ne correspond plus aux données du projet",
+    queryFailed: "Impossible de lire les données de cette feuille.",
     types: {
       text: "Texte",
       number: "Nombre",

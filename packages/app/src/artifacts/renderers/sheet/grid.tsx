@@ -42,6 +42,7 @@ import {
   EmptyCell,
   GridCell,
   HeaderContent,
+  LockedContent,
   selectionEdges,
   TotalCell,
 } from "./cells"
@@ -55,7 +56,8 @@ import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, type FormattedCell, numberFormat } from "./format"
 import { cellHighlight, highlightRanges } from "./highlight"
 import type { CellInput, CellInputError } from "./input"
-import type { SheetColumn, SheetModel } from "./model"
+import { lockedCellLabel, lockedTotalLabel } from "./locked"
+import { isLocked, type SheetColumn, type SheetModel } from "./model"
 import {
   type CellPoint,
   type CellRange,
@@ -1056,7 +1058,7 @@ export function SheetGrid({
       let next = index + 1
       while (width < need && next < segment.length) {
         const neighbour = segment[next] as number
-        if (valueAt(row, neighbour).trim()) break
+        if (valueAt(row, neighbour).trim() || lockedAt(row, neighbour)) break
         over.push(neighbour)
         width += widths[neighbour] ?? 0
         next += 1
@@ -1080,6 +1082,10 @@ export function SheetGrid({
 
   const cellAt = (row: number, column: number): FormattedCell | undefined =>
     row === 0 ? undefined : formatters[column]?.(valueAt(row, column))
+
+  /** Whether a grid row's cell holds a value the reader may not see. */
+  const lockedAt = (row: number, column: number): boolean =>
+    row > 0 && isLocked(model, order[row - 1] ?? -1, column)
 
   /** One grid row: its number, the frozen cells, then the cells in view. */
   const renderRow = (row: number) => {
@@ -1173,6 +1179,11 @@ export function SheetGrid({
                 ) : undefined
               }
             />
+          ) : lockedAt(row, column) ? (
+            <LockedContent
+              label={lockedCellLabel(model, order[row - 1] ?? -1, column, messages)}
+              numeric={model.columns[column]?.numeric ?? false}
+            />
           ) : (
             <CellContent
               cell={cellAt(row, column) ?? { text: "" }}
@@ -1261,6 +1272,7 @@ export function SheetGrid({
           text={text}
           label={!entry}
           {...(entry ? { title: messages[entry.total] } : {})}
+          {...(entry?.locked ? { locked: lockedTotalLabel(model, column, messages) } : {})}
           fixed={fixed}
           lastFixed={fixed && column === frozenColumns - 1}
           scrolled={viewport.left > 0}

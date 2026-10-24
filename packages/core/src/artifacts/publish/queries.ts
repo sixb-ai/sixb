@@ -23,17 +23,20 @@ import {
   ARTIFACT_QUERY_KINDS,
   type ArtifactQuery,
   artifactQueryName,
+  type CheckedArtifactQuery,
   parseArtifactQuery,
 } from "../queries"
+import { describeArtifactQuery } from "../run-query"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "./files"
 
 /**
  * Admits a query as the version's author: it throws what running it as them would throw, and
- * refuses one that would return what they cannot read. A version is refused when its author could
- * not run one of its queries, so a query never reads what whoever wrote it cannot. Each reader
- * still runs it with their own rights.
+ * refuses one that would return what they cannot read; it returns what the query returns and what
+ * its rows hold as they see them. A version is refused when its author could not run one of its
+ * queries, so a query never reads what whoever wrote it cannot. Each reader still runs it with
+ * their own rights.
  */
-export type ArtifactQueryChecker = (query: ArtifactQuery) => Promise<void>
+export type ArtifactQueryChecker = (query: ArtifactQuery) => Promise<CheckedArtifactQuery>
 
 /**
  * The checker for the runtime's caller. Running the query once, as cheaply as its kind allows,
@@ -53,9 +56,11 @@ export function createArtifactQueryChecker(
   >
 ): ArtifactQueryChecker {
   return async (query) => {
+    const shape = describeArtifactQuery(runtime, query)
+
     if (query.kind === "facets") {
       await runtime.objectReader.facet({ query: query.query, facets: query.facets })
-      return
+      return { kind: query.kind, ...shape }
     }
 
     await runtime.objectReader.exists({ query: query.query })
@@ -65,6 +70,8 @@ export function createArtifactQueryChecker(
 
     // The reader attaches profiles only for an authority that may view the directory.
     if (!isRuntimeAllowed(runtime, { kind: "users.view" })) assertExpandsNoUsers(query.query)
+
+    return { kind: query.kind, ...shape }
   }
 }
 
@@ -237,20 +244,22 @@ function outermostProject(
 
 /**
  * Checks the `queries/` files of a version: their names and number, their shape, then each one as
- * its author through `checker`. Fails closed: a version that holds a query is refused without one.
- * A file artifact is delivered as it is, so its one file is never read as a query.
+ * its author through `checker`, and returns what each check learned by query name, for the kind's
+ * own check. Fails closed: a version that holds a query is refused without one. A file artifact is
+ * delivered as it is, so its one file is never read as a query.
  */
 export async function checkArtifactQueries(
   blobStorage: ArtifactBlobStorage,
   kind: ArtifactKind,
   files: readonly ArtifactFile[],
   checker: ArtifactQueryChecker | undefined
-): Promise<void> {
-  if (kind === "file") return
+): Promise<ReadonlyMap<string, CheckedArtifactQuery>> {
+  const checked = new Map<string, CheckedArtifactQuery>()
+  if (kind === "file") return checked
 
   const queries = files.filter((file) => file.path.startsWith(ARTIFACT_QUERIES_DIRECTORY))
   const [first] = queries
-  if (!first) return
+  if (!first) return checked
 
   if (!ARTIFACT_QUERY_KINDS.includes(kind)) {
     throw invalidArtifact(
@@ -272,7 +281,8 @@ export async function checkArtifactQueries(
 
   // One at a time, so the same version is always refused for the same query.
   for (const file of queries) {
-    if (!artifactQueryName(file.path)) {
+    const name = artifactQueryName(file.path)
+    if (!name) {
       throw invalidArtifact(
         `'${file.path}' is not a query: name it queries/<name>.json, with lowercase letters, digits and hyphens, at most 64 characters.`
       )
@@ -283,11 +293,13 @@ export async function checkArtifactQueries(
     if ("error" in parsed) throw invalidArtifact(parsed.error)
 
     try {
-      await checker(parsed.query)
+      checked.set(name, await checker(parsed.query))
     } catch (error) {
       throw refusal(file.path, parsed, error)
     }
   }
+
+  return checked
 }
 
 /**

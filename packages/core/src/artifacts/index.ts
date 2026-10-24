@@ -43,6 +43,7 @@ export {
   type FormulaType,
   formulaDependencies,
   formulaFitsColumn,
+  formulaReferences,
   parseFormula,
   renameColumnReferences,
 } from "./formula"
@@ -64,6 +65,14 @@ export {
 export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"
 export { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "./limits"
 export {
+  type LiveSheetColumn,
+  type LiveSheetLayout,
+  type LiveSheetRow,
+  type LiveSheetTable,
+  liveSheetColumns,
+  liveSheetTable,
+} from "./live-sheet"
+export {
   type ArtifactOutline,
   type CanvasOutline,
   type CanvasOutlineItem,
@@ -78,7 +87,10 @@ export {
 export type {
   ArtifactFacetsQueryResult,
   ArtifactObjectsQueryResult,
+  ArtifactQueryProperty,
+  ArtifactQueryPropertyType,
   ArtifactQueryResult,
+  ArtifactQuerySchema,
 } from "./queries"
 export {
   type ArtifactAddressTarget,
@@ -89,6 +101,8 @@ export { checkSheet } from "./sheet-rules"
 export { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "./theme"
 export { ARTIFACT_TONES, type ArtifactTone } from "./tones"
 export {
+  type LiveSheetColumnSource,
+  type LiveSheetSource,
   NUMERIC_COLUMN_TYPES,
   parseSheetDate,
   parseSheetNumber,

@@ -357,7 +357,8 @@
               "total",
               "truncated",
               "resultObjectTypeIds",
-              "readObjectTypeIds"
+              "readObjectTypeIds",
+              "schema"
             ],
             "additionalProperties": false,
             "properties": {
@@ -393,12 +394,22 @@
                   "type": "string"
                 },
                 "description": "Every object type the query reads: where it starts, and what it traverses or expands"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactQuerySchema"
               }
             }
           },
           {
             "type": "object",
-            "required": ["kind", "total", "facets", "resultObjectTypeIds", "readObjectTypeIds"],
+            "required": [
+              "kind",
+              "total",
+              "facets",
+              "resultObjectTypeIds",
+              "readObjectTypeIds",
+              "schema"
+            ],
             "additionalProperties": false,
             "properties": {
               "kind": {
@@ -428,10 +439,77 @@
                   "type": "string"
                 },
                 "description": "Every object type the query reads: where it starts, and what it traverses or expands"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactQuerySchema"
               }
             }
           }
         ]
+      },
+      "ArtifactQuerySchema": {
+        "type": "object",
+        "description": "What each value of a row holds, from the ontology as the caller may view it: a property their view leaves out is absent",
+        "required": ["properties", "links"],
+        "additionalProperties": false,
+        "properties": {
+          "properties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ArtifactQueryProperty"
+            },
+            "description": "The properties of the types the query returns, by id; the first type's when two disagree"
+          },
+          "links": {
+            "type": "object",
+            "description": "By link id, for each link the query expands on its rows: the properties of what it reaches",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["properties"],
+              "additionalProperties": false,
+              "properties": {
+                "properties": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/ArtifactQueryProperty"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ArtifactQueryProperty": {
+        "type": "object",
+        "required": ["type"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "integer",
+              "double",
+              "decimal",
+              "boolean",
+              "date",
+              "timestamp",
+              "uuid",
+              "fileRef",
+              "userRef",
+              "enum",
+              "array",
+              "object",
+              "map"
+            ],
+            "description": "The property's type, a value type resolved to the schema it names"
+          },
+          "valueType": {
+            "type": "string",
+            "enum": ["string", "integer"],
+            "description": "What an enum's values are"
+          }
+        }
       },
       "ObjectQueryLink": {
         "type": "object",
@@ -42517,13 +42595,18 @@
                                         "type": "string"
                                       },
                                       "rows": {
-                                        "type": "integer"
+                                        "type": "integer",
+                                        "description": "The rows of its CSV; none for a live sheet"
                                       },
                                       "columns": {
                                         "type": "array",
                                         "items": {
                                           "type": "string"
                                         }
+                                      },
+                                      "query": {
+                                        "type": "string",
+                                        "description": "A live sheet's query, queries/<name>.json, whose rows each reader reads"
                                       }
                                     },
                                     "required": ["name", "rows", "columns"],
@@ -44851,13 +44934,18 @@
                                         "type": "string"
                                       },
                                       "rows": {
-                                        "type": "integer"
+                                        "type": "integer",
+                                        "description": "The rows of its CSV; none for a live sheet"
                                       },
                                       "columns": {
                                         "type": "array",
                                         "items": {
                                           "type": "string"
                                         }
+                                      },
+                                      "query": {
+                                        "type": "string",
+                                        "description": "A live sheet's query, queries/<name>.json, whose rows each reader reads"
                                       }
                                     },
                                     "required": ["name", "rows", "columns"],
@@ -45721,13 +45809,18 @@
                                     "type": "string"
                                   },
                                   "rows": {
-                                    "type": "integer"
+                                    "type": "integer",
+                                    "description": "The rows of its CSV; none for a live sheet"
                                   },
                                   "columns": {
                                     "type": "array",
                                     "items": {
                                       "type": "string"
                                     }
+                                  },
+                                  "query": {
+                                    "type": "string",
+                                    "description": "A live sheet's query, queries/<name>.json, whose rows each reader reads"
                                   }
                                 },
                                 "required": ["name", "rows", "columns"],
@@ -46078,7 +46171,7 @@
     "/api/artifacts/{artifactId}/versions/{version}/queries/{name}": {
       "get": {
         "summary": "Run an artifact's query",
-        "description": "Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them. Use \"latest\" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.",
+        "description": "Runs the version's queries/<name>.json as the caller, with their rights: a type they cannot view is refused with 403, and a marked property they are not cleared for is left out of each row. Rows are serialized as POST /api/objects/query returns them, beside the schema of what they hold as the caller may view it. Use \"latest\" for the newest version. A query the ontology no longer admits is refused with 409 query_invalid.",
         "tags": ["Artifacts"],
         "operationId": "getArtifactQuery",
         "security": [

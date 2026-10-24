@@ -407,6 +407,15 @@ describe("reading a version's query", () => {
       facets: [{ propertyId: "status", buckets: [{ value: "open", count: 3 }] }],
       resultObjectTypeIds: ["Invoice"],
       readObjectTypeIds: ["Invoice"],
+      schema: {
+        properties: {
+          id: { type: "string" },
+          status: { type: "string" },
+          amount: { type: "double" },
+          dueDate: { type: "date" },
+        },
+        links: {},
+      },
     })
   })
 

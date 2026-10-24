@@ -27,7 +27,8 @@ import {
   YAxis,
 } from "recharts"
 import { useArtifactMessages } from "../../messages"
-import { chartData, latestValue } from "./chart-data"
+import { chartData, chartLockedColumns, latestValue } from "./chart-data"
+import { ChartLocked } from "./chart-locked"
 import { cellFormatter, compactFormatter } from "./format"
 import type { SheetModel } from "./model"
 
@@ -47,8 +48,13 @@ export default memo(function SheetChart({
   readonly model: SheetModel
   readonly locale: string
 }) {
-  const countLabel = useArtifactMessages().sheet.count
-  const data = useMemo(() => chartData(chart, model, countLabel), [chart, model, countLabel])
+  const messages = useArtifactMessages().sheet
+  const countLabel = messages.count
+  const locked = useMemo(() => chartLockedColumns(chart, model), [chart, model])
+  const data = useMemo(
+    () => (locked.length > 0 ? null : chartData(chart, model, countLabel)),
+    [locked, chart, model, countLabel]
+  )
   const config = useMemo<ChartConfig>(
     () =>
       Object.fromEntries(
@@ -59,6 +65,7 @@ export default memo(function SheetChart({
       ),
     [data]
   )
+  if (locked.length > 0) return <ChartLocked label={messages.chartLocked(locked)} />
   if (!data) return null
 
   const [first] = data.series

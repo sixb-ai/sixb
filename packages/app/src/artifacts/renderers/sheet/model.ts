@@ -32,6 +32,30 @@ export interface SheetModel {
   readonly frozenColumns: number
   /** Whether a totals row is pinned under the rows: some column has a total. */
   readonly totals: boolean
+  /**
+   * A live sheet's cells the reader may not see, by data row, then column: drawn locked, and a
+   * total over one is locked too. Their values are empty.
+   */
+  readonly locked?: ReadonlyMap<number, ReadonlySet<number>>
+  /** A live sheet's rows are the first its query returns: the cap left the others out. */
+  readonly truncated?: boolean
+}
+
+/** What a live sheet's rows add to its model: the reader's locked cells, and whether rows were left out. */
+export type LiveRows = Pick<SheetModel, "locked" | "truncated">
+
+/** Whether the reader may not see a data row's value in a column. */
+export function isLocked(model: SheetModel, row: number, column: number): boolean {
+  return model.locked?.get(row)?.has(column) ?? false
+}
+
+/** The names of the columns that hold a value the reader may not see, in the sheet's order. */
+export function lockedColumns(model: SheetModel): string[] {
+  if (!model.locked) return []
+
+  const columns = new Set<number>()
+  for (const cells of model.locked.values()) for (const column of cells) columns.add(column)
+  return model.columns.flatMap((column, index) => (columns.has(index) ? [column.name] : []))
 }
 
 type SheetLayout = Pick<
@@ -42,9 +66,9 @@ type SheetLayout = Pick<
 
 /**
  * A sheet of a workbook, laid out as its workbook says, its computed columns filled. Publishing
- * refused formulas that can't compute, so they all do here.
+ * refused formulas that can't compute, so they all do here. A live sheet's rows bring `live`.
  */
-export function sheetModel(sheet: SheetLayout, source: CsvTable): SheetModel {
+export function sheetModel(sheet: SheetLayout, source: CsvTable, live: LiveRows = {}): SheetModel {
   const table = evaluateComputedColumns(sheet, source).table
   const columns = table.header.map((name, index) => {
     const format = sheet.columns[name] ?? { type: "text" as const }
@@ -56,13 +80,23 @@ export function sheetModel(sheet: SheetLayout, source: CsvTable): SheetModel {
       ...(total ? { total } : {}),
     }
   })
+  // A formula computes a locked cell over the values the reader sees: it stays empty, as the
+  // values it read are, so no download or total shows what it computed without them.
+  const rows = table.rows.map((row, index) => {
+    const locked = live.locked?.get(index)
+    const padded = pad(row, columns.length)
+    return locked ? padded.map((value, column) => (locked.has(column) ? "" : value)) : padded
+  })
+
   return {
     name: sheet.name,
     columns,
-    rows: table.rows.map((row) => pad(row, columns.length)),
+    rows,
     frozenRows: Math.min(sheet.frozenRows, table.rows.length + 1),
     frozenColumns: Math.min(sheet.frozenColumns, columns.length),
     totals: columns.some((entry) => entry.total),
+    ...(live.locked && live.locked.size > 0 ? { locked: live.locked } : {}),
+    ...(live.truncated ? { truncated: true } : {}),
   }
 }
 

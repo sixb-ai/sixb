@@ -1,6 +1,7 @@
 import { parseSheetNumber } from "@sixb/core/artifacts"
 import type { FormattedCell } from "./format"
-import type { SheetModel } from "./model"
+import { lockedBy } from "./locked"
+import { isLocked, type SheetModel } from "./model"
 
 // Grid coordinates: row 0 is the header row, row 1 the first data row as currently ordered;
 // column 0 is the sheet's first column. A1 names count rows from 1, so grid row 0 is row 1.
@@ -55,11 +56,18 @@ export interface RangeStats {
   readonly average?: number
   readonly min?: number
   readonly max?: number
+  /**
+   * Cells the reader may not see, in a live sheet: the sum, average, min and max would leave them
+   * out, so the status bar shows them locked.
+   */
+  readonly locked?: number
+  /** The properties that lock those cells, by name in the sheet's order. */
+  readonly lockedColumns?: readonly string[]
 }
 
 /**
  * What a spreadsheet's status bar says about a selection. Header cells are labels, not values, and
- * hidden columns are left out.
+ * hidden columns are left out. A locked cell is counted apart: it is no value the figures read.
  */
 export function rangeStats(
   range: CellRange,
@@ -72,11 +80,19 @@ export function rangeStats(
   let sum = 0
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
+  let locked = 0
+  const lockedIn = new Set<string>()
   for (let row = Math.max(range.top, 1); row <= range.bottom; row += 1) {
-    const values = model.rows[order[row - 1] ?? -1]
+    const dataRow = order[row - 1] ?? -1
+    const values = model.rows[dataRow]
     if (!values) continue
     for (let column = range.left; column <= range.right; column += 1) {
       if (hidden.has(column)) continue
+      if (isLocked(model, dataRow, column)) {
+        locked += 1
+        for (const name of lockedBy(model, column, dataRow)) lockedIn.add(name)
+        continue
+      }
       const value = values[column] ?? ""
       if (!value.trim()) continue
       count += 1
@@ -94,6 +110,14 @@ export function rangeStats(
     numericCount,
     sum,
     ...(numericCount > 0 ? { average: sum / numericCount, min, max } : {}),
+    ...(locked > 0
+      ? {
+          locked,
+          lockedColumns: model.columns.flatMap((entry) =>
+            lockedIn.has(entry.name) ? [entry.name] : []
+          ),
+        }
+      : {}),
   }
 }
 

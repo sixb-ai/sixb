@@ -193,6 +193,37 @@ download each sheet as CSV or the whole workbook as an `.xlsx` file, with its co
 panes, widths, links, checkboxes as booleans, highlights as conditional formats, and totals as
 `SUBTOTAL` formulas. A CSV or TSV `file` artifact opens in the same grid.
 
+### Live rows
+
+A sheet can read its rows from one of the version's [queries](#declare-a-query) instead of a CSV,
+so each reader sees the project's objects as they are when they open it:
+
+```json
+{
+  "name": "Overdue",
+  "query": "overdue",
+  "columns": {
+    "Invoice": { "from": "number" },
+    "Customer": { "from": "customer.name" },
+    "Amount": { "from": "amount", "type": "currency" },
+    "Due": { "from": "dueDate" }
+  },
+  "totals": { "Amount": "sum" }
+}
+```
+
+- `query` names `queries/<name>.json`, a query of rows; the sheet has no `sheets/<name>.csv`.
+- Its columns are those `columns` lists, in order. Each shows a property in `from`, or
+  `<link>.<property>` of a link the query expands, or computes with a `formula`.
+- Without `type`, a column takes its property's: numbers, dates, booleans, an enum as a tag, the
+  rest as text. Formats, totals, charts, and downloads work as on any sheet.
+- A value the reader is not cleared for shows locked, as does a formula, total, or chart over it; a
+  download leaves it empty. The sheet names the columns the reader lacks permission to see and
+  tells them to ask an admin of the project. It shows up to 10,000 rows and says when there were
+  more.
+- A live sheet is read-only in the app. A document, deck, or canvas that shows its range or chart
+  shows each reader their rows.
+
 ## Write slides
 
 A deck is `index.html` with one `<section class="slide">` per 1280×720 slide, and the CSS and
@@ -379,7 +410,8 @@ File: `queries/overdue.json`
 - A version holds up to 20 queries of 64 KB each. A query returns up to 10,000 rows, and
   `truncated` says when there were more.
 - `sixb.artifacts.query(id, "overdue")` runs one as the caller, as does
-  `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. A query the ontology no
+  `GET /api/artifacts/{artifactId}/versions/{version}/queries/{name}`. Its `schema` gives the type
+  of each property its rows and the links it expands hold, as the caller may view them. A query the ontology no
   longer admits fails with `query_invalid` (409 over HTTP).
 
 From server code, pass query builders as `queries`; each is stored as its file:

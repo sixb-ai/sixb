@@ -254,11 +254,34 @@ export function parseFormula(text: string): FormulaNode {
 /** The columns a formula reads, by row or whole. */
 export function formulaDependencies(node: FormulaNode): Set<string> {
   const columns = new Set<string>()
+  visitReferences(node, (reference) => columns.add(reference.column))
+  return columns
+}
+
+/**
+ * The columns a formula reads in its own row, `[@Revenue]`, apart from those it reads whole,
+ * `[Revenue]` in `SUM([Revenue])`: a value of the second depends on every row's.
+ */
+export function formulaReferences(node: FormulaNode): {
+  readonly row: Set<string>
+  readonly whole: Set<string>
+} {
+  const row = new Set<string>()
+  const whole = new Set<string>()
+  visitReferences(node, (reference) =>
+    (reference.kind === "ref" ? row : whole).add(reference.column)
+  )
+  return { row, whole }
+}
+
+type FormulaReference = Extract<FormulaNode, { readonly kind: "ref" | "columnRef" }>
+
+function visitReferences(node: FormulaNode, found: (reference: FormulaReference) => void): void {
   const visit = (current: FormulaNode) => {
     switch (current.kind) {
       case "ref":
       case "columnRef":
-        columns.add(current.column)
+        found(current)
         return
       case "unary":
         visit(current.operand)
@@ -275,7 +298,6 @@ export function formulaDependencies(node: FormulaNode): Set<string> {
     }
   }
   visit(node)
-  return columns
 }
 
 /**

@@ -1,4 +1,4 @@
-import { parseSheetPart } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, parseSheetPart } from "@sixb/core/artifacts"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronLeft, ChevronRight, Menu } from "lucide-react"
+import { ChevronLeft, ChevronRight, Lock, Menu } from "lucide-react"
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -435,6 +435,9 @@ export function StatusFigures({
               {messages.sheet.clearFilters}
             </StatusAction>
           </>
+        ) : model.truncated ? (
+          // A live sheet reads its query's rows up to the cap; the rest are left out.
+          messages.sheet.firstRows(ARTIFACT_LIMITS.maxQueryRows)
         ) : (
           messages.sheet.rows(model.rows.length)
         )}
@@ -450,7 +453,23 @@ export function StatusFigures({
       {model.frozenRows > 0 ? (
         <span className="hidden @5xl:inline">{messages.sheet.frozenRows(model.frozenRows)}</span>
       ) : null}
-      {stats && stats.count > 1 ? (
+      {stats?.locked && stats.count + stats.locked > 1 ? (
+        // A figure over cells the reader may not see would be a partial one: each is locked.
+        <>
+          {[messages.sheet.average, messages.sheet.min, messages.sheet.max].map((label) => (
+            <LockedStat
+              key={label}
+              label={label}
+              title={messages.sheet.lockedFigures(stats.lockedColumns ?? [])}
+            />
+          ))}
+          <Stat label={messages.sheet.count} value={stats.count.toLocaleString(locale)} />
+          <LockedStat
+            label={messages.sheet.sum}
+            title={messages.sheet.lockedFigures(stats.lockedColumns ?? [])}
+          />
+        </>
+      ) : stats && stats.count > 1 ? (
         <>
           {stats.numericCount > 0 ? (
             <>
@@ -490,6 +509,16 @@ function StatusAction({
     >
       {children}
     </button>
+  )
+}
+
+/** A figure the selection's locked cells keep from being whole: a lock in place of its value. */
+function LockedStat({ label, title }: { readonly label: string; readonly title: string }) {
+  return (
+    <span className="inline-flex items-center gap-1" data-locked="" title={title}>
+      {label}:
+      <Lock className="size-3 text-muted-foreground/70" role="img" aria-label={title} />
+    </span>
   )
 }
 

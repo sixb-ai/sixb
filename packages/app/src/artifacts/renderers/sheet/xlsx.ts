@@ -8,7 +8,7 @@ import {
   type SheetTotal,
 } from "@sixb/core/artifacts"
 import { currencySymbol } from "./format"
-import type { SheetColumn, SheetModel } from "./model"
+import { isLocked, type SheetColumn, type SheetModel } from "./model"
 import { columnLetter } from "./selection"
 import { columnTotals } from "./totals"
 import { zipFiles } from "./zip"
@@ -118,6 +118,8 @@ function worksheet(
     const cells = sheet.columns.map((column, index) => {
       const value = values[index] ?? ""
       const formula = formulas[index]
+      // Excel would compute a locked cell's formula over the cells written empty: it is left out.
+      if (formula && isLocked(sheet, rowIndex, index)) return ""
       if (formula) {
         const ref = `${columnLetter(index)}${row}`
         return computedCell(ref, formulaToA1(formula, letters, row, lastRow), value, column, styles)
@@ -309,6 +311,8 @@ function totalsRow(sheet: SheetModel, styles: StyleSheet): string {
         ? `<c r="${ref}" s="${HEADER_STYLE}" t="inlineStr"><is><t>Total</t></is></c>`
         : ""
     }
+    // Excel would total the cells written empty: a total over what the reader may not see is left out.
+    if (entry.locked) return ""
     const style = styles.numberFormat(
       entry.total === "count" ? "#,##0" : numberFormatCode(column),
       true

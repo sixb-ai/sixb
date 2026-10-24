@@ -8,7 +8,7 @@ import {
 import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { Download, ListFilter, Search } from "lucide-react"
+import { Download, ListFilter, Lock, Search } from "lucide-react"
 import {
   lazy,
   type ReactNode,
@@ -59,10 +59,11 @@ import {
 } from "./frame"
 import { SheetGrid, type SheetGridEditor, type SheetGridStatus } from "./grid"
 import { cellInputText, parseCellInput } from "./input"
+import { hiddenProperties } from "./locked"
 import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
 import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
-import { useSheetModel, useWorkbook } from "./workbook"
+import { liveSheetErrorText, useSheetModel, useWorkbook } from "./workbook"
 
 const SheetChart = lazy(() => import("./chart"))
 
@@ -133,7 +134,7 @@ function WorkbookView({
     version,
     published.sheets.find((entry) => entry.name === sheetName)
   )
-  const { source, loading, tooLarge } = read
+  const { source, loading, tooLarge, error } = read
   const edit = useWorkbookEdit(version, published, sheetName, read.table, read.model, locale)
   // What is shown is the draft's, while there is one: its charts follow a column renamed.
   const workbook = edit.workbook
@@ -218,6 +219,8 @@ function WorkbookView({
         }
       />
 
+      {onSheet ? <LockedNotice model={model} /> : null}
+
       <div
         role="tabpanel"
         id={panelId}
@@ -228,6 +231,13 @@ function WorkbookView({
         {!model ? (
           loading ? (
             <ViewerLoading label={messages.viewer.loading} />
+          ) : error ? (
+            <ViewerNotice
+              {...liveSheetErrorText(error, messages.sheet)}
+              {...(error.kind === "forbidden"
+                ? { icon: <Lock className="size-8 text-muted-foreground" aria-hidden="true" /> }
+                : {})}
+            />
           ) : tooLarge && source ? (
             <ViewerNotice
               title={messages.sheet.tooLarge}
@@ -536,6 +546,27 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
         }
       />
     </div>
+  )
+}
+
+/**
+ * Above a live sheet with values the reader may not see: which properties, and that it is a
+ * permission they can ask for, said once where each lock only says it on hover. A computed column
+ * is no permission to ask for: the properties it reads are named.
+ */
+function LockedNotice({ model }: { readonly model: SheetModel }) {
+  const messages = useArtifactMessages().sheet
+  const columns = useMemo(() => hiddenProperties(model), [model])
+  if (columns.length === 0) return null
+
+  return (
+    <p
+      role="note"
+      className="m-0 flex shrink-0 items-start gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-xs break-words text-muted-foreground"
+    >
+      <Lock className="mt-0.5 size-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+      <span className="min-w-0">{messages.lockedNotice(columns)}</span>
+    </p>
   )
 }
 
