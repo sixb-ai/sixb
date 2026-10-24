@@ -19,10 +19,13 @@ export {
 export { AgentPanel, type AgentPanelProps } from "./agent/agent-panel"
 export { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "./agent/agent-surface"
 export { setAgentSurfaceMode } from "./agent/agent-surface-state"
-export type {
-  AgentApproval,
-  AgentApprovalDecision,
-  AgentApprovalMode,
+export {
+  type AgentApproval,
+  type AgentApprovalDecided,
+  type AgentApprovalDecision,
+  AgentApprovalDecisionError,
+  type AgentApprovalDecisionFailure,
+  type AgentApprovalMode,
 } from "./agent/approvals"
 export { ArtifactPanelRoot, type ArtifactPanelRootProps } from "./agent/artifact-panel"
 export {

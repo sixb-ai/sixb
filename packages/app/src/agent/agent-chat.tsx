@@ -141,7 +141,7 @@ export function AgentChat({
         messagesError={conversation.messagesError}
         currentThread={conversation.currentThread}
         runningThreadCount={conversation.runningThreadCount}
-        waitingApprovals={conversation.waitingApprovals}
+        waitingThreadIds={conversation.waitingThreadIds}
         threadsError={conversation.threadsError ? messages.chat.threadsLoadFailed : null}
         hasMoreThreads={conversation.threadsHasMore}
         loadingMoreThreads={conversation.threadsLoadingMore}

@@ -31,7 +31,7 @@ export interface SharedThreadList {
 }
 
 const NO_SHARED_THREADS: SharedThreadList = { threads: [], total: 0 }
-const NO_WAITING_APPROVALS: ReadonlyMap<string, number> = new Map()
+const NO_WAITING_THREADS: ReadonlySet<string> = new Set()
 
 export interface AgentThreadSwitcherProps {
   readonly agentName: string
@@ -43,8 +43,11 @@ export interface AgentThreadSwitcherProps {
    */
   readonly sharedThreads?: SharedThreadList
   readonly runningThreadCount?: number
-  /** Calls waiting for the reader's approval, by thread: each row says so, and the button counts them. */
-  readonly waitingApprovals?: ReadonlyMap<string, number>
+  /**
+   * The threads where a call waits for the reader's approval: they open the list, each row says so,
+   * and the button counts them.
+   */
+  readonly waitingThreadIds?: ReadonlySet<string>
   readonly threadsError?: string | null
   readonly hasMoreThreads?: boolean
   readonly loadingMoreThreads?: boolean
@@ -60,7 +63,7 @@ export function AgentThreadSwitcher({
   threads,
   sharedThreads,
   runningThreadCount = 0,
-  waitingApprovals = NO_WAITING_APPROVALS,
+  waitingThreadIds = NO_WAITING_THREADS,
   threadsError,
   hasMoreThreads,
   loadingMoreThreads,
@@ -101,13 +104,27 @@ export function AgentThreadSwitcher({
   }, [filter, normalizedSearchTerm, shownThreads, shownShared, messages])
   const matchingIds = new Set(matchingThreads.map((thread) => thread.id))
   const currentVisible = currentThread && matchingIds.has(currentThread.id) ? currentThread : null
+  // Waiting threads open the list, the reader's own and those shared with them alike.
+  const waitingRows =
+    filter === "archived"
+      ? []
+      : uniqueThreads(null, [...shownThreads, ...shownShared]).filter(
+          (thread) =>
+            waitingThreadIds.has(thread.id) &&
+            thread.id !== currentVisible?.id &&
+            (!normalizedSearchTerm ||
+              agentThreadTitle(thread, messages).toLowerCase().includes(normalizedSearchTerm))
+        )
+  const waitingRowIds = new Set(waitingRows.map((thread) => thread.id))
   const groups = groupThreadsByDate(
-    matchingThreads.filter((thread) => thread.id !== currentVisible?.id)
+    matchingThreads.filter(
+      (thread) => thread.id !== currentVisible?.id && !waitingRowIds.has(thread.id)
+    )
   )
   const archivedCount = shownThreads.filter((thread) => thread.status === "archived").length
   const currentTitle = agentThreadTitle(currentThread, messages)
   // The open conversation shows its own cards: the button counts the others that wait.
-  const waitingElsewhere = [...waitingApprovals.keys()].filter(
+  const waitingElsewhere = [...waitingThreadIds].filter(
     (threadId) => threadId !== currentThread?.id
   ).length
   const waitingLabel =
@@ -177,12 +194,18 @@ export function AgentThreadSwitcher({
           className="relative [&_svg]:size-5"
         >
           {waitingElsewhere > 0 ? (
+            // Beside a running count, a dot: the spinner keeps its own number readable.
             <span
               data-waiting-approval-count={waitingElsewhere}
               aria-hidden="true"
-              className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white tabular-nums ring-2 ring-background"
+              className={cn(
+                "absolute rounded-full bg-amber-500 ring-2 ring-background",
+                runningThreadCount > 0
+                  ? "top-1.5 right-1.5 size-2.5"
+                  : "top-1 right-1 flex h-4 min-w-4 items-center justify-center px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+              )}
             >
-              {waitingElsewhere > 9 ? "9+" : waitingElsewhere}
+              {runningThreadCount > 0 ? null : waitingElsewhere > 9 ? "9+" : waitingElsewhere}
             </span>
           ) : null}
           {runningThreadCount > 0 ? (
@@ -276,9 +299,24 @@ export function AgentThreadSwitcher({
                 thread={currentVisible}
                 selected
                 shared={filter === "shared"}
-                waiting={waitingApprovals.has(currentVisible.id)}
+                waiting={waitingThreadIds.has(currentVisible.id)}
                 onSelect={selectThread}
               />
+            </ThreadSwitcherSection>
+          ) : null}
+
+          {waitingRows.length > 0 ? (
+            <ThreadSwitcherSection label={approvalMessages.threadWaiting}>
+              {waitingRows.map((thread) => (
+                <ThreadSwitcherRow
+                  key={thread.id}
+                  thread={thread}
+                  selected={false}
+                  shared={!threads.some((own) => own.id === thread.id)}
+                  waiting
+                  onSelect={selectThread}
+                />
+              ))}
             </ThreadSwitcherSection>
           ) : null}
 
@@ -290,7 +328,7 @@ export function AgentThreadSwitcher({
                   thread={thread}
                   selected={thread.id === currentThread?.id}
                   shared={filter === "shared"}
-                  waiting={waitingApprovals.has(thread.id)}
+                  waiting={waitingThreadIds.has(thread.id)}
                   onSelect={selectThread}
                 />
               ))}

@@ -33,7 +33,7 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
-import { type AgentApprovalMode, nextApprovalMode } from "../approvals"
+import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef, LanguageModel } from "../types"
@@ -97,8 +97,8 @@ export interface ComposerProps {
   readonly compact?: boolean
   /**
    * What the agent may change without asking in the reader's next turns. With
-   * {@link onApprovalModeChange}, the composer shows it as a chip, and Shift+Tab in the input
-   * cycles it.
+   * {@link onApprovalModeChange}, the composer shows it as a chip, and Shift+Tab in an empty input
+   * switches between Manual and Accept edits.
    */
   readonly approvalMode?: AgentApprovalMode
   /** The reader's mode for new conversations, which the chip's menu offers to change. */
@@ -532,7 +532,9 @@ export function Composer({
   }
 
   // Enter sends; Cmd/Ctrl+Enter and Shift+Enter insert a newline (and let the field grow).
-  // Shift+Tab cycles the approval mode, as in a terminal agent; Tab still moves focus on.
+  // Shift+Tab in an empty input switches between Manual and Accept edits, as in a terminal agent.
+  // Once something is typed, it moves focus back as everywhere else, and Auto is only ever chosen
+  // from the chip's menu.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       event.key === "Tab" &&
@@ -540,12 +542,13 @@ export function Composer({
       !event.metaKey &&
       !event.ctrlKey &&
       !event.altKey &&
+      value.length === 0 &&
       mention === null &&
       approvalMode !== undefined &&
       onApprovalModeChange
     ) {
       event.preventDefault()
-      changeApprovalMode(nextApprovalMode(approvalMode))
+      changeApprovalMode(toggledApprovalMode(approvalMode))
       return
     }
     if (mention) {

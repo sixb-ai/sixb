@@ -18,6 +18,7 @@ import { type SubmitEvent, useEffect, useMemo, useRef, useState } from "react"
 import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../../agent/approvals"
 import { APPROVAL_MODE_ICONS } from "../../agent/components/approval-mode-chip"
 import { useAgentMessages } from "../../agent/i18n"
+import { moveRadioFocus } from "../../agent/utils/radio-group"
 import { useCurrentUser, useSignOut } from "../../session"
 import { notify, SectionPage } from "../section-page"
 import { apiErrorMessage, PageSection, Panel } from "../section-ui"
@@ -237,8 +238,10 @@ function ApprovalModeSection() {
     retry: false,
   })
 
+  // Each save runs after the one before, so the last choice is the one kept.
   const save = useMutation({
     ...updateAgentPreferencesMutation(),
+    scope: { id: "agent-preferences" },
     onSuccess: (updated) => {
       queryClient.setQueryData(getAgentPreferencesQueryKey(), updated)
       notify.success(messages.approvalsSaved)
@@ -256,7 +259,12 @@ function ApprovalModeSection() {
   return (
     <PageSection title={messages.approvals} description={messages.approvalsDescription}>
       <Panel>
-        <div role="radiogroup" aria-label={messages.approvals} className="divide-y divide-border">
+        <div
+          role="radiogroup"
+          aria-label={messages.approvals}
+          onKeyDown={(event) => moveRadioFocus(event, { select: true })}
+          className="divide-y divide-border"
+        >
           {AGENT_APPROVAL_MODES.map((mode) => {
             const Icon = APPROVAL_MODE_ICONS[mode]
             const selected = mode === current
@@ -266,7 +274,7 @@ function ApprovalModeSection() {
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                disabled={save.isPending}
+                tabIndex={selected ? 0 : -1}
                 onClick={() => {
                   if (!selected) save.mutate({ body: { approvalMode: mode } })
                 }}
@@ -300,6 +308,10 @@ function ApprovalModeSection() {
           })}
         </div>
       </Panel>
+      {/* A keyboard shortcut means nothing on a touch screen. */}
+      <p className="text-[0.8125rem] leading-5 text-muted-foreground pointer-coarse:hidden">
+        {messages.approvalsShortcut}
+      </p>
     </PageSection>
   )
 }

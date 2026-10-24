@@ -8,14 +8,16 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@sixb/ui/components"
-import { memo, useMemo } from "react"
+import { Fragment, memo, useMemo } from "react"
 import {
+  ApprovalCardsContext,
+  type HeldCall,
   heldCallIdsInMessages,
   heldCallOf,
   heldCallsInParts,
   isApprovalOutcomeMessage,
+  reportedApprovalOutcomes,
   type TranscriptApprovals,
-  TranscriptApprovalsContext,
 } from "../approvals"
 import { hasLiveContent, type LiveRunState } from "../live-run"
 import { authorKey, useMessageAuthors } from "../message-authors"
@@ -63,16 +65,23 @@ export interface TranscriptProps {
   readonly reconnecting?: boolean
   /**
    * The thread's calls held for approval. Each shows as a card under the work that made it, which
-   * its requester answers; without them, the cards say only what the agent asked.
+   * its requester answers; without them, as for an observer, the cards show only what the messages
+   * report of how each ended.
    */
   readonly approvals?: TranscriptApprovals
 }
 
 export function Transcript(props: TranscriptProps) {
+  const { approvals, messages } = props
+  const cards = useMemo(
+    () => ({ approvals: approvals ?? null, outcomes: reportedApprovalOutcomes(messages) }),
+    [approvals, messages]
+  )
+
   return (
-    <TranscriptApprovalsContext.Provider value={props.approvals ?? null}>
+    <ApprovalCardsContext.Provider value={cards}>
       <TranscriptView {...props} />
-    </TranscriptApprovalsContext.Provider>
+    </ApprovalCardsContext.Provider>
   )
 }
 
@@ -107,17 +116,35 @@ function TranscriptView({
   )
 
   // A call is answered on the card under the work that made it. One whose command output does not
-  // name it, such as output sent elsewhere, still waits: its card closes the transcript.
-  const unshownPending = useMemo(() => {
-    const pending = approvals?.approvals.filter((approval) => approval.status === "pending") ?? []
-    if (pending.length === 0) return []
+  // name it, such as output sent elsewhere, still gets a card, after its turn's answer, and keeps it
+  // once decided. One whose turn has no answer yet closes the transcript.
+  const unshown = useMemo(() => {
+    const byRun = new Map<string, HeldCall[]>()
+    const all = approvals?.approvals ?? []
+    if (all.length === 0) return { byRun, trailing: [] as HeldCall[] }
 
     const shown = new Set([
       ...heldCallIdsInMessages(messages),
       ...heldCallsInParts(live.parts).map((call) => call.id),
     ])
-    return pending.filter((approval) => !shown.has(approval.id)).map(heldCallOf)
+    const answered = new Set(messages.flatMap((message) => (message.runId ? [message.runId] : [])))
+    const trailing: HeldCall[] = []
+    for (const approval of all) {
+      if (shown.has(approval.id)) continue
+      if (!answered.has(approval.runId)) {
+        trailing.push(heldCallOf(approval))
+        continue
+      }
+      byRun.set(approval.runId, [...(byRun.get(approval.runId) ?? []), heldCallOf(approval)])
+    }
+    return { byRun, trailing }
   }, [approvals, messages, live.parts])
+  // The last message of each turn, where its unshown calls go.
+  const lastOfRun = useMemo(() => {
+    const last = new Map<string, string>()
+    for (const message of shownMessages) if (message.runId) last.set(message.runId, message.id)
+    return last
+  }, [shownMessages])
 
   // Messages one person sends in a row name them once; an answer in between names them again.
   const { continuedIds, lastUserAuthor } = useMemo(
@@ -184,21 +211,33 @@ function TranscriptView({
             aria-busy={live.active || showThinking}
             className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
           >
-            {shownMessages.map((message, index) => (
-              <TranscriptMessage
-                key={message.id}
-                message={message}
-                continued={continuedIds.has(message.id)}
-                scrollAnchor={message.id === anchoredUserMessageId}
-                // Only the newest answer can be continued; older ones keep their notice alone.
-                {...(index === shownMessages.length - 1 && onContinue
-                  ? { onContinue, continuing: Boolean(continuing) }
-                  : {})}
-              />
-            ))}
-            {unshownPending.length > 0 ? (
+            {shownMessages.map((message, index) => {
+              const calls =
+                message.runId && lastOfRun.get(message.runId) === message.id
+                  ? unshown.byRun.get(message.runId)
+                  : undefined
+              return (
+                <Fragment key={message.id}>
+                  <TranscriptMessage
+                    message={message}
+                    continued={continuedIds.has(message.id)}
+                    scrollAnchor={message.id === anchoredUserMessageId}
+                    // Only the newest answer can be continued; older ones keep their notice alone.
+                    {...(index === shownMessages.length - 1 && onContinue
+                      ? { onContinue, continuing: Boolean(continuing) }
+                      : {})}
+                  />
+                  {calls ? (
+                    <MessageScrollerItem messageId={`approvals:${message.id}`}>
+                      <ApprovalCards calls={calls} />
+                    </MessageScrollerItem>
+                  ) : null}
+                </Fragment>
+              )
+            })}
+            {unshown.trailing.length > 0 ? (
               <MessageScrollerItem messageId="approvals">
-                <ApprovalCards calls={unshownPending} />
+                <ApprovalCards calls={unshown.trailing} />
               </MessageScrollerItem>
             ) : null}
             {pendingUserText ||

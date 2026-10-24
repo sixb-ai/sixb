@@ -228,6 +228,25 @@ describe("what the agent may change, on Settings › Personal", () => {
     expect(sent).toEqual([{ approvalMode: "auto" }])
   })
 
+  // Removal proof: drop `moveRadioFocus` from the group's onKeyDown; the arrow saves nothing.
+  test("the arrow keys move through the modes, as in any radio group", async () => {
+    const sent: unknown[] = []
+    answerWith(async (request) => {
+      sent.push(await request.json())
+      return Response.json({ approvalMode: "accept-edits", approvalModeSource: "default" })
+    })
+    const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
+    const manual = view.getByRole("radio", { name: /^Manual/ })
+    expect(manual.getAttribute("tabindex")).toBe("0")
+    expect(view.getByRole("radio", { name: /^Auto/ }).getAttribute("tabindex")).toBe("-1")
+
+    manual.focus()
+    fireEvent.keyDown(manual, { key: "ArrowDown" })
+
+    await waitFor(() => expect(sent).toEqual([{ approvalMode: "accept-edits" }]))
+    expect(document.activeElement).toBe(view.getByRole("radio", { name: /^Accept edits/ }))
+  })
+
   test("is not offered in a project without an agent", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"))
 

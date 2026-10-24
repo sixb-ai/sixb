@@ -1,4 +1,4 @@
-import type { ListAgentThreadApprovalsResponse } from "@sixb/client"
+import type { DecideAgentApprovalResponse, ListAgentThreadApprovalsResponse } from "@sixb/client"
 import { createContext, useContext } from "react"
 import type { NormalizedPart } from "./parts"
 import type { AgentMessage, AgentRun } from "./types"
@@ -13,10 +13,24 @@ export const AGENT_APPROVAL_MODES = ["manual", "accept-edits", "auto"] as const
 
 export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number]
 
-/** The mode after `mode`, as Shift+Tab cycles them, wrapping around. */
-export function nextApprovalMode(mode: AgentApprovalMode): AgentApprovalMode {
-  const index = AGENT_APPROVAL_MODES.indexOf(mode)
-  return AGENT_APPROVAL_MODES[(index + 1) % AGENT_APPROVAL_MODES.length] ?? "manual"
+/**
+ * The mode Shift+Tab switches to: between Manual and Accept edits only. Auto is chosen from the menu,
+ * never reached by a key pressed in passing; from Auto, the key goes back to Manual.
+ */
+export function toggledApprovalMode(mode: AgentApprovalMode): AgentApprovalMode {
+  return mode === "manual" ? "accept-edits" : "manual"
+}
+
+/** From least to most allowed. */
+const APPROVAL_MODE_RANK: Readonly<Record<AgentApprovalMode, number>> = {
+  manual: 0,
+  "accept-edits": 1,
+  auto: 2,
+}
+
+/** Whether a turn in `mode` runs this call without asking. */
+export function approvalModeAllows(mode: AgentApprovalMode, call: AgentApproval["call"]): boolean {
+  return APPROVAL_MODE_RANK[mode] >= APPROVAL_MODE_RANK[alwaysAllowMode(call)]
 }
 
 /** The mode "Always allow" leaves its requester in: the least that runs such a call. */
@@ -121,20 +135,58 @@ export function heldCallOf(approval: AgentApproval): HeldCall {
   }
 }
 
+/** How a call the transcript holds no record of ended, from the message that told the agent. */
+export interface ReportedApprovalOutcome {
+  readonly status: Exclude<AgentApprovalStatus, "pending">
+  readonly outcome?: AgentApproval["outcome"]
+}
+
+/**
+ * How each held call ended, as the messages that resumed or followed its turn told the agent. A
+ * reader without the thread's approvals, such as an observer, still sees each card's outcome.
+ */
+export function reportedApprovalOutcomes(
+  messages: readonly AgentMessage[]
+): ReadonlyMap<string, ReportedApprovalOutcome> {
+  const outcomes = new Map<string, ReportedApprovalOutcome>()
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== "approval-outcome") continue
+      outcomes.set(part.approvalId, {
+        status: part.status,
+        ...(part.outcome === undefined
+          ? {}
+          : { outcome: part.outcome as AgentApproval["outcome"] }),
+      })
+    }
+  }
+  return outcomes
+}
+
 /** What a decision sends: approve, optionally for good in this thread, or deny. */
 export interface AgentApprovalDecision {
   readonly decision: "approve" | "deny"
   readonly always?: true
 }
 
+/** A decision that went through. `resume` says why the turn did not continue, when it did not. */
+export type AgentApprovalDecided = Pick<DecideAgentApprovalResponse, "approval" | "resume">
+
 /** Why a decision did not go through, as the card tells it. */
 export type AgentApprovalDecisionFailure =
-  /** The decision stands and the call ran, but the AI limit holds the resume back. */
-  | "limit"
   | "expired"
   /** Someone, on another device, decided first. */
   | "decided"
   | "failed"
+
+/** A decision that did not go through; nothing ran. */
+export class AgentApprovalDecisionError extends Error {
+  readonly name = "AgentApprovalDecisionError"
+
+  constructor(readonly code: AgentApprovalDecisionFailure) {
+    super(`[SixbApp] The approval decision did not go through: ${code}.`)
+  }
+}
 
 /** The held calls of a conversation, as its transcript shows and answers them. */
 export interface TranscriptApprovals {
@@ -146,15 +198,26 @@ export interface TranscriptApprovals {
   readonly canDecide: (approval: AgentApproval) => boolean
   /** Who decides on it, by name, for the others. */
   readonly requesterName: (approval: AgentApproval) => string
-  /** Resolves once decided; rejects with an {@link AgentApprovalDecisionFailure}. */
-  readonly decide?: (approval: AgentApproval, decision: AgentApprovalDecision) => Promise<void>
+  /** Rejects with an {@link AgentApprovalDecisionError} when nothing was decided. */
+  readonly decide?: (
+    approval: AgentApproval,
+    decision: AgentApprovalDecision
+  ) => Promise<AgentApprovalDecided>
 }
 
-export const TranscriptApprovalsContext = createContext<TranscriptApprovals | null>(null)
+/** What the cards of a transcript read: its approvals when it has them, and the reported outcomes. */
+export interface ApprovalCardsContext {
+  readonly approvals: TranscriptApprovals | null
+  readonly outcomes: ReadonlyMap<string, ReportedApprovalOutcome>
+}
 
-/** The conversation's held calls, or null where the transcript was given none (an observed one). */
-export function useTranscriptApprovals(): TranscriptApprovals | null {
-  return useContext(TranscriptApprovalsContext)
+export const ApprovalCardsContext = createContext<ApprovalCardsContext>({
+  approvals: null,
+  outcomes: new Map(),
+})
+
+export function useApprovalCards(): ApprovalCardsContext {
+  return useContext(ApprovalCardsContext)
 }
 
 function heldCall(value: unknown): HeldCall | null {
