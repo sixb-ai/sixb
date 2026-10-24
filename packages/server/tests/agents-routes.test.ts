@@ -22,6 +22,7 @@ import type {
   AgentRunFailureCode,
   AgentStorage,
   AiUsageStorage,
+  ConversationAgentRunSpec,
   SixbFailure,
 } from "@sixb/core/storage"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
@@ -52,7 +53,9 @@ const FAILURE: SixbFailure<AgentRunFailureCode> = {
 }
 
 type StartedRunInput = Omit<Parameters<AgentStorage["runs"]["create"]>[0], "executionId" | "spec"> &
-  Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
+  Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId"> & {
+    readonly spec?: ConversationAgentRunSpec
+  }
 
 function testExecution(token = createAgentRunExecutionToken()) {
   return { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) }
@@ -67,7 +70,7 @@ async function createStartedRun(storage: InMemoryStorage, input: StartedRunInput
   await storage.agents.runs.create({
     ...input,
     executionId,
-    spec: { model: { provider: "test", modelId: "test-model" } },
+    spec: input.spec ?? { model: { provider: "test", modelId: "test-model" } },
   })
   return storage.agents.runs.start({
     id: input.id,
@@ -1164,6 +1167,7 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-user",
+      spec: { model: { provider: "test", modelId: "test-model" }, tier: "standard" },
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -1197,6 +1201,8 @@ describe("agent routes", () => {
       id: run.id,
       threadId: thread.id,
       status: "running",
+      model: { provider: "test", modelId: "test-model" },
+      tier: "standard",
       modelId: "test-model",
       attempt: 1,
       streamId: `agents.runs.${run.id}`,

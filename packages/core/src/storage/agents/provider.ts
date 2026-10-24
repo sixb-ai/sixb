@@ -3,6 +3,7 @@ import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../.
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import type { UserPrincipal } from "../../auth"
 import { isJsonObject, isPlainRecord } from "../../json"
+import { isLanguageModelTier, LANGUAGE_MODEL_TIERS } from "../../models/catalog"
 import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
@@ -328,6 +329,20 @@ export function assertConversationAgentRunSpec(
       `[${prefix}] Conversational Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
+
+  if (spec.tier !== undefined && !isLanguageModelTier(spec.tier)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Conversational Agent run 'tier' must be one of: ${LANGUAGE_MODEL_TIERS.join(", ")}.`
+    )
+  }
+  if (spec.tierProbabilities !== undefined && !isTierProbabilities(spec.tierProbabilities)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Conversational Agent run 'tierProbabilities' must give each tier a probability.`
+    )
+  }
+
   for (const [name, value] of [
     ["timeZone", spec.timeZone],
     ["locale", spec.locale],
@@ -343,6 +358,15 @@ export function assertConversationAgentRunSpec(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isTierProbabilities(value: unknown): boolean {
+  if (!isRecord(value) || Object.keys(value).length !== LANGUAGE_MODEL_TIERS.length) return false
+
+  return LANGUAGE_MODEL_TIERS.every((tier) => {
+    const probability = value[tier]
+    return typeof probability === "number" && probability >= 0 && probability <= 1
+  })
 }
 
 /** Validate the semantic link between a conversational Agent run and its immutable execution. */

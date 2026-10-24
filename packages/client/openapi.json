@@ -37148,6 +37148,10 @@
                           "required": ["provider", "modelId"],
                           "additionalProperties": false
                         },
+                        "tier": {
+                          "type": "string",
+                          "enum": ["light", "standard", "heavy"]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -37915,6 +37919,10 @@
                           "required": ["provider", "modelId"],
                           "additionalProperties": false
                         },
+                        "tier": {
+                          "type": "string",
+                          "enum": ["light", "standard", "heavy"]
+                        },
                         "reasoning": {
                           "anyOf": [
                             {
@@ -38381,6 +38389,10 @@
                           },
                           "required": ["provider", "modelId"],
                           "additionalProperties": false
+                        },
+                        "tier": {
+                          "type": "string",
+                          "enum": ["light", "standard", "heavy"]
                         },
                         "reasoning": {
                           "anyOf": [
@@ -38912,6 +38924,10 @@
                             "required": ["provider", "modelId"],
                             "additionalProperties": false
                           },
+                          "tier": {
+                            "type": "string",
+                            "enum": ["light", "standard", "heavy"]
+                          },
                           "reasoning": {
                             "anyOf": [
                               {
@@ -39321,6 +39337,10 @@
                       },
                       "required": ["provider", "modelId"],
                       "additionalProperties": false
+                    },
+                    "tier": {
+                      "type": "string",
+                      "enum": ["light", "standard", "heavy"]
                     },
                     "reasoning": {
                       "anyOf": [
@@ -40923,6 +40943,10 @@
                             },
                             "required": ["provider", "modelId"],
                             "additionalProperties": false
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": ["light", "standard", "heavy"]
                           },
                           "reasoning": {
                             "anyOf": [

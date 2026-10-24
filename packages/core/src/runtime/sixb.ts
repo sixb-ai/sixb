@@ -24,7 +24,9 @@ import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-obj
 import type { LakeStorage } from "../lake-storage/types"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
+import { createDecisionRuntime } from "../models/decision/runtime"
 import { createModelsRuntime } from "../models/execution"
+import { ModelExecutionSession } from "../models/execution/session"
 import type { ModelsRuntime } from "../models/generation-types"
 import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
 import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/execution"
@@ -127,10 +129,20 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
 ): Omit<Sixb<TParams>, "execution"> {
   const actions = createActionsRuntime(runtime, execution)
   const workflows = createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows)
+  // One session per execution: the facade's model calls and the Agent's decisions share its
+  // accounting, AI limits and cancellation.
+  const session = runtime.modelExecution ?? new ModelExecutionSession(runtime, execution)
   const agent = createAgentRuntime<TParams>(
     runtime,
     execution,
     dependencies.definitions.models,
+    createDecisionRuntime(
+      runtime,
+      execution,
+      dependencies.definitions.models,
+      session,
+      "agent.run"
+    ),
     dependencies.sandbox,
     dependencies.definitions.security
   )
@@ -156,6 +168,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       runtime,
       execution,
       dependencies.definitions.models,
+      session,
       {
         canViewActionRun: async (id) => (await actions.runs.getById(id)) !== null,
         canViewWorkflowRun: async (id) => (await workflows.runs.getById(id)) !== null,

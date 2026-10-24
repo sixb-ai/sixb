@@ -12451,6 +12451,7 @@ export type PostAgentThreadMessageResponses = {
         provider: string
         modelId: string
       }
+      tier?: "light" | "standard" | "heavy"
       reasoning?:
         | "provider-default"
         | "none"
@@ -12729,6 +12730,7 @@ export type CancelAgentRunResponses = {
         provider: string
         modelId: string
       }
+      tier?: "light" | "standard" | "heavy"
       reasoning?:
         | "provider-default"
         | "none"
@@ -12924,6 +12926,7 @@ export type RetryAgentRunResponses = {
         provider: string
         modelId: string
       }
+      tier?: "light" | "standard" | "heavy"
       reasoning?:
         | "provider-default"
         | "none"
@@ -13086,6 +13089,7 @@ export type ListAgentThreadRunsResponses = {
         provider: string
         modelId: string
       }
+      tier?: "light" | "standard" | "heavy"
       reasoning?:
         | "provider-default"
         | "none"
@@ -13245,6 +13249,7 @@ export type GetAgentRunResponses = {
       provider: string
       modelId: string
     }
+    tier?: "light" | "standard" | "heavy"
     reasoning?:
       | "provider-default"
       | "none"
@@ -13852,6 +13857,7 @@ export type ListObservedAgentThreadRunsResponses = {
         provider: string
         modelId: string
       }
+      tier?: "light" | "standard" | "heavy"
       reasoning?:
         | "provider-default"
         | "none"
