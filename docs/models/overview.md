@@ -234,7 +234,8 @@ const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { d
 - If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
   run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
 - **A sub-agent asks with its turn's mode.** When one of its calls waits, it ends its work and
-  says so; the call waits on the turn that started it, and the agent tells you.
+  says so. The call waits on the turn that started it, which pauses on it once the sub-agent has
+  finished, as on one of its own.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
 Over HTTP: `GET`/`PUT /api/agent/preferences`, `PUT /api/agent-threads/:threadId/approval-mode`,

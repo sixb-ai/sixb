@@ -9,7 +9,7 @@ import type {
   AgentRunRecord,
   AgentStorage,
 } from "../storage/agents"
-import { isAgentApprovalMode } from "../storage/agents/provider"
+import { agentApprovalHoldsRun, isAgentApprovalMode } from "../storage/agents/provider"
 import { AGENT_APPROVAL_MODES } from "../storage/agents/types"
 import type { AgentApprovalDecider, AgentApprovalExecutor } from "./approval-executor"
 import { AgentRequestError } from "./errors"
@@ -284,6 +284,30 @@ export function turnResumeReadiness(approvals: readonly AgentApprovalRecord[]): 
     ) &&
     approvals.some((approval) => approval.reportedInMessageId === undefined)
   return resumable ? "ready" : "closed"
+}
+
+/**
+ * Whether a conversation turn pauses on the calls it holds. A call a child holds counts once the
+ * child has ended: until children pause themselves, a child still queued or running finishes on its
+ * own and reports its held call through `wait_agent`, and pausing the turn now would cancel it.
+ */
+export async function turnPausesOnHeldCalls(
+  agents: AgentStorage,
+  run: { readonly projectId: string; readonly id: string }
+): Promise<boolean> {
+  const { projectId, id: runId } = run
+  if (!(await agents.approvals.holdsRun({ projectId, runId }))) return false
+
+  const held = (await listTurnApprovals(agents, { projectId, runId })).filter((approval) =>
+    agentApprovalHoldsRun(approval, runId)
+  )
+  if (held.some((approval) => approval.callerRunId === runId)) return true
+
+  const callers = await agents.runs.getByIds({
+    projectId,
+    ids: [...new Set(held.map((approval) => approval.callerRunId))],
+  })
+  return callers.some((caller) => caller.status !== "queued" && caller.status !== "running")
 }
 
 /** The calls a conversation turn held, its children's included. */

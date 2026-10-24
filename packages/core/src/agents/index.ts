@@ -34,6 +34,7 @@ export {
   listChildApprovalsAwaiting,
   listTurnApprovals,
   stopAgentTurn,
+  turnPausesOnHeldCalls,
   turnResumeReadiness,
 } from "./approvals"
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
