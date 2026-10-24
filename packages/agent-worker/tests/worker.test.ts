@@ -2271,6 +2271,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
       confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
       getByIds: (params) => agents.runs.getByIds(params),
+      listThreadSubagents: (input) => agents.runs.listThreadSubagents(input),
       list: (input) => agents.runs.list(input),
       finish: (input) => {
         if (fails < failTimes) {
@@ -2316,6 +2317,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
       confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
       getByIds: (params) => agents.runs.getByIds(params),
+      listThreadSubagents: (input) => agents.runs.listThreadSubagents(input),
       list: (input) => agents.runs.list(input),
       finish: () => Promise.reject(new Error("storage down after message generation")),
     },

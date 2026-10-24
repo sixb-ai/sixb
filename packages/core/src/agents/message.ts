@@ -102,16 +102,19 @@ export type AgentApprovalCallSummary =
   | Pick<Extract<AgentApprovalCall, { readonly kind: "workflow" }>, "kind" | "workflowId">
 
 /**
- * A message a sub-agent read before its next step: today, its parent steering it. Sixb writes it in
- * the sub-agent's thread, where the child read it; the model reads it as data from the sender,
- * never from the user.
+ * A message a sub-agent read before its next step: today, its parent steering it, or answering the
+ * question it paused on. Sixb writes it in the sub-agent's thread, where the child read it; the
+ * model reads it as data from the sender, never from the user.
  */
 export interface AgentMailPart {
   readonly type: "mail"
   /** The mail's id, the same in the sender's and the reader's records. */
   readonly id: string
   readonly from: "parent"
-  readonly kind: "message"
+  /** `answer`: the reply to the question it asked, `inReplyTo`. */
+  readonly kind: "message" | "answer"
+  /** The question an answer replies to. */
+  readonly inReplyTo?: string
   readonly text: string
   /**
    * It came as the reader answered: the sender has not received that answer, so the reader writes

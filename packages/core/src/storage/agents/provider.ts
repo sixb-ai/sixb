@@ -26,6 +26,7 @@ import type {
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  FinishAgentRunInput,
   ForkAgentThreadInput,
   ListAgentApprovalsInput,
   RequestAgentApprovalInput,
@@ -610,6 +611,40 @@ export function assertSubagentThreadTakesRun(
       "active_run_exists",
       `[${prefix}] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
     )
+  }
+}
+
+/**
+ * Validate what a finish keeps: a child's result once it succeeded. A child that paused, on its
+ * held calls or on a question, may not have answered yet, so its text may be empty. A conversation
+ * turn keeps none, and has no parent to wait for.
+ */
+export function assertAgentRunFinishPayload(
+  kind: AgentRunRecord["kind"],
+  input: FinishAgentRunInput,
+  runId: string,
+  prefix = "Sixb"
+): void {
+  if (kind === "conversation") {
+    if (input.status === "succeeded" && input.result !== undefined) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Conversational Agent run '${runId}' cannot persist a subagent result.`
+      )
+    }
+    if (input.finishReason === "awaiting_answer") {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Conversational Agent run '${runId}' has no parent to wait for: only a subagent finishes awaiting_answer.`
+      )
+    }
+    return
+  }
+
+  if (input.status === "succeeded") {
+    const paused =
+      input.finishReason === "awaiting_approval" || input.finishReason === "awaiting_answer"
+    assertSubagentRunResult(input.result, runId, prefix, paused)
   }
 }
 

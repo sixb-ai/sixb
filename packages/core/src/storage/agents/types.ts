@@ -213,8 +213,9 @@ export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
 /**
  * Why a run ended — Sixb's provider-independent vocabulary. It includes model-loop reasons plus
  * platform-level endings such as `timeout`, `interrupted` for a turn whose worker died before
- * finishing it, or `awaiting_approval` for a succeeded turn that paused on calls waiting for its
- * requester, so reads remain typed and exhaustive. `other` and `unknown` preserve terminal state
+ * finishing it, `awaiting_approval` for a succeeded turn that paused on calls waiting for its
+ * requester, or `awaiting_answer` for a succeeded sub-agent that paused on a question its parent
+ * answers in a later turn, so reads remain typed and exhaustive. `other` and `unknown` preserve terminal state
  * when a provider adds a new reason.
  */
 export const AGENT_RUN_FINISH_REASONS = [
@@ -225,6 +226,7 @@ export const AGENT_RUN_FINISH_REASONS = [
   "timeout",
   "interrupted",
   "awaiting_approval",
+  "awaiting_answer",
   "error",
   "other",
   "unknown",
@@ -463,8 +465,8 @@ export type FinishAgentRunInput =
       readonly executionToken: string
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
-      /** Only a succeeded run pauses for approval. */
-      readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval">
+      /** Only a succeeded run pauses. */
+      readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval" | "awaiting_answer">
       readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly error?: SixbFailure<AgentRunFailureCode>
       readonly completedAt?: Date
@@ -483,6 +485,16 @@ export interface ListAgentRunsInput {
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
+}
+
+export interface ListThreadSubagentsInput {
+  readonly projectId: string
+  /** The conversation whose turns spawned them. */
+  readonly threadId: string
+  readonly spawnKey?: string
+  readonly finishReason?: AgentRunFinishReason
+  /** At most this many, 100 by default. */
+  readonly limit?: number
 }
 
 export interface ListAgentRunsResult {
@@ -672,6 +684,11 @@ export interface AgentRunStore {
     projectId: string
     ids: readonly string[]
   }): Promise<readonly AgentRunRecord[]>
+  /**
+   * The children of a conversation's turns, the latest turn's first, by its effective start, and
+   * within a turn the latest admitted first. Read by key (one per turn) or by finish reason.
+   */
+  listThreadSubagents(input: ListThreadSubagentsInput): Promise<readonly SubagentRunRecord[]>
   list(input: ListAgentRunsInput): Promise<ListAgentRunsResult>
 }
 

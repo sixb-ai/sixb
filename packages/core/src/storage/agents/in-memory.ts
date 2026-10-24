@@ -21,6 +21,7 @@ import {
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
+  assertAgentRunFinishPayload,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
@@ -28,7 +29,6 @@ import {
   assertCreateSubagentRunInput,
   assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
-  assertSubagentRunResult,
   assertSubagentThreadTakesRun,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
@@ -91,6 +91,7 @@ import type {
   ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
+  ListThreadSubagentsInput,
   MarkAgentApprovalsReportedInput,
   ReclaimAgentRunInput,
   RemoveAgentThreadParticipantInput,
@@ -698,20 +699,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
     }
-    if (input.status === "succeeded" && run.kind === "subagent") {
-      assertSubagentRunResult(
-        input.result,
-        run.id,
-        "Sixb",
-        input.finishReason === "awaiting_approval"
-      )
-    }
-    if (input.status === "succeeded" && run.kind === "conversation" && input.result !== undefined) {
-      throw new AgentStorageError(
-        "invalid_input",
-        `[Sixb] Conversational Agent run '${run.id}' cannot persist a subagent result.`
-      )
-    }
+    assertAgentRunFinishPayload(run.kind, input, run.id, "Sixb")
     if (input.finishReason === "awaiting_approval") {
       assertAwaitingApprovalFinish({
         runId: run.id,
@@ -757,6 +745,37 @@ class InMemoryAgentRunStore implements AgentRunStore {
       .map((id) => this.state.runs.get(key(params.projectId, id)))
       .filter((record): record is AgentRunRecord => record !== undefined)
       .map(clone)
+  }
+
+  async listThreadSubagents(
+    input: ListThreadSubagentsInput
+  ): Promise<readonly SubagentRunRecord[]> {
+    const runs = [...this.state.runs.values()].filter((run) => run.projectId === input.projectId)
+    const turns = new Map(
+      runs.flatMap((run) =>
+        run.kind === "conversation" && run.threadId === input.threadId ? [[run.id, run]] : []
+      )
+    )
+    const children = runs
+      .filter((run): run is SubagentRunRecord => run.kind === "subagent")
+      .filter((run) => turns.has(run.parentRunId))
+      .filter((run) => (input.spawnKey === undefined ? true : run.spawnKey === input.spawnKey))
+      .filter((run) =>
+        input.finishReason === undefined ? true : run.finishReason === input.finishReason
+      )
+      .sort((left, right) => {
+        const [a, b] = [turns.get(left.parentRunId), turns.get(right.parentRunId)]
+        return (
+          compareByDate(
+            a?.startedAt ?? a?.createdAt,
+            b?.startedAt ?? b?.createdAt,
+            left.parentRunId,
+            right.parentRunId,
+            "desc"
+          ) || compareByDate(left.createdAt, right.createdAt, left.id, right.id, "desc")
+        )
+      })
+    return children.slice(0, input.limit ?? 100).map(clone)
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

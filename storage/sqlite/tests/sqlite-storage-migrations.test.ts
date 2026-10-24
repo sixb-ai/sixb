@@ -197,6 +197,7 @@ const shippedMigrationIds = [
   "076-agent-approvals",
   "077-agent-approval-resume",
   "078-subagent-threads",
+  "079-subagent-questions",
 ]
 
 afterEach(async () => {
