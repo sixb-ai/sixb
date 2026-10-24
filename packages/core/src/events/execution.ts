@@ -4,6 +4,7 @@ import {
   type AuthorizedObjectReader,
   readerClearance,
   readerEventClearance,
+  readerViewConditions,
 } from "../execution/authorized-object-reader"
 import type { EventSources } from "../execution/object-reader-clearance"
 import { redactDomainEvent } from "../objects/clearance-redaction"
@@ -16,6 +17,11 @@ import type {
   EventsSubscribeInput,
 } from "./service"
 import type { StoredDomainEvent } from "./types"
+import {
+  type ObjectHistory,
+  visibleUnderConditions,
+  withoutHiddenPriorState,
+} from "./view-conditions"
 
 export interface EventsRuntime {
   /**
@@ -42,6 +48,21 @@ export interface EventsRuntime {
 
 export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
+
+  // Objects an event names that the reader cannot read: storage tells which still exist, and the
+  // log what the others held. Neither answer is shown.
+  const history: ObjectHistory = {
+    existing: async (objects) => {
+      const rows = await runtime.storage.objects.getByPrimaryIdBatch({
+        projectId: runtime.projectId,
+        items: objects,
+      })
+      return new Set(rows.keys())
+    },
+    lastEventBefore: (event, object) =>
+      runtime.events.lastObjectEventBefore({ cursor: event.cursor, ...object }),
+  }
+
   const visible = async (
     events: readonly StoredDomainEvent[]
   ): Promise<readonly StoredDomainEvent[]> => {
@@ -52,17 +73,31 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       case "unrestricted":
         return events
       case "principal": {
-        const viewable = events.filter((event) => canViewEvent(authority.context, event))
+        const reader = runtime.objectReader
+        const conditions = readerViewConditions(reader)
+        const viewable = events.filter((event) =>
+          canViewEvent(authority.context, event, conditions)
+        )
         if (viewable.length === 0) return viewable
 
-        const clearance = await readerClearance(runtime.objectReader)
-        const clearanceFor = await eventClearances(runtime.objectReader, viewable, clearance)
+        const clearance = await readerClearance(reader)
+        const clearanceFor = await eventClearances(reader, viewable, clearance)
 
-        return viewable.flatMap((event) => {
-          if (clearance && readsUnreadable(event, clearance)) return []
+        const readable = clearance
+          ? viewable.filter((event) => !readsUnreadable(event, clearance))
+          : viewable
+        const shown = await visibleUnderConditions(
+          reader,
+          readable,
+          conditions,
+          clearanceFor,
+          history
+        )
 
+        return shown.map((event) => {
           const redacting = clearanceFor(event)
-          return [redacting ? redactDomainEvent(event, redacting) : event]
+          const redacted = redacting ? redactDomainEvent(event, redacting) : event
+          return withoutHiddenPriorState(event, redacted, conditions)
         })
       }
     }

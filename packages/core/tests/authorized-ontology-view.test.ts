@@ -15,6 +15,7 @@ import {
   SixbHost,
   valueTypeRef,
 } from "../src"
+import { createDomainEventService } from "../src/events"
 import {
   createAuthorizedObjectReader,
   getAuthorizedOntologyView,
@@ -584,7 +585,7 @@ describe("authorized ontology view", () => {
       broker: host.broker,
       ontology,
       actionRegistry: host.definitions.actions,
-      events: host.events,
+      events: createDomainEventService({ projectId: host.id, broker: host.broker }),
       storage: host.storage,
       queues: host.queues,
       runtimeAuthorization: scope.authorization,

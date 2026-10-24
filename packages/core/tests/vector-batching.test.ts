@@ -7,6 +7,7 @@ import {
   type SixbErrorContext,
   SixbHost,
 } from "../src"
+import { createDomainEventService } from "../src/events"
 import { createKernelScope } from "../src/execution/scopes"
 import { createOntologyMaterializer } from "../src/materializer/materializer"
 import { VectorIndexingDeferred } from "../src/objects/vectors/indexing"
@@ -71,7 +72,7 @@ function fixture(
     embeddingModels: host.definitions.models?.embedding,
     actionRegistry: host.definitions.actions,
     broker: host.broker,
-    events: host.events,
+    events: createDomainEventService({ projectId: host.id, broker: host.broker }),
     queues: host.queues,
     storage: f.storage,
   }

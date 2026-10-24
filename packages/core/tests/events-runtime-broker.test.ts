@@ -6,6 +6,8 @@ import {
   EventsError,
   type StoredDomainEvent,
 } from "../src/events"
+import { objectPartitionKey } from "../src/materialization/event-envelopes"
+import type { OntologyMaterializationEvent } from "../src/materialization/events"
 
 function syncRunStarted(runId: string) {
   return {
@@ -117,6 +119,36 @@ describe("DomainEventService broker backing", () => {
 
     const limited = await runtime.read({ topics: ["syncs"], limit: 1 })
     expect(limited.map(runIds)).toEqual(["run-1"])
+  })
+
+  // Reproduce: drop the payload check of lastObjectEventBefore() in events/service.ts; the device
+  // whose type id and primary id join to the same key answers for the deleted one.
+  test("finds the last event of an object before another event", async () => {
+    const runtime = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
+    const marker = async (runId: string) => {
+      const [event] = await runtime.append({ events: [syncRunStarted(runId)] })
+      return event!.cursor
+    }
+
+    await runtime.publishEnvelopes([
+      deviceEvent("object.created", "Device", "a:b", "first"),
+      deviceEvent("object.updated", "Device", "a:b", "second"),
+    ])
+    const afterUpdate = await marker("after-update")
+    await runtime.publishEnvelopes([deviceEvent("object.deleted", "Device", "a:b", "second")])
+    const afterDeletion = await marker("after-deletion")
+    await runtime.publishEnvelopes([deviceEvent("object.created", "Device:a", "b", "other")])
+    const afterOther = await marker("after-other")
+
+    const before = (cursor: string) =>
+      runtime.lastObjectEventBefore({ cursor, objectTypeId: "Device", primaryId: "a:b" })
+
+    expect(await before(afterUpdate)).toMatchObject({
+      type: "object.updated",
+      payload: { properties: { name: "second" } },
+    })
+    expect((await before(afterDeletion))?.type).toBe("object.deleted")
+    expect(await before(afterOther)).toBeUndefined()
   })
 
   test("returns the latest event cursor without reading retained events", async () => {
@@ -316,5 +348,50 @@ class RecordingBroker extends InMemoryBroker {
   ): ReturnType<InMemoryBroker["append"]> {
     this.appended.push(params)
     return super.append(params)
+  }
+}
+
+/** An event of a device whose name is `name`, as the ontology outbox publishes it. */
+function deviceEvent(
+  type: "object.created" | "object.updated" | "object.deleted",
+  objectTypeId: string,
+  primaryId: string,
+  name: string
+): OntologyMaterializationEvent {
+  const context = {
+    id: `${type}:${objectTypeId}:${primaryId}`,
+    schemaVersion: 1 as const,
+    projectId: "project-a",
+    occurredAt: "2026-05-20T10:00:00.000Z",
+    correlationId: "correlation-1",
+    origin: { kind: "runtime" as const, requestId: "request-1" },
+    executor: { type: "request" as const, requestId: "request-1" },
+    commitId: `commit:${type}`,
+    commitOrdinal: 0,
+    topic: "objects" as const,
+    partitionKey: objectPartitionKey({ objectTypeId, primaryId }),
+  }
+
+  if (type === "object.deleted") {
+    return {
+      ...context,
+      type,
+      payload: {
+        objectTypeId,
+        primaryId,
+        propertyChanges: { name: { operation: "cleared", before: name, after: null } },
+      },
+    }
+  }
+
+  return {
+    ...context,
+    type,
+    payload: {
+      objectTypeId,
+      primaryId,
+      properties: { name },
+      propertyChanges: { name: { operation: "created", after: name } },
+    },
   }
 }

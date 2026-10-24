@@ -18,7 +18,6 @@ import {
   ref,
   type SharedAccessInvitation,
   SixbHost,
-  type StoredDomainEvent,
   userRef,
 } from "../src"
 import { agentServiceAccountId } from "../src/agents/authority"
@@ -493,21 +492,6 @@ describe("surfaces that do not apply view conditions deny the type", () => {
     await trusted.actions.request({ actionId: escalate.id, subject, runId: "act_trusted" })
     expect(await operator.actions.runs.getById("act_trusted")).toBeNull()
     expect((await operator.actions.runs.list()).runs).toEqual([])
-  })
-
-  test("events", async () => {
-    const { sixbFor } = await deploy()
-    const created = (events: readonly StoredDomainEvent[]) =>
-      events.flatMap((event) =>
-        event.type === "object.created"
-          ? [`${event.payload.objectTypeId}:${event.payload.primaryId}`]
-          : []
-      )
-
-    // The log holds the open ticket's creation: a reader of every ticket gets it.
-    expect(created(await sixbFor(["all"]).events.read())).toContain("ticket:t-open-alice")
-
-    expect(created(await sixbFor(["open"]).events.read())).toEqual(["team:team-1"])
   })
 
   test("rules", async () => {

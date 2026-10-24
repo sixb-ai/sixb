@@ -10,6 +10,7 @@ import type { AuthorizationContext } from "../authorization"
 import type { OpenedFileRef } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
+import type { ObjectEventHistory } from "../events/service"
 import type { RuntimeAuthorization } from "../execution"
 import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type { EmbeddingModelCatalog, RerankingModelCatalog, RerankingModelRef } from "../models"
@@ -62,7 +63,7 @@ export interface SixbHostContext {
   readonly broker: Broker
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionDefinitionCatalog
-  readonly events: DomainEventLog
+  readonly events: DomainEventLog & ObjectEventHistory
   readonly storage: Storage
   readonly queues: Queues
 }

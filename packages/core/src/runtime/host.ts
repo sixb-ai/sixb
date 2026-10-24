@@ -335,7 +335,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       broker: this.broker,
       ontology: definitions.ontology,
       actionRegistry: definitions.actions,
-      events: this.events,
+      events: this.eventService,
       storage: this.storage,
       queues: this.queues,
     }

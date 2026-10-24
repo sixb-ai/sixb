@@ -9,6 +9,14 @@ import type {
 } from "./events"
 import type { OntologyMaterializationPropertyChangeMap } from "./model"
 
+/** The partition key of an object's events, which the log can be read by. */
+export function objectPartitionKey(object: {
+  readonly objectTypeId: string
+  readonly primaryId: string
+}): string {
+  return `${object.objectTypeId}:${object.primaryId}`
+}
+
 /** Where an event sits in its commit: its id and its ordinal. */
 export interface OntologyMaterializationEventSequence {
   readonly id: string
@@ -46,7 +54,7 @@ export function materializationEvent(
         ...context,
         type: draft.type,
         topic: "objects",
-        partitionKey: `${draft.payload.objectTypeId}:${draft.payload.primaryId}`,
+        partitionKey: objectPartitionKey(draft.payload),
         payload: {
           ...draft.payload,
           propertyChanges: createdPropertyChanges(draft.payload.properties),
@@ -57,7 +65,7 @@ export function materializationEvent(
         ...context,
         type: draft.type,
         topic: "objects",
-        partitionKey: `${draft.payload.objectTypeId}:${draft.payload.primaryId}`,
+        partitionKey: objectPartitionKey(draft.payload),
         payload: draft.payload,
       }
     case "object.deleted":
@@ -65,7 +73,7 @@ export function materializationEvent(
         ...context,
         type: draft.type,
         topic: "objects",
-        partitionKey: `${draft.payload.objectTypeId}:${draft.payload.primaryId}`,
+        partitionKey: objectPartitionKey(draft.payload),
         payload: draft.payload,
       }
     case "link.created":
