@@ -69,9 +69,10 @@ import {
   createConversationAgentEnvironment,
   createSubagentEnvironment,
 } from "./run-environment"
-import { runSubagent, type SubagentWork, subagentWorkMessage } from "./run-subagent"
+import { runSubagent, type SubagentWork } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
 import { loadSubagentHistory } from "./subagent-continuation"
+import { SubagentInbox } from "./subagent-inbox"
 import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
@@ -737,6 +738,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       await runSubagent({
         history,
+        // From the first message: one its parent sent while it was queued is read at its first step.
+        inbox: new SubagentInbox(this.host.broker, run, history.messages),
         context: environment.turnContext,
         plan,
         run,
@@ -769,9 +772,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         executionToken,
         aborted ? "cancelled" : "failed",
         error,
-        work.parts?.some((part) => part.type !== "step-start")
-          ? subagentWorkMessage(run, work.parts)
-          : undefined
+        work.messages
       )
       if (finalized) {
         if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
@@ -1230,7 +1231,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     status: "failed" | "cancelled",
     error: unknown,
     /** What the run did, kept with its fate in one transaction. */
-    message?: AppendAgentMessageInput
+    messages?: readonly AppendAgentMessageInput[]
   ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
     try {
       const completedAt = new Date()
@@ -1254,8 +1255,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           ? { finishReason: "interrupted" as const }
           : {}),
       }
-      const finalized = message
-        ? await appendMessageAndFinishRunOrThrow(context.storage, { message, finish })
+      const finalized = messages?.length
+        ? await appendMessageAndFinishRunOrThrow(context.storage, { messages, finish })
         : await finishRunOrThrow(context.storage.agents, finish)
       return { run: finalized, failure }
     } catch (finalizeError) {

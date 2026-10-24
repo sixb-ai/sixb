@@ -310,17 +310,19 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     await context.beforeFinalize?.()
     const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-      message: {
-        id: assistantMessageId,
-        projectId,
-        threadId: run.threadId,
-        runId,
-        role: assistant.role,
-        parts: assistant.parts,
-        ...(context.authorPrincipal === undefined
-          ? {}
-          : { authorPrincipal: context.authorPrincipal }),
-      },
+      messages: [
+        {
+          id: assistantMessageId,
+          projectId,
+          threadId: run.threadId,
+          runId,
+          role: assistant.role,
+          parts: assistant.parts,
+          ...(context.authorPrincipal === undefined
+            ? {}
+            : { authorPrincipal: context.authorPrincipal }),
+        },
+      ],
       finish: {
         projectId,
         id: runId,
@@ -467,17 +469,19 @@ async function finalizeInterruptedTurn(input: {
 
   const assistantMessageId = createAgentMessageId()
   const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-    message: {
-      id: assistantMessageId,
-      projectId,
-      threadId: run.threadId,
-      runId: run.id,
-      role: "assistant",
-      parts,
-      ...(context.authorPrincipal === undefined
-        ? {}
-        : { authorPrincipal: context.authorPrincipal }),
-    },
+    messages: [
+      {
+        id: assistantMessageId,
+        projectId,
+        threadId: run.threadId,
+        runId: run.id,
+        role: "assistant",
+        parts,
+        ...(context.authorPrincipal === undefined
+          ? {}
+          : { authorPrincipal: context.authorPrincipal }),
+      },
+    ],
     finish: {
       projectId,
       id: run.id,

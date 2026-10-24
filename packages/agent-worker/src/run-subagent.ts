@@ -23,15 +23,17 @@ import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { SubagentHistory } from "./subagent-continuation"
+import type { SubagentDelivery, SubagentInbox } from "./subagent-inbox"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentRunFiles, AgentTurnContext } from "./types"
 
 /**
  * What a child did so far, kept in its thread however its run ends: a failed or stopped child
- * keeps it as an interrupted turn does.
+ * keeps it as an interrupted turn does. Its steps, and each message its parent sent it where it
+ * read it.
  */
 export interface SubagentWork {
-  parts?: readonly AgentMessagePart[]
+  messages?: readonly AppendAgentMessageInput[]
 }
 
 /**
@@ -52,8 +54,10 @@ export async function runSubagent(input: {
   readonly work?: SubagentWork
   /** Where it finds the files its parent handed over, and leaves the ones it returns. */
   readonly runFiles: AgentRunFiles
+  /** What its parent sends it while it runs: it reads it before its next step. */
+  readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
-  const { context, plan, run, thread, runtime } = input
+  const { context, plan, run, thread, runtime, inbox } = input
   const executionToken = run.execution?.token
   if (!executionToken) {
     throw createSixbError(
@@ -72,6 +76,7 @@ export async function runSubagent(input: {
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
+  let stepsRun = 0
   const generation = await runModelLoop({
     model: runtime.usageRecorder.wrapModel(plan.model),
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
@@ -79,7 +84,23 @@ export async function runSubagent(input: {
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
     maxSteps: plan.maxSteps,
     finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
-    ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
+    // A message from the parent comes after the step that was running when it arrived, and stays
+    // in the history of every later step.
+    prepareStep: async (step) => {
+      const prepared = await context.prepareStep?.(step)
+      const mail = await inbox.take(step.stepIndex)
+      if (!mail) return prepared
+
+      return { messages: [...(prepared?.messages ?? step.messages), ...toModelMessages([mail])] }
+    },
+    // One that arrives as the child answers is read too: it answers again, after reading it.
+    beforeComplete: async () => {
+      const mail = await inbox.take(stepsRun)
+      return mail ? toModelMessages([mail]) : undefined
+    },
+    onStepEnd: () => {
+      stepsRun += 1
+    },
     signal: abortSignal,
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) => context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
@@ -87,20 +108,17 @@ export async function runSubagent(input: {
     // child after that step, whatever its model would do next.
     pauseAfterStep: () => holdsSubagentCalls(context, run),
   })
-  const traceDetails = { threadId: run.threadId, runId: run.id }
-  const parts =
-    generation.status === "aborted"
-      ? agentTraceFromPartialModelLoop(generation.steps, generation.partialContent, traceDetails)
-      : agentTraceFromModelSteps(generation.steps, traceDetails)
-  if (input.work) input.work.parts = parts
+  const work = subagentWorkMessages(generation, run, inbox.deliveries)
+  if (input.work) input.work.messages = work
 
   return settleSubagent({
     ...input,
     executionToken,
     generation,
-    parts,
+    work,
     abortSignal,
     sandboxReadiness,
+    lastMessageAt: inbox.deliveries.at(-1)?.afterSteps ?? 0,
   })
 }
 
@@ -113,6 +131,8 @@ async function settleSubagent(
   input: Omit<Parameters<typeof finishSubagent>[0], "finishReason" | "text"> & {
     readonly generation: PausableModelLoopResult
     readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
+    /** After how many steps it read its parent's last message. */
+    readonly lastMessageAt: number
   }
 ): Promise<SubagentRunRecord> {
   const { generation, run } = input
@@ -138,7 +158,7 @@ async function settleSubagent(
   }
   return finishSubagent({
     ...input,
-    text: subagentResult(generation.steps, run),
+    text: subagentResult(generation.steps, run, input.lastMessageAt),
     finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
   })
 }
@@ -157,7 +177,7 @@ async function finishSubagent(input: {
   readonly executionToken: string
   readonly abortSignal: AbortSignal
   readonly finishReason: AgentRunFinishReason
-  readonly parts: readonly AgentMessagePart[]
+  readonly work: readonly AppendAgentMessageInput[]
   /** None yet for a paused child. */
   readonly text?: string
 }): Promise<SubagentRunRecord> {
@@ -170,7 +190,7 @@ async function finishSubagent(input: {
   input.runtime.assertCanContinue()
 
   const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
-    message: subagentWorkMessage(run, input.parts),
+    messages: input.work,
     finish: {
       projectId: context.id,
       id: run.id,
@@ -192,19 +212,45 @@ async function finishSubagent(input: {
   return finalized
 }
 
-/** The assistant message that keeps what a child run did in its thread. */
-export function subagentWorkMessage(
+/**
+ * What a child run did, as the messages its thread keeps: its steps, the one cut short included,
+ * and each message its parent sent it, where it read it. Each has the run's id.
+ */
+function subagentWorkMessages(
+  generation: PausableModelLoopResult,
   run: SubagentRunRecord,
-  parts: readonly AgentMessagePart[]
-): AppendAgentMessageInput {
-  return {
-    id: createAgentMessageId(),
-    projectId: run.projectId,
-    threadId: run.threadId,
-    runId: run.id,
-    role: "assistant",
-    parts,
+  deliveries: readonly SubagentDelivery[]
+): readonly AppendAgentMessageInput[] {
+  const details = { threadId: run.threadId, runId: run.id }
+  const messages: AppendAgentMessageInput[] = []
+  const push = (role: "user" | "assistant", parts: readonly AgentMessagePart[]) => {
+    messages.push({
+      id: createAgentMessageId(),
+      projectId: run.projectId,
+      threadId: run.threadId,
+      runId: run.id,
+      role,
+      parts,
+    })
   }
+  const pushSteps = (parts: readonly AgentMessagePart[]) => {
+    if (parts.some((part) => part.type !== "step-start")) push("assistant", parts)
+  }
+
+  let from = 0
+  for (const delivery of deliveries) {
+    pushSteps(agentTraceFromModelSteps(generation.steps.slice(from, delivery.afterSteps), details))
+    push("user", delivery.parts)
+    from = delivery.afterSteps
+  }
+
+  const rest = generation.steps.slice(from)
+  pushSteps(
+    generation.status === "aborted"
+      ? agentTraceFromPartialModelLoop(rest, generation.partialContent, details)
+      : agentTraceFromModelSteps(rest, details)
+  )
+  return messages
 }
 
 /**
@@ -249,8 +295,12 @@ function assertSubagentCanFinalize(input: {
 }
 
 /** The child's answer, or a failure that tells the parent what to do about none. */
-function subagentResult(steps: readonly ModelStep[], run: SubagentRunRecord): string {
-  const text = subagentAnswer(steps)
+function subagentResult(
+  steps: readonly ModelStep[],
+  run: SubagentRunRecord,
+  lastMessageAt: number
+): string {
+  const text = subagentAnswer(steps, lastMessageAt)
   if (!text) {
     const remedy = "Spawn it again with a task that says what its answer must contain."
     throw withFailureMessage(
@@ -267,14 +317,16 @@ function subagentResult(steps: readonly ModelStep[], run: SubagentRunRecord): st
 
 /**
  * What the child answers: the text it wrote once its last local tool returned, through any provider
- * continuation. Without any, the last text it wrote, such as an answer it gave before a final tool
- * call. Narration written before earlier tool calls never reaches the parent.
+ * continuation, and after the last message its parent sent it (read after `lastMessageAt` steps),
+ * which an answer written before it no longer answers. Without any, the last text it wrote, such
+ * as an answer it gave before a final tool call. Narration written before earlier tool calls never
+ * reaches the parent.
  */
-export function subagentAnswer(steps: readonly ModelStep[]): string {
+export function subagentAnswer(steps: readonly ModelStep[], lastMessageAt = 0): string {
   const ranLocalTools = steps.map((step) =>
     step.content.some((part) => part.type === "tool-call" && part.providerExecuted !== true)
   )
-  const answer = textOf(steps.slice(ranLocalTools.lastIndexOf(true) + 1))
+  const answer = textOf(steps.slice(Math.max(ranLocalTools.lastIndexOf(true) + 1, lastMessageAt)))
   if (answer) return answer
 
   const written = steps.map((step) => textOf([step])).filter(Boolean)

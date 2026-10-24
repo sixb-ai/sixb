@@ -47,10 +47,11 @@ export async function finishRunOrThrow(
   }
 }
 
+/** Append what a run did, in order, and finish it, in one transaction. */
 export async function appendMessageAndFinishRunOrThrow(
   storage: Storage,
   input: {
-    readonly message: AppendAgentMessageInput
+    readonly messages: readonly AppendAgentMessageInput[]
     readonly finish: FinishAgentRunInput
   }
 ): Promise<AgentRunRecord> {
@@ -61,7 +62,7 @@ export async function appendMessageAndFinishRunOrThrow(
         if (!agents) {
           throw new Error("[SixbAgentWorker] Agent storage is not configured.")
         }
-        await agents.messages.append(input.message)
+        for (const message of input.messages) await agents.messages.append(message)
         return agents.runs.finish(input.finish)
       })
     } catch (error) {
