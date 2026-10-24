@@ -170,20 +170,33 @@ await sixb.agent.threads.setApprovalMode(thread.id, "manual") // yours here; nul
 await sixb.agent.runs.request({ threadId: thread.id, text: "Mark INV-2041 paid", approvalMode: "manual" })
 
 const { approvals } = await sixb.agent.approvals.list({ threadId: thread.id, statuses: ["pending"] })
-await sixb.agent.approvals.decide(approvals[0].id, { decision: "approve" }) // runs it now
+const { approval, run } = await sixb.agent.approvals.decide(approvals[0].id, { decision: "approve" })
+// approval.outcome: what the call gave; run: the turn that picks up from there
 ```
 
 - **A turn keeps the mode it started with**: the message's, else the sender's choice in the
   conversation, else their default. Participants each have their own. `getApprovalMode` and the
   thread's `GET` say where yours comes from: `thread`, `default` or `fallback`.
-- **A call that waits does not run.** Sixb holds it, whatever the agent does, and tells the agent
-  to end its turn. A call that would be refused, such as a workflow start with invalid input, is
-  refused instead of held. Only whoever sent the message decides; an approved call runs with their
-  permissions and returns its result on the approval. `always: true` also raises their mode in
-  the conversation so such calls no longer wait.
-- **The agent learns how it ended with the next message.** A new message also sets aside the calls
-  still waiting: they never run. A turn that fails or is stopped cancels its own. An approval
-  expires after 7 days.
+- **A call that waits does not run.** Sixb holds it, whatever the agent does. A call that would be
+  refused, such as a workflow start with invalid input, is refused instead of held. Only whoever
+  sent the message decides; an approved call runs with their permissions, as it was asked, and
+  returns its result on the approval. `always: true` also raises their mode in the conversation,
+  and approves the turn's other calls that mode runs.
+- **The turn pauses, then resumes.** After the step that made the call, the turn ends `succeeded`
+  with `finishReason: "awaiting_approval"`, and keeps that finish reason; it holds no worker
+  meanwhile. Once every call it held is decided, even days later, a new turn continues it with the
+  same model and reasoning, and the agent reads how each call ended. Its mode is the paused turn's,
+  raised only by `always: true` on one of its calls. `decide` returns that turn as `run`.
+- **`decide` stands once the call ran.** If the turn cannot resume, `resume` says why
+  (`{ status: "refused", code, message, retrying }`). With `retrying`, as after an AI limit, Sixb
+  resumes the turn once it can; otherwise the next message reports the calls.
+- **What keeps a turn from resuming.** A new message sets the calls still waiting aside, and the
+  agent learns once that they never ran; a call approved meanwhile reports its result with a later
+  message. Stopping the paused turn (`runs.cancel`, even once its calls are decided), its sender
+  leaving the conversation, or a call expiring after 7 days stops it too: the next message reports
+  its calls. A turn that fails or is stopped while running cancels its own.
+- If a crash kept an approved call from running and the sender's sign-in ended since, Sixb does not
+  run it later: its outcome is `agent.approval_authority_lost`. Ask the Agent again.
 - The app does not show approvals yet; until it does, the default stays `auto`.
 - [Tools](./tools-and-authorization.md) run their actions without asking, whatever the mode.
 
