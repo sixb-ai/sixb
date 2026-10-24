@@ -287,6 +287,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("073-model-call-files", modelCallFilesSql),
     sqliteSql("074-agent-memory", agentMemorySql),
     sqliteSql("075-artifact-threads", artifactThreadsSql),
+    sqliteSql("076-agent-approvals", agentApprovalsSql),
   ],
 })
 
@@ -659,3 +660,4 @@ import generatedMediaUsageSql from "./migrations/072-generated-media-usage.sql" 
 import modelCallFilesSql from "./migrations/073-model-call-files.sql" with { type: "text" }
 import agentMemorySql from "./migrations/074-agent-memory.sql" with { type: "text" }
 import artifactThreadsSql from "./migrations/075-artifact-threads.sql" with { type: "text" }
+import agentApprovalsSql from "./migrations/076-agent-approvals.sql" with { type: "text" }

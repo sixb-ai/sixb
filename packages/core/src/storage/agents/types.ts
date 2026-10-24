@@ -1,13 +1,15 @@
+import type { ActionSubject } from "../../actions/types"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { AgentReasoning } from "../../agents/types"
 import type { Principal, UserPrincipal } from "../../auth"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
-import type { JsonValue } from "../../json"
+import type { JsonObject, JsonValue } from "../../json"
 import type {
   LanguageModelRef,
   LanguageModelTier,
   LanguageModelTierProbabilities,
 } from "../../models"
+import type { ActionRunFailure, ActionRunParams } from "../action-runs/types"
 
 // ── agent_threads — one conversation with an agent ──────────────────────────────────────────────
 
@@ -301,6 +303,8 @@ export interface ConversationAgentRunSpec {
   readonly timeZone?: string
   /** Canonical BCP 47 language of the requester. Absent uses the project locale. */
   readonly locale?: string
+  /** What the turn may change without asking its requester. Absent on older runs: `auto`. */
+  readonly approvalMode?: AgentApprovalMode
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
@@ -312,6 +316,8 @@ export interface SubagentRunSpec {
   /** Project tools available when the child was admitted. Runtime tools are injected separately. */
   readonly toolNames: readonly string[]
   readonly maxSteps: number
+  /** The parent turn's mode, copied when the child was admitted. Absent: `auto`. */
+  readonly approvalMode?: AgentApprovalMode
 }
 
 /** Durable child output returned to its parent by `wait_agent`. */
@@ -621,6 +627,228 @@ export interface AgentContextCheckpointStore {
   }): Promise<AgentContextCheckpointRecord | null>
 }
 
+// ── agent_approvals — calls of the Agent that wait for whoever asked ───────────────────────────
+
+/**
+ * What the Agent may change without asking its requester: `manual` asks for every action and
+ * workflow, `accept-edits` runs the actions that only change Sixb, `auto` runs everything.
+ */
+export const AGENT_APPROVAL_MODES = ["manual", "accept-edits", "auto"] as const
+
+export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number]
+
+/** The modes that hold some calls: the one that held a call is recorded on its approval. */
+export const AGENT_HOLDING_APPROVAL_MODES = [
+  "manual",
+  "accept-edits",
+] as const satisfies readonly AgentApprovalMode[]
+
+export type AgentHoldingApprovalMode = (typeof AGENT_HOLDING_APPROVAL_MODES)[number]
+
+export const AGENT_APPROVAL_STATUSES = [
+  "pending",
+  "approved",
+  "denied",
+  "cancelled",
+  "superseded",
+  "expired",
+] as const
+
+export type AgentApprovalStatus = (typeof AGENT_APPROVAL_STATUSES)[number]
+
+/** The statuses a pending approval is settled to without a decision. */
+export type AgentApprovalSettledStatus = Extract<
+  AgentApprovalStatus,
+  "cancelled" | "superseded" | "expired"
+>
+
+/**
+ * The held call, as it runs once approved. An action's params are normalized: what the user
+ * approves is exactly what runs. Its run id is the one the Agent named, so a repeated request finds
+ * the same approval and the same run.
+ */
+export type AgentApprovalCall =
+  | {
+      readonly kind: "action"
+      readonly actionId: string
+      readonly subject: ActionSubject
+      readonly params: ActionRunParams
+      readonly actionRunId: string
+      /** `external` when the action has a writeback or effects: it reaches beyond Sixb. */
+      readonly effect: "ontology" | "external"
+    }
+  | {
+      readonly kind: "workflow"
+      readonly workflowId: string
+      readonly input: JsonObject
+      readonly workflowRunId: string
+    }
+
+/** What running an approved call gave. */
+export type AgentApprovalOutcome =
+  | {
+      readonly kind: "action-run"
+      readonly runId: string
+      readonly status: "succeeded" | "failed"
+      readonly error?: ActionRunFailure
+    }
+  | { readonly kind: "workflow-run"; readonly runId: string; readonly queuedAt: string }
+  /** The call was refused when it ran, for example because its requester lost a grant. */
+  | { readonly kind: "error"; readonly error: SixbFailure }
+
+export interface AgentApprovalRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly threadId: string
+  /** The conversation turn the call belongs to. */
+  readonly runId: string
+  /** The run that made the call: the turn itself, or one of its children. */
+  readonly callerRunId: string
+  /** Who asked for the turn: the only one who decides, as the call runs with their rights. */
+  readonly requestedBy: Principal
+  /** The mode that held the call. */
+  readonly mode: AgentHoldingApprovalMode
+  /** The call's run id, unique among a thread's pending, approved and denied approvals. */
+  readonly callKey: string
+  readonly call: AgentApprovalCall
+  readonly status: AgentApprovalStatus
+  readonly createdAt: Date
+  readonly expiresAt: Date
+  readonly decidedAt?: Date
+  readonly decidedBy?: Principal
+  /** Set once an approved call ran. */
+  readonly outcome?: AgentApprovalOutcome
+  /** The user message that told the model how the approval ended. */
+  readonly reportedInMessageId?: string
+}
+
+export interface RequestAgentApprovalInput {
+  readonly id: string
+  readonly projectId: string
+  readonly runId: string
+  readonly callerRunId: string
+  /** The caller run's current delivery token: a stale delivery holds nothing. */
+  readonly executionToken: string
+  readonly requestedBy: Principal
+  readonly mode: AgentHoldingApprovalMode
+  readonly call: AgentApprovalCall
+  readonly createdAt?: Date
+  readonly expiresAt: Date
+}
+
+export interface RequestAgentApprovalResult {
+  readonly approval: AgentApprovalRecord
+  /** `false` when a pending, approved or denied approval of the thread had the same call key. */
+  readonly created: boolean
+}
+
+export interface DecideAgentApprovalInput {
+  readonly projectId: string
+  readonly id: string
+  readonly decision: "approved" | "denied"
+  readonly decidedBy: Principal
+  readonly decidedAt?: Date
+}
+
+export interface DecideAgentApprovalResult {
+  /** The approval afterwards: `expired` when its time ran out before this decision. */
+  readonly approval: AgentApprovalRecord
+  /** Whether this call moved it out of `pending` with the decision. */
+  readonly decided: boolean
+}
+
+export interface SettleAgentApprovalsInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly status: AgentApprovalSettledStatus
+}
+
+export interface MarkAgentApprovalsReportedInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly ids: readonly string[]
+  readonly messageId: string
+}
+
+export interface ListAgentApprovalsInput {
+  readonly projectId: string
+  readonly threadId?: string
+  readonly runId?: string
+  readonly requestedBy?: Principal
+  readonly statuses?: readonly AgentApprovalStatus[]
+  /** `false`: only the approvals no message reported yet. */
+  readonly reported?: boolean
+  readonly limit?: number
+  readonly offset?: number
+}
+
+export interface ListAgentApprovalsResult {
+  /** Oldest first. */
+  readonly approvals: readonly AgentApprovalRecord[]
+  readonly hasMore: boolean
+  readonly total: number
+}
+
+/**
+ * Held calls and their decisions. `runs.finish` cancels the pending approvals of a run that failed
+ * or was cancelled, in its own transaction; a succeeded run's stay pending for their decision.
+ */
+export interface AgentApprovalStore {
+  /**
+   * Fenced like a checkpoint: the caller run is running with `executionToken`, and is the
+   * conversation turn `runId` or one of its children. Returns the thread's pending, approved or
+   * denied approval with the same call key when there is one, and creates one otherwise.
+   */
+  request(input: RequestAgentApprovalInput): Promise<RequestAgentApprovalResult>
+  /** Compare-and-swap from `pending`; `null` when no such approval exists. */
+  decide(input: DecideAgentApprovalInput): Promise<DecideAgentApprovalResult | null>
+  /** Record what an approved call gave, once: an approval with an outcome is returned unchanged. */
+  recordOutcome(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly outcome: AgentApprovalOutcome
+  }): Promise<AgentApprovalRecord>
+  /** Settle the thread's pending approvals, and return the ones it settled. */
+  settle(input: SettleAgentApprovalsInput): Promise<readonly AgentApprovalRecord[]>
+  /** Mark the ones no message reported yet, and return their ids. */
+  markReported(input: MarkAgentApprovalsReportedInput): Promise<readonly string[]>
+  getById(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<AgentApprovalRecord | null>
+  list(input: ListAgentApprovalsInput): Promise<ListAgentApprovalsResult>
+}
+
+/** Each user's approval mode: a default, and their own choice in each thread. */
+export interface AgentApprovalModeStore {
+  getDefault(input: {
+    readonly projectId: string
+    readonly principal: Principal
+  }): Promise<AgentApprovalMode | null>
+  setDefault(input: {
+    readonly projectId: string
+    readonly principal: Principal
+    readonly mode: AgentApprovalMode
+    readonly updatedAt?: Date
+  }): Promise<void>
+  getForThread(input: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly principal: Principal
+  }): Promise<AgentApprovalMode | null>
+  /**
+   * `null` clears the choice: the user's turns in the thread follow their default again. Throws
+   * `thread_not_found` when the thread does not exist.
+   */
+  setForThread(input: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly principal: Principal
+    readonly mode: AgentApprovalMode | null
+    readonly updatedAt?: Date
+  }): Promise<void>
+}
+
 // ── Memory ──────────────────────────────────────────────────────────────────────────────────────
 
 /** One file of a memory repo, at its path from the repo root. */
@@ -730,4 +958,6 @@ export interface AgentStorage {
   readonly messages: AgentMessageStore
   readonly checkpoints: AgentContextCheckpointStore
   readonly memory: AgentMemoryStore
+  readonly approvals: AgentApprovalStore
+  readonly approvalModes: AgentApprovalModeStore
 }

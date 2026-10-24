@@ -13,6 +13,11 @@ export {
   type ActivityStorageContractSuiteOptions,
   runActivityStorageContractSuite,
 } from "./activity-storage-contract"
+export {
+  type AgentApprovalStorageContractStorage,
+  type AgentApprovalStorageContractSuiteOptions,
+  runAgentApprovalStorageContractSuite,
+} from "./agent-approval-storage-contract"
 export { createTestAgentExecution } from "./agent-execution"
 export {
   type AgentMemoryStorageContractStorage,

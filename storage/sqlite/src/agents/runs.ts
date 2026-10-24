@@ -393,6 +393,15 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
 
       this.releaseThread(run, completedAt)
+      if (input.status !== "succeeded") {
+        // A run that failed or was cancelled takes its held calls with it.
+        this.db
+          .query(
+            `UPDATE agent_approvals SET status = 'cancelled'
+             WHERE project_id = ? AND status = 'pending' AND (run_id = ? OR caller_run_id = ?)`
+          )
+          .run(input.projectId, input.id, input.id)
+      }
 
       return this.requireRun(input.projectId, input.id)
     })()

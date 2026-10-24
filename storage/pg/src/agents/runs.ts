@@ -347,6 +347,14 @@ export class PgAgentRunStore implements AgentRunStore {
       `
 
       await this.releaseThread(tx, run, completedAt)
+      if (input.status !== "succeeded") {
+        // A run that failed or was cancelled takes its held calls with it.
+        await tx`
+          UPDATE agent_approvals SET status = 'cancelled'
+          WHERE project_id = ${input.projectId} AND status = 'pending'
+            AND (run_id = ${input.id} OR caller_run_id = ${input.id})
+        `
+      }
 
       return rowToRunRecord(row)
     })
