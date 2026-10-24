@@ -60,10 +60,10 @@ createSixb({ models: { language: [glmModel, openaiModel] } })
 
 Sixb applies it whenever this model runs without an explicit choice: chat messages, AI workflow
 steps, and `generate()` calls. Without one, the provider's own default applies. An explicit
-`reasoning` always wins. Sixb checks the level of each model in `models.language` against the
-capabilities the provider declares at startup; if the provider later reports that the model does
-not support it, the call falls back to the provider default. A provider you write yourself sets
-the level as `defaultReasoning` on the `LanguageModel` it returns.
+`reasoning` always wins. Sixb checks the level of each model in `models.language` or on an AI
+workflow step against the capabilities the provider declares at startup; if the provider later
+reports that the model does not support it, the call falls back to the provider default. A
+provider you write yourself sets the level as `defaultReasoning` on the `LanguageModel` it returns.
 
 The default is an effort level. An AI workflow step can instead set its own `reasoning` to a level
 or a token budget such as `{ budgetTokens: 4096 }`; Sixb checks it against the step's model the same
