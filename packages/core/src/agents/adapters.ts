@@ -9,6 +9,7 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models"
+import { agentMailInstruction } from "./agent-mail"
 import { approvalOutcomeInstruction } from "./approval-outcome"
 import { serializeAgentContextForModel } from "./context-model"
 import type {
@@ -138,6 +139,10 @@ function userModelMessage<TMessage extends AgentMessage>(
     }
     if (part.type === "approval-outcome") {
       content.push({ type: "text", text: `${approvalOutcomeInstruction(part)}\n\n` })
+      return
+    }
+    if (part.type === "agent-message") {
+      content.push({ type: "text", text: agentMailInstruction(part) })
       return
     }
     if (part.type === "text") {

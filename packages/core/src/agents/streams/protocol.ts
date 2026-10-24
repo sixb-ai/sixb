@@ -289,6 +289,107 @@ export async function subscribeAgentRunCancel(
   )
 }
 
+// ── Inbox stream (mail to a sub-agent's thread) ─────────────────────────────────────────────────
+//
+// A per-thread channel a sub-agent's runs read at each step boundary: today, its parent steering
+// it. The sender is a run and the recipient a sub-agent's thread, so every run of the child reads
+// the same inbox. Its durable record is the sender's tool call and the reader's thread, which keeps
+// each `agent-message` part where the child read it, so the stream keeps it a day.
+
+export type AgentThreadInboxStreamId = `agents.threads.${string}.inbox`
+
+export function agentThreadInboxStreamId(threadId: string): AgentThreadInboxStreamId {
+  return `agents.threads.${threadId}.inbox`
+}
+
+const AGENT_MAIL_RECORD = "agent.mail"
+
+const AGENT_THREAD_INBOX_RETENTION = { maxAgeMs: 24 * 60 * 60 * 1000, maxRecords: 1_000 } as const
+
+export function agentThreadInboxStreamDefinition(threadId: string): BrokerStreamDefinition {
+  return { id: agentThreadInboxStreamId(threadId), retention: AGENT_THREAD_INBOX_RETENTION }
+}
+
+/** One message from a run to a sub-agent's thread. */
+export interface AgentMail {
+  /** Unique per message: a sender writing it again, or the broker redelivering it, is the same. */
+  readonly id: string
+  readonly fromRunId: string
+  readonly toThreadId: string
+  readonly kind: "message"
+  readonly text: string
+  readonly sentAt: string
+}
+
+function isAgentMail(value: unknown): value is AgentMail {
+  return (
+    isPlainRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.fromRunId === "string" &&
+    typeof value.toThreadId === "string" &&
+    value.kind === "message" &&
+    typeof value.text === "string" &&
+    typeof value.sentAt === "string"
+  )
+}
+
+/** Write a message to its recipient's inbox. Idempotent by its id where the broker dedupes. */
+export async function publishAgentMail(
+  broker: Broker,
+  params: { readonly projectId: string; readonly mail: AgentMail }
+): Promise<void> {
+  const { projectId, mail } = params
+  await broker.ensureStream({
+    projectId,
+    stream: agentThreadInboxStreamDefinition(mail.toThreadId),
+  })
+  await broker.append({
+    projectId,
+    streamId: agentThreadInboxStreamId(mail.toThreadId),
+    records: [
+      {
+        name: AGENT_MAIL_RECORD,
+        key: mail.toThreadId,
+        // The mail is composed only of validated JSON primitives.
+        payload: mail as unknown as JsonValue,
+        idempotencyKey: mail.id,
+      },
+    ],
+  })
+}
+
+/**
+ * Read a thread's mail after `afterCursor`, or from the start, every page of it. A record that is
+ * not mail to this thread is skipped. Carry the returned cursor to the next read.
+ */
+export async function readAgentMail(
+  broker: Broker,
+  params: { readonly projectId: string; readonly threadId: string; readonly afterCursor?: string }
+): Promise<{ readonly mail: readonly AgentMail[]; readonly cursor?: string }> {
+  const mail: AgentMail[] = []
+  let cursor = params.afterCursor
+
+  for (;;) {
+    const page = await broker.read({
+      projectId: params.projectId,
+      streamId: agentThreadInboxStreamId(params.threadId),
+      names: [AGENT_MAIL_RECORD],
+      ...(cursor === undefined ? {} : { afterCursor: cursor }),
+    })
+    for (const record of page.records) {
+      if (isAgentMail(record.payload) && record.payload.toThreadId === params.threadId) {
+        mail.push(record.payload)
+      }
+    }
+
+    const previous = cursor
+    cursor = page.cursor ?? cursor
+    if (!page.hasMore || cursor === previous) break
+  }
+
+  return { mail, ...(cursor === undefined ? {} : { cursor }) }
+}
+
 /** Exact portable failure exposed by a terminal Agent run stream event. */
 export type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 

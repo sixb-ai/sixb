@@ -1148,6 +1148,7 @@ export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
   AgentFilePart,
+  AgentMailPart,
   AgentMemoryReference,
   AgentMessage,
   AgentMessagePart,
