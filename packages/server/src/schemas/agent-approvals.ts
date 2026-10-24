@@ -65,6 +65,8 @@ export const AgentApprovalSchema = z.object({
   runId: z.string(),
   /** The turn itself, or the child of it that made the call. */
   callerRunId: z.string(),
+  /** The child that made the call, by the key the turn spawned it with; absent for the turn's own. */
+  caller: z.object({ runId: z.string(), key: z.string() }).optional(),
   /** Who asked for the turn: the only one who decides. */
   requestedBy: PrincipalSchema,
   /** The mode that held the call. */

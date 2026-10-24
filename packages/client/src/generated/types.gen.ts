@@ -8230,6 +8230,11 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                   truncated?: true
                 }
               }
+          caller?: {
+            runId: string
+            key: string
+            continues?: true
+          }
         }
       | {
           type: "reasoning"
@@ -12411,6 +12416,11 @@ export type ListAgentThreadMessagesResponses = {
                     truncated?: true
                   }
                 }
+            caller?: {
+              runId: string
+              key: string
+              continues?: true
+            }
           }
         | {
             type: "reasoning"
@@ -13931,6 +13941,10 @@ export type ListAgentThreadApprovalsResponses = {
       threadId: string
       runId: string
       callerRunId: string
+      caller?: {
+        runId: string
+        key: string
+      }
       requestedBy: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -14160,6 +14174,10 @@ export type DecideAgentApprovalResponses = {
       threadId: string
       runId: string
       callerRunId: string
+      caller?: {
+        runId: string
+        key: string
+      }
       requestedBy: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -14488,6 +14506,10 @@ export type ListAgentApprovalsResponses = {
       threadId: string
       runId: string
       callerRunId: string
+      caller?: {
+        runId: string
+        key: string
+      }
       requestedBy: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -14964,6 +14986,11 @@ export type ListObservedAgentThreadMessagesResponses = {
                     truncated?: true
                   }
                 }
+            caller?: {
+              runId: string
+              key: string
+              continues?: true
+            }
           }
         | {
             type: "reasoning"

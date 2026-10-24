@@ -139,6 +139,8 @@ export function heldCallOf(approval: AgentApproval): HeldCall {
 export interface ReportedApprovalOutcome {
   readonly status: Exclude<AgentApprovalStatus, "pending">
   readonly outcome?: AgentApproval["outcome"]
+  /** The sub-agent that made it, when the turn did not. */
+  readonly caller?: AgentApproval["caller"]
 }
 
 /**
@@ -157,6 +159,7 @@ export function reportedApprovalOutcomes(
         ...(part.outcome === undefined
           ? {}
           : { outcome: part.outcome as AgentApproval["outcome"] }),
+        ...(part.caller === undefined ? {} : { caller: part.caller }),
       })
     }
   }

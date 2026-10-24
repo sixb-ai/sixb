@@ -726,6 +726,7 @@ export const fr: Translation<AgentMessages> = {
     expired: "Expiré",
     expiredDetail: (days) => `Personne n’a décidé en ${count(days, "jour")}. Rien n’a été exécuté.`,
     askedForApproval: "Approbation demandée",
+    fromSubagent: (key: string) => `Demandé par le sous-agent ${key}`,
     effects: {
       ontology: "Les modifications restent dans vos données",
       external: "Contacte un système externe, puis met à jour vos données",

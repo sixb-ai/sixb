@@ -24504,6 +24504,23 @@
                                     "additionalProperties": false
                                   }
                                 ]
+                              },
+                              "caller": {
+                                "type": "object",
+                                "properties": {
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "key": {
+                                    "type": "string"
+                                  },
+                                  "continues": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  }
+                                },
+                                "required": ["runId", "key"],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["type", "approvalId", "status", "call"],
@@ -36719,6 +36736,23 @@
                                           "additionalProperties": false
                                         }
                                       ]
+                                    },
+                                    "caller": {
+                                      "type": "object",
+                                      "properties": {
+                                        "runId": {
+                                          "type": "string"
+                                        },
+                                        "key": {
+                                          "type": "string"
+                                        },
+                                        "continues": {
+                                          "type": "boolean",
+                                          "enum": [true]
+                                        }
+                                      },
+                                      "required": ["runId", "key"],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": ["type", "approvalId", "status", "call"],
@@ -41227,6 +41261,19 @@
                           "callerRunId": {
                             "type": "string"
                           },
+                          "caller": {
+                            "type": "object",
+                            "properties": {
+                              "runId": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["runId", "key"],
+                            "additionalProperties": false
+                          },
                           "requestedBy": {
                             "type": "object",
                             "properties": {
@@ -41836,6 +41883,19 @@
                         },
                         "callerRunId": {
                           "type": "string"
+                        },
+                        "caller": {
+                          "type": "object",
+                          "properties": {
+                            "runId": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["runId", "key"],
+                          "additionalProperties": false
                         },
                         "requestedBy": {
                           "type": "object",
@@ -42777,6 +42837,19 @@
                           },
                           "callerRunId": {
                             "type": "string"
+                          },
+                          "caller": {
+                            "type": "object",
+                            "properties": {
+                              "runId": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["runId", "key"],
+                            "additionalProperties": false
                           },
                           "requestedBy": {
                             "type": "object",
@@ -44015,6 +44088,23 @@
                                           "additionalProperties": false
                                         }
                                       ]
+                                    },
+                                    "caller": {
+                                      "type": "object",
+                                      "properties": {
+                                        "runId": {
+                                          "type": "string"
+                                        },
+                                        "key": {
+                                          "type": "string"
+                                        },
+                                        "continues": {
+                                          "type": "boolean",
+                                          "enum": [true]
+                                        }
+                                      },
+                                      "required": ["runId", "key"],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": ["type", "approvalId", "status", "call"],

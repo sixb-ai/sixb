@@ -1,4 +1,6 @@
 import type { AgentApprovalRecord, SixbHostView } from "@sixb/core"
+import { agentApprovalCallers } from "@sixb/core/internal/agents"
+import type { AgentStorage } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -27,14 +29,28 @@ import { handleAgentRouteError, serializeAgentRun, serializeThread } from "./age
 const DECIDING =
   "Only whoever asked for the turn decides: an approved call runs now, as the turn, with the rights their request carries, and the approval comes back with its outcome. A turn paused on its calls resumes once all of them are decided: `run` is the turn that continues it, and the Agent reads how each call ended. Once the call ran, the decision never fails: when the turn cannot resume, `resume` says why, and whether Sixb tries again, as it does once an AI limit resets. A new message sets the calls still waiting aside. None of these routes is reachable from the Agent's sandbox."
 
-function serializeApproval(
-  approval: AgentApprovalRecord
-): ReturnType<typeof AgentApprovalSchema.parse> {
+type SerializedApproval = ReturnType<typeof AgentApprovalSchema.parse>
+
+/** Each with the sub-agent that made it, when its turn did not make it itself. */
+async function serializeApprovals(
+  agents: AgentStorage,
+  approvals: readonly AgentApprovalRecord[]
+): Promise<SerializedApproval[]> {
+  const projectId = approvals[0]?.projectId
+  const callers = projectId ? await agentApprovalCallers(agents, projectId, approvals) : new Map()
+
+  return approvals.map((approval) =>
+    serializeApproval(approval, callers.get(approval.callerRunId)?.key)
+  )
+}
+
+function serializeApproval(approval: AgentApprovalRecord, callerKey?: string): SerializedApproval {
   return AgentApprovalSchema.parse({
     id: approval.id,
     threadId: approval.threadId,
     runId: approval.runId,
     callerRunId: approval.callerRunId,
+    caller: callerKey === undefined ? undefined : { runId: approval.callerRunId, key: callerKey },
     requestedBy: approval.requestedBy,
     mode: approval.mode,
     status: approval.status,
@@ -177,7 +193,7 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
           })
           return AgentApprovalListResponseSchema.parse({
             ...result,
-            approvals: result.approvals.map(serializeApproval),
+            approvals: await serializeApprovals(host.storage.agents, result.approvals),
           })
         } catch (error) {
           return handleAgentRouteError(error, set)
@@ -215,8 +231,9 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = DecideAgentApprovalBodySchema.parse(body)
           const decided = await sixb.agent.approvals.decide(approval.id, parsed)
+          const [serialized] = await serializeApprovals(host.storage.agents, [decided.approval])
           return DecideAgentApprovalResponseSchema.parse({
-            approval: serializeApproval(decided.approval),
+            approval: serialized,
             ...(decided.run === undefined ? {} : { run: serializeAgentRun(decided.run) }),
             ...(decided.resume === undefined ? {} : { resume: decided.resume }),
           })
@@ -258,7 +275,7 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
           })
           return AgentApprovalListResponseSchema.parse({
             ...result,
-            approvals: result.approvals.map(serializeApproval),
+            approvals: await serializeApprovals(host.storage.agents, result.approvals),
           })
         } catch (error) {
           return handleAgentRouteError(error, set)

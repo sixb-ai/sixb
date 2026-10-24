@@ -685,6 +685,7 @@ export const en = {
     expired: "Expired",
     expiredDetail: (days: number) => `Nobody decided within ${count(days, "day")}. It didn't run.`,
     askedForApproval: "Asked for approval",
+    fromSubagent: (key: string) => `Asked by the sub-agent ${key}`,
     effects: {
       ontology: "Changes stay in your data",
       external: "Reaches an external system, then updates your data",
