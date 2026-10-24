@@ -144,11 +144,18 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
   minute before the turn's time is up, the agent stops waiting and answers with what the others
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
+  One waiting on a question is the exception, below.
 - **The agent can steer a sub-agent at work.** It sends it a message to correct its course, add
   what it lacks or narrow its task, and the sub-agent reads it before its next step. One that
   comes as the sub-agent answers makes it write its result again, and the agent keeps both
   answers. A sub-agent that finished, or waits for your approval, takes no new message, and the
   agent is told so; one sent just before it paused reaches it when it continues.
+- **A sub-agent can ask the agent a question** when only the agent or you can settle it, such as
+  "Calendar year or the April–March fiscal year?". Otherwise it makes a reasonable assumption and
+  says so in its answer. The agent answers from the conversation when it can. When the answer is
+  yours to give, the agent asks you and its turn ends: the sub-agent pauses on its question, and
+  once you reply, the agent passes your answer on and the sub-agent continues where it stopped,
+  with its work and files. If you stop the turn instead, the sub-agent stops with it.
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.

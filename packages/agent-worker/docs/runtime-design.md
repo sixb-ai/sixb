@@ -135,7 +135,8 @@ Each child:
   stream (see [Child threads](#child-threads));
 - stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
   the parent's deadline, which its spec carries, so its wait in the queue counts against it. Once
-  its parent has ended, the gateway and the publish transaction refuse it;
+  its parent has ended, the gateway and the publish transaction refuse it. A child waiting on its
+  question when its parent finishes pauses instead: see [questions to the parent](#questions-to-the-parent);
 - is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
   run actions or published. Its parent decides whether to spawn it again;
 - holds a call its mode does not run on its parent's turn, and pauses: see
@@ -207,7 +208,9 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
   approval may wait, for the continuation below.
 - **Kinds.** Every mail carries `text` its reader's model can read. A reader delivers a kind it
   does not know (a newer sender's) as a message, with a warning, so no cursor passes mail it never
-  delivered; a record with no mail envelope is reported and passed.
+  delivered; a record with no mail envelope is reported and passed. `question`, `answer` and
+  `deferred` are a child's questions and their replies (see
+  [questions to the parent](#questions-to-the-parent)): never read as messages.
 - **Reading.** At each step boundary the child reads its inbox from its last cursor, from the
   start for its first step, so a message sent while it was queued is read then. It keeps each id
   once, whatever the broker delivers again, and skips the ids its thread already holds. The
@@ -230,6 +233,58 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
 - **Refusals.** A key that is no child of the turn, a child of one of the conversation's 20 latest
   earlier turns (spawn it again), a child that ended, and a paused one are refused, each with what
   to do.
+
+## Questions to the parent
+
+A child asks with `ask_parent({ question })` and waits for the answer within its step. The
+question and its replies travel through the same inboxes as messages (`src/subagent-inbox.ts`,
+`src/child-questions.ts`, `src/subagent-tools.ts`):
+
+- **Asking.** The child writes a `question` mail to its parent turn's inbox,
+  `agents.runs.<parentRunId>.inbox`, naming its thread (`fromThreadId`), its id
+  `<childRunId>:<modelCallId>:<toolCallId>`, and waits on its thread's inbox, subscribed, for the
+  parent's reply (`inReplyTo` the question), bounded by its signal: its cancel, its parent's, its
+  deadline. One question at a time: a second `ask_parent` while one waits is refused. Replies never
+  reach the step-boundary reads as messages, a continuation's included, and the first reply counts.
+- **The parent's wait wakes.** From its first child, the turn subscribes to its inbox; when it
+  cannot, `wait_agent` reads the inbox at each poll instead. `wait_agent` returns as soon as a
+  question comes, from any child of the turn, not only those it waits for, since a child blocked
+  on its question never finishes. A question it already returned no longer stops a wait for other
+  children, only a wait for its own. `questions` (`key`, `runId`, `id`, `text`) lists the questions
+  it returns first and those of the children it waits for, and each is on its child's result. The
+  finish poll stays as it was.
+- **Answering.** While the child waits on a question the model has read, the parent's next
+  `message_agent` to its key is the answer: an `answer` mail, which `ask_parent` returns as
+  `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
+  the second is a message. A message sent before the model read the question stays a message. The
+  answer's id is the call's, so a replay is the same answer, sent once.
+- **A question the model has not read.** When the model answers without tools, a question it has
+  not read comes as one more step, a `<sixb_child_questions>` block: the turn does not end on an
+  answer that ignores it.
+- **The turn's end.** Before the turn records its end, while it still runs, it writes a `deferred`
+  reply to each child still waiting on its question, and waits, until 10 s before its deadline,
+  for each to pause: `succeeded`, `finishReason: "awaiting_answer"`, its work in its thread, the
+  `ask_parent` call and its `deferred` output, which names the question's id, included, and its
+  `out/` in its result. Only then does it wait for its other children when it pauses, and record its end, which
+  cancels those still at work. The repair pass leaves a running turn's children alone, so a child
+  that pauses is never cancelled under it. A cancelled turn or one that fails or times out stops
+  its children, waiting or not, and their own signal ends the wait. A child that held a call in
+  the same step pauses `awaiting_approval`: only a decision continues it, its `ask_parent` output
+  then says it goes on without an answer, and it can ask again.
+- **The next turn continues it.** A turn reads, after its conversation, a
+  `<sixb_waiting_children>` block of the conversation's children still paused on a question. It
+  comes from one indexed read, `runs.listThreadSubagents` with `finishReason: "awaiting_answer"`
+  (a partial index on paused children), which finds none at once in a conversation that has none,
+  however many turns it had. `wait_agent` lists a paused child's id as `awaiting_answer`, with its
+  question, read from the last message of the run that paused. `message_agent` to a key no child
+  of the turn holds reads the latest child under that key in the conversation, then the latest run
+  of its thread, past the continuations that failed or were cancelled. One `awaiting_answer` is
+  continued as the next run of its thread under this turn and the same key, as
+  [paused children](#paused-children) are, with the answer's `mail` part in its trigger instead of
+  outcomes; the failed attempts' messages leave the thread first, and a second answer in the same
+  turn is refused. The continuation reads it, as a `<sixb_parent_answer>` block, after the thread's
+  messages, so its request starts with the bytes the paused run's last one had. `wait_agent` by
+  the old id returns its answer.
 
 ## Child runs
 
