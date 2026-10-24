@@ -425,20 +425,6 @@ describe("reads through view conditions", () => {
 // The surfaces below decide on view:object, which a conditional grant never fills. Each test is a
 // guard a later change opens deliberately, by reading through the conditions there.
 describe("surfaces that do not apply view conditions deny the type", () => {
-  test("telemetry reads", async () => {
-    const { sixbFor } = await deploy()
-    const reader = sixbFor(["open"])
-
-    const denial = await reader.objects
-      .getLatestTelemetry({
-        objectTypeId: Ticket.id,
-        objectId: "t-open-alice",
-        propertyId: "temperature",
-      })
-      .catch((error) => error)
-    expect(denial).toBeInstanceOf(AuthorizationError)
-  })
-
   test("telemetry appends", async () => {
     const { sixbFor } = await deploy()
 

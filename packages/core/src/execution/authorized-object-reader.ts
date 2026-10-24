@@ -264,17 +264,11 @@ class AuthorizedObjectReaderImpl {
       propertyId: input.propertyId,
     })
     const clearance = await this.#security.clearance.current()
-    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance, {
-      everyObject: true,
-    })
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
 
     if (hidesProperty(request, clearance)) return false
-    if (this.#security.authority.type !== "delegated") return true
-    const [readable] = await this.#storage.selectsObjectProperties({
-      projectId: this.#security.runtime.projectId,
-      items: [request],
-    })
-    return readable ?? false
+    const [selected] = await this.#selectsObjectProperties([request])
+    return selected ?? false
   }
 
   async canReadObjectPropertiesBatch(
@@ -290,16 +284,9 @@ class AuthorizedObjectReaderImpl {
     const clearance = await this.#security.clearance.current()
     this.#security.assertObjectTypesViewable(
       request.items.map((item) => item.objectTypeId),
-      clearance,
-      { everyObject: true }
+      clearance
     )
-    const selected =
-      this.#security.authority.type === "delegated"
-        ? await this.#storage.selectsObjectProperties({
-            ...request,
-            projectId: this.#security.runtime.projectId,
-          })
-        : request.items.map(() => true)
+    const selected = await this.#selectsObjectProperties(request.items)
     return request.items.map(
       (item, index) => !hidesProperty(item, clearance) && selected[index] === true
     )
@@ -701,6 +688,31 @@ class AuthorizedObjectReaderImpl {
       canViewUsers: isRuntimeAllowed(this.#security.runtime, { kind: "users.view" }),
       users: this.#users,
     })
+  }
+
+  /**
+   * Whether the reader's storage selects each property of its object. A delegated reader selects
+   * what its share does. A principal reads a type it views through a condition object by object,
+   * so a hidden object and a missing one both select nothing; it selects every other property.
+   */
+  async #selectsObjectProperties(
+    items: readonly CanReadObjectPropertyInput[]
+  ): Promise<readonly boolean[]> {
+    const readsByObject = (item: CanReadObjectPropertyInput) =>
+      this.#security.authority.type === "delegated" ||
+      this.#security.viewsThroughCondition(item.objectTypeId)
+
+    const checked = items.filter(readsByObject)
+    const selected =
+      checked.length === 0
+        ? []
+        : await this.#storage.selectsObjectProperties({
+            projectId: this.#security.runtime.projectId,
+            items: checked,
+          })
+
+    let next = 0
+    return items.map((item) => !readsByObject(item) || selected[next++] === true)
   }
 
   #omitHidden<TRow extends ObjectRow>(row: TRow, clearance: Clearance): TRow {
