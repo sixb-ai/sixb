@@ -136,7 +136,8 @@ Each child:
 - is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
   run actions or published. Its parent decides whether to spawn it again;
 - holds a call its mode does not run on its parent's turn, finishes and says so; `wait_agent` lists
-  that call under `awaitingApproval`.
+  that call under `awaitingApproval`. The parent pauses on it only once the child has ended
+  (`turnPausesOnHeldCalls`): pausing earlier would cancel the child. Children don't pause yet.
 
 `subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They execute on a
 separate worker lane, sized by `subagentConcurrency`, so waiting parents cannot consume their

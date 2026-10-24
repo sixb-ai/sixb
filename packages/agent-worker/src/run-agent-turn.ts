@@ -4,6 +4,7 @@ import {
   type PausableModelLoopResult,
   runModelLoop,
   toModelMessages,
+  turnPausesOnHeldCalls,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
@@ -330,10 +331,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
 /**
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
- * waiting, or decided and not reported to the model yet.
+ * waiting, or decided and not reported to the model yet. A child's counts once the child has ended.
  */
 function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): Promise<boolean> {
-  return agents.approvals.holdsRun({ projectId: run.projectId, runId: run.id })
+  return turnPausesOnHeldCalls(agents, run)
 }
 
 /**
