@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs"
-import type { ModelCatalogInput } from "@sixb/core"
+import type { LanguageModel } from "@sixb/core"
 import {
   col,
   type DatasetDefinition,
@@ -190,7 +190,7 @@ export const sixb = new SixbHost({
         stream: async () => {
           throw new Error("Unused fixture model")
         },
-      } satisfies NonNullable<ModelCatalogInput["language"]>[number],
+      } satisfies LanguageModel,
     ],
   },
   sandboxes,

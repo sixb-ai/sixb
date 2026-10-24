@@ -816,6 +816,46 @@ describe("SixbHost workflow registration", () => {
     )
   })
 
+  test("checks an agent step's reasoning against its tier's model", () => {
+    // Proven by removal: check the reasoning against the default model whatever the step's tier.
+    const reviewer: LanguageModel = {
+      ...testModel("test", "reviewer-model"),
+      definition: {
+        kind: "language",
+        providerId: "test",
+        modelId: "reviewer-model",
+        capabilities: { reasoning: { efforts: ["low"] } },
+      },
+    }
+    const host = (model: "light" | "heavy") =>
+      new SixbHost({
+        ontology: [Transaction, Invoice],
+        models: { language: { standard: workflowModel, heavy: reviewer } },
+        workflows: [
+          withStep("tier-workflow", resolveStep("tier-step", { model, reasoning: "high" })),
+        ],
+        ...createTestRuntimeDeps(),
+      })
+
+    // A tier left out runs the standard model, which declares no reasoning limits.
+    expect(() => host("light")).not.toThrow()
+    expect(() => host("heavy")).toThrow(
+      /agent step "tier-step" cannot use its reasoning with language model "test\/reviewer-model"/
+    )
+  })
+
+  test("rejects an agent step model that is neither a model nor a tier", () => {
+    // Proven by removal: drop the tier check from defineAgentStep.
+    expect(() =>
+      defineAgentStep("unknown-tier", {
+        instructions: "Resolve invoices.",
+        model: "medium" as unknown as "light",
+      })
+    ).toThrow(
+      'Agent step "unknown-tier" has unknown model tier "medium". Use light, standard or heavy, or pass a model.'
+    )
+  })
+
   test("checks an agent step's own model like a catalog model", () => {
     // Proven by removal: drop the assertValidLanguageModel call for step models in validation.
     const limited: LanguageModel = {
@@ -879,6 +919,17 @@ describe("SixbHost workflow registration", () => {
       error: WorkflowDefinitionError,
       message:
         "Workflow \"missing-model-workflow\" agent step \"missing-model\" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().",
+    },
+    {
+      name: "an agent step tier without 'models.language'",
+      options: {
+        workflows: [
+          withStep("missing-tier-workflow", resolveStep("missing-tier", { model: "light" })),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message:
+        'Workflow "missing-tier-workflow" agent step "missing-tier" needs a model for tier "light". Configure \'models.language\' or pass a model to defineAgentStep().',
     },
     {
       name: "an agent-step tool outside the project catalog",

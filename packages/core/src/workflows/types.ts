@@ -15,6 +15,7 @@ import type { EventsRuntime } from "../events/execution"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
 import type { LogsRuntime } from "../logging/execution"
+import type { LanguageModelTier } from "../models/catalog"
 import type { ModelsRuntime } from "../models/generation-types"
 import type { LanguageModel } from "../models/language-model"
 import type { ObjectsRuntime } from "../objects/execution"
@@ -142,7 +143,8 @@ export type AgentStepPrompt<TInput extends Record<string, unknown>> = (
 
 /** Runtime configuration owned directly by a workflow Agent step. */
 export interface DefineAgentStepConfig {
-  readonly model?: LanguageModel
+  /** A model runs as given; a tier runs that tier's model from `models.language`. */
+  readonly model?: LanguageModel | LanguageModelTier
   readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
@@ -168,7 +170,7 @@ export interface AgentStepDefinition<
 > {
   readonly kind: "agentStep"
   readonly id: TId
-  readonly model?: LanguageModel
+  readonly model?: LanguageModel | LanguageModelTier
   readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groupIds: readonly string[]

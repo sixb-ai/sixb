@@ -1,6 +1,7 @@
 import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
 import { AGENT_REASONING_LEVELS, isAgentToolDefinition } from "../agents"
+import { formatLanguageModelTiers, isLanguageModelTier } from "../models/catalog"
 import { isModelReasoning } from "../models/language-model"
 import type { SchemaOrRef } from "../ontology"
 import type { SandboxFactory } from "../sandboxes"
@@ -129,6 +130,11 @@ export function defineAgentStep<const TId extends string>(
   }
   if (typeof config.instructions !== "string" || !config.instructions.trim()) {
     throw new WorkflowDefinitionError(`Agent step "${id}" instructions must not be empty.`)
+  }
+  if (typeof config.model === "string" && !isLanguageModelTier(config.model)) {
+    throw new WorkflowDefinitionError(
+      `Agent step "${id}" has unknown model tier "${config.model}". Use ${formatLanguageModelTiers()}, or pass a model.`
+    )
   }
   if (config.reasoning !== undefined && !isModelReasoning(config.reasoning)) {
     throw new WorkflowDefinitionError(

@@ -188,6 +188,34 @@ describe("language generation", () => {
     ).toBe("Hello")
   })
 
+  test("runs a tier's model from the catalog, and standard's for a tier left out", async () => {
+    // Proven by removal: select `input.model ?? default` again; the tier name reaches the call as
+    // its model.
+    const light = fakeModel({ modelId: "light", text: "Light" })
+    const standard = fakeModel({ modelId: "standard", text: "Standard" })
+    const { sixb } = setup({ light: light.model, standard: standard.model })
+
+    const generate = async (model?: "light" | "heavy") =>
+      (await sixb.models.language.generate({ prompt: "Hi", ...(model ? { model } : {}) })).output
+    expect(await generate("light")).toBe("Light")
+    expect(await generate("heavy")).toBe("Standard")
+    expect(await generate()).toBe("Standard")
+
+    // Without a catalog a tier has no model, and a name that is not a tier fails before the call.
+    const missing = await setup()
+      .sixb.models.language.generate({ model: "light", prompt: "Hi" })
+      .catch((error) => error)
+    expect(missing.message).toContain("Configure models.language")
+
+    const unknown = await sixb.models.language
+      .generate({ model: "medium" as unknown as "light", prompt: "Hi" })
+      .catch((error) => error)
+    expect(unknown.message).toBe(
+      "[Sixb] Unknown model tier 'medium'. Use light, standard or heavy, or pass a model."
+    )
+    expect(light.requests).toHaveLength(1)
+  })
+
   test("applies a model's own default reasoning only when the call omits one", async () => {
     // Proven by removal: pass `input.reasoning` instead of the resolved reasoning to the loop.
     const first = fakeModel()

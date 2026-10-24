@@ -10,6 +10,7 @@ import {
   type LanguageModelCatalog,
   type LanguageModelEntry,
 } from "@sixb/core"
+import { createModelCatalog } from "@sixb/core/models"
 import {
   resolveAgentExecutionPlan,
   resolveWorkflowAgentStepExecutionPlan,
@@ -56,6 +57,8 @@ describe("resolveAgentExecutionPlan", () => {
     getByRef: (ref) =>
       entries.find((entry) => entry.provider === ref.provider && entry.modelId === ref.modelId) ??
       null,
+    tiers: [],
+    getByTier: () => entries[0]!,
   }
   const lookup = defineAgentTool("lookup")
     .description("Look up a value.")
@@ -101,6 +104,8 @@ describe("resolveAgentExecutionPlan", () => {
       default: entry,
       list: () => [entry],
       getByRef: () => entry,
+      tiers: [],
+      getByTier: () => entry,
     }
     const spec = { model: { provider: model.providerId, modelId: model.modelId } }
     expect(
@@ -140,6 +145,8 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       default: entry,
       list: () => [entry],
       getByRef: () => entry,
+      tiers: [],
+      getByTier: () => entry,
     }
 
     const plan = resolveWorkflowAgentStepExecutionPlan({
@@ -166,6 +173,8 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       default: entry,
       list: () => [entry],
       getByRef: () => entry,
+      tiers: [],
+      getByTier: () => entry,
     }
     const plan = (config: Parameters<typeof defineAgentStep>[1]) =>
       resolveWorkflowAgentStepExecutionPlan({
@@ -194,6 +203,8 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       list: () => [entry],
       getByRef: (ref) =>
         ref.provider === entry.provider && ref.modelId === entry.modelId ? entry : null,
+      tiers: [],
+      getByTier: () => entry,
     }
     const plan = (model: WorkerTestModel) =>
       resolveWorkflowAgentStepExecutionPlan({
@@ -215,6 +226,37 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
     const outside = plan(unlisted)
     expect(outside.model).toBe(unlisted)
     expect(outside).not.toHaveProperty("reasoning")
+  })
+
+  test("runs a tier's model from the catalog, and standard's for a tier left out", () => {
+    // Proven by removal: select `step.model ?? models.default.model` again; the tier name is
+    // passed on as the model.
+    const light = new WorkerTestModel({ modelId: "light-model", defaultReasoning: "low" })
+    const standard = new WorkerTestModel({ modelId: "standard-model" })
+    const { language } = createModelCatalog({ language: { light, standard } })
+    const plan = (model: "light" | "heavy") =>
+      resolveWorkflowAgentStepExecutionPlan({
+        workflowId: "triage",
+        step: workflowStep({ instructions: "Review.", model }),
+        models: language,
+        tools: toolCatalog([]),
+        skills: skillCatalog([]),
+        defaultMaxSteps: 25,
+      })
+
+    expect(plan("light")).toMatchObject({ model: light, reasoning: "low" })
+    expect(plan("heavy").model).toBe(standard)
+
+    // Proven by removal: name the project default whatever the step asked for.
+    expect(() =>
+      resolveWorkflowAgentStepExecutionPlan({
+        workflowId: "triage",
+        step: workflowStep({ instructions: "Review.", model: "light" }),
+        tools: toolCatalog([]),
+        skills: skillCatalog([]),
+        defaultMaxSteps: 25,
+      })
+    ).toThrow("agent step 'review' cannot resolve the model of tier 'light'.")
   })
 
   test("resolves only the tools and skills selected by the workflow step", () => {

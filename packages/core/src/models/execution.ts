@@ -5,7 +5,7 @@ import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createAudioRuntime } from "./audio/runtime"
 import { createModelCallsRuntime, type ModelCallRunVisibility } from "./calls"
-import type { ModelCatalog } from "./catalog"
+import { type ModelCatalog, selectLanguageModel } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
 import type { ModelCallEndEvent } from "./events"
@@ -48,8 +48,8 @@ export function createModelsRuntime(
     const messages = generationMessages(input)
     const signal = session.signal(input.signal)
     signal.throwIfAborted()
-    // An explicit model runs as given, listed or not; the catalog only supplies the default.
-    const selected = input.model ?? catalog?.language?.default.model
+    // An explicit model runs as given, listed or not; the catalog supplies a tier's or the default.
+    const selected = selectLanguageModel(catalog?.language, input.model)
     if (!selected) {
       throw new Error(
         "[SixbModels] Configure models.language in createSixb() or supply a model to generate()."

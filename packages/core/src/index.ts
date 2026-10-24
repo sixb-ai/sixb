@@ -1231,6 +1231,8 @@ export type {
   LanguageModelCatalog,
   LanguageModelEntry,
   LanguageModelRef,
+  LanguageModelTier,
+  LanguageModelTiers,
   ModelCallCost,
   ModelCatalog,
   ModelCatalogInput,

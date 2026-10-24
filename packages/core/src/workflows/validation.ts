@@ -1,7 +1,11 @@
 import { isActionDefinition } from "../actions"
 import type { AgentSkillCatalog, AgentToolCatalog } from "../agents"
 import type { ModelCatalog } from "../models"
-import { assertValidLanguageModel } from "../models/catalog"
+import {
+  assertValidLanguageModel,
+  isLanguageModelTier,
+  selectLanguageModel,
+} from "../models/catalog"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology/refs"
@@ -56,7 +60,9 @@ export function isAgentStepDefinition(value: unknown): value is AgentStepDefinit
     isRecord(value) &&
     value.kind === "agentStep" &&
     typeof value.id === "string" &&
-    (value.model === undefined || isLanguageModel(value.model)) &&
+    (value.model === undefined ||
+      isLanguageModelTier(value.model) ||
+      isLanguageModel(value.model)) &&
     (value.reasoning === undefined || isModelReasoning(value.reasoning)) &&
     typeof value.instructions === "string" &&
     isStringArray(value.groupIds) &&
@@ -191,8 +197,13 @@ function validateWorkflowAgentStepRuntimeReferences(
       `Workflow "${workflowId}" agent step "${step.id}" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().`
     )
   }
+  if (typeof step.model === "string" && options.models?.language === undefined) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" agent step "${step.id}" needs a model for tier "${step.model}". Configure 'models.language' or pass a model to defineAgentStep().`
+    )
+  }
   // The step's own model runs as given, so it passes the checks a catalog model passes.
-  if (step.model !== undefined) {
+  if (step.model !== undefined && typeof step.model !== "string") {
     assertValidLanguageModel(
       step.model,
       (detail) =>
@@ -203,7 +214,7 @@ function validateWorkflowAgentStepRuntimeReferences(
   }
   // Same rule as a catalog default: checked against the capabilities the model declares, so an
   // effort or token budget outside them fails at startup rather than on the step's first run.
-  const model = step.model ?? options.models?.language?.default?.model
+  const model = selectLanguageModel(options.models?.language, step.model)
   if (step.reasoning !== undefined && model !== undefined) {
     const issue = modelReasoningSupportIssue(
       model.definition.capabilities.reasoning,

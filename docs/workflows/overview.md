@@ -95,7 +95,8 @@ Add it with `.then(draftReminder)`, just like a regular step. The workflow waits
 output before continuing.
 
 The task uses your [default language model](../models/configuration.md#language-models) and built-in sandbox
-tools. Pass `model` to run another one, listed in `models.language` or not. `groups` controls its
+tools. Pass `model` to run another one, listed in `models.language` or not, or a
+[tier](../models/configuration.md#tiers) such as `model: "light"`. `groups` controls its
 access to project data; grant the example's `finance` group permission to read invoices. Without
 groups, it has no project grants. Actions the task requests keep the
 workflow run's requester, if any (a scheduled or event-triggered run has none), while its access
