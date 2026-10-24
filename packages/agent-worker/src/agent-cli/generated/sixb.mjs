@@ -560,7 +560,7 @@ Options:
   models: `Usage:
   sixb models list [--kind language|image|speech|transcription]
   sixb models get <model> [--kind <kind>]
-  sixb models text "<prompt>" [--model <model>] [--instructions <text>]
+  sixb models text "<prompt>"|--file <path|-> [--model <tier|model>] [--instructions <text>]
                    [--max-output-tokens <n>] [--reasoning <level>]
   sixb models image "<prompt>" --output <path> [--model <model>] [--n <n>]
                     [--size <size>] [--aspect-ratio <ratio>] [--quality <q>] [--style <s>]
@@ -574,6 +574,9 @@ Options:
 <model> is a model id, or provider:model-id when two providers share one; without --model, the
 kind's default answers. \`list\` shows each model's kind, default, description and price; \`get\`
 adds the sizes, voices and other options a request can use. Prices are in USD.
+
+\`text\` also takes a tier (light, standard or heavy) for --model, and reads a long prompt from
+--file: a path, or - for standard input.
 
 --output is a file, numbered when a call returns several, or a directory ending in /. The
 extension follows the file's type, and the result lists the paths written. --image uploads a
@@ -640,18 +643,20 @@ function singleFileOption(args, command) {
   return options["--file"];
 }
 async function readJson(source) {
-  let text;
-  try {
-    text = source === "-" ? await readStdin() : await readFile2(source, "utf8");
-  } catch (error) {
-    if (isFileError(error, "ENOENT"))
-      fail(`JSON file '${source}' does not exist.`);
-    throw error;
-  }
+  const text = await readText(source, "JSON file");
   try {
     return JSON.parse(text);
   } catch {
     fail(source === "-" ? "Standard input is not valid JSON." : `JSON file '${source}' is not valid JSON.`, "invalid_json");
+  }
+}
+async function readText(source, noun) {
+  try {
+    return source === "-" ? await readStdin() : await readFile2(source, "utf8");
+  } catch (error) {
+    if (isFileError(error, "ENOENT"))
+      fail(`${noun} '${source}' does not exist.`);
+    throw error;
   }
 }
 function asRecord2(value) {
@@ -855,12 +860,14 @@ async function generateText(api, args) {
     "--model": "string",
     "--instructions": "string",
     "--max-output-tokens": "string",
-    "--reasoning": "string"
-  }, "models text", 1);
+    "--reasoning": "string",
+    "--file": "string"
+  }, "models text", [0, 1]);
+  const prompt = await readPrompt(positionals[0], options["--file"]);
   const maxOutputTokens = options["--max-output-tokens"];
   const result = await api.post("/api/models/language/generations", {
-    ...await modelRef(api, options["--model"], "language"),
-    prompt: positionals[0],
+    ...await languageModelRef(api, options["--model"]),
+    prompt,
     ...options["--instructions"] === undefined ? {} : { instructions: options["--instructions"] },
     ...maxOutputTokens === undefined ? {} : { maxOutputTokens: integerInRange("--max-output-tokens", maxOutputTokens, 1, 1e6) },
     ...options["--reasoning"] === undefined ? {} : { reasoning: options["--reasoning"] }
@@ -964,6 +971,25 @@ async function modelRef(api, reference, kind) {
     return {};
   const { entry } = findModel(catalogEntries(await api.get("/api/models")), reference, kind);
   return { model: { provider: entry.provider, modelId: entry.modelId } };
+}
+var LANGUAGE_TIERS = ["light", "standard", "heavy"];
+async function languageModelRef(api, reference) {
+  const tier = LANGUAGE_TIERS.find((candidate) => candidate === reference);
+  if (tier !== undefined)
+    return { model: tier };
+  return modelRef(api, reference, "language");
+}
+async function readPrompt(argument, source) {
+  if (argument !== undefined && source !== undefined) {
+    fail("models text takes its prompt as an argument or from --file, not both.");
+  }
+  const prompt = source === undefined ? argument : await readText(source, "Prompt file");
+  if (prompt === undefined) {
+    fail('models text requires a prompt: "<prompt>", or --file <path|-> to read it.');
+  }
+  if (!prompt.trim())
+    fail("The prompt is empty.");
+  return prompt;
 }
 function requireOutput(output, command) {
   if (!output)
