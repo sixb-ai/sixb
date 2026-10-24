@@ -39,6 +39,11 @@ work/overdue/
   `"from": "customer.name"` reads it.
 - Bound it with `limit`, `filter`, and `sort`, not `page`: Sixb pages it, up to 10,000 rows.
   `vector` and `rerank` are refused, since every reader would pay for the search.
+- Publishing refuses a query that returns a marked property the user who asked can't read, on the
+  rows or on an object `expand` attaches, which returns all of its properties. List what the
+  artifact needs with a `project` node, wrapped only by `expand`, `sort`, or `limit`:
+  `{ "kind": "project", "input": …, "properties": ["number", "dueDate"] }`. A live sheet's `from`
+  must be among them.
 - To count rows by value, such as invoices by status, the file holds a query and its facets
   instead: `{ "query": …, "facets": [{ "propertyId": "status", "limit": 10 }] }`. Run it with
   `sixb objects facets --file`; `objects query` refuses it. A page reads its result,
