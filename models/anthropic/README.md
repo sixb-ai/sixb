@@ -45,8 +45,9 @@ const definitions = await provider.catalog.list()
 ```
 
 `reasoning` is the level Sixb applies when the model runs without an explicit choice; Sixb checks
-it against the model's capabilities at startup. Share the configured provider or model through
-normal imports. Agents accept the returned
+it against the model's capabilities at startup. `name` and `description` replace the catalog's
+own in the chat's model picker and in the delegation guide of `spawn_agent`. Share the configured
+provider or model through normal imports. Agents accept the returned
 `LanguageModel` directly. An optional project catalog uses `models: { language: [model] }`.
 
 `await model.resolve?.()` returns an executable metadata snapshot from the effective catalog.

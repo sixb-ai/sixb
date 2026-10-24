@@ -163,8 +163,9 @@ the endpoint, deployment, and protocol. Chat compatibility is selected with `pro
 DeepSeek reasoning replay uses `reasoningReplay: "tool-continuation"`.
 
 Every protocol accepts `reasoning`, the level Sixb applies when the model runs without an explicit
-choice, such as `foundry.chat("production", { reasoning: "low" })`. A binding's `maxOutputTokens`
-caps every call, agents included.
+choice, such as `foundry.chat("production", { reasoning: "low" })`, and `name` and `description`,
+which replace the catalog's own in the chat's model picker and in the delegation guide of
+`spawn_agent`. A binding's `maxOutputTokens` caps every call, agents included.
 
 Messages `thinkingMode` selects manual or adaptive thinking. Manual budgets start at 1024 tokens
 and must stay below the output ceiling. Inline media has a 20 MiB aggregate default limit,

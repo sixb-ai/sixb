@@ -63,4 +63,29 @@ describe("subagent model guidance", () => {
       ].join("\n")
     )
   })
+
+  test("gives each model its name and description on one line", async () => {
+    // Removal proof: drop the name and description from the model's line.
+    const catalog = createModelCatalog({
+      language: [
+        new WorkerTestModel({
+          definition: {
+            kind: "language",
+            providerId: "gateway",
+            modelId: "openai/gpt-5.5",
+            name: "GPT",
+            description: "A second opinion,\nuseful to compare an analysis.",
+            capabilities: { localTools: true },
+          },
+        }),
+      ],
+    })
+
+    expect(await renderSubagentModelGuide(catalog.language)).toBe(
+      [
+        "Available models (provider-declared metadata when available):",
+        '- {"provider":"gateway","modelId":"openai/gpt-5.5"} GPT (default; tools): A second opinion, useful to compare an analysis.',
+      ].join("\n")
+    )
+  })
 })

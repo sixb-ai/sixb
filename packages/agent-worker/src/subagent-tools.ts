@@ -259,7 +259,13 @@ export async function renderSubagentModelGuide(models: LanguageModelCatalog): Pr
       else if (media?.length) details.push(`input: ${media.join(", ")}`)
       if (details.length === 0 || (details.length === 1 && details[0] === "default"))
         details.push("metadata unavailable")
-      return `- ${formatModelRef(entry)} (${details.join("; ")})`
+
+      // A provider's catalog text may span lines; each model keeps to one.
+      const name = metadata.name === undefined ? "" : ` ${oneLine(metadata.name)}`
+      const description =
+        metadata.description === undefined ? "" : `: ${oneLine(metadata.description)}`
+
+      return `- ${formatModelRef(entry)}${name} (${details.join("; ")})${description}`
     })
   )
   return ["Available models (provider-declared metadata when available):", ...entries].join("\n")
@@ -267,6 +273,10 @@ export async function renderSubagentModelGuide(models: LanguageModelCatalog): Pr
 
 function formatModelRef({ provider, modelId }: LanguageModelRef): string {
   return JSON.stringify({ provider, modelId })
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
 }
 
 function sameModel(

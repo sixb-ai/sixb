@@ -57,6 +57,39 @@ export interface LanguageModelDefinition extends ModelDefinition {
   readonly capabilities: ModelCapabilities
 }
 
+/** The name and description a project gives a language model, in place of the provider's. */
+export interface LanguageModelLabel {
+  /** Shown in the chat's model picker and to the Agent. */
+  readonly name?: string
+  /** When the model is useful, for the people choosing it and for the Agent delegating to it. */
+  readonly description?: string
+}
+
+/**
+ * The label a model binding sets, checked and reported with the provider's error prefix. A provider
+ * spreads it over every definition it builds for the binding, its resolved ones included.
+ *
+ * Stricter than `defineLanguageModel`, which takes a provider's catalog text as it comes: the
+ * project types a label by hand, so an empty or padded value is a mistake to report.
+ */
+export function defineLanguageModelLabel(
+  label: LanguageModelLabel,
+  prefix: string
+): LanguageModelLabel {
+  for (const field of ["name", "description"] as const) {
+    const value: unknown = label[field]
+
+    if (value !== undefined && (typeof value !== "string" || !value || value !== value.trim())) {
+      throw new TypeError(`${prefix} ${field} must be a nonempty trimmed string.`)
+    }
+  }
+
+  return {
+    ...(label.name === undefined ? {} : { name: label.name }),
+    ...(label.description === undefined ? {} : { description: label.description }),
+  }
+}
+
 export function defineLanguageModel(definition: LanguageModelDefinition): LanguageModelDefinition {
   if (definition.kind !== "language") {
     throw new TypeError("[Sixb] Language model definitions must use kind 'language'.")

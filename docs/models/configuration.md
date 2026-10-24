@@ -49,6 +49,21 @@ defineAgentStep("second-opinion", {
 })
 ```
 
+### Name and description
+
+Give a model your own name and description with the `name` and `description` options of its
+binding:
+
+```ts
+const gptModel = vercelGateway("openai/gpt-5.5", {
+  name: "GPT",
+  description: "A second opinion, useful to compare an analysis.",
+})
+```
+
+They show in the chat's model picker and in the delegation guide of `spawn_agent`. Each replaces
+the provider's own text; without them, the provider's name and description apply.
+
 ### Default reasoning
 
 Give a model a default reasoning effort with the `reasoning` option of its binding:

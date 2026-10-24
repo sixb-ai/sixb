@@ -1438,3 +1438,35 @@ test("exposes the binding's output limit only when the binding sets one", async 
   // The model maximum still bounds every request, but it is not the developer's choice.
   expect(provider("claude-opus-5").maxOutputTokens).toBeUndefined()
 })
+
+test("keeps the binding's own name and description over the live catalog's", async () => {
+  // Proven by removal: drop the defineLanguageModelLabel spread from the model constructor.
+  const provider = createAnthropic({
+    apiKey: "test",
+    fetch: async () =>
+      Response.json({
+        data: [
+          {
+            id: "claude-opus-5",
+            type: "model",
+            display_name: "Claude Opus 5",
+            max_input_tokens: 1_000_000,
+            capabilities: {},
+          },
+        ],
+        has_more: false,
+      }),
+  })
+  const label = { name: "Opus", description: "For the hardest analyses." }
+  const model = provider("claude-opus-5", label)
+
+  expect(model.definition).toMatchObject(label)
+
+  const resolved = await model.resolve?.()
+  expect(resolved?.definition).toMatchObject({ ...label, maxInputTokens: 1_000_000 })
+  expect((await provider("claude-opus-5").resolve?.())?.definition.name).toBe("Claude Opus 5")
+
+  expect(() => provider("claude-opus-5", { name: "" })).toThrow(
+    "[SixbAnthropic] name must be a nonempty trimmed string."
+  )
+})

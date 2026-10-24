@@ -1672,3 +1672,39 @@ test("exposes the binding's output limit only when the binding sets one", async 
     gateway("zai/glm-5.3-flash", { request: { max_output_tokens: 9_000 } }).maxOutputTokens
   ).toBeUndefined()
 })
+
+test("keeps the binding's own name and description over the live catalog's", async () => {
+  // Proven by removal: drop the defineLanguageModelLabel spread from the model constructor.
+  const gateway = createVercelGateway({
+    apiKey: "test",
+    fetch: async () =>
+      Response.json({
+        data: [
+          {
+            id: "openai/gpt-5.5",
+            type: "language",
+            name: "GPT-5.5",
+            description: "OpenAI's flagship model.",
+            context_window: 400_000,
+          },
+        ],
+      }),
+  })
+  const label = { name: "GPT", description: "A second opinion, useful to compare an analysis." }
+  const model = gateway("openai/gpt-5.5", label)
+
+  expect(model.definition).toMatchObject(label)
+
+  const resolved = await model.resolve?.()
+  expect(resolved?.definition).toMatchObject({ ...label, contextWindow: 400_000 })
+
+  const unlabeled = await gateway("openai/gpt-5.5").resolve?.()
+  expect(unlabeled?.definition).toMatchObject({
+    name: "GPT-5.5",
+    description: "OpenAI's flagship model.",
+  })
+
+  expect(() => gateway("openai/gpt-5.5", { name: " GPT" })).toThrow(
+    "[SixbVercelGateway] name must be a nonempty trimmed string."
+  )
+})

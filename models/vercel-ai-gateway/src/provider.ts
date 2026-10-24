@@ -3,6 +3,7 @@ import {
   type DecisionModel,
   type DecisionModelDefinition,
   defineLanguageModel,
+  defineLanguageModelLabel,
   defineModelRateCard,
   type EmbeddingModel,
   estimateModelReservation,
@@ -14,6 +15,7 @@ import {
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
+  type LanguageModelLabel,
   type LanguageModelProvider,
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
@@ -94,7 +96,7 @@ export interface VercelGatewayOptions {
   readonly models?: readonly LanguageModelDefinition[]
 }
 
-export interface VercelGatewayModelOptions {
+export interface VercelGatewayModelOptions extends LanguageModelLabel {
   /** Reasoning Sixb applies when this model runs without an explicit choice. */
   readonly reasoning?: ModelReasoningLevel
   /** Default output ceiling; individual calls may request less. */
@@ -1067,6 +1069,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     this.definition = defineLanguageModel({
       ...(configuredDefinition ?? fallbackDefinition(modelId)),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+      ...defineLanguageModelLabel(options, "[SixbVercelGateway]"),
     })
     if (
       options.maxOutputTokens !== undefined &&
