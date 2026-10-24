@@ -1180,7 +1180,7 @@ export function SheetGrid({
             />
           ) : lockedAt(row, column) ? (
             <LockedContent
-              label={messages.locked}
+              label={messages.locked(model.columns[column]?.name ?? "")}
               numeric={model.columns[column]?.numeric ?? false}
             />
           ) : (
@@ -1271,7 +1271,9 @@ export function SheetGrid({
           text={text}
           label={!entry}
           {...(entry ? { title: messages[entry.total] } : {})}
-          {...(entry?.locked ? { locked: messages.lockedTotal } : {})}
+          {...(entry?.locked
+            ? { locked: messages.lockedTotal(model.columns[column]?.name ?? "") }
+            : {})}
           fixed={fixed}
           lastFixed={fixed && column === frozenColumns - 1}
           scrolled={viewport.left > 0}

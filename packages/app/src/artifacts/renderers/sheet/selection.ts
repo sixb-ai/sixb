@@ -60,6 +60,8 @@ export interface RangeStats {
    * out, so the status bar shows them locked.
    */
   readonly locked?: number
+  /** The names of the columns those cells are in, in the sheet's order. */
+  readonly lockedColumns?: readonly string[]
 }
 
 /**
@@ -78,6 +80,7 @@ export function rangeStats(
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
   let locked = 0
+  const lockedIn = new Set<number>()
   for (let row = Math.max(range.top, 1); row <= range.bottom; row += 1) {
     const dataRow = order[row - 1] ?? -1
     const values = model.rows[dataRow]
@@ -86,6 +89,7 @@ export function rangeStats(
       if (hidden.has(column)) continue
       if (isLocked(model, dataRow, column)) {
         locked += 1
+        lockedIn.add(column)
         continue
       }
       const value = values[column] ?? ""
@@ -105,7 +109,14 @@ export function rangeStats(
     numericCount,
     sum,
     ...(numericCount > 0 ? { average: sum / numericCount, min, max } : {}),
-    ...(locked > 0 ? { locked } : {}),
+    ...(locked > 0
+      ? {
+          locked,
+          lockedColumns: model.columns.flatMap((entry, index) =>
+            lockedIn.has(index) ? [entry.name] : []
+          ),
+        }
+      : {}),
   }
 }
 

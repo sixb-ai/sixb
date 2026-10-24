@@ -4,6 +4,11 @@ import { defineMessages, type MessageTree, type Translation } from "@sixb/ui/lib
 const number = (value: number) => value.toLocaleString("en")
 const numberFr = (value: number) => value.toLocaleString("fr")
 
+// What a reader does about a value a live sheet locks: it is a permission they lack, which an admin
+// of the project can give.
+const ASK_FOR_ACCESS = "Ask an admin of the project for access."
+const ASK_FOR_ACCESS_FR = "Demandez l’accès à un administrateur du projet."
+
 /** Source catalog of the artifact viewer. */
 export const en = {
   kinds: {
@@ -378,10 +383,16 @@ export const en = {
     empty: "This sheet has no rows.",
     loadFailed: "This sheet could not be read.",
     tooLarge: "This sheet is too large to show here",
-    locked: "You can't see this value",
-    lockedTotal: "This total reads values you can't see",
-    lockedFigures: "The selection holds values you can't see",
-    chartLocked: "You can't see some of the values this chart draws.",
+    locked: (column: string) => `You don't have permission to see ${column}. ${ASK_FOR_ACCESS}`,
+    lockedTotal: (column: string) =>
+      `You don't have permission to see all of ${column}, so its total is hidden. ${ASK_FOR_ACCESS}`,
+    lockedFigures: (columns: readonly string[]) =>
+      `You don't have permission to see some of the selected values: ${columns.join(", ")}. ${ASK_FOR_ACCESS}`,
+    chartLocked: (columns: readonly string[]) =>
+      `You don't have permission to see ${columns.join(", ")}, which this chart draws. ${ASK_FOR_ACCESS}`,
+    lockedNotice: (columns: readonly string[]) =>
+      `Some values are hidden: you don't have permission to see ${columns.join(", ")}. ${ASK_FOR_ACCESS}`,
+    askForAccess: ASK_FOR_ACCESS,
     queryForbidden: "You don't have access to the data this sheet shows.",
     queryInvalid: "This sheet's query no longer matches the project's data",
     queryFailed: "This sheet's data could not be read.",
@@ -804,10 +815,16 @@ export const fr: Translation<ArtifactMessages> = {
     empty: "Cette feuille n’a aucune ligne.",
     loadFailed: "Impossible de lire cette feuille.",
     tooLarge: "Cette feuille est trop volumineuse pour s’afficher ici",
-    locked: "Vous ne pouvez pas voir cette valeur",
-    lockedTotal: "Ce total lit des valeurs que vous ne pouvez pas voir",
-    lockedFigures: "La sélection contient des valeurs que vous ne pouvez pas voir",
-    chartLocked: "Vous ne pouvez pas voir certaines des valeurs que ce graphique trace.",
+    locked: (column) => `Vous n’avez pas l’autorisation de voir ${column}. ${ASK_FOR_ACCESS_FR}`,
+    lockedTotal: (column) =>
+      `Vous n’avez pas l’autorisation de voir toutes les valeurs de ${column} : son total est masqué. ${ASK_FOR_ACCESS_FR}`,
+    lockedFigures: (columns) =>
+      `Vous n’avez pas l’autorisation de voir certaines des valeurs sélectionnées : ${columns.join(", ")}. ${ASK_FOR_ACCESS_FR}`,
+    chartLocked: (columns) =>
+      `Vous n’avez pas l’autorisation de voir ${columns.join(", ")}, que ce graphique trace. ${ASK_FOR_ACCESS_FR}`,
+    lockedNotice: (columns) =>
+      `Certaines valeurs sont masquées : vous n’avez pas l’autorisation de voir ${columns.join(", ")}. ${ASK_FOR_ACCESS_FR}`,
+    askForAccess: ASK_FOR_ACCESS_FR,
     queryForbidden: "Vous n’avez pas accès aux données de cette feuille.",
     queryInvalid: "La requête de cette feuille ne correspond plus aux données du projet",
     queryFailed: "Impossible de lire les données de cette feuille.",

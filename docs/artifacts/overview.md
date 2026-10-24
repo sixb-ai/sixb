@@ -217,8 +217,10 @@ so each reader sees the project's objects as they are when they open it:
   `<link>.<property>` of a link the query expands, or computes with a `formula`.
 - Without `type`, a column takes its property's: numbers, dates, booleans, an enum as a tag, the
   rest as text. Formats, totals, charts, and downloads work as on any sheet.
-- A value the reader is not cleared for shows locked, and a total over it is locked too; a download
-  leaves it empty. The sheet shows up to 10,000 rows and says when there were more.
+- A value the reader is not cleared for shows locked, as does a formula, total, or chart over it; a
+  download leaves it empty. The sheet names the columns the reader lacks permission to see and
+  tells them to ask an admin of the project. It shows up to 10,000 rows and says when there were
+  more.
 - A live sheet is read-only in the app. A document, deck, or canvas that shows its range or chart
   shows each reader their rows.
 
