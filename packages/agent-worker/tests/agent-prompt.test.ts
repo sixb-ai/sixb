@@ -415,10 +415,10 @@ describe("agent system prompt", () => {
     const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
 
     expect(parent).toContain(
-      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back under .sixb/agent/children/<key>/ for this turn, listed by wait_agent, and what it publishes is in $SIXB_ARTIFACTS once wait_agent returns."
+      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait_agent's result, which lists where each file is: under .sixb/agent/children/<key>/ this turn, then in $SIXB_ATTACHMENTS, which keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes is in $SIXB_ARTIFACTS once wait_agent returns, unless it says otherwise."
     )
     expect(child).toContain(
-      "The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most 50 files of 25 MB, 100 MB in all."
+      "The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most 50 files of 25.0MB, 100.0MB in all; past that, none does."
     )
     expect(child).toContain("Files outside out/ are lost when the task ends.")
     expect(child).not.toContain("Hand a child")

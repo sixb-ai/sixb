@@ -1,23 +1,28 @@
 import { createHash } from "node:crypto"
 import { posix } from "node:path"
-import type { BlobStorage } from "@sixb/core"
+import type { BlobStorage, FileRef } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
-import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { readBlob } from "./artifacts/materialize"
-import { type PreparedAgentAttachmentContext, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
+import {
+  formatBytes,
+  type PreparedAgentAttachmentContext,
+  SANDBOX_ATTACHMENT_LIMITS,
+} from "./attachments"
 import {
   listSandboxFiles,
   readSandboxFile,
+  resolveSandboxEntry,
   resolveSandboxPath,
   type SandboxFileEntry,
   SandboxFileError,
   type SandboxFileListing,
 } from "./sandbox-files"
 import type { AgentSandboxHandle } from "./sandbox-handle"
-import type { AgentFileBudget } from "./tools/tool-files"
+import { AgentFileBudget } from "./tools/tool-files"
+import type { AgentRunFiles } from "./types"
 
 // A parent Agent hands its child files from its sandbox, and gets back what the child wrote under
 // `out/`. Both go through blob storage: the parent stores what it hands over in the child's spec,
@@ -39,52 +44,46 @@ const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", "child
 const SANDBOX_TIMEOUT_MS = 30_000
 const { maxFiles, fileMaxBytes, totalMaxBytes } = SANDBOX_ATTACHMENT_LIMITS
 
-/** What a run's framework tools share of its environment, to hand files over. */
-export interface AgentRunWorkspace {
-  readonly sandbox: () => Promise<AgentSandboxHandle>
-  readonly blobStorage: BlobStorage
-  /** Shared with every other file the run stores. */
-  readonly budget: AgentFileBudget
-  /**
-   * Install the latest version of what these runs published in the thread, in the run's
-   * `$SIXB_ARTIFACTS`. Absent when the run installs no artifacts.
-   */
-  readonly installArtifactsFrom?: (runIds: readonly string[], signal: AbortSignal) => Promise<void>
+/** A file a child returned, copied into its parent's sandbox for the turn. */
+export interface InstalledChildFile extends SubagentRunFile {
+  /** Relative to the working directory. */
+  readonly sandboxPath: string
 }
 
-/** A file in a sandbox, as `wait_agent` lists it. */
-export interface ListedChildFile {
-  /** Relative to the working directory. */
+/** A file a parent hands its child, checked but not read yet. */
+export interface HandedSource {
+  /** Where the child finds it: the path the parent named, relative to the working directory. */
   readonly path: string
-  readonly sizeBytes: number
-  readonly mediaType?: string
-}
-
-interface Source {
-  /** Relative to the working directory. */
-  readonly path: string
+  /** Where it really is, every symbolic link followed. */
   readonly absolutePath: string
   readonly sizeBytes?: number
 }
 
 /**
- * Store the files and directories a parent hands its child, each at its path relative to the
- * working directory. Refused before the child is admitted when a path is missing, leaves the
- * working directory or is the run's own context, or when the files pass the attachment limits.
- * The bytes count against the parent's run budget: `release` them when no child is admitted.
+ * Check the files and directories a parent hands its child, without reading them. Refused when a
+ * path is missing or a link, leaves the working directory or really is the run's own context, or
+ * when the files pass the attachment limits.
  */
-export async function storeHandedFiles(input: {
-  readonly workspace: AgentRunWorkspace
+export async function listHandedSources(input: {
+  readonly files: AgentRunFiles
   readonly paths: readonly string[]
   readonly signal: AbortSignal
-}): Promise<{ readonly files: readonly SubagentRunFile[]; release(): void }> {
-  const { workspace, signal } = input
-  const handle = await workspace.sandbox()
-  signal.throwIfAborted()
+}): Promise<readonly HandedSource[]> {
+  const handle = await input.files.sandbox()
+  input.signal.throwIfAborted()
 
-  const sources = new Map<string, Source>()
+  // The working directory may itself be reached through a link: compare real paths with its own.
+  const root = posix.resolve(handle.sandbox.workingDirectory)
+  const rootEntry = await resolveSandboxEntry(handle, {
+    path: root,
+    signal: input.signal,
+    timeoutMs: SANDBOX_TIMEOUT_MS,
+  })
+  const realRoot = rootEntry.kind === "directory" ? rootEntry.realPath : root
+
+  const sources = new Map<string, HandedSource>()
   for (const path of input.paths) {
-    for (const source of await listHandedSources(handle, path, signal)) {
+    for (const source of await handedSourcesAt(handle, realRoot, path, input.signal)) {
       sources.set(source.path, source)
     }
   }
@@ -94,38 +93,73 @@ export async function storeHandedFiles(input: {
     )
   }
   assertWithinTotal([...sources.values()].reduce((sum, source) => sum + (source.sizeBytes ?? 0), 0))
+  return [...sources.values()]
+}
 
-  const reservation = workspace.budget.reserve(0, "spawn_agent")
+/**
+ * Read and store the files a parent hands its child once it will be admitted, one at a time,
+ * against the parent's run budget: `release` them when it is not.
+ */
+export async function storeHandedFiles(input: {
+  readonly files: AgentRunFiles
+  readonly sources: readonly HandedSource[]
+  readonly signal: AbortSignal
+}): Promise<{ readonly files: readonly SubagentRunFile[]; release(): void }> {
+  const reservation = input.files.budget.reserve(0, "spawn_agent")
   try {
-    const files: SubagentRunFile[] = []
-    let totalBytes = 0
-    for (const source of sources.values()) {
-      if (source.sizeBytes !== undefined && source.sizeBytes > fileMaxBytes) {
-        throw fileTooLarge(source.path)
-      }
-
-      const bytes = await readSandboxFile(handle, {
-        path: source.absolutePath,
-        maxBytes: fileMaxBytes,
-        signal,
-        timeoutMs: SANDBOX_TIMEOUT_MS,
-      }).catch((error: unknown) => {
-        throw toHandOffError(error, source.path)
-      })
-      if (bytes.byteLength > fileMaxBytes) throw fileTooLarge(source.path)
-
-      totalBytes += bytes.byteLength
-      assertWithinTotal(totalBytes)
-
-      files.push({
-        path: source.path,
-        fileRef: await storeFile(workspace, reservation, bytes, source.path, signal),
-      })
-    }
-    return { files, release: () => reservation.release() }
+    const stored: SubagentRunFile[] = []
+    await readHandedSources(input, async (source, bytes) => {
+      const fileRef = await storeFile(input.files, reservation, bytes, source.path, input.signal)
+      stored.push({ path: source.path, fileRef })
+    })
+    return { files: stored, release: () => reservation.release() }
   } catch (error) {
     reservation.release()
     throw error
+  }
+}
+
+/** The references the files would be stored under, read one at a time and stored nowhere. */
+export async function handedFileRefs(input: {
+  readonly files: AgentRunFiles
+  readonly sources: readonly HandedSource[]
+  readonly signal: AbortSignal
+}): Promise<readonly SubagentRunFile[]> {
+  const refs: SubagentRunFile[] = []
+  await readHandedSources(input, async (source, bytes) => {
+    refs.push({ path: source.path, fileRef: contentFileRef(bytes, source.path) })
+  })
+  return refs
+}
+
+async function readHandedSources(
+  input: {
+    readonly files: AgentRunFiles
+    readonly sources: readonly HandedSource[]
+    readonly signal: AbortSignal
+  },
+  use: (source: HandedSource, bytes: Uint8Array) => Promise<void>
+): Promise<void> {
+  const handle = await input.files.sandbox()
+  let totalBytes = 0
+  for (const source of input.sources) {
+    if (source.sizeBytes !== undefined && source.sizeBytes > fileMaxBytes) {
+      throw fileTooLarge(source.path)
+    }
+
+    const bytes = await readSandboxFile(handle, {
+      path: source.absolutePath,
+      maxBytes: fileMaxBytes,
+      signal: input.signal,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+    }).catch((error: unknown) => {
+      throw toHandOffError(error, source.path)
+    })
+    if (bytes.byteLength > fileMaxBytes) throw fileTooLarge(source.path)
+
+    totalBytes += bytes.byteLength
+    assertWithinTotal(totalBytes)
+    await use(source, bytes)
   }
 }
 
@@ -184,19 +218,18 @@ export async function prepareHandedFiles(input: {
 }
 
 /**
- * Store what a child that finished wrote under `out/`, by path relative to it. A file its parent
- * handed over there and the child left unchanged does not come back. Past the attachment limits
- * the child fails, saying so, rather than return some of its files as if they were all.
+ * Store what a child that finished wrote under `out/`, by path relative to it, against a budget of
+ * their own: what the child published does not count. A file its parent handed over there and the
+ * child left unchanged does not come back. Past the attachment limits, none comes back and `error`
+ * says why, so the child's answer still does.
  */
 export async function storeChildOutputs(input: {
-  readonly workspace: AgentRunWorkspace
+  readonly files: AgentRunFiles
   readonly handed: readonly SubagentRunFile[]
-  readonly runId: string
-  readonly parentRunId: string
   readonly signal: AbortSignal
-}): Promise<readonly SubagentRunFile[]> {
-  const { workspace, signal } = input
-  const handle = await workspace.sandbox()
+}): Promise<{ readonly files: readonly SubagentRunFile[]; readonly error?: string }> {
+  const { signal } = input
+  const handle = await input.files.sandbox()
   const directory = posix.join(handle.sandbox.workingDirectory, CHILD_OUTPUT_DIRECTORY)
   const listing = await listSandboxFiles(handle, {
     directory,
@@ -210,90 +243,85 @@ export async function storeChildOutputs(input: {
   const handedAt = (path: string) => handed.get(posix.join(CHILD_OUTPUT_DIRECTORY, path))
   const maybeHanded = (file: SandboxFileEntry) =>
     handedAt(file.relativePath)?.sizeBytes === file.sizeBytes
-  const assertWithinLimits = (files: readonly SandboxFileEntry[], truncated = false) => {
-    if (truncated || files.length > maxFiles) {
-      throw childOutputError(input, `It left more than ${maxFiles} files in out/`)
-    }
-    const tooLarge = files.find((file) => file.sizeBytes > fileMaxBytes)
-    if (tooLarge) {
-      throw childOutputError(
-        input,
-        `'out/${tooLarge.relativePath}' holds more than ${formatFileSize(fileMaxBytes)}`
-      )
-    }
-    if (files.reduce((sum, file) => sum + file.sizeBytes, 0) > totalMaxBytes) {
-      throw childOutputError(
-        input,
-        `Its files in out/ hold more than ${formatFileSize(totalMaxBytes)} in all`
-      )
-    }
-  }
 
   // Checked before reading anything: these files come back whatever their bytes.
-  assertWithinLimits(
+  const tooMany = outputLimitError(
     listing.files.filter((file) => !maybeHanded(file)),
     listing.truncated
   )
+  if (tooMany) return { files: [], error: tooMany }
 
-  const reservation = workspace.budget.reserve(0, "spawn_agent")
-  try {
-    const kept: { readonly entry: SandboxFileEntry; readonly bytes: Uint8Array }[] = []
-    for (const entry of listing.files) {
-      const bytes = await readSandboxFile(handle, {
+  const kept: { readonly entry: SandboxFileEntry; readonly bytes: Uint8Array }[] = []
+  for (const entry of listing.files) {
+    let bytes: Uint8Array
+    try {
+      bytes = await readSandboxFile(handle, {
         path: posix.join(directory, entry.relativePath),
         maxBytes: fileMaxBytes,
         signal,
         timeoutMs: SANDBOX_TIMEOUT_MS,
       })
-      if (handedAt(entry.relativePath)?.digest === `sha256:${sha256(bytes)}`) continue
-
-      kept.push({ entry: { relativePath: entry.relativePath, sizeBytes: bytes.byteLength }, bytes })
+    } catch (error) {
+      if (!(error instanceof SandboxFileError)) throw error
+      return { files: [], error: outputError(`'out/${entry.relativePath}': ${error.message}`) }
     }
-    assertWithinLimits(kept.map((file) => file.entry))
+    if (handedAt(entry.relativePath)?.digest === `sha256:${sha256(bytes)}`) continue
 
-    const files: SubagentRunFile[] = []
-    for (const { entry, bytes } of kept) {
-      files.push({
-        path: entry.relativePath,
-        fileRef: await storeFile(workspace, reservation, bytes, entry.relativePath, signal),
-      })
-    }
-    return files
-  } catch (error) {
-    reservation.release()
-    throw error
+    kept.push({ entry: { relativePath: entry.relativePath, sizeBytes: bytes.byteLength }, bytes })
   }
+  const pastLimits = outputLimitError(kept.map((file) => file.entry))
+  if (pastLimits) return { files: [], error: pastLimits }
+
+  // The child's outputs have a budget of their own, within the limits checked above.
+  const reservation = new AgentFileBudget(totalMaxBytes).reserve(0, "out/")
+  const files: SubagentRunFile[] = []
+  for (const { entry, bytes } of kept) {
+    files.push({
+      path: entry.relativePath,
+      fileRef: await storeFile(input.files, reservation, bytes, entry.relativePath, signal),
+    })
+  }
+  return { files }
 }
 
 /**
- * The parent's side: copy what a child wrote under `out/` into the parent's sandbox, under
- * `.sixb/agent/children/<key>/`, and list it there.
+ * The parent's side: copy what a child wrote under `out/` into the parent's sandbox for the turn,
+ * under `.sixb/agent/children/<key>/`. Each file's reference names it by that path, as its
+ * `logicalPath`, and by a name no other file of the child shares, so a later turn tells them
+ * apart in `$SIXB_ATTACHMENTS`.
  */
 export async function installChildOutputs(input: {
-  readonly workspace: AgentRunWorkspace
+  readonly files: AgentRunFiles
   readonly key: string
-  readonly files: readonly SubagentRunFile[]
+  readonly outputs: readonly SubagentRunFile[]
   readonly signal: AbortSignal
-}): Promise<readonly ListedChildFile[]> {
-  const { workspace, signal } = input
-  const handle = await workspace.sandbox()
-  const directory = posix.join(CHILD_FILES_DIRECTORY, childDirectoryName(input.key))
+}): Promise<readonly InstalledChildFile[]> {
+  const { signal } = input
+  const handle = await input.files.sandbox()
+  const childDirectory = childDirectoryName(input.key)
+  const directory = posix.join(CHILD_FILES_DIRECTORY, childDirectory)
 
-  const records = []
-  for (const { path, fileRef } of input.files) {
-    records.push({
-      path: posix.join(handle.sandbox.workingDirectory, directory, path),
-      contents: await readBlob(workspace.blobStorage, fileRef.blobId, signal),
+  const installed: InstalledChildFile[] = []
+  const names = new Set<string>()
+  for (const { path, fileRef } of input.outputs) {
+    // One file at a time: a child's files can hold 100 MB.
+    const contents = await readBlob(input.files.blobStorage, fileRef.blobId, signal)
+    signal.throwIfAborted()
+    await handle.sandbox.writeFiles([
+      { path: posix.join(handle.sandbox.workingDirectory, directory, path), contents },
+    ])
+
+    const name = `${childDirectory}-${path.split("/").join("-")}`
+    let fileName = name
+    for (let copy = 2; names.has(fileName); copy += 1) fileName = `${copy}-${name}`
+    names.add(fileName)
+    installed.push({
+      path,
+      fileRef: { ...fileRef, fileName, logicalPath: posix.join(childDirectory, path) },
+      sandboxPath: posix.join(directory, path),
     })
   }
-  signal.throwIfAborted()
-  await handle.sandbox.writeFiles(records)
-
-  return input.files.map(({ path, fileRef }) => ({
-    path: posix.join(directory, path),
-    sizeBytes: fileRef.sizeBytes,
-    ...(fileRef.mediaType === undefined ? {} : { mediaType: fileRef.mediaType }),
-  }))
+  return installed
 }
 
 /** A spawn key as one path segment; one that needs changing gets a hash, so two never collide. */
@@ -304,25 +332,45 @@ function childDirectoryName(key: string): string {
   return `${safe.slice(0, 96) || "child"}-${sha256(new TextEncoder().encode(key)).slice(0, 8)}`
 }
 
-async function listHandedSources(
+async function handedSourcesAt(
   handle: AgentSandboxHandle,
+  realRoot: string,
   path: string,
   signal: AbortSignal
-): Promise<readonly Source[]> {
-  const root = handle.sandbox.workingDirectory
-  let absolutePath: string
+): Promise<readonly HandedSource[]> {
+  const root = posix.resolve(handle.sandbox.workingDirectory)
+  let requested: string
   try {
-    absolutePath = resolveSandboxPath(root, path)
+    requested = resolveSandboxPath(root, path)
   } catch (error) {
     throw toHandOffError(error, path)
   }
-  const relativePath = posix.relative(posix.resolve(root), absolutePath)
-  assertHandable(relativePath, path)
+  const childPath = posix.relative(root, requested)
+
+  // What the path really is decides what it may hand over: a link must not reach the run context.
+  const entry = await resolveSandboxEntry(handle, {
+    path: requested,
+    signal,
+    timeoutMs: SANDBOX_TIMEOUT_MS,
+  }).catch((error: unknown) => {
+    throw toHandOffError(error, path)
+  })
+  if (entry.kind === "missing") throw handOffError(`'${path}': it does not exist`)
+  if (entry.kind === "link") throw handOffError(`'${path}': it is a symbolic link`)
+  const realPath = posix.relative(realRoot, entry.realPath)
+  if (realPath === "" || realPath.startsWith("../") || realPath === "..") {
+    throw handOffError(`'${path}': it leads outside the sandbox working directory`)
+  }
+  assertHandable(realPath, path)
+
+  if (entry.kind === "file") {
+    return [{ path: childPath, absolutePath: entry.realPath }]
+  }
 
   let listing: SandboxFileListing
   try {
     listing = await listSandboxFiles(handle, {
-      directory: absolutePath,
+      directory: entry.realPath,
       maxFiles: maxFiles + 1,
       signal,
       timeoutMs: SANDBOX_TIMEOUT_MS,
@@ -330,30 +378,25 @@ async function listHandedSources(
   } catch (error) {
     throw toHandOffError(error, path)
   }
-
   if (listing.truncated) {
     throw handOffError(
       `'${path}': it holds more than ${maxFiles} files; a child receives at most ${maxFiles}`
     )
   }
-  if (listing.files.length === 0) {
-    if (listing.directory) throw handOffError(`'${path}': it is an empty directory`)
-    // A missing path lists nothing as well; reading it says which.
-    return [{ path: relativePath, absolutePath }]
-  }
+  if (listing.files.length === 0) throw handOffError(`'${path}': it is an empty directory`)
 
-  return listing.files.map((file) => {
-    const filePath = posix.join(relativePath, file.relativePath)
-    assertHandable(filePath, path)
-    return {
-      path: filePath,
-      absolutePath: posix.join(absolutePath, file.relativePath),
-      sizeBytes: file.sizeBytes,
-    }
-  })
+  // A listing reaches no file through a link, so each file is where it is listed.
+  return listing.files.map((file) => ({
+    path: posix.join(childPath, file.relativePath),
+    absolutePath: posix.join(entry.realPath, file.relativePath),
+    sizeBytes: file.sizeBytes,
+  }))
 }
 
-/** The run's own context under `.sixb/agent` stays its own: it holds the run's API address. */
+/**
+ * Hands over nothing of the run context under `.sixb/agent` but its files: the context holds the
+ * run's API address. Checked where a path really is; a copy the Agent makes with `cp` is not.
+ */
 function assertHandable(relativePath: string, requested: string): void {
   const runFile = relativePath === ".sixb/agent" || relativePath.startsWith(".sixb/agent/")
   const handed = HANDED_RUN_DIRECTORIES.some((directory) =>
@@ -369,34 +412,51 @@ function assertHandable(relativePath: string, requested: string): void {
 }
 
 async function storeFile(
-  workspace: AgentRunWorkspace,
+  files: AgentRunFiles,
   reservation: ReturnType<AgentFileBudget["reserve"]>,
   bytes: Uint8Array,
   path: string,
   signal: AbortSignal
-) {
+): Promise<FileRef> {
   // Blob storage keeps identical bytes once: a file handed to several children counts once.
+  const expected = contentFileRef(bytes, path)
   reservation.addContent(sha256(bytes), bytes.byteLength)
-  const fileName = posix.basename(path)
-  return workspace.blobStorage.put({
+  const stored = await files.blobStorage.put({
     body: bytes,
     expectedSizeBytes: bytes.byteLength,
     signal,
+    ...(expected.fileName === undefined ? {} : { fileName: expected.fileName }),
+    ...(expected.mediaType === undefined ? {} : { mediaType: expected.mediaType }),
+  })
+  if (stored.blobId !== expected.blobId) {
+    throw new Error(`[SixbAgentWorker] Blob storage stored '${path}' under another id.`)
+  }
+  return stored
+}
+
+/** The reference blob storage gives these bytes, named after `path`: its id is their SHA-256. */
+function contentFileRef(bytes: Uint8Array, path: string): FileRef {
+  const hex = sha256(bytes)
+  const fileName = posix.basename(path)
+  return {
+    blobId: `blob_${hex}`,
+    digest: `sha256:${hex}`,
+    sizeBytes: bytes.byteLength,
     fileName,
     mediaType: inferFileMediaType(fileName, bytes),
-  })
+  }
 }
 
 function assertWithinTotal(totalBytes: number): void {
   if (totalBytes <= totalMaxBytes) return
 
-  const limit = formatFileSize(totalMaxBytes)
+  const limit = formatBytes(totalMaxBytes)
   throw handOffError(`more than ${limit}; a child receives at most ${limit} in all`)
 }
 
 function fileTooLarge(path: string): AgentToolPublicError {
   return handOffError(
-    `'${path}': it holds more than ${formatFileSize(fileMaxBytes)}, the most a file handed to a child may hold`
+    `'${path}': it holds more than ${formatBytes(fileMaxBytes)}, the most a file handed to a child may hold`
   )
 }
 
@@ -410,27 +470,30 @@ function handOffError(problem: string): AgentToolPublicError {
   return new AgentToolPublicError(`[SixbAgentWorker] spawn_agent cannot hand over ${problem}.`)
 }
 
-function childOutputError(
-  run: { readonly runId: string; readonly parentRunId: string },
-  problem: string
-): Error {
-  const message = `${problem}; at most ${maxFiles} files of ${formatFileSize(fileMaxBytes)}, ${formatFileSize(totalMaxBytes)} in all, come back to its parent. Spawn it again with a task that writes fewer or smaller files to out/.`
-  return withFailureMessage(
-    createSixbError(
-      "agent.execution_failed",
-      `[SixbAgentWorker] Subagent run '${run.runId}' could not return its files. ${message}`,
-      { details: { parentRunId: run.parentRunId, runId: run.runId } }
-    ),
-    `The subagent could not return its files. ${message}`
-  )
+/** Why the files a child left in `out/` do not come back, or nothing when they do. */
+function outputLimitError(
+  files: readonly SandboxFileEntry[],
+  truncated = false
+): string | undefined {
+  if (truncated || files.length > maxFiles) {
+    return outputError(`It left more than ${maxFiles} files in out/`)
+  }
+  const tooLarge = files.find((file) => file.sizeBytes > fileMaxBytes)
+  if (tooLarge) {
+    return outputError(
+      `'out/${tooLarge.relativePath}' holds more than ${formatBytes(fileMaxBytes)}`
+    )
+  }
+  if (files.reduce((sum, file) => sum + file.sizeBytes, 0) > totalMaxBytes) {
+    return outputError(`Its files in out/ hold more than ${formatBytes(totalMaxBytes)} in all`)
+  }
+  return undefined
+}
+
+function outputError(problem: string): string {
+  return `${problem}, so none of its files came back: at most ${maxFiles} files of ${formatBytes(fileMaxBytes)}, ${formatBytes(totalMaxBytes)} in all, do. To get them, spawn it again with a task that writes fewer or smaller files to out/, or that publishes them.`
 }
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex")
-}
-
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} bytes`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
 }

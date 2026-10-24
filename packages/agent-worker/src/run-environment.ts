@@ -34,7 +34,7 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
-import { type AgentRunWorkspace, prepareHandedFiles } from "./child-files"
+import { prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
 import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
@@ -56,7 +56,7 @@ import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import {
-  NO_TOOL_ATTACHMENTS,
+  handedToolAttachments,
   threadToolAttachments,
   workflowInputToolAttachments,
 } from "./tools/attachments"
@@ -66,13 +66,13 @@ import { AgentToolResultMediaBridge } from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles } from "./tools/tool-files"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
-import type { AgentExecutionContext, AgentTurnContext } from "./types"
+import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
   /** The run's sandbox and file budget, for the files a parent and its children hand each other. */
-  readonly workspace: AgentRunWorkspace
+  readonly runFiles: AgentRunFiles
   /** Confirm preservation before recording success, cancellation or failure. Idempotent. */
   beforeFinalize(): Promise<void>
   dispose(): Promise<void>
@@ -306,7 +306,10 @@ export async function createSubagentEnvironment(
           },
         }
       : {}),
-    toolAttachments: NO_TOOL_ATTACHMENTS,
+    toolAttachments: handedToolAttachments({
+      files: run.spec.files ?? [],
+      blobStorage: context.blobStorage,
+    }),
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
       projectId: context.id,
@@ -624,28 +627,27 @@ async function startAgentEnvironment(
     publishing && installedArtifacts
       ? { threadId: publishing.threadId, installed: installedArtifacts }
       : undefined
-  const workspace: AgentRunWorkspace = {
+  const runFiles: AgentRunFiles = {
     sandbox: resolveSandbox,
     blobStorage: context.blobStorage,
     budget: fileBudget,
-    ...(artifacts
-      ? {
-          installArtifactsFrom: async (runIds, signal) =>
-            installArtifactsPublishedBy({
-              installed: await artifacts.installed,
-              threadId: artifacts.threadId,
-              artifacts: context.sixb.artifacts,
-              blobStorage: context.blobStorage,
-              sandbox: (await ready).sandbox,
-              runIds,
-              signal,
-            }),
-        }
-      : {}),
+    async installArtifactsFrom(runIds, signal) {
+      if (!artifacts) return
+
+      await installArtifactsPublishedBy({
+        installed: await artifacts.installed,
+        threadId: artifacts.threadId,
+        artifacts: context.sixb.artifacts,
+        blobStorage: context.blobStorage,
+        sandbox: (await ready).sandbox,
+        runIds,
+        signal,
+      })
+    },
   }
   return {
     beforeFinalize,
-    workspace,
+    runFiles,
     turnContext: {
       environmentFailureSignal: input.failureSignal,
       ...(sandbox.beforeFinalize ? { beforeFinalize } : {}),

@@ -106,6 +106,26 @@ export function toolResultFiles(
   )
 }
 
+/**
+ * What a rich tool result says, for a tool shown without a view of its own: its text, as the value
+ * it holds when it is JSON. Any other output is returned as it is.
+ */
+export function toolResultValue(output: unknown): unknown {
+  if (!isRecord(output) || output.kind !== "agentToolResult" || !Array.isArray(output.content)) {
+    return output
+  }
+  const text = output.content
+    .flatMap((part: unknown) =>
+      isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []
+    )
+    .join("\n")
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
 function isFileRef(value: unknown): value is AgentFileRef {
   return (
     isRecord(value) &&

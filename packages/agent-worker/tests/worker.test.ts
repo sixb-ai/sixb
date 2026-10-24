@@ -95,6 +95,7 @@ import {
   type AppendAgentMessageInput,
   type ArtifactRecord,
   type ArtifactStorage,
+  type ArtifactVersionRecord,
   type ConversationAgentRunRecord,
   type RecordAiModelCallInput,
   type SubagentRunRecord,
@@ -111,7 +112,9 @@ import { renderAgentSystemPrompt, renderCurrentTime } from "../src/agent-prompt"
 import { agentMemoryFileHash } from "../src/agent-runtime/memory"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { normalizeApiBaseUrl } from "../src/api-url"
+import { InstalledArtifacts, installArtifactsPublishedBy } from "../src/artifacts/materialize"
 import { prepareAgentAttachments } from "../src/attachments"
+import { storeChildOutputs } from "../src/child-files"
 import * as conversationPreparation from "../src/context-compaction"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import {
@@ -131,9 +134,11 @@ import {
 } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
+import { AgentFileBudget } from "../src/tools/tool-files"
 import { createAgentTurnRuntime } from "../src/turn-runtime"
 import type {
   AgentExecutionContext,
+  AgentRunFiles,
   AgentWorkerContext,
   AgentWorkerHost,
   AgentWorkerStorage,
@@ -1102,6 +1107,8 @@ class RecordingSandbox implements Sandbox {
   readonly commands: RecordedCommand[] = []
   readonly writtenFiles: SandboxFileRecord[] = []
   readonly files = new Map<string, Uint8Array>()
+  /** Symbolic links, by the absolute path of the link to the absolute path it leads to. */
+  readonly links = new Map<string, string>()
   destroyed = false
 
   constructor(id: string, provider = "recording") {
@@ -1181,6 +1188,10 @@ class RecordingSandbox implements Sandbox {
       this.writeWorkingFile("reports/notes/summary.md", "# Acme\n\nMargins fell.\n")
       this.files.set(join(this.workingDirectory, "out", "logo.png"), TEST_PNG_BYTES)
       this.writeWorkingFile("out/brief.txt", "Brief v1\n")
+      this.links.set(
+        join(this.workingDirectory, "ctx"),
+        join(this.workingDirectory, ".sixb/agent/context")
+      )
       for (let index = 0; index < 51; index += 1) {
         this.writeWorkingFile(`reports/daily/${index}.csv`, `day,${index}\n`)
       }
@@ -1207,6 +1218,32 @@ class RecordingSandbox implements Sandbox {
       return {
         exitCode: 0,
         stdout: this.readFileContents(String(options.env?.SIXB_ATTACHMENTS)),
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-resolve-sandbox-path")
+    ) {
+      const encoded = options.env?.SIXB_RESOLVE_PATH_B64
+      let path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
+      if (this.links.has(path)) return { exitCode: 0, stdout: "link\n", stderr: "", durationMs: 1 }
+      for (const [link, target] of this.links) {
+        if (path.startsWith(`${link}/`)) path = `${target}${path.slice(link.length)}`
+      }
+      const kind = this.files.has(path)
+        ? "file"
+        : [...this.files.keys()].some((file) => file.startsWith(`${path}/`))
+          ? "directory"
+          : "missing"
+      return {
+        exitCode: 0,
+        stdout:
+          kind === "missing"
+            ? "missing\n"
+            : `${kind}\n${Buffer.from(path, "utf-8").toString("base64")}\n`,
         stderr: "",
         durationMs: 1,
       }
@@ -8032,7 +8069,9 @@ describe("AgentWorker", () => {
   test("hands a child files at their paths and gets back what it writes to out/", async () => {
     // Removal proofs: leave `files` out of the child's spec in SubagentCoordinator.admit, and the
     // child's sandbox lacks reports/acme.csv; drop storeChildOutputs from runSubagent, and
-    // wait_agent lists nothing and the parent's sandbox holds no chart; skip nothing in
+    // wait_agent lists nothing, the parent's sandbox holds no chart and the next turn's
+    // $SIXB_ATTACHMENTS lists none; return the result as plain JSON from wait_agent's execute,
+    // and the next turn lists none either; skip nothing in
     // storeChildOutputs, and the logo the parent handed over comes back to it; skip by size
     // instead of digest there, and the brief the child rewrote stays behind.
     let childRunId = ""
@@ -8108,7 +8147,7 @@ describe("AgentWorker", () => {
       expect(inChild("out/logo.png")).toEqual(TEST_PNG_BYTES)
       const task = JSON.stringify(childCalls[0]?.messages.at(-1))
       expect(task).toContain("Chart Acme's margins from the P&L.")
-      expect(task).toContain(`- reports/acme.csv (text/csv, ${ACME_CSV.length} bytes)`)
+      expect(task).toContain(`- reports/acme.csv (text/csv, ${ACME_CSV.length}B)`)
       expect(task).toContain("- reports/notes/summary.md (")
       const manifest = JSON.parse(
         new TextDecoder().decode(inChild(".sixb/agent/context/attachments.json"))
@@ -8132,13 +8171,68 @@ describe("AgentWorker", () => {
       expect(inParent(".sixb/agent/children/acme-review/logo.png")).toBeUndefined()
       expect(inParent(".sixb/agent/children/acme-review/draft.md")).toBeUndefined()
 
+      // This turn, the result names where each file is; it holds the files themselves.
       const waited = JSON.stringify(parentCalls[3]?.messages)
-      for (const listed of [
-        { path: ".sixb/agent/children/acme-review/margins.png", sizeBytes: TEST_PNG_BYTES.length },
-        { path: ".sixb/agent/children/acme-review/tables/margins.csv", sizeBytes: 22 },
-      ]) {
-        expect(waited).toContain(JSON.stringify(listed).slice(1, -1))
+      for (const path of ["brief.txt", "margins.png", "tables/margins.csv"]) {
+        const sandboxPath = join(".sixb/agent/children/acme-review", path)
+        expect(waited).toContain(
+          JSON.stringify(`"path":"${path}","sandboxPath":"${sandboxPath}"`).slice(1, -1)
+        )
       }
+      const answer = (await listMessages(storage, requested.run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      const waitPart = answer?.parts.find(
+        (part) => part.type === "tool-call" && part.toolName === "wait_agent"
+      )
+      if (waitPart?.type !== "tool-call" || waitPart.state !== "output-available") {
+        throw new Error("Expected the wait_agent result.")
+      }
+      // Each file names its child and its path, so no turn pairs them by their order.
+      expect(waitPart.output).toMatchObject({
+        kind: "agentToolResult",
+        content: [
+          { type: "text" },
+          ...(child.result?.files ?? []).map(({ path, fileRef }) => ({
+            type: "file",
+            fileRef: {
+              ...fileRef,
+              fileName: `acme-review-${path.replaceAll("/", "-")}`,
+              logicalPath: `acme-review/${path}`,
+            },
+          })),
+        ],
+      })
+
+      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result.
+      const next = await requestAgent(sixb, {
+        threadId: requested.run.threadId,
+        text: "Show the chart.",
+      })
+      await underFakeTime(() => terminalRun(storage, next.run.id), "next turn terminal")
+      const nextSandbox = sandboxes.sandboxes.at(-1)
+      if (!nextSandbox || nextSandbox === childSandbox) throw new Error("Expected a new sandbox.")
+      const attachments = JSON.parse(
+        new TextDecoder().decode(
+          nextSandbox.files.get(
+            join(nextSandbox.workingDirectory, ".sixb/agent/context/attachments.json")
+          )
+        )
+      ) as {
+        readonly attachments: readonly {
+          readonly fileName: string
+          readonly logicalPath?: string
+          readonly sandboxPath: string
+        }[]
+      }
+      const chart = attachments.attachments.find(
+        (entry) => entry.logicalPath === "acme-review/margins.png"
+      )
+      expect(chart?.fileName).toBe("acme-review-margins.png")
+      expect(chart?.sandboxPath).toStartWith(".sixb/agent/attachments/")
+      expect(
+        nextSandbox.files.get(join(nextSandbox.workingDirectory, chart?.sandboxPath ?? ""))
+      ).toEqual(TEST_PNG_BYTES)
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
@@ -8146,7 +8240,12 @@ describe("AgentWorker", () => {
   })
 
   test.each([
-    ["a missing file", "reports/missing.csv", "'reports/missing.csv': file does not exist"],
+    ["a missing file", "reports/missing.csv", "'reports/missing.csv': it does not exist"],
+    [
+      "the run's own context through a link",
+      "ctx/run.json",
+      "'ctx/run.json': it is part of the run context Sixb installs under .sixb/agent.",
+    ],
     [
       "a path outside the sandbox",
       "../elsewhere/acme.csv",
@@ -8161,11 +8260,12 @@ describe("AgentWorker", () => {
     [
       "a file too large",
       "reports/scan.bin",
-      "'reports/scan.bin': it holds more than 25 MB, the most a file handed to a child may hold",
+      "'reports/scan.bin': it holds more than 25.0MB, the most a file handed to a child may hold",
     ],
   ])("refuses to hand a child %s, saying why", async (_case, path, reason) => {
-    // Removal proofs: drop assertHandable, and the parent's run context reaches the child; drop the
-    // count or size checks of storeHandedFiles, and the child is admitted with the files.
+    // Removal proofs: drop assertHandable, and the parent's run context reaches the child; check
+    // it on the path as written instead of where it leads, and it does through a link; drop the
+    // count or size checks of listHandedSources, and the child is admitted with the files.
     let childRunId = ""
     const parentCalls: LanguageModelRequest[] = []
     const parentModel = new WorkerTestModel({
@@ -8210,10 +8310,348 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("fails a child whose out/ holds more than comes back, saying what to do", async () => {
-    // Removal proof: drop the count check from storeChildOutputs, and the child succeeds with
-    // 51 files.
+  test.each([
+    {
+      name: "past the active-child limit",
+      spawns: [[{ key: "first" }], [{ key: "second", files: ["reports/acme.csv"] }]],
+      refusal: "The current Agent run already has 1 active children.",
+    },
+    {
+      name: "again under a key in use",
+      spawns: [
+        [{ key: "review", files: ["reports/notes"] }],
+        [{ key: "review", files: ["reports/acme.csv"] }],
+      ],
+      refusal: "spawn_agent key 'review' was already used with different inputs.",
+    },
+    {
+      name: "past the limit in the same step",
+      spawns: [
+        [
+          { key: "first", files: ["reports/notes"] },
+          { key: "second", files: ["reports/acme.csv"] },
+        ],
+      ],
+      refusal: "The current Agent run already has 1 active children.",
+    },
+  ])("stores nothing for a spawn refused $name", async ({ spawns, refusal }) => {
+    // Removal proofs: drop admissionOf from SubagentCoordinator.spawn, and the refused spawn's file
+    // is stored though no child gets it; admit outside admitInTurn, and two spawns of one step both
+    // pass the check before either is admitted; read the files before admitInTurn, and the
+    // refused spawn reads its file.
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "blocking-child",
+      stream: async (options) => untilAborted(options),
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (options) => {
+        parentCalls.push(options)
+        if (parentCalls.length === 1) {
+          return toolCallStream("reports", "bash", { command: "write-handoff-files" })
+        }
+        const step = spawns[parentCalls.length - 2]
+        if (!step) return answerStream("Done.")
+        return stream([
+          { type: "stream-start", warnings: [] },
+          ...step.map((spawn, index) => ({
+            type: "tool-call" as const,
+            toolCallId: `spawn-${parentCalls.length}-${index}`,
+            toolName: "spawn_agent",
+            input: JSON.stringify({
+              ...spawn,
+              task: "Review Acme.",
+              model: { provider: childModel.providerId, modelId: childModel.modelId },
+            }),
+          })),
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Review Acme." })
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({ subagentConcurrencyPerRun: 1, defaultMaxSteps: 6 })
+    )
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "parent of a refused spawn terminal"
+      )
+
+      const tool = JSON.stringify(parentCalls.at(-1)?.messages)
+      expect(tool).toContain(JSON.stringify(refusal).slice(1, -1))
+      const { runs } = await storage.runs.list({
+        projectId: PROJECT_ID,
+        kinds: ["subagent"],
+        parentRunId: requested.run.id,
+      })
+      expect(runs).toHaveLength(1)
+
+      // Only the admitted child's file is stored: each spawn here hands over a file of its own.
+      const handed = new Set(
+        runs
+          .flatMap((run) => (run.kind === "subagent" ? run.spec.files : []) ?? [])
+          .map((file) => file?.fileRef.blobId)
+      )
+      for (const contents of [ACME_CSV, "# Acme\n\nMargins fell.\n"]) {
+        const blobId = `blob_${new Bun.CryptoHasher("sha256").update(contents).digest("hex")}`
+        expect(Boolean(await sixb.blobStorage.stat(blobId))).toBe(handed.has(blobId))
+      }
+      // And no file was read but the admitted child's.
+      const read = (sandboxes.sandboxes[0]?.commands ?? []).flatMap(({ options }) => {
+        const encoded = options.env?.SIXB_READ_PATH_B64
+        return encoded ? [Buffer.from(encoded, "base64").toString("utf-8")] : []
+      })
+      const admitted = new Set(
+        runs
+          .flatMap((run) => (run.kind === "subagent" ? (run.spec.files ?? []) : []))
+          .map((file) => file.path)
+      )
+      for (const path of ["reports/acme.csv", "reports/notes/summary.md"]) {
+        expect(read.some((readPath) => readPath.endsWith(path))).toBe(admitted.has(path))
+      }
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
+  /** A parent's files as its environment gives them to its tools, in a sandbox the test fills. */
+  function recordingRunFiles(
+    sixb: TestSixb,
+    options: {
+      readonly budget?: AgentFileBudget
+      readonly installArtifactsFrom?: AgentRunFiles["installArtifactsFrom"]
+    } = {}
+  ) {
+    const sandbox = new RecordingSandbox("run-files")
+    const runFiles: AgentRunFiles = {
+      sandbox: async () => ({ sandbox }),
+      blobStorage: sixb.blobStorage,
+      budget: options.budget ?? new AgentFileBudget(),
+      installArtifactsFrom: options.installArtifactsFrom ?? (async () => {}),
+    }
+    return { sandbox, runFiles }
+  }
+
+  test("wait_agent holds each child's files once, a result's worth, and says what it could not", async () => {
+    // Removal proofs: attach a child's installed files on every wait in deliverFiles, and the
+    // second result holds a's chart again; drop its `fits` check, and d's 30 files join b's 30;
+    // drop its catch, and c's missing blob costs every answer; warn instead of reporting the
+    // artifact failure, and the result does not say it.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { children: spawned, coordinator } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Report on each region." },
+      { keys: ["a", "b", "c", "d"] }
+    )
+    const put = (fileName: string, text: string) =>
+      sixb.blobStorage.put({
+        body: new TextEncoder().encode(text),
+        fileName,
+        mediaType: "text/csv",
+      })
+    const days = (region: string) =>
+      Promise.all(
+        Array.from({ length: 30 }, async (_, day) => ({
+          path: `days/${day}.csv`,
+          fileRef: await put(`${day}.csv`, `${region},${day}\n`),
+        }))
+      )
+    const gone = "c".repeat(64)
+    const outputs = [
+      [{ path: "chart.csv", fileRef: await put("chart.csv", "a,1\n") }],
+      await days("b"),
+      [
+        {
+          path: "gone.csv",
+          fileRef: { blobId: `blob_${gone}`, digest: `sha256:${gone}` as const, sizeBytes: 4 },
+        },
+      ],
+      await days("d"),
+    ]
+    const runIds = []
+    for (const [index, child] of spawned.entries()) {
+      const execution = freshTestExecution()
+      await storage.runs.start({ projectId: PROJECT_ID, id: child.runId, execution })
+      await storage.runs.finish({
+        projectId: PROJECT_ID,
+        id: child.runId,
+        executionToken: execution.token,
+        status: "succeeded",
+        result: { text: `Region ${index}.`, files: outputs[index] ?? [] },
+      })
+      runIds.push(child.runId)
+    }
+    const [a, b, c, d] = runIds as [string, string, string, string]
+    const { runFiles } = recordingRunFiles(sixb, {
+      installArtifactsFrom: async () => {
+        throw new Error("[SixbAgentWorker] Could not install artifacts art_q3.")
+      },
+    })
+    coordinator.attach(runFiles)
+    const signal = new AbortController().signal
+
+    const first = await coordinator.wait({ runIds: [a] }, signal)
+    expect(first.files.map((file) => file.fileRef.logicalPath)).toEqual(["a/chart.csv"])
+
+    const second = await coordinator.wait({ runIds: [a, b, c, d] }, signal)
+    expect(second.results.map((result) => result.text)).toEqual([
+      "Region 0.",
+      "Region 1.",
+      "Region 2.",
+      "Region 3.",
+    ])
+    expect(second.results[0]?.files).toEqual([
+      {
+        path: "chart.csv",
+        sandboxPath: ".sixb/agent/children/a/chart.csv",
+        sizeBytes: 4,
+        mediaType: "text/csv",
+      },
+    ])
+    expect(second.files.map((file) => file.fileRef.logicalPath)).toEqual(
+      outputs[1]?.map((file) => `b/${file.path}`)
+    )
+    expect(second.results[2]?.filesNote).toStartWith(
+      "Its files could not be copied into your sandbox ("
+    )
+    expect(second.results[3]?.filesNote).toBe(
+      "Its 30 files did not fit in this result, which holds at most 50 files, 100.0MB in all. Wait for this child again to get them."
+    )
+    expect(second.artifactsError).toBe(
+      "What these children published could not all be installed in $SIXB_ARTIFACTS (Could not install artifacts art_q3.). The addresses in their answers still work."
+    )
+
+    const third = await coordinator.wait({ runIds: [d] }, signal)
+    expect(third.files).toHaveLength(30)
+  })
+
+  test("a spawn after its turn ended is refused before its files are read", async () => {
+    // Removal proof: drop the parent's status check from admissionOf; the files are stored and
+    // only the storage transaction refuses the child.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { parent, coordinator } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Review Acme." },
+      { keys: [] }
+    )
+    const { sandbox, runFiles } = recordingRunFiles(sixb)
+    sandbox.writeWorkingFile("reports/acme.csv", ACME_CSV)
+    coordinator.attach(runFiles)
+    await storage.runs.finish({
+      projectId: PROJECT_ID,
+      id: parent.id,
+      executionToken: parent.execution?.token ?? "",
+      status: "succeeded",
+    })
+
+    const refused = await coordinator
+      .spawn(
+        { key: "late", task: "Review Acme.", files: ["reports/acme.csv"] },
+        new AbortController().signal
+      )
+      .catch((error: unknown) => error)
+
+    expect(refused).toBeInstanceOf(AgentToolPublicError)
+    expect((refused as Error).message).toContain("The parent Agent run is no longer active.")
+    const blobId = `blob_${new Bun.CryptoHasher("sha256").update(ACME_CSV).digest("hex")}`
+    expect(await sixb.blobStorage.stat(blobId)).toBeNull()
+  })
+
+  test("a child's out/ has a budget of its own, apart from what it published", async () => {
+    // Removal proof: reserve from the run's budget in storeChildOutputs; the run's budget, spent
+    // by a publish, refuses the child's answer file.
+    const sixb = buildSixb(answerModel())
+    const { sandbox, runFiles } = recordingRunFiles(sixb, { budget: new AgentFileBudget(4) })
+    sandbox.writeWorkingFile("out/answer.md", "The full answer.\n")
+
+    const stored = await storeChildOutputs({
+      files: runFiles,
+      handed: [],
+      signal: new AbortController().signal,
+    })
+
+    expect(stored.files.map((file) => file.path)).toEqual(["answer.md"])
+    expect(stored).not.toHaveProperty("error")
+  })
+
+  test("installs an artifact a waited child published, whoever published its latest version", async () => {
+    // Removal proof: look only at the latest version's origin in installArtifactsPublishedBy; the
+    // artifact the child made is not installed once someone else revised it.
+    const sixb = buildSixb(answerModel())
+    const sandbox = new RecordingSandbox("artifacts")
+    const bytes = new TextEncoder().encode(Q3_REVIEW_MARKDOWN)
+    const fileRef = await sixb.blobStorage.put({ body: bytes, fileName: "document.md" })
+    const version = (number: number, runId: string) =>
+      ({
+        artifactId: "art_q3",
+        version: number,
+        title: "Q3 review",
+        files: [{ path: "document.md", file: fileRef }],
+        entry: "document.md",
+        outline: { kind: "document", headings: [] },
+        origin: { threadId: "thread", runId },
+      }) as unknown as ArtifactVersionRecord
+    const artifact = {
+      id: "art_q3",
+      kind: "document",
+      latestVersion: 2,
+    } as unknown as ArtifactRecord
+    const installed = new InstalledArtifacts(
+      {
+        directory: ".sixb/agent/artifacts",
+        manifestPath: ".sixb/agent/context/artifacts.json",
+        maxBytes: 1_000_000,
+      },
+      [],
+      new Map(),
+      []
+    )
+
+    await installArtifactsPublishedBy({
+      installed,
+      threadId: "thread",
+      artifacts: {
+        list: async () => ({ artifacts: [artifact], hasMore: false, total: 1 }),
+        listVersions: async () => ({
+          versions: [version(2, "someone-else"), version(1, "child-run")],
+          hasMore: false,
+          total: 2,
+        }),
+        getVersion: async () => version(2, "someone-else"),
+      } as never,
+      blobStorage: sixb.blobStorage,
+      sandbox,
+      runIds: ["child-run"],
+      signal: new AbortController().signal,
+    })
+
+    expect(installed.versionOf("art_q3")).toBe(2)
+    expect(
+      sandbox.files.get(join(sandbox.workingDirectory, ".sixb/agent/artifacts/art_q3/document.md"))
+    ).toEqual(bytes)
+  })
+
+  test("a child whose out/ holds more than comes back answers, and says why no file did", async () => {
+    // Removal proofs: drop the count check from storeChildOutputs, and the child returns 51
+    // files; throw for it as before, and the child fails and its answer is lost.
     let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
     let childCall = 0
     const childModel = new WorkerTestModel({
       providerId: "child-provider",
@@ -8229,11 +8667,11 @@ describe("AgentWorker", () => {
     const parentModel = delegatingParentModel({
       childRunId: () => childRunId,
       childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
     })
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    attachSixbErrorReporter(sixb, () => {})
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Tabulate each day." })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -8246,14 +8684,17 @@ describe("AgentWorker", () => {
         () => terminalRun(storage, requested.run.id),
         "parent of a child with too many files terminal"
       )
-      expect(await terminalRun(storage, childRunId)).toMatchObject({
-        status: "failed",
-        error: {
-          code: "agent.execution_failed",
-          message:
-            "Agent execution failed. The subagent could not return its files. It left more than 50 files in out/; at most 50 files of 25 MB, 100 MB in all, come back to its parent. Spawn it again with a task that writes fewer or smaller files to out/.",
-        },
+      const filesError =
+        "It left more than 50 files in out/, so none of its files came back: at most 50 files of 25.0MB, 100.0MB in all, do. To get them, spawn it again with a task that writes fewer or smaller files to out/, or that publishes them."
+      const child = await terminalRun(storage, childRunId)
+      expect(child).toMatchObject({
+        status: "succeeded",
+        result: { text: "The daily tables are in out/daily.", filesError },
       })
+      expect(child?.kind === "subagent" ? child.result : null).not.toHaveProperty("files")
+      expect(JSON.stringify(parentCalls[2]?.messages)).toContain(
+        JSON.stringify(`"filesNote":"${filesError}"`).slice(1, -1)
+      )
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
@@ -8468,7 +8909,7 @@ describe("AgentWorker", () => {
       expect(answeredAt).toBeGreaterThanOrEqual(deadline - WAIT_ANSWER_MARGIN_MS)
       expect(answeredAt).toBeLessThan(deadline - WAIT_ANSWER_MARGIN_MS + 1_000)
       expect(JSON.stringify(parentCalls[2]?.request.messages.at(-1))).toContain(
-        `"results":[{"runId":"${childRunId}","status":"running"}]`
+        JSON.stringify(`"results":[{"runId":"${childRunId}","status":"running"}]`).slice(1, -1)
       )
     } finally {
       await stopUnderFakeTime(worker)
@@ -12741,8 +13182,8 @@ describe("agent tools act as the requester", () => {
     })
   }
 
-  // Regression proof: give conversations NO_TOOL_ATTACHMENTS in run-environment.ts; the tool then
-  // cannot open the chat's file.
+  // Regression proof: give conversations a child's handedToolAttachments in run-environment.ts;
+  // the tool then cannot open the chat's file.
   test("lets a chat tool open the chat's attachment by the key the Agent sees", async () => {
     const sixb = buildSixb(
       toolCallThenAnswerModel(readAttachment.name, { key: "msg-quote:1" }),
@@ -12773,9 +13214,10 @@ describe("agent tools act as the requester", () => {
     }
   })
 
-  // Regression proof: swap the subagent's and the workflow task's `toolAttachments` in
-  // run-environment.ts; the child opens the input file and the task cannot.
-  test("gives a workflow task's tools its input files and a child Agent's tools none", async () => {
+  // Regression proofs: swap the subagent's and the workflow task's `toolAttachments` in
+  // run-environment.ts; the child opens the input file and the task cannot. Give the child
+  // nothing to open, and it cannot open the quote its parent handed it.
+  test("gives a workflow task's tools its input files and a child's those its parent handed", async () => {
     const sixb = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
       projectTools: [readAttachment],
     })
@@ -12808,7 +13250,7 @@ describe("agent tools act as the requester", () => {
       id: "child-run",
       parentRunId: "parent-run",
       execution,
-      spec: {},
+      spec: { files: [{ path: "inputs/quote.txt", fileRef: quote }] },
     } as unknown as SubagentRunRecord
     const childThread = {
       id: "child-thread",
@@ -12821,10 +13263,10 @@ describe("agent tools act as the requester", () => {
       run: childRun,
       thread: childThread,
     })
-    const openQuote = (environment: typeof task) => {
+    const openQuote = (environment: typeof task, key: string) => {
       const tool = environment.turnContext.tools.find(({ name }) => name === readAttachment.name)
       return tool?.execute(
-        { key: "input.quote" },
+        { key },
         { signal: new AbortController().signal, callId: "call", toolCallId: "call" }
       )
     }
@@ -12832,8 +13274,14 @@ describe("agent tools act as the requester", () => {
       expect(JSON.parse(task.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
         attachments: [{ key: "input.quote", path: "input.quote" }],
       })
-      await expect(openQuote(task)).resolves.toEqual({ fileName: "quote.txt", text: "Quote 42" })
-      await expect(openQuote(child)).rejects.toThrow(AgentToolPublicError)
+      expect(JSON.parse(child.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
+        attachments: [{ key: "inputs/quote.txt", sandboxPath: "inputs/quote.txt" }],
+      })
+      const quoted = { fileName: "quote.txt", text: "Quote 42" }
+      await expect(openQuote(task, "input.quote")).resolves.toEqual(quoted)
+      await expect(openQuote(child, "inputs/quote.txt")).resolves.toEqual(quoted)
+      await expect(openQuote(child, "input.quote")).rejects.toThrow(AgentToolPublicError)
+      await expect(openQuote(task, "inputs/quote.txt")).rejects.toThrow(AgentToolPublicError)
     } finally {
       await Promise.all([task.dispose(), child.dispose()])
     }
