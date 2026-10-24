@@ -466,6 +466,42 @@ describe("a live sheet's rows", () => {
     expect(locked).toEqual(new Map([[0, new Set([1, 3, 7])]]))
   })
 
+  // Guard proof: lock nothing by `whole` in lockComputed; inv_2's Share then reads its amount over
+  // the one sum the reader sees, as if it were all of it.
+  test("lock a formula over a whole column on every row, when one of its cells is locked", () => {
+    const shares = liveSheetColumns(
+      parsed({
+        name: "Shares",
+        query: "overdue",
+        columns: {
+          Invoice: { from: "number" },
+          Amount: { from: "amount" },
+          Share: { type: "percent", formula: "[@Amount]/SUM([Amount])" },
+          Doubled: { type: "percent", formula: "[@Share]*2" },
+        },
+      }),
+      { properties: { number: { type: "string" }, amount: { type: "double" } }, links: {} }
+    )
+
+    const { locked } = liveSheetTable(shares, [
+      { properties: { number: "inv_1" }, redactions: { amount: { reason: "missing_clearance" } } },
+      { properties: { number: "inv_2", amount: 100 } },
+    ])
+    expect(locked).toEqual(
+      new Map([
+        [0, new Set([1, 2, 3])],
+        [1, new Set([2, 3])],
+      ])
+    )
+
+    // With every amount in view, nothing is.
+    const open = liveSheetTable(shares, [
+      { properties: { number: "inv_1", amount: 1250 } },
+      { properties: { number: "inv_2", amount: 100 } },
+    ])
+    expect(open.locked.size).toBe(0)
+  })
+
   test("lock every cell of a column whose property the reader's rows do not hold", () => {
     const { amount: _amount, ...visible } = {
       number: { type: "string" },
