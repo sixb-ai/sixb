@@ -192,6 +192,33 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
 - A decision made while the turn still runs takes effect once it pauses: it then resumes at once,
   and the child continues in the next turn.
 
+## Messages to a child
+
+The parent steers a child still at work with `message_agent({ key, text })`. The key, not a run
+id, names the child, so it stays right across a continuation (`src/subagent-tools.ts`,
+`src/subagent-inbox.ts`):
+
+- **Transport.** The parent appends an `agent.mail` record (`id`, `fromRunId`, `toRunId`, `kind`,
+  `text`, `sentAt`) to the child's inbox stream, `agents.runs.<childId>.inbox`, kept a day or 1,000
+  records. Its id is `<parentRunId>:<toolCallId>` and its idempotency key. There is no table: mail
+  lives one turn, and both transcripts keep it, the parent's tool call and the child's
+  `agent-message` part.
+- **Reading.** At each step boundary the child reads its inbox from its last cursor, from the
+  start for its first step, so a message sent while it was queued is read then. It keeps each id
+  once, whatever the broker delivers again, and only its parent's. The messages become one user
+  message of `agent-message` parts, projected as `<sixb_parent_message id="…">`, which stays in
+  the history of every later step. A read that fails is tried again at the next boundary.
+- **As it answers.** When the model answers without tools and a step is left, `beforeComplete`
+  reads the inbox once more: a message there adds a step after the answer, and the child's answer
+  is what it wrote after its last message. On its last step, or when it pauses on a held call, it
+  ends without reading; `wait_agent` then lists the message in `unread`, from the transcript.
+- **Transcript.** Each delivery is a user message between the steps it came between, so a
+  continuation replays it in place, with the bytes the child read.
+- **Refusals.** A key that is no child of the turn, a child that ended, and a paused child are
+  refused, each with what to do. A paused child reads nothing until a later turn continues it
+  under a new run, and only if the user decides: a message held for it could go unread. In that
+  turn, the parent messages the continuation by the same key.
+
 ## Child runs
 
 Child events are recorded in the broker, but the client API does not expose their streams. The

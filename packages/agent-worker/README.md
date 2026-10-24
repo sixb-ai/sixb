@@ -62,7 +62,7 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
-- Conversations get `spawn_agent` and `wait_agent`. `spawn_agent` takes a tier or one of the exact
+- Conversations get `spawn_agent`, `wait_agent` and `message_agent`. `spawn_agent` takes a tier or one of the exact
   `{ provider, modelId }` pairs of the project catalog, for example
   `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. Its guide
   lists each model from its configured definition: name, description, context limits and
@@ -80,6 +80,9 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   installed in the parent's `$SIXB_ARTIFACTS` (see
   [runtime design](./docs/runtime-design.md#child-runs)). It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
+  `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
+  before its next step, and `wait_agent` lists in `unread` what a child ended without reading
+  (see [messages to a child](./docs/runtime-design.md#messages-to-a-child)).
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
   instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only
