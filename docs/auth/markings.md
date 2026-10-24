@@ -151,6 +151,7 @@ An omitted property is absent, never `null`, so `null` keeps meaning an empty va
 | Project `amount` | Returned without `amount` |
 | Filter, sort, facet, or search by `amount` | Rejected with `403` |
 | `getBy` on a unique `amount` | Rejected with `403` |
+| Upsert a value for a unique `amount` | Rejected with `403`, whether or not the value is taken |
 | Search without `fields` | Searches the other default text fields |
 | Object events | `amount` omitted from `properties` and `propertyChanges` |
 | Object updates and deletions, when a dataset column is marked | Projected properties omitted unless the reader holds every marking a column declares |

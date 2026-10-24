@@ -26,6 +26,7 @@ export async function upsertObjectBatch(
   const { objectType, primaryPropertyId, ontology } = ctx
   const valueTypesById = ontology.getValueTypesById()
   const redact = await ctx.objectReader.writtenRowRedactor(objectType.id)
+  const checkUniqueValues = await ctx.objectReader.uniqueValueWriteCheck(objectType.id)
 
   return runRuntimeItemBatch({
     ctx,
@@ -37,6 +38,9 @@ export async function upsertObjectBatch(
         properties: item.properties,
         valueTypesById,
       })
+      // Fails this item alone, whatever objects hold: a refusal as taken would answer per value.
+      checkUniqueValues(normalized.properties)
+
       const ref = { objectTypeId: objectType.id, primaryId: normalized.primaryId }
       return {
         // One commit resolves one authority state per object, so two items for the same identity are

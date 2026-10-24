@@ -52,6 +52,11 @@ const Secret = defineObjectType({
 
 const staff = defineGroup("staff")
 const reader = defineRole("person-reader", { grantedTo: [staff], grants: [can.view(Person)] })
+const editors = defineGroup("editors")
+const editor = defineRole("person-editor", {
+  grantedTo: [editors],
+  grants: [can.view(Person), can.edit(Person)],
+})
 
 const whoHasEmail = defineAction("whoHasEmail")
   .params({ email: { schema: "string", required: true } })
@@ -80,17 +85,17 @@ function createHost() {
     id: "get-by",
     ontology: [Person, Employee, Secret],
     markings: [pii],
-    groups: [staff],
-    roles: [reader],
+    groups: [staff, editors],
+    roles: [reader, editor],
     actions: [whoHasEmail, ensurePerson],
     ...createTestRuntimeDeps(),
   })
 }
 
-function staffContext(host: SixbHost): AuthorizationContext {
+function staffContext(host: SixbHost, groupId = "staff"): AuthorizationContext {
   return resolveAuthorizationContext({
-    principal: { type: "user", id: "user-staff" },
-    groupIds: ["staff"],
+    principal: { type: "user", id: `user-${groupId}` },
+    groupIds: [groupId],
     roles: host.definitions.security.listResolvedRoles(),
   })
 }
@@ -177,6 +182,41 @@ describe("getBy", () => {
     await expect(staffReader.objects(Secret).getBy(Secret.p.code, "x")).rejects.toBeInstanceOf(
       AuthorizationError
     )
+  })
+
+  // Removal proof: drop `checkUniqueValues` from `objects/object/upsert.ts` and `upsert-batch.ts`;
+  // the taken badge then fails with object.unique_violation while the free one is written.
+  test("a write needs clearance to give a value to a marked unique property", async () => {
+    const host = createHost()
+    await seed(host)
+    await host.storage.auth?.users.create({
+      projectId: host.id,
+      id: "user-editors",
+      email: "e@x.test",
+    })
+    const staffEditor = createTestSixb(host, { authorization: staffContext(host, "editors") })
+    const refusal = new AuthorizationError(
+      "clearance:marking:pii",
+      "[Sixb] Cannot write a value to 'Person.badge': it is unique and requires clearance for marking 'pii'."
+    )
+
+    for (const badge of ["B-1", "B-2"]) {
+      await expect(
+        staffEditor.objects(Person).upsert({ properties: { id: "bob", badge } })
+      ).rejects.toThrow(refusal)
+    }
+
+    const results = await staffEditor.objects.upsertBatch("Person", [
+      { properties: { id: "bob", badge: "B-1" } },
+      { properties: { id: "cleo", badge: "B-2" } },
+      { properties: { id: "dan", name: "Dan" } },
+    ])
+    expect(results.map((result) => (result.ok ? "ok" : result.error))).toEqual([
+      refusal,
+      refusal,
+      "ok",
+    ])
+    expect(await staffEditor.objects(Person).get("bob")).toBeNull()
   })
 
   test("reads in an Action", async () => {

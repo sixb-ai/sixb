@@ -21,6 +21,7 @@ export async function upsertObject(
   assertCanEdit(ctx, ctx.objectType.id)
   const { objectType, primaryPropertyId, ontology } = ctx
   const redact = await ctx.objectReader.writtenRowRedactor(objectType.id)
+  const checkUniqueValues = await ctx.objectReader.uniqueValueWriteCheck(objectType.id)
 
   const normalized = normalizeRuntimeObject({
     objectType,
@@ -28,6 +29,7 @@ export async function upsertObject(
     properties,
     valueTypesById: ontology.getValueTypesById(),
   })
+  checkUniqueValues(normalized.properties)
   const ref = { objectTypeId: objectType.id, primaryId: normalized.primaryId }
 
   // The Materializer classifies this as an independent create, a patch over source authority, or a
