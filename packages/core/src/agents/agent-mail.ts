@@ -11,6 +11,11 @@ const AFTER_ANSWER =
  * for one of Sixb's own.
  */
 export function agentMailInstruction(part: AgentMailPart): string {
+  if (part.kind === "answer") {
+    const question =
+      part.inReplyTo === undefined ? "" : ` question="${escapeAttribute(part.inReplyTo)}"`
+    return `<sixb_parent_answer id="${escapeAttribute(part.id)}"${question}>${escapeText(part.text)}</sixb_parent_answer>`
+  }
   const block = `<sixb_parent_message id="${escapeAttribute(part.id)}">${escapeText(part.text)}</sixb_parent_message>`
   return part.afterAnswer ? `${block}\n\n${AFTER_ANSWER}` : block
 }

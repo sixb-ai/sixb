@@ -289,48 +289,82 @@ export async function subscribeAgentRunCancel(
   )
 }
 
-// ── Inbox stream (mail to a sub-agent's thread) ─────────────────────────────────────────────────
+// ── Inbox streams (mail between a turn and its sub-agents) ──────────────────────────────────────
 //
-// A per-thread channel a sub-agent's runs read at each step boundary: today, its parent steering
-// it. The sender is a run and the recipient a sub-agent's thread, so every run of the child reads
-// the same inbox. Its durable record is the sender's tool call and the reader's thread, which keeps
-// each `mail` part where the child read it. The stream outlives the turn only so that a child
-// paused on a held call, which a later turn continues once the user decides, can still be given
-// what it did not read: it keeps mail as long as an approval waits, and a day more.
+// A sub-agent's thread has an inbox its runs read at each step boundary: its parent steering it,
+// and the parent's reply to its question. Every run of the child reads the same one. A turn has
+// one too, where its children ask it. Its durable record is the sender's tool call and the
+// reader's thread, which keeps each `mail` part where it was read, or the tool result. An answer
+// the parent could only give in a later turn starts the run that continues the child, never through
+// these streams. A thread's inbox outlives the turn only so that a child paused on a held call,
+// which a later turn continues once the user decides, can still be given what it did not read: it
+// keeps mail as long as an approval waits, and a day more.
 
 export type AgentThreadInboxStreamId = `agents.threads.${string}.inbox`
+export type AgentRunInboxStreamId = `agents.runs.${string}.inbox`
 
 export function agentThreadInboxStreamId(threadId: string): AgentThreadInboxStreamId {
   return `agents.threads.${threadId}.inbox`
 }
 
+export function agentRunInboxStreamId(runId: string): AgentRunInboxStreamId {
+  return `agents.runs.${runId}.inbox`
+}
+
 const AGENT_MAIL_RECORD = "agent.mail"
 
-const AGENT_THREAD_INBOX_RETENTION = {
+const AGENT_INBOX_RETENTION = {
   // An approval waits at most 7 days (`AGENT_APPROVAL_TTL_MS`).
   maxAgeMs: 8 * 24 * 60 * 60 * 1000,
   maxRecords: 1_000,
 } as const
 
-export function agentThreadInboxStreamDefinition(threadId: string): BrokerStreamDefinition {
-  return { id: agentThreadInboxStreamId(threadId), retention: AGENT_THREAD_INBOX_RETENTION }
+/** Whose inbox: a sub-agent's thread, or a turn its children ask. */
+export type AgentInbox = { readonly threadId: string } | { readonly runId: string }
+
+function inboxStreamDefinition(inbox: AgentInbox): BrokerStreamDefinition {
+  return { id: inboxStreamId(inbox), retention: AGENT_INBOX_RETENTION }
 }
 
-/** The kinds of mail this version writes and understands. */
-export const AGENT_MAIL_KINDS = ["message"] as const
+function inboxStreamId(inbox: AgentInbox): AgentThreadInboxStreamId | AgentRunInboxStreamId {
+  return "threadId" in inbox
+    ? agentThreadInboxStreamId(inbox.threadId)
+    : agentRunInboxStreamId(inbox.runId)
+}
+
+/**
+ * The kinds of mail this version writes and understands:
+ *
+ * - `message`: the parent steers its child;
+ * - `question`: the child asks its parent, and waits;
+ * - `answer`: the parent's reply to a question, `inReplyTo`;
+ * - `deferred`: the parent's turn ended without one, so the child pauses on its question.
+ */
+export const AGENT_MAIL_KINDS = ["message", "question", "answer", "deferred"] as const
 export type AgentMailKind = (typeof AGENT_MAIL_KINDS)[number]
 
-/** One message from a run to a sub-agent's thread. */
-export interface AgentMail {
+/**
+ * One message between a turn and its sub-agent: to the child's thread, or, a question, from the
+ * child's thread to the turn.
+ */
+export type AgentMail = {
   /** Unique per message: a sender writing it again, or the broker redelivering it, is the same. */
   readonly id: string
   readonly fromRunId: string
-  readonly toThreadId: string
   readonly kind: AgentMailKind
+  /** The question an `answer` or `deferred` replies to. */
+  readonly inReplyTo?: string
   /** What the reader's model reads, whatever the kind: a reader that does not know it reads this. */
   readonly text: string
   readonly sentAt: string
-}
+} & (
+  | { readonly toThreadId: string }
+  | {
+      readonly toRunId: string
+      /** The sub-agent's thread that asks. */
+      readonly fromThreadId: string
+    }
+)
 
 /**
  * Mail as a reader finds it. Its kind may be one a newer sender writes: the reader delivers its
@@ -347,12 +381,25 @@ function isReceivedAgentMail(value: unknown): value is ReceivedAgentMail {
     isPlainRecord(value) &&
     typeof value.id === "string" &&
     typeof value.fromRunId === "string" &&
-    typeof value.toThreadId === "string" &&
+    (typeof value.toThreadId === "string" ||
+      (typeof value.toRunId === "string" && typeof value.fromThreadId === "string")) &&
     typeof value.kind === "string" &&
     value.kind.length > 0 &&
+    (value.inReplyTo === undefined || typeof value.inReplyTo === "string") &&
     typeof value.text === "string" &&
     typeof value.sentAt === "string"
   )
+}
+
+/** Whether mail is addressed to this inbox. */
+function isFor(mail: ReceivedAgentMail, inbox: AgentInbox): boolean {
+  return "threadId" in inbox
+    ? "toThreadId" in mail && mail.toThreadId === inbox.threadId
+    : "toRunId" in mail && mail.toRunId === inbox.runId
+}
+
+function recipientOf(mail: AgentMail): AgentInbox {
+  return "toThreadId" in mail ? { threadId: mail.toThreadId } : { runId: mail.toRunId }
 }
 
 /** Write a message to its recipient's inbox. Idempotent by its id where the broker dedupes. */
@@ -361,17 +408,15 @@ export async function publishAgentMail(
   params: { readonly projectId: string; readonly mail: AgentMail }
 ): Promise<void> {
   const { projectId, mail } = params
-  await broker.ensureStream({
-    projectId,
-    stream: agentThreadInboxStreamDefinition(mail.toThreadId),
-  })
+  const inbox = recipientOf(mail)
+  await broker.ensureStream({ projectId, stream: inboxStreamDefinition(inbox) })
   await broker.append({
     projectId,
-    streamId: agentThreadInboxStreamId(mail.toThreadId),
+    streamId: inboxStreamId(inbox),
     records: [
       {
         name: AGENT_MAIL_RECORD,
-        key: mail.toThreadId,
+        key: "threadId" in inbox ? inbox.threadId : inbox.runId,
         // The mail is composed only of validated JSON primitives.
         payload: mail as unknown as JsonValue,
         idempotencyKey: mail.id,
@@ -381,32 +426,65 @@ export async function publishAgentMail(
 }
 
 /**
- * Read a thread's mail after `afterCursor`, or from the start, every page of it. Carry the returned
+ * Call `onMail` with each page of mail to an inbox as it arrives, from its start. It is a wake: a
+ * broker may deliver a record again, so the reader keeps each mail once by its id. Returns the
+ * unsubscribe handle.
+ */
+export async function subscribeAgentMail(
+  broker: Broker,
+  params: { readonly projectId: string; readonly inbox: AgentInbox },
+  onMail: (mail: readonly ReceivedAgentMail[]) => void
+): Promise<() => void> {
+  await broker.ensureStream({
+    projectId: params.projectId,
+    stream: inboxStreamDefinition(params.inbox),
+  })
+  return broker.subscribe(
+    {
+      projectId: params.projectId,
+      streamId: inboxStreamId(params.inbox),
+      from: "earliest",
+      names: [AGENT_MAIL_RECORD],
+    },
+    (records) => {
+      const mail = records.flatMap((record) =>
+        isReceivedAgentMail(record.payload) && isFor(record.payload, params.inbox)
+          ? [record.payload]
+          : []
+      )
+      if (mail.length > 0) onMail(mail)
+    }
+  )
+}
+
+/**
+ * Read an inbox's mail after `afterCursor`, or from the start, every page of it. Carry the returned
  * cursor to the next read. A record that is not mail at all (no envelope, no text) cannot be
  * delivered: it is reported and passed, never silently.
  */
 export async function readAgentMail(
   broker: Broker,
-  params: { readonly projectId: string; readonly threadId: string; readonly afterCursor?: string }
+  params: { readonly projectId: string; readonly inbox: AgentInbox; readonly afterCursor?: string }
 ): Promise<{ readonly mail: readonly ReceivedAgentMail[]; readonly cursor?: string }> {
   const mail: ReceivedAgentMail[] = []
+  const streamId = inboxStreamId(params.inbox)
   let cursor = params.afterCursor
 
   for (;;) {
     const page = await broker.read({
       projectId: params.projectId,
-      streamId: agentThreadInboxStreamId(params.threadId),
+      streamId,
       names: [AGENT_MAIL_RECORD],
       ...(cursor === undefined ? {} : { afterCursor: cursor }),
     })
     for (const record of page.records) {
       if (!isReceivedAgentMail(record.payload)) {
         console.error(
-          `[Sixb] Agent thread '${params.threadId}' inbox record '${record.cursor}' is not mail; it is skipped.`
+          `[Sixb] Agent inbox '${streamId}' record '${record.cursor}' is not mail; it is skipped.`
         )
         continue
       }
-      if (record.payload.toThreadId === params.threadId) mail.push(record.payload)
+      if (isFor(record.payload, params.inbox)) mail.push(record.payload)
     }
 
     const previous = cursor

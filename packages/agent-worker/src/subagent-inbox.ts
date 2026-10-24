@@ -56,7 +56,7 @@ export class SubagentInbox {
     try {
       page = await readAgentMail(this.broker, {
         projectId,
-        threadId,
+        inbox: { threadId },
         ...(this.#cursor === undefined ? {} : { afterCursor: this.#cursor }),
       })
     } catch (error) {

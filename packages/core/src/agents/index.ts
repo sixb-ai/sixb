@@ -192,6 +192,7 @@ export {
   publishAgentRunCancel,
   publishAgentRunFinished,
   readAgentMail,
+  subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
 export { listSubagentThreadRuns } from "./subagent-runs"
