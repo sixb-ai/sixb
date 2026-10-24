@@ -29,17 +29,16 @@ import {
 import type {
   ObjectExpansion,
   ObjectQuery,
-  ObjectQueryPredicate,
   ObjectQueryResultShape,
   ObjectQuerySortField,
-  QueryScalarKind,
 } from "./ir"
+import { matchesPredicate } from "./matches-predicate"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
 import { usePrimaryIdLookups } from "./primary-id"
 import { rerankObjectCandidates } from "./reranking-executor"
 import { findQueryReranking } from "./reranking-query"
-import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
+import { compareQueryScalarValues } from "./scalar-values"
 import { withoutUserExpansions } from "./user-expansions"
 import {
   type AdmittedObjectQuery,
@@ -1120,99 +1119,6 @@ function completeFallbackEvaluation(entries: FallbackEntry[]): FallbackEvaluatio
   }
 }
 
-function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): boolean {
-  switch (predicate.op) {
-    case "and":
-      return predicate.items.every((item) => matchesPredicate(row, item))
-    case "or":
-      return predicate.items.some((item) => matchesPredicate(row, item))
-    case "not":
-      return !matchesPredicate(row, predicate.item)
-    case "constant":
-      return predicate.value
-    case "eq":
-      return queryScalarValuesEqual(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-    case "neq":
-      return !queryScalarValuesEqual(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-    case "lt":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) < 0
-      )
-    case "lte":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) <= 0
-      )
-    case "gt":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) > 0
-      )
-    case "gte":
-      return (
-        compareQueryScalarValues(
-          row.properties[predicate.propertyId],
-          predicate.value,
-          predicate.scalarKind
-        ) >= 0
-      )
-    case "in":
-      return predicate.values.some((value) =>
-        queryScalarValuesEqual(row.properties[predicate.propertyId], value, predicate.scalarKind)
-      )
-    case "exists": {
-      const exists =
-        Object.hasOwn(row.properties, predicate.propertyId) &&
-        row.properties[predicate.propertyId] !== undefined
-      return predicate.value ? exists : !exists
-    }
-    case "contains":
-      return containsValue(
-        row.properties[predicate.propertyId],
-        predicate.value,
-        predicate.scalarKind
-      )
-  }
-}
-
-function containsValue(
-  actual: unknown,
-  expected: unknown,
-  itemScalarKind: QueryScalarKind | undefined
-): boolean {
-  if (typeof actual === "string" && typeof expected === "string") {
-    return actual.includes(expected)
-  }
-
-  if (Array.isArray(actual)) {
-    return actual.some((item) => queryScalarValuesEqual(item, expected, itemScalarKind))
-  }
-
-  if (isPlainObject(actual) && typeof expected === "string") {
-    return Object.hasOwn(actual, expected)
-  }
-
-  return false
-}
-
 function sortEntries(
   entries: readonly FallbackEntry[],
   fields: readonly ObjectQuerySortField[]
@@ -1465,8 +1371,4 @@ function decodePageOffset(token: string | undefined): number {
     )
   }
   return offset
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
