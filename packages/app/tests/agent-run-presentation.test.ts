@@ -17,6 +17,7 @@ function run(input: Partial<AgentRun> & Pick<AgentRun, "id" | "status">): AgentR
   const { id, status, ...overrides } = input
   return {
     projectId: "project",
+    kind: "conversation",
     threadId: "thread",
     triggerMessageId: "message-user",
     requestedBy: { type: "user", id: "user" },

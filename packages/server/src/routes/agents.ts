@@ -159,8 +159,10 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
+    kind: run.kind,
     threadId: run.threadId,
     triggerMessageId: run.triggerMessageId,
+    parentRunId: run.kind === "subagent" ? run.parentRunId : undefined,
     requestedBy: run.requestedBy,
     status: run.status,
     model: run.spec?.model,
@@ -1059,8 +1061,48 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         },
         detail: {
           summary: "Get agent run",
+          description:
+            "A conversation's turn, or a sub-agent's run (`kind: \"subagent\"`), read through its thread: a sub-agent's run is visible exactly when its conversation is.",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "getAgentRun",
+        },
+      }
+    )
+    .post(
+      "/api/agent-runs/:runId/cancel",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const current = await sixb.agent.runs.cancel(params.runId)
+
+          set.status = 202
+          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(current) })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentRunParamsSchema,
+        response: {
+          202: CancelAgentRunResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Stop an agent run",
+          description:
+            "A turn, or a sub-agent's run. Whoever asked for the turn, or the conversation's owner, can stop it, and a sub-agent's run as its turn. A queued run is cancelled at once; a running one is still running in the response, with the stop signal sent. A sub-agent's parent reads that it was stopped.",
+          tags: [OPENAPI_TAGS.agentRuns.name],
+          operationId: "cancelAgentRunById",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

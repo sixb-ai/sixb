@@ -20,6 +20,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
+  CancelAgentRunByIdData,
+  CancelAgentRunByIdErrors,
+  CancelAgentRunByIdResponses,
   CancelAgentRunData,
   CancelAgentRunErrors,
   CancelAgentRunResponses,
@@ -136,6 +139,9 @@ import type {
   GetActivityVisitTimelineData,
   GetActivityVisitTimelineErrors,
   GetActivityVisitTimelineResponses,
+  GetAgentChildFileContentData,
+  GetAgentChildFileContentErrors,
+  GetAgentChildFileContentResponses,
   GetAgentData,
   GetAgentErrors,
   GetAgentMemoryData,
@@ -228,6 +234,9 @@ import type {
   GetObjectTypeData,
   GetObjectTypeErrors,
   GetObjectTypeResponses,
+  GetObservedAgentChildFileContentData,
+  GetObservedAgentChildFileContentErrors,
+  GetObservedAgentChildFileContentResponses,
   GetObservedAgentMessageFileContentData,
   GetObservedAgentMessageFileContentErrors,
   GetObservedAgentMessageFileContentResponses,
@@ -286,6 +295,9 @@ import type {
   HeadActionRunFileContentData,
   HeadActionRunFileContentErrors,
   HeadActionRunFileContentResponses,
+  HeadAgentChildFileContentData,
+  HeadAgentChildFileContentErrors,
+  HeadAgentChildFileContentResponses,
   HeadAgentMessageFileContentData,
   HeadAgentMessageFileContentErrors,
   HeadAgentMessageFileContentResponses,
@@ -330,6 +342,9 @@ import type {
   ListAgentThreadApprovalsData,
   ListAgentThreadApprovalsErrors,
   ListAgentThreadApprovalsResponses,
+  ListAgentThreadChildrenData,
+  ListAgentThreadChildrenErrors,
+  ListAgentThreadChildrenResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -396,6 +411,9 @@ import type {
   ListObjectsResponses,
   ListObjectTypesData,
   ListObjectTypesResponses,
+  ListObservedAgentThreadChildrenData,
+  ListObservedAgentThreadChildrenErrors,
+  ListObservedAgentThreadChildrenResponses,
   ListObservedAgentThreadMessagesData,
   ListObservedAgentThreadMessagesErrors,
   ListObservedAgentThreadMessagesResponses,
@@ -3067,6 +3085,8 @@ export const listAgentThreadRuns = <ThrowOnError extends boolean = false>(
 
 /**
  * Get agent run
+ *
+ * A conversation's turn, or a sub-agent's run (`kind: "subagent"`), read through its thread: a sub-agent's run is visible exactly when its conversation is.
  */
 export const getAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<GetAgentRunData, ThrowOnError>
@@ -3074,6 +3094,85 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * Stop an agent run
+ *
+ * A turn, or a sub-agent's run. Whoever asked for the turn, or the conversation's owner, can stop it, and a sub-agent's run as its turn. A queued run is cancelled at once; a running one is still running in the response, with the stop signal sent. A sub-agent's parent reads that it was stopped.
+ */
+export const cancelAgentRunById = <ThrowOnError extends boolean = false>(
+  options: Options<CancelAgentRunByIdData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CancelAgentRunByIdResponses,
+    CancelAgentRunByIdErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-runs/{runId}/cancel",
+    ...options,
+  })
+
+/**
+ * List the sub-agents of an agent conversation
+ *
+ * A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `runId` keeps those one turn spawned. Each lists every run it took, the one at work by `activeRunId`.
+ */
+export const listAgentThreadChildren = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadChildrenData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadChildrenResponses,
+    ListAgentThreadChildrenErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/children",
+    ...options,
+  })
+
+/**
+ * Get a file of a sub-agent
+ *
+ * A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `threadId` is the sub-agent's thread, `run` one of its runs, and `path` points into it: `/handedFiles/0/fileRef`, or `/files/0/fileRef` for what the run returned.
+ */
+export const getAgentChildFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentChildFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAgentChildFileContentResponses,
+    GetAgentChildFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/child-files/content",
+    ...options,
+  })
+
+/**
+ * Head a file of a sub-agent
+ */
+export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadAgentChildFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadAgentChildFileContentResponses,
+    HeadAgentChildFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/child-files/content",
     ...options,
   })
 
@@ -3273,6 +3372,42 @@ export const listObservedAgentThreadRuns = <ThrowOnError extends boolean = false
   >({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/observed-agent-threads/{threadId}/runs",
+    ...options,
+  })
+
+/**
+ * List the sub-agents of another user's agent conversation
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const listObservedAgentThreadChildren = <ThrowOnError extends boolean = false>(
+  options: Options<ListObservedAgentThreadChildrenData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListObservedAgentThreadChildrenResponses,
+    ListObservedAgentThreadChildrenErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}/children",
+    ...options,
+  })
+
+/**
+ * Get a file of another user's sub-agent
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentChildFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetObservedAgentChildFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetObservedAgentChildFileContentResponses,
+    GetObservedAgentChildFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}/child-files/content",
     ...options,
   })
 

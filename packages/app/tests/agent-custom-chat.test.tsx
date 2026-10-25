@@ -49,6 +49,7 @@ const question: AgentMessage = {
 const failedRun: AgentRun = {
   id: "run",
   projectId: "project",
+  kind: "conversation",
   threadId: thread.id,
   triggerMessageId: question.id,
   requestedBy: { type: "user", id: "user" },
