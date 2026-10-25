@@ -142,6 +142,7 @@ export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
           200: AgentThreadSchema,
           400: AgentRequestErrorResponseSchema,
           404: AgentRequestErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {

@@ -127,9 +127,10 @@ Each child:
 - knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
   time zone and locale, and the memory, which it reads and the gateway refuses to let it save;
 - gets the conversation prompt's data rules, never its rules for talking to the user;
-- publishes artifacts into its parent's thread as its own run, so a retry of the parent removes
-  them with the parent's own;
-- owns a durable run, usage records and stream, but no conversation thread;
+- publishes artifacts into its conversation (`conversationThreadId`) as its own run, so a retry of
+  the parent removes them with the parent's own;
+- works in a thread of its own, its run's `threadId`, beside a durable run, usage records and
+  stream (see [Child threads](#child-threads));
 - stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
   the parent's deadline, which its spec carries, so its wait in the queue counts against it. Once
   its parent has ended, the gateway and the publish transaction refuse it;
@@ -155,3 +156,30 @@ wrote after its last local tool call, else its last text. `wait_agent` returns
 `WAIT_ANSWER_MARGIN_MS` (a minute) before the parent's deadline, children still at work reported
 `queued` or `running`, so the parent answers before it times out. A child's files stay in its
 sandbox, except the artifacts it publishes.
+
+## Child threads
+
+A child's thread is an `agent_threads` row with `kind = 'subagent'` and a `parent`: the
+conversation, the turn that spawned it and its key. Its id is
+`createSubagentThreadId(spawningRunId, key)`, which shares its first run's digest.
+
+| Moment | What is written |
+| --- | --- |
+| `spawn_agent` | `runs.createSubagent`, in one transaction: the thread (owned by the conversation's owner), its task as a user message with the run's id, and the queued run as the thread's active run. A replay with the same key writes nothing more |
+| the child runs | its request is the thread's messages; the task closes with the thread's creation time, so each run of the child replays the same bytes. Memory is read as of the same time |
+| the child finishes | its work as one assistant message, in the transaction of `runs.finish`, which releases the thread. A failed or stopped child keeps what it did, as an interrupted turn does |
+
+Every message of a child's thread has a run id, its trigger too, so `deleteByRunId` removes a run's
+messages whole. A later run of the thread (`thread.create: false`) is single-flight, as a turn is.
+
+- **Read**: `createAgentThreadAccessRule` reads a child's thread exactly when it reads the
+  conversation, with the same access. Observers read it by id.
+- **Never listed**: `threads.list` returns conversations only, and the list indexes leave children
+  out. A fork copies the conversation's messages, never its children.
+- **No writes**: a message, a fork, participants, a thread mode or a sandbox recreation on a child's
+  thread is refused with `thread_not_conversation` (409). A child's mode is its run's,
+  copied from its turn: its thread reports that one to every reader (`approvalModeSource: "run"`).
+- **Deletion**: its row goes with the conversation's (`ON DELETE CASCADE`).
+
+The parent's own messages keep `spawn_agent` and `wait_agent`: they are the conversation's
+condensed view of the child, and the only one a fork reader gets.

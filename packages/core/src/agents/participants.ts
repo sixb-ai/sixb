@@ -10,7 +10,11 @@ import {
 import { announceAgentApprovals } from "./approvals"
 import { userCanRunAgent } from "./authority"
 import { AgentRequestError } from "./errors"
-import type { AgentThreadAccessRule, AgentThreadView } from "./thread-access"
+import {
+  type AgentThreadAccessRule,
+  type AgentThreadView,
+  assertConversationThread,
+} from "./thread-access"
 
 /** At most this many users take part in one conversation, besides its owner. */
 export const MAX_AGENT_THREAD_PARTICIPANTS = 50
@@ -29,6 +33,8 @@ export async function addAgentThreadParticipants(
   const storage = requireStorage(runtime)
   const readable = await rule.read(threadId)
   if (!readable) throw threadNotFound(threadId)
+  // A sub-agent's thread is read by its conversation's participants.
+  assertConversationThread(readable.thread)
 
   if (readable.access !== "owner") {
     throw new AgentRequestError(
@@ -83,6 +89,7 @@ export async function removeAgentThreadParticipant(
   requireStorage(runtime)
   const readable = await rule.read(threadId)
   if (!readable) throw threadNotFound(threadId)
+  assertConversationThread(readable.thread)
 
   const principal = userOf(user)
 

@@ -14,6 +14,7 @@ function thread(id: string, title: string): AgentThread {
   return {
     id,
     projectId: "project",
+    kind: "conversation",
     ownerPrincipal: { type: "user", id: "user" },
     owner: { type: "user", id: "user" },
     participants: [],

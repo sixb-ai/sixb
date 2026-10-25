@@ -21,6 +21,7 @@ import {
 const thread: AgentThread = {
   id: "thread",
   projectId: "project",
+  kind: "conversation",
   ownerPrincipal: { type: "user", id: "user" },
   owner: { type: "user", id: "user" },
   participants: [],

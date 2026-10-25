@@ -60,9 +60,11 @@ import {
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
+import { listSubagentThreadRuns } from "./subagent-runs"
 import {
   type AgentThreadView,
   agentThreadViews,
+  assertConversationThread,
   createAgentThreadAccessRule,
 } from "./thread-access"
 import type { AgentDescriptor } from "./types"
@@ -378,7 +380,17 @@ export function createAgentRuntime<
   const getThreadApprovalMode = async (
     threadId: string
   ): Promise<ResolvedAgentApprovalMode | null> => {
-    if (!(await getVisibleThreadRecord(threadId))) return null
+    const thread = await getVisibleThreadRecord(threadId)
+    if (!thread) return null
+    if (thread.kind === "subagent") {
+      // A child's mode is its run's, copied from the turn it works under, whoever reads it.
+      const latest = (
+        await listSubagentThreadRuns(requireAgents(), { projectId: runtime.projectId, threadId })
+      ).at(-1)
+      return latest
+        ? { approvalMode: agentRunApprovalMode(latest), approvalModeSource: "run" }
+        : null
+    }
     return resolveAgentApprovalMode(requireAgents(), {
       projectId: runtime.projectId,
       principal: settingsPrincipal(),
@@ -391,12 +403,14 @@ export function createAgentRuntime<
     mode: AgentApprovalMode | null
   ): Promise<ResolvedAgentApprovalMode> => {
     if (mode !== null) assertAgentApprovalMode(mode)
-    if (!(await getVisibleThreadRecord(threadId))) {
+    const thread = await getVisibleThreadRecord(threadId)
+    if (!thread) {
       throw new AgentRequestError(
         "thread_not_found",
         `[Sixb] Agent thread '${threadId}' not found.`
       )
     }
+    assertConversationThread(thread)
     const agents = requireAgents()
     const scope = { projectId: runtime.projectId, principal: settingsPrincipal() }
     await agents.approvalModes.setForThread({ ...scope, threadId, mode })
@@ -629,6 +643,7 @@ export function createAgentRuntime<
         const readable = await rule.read(threadId)
         if (!readable)
           throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+        assertConversationThread(readable.thread)
         if (readable.access !== "owner") {
           throw new AgentRequestError(
             "not_thread_owner",
@@ -694,6 +709,8 @@ export function createAgentRuntime<
             `[Sixb] Agent thread '${threadId}' not found.`
           )
         }
+        // A sub-agent's work is continued by its conversation, never on its own.
+        assertConversationThread(readable.thread)
 
         if (!getAgent()) {
           throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
@@ -821,9 +838,15 @@ async function listConversationRuns(
   const storage = runtime.storage.agents
   if (!storage) return null
 
-  const result = await storage.runs.list({ ...input, projectId: runtime.projectId, threadId })
+  const result = await storage.runs.list({
+    ...input,
+    projectId: runtime.projectId,
+    threadId,
+    kinds: ["conversation"],
+  })
   return {
     ...result,
+    // Only narrows the type: storage listed turns alone.
     runs: await attachRunViews(
       runtime,
       result.runs.filter((run) => run.kind === "conversation")

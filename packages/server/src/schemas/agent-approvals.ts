@@ -17,7 +17,7 @@ export const AgentApprovalModeSchema = z.enum(AGENT_APPROVAL_MODES)
 export const AgentApprovalStatusSchema = z.enum(AGENT_APPROVAL_STATUSES)
 
 /** Where your mode comes from: your choice in the thread, your default, or none yet. */
-export const AgentApprovalModeSourceSchema = z.enum(["thread", "default", "fallback"])
+export const AgentApprovalModeSourceSchema = z.enum(["thread", "default", "fallback", "run"])
 
 /** The held call as the Agent asked for it, without its params. */
 export const AgentApprovalCallSummarySchema = z.discriminatedUnion("kind", [
@@ -123,5 +123,5 @@ export const AgentPreferencesSchema = z.object({
   /** The mode of your turns in threads where you chose none. */
   approvalMode: AgentApprovalModeSchema,
   /** `fallback` until you choose a default. */
-  approvalModeSource: AgentApprovalModeSourceSchema.exclude(["thread"]),
+  approvalModeSource: AgentApprovalModeSourceSchema.exclude(["thread", "run"]),
 })

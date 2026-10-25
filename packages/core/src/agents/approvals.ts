@@ -38,8 +38,12 @@ export type AgentApprovalCallEffect =
   | { readonly kind: "action"; readonly effect: "ontology" | "external" }
   | { readonly kind: "workflow" }
 
-/** Where a user's mode in a thread comes from: their choice there, their default, or neither. */
-export type AgentApprovalModeSource = "thread" | "default" | "fallback"
+/**
+ * Where a user's mode in a thread comes from: their choice there, their default, or neither. A
+ * sub-agent's thread has no mode of its own to choose: `run`, its latest run's, copied from the turn
+ * it works under.
+ */
+export type AgentApprovalModeSource = "thread" | "default" | "fallback" | "run"
 
 export interface ResolvedAgentApprovalMode {
   readonly approvalMode: AgentApprovalMode

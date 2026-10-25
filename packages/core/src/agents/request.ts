@@ -58,6 +58,7 @@ import type { AgentMessagePart } from "./message"
 import type { TurnModelRouter } from "./model-routing"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
+import { assertConversationThread } from "./thread-access"
 import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
 
 export interface RequestAgentRunInput {
@@ -654,6 +655,7 @@ function assertAttachments(attachments: readonly FileRef[] | undefined): void {
 }
 
 function assertThreadAcceptsRun(thread: AgentThreadRecord): void {
+  assertConversationThread(thread)
   assertSandboxExecutionAvailable(thread)
   // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
   if (thread.activeRunId !== null) {

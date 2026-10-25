@@ -11553,6 +11553,12 @@ export type ListAgentThreadsResponses = {
       }
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
+      parent?: {
+        threadId: string
+        spawnedBy: string
+        key: string
+      }
       ownerPrincipal: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -11593,7 +11599,7 @@ export type ListAgentThreadsResponses = {
       createdAt: string
       updatedAt: string
       approvalMode?: "manual" | "accept-edits" | "auto"
-      approvalModeSource?: "thread" | "default" | "fallback"
+      approvalModeSource?: "thread" | "default" | "fallback" | "run"
     }>
     hasMore: boolean
     total: number
@@ -11665,6 +11671,12 @@ export type CreateAgentThreadResponses = {
       }
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
+      parent?: {
+        threadId: string
+        spawnedBy: string
+        key: string
+      }
       ownerPrincipal: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -11705,7 +11717,7 @@ export type CreateAgentThreadResponses = {
       createdAt: string
       updatedAt: string
       approvalMode?: "manual" | "accept-edits" | "auto"
-      approvalModeSource?: "thread" | "default" | "fallback"
+      approvalModeSource?: "thread" | "default" | "fallback" | "run"
     }
   }
 }
@@ -11756,6 +11768,12 @@ export type GetAgentThreadResponses = {
     }
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -11796,7 +11814,7 @@ export type GetAgentThreadResponses = {
     createdAt: string
     updatedAt: string
     approvalMode?: "manual" | "accept-edits" | "auto"
-    approvalModeSource?: "thread" | "default" | "fallback"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
 }
 
@@ -11843,6 +11861,13 @@ export type AddAgentThreadParticipantsErrors = {
     error: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -11865,6 +11890,12 @@ export type AddAgentThreadParticipantsResponses = {
     }
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -11905,7 +11936,7 @@ export type AddAgentThreadParticipantsResponses = {
     createdAt: string
     updatedAt: string
     approvalMode?: "manual" | "accept-edits" | "auto"
-    approvalModeSource?: "thread" | "default" | "fallback"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
 }
 
@@ -11942,6 +11973,13 @@ export type RemoveAgentThreadParticipantErrors = {
    */
   404: {
     error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
   }
   /**
    * Response for status 501
@@ -11985,6 +12023,13 @@ export type ForkAgentThreadErrors = {
     error: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -12007,6 +12052,12 @@ export type ForkAgentThreadResponses = {
       }
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
+      parent?: {
+        threadId: string
+        spawnedBy: string
+        key: string
+      }
       ownerPrincipal: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -12047,7 +12098,7 @@ export type ForkAgentThreadResponses = {
       createdAt: string
       updatedAt: string
       approvalMode?: "manual" | "accept-edits" | "auto"
-      approvalModeSource?: "thread" | "default" | "fallback"
+      approvalModeSource?: "thread" | "default" | "fallback" | "run"
     }
   }
 }
@@ -12109,6 +12160,12 @@ export type RecreateAgentThreadSandboxResponses = {
     }
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -12149,7 +12206,7 @@ export type RecreateAgentThreadSandboxResponses = {
     createdAt: string
     updatedAt: string
     approvalMode?: "manual" | "accept-edits" | "auto"
-    approvalModeSource?: "thread" | "default" | "fallback"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
 }
 
@@ -12663,6 +12720,7 @@ export type PostAgentThreadMessageErrors = {
    */
   409: {
     error: string
+    code?: string
   }
   /**
    * Response for status 429
@@ -13743,6 +13801,13 @@ export type SetAgentThreadApprovalModeErrors = {
     code?: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -13765,6 +13830,12 @@ export type SetAgentThreadApprovalModeResponses = {
     }
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -13805,7 +13876,7 @@ export type SetAgentThreadApprovalModeResponses = {
     createdAt: string
     updatedAt: string
     approvalMode?: "manual" | "accept-edits" | "auto"
-    approvalModeSource?: "thread" | "default" | "fallback"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
 }
 
@@ -14636,6 +14707,12 @@ export type GetObservedAgentThreadResponses = {
     }
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -14676,7 +14753,7 @@ export type GetObservedAgentThreadResponses = {
     createdAt: string
     updatedAt: string
     approvalMode?: "manual" | "accept-edits" | "auto"
-    approvalModeSource?: "thread" | "default" | "fallback"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
   }
 }
 
