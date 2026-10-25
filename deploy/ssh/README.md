@@ -46,7 +46,9 @@ Each deployment lives in its deploy user's home:
   pattern. A deploy runs `caddy validate` on the whole configuration before
   `sudo systemctl reload caddy`, the one command the `sixb-deploy` group may run as root, and puts
   the previous snippet back when Caddy rejects the new one. The app answers 502, 503, and
-  504 with the update page in `src/update-page.ts`.
+  504 with the update page in `src/update-page.ts`. Caddy compresses the API's complete JSON
+  responses (status 200) with zstd or gzip, which the API never does itself; the WebSocket and
+  other responses pass through untouched, and the app's assets are already precompressed.
 - **The deploy.** `src/scripts.ts` renders one script that holds `deploy/lock` throughout and prints
   a marker around each step, which the CLI turns into progress. `code/` is updated like
   `git reset --hard`, using the previous deploy's `deploy/files.txt` to find removed files.

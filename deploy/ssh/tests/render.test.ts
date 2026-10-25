@@ -127,11 +127,32 @@ describe("deployment files", () => {
   test("route each domain, with the update page for the app only", () => {
     const snippet = renderCaddySnippet(release)
 
-    expect(snippet).toContain("api.example.com {\n\treverse_proxy 127.0.0.1:3002\n}")
+    expect(snippet).toContain("api.example.com {\n\tencode {")
     expect(snippet).toContain(
-      "example.com {\n\treverse_proxy 127.0.0.1:3001\n\thandle_errors 502 503 504 {"
+      "\n\nexample.com {\n\treverse_proxy 127.0.0.1:3001\n\thandle_errors 502 503 504 {"
     )
     expect(snippet.match(/handle_errors/g)?.length).toBe(1)
+  })
+
+  test("compress the API's JSON answers, and nothing the app serves", () => {
+    const snippet = renderCaddySnippet(release)
+
+    expect(snippet).toContain(
+      [
+        "api.example.com {",
+        "\tencode {",
+        "\t\tzstd",
+        "\t\tgzip",
+        "\t\tmatch {",
+        "\t\t\tstatus 200",
+        "\t\t\theader Content-Type application/json*",
+        "\t\t}",
+        "\t}",
+        "\treverse_proxy 127.0.0.1:3002",
+        "}",
+      ].join("\n")
+    )
+    expect(snippet.match(/\tencode /g)?.length).toBe(1)
   })
 })
 
