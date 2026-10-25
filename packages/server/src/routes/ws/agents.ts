@@ -79,6 +79,10 @@ export function parseAgentStreamMessage(payload: unknown):
   return { ok: true, data: parsed.data }
 }
 
+/**
+ * A run's stream reaches whoever reads its thread: a turn's conversation, or a sub-agent's, which
+ * is read through its conversation. Either starts with the run's snapshot.
+ */
 export async function canAccessAgentRunStream(
   sixb: Sixb,
   runId: string

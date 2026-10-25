@@ -15,7 +15,11 @@ import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   type AgentRunStreamEvent,
 } from "@sixb/core/agents/streams"
-import { announceAgentApprovals } from "@sixb/core/internal/agents"
+import {
+  announceAgentApprovals,
+  createSubagentRunId,
+  createSubagentThreadId,
+} from "@sixb/core/internal/agents"
 import {
   agentRunStreamDefinition,
   agentRunStreamId,
@@ -422,6 +426,60 @@ describe("a shared thread's live stream", () => {
   })
 })
 
+describe("a sub-agent's live stream", () => {
+  // Guard proof: refuse a sub-agent's run in runs.getById, as for turns only; the subscription
+  // then ends on "Agent run not found." instead of the run's snapshot.
+  test("starts with its run's snapshot, read through its thread, then streams its run", async () => {
+    await withAgentWsServer(async ({ baseUrl, sixb }) => {
+      await advanceDurableRun(sixb, { type: "agent.run.started", runId })
+      const childId = await spawnStartedChild(sixb)
+      const [started] = await appendChildRecord(sixb, childId, {
+        type: "agent.run.started",
+        modelId: "test-model",
+      })
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "agents" })
+        ws.send(JSON.stringify({ type: "subscribe", runId: childId }))
+
+        expect(await nextWsMessage(ws)).toEqual({
+          type: "subscribed",
+          runId: childId,
+          afterCursor: null,
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "record",
+          record: { cursor: started?.cursor, payload: { runId: childId, parentRunId: runId } },
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "run.snapshot",
+          run: {
+            id: childId,
+            kind: "subagent",
+            parentRunId: runId,
+            threadId: createSubagentThreadId(runId, "research"),
+            status: "running",
+            streamId: agentRunStreamId(childId),
+          },
+        })
+
+        const [chunk] = await appendChildRecord(sixb, childId, {
+          type: "agent.ui.chunk",
+          chunkIndex: 0,
+          chunk: { type: "text-delta", textDelta: "hello" },
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "record",
+          record: { cursor: chunk?.cursor, name: "agent.ui.chunk" },
+        })
+      } finally {
+        ws.close()
+      }
+    })
+  })
+})
+
 describe("canAccessAgentThreadActivity", () => {
   test("filters project activity by durable run, thread, project, and owner", async () => {
     const sixb = createSixbInstance({
@@ -479,6 +537,72 @@ describe("canAccessAgentThreadActivity", () => {
     }
   })
 })
+
+/** A child the started turn spawned into its own thread, at work. */
+async function spawnStartedChild(sixb: SixbHost): Promise<string> {
+  const agents = agentStorage(sixb)
+  const turn = await agents.runs.getById({ projectId, id: runId })
+  if (!turn) throw new Error("expected the turn")
+
+  const childId = createSubagentRunId(runId, "research")
+  const executionId = await createTestAgentExecution(sixb.storage, {
+    projectId,
+    runId: childId,
+    sourceExecutionId: turn.executionId,
+  })
+  await agents.runs.createSubagent({
+    projectId,
+    id: childId,
+    executionId,
+    parentRunId: runId,
+    parentExecutionToken: `exec_${runId}`,
+    spawnKey: "research",
+    spec: {
+      model: { provider: "test", modelId: "test-model" },
+      task: "Research the issue.",
+      toolNames: [],
+      maxSteps: 5,
+    },
+    thread: { id: createSubagentThreadId(runId, "research"), create: true },
+    trigger: { id: `task_${childId}`, parts: [{ type: "text", text: "Research the issue." }] },
+    maxActiveChildren: 4,
+  })
+  await agents.runs.start({
+    projectId,
+    id: childId,
+    execution: { token: `exec_${childId}`, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+  })
+  return childId
+}
+
+/** A record of the child's stream, with the lineage a child's records carry. */
+async function appendChildRecord(
+  sixb: SixbHost,
+  childId: string,
+  event:
+    | { readonly type: "agent.run.started"; readonly modelId: string }
+    | {
+        readonly type: "agent.ui.chunk"
+        readonly chunkIndex: number
+        readonly chunk: { readonly type: "text-delta"; readonly textDelta: string }
+      }
+) {
+  await sixb.broker.ensureStream({ projectId, stream: agentRunStreamDefinition(childId) })
+  const payload = {
+    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    projectId,
+    runId: childId,
+    parentRunId: runId,
+    attempt: 1,
+    occurredAt: "2026-06-27T16:00:00.000Z",
+    ...event,
+  }
+  return sixb.broker.append({
+    projectId,
+    streamId: agentRunStreamId(childId),
+    records: [{ name: event.type, key: childId, payload: payload as unknown as JsonValue }],
+  })
+}
 
 function requestSdk(sixb: SixbHost, authorization: AuthorizationContext) {
   return bindRequestExecution(sixb, {
