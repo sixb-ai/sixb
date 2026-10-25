@@ -21,6 +21,7 @@ import {
   every,
   link,
   type PipelineDefinition,
+  param,
   prop,
   ref,
   resolveAuthorizationContext,
@@ -141,6 +142,11 @@ const archiveInvoice: ActionDefinition = defineAction("archive-invoice")
   .params({})
   .edits(() => {})
 
+/** A global action handed an invoice: its caller must be able to see the invoice. */
+const remindInvoice: ActionDefinition = defineAction("remind-invoice")
+  .params({ invoice: param(ref(Invoice)) })
+  .edits(() => {})
+
 const reviewContract = defineWorkflowStep("review-contract")
   .input({ contract: ref(Contract) })
   .output({ contract: ref(Contract) })
@@ -167,6 +173,8 @@ const linkers = defineGroup("linkers")
 const blindLinkers = defineGroup("blind-linkers")
 const unsignedReaders = defineGroup("unsigned-readers")
 const broadSenders = defineGroup("broad-senders")
+const reminders = defineGroup("reminders")
+const blindReminders = defineGroup("blind-reminders")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -240,6 +248,17 @@ const unsignedContractReader = defineRole("contract.unsigned-reader", {
   grants: [can.view(every.object().except([SignedContract]))],
 })
 
+const invoiceReminder = defineRole("invoice.reminder", {
+  grantedTo: [reminders],
+  grants: [can.view(Invoice), can.apply(remindInvoice)],
+})
+
+// Apply without view on the type of its param: the caller cannot name an invoice.
+const blindInvoiceReminder = defineRole("invoice.blind-reminder", {
+  grantedTo: [blindReminders],
+  grants: [can.apply(remindInvoice)],
+})
+
 const principal = { type: "user", id: "adam" } as const
 
 // No explicit instance annotations anywhere in this file: naming
@@ -254,7 +273,7 @@ function createRuntime(
   return new SixbHost({
     ontology: [Contract, SignedContract, Invoice],
     datasets: [ContractsDataset, InvoicesDataset],
-    actions: [sendContract, archiveInvoice],
+    actions: [sendContract, archiveInvoice, remindInvoice],
     connectors: [sourceConnector],
     syncs: [syncContracts, syncInvoices],
     pipelines: [contractPipeline, invoicePipeline],
@@ -273,6 +292,8 @@ function createRuntime(
       blindLinkers,
       unsignedReaders,
       broadSenders,
+      reminders,
+      blindReminders,
     ],
     roles: [
       contractOperator,
@@ -287,6 +308,8 @@ function createRuntime(
       blindInvoiceLinker,
       unsignedContractReader,
       broadContractSender,
+      invoiceReminder,
+      blindInvoiceReminder,
     ],
     ...(options.onError === undefined ? {} : { onError: options.onError }),
     ...(options.deps ?? createTestRuntimeDeps()),
@@ -617,6 +640,41 @@ describe("bound Sixb actions", () => {
       operator.actions.request({ actionId: "send-contract", subject: signed, runId: "act_signed" })
     ).resolves.toEqual(run)
     expect(await operator.actions.runs.getById("act_signed")).toEqual(run)
+  })
+
+  // Guard proof: name only the subject's type in `assertNamedObjectsVisible`
+  // (`actions/request.ts`), and the blind requests run.
+  test("an object passed as a param needs a view of its type, like the subject", async () => {
+    const host = createRuntime()
+    await seedPrincipal(host)
+    await createTestSixb(host)
+      .objects(Invoice)
+      .upsert({ properties: { id: "i1" } })
+    const request = (sixb: ReturnType<typeof bindPrincipal>, primaryId: string, runId: string) =>
+      sixb.actions
+        .request({
+          actionId: "remind-invoice",
+          params: { invoice: { objectTypeId: "invoice", primaryId } },
+          runId,
+        })
+        .catch((error: unknown) => error)
+
+    // Refused on the type alone: the caller cannot tell an existing invoice from a missing one.
+    const blind = bindPrincipal(host, contextFor(host, ["blind-reminders"]))
+    for (const [primaryId, runId] of [
+      ["i1", "act_hidden_invoice"],
+      ["i404", "act_missing_invoice"],
+    ] as const) {
+      const refused = await request(blind, primaryId, runId)
+      expect(refused).toBeInstanceOf(AuthorizationError)
+      expect(refused).toMatchObject({ grantKey: "view:object:invoice" })
+      expect(await host.storage.actionRuns?.getById({ projectId: host.id, id: runId })).toBeNull()
+    }
+
+    const reminder = bindPrincipal(host, contextFor(host, ["reminders"]))
+    await expect(request(reminder, "i1", "act_seen_invoice")).resolves.toMatchObject({
+      status: "succeeded",
+    })
   })
 })
 

@@ -57,6 +57,11 @@ Use `ref()` from `@sixb/core` for an object-reference input:
 Callers pass `{ objectTypeId: "Customer", primaryId: "cus-1" }` for `customer`. In a handler,
 read its ID from `params.customer.primaryId` or pass the reference to a link edit.
 
+A signed-in user or a service account can only pass an object it could read itself, as for the
+subject: Sixb answers `403` when the caller cannot view its type. Where a
+[condition](../auth/authorization.md#grant-only-some-objects) hides the object from the caller,
+Sixb answers `404`, as for a missing one.
+
 Use `ref.user()` for an input that names a project member:
 
 ```ts
