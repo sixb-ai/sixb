@@ -243,12 +243,6 @@ async function admitActionRequest(
 
   validateActionSubject(action, subject)
 
-  // A run names its subject: a principal cannot request one on a type it cannot read. The action
-  // itself runs as trusted code.
-  if (authorization.type !== "delegated" && subject.kind === "object") {
-    await objectReader.assertReadable({ objectTypeIds: [subject.objectTypeId] })
-  }
-
   let pathPrefix = action.id
   if (isObjectActionDefinition(action)) {
     const objectType: ObjectTypeWithPropertyTokens = resolveObjectActionSubject({
@@ -257,17 +251,6 @@ async function admitActionRequest(
       subject,
     })
     pathPrefix = `${objectType.id}.${action.id}`
-    if (authorization.type !== "delegated") {
-      // A run is visible to whoever may view its subject (`viewableActionRuns`). A subtype
-      // excluded from a broad grant is not visible through its parent, so admitting the request on
-      // the bound type alone would run what its caller can never read back.
-      await assertTypeViewable({
-        projectId,
-        runtimeAuthorization,
-        objectReader,
-        objectTypeId: objectType.id,
-      })
-    }
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
@@ -316,12 +299,15 @@ async function assertTypeViewable(input: {
 }
 
 /**
- * A principal acts only on the objects it can see. Where it views a type through a condition, the
- * subject and each `ref()` param of that type must be visible through its reader now: one that is
- * not is hidden or missing, and both are not found, before anything is recorded.
+ * A principal acts only on the objects it can see: the action runs as trusted code, so it cannot
+ * name, as its subject or a `ref()` param, an object it could not read itself. Each one's type must
+ * be viewable as a read requires it, its markings included. A subtype excluded from a broad grant
+ * is not viewable through its parent, and a run on it is one its caller could never read back.
  *
- * A type it views whole is not read here. Its missing subject fails the run, and its `ref()` params
- * are not looked up, as before conditions existed.
+ * Where it views a type through a condition, each object of that type must also be visible through
+ * its reader now: one that is not is hidden or missing, and both are not found, before anything is
+ * recorded. An object of a type it views whole is not read here. Its missing subject fails the run,
+ * and its `ref()` params are not looked up, as before conditions existed.
  */
 async function assertNamedObjectsVisible(input: {
   readonly objectReader: SixbRuntimeContext["objectReader"]
@@ -345,6 +331,9 @@ async function assertNamedObjectsVisible(input: {
       context: `Object not found for action param '${input.pathPrefix}.${paramId}'`,
     })
   }
+
+  if (named.length === 0) return
+  await objectReader.assertViewable(named.map(({ ref }) => ref.objectTypeId))
 
   const conditioned = named.filter(({ ref }) =>
     objectReader.viewsThroughCondition(ref.objectTypeId)
