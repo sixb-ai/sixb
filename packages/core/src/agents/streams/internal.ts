@@ -12,6 +12,7 @@ export {
   agentRunStreamIdempotencyKey,
   DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
+  publishAgentChildFinished,
   publishAgentRunActivity,
   publishAgentRunCancel,
   publishAgentRunFinished,

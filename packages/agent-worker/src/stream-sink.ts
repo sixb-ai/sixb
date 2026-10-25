@@ -10,6 +10,7 @@ import {
   agentRunStreamEventBase,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  publishAgentChildFinished,
   publishAgentRunActivity,
 } from "@sixb/core/internal/agents/streams"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -101,7 +102,11 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
   }
 }
 
-/** Keep the project lifecycle feed platform-owned even when callers replace transcript streaming. */
+/**
+ * Keep the lifecycle feeds platform-owned even when callers replace transcript streaming: a
+ * conversation's on the project's activity feed, a child's finish on its parent's inbox, which the
+ * parent's waits wake on.
+ */
 export function withAgentActivityStream(sink: StreamSink, broker: Broker): StreamSink {
   return {
     publishStarted: (run) =>
@@ -117,7 +122,9 @@ export function withAgentActivityStream(sink: StreamSink, broker: Broker): Strea
     publishRunFinished: (run) =>
       publishLifecycle([
         sink.publishRunFinished(run),
-        ...(run.kind === "conversation" ? [publishAgentRunActivity(broker, run)] : []),
+        run.kind === "conversation"
+          ? publishAgentRunActivity(broker, run)
+          : publishAgentChildFinished(broker, run),
       ]),
   }
 }

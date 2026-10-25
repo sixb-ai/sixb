@@ -12,6 +12,7 @@ import {
   type AgentRunFailureCode,
   type AgentRunRecord,
   type ConversationAgentRunRecord,
+  type SubagentRunRecord,
 } from "../../storage/agents/types"
 
 export const AGENT_RUN_STREAM_SCHEMA_VERSION = 1 as const
@@ -299,6 +300,9 @@ export async function subscribeAgentRunCancel(
 // these streams. A thread's inbox outlives the turn only so that a child paused on a held call,
 // which a later turn continues once the user decides, can still be given what it did not read: it
 // keeps mail as long as an approval waits, and a day more.
+//
+// A turn's inbox also hears when each of its children finishes, so one subscription per turn wakes
+// its waits for questions and for children alike.
 
 export type AgentThreadInboxStreamId = `agents.threads.${string}.inbox`
 export type AgentRunInboxStreamId = `agents.runs.${string}.inbox`
@@ -430,31 +434,112 @@ export async function publishAgentMail(
  * broker may deliver a record again, so the reader keeps each mail once by its id. Returns the
  * unsubscribe handle.
  */
-export async function subscribeAgentMail(
+export function subscribeAgentMail(
   broker: Broker,
   params: { readonly projectId: string; readonly inbox: AgentInbox },
   onMail: (mail: readonly ReceivedAgentMail[]) => void
 ): Promise<() => void> {
+  return subscribeAgentInbox(broker, params, { mail: onMail })
+}
+
+/**
+ * Hear an inbox from its start: its mail, and, for a turn's with `childFinished`, the ids of its
+ * children as each finishes. Both are wakes: a broker may deliver a record again, and a finish says
+ * only that the child's run is worth reading. Returns the unsubscribe handle.
+ */
+export async function subscribeAgentInbox(
+  broker: Broker,
+  params: { readonly projectId: string; readonly inbox: AgentInbox },
+  on: {
+    readonly mail: (mail: readonly ReceivedAgentMail[]) => void
+    readonly childFinished?: (runIds: readonly string[]) => void
+  }
+): Promise<() => void> {
+  const { inbox } = params
   await broker.ensureStream({
     projectId: params.projectId,
-    stream: inboxStreamDefinition(params.inbox),
+    stream: inboxStreamDefinition(inbox),
   })
   return broker.subscribe(
     {
       projectId: params.projectId,
-      streamId: inboxStreamId(params.inbox),
+      streamId: inboxStreamId(inbox),
       from: "earliest",
-      names: [AGENT_MAIL_RECORD],
+      names: on.childFinished
+        ? [AGENT_MAIL_RECORD, AGENT_CHILD_FINISHED_RECORD]
+        : [AGENT_MAIL_RECORD],
     },
     (records) => {
-      const mail = records.flatMap((record) =>
-        isReceivedAgentMail(record.payload) && isFor(record.payload, params.inbox)
-          ? [record.payload]
-          : []
-      )
-      if (mail.length > 0) onMail(mail)
+      const mail: ReceivedAgentMail[] = []
+      const finished: string[] = []
+      for (const { name, payload } of records) {
+        if (name === AGENT_MAIL_RECORD) {
+          if (isReceivedAgentMail(payload) && isFor(payload, inbox)) mail.push(payload)
+        } else if (
+          "runId" in inbox &&
+          isAgentChildFinished(payload) &&
+          payload.parentRunId === inbox.runId
+        ) {
+          finished.push(payload.runId)
+        }
+      }
+
+      if (mail.length > 0) on.mail(mail)
+      if (finished.length > 0) on.childFinished?.(finished)
     }
   )
+}
+
+const AGENT_CHILD_FINISHED_RECORD = "agent.child.finished"
+
+/** A child stopped being at work: it ended, or paused on a held call or on its question. */
+interface AgentChildFinished {
+  readonly runId: string
+  readonly parentRunId: string
+  readonly status: "succeeded" | "failed" | "cancelled"
+}
+
+function isAgentChildFinished(value: unknown): value is AgentChildFinished {
+  return (
+    isPlainRecord(value) &&
+    typeof value.runId === "string" &&
+    typeof value.parentRunId === "string" &&
+    isTerminalAgentRunStatus(value.status)
+  )
+}
+
+/**
+ * Tell the turn a child works under, on the turn's inbox, that the child finished. Its run stream
+ * says so too, but that stream belongs to the transcript sink, which a worker may replace, and
+ * hearing it would take one subscription per child, each carrying every chunk the child streams.
+ * This record is the platform's, and one subscription per turn hears every child.
+ */
+export async function publishAgentChildFinished(
+  broker: Broker,
+  run: SubagentRunRecord
+): Promise<void> {
+  if (run.status === "queued" || run.status === "running") return
+
+  const finished: AgentChildFinished = {
+    runId: run.id,
+    parentRunId: run.parentRunId,
+    status: run.status,
+  }
+  const inbox = { runId: run.parentRunId }
+  await broker.ensureStream({ projectId: run.projectId, stream: inboxStreamDefinition(inbox) })
+  await broker.append({
+    projectId: run.projectId,
+    streamId: inboxStreamId(inbox),
+    records: [
+      {
+        name: AGENT_CHILD_FINISHED_RECORD,
+        key: run.parentRunId,
+        // The record is composed only of validated JSON primitives.
+        payload: finished as unknown as JsonValue,
+        idempotencyKey: `${run.id}:${run.attempt}:finished:${run.status}`,
+      },
+    ],
+  })
 }
 
 /**
@@ -712,4 +797,5 @@ export async function publishAgentRunFinished(broker: Broker, run: AgentRunRecor
     ],
   })
   if (run.kind === "conversation") await publishAgentRunActivity(broker, run)
+  else await publishAgentChildFinished(broker, run)
 }

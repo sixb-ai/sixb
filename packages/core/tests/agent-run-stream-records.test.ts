@@ -5,11 +5,14 @@ import {
   AGENT_ACTIVITY_STREAM_ID,
   agentRunActivityEvent,
   agentRunFinishedEvent,
+  agentRunInboxStreamId,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
   isAgentRunActivityEvent,
   isAgentRunStreamEvent,
+  publishAgentChildFinished,
   publishAgentRunActivity,
+  subscribeAgentInbox,
 } from "../src/agents/streams/protocol"
 import { MODEL_UI_CHUNK_TYPES, type ModelUiChunk } from "../src/models/events"
 import type { ConversationAgentRunRecord, SubagentRunRecord } from "../src/storage"
@@ -142,6 +145,53 @@ describe("agent run stream records", () => {
       streamId: AGENT_ACTIVITY_STREAM_ID,
     })
     expect(activity.records).toHaveLength(0)
+    // Its parent hears it on its inbox instead.
+    const inbox = await broker.read({
+      projectId: run.projectId,
+      streamId: agentRunInboxStreamId(run.parentRunId),
+    })
+    expect(inbox.records).toMatchObject([
+      {
+        name: "agent.child.finished",
+        payload: { runId: run.id, parentRunId: run.parentRunId, status: "cancelled" },
+      },
+    ])
+  })
+
+  // Removal proof: drop the parent check from subscribeAgentInbox; the finish of another run's
+  // child, written to this inbox, reads as this run's.
+  test("tells a parent each of its children that finished, and no other run's", async () => {
+    const broker = new InMemoryBroker()
+    const run = subagentRunRecord()
+    let heard!: (runIds: readonly string[]) => void
+    const finished = new Promise<readonly string[]>((resolve) => {
+      heard = resolve
+    })
+    const unsubscribe = await subscribeAgentInbox(
+      broker,
+      { projectId: run.projectId, inbox: { runId: run.parentRunId } },
+      { mail: () => {}, childFinished: (runIds) => heard(runIds) }
+    )
+    try {
+      // Written first, so the first thing heard proves they are left out. Still at work: nothing
+      // to hear.
+      await publishAgentChildFinished(broker, subagentRunRecord({ status: "running" }))
+      await broker.append({
+        projectId: run.projectId,
+        streamId: agentRunInboxStreamId(run.parentRunId),
+        records: [
+          {
+            name: "agent.child.finished",
+            payload: { runId: "agt_run_child_2", parentRunId: "agt_run_2", status: "succeeded" },
+          },
+        ],
+      })
+      await publishAgentChildFinished(broker, run)
+
+      expect(await finished).toEqual([run.id])
+    } finally {
+      unsubscribe()
+    }
   })
 
   test("validates the exact durable failure on a finished event", () => {

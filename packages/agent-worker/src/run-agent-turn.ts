@@ -1,7 +1,6 @@
 import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
 import {
   createAgentMessageId,
-  hasActiveChildren,
   type PausableModelLoopResult,
   runModelLoop,
   toModelMessages,
@@ -18,7 +17,6 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
-import { delay } from "./abort"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
 import {
   attachmentKey,
@@ -34,7 +32,6 @@ import { type ConversationReaders, loadConversationAuthors } from "./message-aut
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
-import { WAIT_POLL_MS } from "./subagent-tools"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
@@ -60,12 +57,15 @@ export interface RunAgentTurnInput {
   readonly conversation?: ConversationReaders
   /** Preflight's retained projection, avoiding a second storage read in the worker path. */
   readonly threadContext?: LoadedAgentThreadModelContext
-  /** What the turn's children ask it, when it can delegate. */
-  readonly questions?: TurnQuestions
+  /** What the turn's children ask it, and the work it waits for, when it can delegate. */
+  readonly children?: TurnChildren
 }
 
-/** How a turn hears the questions its children ask, and leaves them waiting when it ends. */
-export interface TurnQuestions {
+/**
+ * How a turn hears the questions its children ask, leaves them waiting when it ends, and waits for
+ * those still at work when it pauses.
+ */
+export interface TurnChildren {
   /** Read after the conversation: children of earlier turns still waiting on their question. */
   readonly waiting?: string
   /** The questions the model has not read yet, read in one more step when it answers. */
@@ -75,6 +75,11 @@ export interface TurnQuestions {
    * the turn waits until it has, until `stopAt`. Only then can its end cancel the others.
    */
   defer(stopAt: number, signal: AbortSignal): Promise<void>
+  /**
+   * Before a pausing turn records its end: wait until none of its children is at work, or until
+   * `stopAt`. Its end cancels those still at work; one that holds a call pauses by itself.
+   */
+  settle(stopAt: number, signal: AbortSignal): Promise<void>
 }
 
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
@@ -253,11 +258,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
             content: context.systemPrompt,
           },
           ...modelMessages,
-          ...(input.questions?.waiting
+          ...(input.children?.waiting
             ? [
                 {
                   role: "user" as const,
-                  content: [{ type: "text" as const, text: input.questions.waiting }],
+                  content: [{ type: "text" as const, text: input.children.waiting }],
                 },
               ]
             : []),
@@ -268,11 +273,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         // A child's question the model has not read comes before its answer ends the turn.
-        ...(input.questions === undefined
+        ...(input.children === undefined
           ? {}
           : {
               beforeComplete: async () => {
-                const unread = await input.questions?.unread()
+                const unread = await input.children?.unread()
                 return unread
                   ? [{ role: "user", content: [{ type: "text", text: unread }] }]
                   : undefined
@@ -321,13 +326,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     // A child waiting on its question pauses on it while the turn still runs: a waiting child
     // would hold the wait below forever, and the turn's end cancels the children still at work.
-    await input.questions?.defer(runtime.deadline.getTime() - PAUSE_WAIT_MARGIN_MS, abortSignal)
+    const stopWaitingAt = runtime.deadline.getTime() - PAUSE_WAIT_MARGIN_MS
+    await input.children?.defer(stopWaitingAt, abortSignal)
 
     // A call held after the last step that ran tools, by a command left running in the sandbox or
     // by a child, pauses the turn too. Its end cancels the children still at work, so it first
     // waits for them: one that holds a call pauses by itself instead of being stopped.
     if (result.status === "paused" || (await holdsApproval(agents, run))) {
-      await waitForChildren(agents, run, runtime.deadline, abortSignal)
+      await input.children?.settle(stopWaitingAt, abortSignal)
     }
     const interruptedWhileWaiting = await finalizeIfInterrupted()
     if (interruptedWhileWaiting) return interruptedWhileWaiting
@@ -393,27 +399,6 @@ function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): P
  * pause, which then cancels those still at work.
  */
 export const PAUSE_WAIT_MARGIN_MS = 10_000
-
-/** Wait until none of the turn's children is queued or running, or its deadline nears. */
-async function waitForChildren(
-  agents: AgentStorage,
-  run: ConversationAgentRunRecord,
-  deadline: Date,
-  signal: AbortSignal
-): Promise<void> {
-  const stopAt = deadline.getTime() - PAUSE_WAIT_MARGIN_MS
-  while (await hasActiveChildren(agents, run)) {
-    const remainingMs = stopAt - Date.now()
-    if (remainingMs <= 0) return
-    try {
-      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
-    } catch (error) {
-      // The turn's interruption checks record why it stopped, with what it wrote.
-      if (signal.aborted) return
-      throw error
-    }
-  }
-}
 
 /**
  * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:

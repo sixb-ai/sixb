@@ -373,7 +373,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         stopSignal: signal,
         runtime,
         threadContext: environment.threadContext,
-        questions: await delegation.turnQuestions(),
+        children: await delegation.turnChildren(),
       })
       await this.cancelActiveSubagents(completed.id, "The parent Agent run has finished.")
       if (completed.kind === "conversation") {

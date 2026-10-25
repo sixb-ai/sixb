@@ -24,6 +24,7 @@ import {
   createSubagentThreadId,
   deferredChildQuestion,
   dispatchQueuedSubagentRuns,
+  hasActiveChildren,
   isAgentToolResult,
   isAwaitingAnswerRun,
   isPausedSubagentRun,
@@ -68,12 +69,23 @@ import {
 } from "./child-questions"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
-import type { TurnQuestions } from "./run-agent-turn"
+import type { TurnChildren } from "./run-agent-turn"
 import { continuationTrigger } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
-/** How often a wait for children reads their runs. */
-export const WAIT_POLL_MS = 250
+/**
+ * How long a wait for children goes without reading their runs when nothing woke it. A child's
+ * finish and a question wake it at once, through the turn's inbox; this only bounds what a lost
+ * wake costs: a record the broker dropped, a subscription that failed. Five seconds keeps such a
+ * loss short beside the minutes a child works, and a wait reads storage 12 times a minute.
+ */
+export const CHILD_WAIT_RECHECK_MS = 5_000
+/**
+ * How often a wait reads a run whose finish goes to another run's inbox, which nothing wakes it
+ * for: a child of an earlier turn, or of an earlier attempt of this resume, still stopping. Both
+ * are rare and short, so a short poll costs little.
+ */
+export const OTHER_INBOX_RECHECK_MS = 250
 /**
  * How long before its turn's deadline `wait_agent` stops waiting, so the Agent still answers with
  * what its children found. A last step without tools takes seconds on a light model and up to about
@@ -234,9 +246,10 @@ export class SubagentCoordinator {
   /**
    * How the turn hears its children's questions: those of earlier turns' children still paused on
    * one, read after the conversation; those it has not read, before its answer ends it; and the
-   * pause, before its end, of each child still waiting on one.
+   * pause, before its end, of each child still waiting on one. And how a pausing turn waits for
+   * those still at work.
    */
-  async turnQuestions(): Promise<TurnQuestions> {
+  async turnChildren(): Promise<TurnChildren> {
     let waiting: readonly WaitedQuestion[] = []
     try {
       waiting = await this.waitingQuestions()
@@ -253,6 +266,7 @@ export class SubagentCoordinator {
         return unread.length > 0 ? renderChildQuestions(unread) : undefined
       },
       defer: (stopAt, signal) => this.deferOpenQuestions(stopAt, signal),
+      settle: (stopAt, signal) => this.settleChildren(stopAt, signal),
     }
   }
 
@@ -324,7 +338,8 @@ export class SubagentCoordinator {
           `[SixbAgentWorker] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
         )
       }
-      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal)
+      // Its finish goes to the inbox of the attempt it ran under, not this turn's: read it again.
+      await delay(Math.min(OTHER_INBOX_RECHECK_MS, remainingMs), signal)
     }
   }
 
@@ -746,17 +761,40 @@ export class SubagentCoordinator {
 
     try {
       while (deferred.length > 0 && Date.now() < stopAt) {
+        const paused = this.#questions.nextChange()
         const runs = await this.context.storage.agents.runs.getByIds({
           projectId: this.context.id,
           ids: deferred,
         })
         if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
-        await delay(Math.min(WAIT_POLL_MS, stopAt - Date.now()), signal)
+        await delay(Math.min(CHILD_WAIT_RECHECK_MS, stopAt - Date.now()), signal, paused)
       }
     } catch (error) {
       // The turn's interruption checks record why it stopped.
       if (signal.aborted) return
       throw error
+    }
+  }
+
+  /**
+   * Wait until none of the turn's children is queued or running, or `stopAt`: a pausing turn's
+   * end cancels those still at work, and one that holds a call pauses by itself meanwhile.
+   */
+  async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
+    const { agents } = this.context.storage
+    for (;;) {
+      const finished = this.#questions.nextChange()
+      if (!(await hasActiveChildren(agents, this.parentRun))) return
+
+      const remainingMs = stopAt - Date.now()
+      if (remainingMs <= 0) return
+      try {
+        await delay(Math.min(CHILD_WAIT_RECHECK_MS, remainingMs), signal, finished)
+      } catch (error) {
+        // The turn's interruption checks record why it stopped, with what it wrote.
+        if (signal.aborted) return
+        throw error
+      }
     }
   }
 
@@ -1037,6 +1075,8 @@ export class SubagentCoordinator {
     const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
     for (;;) {
       signal.throwIfAborted()
+      // Taken before the reads, so a question or a finish that comes during them wakes the wait.
+      const changed = this.#questions.nextChange()
       const runs = await this.context.storage.agents.runs.getByIds({
         projectId: this.context.id,
         ids: runIds,
@@ -1099,7 +1139,12 @@ export class SubagentCoordinator {
             : { artifactsError: delivered.artifactsError }),
         }
       }
-      await delay(Math.min(WAIT_POLL_MS, remainingMs), signal, this.#questions.nextQuestion())
+      // A child of an earlier turn finishes into that turn's inbox, which this one does not hear.
+      const unheard = children.some(
+        (run) => run.parentRunId !== this.parentRun.id && !isTerminalSubagent(run)
+      )
+      const recheckMs = unheard ? OTHER_INBOX_RECHECK_MS : CHILD_WAIT_RECHECK_MS
+      await delay(Math.min(recheckMs, remainingMs), signal, changed)
     }
   }
 
