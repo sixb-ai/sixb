@@ -6,7 +6,7 @@ import type {
   SandboxDefinition,
   SandboxFactory,
 } from "@sixb/core"
-import { staticSandboxRecipe } from "@sixb/core/internal/agents"
+import { conversationThreadId, staticSandboxRecipe } from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -110,8 +110,10 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: SubagentRunRecord
-  /** The parent's thread: what the child publishes lands there. Absent, it publishes nothing. */
-  readonly thread?: AgentThreadRecord | null
+  /** The child's own thread: memory is read as of its creation. */
+  readonly thread: AgentThreadRecord
+  /** The conversation: what the child publishes lands there. Absent, it publishes nothing. */
+  readonly conversation?: AgentThreadRecord | null
   /** Who asked for the parent turn: what the child publishes is theirs. */
   readonly requestedBy?: Principal
 }
@@ -255,17 +257,18 @@ export async function createConversationAgentEnvironment(
 
 /**
  * Build an isolated environment for one fresh, headless child Agent. It knows the project as its
- * parent does (ontology docs, memory to read) and publishes into its parent's thread, as its own run.
+ * parent does (ontology docs, memory to read) and publishes into its conversation, as its own run.
  */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, thread } = input
+  const { context, plan, run, conversation } = input
   const execution = run.execution
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
-  const memory = await loadConversationMemory({ sixb: context.sixb, asOf: run.createdAt })
+  // As of the thread's start, as a conversation's: each run of the child reads the same memory.
+  const memory = await loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt })
 
   return startAgentEnvironment({
     mode: "subagent",
@@ -275,13 +278,14 @@ export async function createSubagentEnvironment(
     plan,
     runId: run.id,
     parentRunId: run.parentRunId,
+    threadId: conversationThreadId(input.thread),
     toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
-    ...(thread
+    ...(conversation
       ? {
           publishing: {
-            threadId: thread.id,
-            owner: thread.ownerPrincipal,
-            author: input.requestedBy ?? thread.ownerPrincipal,
+            threadId: conversation.id,
+            owner: conversation.ownerPrincipal,
+            author: input.requestedBy ?? conversation.ownerPrincipal,
             executionToken: execution.token,
           },
         }

@@ -1,23 +1,46 @@
-import { runModelLoop } from "@sixb/core/internal/agents"
+import type { AgentMessagePart } from "@sixb/core"
+import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
-import type { ModelStep } from "@sixb/core/models"
-import { coerceAgentRunFinishReason, type SubagentRunRecord } from "@sixb/core/storage"
-import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, withCurrentTime } from "./agent-prompt"
+import type { ModelMessage, ModelStep } from "@sixb/core/models"
+import {
+  type AgentThreadRecord,
+  type AppendAgentMessageInput,
+  coerceAgentRunFinishReason,
+  type SubagentRunRecord,
+} from "@sixb/core/storage"
+import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { finishRunOrThrow } from "./finalize"
+import { appendMessageAndFinishRunOrThrow } from "./finalize"
+import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
+/**
+ * What a child did so far, kept in its thread however its run ends: a failed or stopped child
+ * keeps it as an interrupted turn does.
+ */
+export interface SubagentWork {
+  parts?: readonly AgentMessagePart[]
+}
+
+/**
+ * Run one child in its thread. Its request is the thread's messages, the task dated at the thread's
+ * creation; what it did is the thread's next message, written with its finish.
+ */
 export async function runSubagent(input: {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly run: SubagentRunRecord
+  /** The child's own thread. */
+  readonly thread: AgentThreadRecord
   /** Created by the worker before the run's tools, which share its signal and accounting. */
   readonly runtime: AgentTurnRuntime
+  /** Filled once the model loop returns, for the worker to keep when the run fails afterwards. */
+  readonly work?: SubagentWork
 }): Promise<SubagentRunRecord> {
-  const { context, plan, run, runtime } = input
+  const { context, plan, run, thread, runtime } = input
   const executionToken = run.execution?.token
   if (!executionToken) {
     throw createSixbError(
@@ -27,19 +50,17 @@ export async function runSubagent(input: {
     )
   }
 
+  const history = await subagentHistory({
+    context,
+    thread,
+    timeZone: plan.timeZone ?? context.projectTimeZone,
+  })
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
   const generation = await runModelLoop({
     model: runtime.usageRecorder.wrapModel(plan.model),
-    messages: [
-      { role: "system", content: context.systemPrompt },
-      withCurrentTime(
-        { role: "user", content: [{ type: "text", text: run.spec.task }] },
-        run.createdAt,
-        plan.timeZone ?? context.projectTimeZone
-      ),
-    ],
+    messages: [{ role: "system", content: context.systemPrompt }, ...history],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
     maxSteps: plan.maxSteps,
@@ -49,6 +70,13 @@ export async function runSubagent(input: {
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) => context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
   })
+  const traceDetails = { threadId: run.threadId, runId: run.id }
+  const parts =
+    generation.status === "aborted"
+      ? agentTraceFromPartialModelLoop(generation.steps, generation.partialContent, traceDetails)
+      : agentTraceFromModelSteps(generation.steps, traceDetails)
+  if (input.work) input.work.parts = parts
+
   assertSubagentCanFinalize({ runtime, sandboxReadiness })
   if (generation.status === "aborted")
     throw new DOMException("Subagent stream was aborted.", "AbortError")
@@ -66,20 +94,61 @@ export async function runSubagent(input: {
   }
   const childResult = subagentResult(generation.steps, run)
 
-  const finalized = await finishRunOrThrow(context.storage.agents, {
-    projectId: context.id,
-    id: run.id,
-    executionToken,
-    status: "succeeded",
-    modelId: plan.model.modelId,
-    finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
-    result: childResult,
+  const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
+    message: subagentWorkMessage(run, parts),
+    finish: {
+      projectId: context.id,
+      id: run.id,
+      executionToken,
+      status: "succeeded",
+      modelId: plan.model.modelId,
+      finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
+      result: childResult,
+    },
   })
   if (finalized.kind !== "subagent") {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' changed kind during finalization.`)
   }
   await context.streamSink.publishRunFinished(finalized)
   return finalized
+}
+
+/** The assistant message that keeps what a child run did in its thread. */
+export function subagentWorkMessage(
+  run: SubagentRunRecord,
+  parts: readonly AgentMessagePart[]
+): AppendAgentMessageInput {
+  return {
+    id: createAgentMessageId(),
+    projectId: run.projectId,
+    threadId: run.threadId,
+    runId: run.id,
+    role: "assistant",
+    parts,
+  }
+}
+
+/**
+ * The child's thread as its model reads it. The task, its first message, closes with the time the
+ * thread was created, so each run of the child replays the same bytes.
+ */
+async function subagentHistory(input: {
+  readonly context: AgentTurnContext
+  readonly thread: AgentThreadRecord
+  readonly timeZone: string
+}): Promise<ModelMessage[]> {
+  const { context, thread } = input
+  const { messages } = await context.storage.agents.messages.list({
+    projectId: context.id,
+    threadId: thread.id,
+    order: "asc",
+  })
+  const taskId = messages[0]?.id
+  const createdAt = renderCurrentTime(thread.createdAt, input.timeZone)
+
+  return toModelMessages(messages, {
+    userMessageSuffix: (message) => (message.id === taskId ? createdAt : undefined),
+  })
 }
 
 function assertSubagentCanFinalize(input: {

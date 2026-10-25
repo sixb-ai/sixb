@@ -76,6 +76,14 @@ export function createAgentThreadAccessRule(
   return { caller, read }
 }
 
+/**
+ * The conversation a thread belongs to: the thread itself, or a sub-agent's parent. What a child
+ * publishes, and the thread its sandbox names, are its conversation's.
+ */
+export function conversationThreadId(thread: Pick<AgentThreadRecord, "id" | "parent">): string {
+  return thread.parent?.threadId ?? thread.id
+}
+
 /** Stored threads as the runtime returns them, with their participants and no execution tokens. */
 export async function agentThreadViews(
   runtime: SixbRuntimeContext,
