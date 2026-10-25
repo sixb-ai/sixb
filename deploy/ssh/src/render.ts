@@ -85,6 +85,7 @@ export function renderCaddySnippet(release: DeployRelease): string {
     return [
       [
         `${service.http.domain} {`,
+        ...(service.name === "api" ? compressJson() : []),
         `\treverse_proxy ${service.http.host}:${service.http.port}`,
         ...(pages ? updatePageOnProxyErrors() : []),
         "}",
@@ -92,6 +93,26 @@ export function renderCaddySnippet(release: DeployRelease): string {
     ]
   })
   return [`# ${GENERATED}`, "", sites.join("\n\n"), ""].join("\n")
+}
+
+/**
+ * The API never compresses its responses, and an object query page is easily a megabyte of
+ * JSON that compresses about twentyfold. Only complete JSON answers are encoded: the
+ * WebSocket upgrade and anything else streamed through the API stay as they are, since an
+ * encoder buffers what it writes. A 206 keeps its byte range of the stored file intact, and the
+ * app's assets are already precompressed.
+ */
+function compressJson(): string[] {
+  return [
+    "\tencode {",
+    "\t\tzstd",
+    "\t\tgzip",
+    "\t\tmatch {",
+    "\t\t\tstatus 200",
+    "\t\t\theader Content-Type application/json*",
+    "\t\t}",
+    "\t}",
+  ]
 }
 
 /**
