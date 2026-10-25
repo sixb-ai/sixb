@@ -53063,6 +53063,9 @@
                         "additionalProperties": false
                       }
                     },
+                    "languageRouting": {
+                      "type": "boolean"
+                    },
                     "image": {
                       "type": "array",
                       "items": {

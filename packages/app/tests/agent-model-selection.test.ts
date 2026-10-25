@@ -98,12 +98,20 @@ test.each<[string, readonly LanguageModel[], ModelPreference | null, ResolvedMod
     { model: unofferedDefault, reasoning: "provider-default" },
   ],
   ["resolves nothing from an empty catalog", [], null, {}],
-  // Proven by removal: drop the tiers check in resolveModelSelection.
+  // Proven by removal: drop the tiers check in resolveModelSelection; Auto shows the default.
+  ["with tiers, nothing chosen is Auto, which asks for nothing", tiers, null, { auto: true }],
+  ["with tiers, a reasoning alone pins no model", tiers, { reasoning: "high" }, { auto: true }],
   [
-    "resolves nothing with tiers, whatever the browser remembered",
+    "with tiers, a chosen model is pinned, with its reasoning",
     tiers,
     { model: deepRef, reasoning: "low" },
-    {},
+    { model: tiers[1], reasoning: "low", request: { model: deepRef, reasoning: "low" } },
+  ],
+  [
+    "with tiers, a pinned model that left the catalog is Auto again",
+    tiers,
+    { model: { provider: "test", modelId: "gone" } },
+    { auto: true },
   ],
 ])("%s", (_name, catalog, preference, expected) => {
   expect(resolveModelSelection(catalog, preference)).toEqual(expected)
@@ -141,4 +149,18 @@ test("names the defaults the composer follows", () => {
     )
   expect(render(true, fast)).toContain('title="Default · fast · Low"')
   expect(render(false, deep)).toContain('title="deep"')
+})
+
+test("ModelControls with tiers is the Auto chip, Auto when no model is pinned", () => {
+  // Removal proof: drop the tiers branch from ModelControls; it shows "Default model".
+  const html = renderToStaticMarkup(
+    createElement(ModelControls, {
+      models: tiers,
+      onSelectModel: () => {},
+      onSelectReasoning: () => {},
+      onResetToDefault: () => {},
+    })
+  )
+  expect(html).toContain('aria-label="Model: Auto. Change it"')
+  expect(html).not.toContain("Default model")
 })

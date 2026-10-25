@@ -128,6 +128,11 @@ export const TranscriptionModelSchema = CatalogEntrySchema.extend({
 
 export const ModelCatalogSchema = z.object({
   language: z.array(LanguageModelSchema),
+  /**
+   * With tiers: whether a decision model picks the model of each chat message that names none.
+   * Without one, such a message runs on `standard`. Absent when `models.language` is a list.
+   */
+  languageRouting: z.boolean().optional(),
   image: z.array(ImageModelSchema),
   audio: z.object({
     speech: z.array(SpeechModelSchema),

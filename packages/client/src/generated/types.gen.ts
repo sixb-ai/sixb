@@ -18343,6 +18343,7 @@ export type ListModelsResponses = {
             }
       }
     }>
+    languageRouting?: boolean
     image: Array<{
       provider: string
       modelId: string

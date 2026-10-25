@@ -121,6 +121,13 @@ export const en = {
     tools: "Tools",
     reasoning: "Reasoning",
     via: (name: string) => `Via ${name}`,
+    /** With tiers: the model menu, and its first choice. */
+    title: "Model",
+    chip: (name: string) => `Model: ${name}. Change it`,
+    auto: "Auto",
+    autoRouting: "Sixb picks the model of each message",
+    autoStandard: (name: string) => `Sixb uses ${name}`,
+    backToAuto: "Back to Auto",
   },
   reasoning: {
     thinking: "Thinking",

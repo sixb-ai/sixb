@@ -5,8 +5,9 @@ import { ChevronDown, RotateCcw, Search, Shapes } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
-import { defaultLanguageModel, defaultReasoningLevel } from "../model-selection"
+import { defaultLanguageModel, defaultReasoningLevel, hasTiers } from "../model-selection"
 import type { LanguageModel } from "../types"
+import { AutoModelChip } from "./auto-model-chip"
 import { ModelPickerRow } from "./model-picker-row"
 import { ProviderLogo } from "./provider-logo"
 import { ReasoningEffortSlider } from "./reasoning-effort-slider"
@@ -24,11 +25,36 @@ export interface ModelControlsProps {
   readonly onResetReasoning?: () => void
   /** The selection follows the project defaults: nothing was chosen explicitly. */
   readonly usingDefault?: boolean
-  /** Forget the explicit choice and follow the project defaults again. */
+  /** Forget the explicit choice and follow the project defaults again; with tiers, Auto. */
   readonly onResetToDefault?: () => void
+  /** With tiers: a decision model picks each message's model on Auto. */
+  readonly routing?: boolean
 }
 
-export function ModelControls({
+/**
+ * The model picker. With tiers and `onResetToDefault`, an Auto chip: no `selectedModel` is Auto,
+ * and choosing a model pins it.
+ */
+export function ModelControls(props: ModelControlsProps) {
+  const { models, onResetToDefault } = props
+  if (!hasTiers(models) || !onResetToDefault) return <ModelListControls {...props} />
+
+  return (
+    <AutoModelChip
+      models={models}
+      selectedModel={props.selectedModel}
+      selectedReasoning={props.selectedReasoning}
+      routing={props.routing}
+      disabled={props.disabled || props.loading}
+      onSelectModel={props.onSelectModel}
+      onSelectReasoning={props.onSelectReasoning}
+      onResetReasoning={props.onResetReasoning}
+      onChooseAuto={onResetToDefault}
+    />
+  )
+}
+
+function ModelListControls({
   models,
   selectedModel,
   selectedReasoning,
