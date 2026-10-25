@@ -3,10 +3,14 @@ import {
   assertAgentRunExecution,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
+  assertConversationThreadRow,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
+  assertSubagentThreadTakesRun,
+  newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
+import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -31,7 +35,7 @@ import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-lis
 import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import { pgHoldsRun } from "./approvals"
-import { type AgentRunRow, rowToRunRecord } from "./rows"
+import { type AgentRunRow, type AgentThreadRow, rowToRunRecord, rowToThreadRecord } from "./rows"
 
 const PG_RUN_ID_BATCH_SIZE = 10_000
 
@@ -53,8 +57,8 @@ export class PgAgentRunStore implements AgentRunStore {
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
-        const [thread] = await tx<{ active_run_id: string | null }[]>`
-          SELECT active_run_id FROM agent_threads
+        const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
+          SELECT id, kind, active_run_id FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
@@ -65,6 +69,7 @@ export class PgAgentRunStore implements AgentRunStore {
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
+        assertConversationThreadRow(thread, "takes turns", "SixbPg")
         if (thread.active_run_id !== null) {
           throw new AgentStorageError(
             "active_run_exists",
@@ -193,17 +198,32 @@ export class PgAgentRunStore implements AgentRunStore {
           )
         }
 
+        const createdAt = input.createdAt ?? new Date()
+        await claimChildThread(tx, input, parent, createdAt)
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
-            project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
-            status, attempt, created_at
+            project_id, id, execution_id, kind, thread_id, trigger_message_id, parent_run_id,
+            spawn_key, spec, status, attempt, created_at
           ) VALUES (
             ${input.projectId}, ${input.id}, ${input.executionId}, ${"subagent"},
-            ${input.parentRunId}, ${input.spawnKey},
+            ${input.thread.id}, ${input.trigger.id}, ${input.parentRunId}, ${input.spawnKey},
             ${JSON.stringify(input.spec)}::text::jsonb,
-            ${"queued"}, ${0}, ${input.createdAt ?? new Date()}
+            ${"queued"}, ${0}, ${createdAt}
           )
           RETURNING *
+        `
+        await tx`
+          INSERT INTO agent_messages (
+            project_id, id, thread_id, run_id, role, seq, parts, metadata, content_version,
+            created_at
+          ) VALUES (
+            ${input.projectId}, ${input.trigger.id}, ${input.thread.id}, ${input.id}, ${"user"},
+            (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
+              WHERE project_id = ${input.projectId} AND thread_id = ${input.thread.id}),
+            ${JSON.stringify(input.trigger.parts)}::text::jsonb,
+            ${input.trigger.metadata === undefined ? null : JSON.stringify(input.trigger.metadata)}::text::jsonb,
+            ${AGENT_MESSAGE_CONTENT_VERSION}, ${createdAt}
+          )
         `
         const created = rowToRunRecord(row)
         if (created.kind !== "subagent") {
@@ -480,13 +500,70 @@ export class PgAgentRunStore implements AgentRunStore {
     return row
   }
 
+  /** A turn releases its conversation, a child run its own thread. */
   private async releaseThread(sql: SQLClient, run: AgentRunRow, completedAt: Date): Promise<void> {
-    if (run.kind !== "conversation") return
     await sql`
       UPDATE agent_threads SET active_run_id = ${null}, updated_at = ${completedAt}
       WHERE project_id = ${run.project_id} AND id = ${run.thread_id} AND active_run_id = ${run.id}
     `
   }
+}
+
+/**
+ * The child's thread: its first run creates it, owned by the conversation's owner; a later run
+ * takes it while it is idle. Either way the run is its active run. Locked after the parent run, in
+ * the run -> thread order every writer follows.
+ */
+async function claimChildThread(
+  tx: SQLClient,
+  input: CreateSubagentRunInput,
+  parent: AgentRunRow,
+  createdAt: Date
+): Promise<void> {
+  if (!input.thread.create) {
+    const [row] = await tx<AgentThreadRow[]>`
+      SELECT * FROM agent_threads
+      WHERE project_id = ${input.projectId} AND id = ${input.thread.id}
+      FOR UPDATE
+    `
+    assertSubagentThreadTakesRun(
+      row ? rowToThreadRecord(row) : null,
+      input,
+      parent.thread_id ?? "",
+      "SixbPg"
+    )
+    await tx`
+      UPDATE agent_threads
+      SET active_run_id = ${input.id}, message_count = message_count + 1,
+        last_message_at = ${createdAt}, updated_at = ${createdAt}
+      WHERE project_id = ${input.projectId} AND id = ${input.thread.id}
+    `
+    return
+  }
+
+  const [conversation] = await tx<AgentThreadRow[]>`
+    SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${parent.thread_id}
+  `
+  if (!conversation) {
+    throw new AgentStorageError(
+      "thread_not_found",
+      `[SixbPg] Agent thread '${parent.thread_id}' not found for project '${input.projectId}'.`
+    )
+  }
+
+  const thread = newSubagentThreadRecord(input, rowToThreadRecord(conversation), createdAt)
+  await tx`
+    INSERT INTO agent_threads (
+      project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
+      owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
+      updated_at
+    ) VALUES (
+      ${thread.projectId}, ${thread.id}, ${"subagent"}, ${conversation.id}, ${input.parentRunId},
+      ${input.spawnKey}, ${thread.ownerPrincipal.type}, ${thread.ownerPrincipal.id},
+      ${thread.status}, ${input.id}, ${createdAt}, ${thread.messageCount}, ${createdAt},
+      ${createdAt}
+    )
+  `
 }
 
 /**

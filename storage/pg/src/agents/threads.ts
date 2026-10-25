@@ -1,4 +1,5 @@
 import {
+  assertConversationThreadRow,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -119,8 +120,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return await runPgTransaction(this.sql, async (tx) => {
         // A share lock holds back the writes that take the thread for update: an admitted request
         // or a finalized answer lands before the copy or after it, never inside it.
-        const [source] = await tx<Pick<AgentThreadRow, "id" | "active_run_id">[]>`
-          SELECT id, active_run_id FROM agent_threads
+        const [source] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
+          SELECT id, kind, active_run_id FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.sourceThreadId}
           FOR SHARE
         `
@@ -131,6 +132,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
             `[SixbPg] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
           )
         }
+        assertConversationThreadRow(source, "can be forked", "SixbPg")
 
         const [activeRun] =
           source.active_run_id === null
@@ -308,7 +310,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return { threads: [], hasMore: false, total: 0 }
     }
 
-    const whereClauses = ["project_id = $1"]
+    // A sub-agent's thread is read through its conversation; the list indexes leave it out too.
+    const whereClauses = ["project_id = $1", "kind = 'conversation'"]
     const params: SqlParameter[] = [input.projectId]
     let index = 2
 
@@ -354,8 +357,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     return runPgTransaction(this.sql, async (tx) => {
       // Concurrent adds to one thread queue on its row, so the limit counts every participant.
-      const [thread] = await tx<{ id: string }[]>`
-        SELECT id FROM agent_threads
+      const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind">[]>`
+        SELECT id, kind FROM agent_threads
         WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         FOR UPDATE
       `
@@ -365,6 +368,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
           `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
+      assertConversationThreadRow(thread, "has participants", "SixbPg")
 
       const existing = await selectParticipants(tx, input.projectId, [input.threadId])
       const added = participantsToAdd(input, existing, "SixbPg")

@@ -100,6 +100,11 @@ test("PgAiCostStorage returns direct and child-agent attribution with each model
         toolNames: [],
         maxSteps: 25,
       },
+      thread: { id: `thread_${childRunId}`, create: true },
+      trigger: {
+        id: `task_${childRunId}`,
+        parts: [{ type: "text", text: "Research the incident." }],
+      },
       maxActiveChildren: 4,
     })
     for (const [id, executionId] of [

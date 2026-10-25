@@ -389,6 +389,11 @@ describe("activity timeline", () => {
         toolNames: [],
         maxSteps: 5,
       },
+      thread: { id: "thread_run_sub", create: true },
+      trigger: {
+        id: "task_run_sub",
+        parts: [{ type: "text", text: "Find the late invoices." }],
+      },
       maxActiveChildren: 4,
     })
 

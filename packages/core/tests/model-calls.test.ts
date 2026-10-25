@@ -93,6 +93,8 @@ async function seed() {
       toolNames: [],
       maxSteps: 25,
     },
+    thread: { id: "thread_child", create: true },
+    trigger: { id: "task_child", parts: [{ type: "text", text: "Research" }] },
     maxActiveChildren: 4,
   })
   await record("call_thread", parentExecution)

@@ -107,6 +107,7 @@ export {
   createAgentThreadSandboxName,
   createSubagentExecutionId,
   createSubagentRunId,
+  createSubagentThreadId,
 } from "./ids"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,

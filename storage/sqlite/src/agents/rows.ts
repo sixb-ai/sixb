@@ -23,6 +23,10 @@ import type { SqliteValue } from "../run-list-query"
 export interface AgentThreadRow {
   project_id: string
   id: string
+  kind: AgentThreadRecord["kind"]
+  parent_thread_id: string | null
+  parent_run_id: string | null
+  spawn_key: string | null
   owner_principal_type: Principal["type"]
   owner_principal_id: string
   title: string | null
@@ -109,6 +113,16 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    kind: row.kind,
+    ...(row.parent_thread_id && row.parent_run_id && row.spawn_key
+      ? {
+          parent: {
+            threadId: row.parent_thread_id,
+            spawnedBy: row.parent_run_id,
+            key: row.spawn_key,
+          },
+        }
+      : {}),
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     title: row.title ?? undefined,
     ...(row.sandbox_state == null
@@ -165,12 +179,20 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
       ...(row.spec === null ? {} : { spec: JSON.parse(row.spec) as ConversationAgentRunSpec }),
     }
   }
-  if (!row.parent_run_id || !row.spawn_key || row.spec === null) {
+  if (
+    !row.thread_id ||
+    !row.trigger_message_id ||
+    !row.parent_run_id ||
+    !row.spawn_key ||
+    row.spec === null
+  ) {
     throw new Error(`[SixbSqlite] Subagent run '${row.id}' has invalid persisted fields.`)
   }
   return {
     ...base,
     kind: "subagent",
+    threadId: row.thread_id,
+    triggerMessageId: row.trigger_message_id,
     parentRunId: row.parent_run_id,
     spawnKey: row.spawn_key,
     spec: JSON.parse(row.spec) as SubagentRunSpec,

@@ -289,6 +289,27 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("075-artifact-threads", artifactThreadsSql),
     sqliteSql("076-agent-approvals", agentApprovalsSql),
     sqliteSql("077-agent-approval-resume", agentApprovalResumeSql),
+    sqliteStep(
+      "078-subagent-threads",
+      (db) => {
+        // Bun runs a script past a statement that fails and reports only the last one's error, so
+        // a refused copy would go unnoticed and the rebuild would drop the rows: count around it.
+        const before = subagentThreadCounts(db)
+        db.run(subagentThreadsSql)
+        const after = subagentThreadCounts(db)
+        if (
+          after.runs !== before.runs ||
+          after.threads !== before.threads + before.threadless ||
+          after.messages !== before.messages + before.threadless ||
+          after.threadless !== 0
+        ) {
+          throw new Error(
+            "[SixbSqliteStorage] Agent runs, threads or messages were lost while giving sub-agents their threads."
+          )
+        }
+      },
+      { checksum: checksum(subagentThreadsSql) }
+    ),
   ],
 })
 
@@ -479,6 +500,26 @@ function sourceStorageCounts(db: Database): {
     .get() as { readonly versions: number; readonly roots: number; readonly rows: number }
 }
 
+function subagentThreadCounts(db: Database): {
+  readonly runs: number
+  readonly threads: number
+  readonly messages: number
+  /** Child runs without a thread. */
+  readonly threadless: number
+} {
+  return db
+    .query(`SELECT (SELECT count(*) FROM agent_runs) AS runs,
+      (SELECT count(*) FROM agent_threads) AS threads,
+      (SELECT count(*) FROM agent_messages) AS messages,
+      (SELECT count(*) FROM agent_runs WHERE kind = 'subagent' AND thread_id IS NULL) AS threadless`)
+    .get() as {
+    readonly runs: number
+    readonly threads: number
+    readonly messages: number
+    readonly threadless: number
+  }
+}
+
 /**
  * Stored events that would not rebuild exactly from their commit and execution. Who asked and what
  * wrote are derived from the execution exactly as 047 derived the commit's copies; both sides were
@@ -665,3 +706,4 @@ import agentApprovalsSql from "./migrations/076-agent-approvals.sql" with { type
 import agentApprovalResumeSql from "./migrations/077-agent-approval-resume.sql" with {
   type: "text",
 }
+import subagentThreadsSql from "./migrations/078-subagent-threads.sql" with { type: "text" }

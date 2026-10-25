@@ -37,6 +37,8 @@ export type {
   AgentRunStatus,
   AgentRunStore,
   AgentStorage,
+  AgentThreadKind,
+  AgentThreadParent,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxParams,

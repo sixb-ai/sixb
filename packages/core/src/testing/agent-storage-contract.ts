@@ -152,6 +152,8 @@ function subagentInput(
       toolNames: ["search_orders"],
       maxSteps: 25,
     },
+    thread: { id: `thread_${id}`, create: true },
+    trigger: { id: `task_${id}`, parts: [{ type: "text", text: "Research the open orders." }] },
     maxActiveChildren: 4,
     createdAt: at("2026-06-23T10:01:00.000Z"),
     ...overrides,
@@ -1129,7 +1131,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
     // ── durable child runs ─────────────────────────────────────────────────────────────────────
 
-    test("creates and exactly replays a child run without claiming a thread", async () => {
+    test("creates a child's thread, its task and its run at once, and replays them exactly", async () => {
       await withStorage(async (storage, fixture) => {
         await createRunningParent(storage, fixture)
         const input = subagentInput("parent_token")
@@ -1138,14 +1140,51 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(child).toMatchObject({
           kind: "subagent",
           id: "child_1",
+          threadId: "thread_child_1",
+          triggerMessageId: "task_child_1",
           parentRunId: "parent_1",
           spawnKey: "research-orders",
           status: "queued",
           attempt: 0,
           spec: input.spec,
         })
-        expect(child).not.toHaveProperty("threadId")
-        await expect(storage.runs.createSubagent(input)).resolves.toEqual(child)
+        await expect(storage.threads.getById({ projectId, id: "thread_child_1" })).resolves.toEqual(
+          {
+            id: "thread_child_1",
+            projectId,
+            kind: "subagent",
+            parent: { threadId: "parent_thread", spawnedBy: "parent_1", key: "research-orders" },
+            ownerPrincipal: owner,
+            status: "active",
+            activeRunId: "child_1",
+            lastMessageAt: at("2026-06-23T10:01:00.000Z"),
+            messageCount: 1,
+            createdAt: at("2026-06-23T10:01:00.000Z"),
+            updatedAt: at("2026-06-23T10:01:00.000Z"),
+          }
+        )
+        const task = {
+          id: "task_child_1",
+          projectId,
+          threadId: "thread_child_1",
+          runId: "child_1",
+          role: "user",
+          seq: 1,
+          parts: [{ type: "text", text: "Research the open orders." }],
+          contentVersion: AGENT_MESSAGE_CONTENT_VERSION,
+          createdAt: at("2026-06-23T10:01:00.000Z"),
+        }
+        await expect(
+          storage.messages.list({ projectId, threadId: "thread_child_1" })
+        ).resolves.toMatchObject({ messages: [task], total: 1 })
+
+        // A replay writes nothing more, whatever trigger it brings.
+        await expect(
+          storage.runs.createSubagent({ ...input, trigger: { ...input.trigger, id: "other" } })
+        ).resolves.toEqual(child)
+        await expect(
+          storage.messages.list({ projectId, threadId: "thread_child_1" })
+        ).resolves.toMatchObject({ total: 1 })
         await expectAgentError(
           storage.runs.createSubagent({
             ...input,
@@ -1161,11 +1200,223 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(listed.runs.map((run) => run.id)).toEqual(["child_1"])
         await expect(
+          storage.runs.list({ projectId, threadId: "thread_child_1" })
+        ).resolves.toMatchObject({ runs: [{ id: "child_1" }], total: 1 })
+        await expect(
           storage.runs.list({ projectId, kinds: ["conversation"] })
         ).resolves.toMatchObject({ runs: [{ id: "parent_1" }], total: 1 })
         await expect(
           storage.threads.getById({ projectId, id: "parent_thread" })
-        ).resolves.toMatchObject({ activeRunId: "parent_1" })
+        ).resolves.toMatchObject({ activeRunId: "parent_1", messageCount: 0 })
+      })
+    })
+
+    test("rolls a child's thread back with its run", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const input = subagentInput("parent_token")
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: input.id,
+          executionId: input.executionId,
+          sourceExecutionId: "test_agent_execution:parent_1",
+          authority: "inherited",
+        })
+
+        const rolledBack = await fixture
+          .transaction(async (tx) => {
+            await tx.agents?.runs.createSubagent(input)
+            throw new Error("rollback")
+          })
+          .catch((error: unknown) => error)
+        expect(rolledBack).toMatchObject({ message: "rollback" })
+
+        await expect(storage.threads.getById({ projectId, id: "thread_child_1" })).resolves.toBe(
+          null
+        )
+        await expect(storage.messages.getById({ projectId, id: "task_child_1" })).resolves.toBe(
+          null
+        )
+        await expect(storage.runs.getById({ projectId, id: "child_1" })).resolves.toBe(null)
+      })
+    })
+
+    test("runs one child run at a time in its thread", async () => {
+      // Removal proof: drop the active-run check on a child's thread; `child_2` is admitted while
+      // `child_1` still runs.
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({
+          projectId,
+          id: "child_1",
+          execution: execution("child_token"),
+        })
+        await storage.runs.finish({
+          projectId,
+          id: "parent_1",
+          executionToken: "parent_token",
+          status: "succeeded",
+        })
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({
+            id: "parent_2",
+            threadId: "parent_thread",
+            triggerMessageId: "msg_user_2",
+            execution: execution("parent_token_2"),
+          })
+        )
+        const next = subagentInput("parent_token_2", {
+          id: "child_2",
+          parentRunId: "parent_2",
+          thread: { id: "thread_child_1", create: false },
+          trigger: { id: "trigger_child_2", parts: [{ type: "text", text: "Go on." }] },
+          createdAt: at("2026-06-23T10:03:00.000Z"),
+        })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: next.id,
+          executionId: next.executionId,
+          sourceExecutionId: "test_agent_execution:parent_2",
+          authority: "inherited",
+        })
+
+        await expectAgentError(storage.runs.createSubagent(next), "active_run_exists")
+        await expectAgentError(
+          storage.runs.createSubagent({ ...next, spawnKey: "another-child" }),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.runs.createSubagent({ ...next, thread: { id: "missing", create: false } }),
+          "thread_not_found"
+        )
+        await expectAgentError(
+          storage.runs.createSubagent({ ...next, thread: { id: "thread_child_1", create: true } }),
+          "duplicate_id"
+        )
+
+        await storage.runs.finish({
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          result: { text: "Three open orders." },
+        })
+        await expect(
+          storage.threads.getById({ projectId, id: "thread_child_1" })
+        ).resolves.toMatchObject({ activeRunId: null })
+
+        await expect(storage.runs.createSubagent(next)).resolves.toMatchObject({
+          id: "child_2",
+          threadId: "thread_child_1",
+          triggerMessageId: "trigger_child_2",
+          parentRunId: "parent_2",
+        })
+        await expect(
+          storage.threads.getById({ projectId, id: "thread_child_1" })
+        ).resolves.toMatchObject({
+          parent: { threadId: "parent_thread", spawnedBy: "parent_1", key: "research-orders" },
+          activeRunId: "child_2",
+          messageCount: 2,
+          lastMessageAt: at("2026-06-23T10:03:00.000Z"),
+        })
+        const { messages } = await storage.messages.list({ projectId, threadId: "thread_child_1" })
+        expect(messages.map(({ id, seq, runId }) => ({ id, seq, runId }))).toEqual([
+          { id: "task_child_1", seq: 1, runId: "child_1" },
+          { id: "trigger_child_2", seq: 2, runId: "child_2" },
+        ])
+      })
+    })
+
+    test("deletes a dead child run's messages whole, its trigger included", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({ projectId, id: "child_1", execution: execution("child_token") })
+        await storage.messages.append({
+          id: "work_child_1",
+          projectId,
+          threadId: "thread_child_1",
+          runId: "child_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Looking." }],
+          createdAt: at("2026-06-23T10:02:00.000Z"),
+        })
+
+        await expect(
+          storage.messages.deleteByRunId({
+            projectId,
+            threadId: "thread_child_1",
+            runId: "child_1",
+          })
+        ).resolves.toBe(2)
+        await expect(
+          storage.threads.getById({ projectId, id: "thread_child_1" })
+        ).resolves.toMatchObject({ messageCount: 0, lastMessageAt: undefined })
+      })
+    })
+
+    test("never lists a child's thread", async () => {
+      // Removal proof: drop the conversation filter from `threads.list`; the child's thread is
+      // listed with its owner's conversations.
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        // A participant of the conversation lists it among what is shared with them, alone.
+        const reader = { type: "user", id: "usr_reader" } as const
+        await storage.threads.addParticipants({
+          ...participantsInput([reader.id]),
+          threadId: "parent_thread",
+        })
+
+        for (const input of [
+          {},
+          { ownerPrincipal: owner },
+          { participantPrincipal: reader },
+          { statuses: ["active" as const] },
+        ]) {
+          await expect(storage.threads.list({ projectId, ...input })).resolves.toMatchObject({
+            threads: [{ id: "parent_thread" }],
+            total: 1,
+          })
+        }
+      })
+    })
+
+    test("keeps a child's thread out of what only a conversation does", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+
+        await expectAgentError(
+          storage.threads.fork(forkInput({ sourceThreadId: "thread_child_1" })),
+          "thread_not_conversation"
+        )
+        await expectAgentError(
+          storage.threads.addParticipants({
+            ...participantsInput(["usr_bob"]),
+            threadId: "thread_child_1",
+          }),
+          "thread_not_conversation"
+        )
+        await expectAgentError(
+          createRun(
+            storage,
+            fixture,
+            runInput({ id: "turn_in_child", threadId: "thread_child_1" })
+          ),
+          "thread_not_conversation"
+        )
+
+        // A fork of the conversation copies its messages, never its children's.
+        const fork = await storage.threads.fork(forkInput({ sourceThreadId: "parent_thread" }))
+        expect(fork).toMatchObject({ kind: "conversation", messageCount: 0 })
+        expect(fork).not.toHaveProperty("parent")
+        await expect(
+          storage.threads.list({ projectId, ownerPrincipal: otherUser })
+        ).resolves.toMatchObject({ threads: [{ id: "thr_fork" }], total: 1 })
       })
     })
 
@@ -2189,6 +2440,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(fork).toEqual({
           id: "thr_fork",
           projectId,
+          kind: "conversation",
           ownerPrincipal: otherUser,
           title: "Slipped deals",
           status: "active",
