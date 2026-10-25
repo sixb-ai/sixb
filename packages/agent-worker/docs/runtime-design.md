@@ -166,7 +166,8 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   (`turnPausesOnHeldCalls`), so it goes on waiting for the others. A turn that pauses, after a
   step or because it ended holding a call, first waits for its children still at work, until
   `PAUSE_WAIT_MARGIN_MS` before its deadline: its end cancels them, and one that holds a call
-  pauses by itself meanwhile.
+  pauses by itself meanwhile. The wait wakes on their finishes: see
+  [the parent's waits](#the-parents-waits).
 - **The resumed turn continues it.** The report that resumes a turn marks each outcome whose caller
   paused on its calls `caller.continues`, and the model reads that from the part. Before the
   model runs, `continuePausedChildren` admits each such child, still paused, as the next run of its
@@ -246,13 +247,13 @@ question and its replies travel through the same inboxes as messages (`src/subag
   parent's reply (`inReplyTo` the question), bounded by its signal: its cancel, its parent's, its
   deadline. One question at a time: a second `ask_parent` while one waits is refused. Replies never
   reach the step-boundary reads as messages, a continuation's included, and the first reply counts.
-- **The parent's wait wakes.** From its first child, the turn subscribes to its inbox; when it
-  cannot, `wait_agent` reads the inbox at each poll instead. `wait_agent` returns as soon as a
-  question comes, from any child of the turn, not only those it waits for, since a child blocked
-  on its question never finishes. A question it already returned no longer stops a wait for other
-  children, only a wait for its own. `questions` (`key`, `runId`, `id`, `text`) lists the questions
-  it returns first and those of the children it waits for, and each is on its child's result. The
-  finish poll stays as it was.
+- **The parent's wait wakes.** A question wakes the parent's waits through its inbox (see
+  [the parent's waits](#the-parents-waits)); when the turn cannot subscribe, `wait_agent` reads the
+  inbox at each re-check instead. `wait_agent` returns as soon as a question comes, from any child
+  of the turn, not only those it waits for, since a child blocked on its question never finishes.
+  A question it already returned no longer stops a wait for other children, only a wait for its
+  own. `questions` (`key`, `runId`, `id`, `text`) lists the questions it returns first and those
+  of the children it waits for, and each is on its child's result.
 - **Answering.** While the child waits on a question the model has read, the parent's next
   `message_agent` to its key is the answer: an `answer` mail, which `ask_parent` returns as
   `{ answer }`. The question is claimed before the mail is written, so of two answers sent at once
@@ -285,6 +286,27 @@ question and its replies travel through the same inboxes as messages (`src/subag
   turn is refused. The continuation reads it, as a `<sixb_parent_answer>` block, after the thread's
   messages, so its request starts with the bytes the paused run's last one had. `wait_agent` by
   the old id returns its answer.
+
+## The parent's waits
+
+A turn waits for its children three ways: `wait_agent`; before its end, for each child it told
+that its question waits to pause; and, when it pauses, for those still at work. Each wakes on
+what it waits for (`src/subagent-tools.ts`, `src/child-questions.ts`):
+
+- **A finish is announced to the parent.** When a child's run finishes, ended or paused, the worker
+  appends an `agent.child.finished` record (`runId`, `parentRunId`, `status`) to its parent's
+  inbox, `agents.runs.<parentRunId>.inbox`, as does a queued child's cancellation. The worker's
+  platform-owned sink layer writes it, like the conversations' activity feed, so a replaced
+  transcript sink cannot silence it. The child's own run stream says it finished too, but hearing
+  it would take one subscription per child, each carrying every chunk the child streams.
+- **One subscription per turn hears it.** From its first child, the turn subscribes to its inbox,
+  for its children's questions and their finishes alike. Each wake has the wait read the runs
+  again, and only then: the record is a wake, never a result. A wait takes the wake before it
+  reads, so what comes during the read wakes it.
+- **A re-check bounds a lost wake.** A wait that nothing woke reads again after
+  `CHILD_WAIT_RECHECK_MS` (5 s): a record the broker dropped, or a subscription that failed, costs
+  at most that, and a minute of waiting reads storage 12 times. A wait never sleeps past its own
+  deadline.
 
 ## Child runs
 

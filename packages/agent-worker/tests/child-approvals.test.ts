@@ -33,6 +33,7 @@ import { createTestSixb } from "@sixb/core/testing"
 import { AgentWorker } from "../src"
 import { renderCurrentTime } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
+import { CHILD_WAIT_RECHECK_MS, OTHER_INBOX_RECHECK_MS } from "../src/subagent-tools"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // A child's held call pauses the child durably; once its requester decides, the turn that resumes
@@ -44,6 +45,9 @@ const HELD_COMMAND = "sixb actions request mark-paid --subject invoice:INV-2041"
 const WRITE_SUMMARY = "write-summary"
 /** Breaks the sandbox's listing, so the files a child leaves in out/ cannot be stored. */
 const BREAK_LISTING = "break-listing"
+/** A command that returns only once `blocking` lets it, whatever stops the run meanwhile. */
+const BLOCK = "block"
+let blocking: (() => Promise<void>) | undefined
 
 const Invoice = defineObjectType({
   id: "invoice",
@@ -82,6 +86,7 @@ const COLLECT = { key: "collect", task: "List the open invoices." }
 
 afterEach(() => {
   editsRun = 0
+  blocking = undefined
   jest.useRealTimers()
 })
 
@@ -152,6 +157,10 @@ class GatewaySandbox implements Sandbox {
       await this.writeFiles([
         { path: "out/summary.md", contents: "# Invoices\n\nINV-2041 open.\n" },
       ])
+      return ok("")
+    }
+    if (script === BLOCK) {
+      await blocking?.()
       return ok("")
     }
     if (script === BREAK_LISTING) {
@@ -252,6 +261,7 @@ function setup(scripts: {
   readonly parent: Script
   readonly children: Readonly<Record<string, Script>>
   readonly afterHold?: (runId: string) => Promise<void>
+  readonly broker?: InMemoryBroker
 }) {
   const storage = new InMemoryStorage()
   const parentRequests: LanguageModelRequest[] = []
@@ -288,7 +298,7 @@ function setup(scripts: {
     actions: [markPaid],
     groups: [agentUsers],
     roles: [agentRunner],
-    broker: new InMemoryBroker(),
+    broker: scripts.broker ?? new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
@@ -758,14 +768,16 @@ describe("a paused child, once its requester decides", () => {
     const harness = setup({
       parent: pausingParent(async (request, call) => {
         if (call === 3) {
+          // The resumed turn is the one at work: under fake time, both turns may share a
+          // `createdAt`, so their order does not tell them apart.
           const { runs } = await harness.agents.runs.list({
             projectId,
             kinds: ["conversation"],
-            order: "asc",
+            statuses: ["running"],
           })
           continuationAtResume = await child(
             harness.agents,
-            createSubagentRunId(runs[1]?.id ?? "", PAY.key)
+            createSubagentRunId(runs[0]?.id ?? "", PAY.key)
           ).catch(() => null)
           return toolCalls(["spawn-again", "spawn_agent", spawn(PAY)])
         }
@@ -1005,7 +1017,8 @@ describe("a paused child, once its requester decides", () => {
     try {
       const { run } = await requestTurn(harness)
       const resumed = await underFakeTime(
-        async () => (await threadRuns(harness.agents, run.threadId))[1] ?? null,
+        async () =>
+          (await threadRuns(harness.agents, run.threadId)).find(({ id }) => id !== run.id) ?? null,
         "the resumed turn"
       )
       await terminal(harness.agents, resumed.id)
@@ -1118,6 +1131,275 @@ describe("a paused child, once its requester decides", () => {
         results: [{ status: "succeeded", files: [{ path: "summary.md" }] }],
       })
     } finally {
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+/** Drops what tells a parent that its child finished, as a lost record would. */
+class LosesChildFinishes extends InMemoryBroker {
+  override async append(params: Parameters<InMemoryBroker["append"]>[0]) {
+    const records = params.records.filter((record) => record.name !== "agent.child.finished")
+    return records.length === 0 ? [] : super.append({ ...params, records })
+  }
+}
+
+/** How much fake time passes until `check` holds. */
+async function elapsedUntil(check: () => boolean | Promise<boolean>, label: string) {
+  const startedAt = Date.now()
+  await underFakeTime(check, label)
+  return Date.now() - startedAt
+}
+
+/** A way a turn waits for Collect while it works. */
+interface ChildWait {
+  readonly name: string
+  readonly parent: Script
+  /** Count, from now on, the reads of Collect's run the wait makes. */
+  readonly countReads: (agents: AgentStorage, turnId: string) => { readonly count: number }
+  readonly over: (harness: ReturnType<typeof setup>) => Promise<boolean>
+}
+
+const WAITS: ChildWait[] = [
+  {
+    name: "wait_agent",
+    parent: (request, call) => {
+      if (call === 1) return toolCalls(["spawn-collect", "spawn_agent", spawn(COLLECT)])
+      if (call === 2) {
+        const collect = toolOutput(request, "spawn-collect") as { readonly runId: string }
+        return toolCalls(["wait", "wait_agent", { runIds: [collect.runId] }])
+      }
+      return answer("Three invoices are open.")
+    },
+    countReads: (agents, turnId) => {
+      const reads = { count: 0 }
+      const getByIds = agents.runs.getByIds.bind(agents.runs)
+      agents.runs.getByIds = (input) => {
+        if (input.ids.includes(createSubagentRunId(turnId, COLLECT.key))) reads.count += 1
+        return getByIds(input)
+      }
+      return reads
+    },
+    over: async (harness) => harness.parentRequests.length === 3,
+  },
+  {
+    name: "a turn that pauses on its own call",
+    parent: (_request, call) =>
+      call === 1
+        ? toolCalls(["spawn-collect", "spawn_agent", spawn(COLLECT)])
+        : toolCalls(["held", "bash", { command: HELD_COMMAND }]),
+    countReads: (agents, turnId) => {
+      const reads = { count: 0 }
+      const list = agents.runs.list.bind(agents.runs)
+      agents.runs.list = (input) => {
+        if (input.parentRunId === turnId) reads.count += 1
+        return list(input)
+      }
+      return reads
+    },
+    over: async (harness) => {
+      const [turn] = (await harness.agents.runs.list({ projectId, kinds: ["conversation"] })).runs
+      return turn?.status === "succeeded"
+    },
+  },
+]
+
+/**
+ * Collect works a minute while its parent waits, then finishes just after one of the wait's
+ * re-checks: only the wake of its finish ends the wait before the next.
+ */
+async function waitOnCollect(wait: ChildWait, broker?: InMemoryBroker) {
+  let releaseCollect!: () => void
+  const collectReleased = new Promise<void>((resolve) => {
+    releaseCollect = resolve
+  })
+  const harness = setup({
+    parent: wait.parent,
+    children: {
+      collect: async () => {
+        await collectReleased
+        return answer("Three invoices are open.")
+      },
+    },
+    ...(broker === undefined ? {} : { broker }),
+  })
+  jest.useFakeTimers()
+  await harness.worker.start()
+  try {
+    const alicesSixb = await signedIn(harness.host)
+    const { run } = await settle(
+      alicesSixb.agent.runs.request({ text: "List the open invoices.", approvalMode: "manual" }),
+      "request"
+    )
+    await underFakeTime(() => harness.parentRequests.length === 2, "the parent waits")
+    const reads = wait.countReads(harness.agents, run.id)
+
+    const minuteFrom = Date.now()
+    await underFakeTime(() => Date.now() - minuteFrom >= 60_000, "a minute of Collect's work")
+    const readsInAMinute = reads.count
+
+    const before = reads.count
+    await underFakeTime(() => reads.count > before, "a re-check")
+    releaseCollect()
+    const waitedAfterFinish = await elapsedUntil(() => wait.over(harness), "the wait is over")
+    return { readsInAMinute, waitedAfterFinish }
+  } finally {
+    releaseCollect()
+    await settle(harness.worker.stop(), "worker stop")
+  }
+}
+
+describe.each(WAITS)("a wait for a child at work: $name", (wait) => {
+  // Removal proofs: drop the wake from the wait's `delay`, and it ends only at its next re-check,
+  // CHILD_WAIT_RECHECK_MS later; set CHILD_WAIT_RECHECK_MS back to the 250 ms poll it replaced,
+  // and the wait reads Collect's run 240 times a minute.
+  test("ends as the child finishes, and reads its run once per re-check meanwhile", async () => {
+    const { readsInAMinute, waitedAfterFinish } = await waitOnCollect(wait)
+
+    expect(waitedAfterFinish).toBeLessThan(1_000)
+    // A re-check every 5 s: 12 reads a minute, where the poll it replaced made 240.
+    expect(readsInAMinute).toBeGreaterThanOrEqual(11)
+    expect(readsInAMinute).toBeLessThanOrEqual(13)
+  })
+
+  // Removal proof: wait for the wake alone, without CHILD_WAIT_RECHECK_MS bounding the delay; the
+  // finish whose record was lost holds the wait until its deadline margin, past what fake time
+  // drives here.
+  test("still ends at its next re-check when the finish's record is lost", async () => {
+    const { waitedAfterFinish } = await waitOnCollect(wait, new LosesChildFinishes())
+
+    expect(waitedAfterFinish).toBeGreaterThanOrEqual(CHILD_WAIT_RECHECK_MS - 100)
+    expect(waitedAfterFinish).toBeLessThan(CHILD_WAIT_RECHECK_MS + 1_000)
+  })
+})
+
+describe("a retried resume whose earlier attempt's continuation is still stopping", () => {
+  // Removal proof: wait CHILD_WAIT_RECHECK_MS in clearDeadAttempts, as for this turn's own
+  // children; the stopped run's finish goes to the failed attempt's inbox, which the retry does not
+  // hear, so the retry continues the child only at its next re-check, seconds later.
+  test("continues the child soon after that run stops", async () => {
+    let reached = () => {}
+    const reachedBlock = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    let release = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    blocking = () => {
+      reached()
+      return released
+    }
+    const harness = setup({
+      parent: pausingParent(async (request, call) => {
+        // The resumed turn fails while its continuation is in its command.
+        if (call === 3) {
+          await reachedBlock
+          throw new Error("The parent's model is unavailable.")
+        }
+        if (call === 4) {
+          return toolCalls(["wait-again", "wait_agent", { runIds: [payRunIdOf(request)] }])
+        }
+        return answer("INV-2041 is paid.")
+      }),
+      children: {
+        pay: () => toolCalls(["held", "bash", { command: HELD_COMMAND }]),
+        "pay'": (_request, call) =>
+          call === 1
+            ? toolCalls(["block", "bash", { command: BLOCK }])
+            : answer("I marked INV-2041 paid."),
+      },
+    })
+    await seedInvoice(harness.host)
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run, alicesSixb } = await requestTurn(harness)
+      const { resumed } = await decide(harness, alicesSixb, run.threadId, "approve")
+      const dead = await child(harness.agents, createSubagentRunId(resumed.id, PAY.key))
+      expect(resumed).toMatchObject({ status: "failed" })
+      expect(dead.status).toBe("running")
+
+      const { run: retried } = await settle(alicesSixb.agent.runs.retry(resumed.id), "retry")
+      const again = createSubagentRunId(retried.id, PAY.key)
+      // The retry waits for the stopping run before it continues the child.
+      await underFakeTime(() => Date.now() - dead.createdAt.getTime() > 10_000, "the retry waits")
+      expect(await harness.agents.runs.getById({ projectId, id: again })).toBeNull()
+
+      release()
+      const continuedAfter = await elapsedUntil(
+        async () => (await harness.agents.runs.getById({ projectId, id: again })) !== null,
+        "the retry continues the child"
+      )
+      expect(continuedAfter).toBeLessThan(OTHER_INBOX_RECHECK_MS + 500)
+      expect(await terminal(harness.agents, retried.id)).toMatchObject({ status: "succeeded" })
+    } finally {
+      release()
+      await settle(harness.worker.stop(), "worker stop")
+    }
+  })
+})
+
+describe("a wait for a child of an earlier turn still stopping", () => {
+  // Removal proof: wait CHILD_WAIT_RECHECK_MS for every child, as for this turn's own; the child's
+  // finish goes to the earlier turn's inbox, which this one does not hear, so the wait ends only at
+  // its next re-check, seconds later.
+  test("ends soon after that child stops", async () => {
+    let reached = () => {}
+    const reachedBlock = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    let release = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    blocking = () => {
+      reached()
+      return released
+    }
+    const harness = setup({
+      parent: async (request, call) => {
+        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawn(PAY)])
+        // The turn ends while its child is in its command, which outlives the cancel.
+        if (call === 2) {
+          await reachedBlock
+          return answer("Pay is on it.")
+        }
+        if (call === 3) return toolCalls(["wait", "wait_agent", { runIds: [payRunIdOf(request)] }])
+        return answer("Pay was stopped.")
+      },
+      children: {
+        pay: (_request, call) =>
+          call === 1
+            ? toolCalls(["block", "bash", { command: BLOCK }])
+            : answer("I marked INV-2041 paid."),
+      },
+    })
+    jest.useFakeTimers()
+    await harness.worker.start()
+    try {
+      const { run, alicesSixb } = await requestTurn(harness)
+      const pay = await child(harness.agents, createSubagentRunId(run.id, PAY.key))
+      expect(pay.status).toBe("running")
+
+      const { run: next } = await settle(
+        alicesSixb.agent.runs.request({ text: "Is it paid?", threadId: run.threadId }),
+        "next request"
+      )
+      await underFakeTime(() => harness.parentRequests.length === 3, "the next turn waits")
+      const waitingFrom = Date.now()
+      await underFakeTime(() => Date.now() - waitingFrom >= 10_000, "the wait goes on")
+      expect(harness.parentRequests).toHaveLength(3)
+
+      release()
+      const waitedAfterStop = await elapsedUntil(
+        () => harness.parentRequests.length === 4,
+        "the wait is over"
+      )
+      expect(waitedAfterStop).toBeLessThan(OTHER_INBOX_RECHECK_MS + 500)
+      expect(await terminal(harness.agents, next.id)).toMatchObject({ status: "succeeded" })
+    } finally {
+      release()
       await settle(harness.worker.stop(), "worker stop")
     }
   })

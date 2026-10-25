@@ -2,7 +2,7 @@ import type { Broker } from "@sixb/core"
 import {
   type ReceivedAgentMail,
   readAgentMail,
-  subscribeAgentMail,
+  subscribeAgentInbox,
 } from "@sixb/core/internal/agents"
 
 /**
@@ -22,14 +22,15 @@ export interface ChildQuestion extends QuestionRef {
 
 /**
  * The questions the children of a turn ask it, from its inbox, until it answers each. A child asks
- * one at a time, so it has at most one open. The inbox subscription is the wake `wait_agent` waits
- * on; `refresh` reads what it has not delivered yet, for an answer or the turn's end. Each question
- * counts once, whatever the broker delivers again.
+ * one at a time, so it has at most one open. The inbox subscription is the wake the turn's waits
+ * for its children wait on: a new question, or a child that finished; `refresh` reads what it has
+ * not delivered yet, for an answer or the turn's end. Each question counts once, whatever the
+ * broker delivers again.
  */
 export class ChildQuestions {
   readonly #open = new Map<string, ChildQuestion>()
   readonly #seen = new Set<string>()
-  /** Shared by every wait until the next question settles it. */
+  /** Shared by every wait until the next question or finish settles it. */
   #wake: { readonly promise: Promise<void>; readonly resolve: () => void } | undefined
   #cursor: string | undefined
   #listening: Promise<void> | undefined
@@ -45,16 +46,16 @@ export class ChildQuestions {
   ) {}
 
   /**
-   * Start listening once the turn has a child: until then, nothing can ask it. A subscription that
-   * fails is tried again by the next call; until then, the turn reads its questions only when it
-   * answers one and when it ends.
+   * Start listening once the turn has a child: until then, nothing can ask it or finish. A
+   * subscription that fails is tried again by the next call; until then, the turn reads its
+   * questions only when it answers one, at its waits' re-checks and when it ends.
    */
   listen(): Promise<void> {
     this.#hasChildren = true
-    this.#listening ??= subscribeAgentMail(
+    this.#listening ??= subscribeAgentInbox(
       this.broker,
       { projectId: this.projectId, inbox: { runId: this.turnRunId } },
-      (mail) => this.#receive(mail)
+      { mail: (mail) => this.#receive(mail), childFinished: () => this.#changed() }
     ).then(
       (unsubscribe) => {
         if (this.#closed) unsubscribe()
@@ -114,8 +115,11 @@ export class ChildQuestions {
     if (this.#open.get(question.runId)?.id === question.id) this.#open.delete(question.runId)
   }
 
-  /** Settles when a question comes. */
-  nextQuestion(): Promise<void> {
+  /**
+   * Settles when a question comes or a child finishes. Take it before reading what it wakes for,
+   * so what comes during the read wakes the wait.
+   */
+  nextChange(): Promise<void> {
     if (!this.#wake) {
       let resolve!: () => void
       const promise = new Promise<void>((settle) => {
@@ -139,10 +143,12 @@ export class ChildQuestions {
       })
       asked = true
     }
-    if (asked) {
-      this.#wake?.resolve()
-      this.#wake = undefined
-    }
+    if (asked) this.#changed()
+  }
+
+  #changed(): void {
+    this.#wake?.resolve()
+    this.#wake = undefined
   }
 }
 

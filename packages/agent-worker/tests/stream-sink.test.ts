@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
 import { AGENT_ACTIVITY_STREAM_ID } from "@sixb/core/agents/streams"
+import { agentRunInboxStreamId } from "@sixb/core/internal/agents"
 import type { ConversationAgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { NOOP_STREAM_SINK, withAgentActivityStream } from "../src/stream-sink"
 
@@ -69,6 +70,44 @@ describe("withAgentActivityStream", () => {
     const page = await broker.read({ projectId: "project", streamId: AGENT_ACTIVITY_STREAM_ID })
     expect(page.records.map((record) => record.payload)).toMatchObject([
       { runId: "run-1", threadId: "thread-1" },
+    ])
+  })
+
+  // Removal proof: publish nothing for a child in withAgentActivityStream; its parent's waits
+  // hear nothing, and read its run only at their next re-check.
+  test("tells a child's parent that it finished, even when transcript streaming is replaced", async () => {
+    const broker = new InMemoryBroker()
+    const sink = withAgentActivityStream(NOOP_STREAM_SINK, broker)
+    const child: SubagentRunRecord = {
+      kind: "subagent",
+      id: "child-1",
+      projectId: "project",
+      executionId: "execution-child-1",
+      threadId: "thread-child-1",
+      triggerMessageId: "task-child-1",
+      parentRunId: "run-1",
+      spawnKey: "west",
+      spec: {
+        model: { provider: "test", modelId: "test" },
+        task: "Look.",
+        toolNames: [],
+        maxSteps: 4,
+      },
+      status: "succeeded",
+      finishReason: "awaiting_approval",
+      attempt: 1,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    }
+
+    await sink.publishStarted({ ...child, status: "running" })
+    await sink.publishRunFinished(child)
+
+    const page = await broker.read({
+      projectId: "project",
+      streamId: agentRunInboxStreamId("run-1"),
+    })
+    expect(page.records).toMatchObject([
+      { name: "agent.child.finished", payload: { runId: "child-1", status: "succeeded" } },
     ])
   })
 

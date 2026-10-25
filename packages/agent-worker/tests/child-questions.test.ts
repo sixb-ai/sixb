@@ -852,7 +852,7 @@ describe("ChildQuestions", () => {
     } as const
     await questions.listen()
     try {
-      const asked = questions.nextQuestion()
+      const asked = questions.nextChange()
       await publishAgentMail(broker, { projectId, mail })
       await asked
       await publishAgentMail(broker, {
@@ -904,9 +904,10 @@ describe("a turn that ends while a child waits on its question", () => {
     }
   })
 
-  // Removal proof: return from `deferOpenQuestions` once the notices are sent, without waiting
+  // Removal proofs: return from `deferOpenQuestions` once the notices are sent, without waiting
   // for the children; the turn ends first and the repair pass, which runs while West stores its
-  // files, cancels it.
+  // files, cancels it. Drop the wake from its wait, and the turn ends at its next re-check, seconds
+  // after West paused.
   test("ends only once the child paused, so the repair pass leaves it alone", async () => {
     const harness = setup({
       parent: asksTheUser,
@@ -922,6 +923,9 @@ describe("a turn that ends while a child waits on its question", () => {
 
       expect(finished).toMatchObject({ status: "succeeded" })
       expect(west).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      // West's pause woke the turn's wait: it ended at once, not at its next re-check.
+      const endedAfterWest = Number(finished.completedAt) - Number(west.completedAt)
+      expect(endedAfterWest).toBeLessThan(1_000)
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }

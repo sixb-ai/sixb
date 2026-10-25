@@ -196,6 +196,7 @@ export {
   publishAgentRunCancel,
   publishAgentRunFinished,
   readAgentMail,
+  subscribeAgentInbox,
   subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
