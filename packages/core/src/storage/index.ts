@@ -144,6 +144,7 @@ export type {
   ListAgentMessagesResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
+  ListAgentThreadChildrenInput,
   ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,

@@ -19,6 +19,7 @@ import {
   type CreateAgentThreadInput,
   type CreateSubagentRunInput,
   type ForkAgentThreadInput,
+  type ListAgentThreadChildrenInput,
   type StartAgentRunInput,
 } from "../storage/agents"
 import type { AuthStorage } from "../storage/auth"
@@ -1397,6 +1398,43 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             total: 1,
           })
         }
+      })
+    })
+
+    test("lists a conversation's sub-agent threads, oldest first, by the turn that spawned them", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture, {
+          id: "child_b",
+          spawnKey: "b",
+          createdAt: at("2026-06-23T10:02:00.000Z"),
+        })
+        await createSubagent(storage, fixture, {
+          id: "child_a",
+          spawnKey: "a",
+          createdAt: at("2026-06-23T10:01:00.000Z"),
+        })
+        const children = (input: Partial<ListAgentThreadChildrenInput> = {}) =>
+          storage.threads
+            .listChildren({ projectId, parentThreadId: "parent_thread", ...input })
+            .then((threads) => threads.map((thread) => thread.id))
+
+        expect(await children()).toEqual(["thread_child_a", "thread_child_b"])
+        expect(await children({ parentRunId: "parent_1" })).toEqual([
+          "thread_child_a",
+          "thread_child_b",
+        ])
+        expect(await children({ parentRunId: "parent_2" })).toEqual([])
+        expect(await children({ limit: 1, offset: 1 })).toEqual(["thread_child_b"])
+        expect(
+          await storage.threads.listChildren({ projectId, parentThreadId: "thread_child_a" })
+        ).toEqual([])
+        expect(
+          (await storage.threads.listChildren({ projectId, parentThreadId: "parent_thread" }))[0]
+        ).toMatchObject({
+          kind: "subagent",
+          parent: { threadId: "parent_thread", spawnedBy: "parent_1", key: "a" },
+        })
       })
     })
 
