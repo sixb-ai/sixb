@@ -64,7 +64,7 @@ test("restores the selected model with every supported saved reasoning level", (
   }
 })
 
-test("with tiers, a remembered model is neither shown nor asked for", async () => {
+test("with tiers, the browser's choice for every conversation pins none", async () => {
   const opus: LanguageModel = {
     provider: "anthropic",
     modelId: "claude-opus-5-5",
@@ -101,12 +101,16 @@ test("with tiers, a remembered model is neither shown nor asked for", async () =
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage: { getItem: () => JSON.stringify(remembered) } },
+    value: {
+      localStorage: {
+        getItem: (key: string) =>
+          key === "sixb.agent-ui.model-preference" ? JSON.stringify(remembered) : null,
+      },
+    },
   })
 
-  // Removal proof: drop the tiers check from resolveModelSelection, the tiered message asks for
-  // Opus; drop it from the conversation's composer props, the tiered composer shows the picker;
-  // return `canChooseModel: true` from the conversation, a custom chat would show its own.
+  // Removal proof: read the list's preference with tiers too; the tiered message asks for Opus
+  // and the conversation's choice is Opus, not Auto.
   const chat = async (language: readonly LanguageModel[]) => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(listModelsOptions().queryKey, { language })
@@ -125,22 +129,25 @@ test("with tiers, a remembered model is neither shown nor asked for", async () =
     queryClient.clear()
 
     return {
-      canChooseModel: conversation?.canChooseModel,
+      modelChoice: conversation?.modelChoice,
       picker: html.includes('aria-label="Choose model and reasoning effort"'),
+      auto: html.includes('aria-label="Model: Auto. Change it"'),
       posted,
     }
   }
 
   try {
     expect(await chat(list)).toEqual({
-      canChooseModel: true,
+      modelChoice: expect.objectContaining({ modelId: opus.modelId }),
       picker: true,
+      auto: false,
       posted: [expect.objectContaining(remembered)],
     })
 
     const tiered = await chat(tiers)
-    expect(tiered.canChooseModel).toBe(false)
+    expect(tiered.modelChoice).toBe("auto")
     expect(tiered.picker).toBe(false)
+    expect(tiered.auto).toBe(true)
     expect(tiered.posted).toEqual([expect.objectContaining({ text: "Why did margin drop?" })])
     expect(tiered.posted[0]).not.toHaveProperty("model")
     expect(tiered.posted[0]).not.toHaveProperty("reasoning")

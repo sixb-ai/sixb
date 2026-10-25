@@ -112,6 +112,9 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
               language.list().map((entry) => serializeLanguageModel(entry, language.default))
             )
           : [],
+        ...(language && language.tiers.length > 0
+          ? { languageRouting: models.decision !== undefined }
+          : {}),
         image: image
           ? await Promise.all(
               image.list().map((entry) => serializeImageModel(entry, image.default))

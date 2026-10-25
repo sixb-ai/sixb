@@ -47,7 +47,9 @@ export const sixb = createSixb({
 
 You can offer models from multiple providers through the same harness. In chat, users choose
 from your configured catalog and adjust the reasoning effort supported by their selected model.
-With [tiers](./configuration.md#tiers), they don't: the chat has no picker.
+With [tiers](./configuration.md#tiers), the chat starts on **Auto**, where a
+[decision model](./configuration.md#decision-models) picks each message's model. Choosing one pins
+it in that conversation until the person goes back to Auto.
 Each model can carry a [default reasoning](./configuration.md#default-reasoning).
 
 ## Give it project instructions
@@ -372,17 +374,20 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 
 | Part | Use it for |
 | --- | --- |
-| `useAgentConversation` | One conversation: messages, the live run, threads, models, `send`, `stop` and `retry`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
+| `useAgentConversation` | One conversation: messages, the live run, threads, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop` and `retry`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and one for each sub-agent |
-| `Composer` | Text, attachments, `@` context, the model picker and the approval mode chip |
+| `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers) and the approval mode chip |
 | `AgentThreadSwitcher` | Search and switch between the person's threads |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
-| `ModelControls` | The model picker on its own; `ProviderLogo` and `ReasoningEffortSlider` to build another |
+| `ModelControls` | The model picker on its own, an Auto chip with tiers; `ProviderLogo` and `ReasoningEffortSlider` to build another |
 | `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |
 | `useRegisteredAgentContext` | The context open pages set with `useAgentContext` |
 
-With [tiers](./configuration.md#tiers), the chat offers no model choice: show your own picker only
-when `conversation.canChooseModel`.
+With [tiers](./configuration.md#tiers), `conversation.modelChoice` is `"auto"` until the person
+pins a model, and `selectedModel` is unset; `resetModelSelection()` returns to Auto.
+`conversation.modelRouting` says whether a decision model picks on Auto. `Composer` and
+`ModelControls` show all this as an Auto chip when given `onResetModelSelection` and
+`onResetToDefault` respectively.
 
 Types such as `AgentThread`, `AgentMessage` and `AgentFileRef` are exported alongside them.
 

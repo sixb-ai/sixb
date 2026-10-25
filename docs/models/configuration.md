@@ -83,9 +83,11 @@ required: its first model is the default.
 
 Every model of every tier stays in the catalog. The Agent sees them grouped by tier, for
 [`sixb models text`](#call-models-over-the-api) and when it [delegates](./overview.md#it-delegates):
-it picks a tier, or a model whose description fits the task. With tiers, the chat offers no model
-choice or reasoning control; without a [decision model](#decision-models), every message runs on
-`standard`.
+it picks a tier, or a model whose description fits the task.
+
+With tiers, the chat's model chip reads **Auto**, and its menu lists the models by tier. Choosing
+one pins it, with a reasoning control, in that conversation and on that browser; × returns to
+Auto. On Auto, without a [decision model](#decision-models), every message runs on `standard`.
 
 With tiers and a [decision model](#decision-models), Sixb picks the model of each chat message that
 names none. Before the answer starts, the default decision model scores the message's tiers:
@@ -545,7 +547,8 @@ Anyone else gets `null`, or a 404 from the API. Seeing a call in
 ## List the catalog
 
 `GET /api/models` and `sixb models list` show every configured model by kind, with its default,
-tier, description, the options a request can use, and its price:
+tier, description, the options a request can use, and its price. With tiers, its
+`languageRouting` says whether a decision model picks each chat message's model:
 
 ```bash
 sixb models list --kind image

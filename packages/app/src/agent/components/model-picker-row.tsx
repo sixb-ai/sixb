@@ -17,11 +17,17 @@ export function ModelPickerRow({
   model,
   selected,
   disabled,
+  radio = false,
+  describedBy,
   onSelect,
 }: {
   model: LanguageModel
   selected: boolean
   disabled?: boolean
+  /** A radio of a radio group, under its model's description. */
+  radio?: boolean
+  /** The id of what else describes the row, such as its tier's label. */
+  describedBy?: string
   onSelect: (model: LanguageModel) => void
 }) {
   const messages = useAgentMessages().models
@@ -35,8 +41,13 @@ export function ModelPickerRow({
           <button
             type="button"
             disabled={disabled}
-            aria-pressed={selected}
-            aria-describedby={detailsOpen ? detailsId : undefined}
+            {...(radio
+              ? { role: "radio", "aria-checked": selected, tabIndex: selected ? 0 : -1 }
+              : { "aria-pressed": selected })}
+            aria-describedby={
+              [describedBy, detailsOpen ? detailsId : undefined].filter(Boolean).join(" ") ||
+              undefined
+            }
             onFocus={(event) => {
               if (!event.currentTarget.matches(":focus-visible")) event.preventDefault()
             }}
@@ -47,8 +58,15 @@ export function ModelPickerRow({
             className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           >
             <ProviderLogo model={model} className="size-5" />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-              {model.name}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {model.name}
+              </span>
+              {radio && model.description ? (
+                <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                  {model.description}
+                </span>
+              ) : null}
             </span>
             <span className="flex size-5 shrink-0 items-center justify-center">
               {selected ? <Check className="size-4 text-foreground" aria-hidden="true" /> : null}

@@ -12,6 +12,8 @@ export interface ModelPreference {
 
 /** What the composer shows and what the next message asks the server for. */
 export interface ResolvedModelSelection {
+  /** With tiers and no model pinned: Sixb picks each message's model, and nothing is asked for. */
+  readonly auto?: true
   readonly model?: LanguageModel
   readonly reasoning?: ModelReasoningLevel
   /** `undefined` while the user follows the project defaults: the server resolves them. */
@@ -19,8 +21,8 @@ export interface ResolvedModelSelection {
 }
 
 /**
- * With tiers, the chat offers no model choice: a decision model picks each message's model, and
- * without one every message runs on `standard`.
+ * With tiers, the chat starts on Auto: a decision model picks each message's model, and without
+ * one every message runs on `standard`. Choosing a model pins it.
  */
 export function hasTiers(models: readonly LanguageModel[]): boolean {
   return models.some((model) => model.tier !== undefined)
@@ -45,19 +47,19 @@ export function defaultReasoningLevel(model: LanguageModel): ModelReasoningLevel
  * whichever model is the project default. A preference the catalog no longer supports falls back
  * the same way.
  *
- * With tiers, nothing is shown or asked for, so the server's choice is never bypassed. The
- * preference stays stored and applies again if the project goes back to a list.
+ * With tiers, a chosen model pins it, with its reasoning; anything else is Auto, which asks for
+ * nothing so the server picks. A reasoning alone pins no model, so Auto drops it.
  */
 export function resolveModelSelection(
   models: readonly LanguageModel[],
   preference: ModelPreference | null
 ): ResolvedModelSelection {
-  if (hasTiers(models)) return {}
-
   const chosen = preference?.model
   const preferred = chosen
     ? models.find((model) => model.provider === chosen.provider && model.modelId === chosen.modelId)
     : undefined
+  if (!preferred && hasTiers(models)) return { auto: true }
+
   const model = preferred ?? defaultLanguageModel(models)
   if (!model) return {}
 

@@ -11,6 +11,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
+  type DecisionModel,
   defineLanguageModel,
   type ImageModel,
   type LanguageModel,
@@ -174,6 +175,34 @@ describe("GET /api/models", () => {
       { modelId: "sonnet", tier: "standard", isDefault: true },
       { modelId: "opus", tier: "heavy", isDefault: false },
     ])
+  })
+
+  test("says whether a decision model picks each message's model, with tiers only", async () => {
+    // Removal proof: drop `languageRouting` from the route; the chat cannot say what Auto does.
+    const tiers = { standard: testModel("gateway", "sonnet") }
+    const decision: DecisionModel = {
+      providerId: "test",
+      modelId: "router",
+      definition: {
+        kind: "decision",
+        providerId: "test",
+        modelId: "router",
+        capabilities: { questions: ["choice"] },
+      },
+      async evaluate() {
+        throw new Error("Route tests do not run inference.")
+      },
+    }
+    const routing = async (models: ModelCatalogInput) => {
+      const response = await createApp(models).fetch(new Request("http://localhost/api/models"))
+      return ((await response.json()) as { languageRouting?: boolean }).languageRouting
+    }
+
+    expect(await routing({ language: tiers, decision: [decision] })).toBe(true)
+    expect(await routing({ language: tiers })).toBe(false)
+    expect(
+      await routing({ language: [testModel("gateway", "sonnet")], decision: [decision] })
+    ).toBe(undefined)
   })
 
   test("returns an empty catalog when no models are configured", async () => {

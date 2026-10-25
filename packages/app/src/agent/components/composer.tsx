@@ -74,7 +74,10 @@ export interface ComposerProps {
   readonly onResetReasoning?: () => void
   /** The model selection follows the project defaults. */
   readonly usingDefaultModel?: boolean
+  /** Follow the project defaults again. With tiers, back to Auto, which `selectedModel` unset shows. */
   readonly onResetModelSelection?: () => void
+  /** With tiers: a decision model picks each message's model on Auto. */
+  readonly modelRouting?: boolean
   readonly placeholder?: string
   /** Optional classes for the composer shell. */
   readonly className?: string
@@ -157,6 +160,7 @@ export function Composer({
   onResetReasoning,
   usingDefaultModel,
   onResetModelSelection,
+  modelRouting,
   placeholder,
   className,
   hint,
@@ -725,6 +729,7 @@ export function Composer({
                 onResetReasoning={onResetReasoning}
                 usingDefault={usingDefaultModel}
                 onResetToDefault={onResetModelSelection}
+                routing={modelRouting}
               />
             ) : null}
             {running && onStop ? (

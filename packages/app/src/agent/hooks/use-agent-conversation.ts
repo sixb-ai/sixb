@@ -113,6 +113,9 @@ const SHARED_THREAD_LIST_QUERY = {
 }
 
 const MODEL_PREFERENCE_KEY = "sixb.agent-ui.model-preference"
+const MODEL_PINS_KEY = "sixb.agent-ui.model-pins"
+/** Pins kept per browser, the most recently chosen last; older ones fall back to Auto. */
+const MAX_MODEL_PINS = 100
 const REASONING_LEVELS = new Set<string>(MODEL_REASONING_LEVELS)
 
 export interface UseAgentConversationInput {
@@ -143,6 +146,7 @@ export type ConversationComposerProps = Pick<
   | "onResetReasoning"
   | "usingDefaultModel"
   | "onResetModelSelection"
+  | "modelRouting"
   | "draft"
   | "draftAttachments"
   | "draftContext"
@@ -235,10 +239,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   })
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
+  // With a list, the browser remembers one choice for every conversation. With tiers, each
+  // conversation starts on Auto and keeps the model pinned in it; a new one keeps its pin in
+  // memory until its first message creates the thread.
+  const tiered = hasTiers(models)
   const [modelPreference, setModelPreference] = useState(readModelPreference)
-  const modelSelection = resolveModelSelection(models, modelPreference)
-  // With tiers, the chat offers no model choice. Until the catalog loads, a choice is offered.
-  const canChooseModel = !hasTiers(models)
+  const [modelPins, setModelPins] = useState(() => readModelPins() ?? {})
+  const [newThreadPin, setNewThreadPin] = useState<ModelPreference | null>(null)
+  const modelSelection = resolveModelSelection(
+    models,
+    tiered ? (threadId === null ? newThreadPin : (modelPins[threadId] ?? null)) : modelPreference
+  )
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
   const threads = useMemo(
@@ -530,7 +541,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
-      onThreadCreated(createdThreadId)
+      showCreatedThread(createdThreadId)
     } catch (error) {
       // Restore the exact submitted snapshot. In particular, do not re-read ambient page context:
       // navigation may have changed it while the request was in flight.
@@ -545,12 +556,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         threadId: createdThreadId ?? targetThreadId,
         failure: sendFailure(error),
       })
-      if (createdThreadId) onThreadCreated(createdThreadId)
+      if (createdThreadId) showCreatedThread(createdThreadId)
 
       // A refusal can mean another turn holds the thread: read who asked for it, too.
       if (targetThreadId !== null) void refreshThread(targetThreadId)
       else void queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
     }
+  }
+
+  // A model pinned before the thread existed stays pinned in it, from the moment it shows.
+  const showCreatedThread = (createdThreadId: string) => {
+    if (tiered && newThreadPin) pinModel(createdThreadId, newThreadPin)
+    onThreadCreated(createdThreadId)
   }
 
   const recordAcceptedSend = (run: AgentRun) => {
@@ -732,13 +749,40 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   const resetReasoning = () => updateModelPreference(preferenceWithoutReasoning(modelSelection))
 
-  /** Follow the project defaults again, including later changes to them. */
+  /** Follow the project defaults again, including later changes to them; with tiers, Auto. */
   const resetModelSelection = () => updateModelPreference(null)
 
   const updateModelPreference = (preference: ModelPreference | null) => {
-    setModelPreference(preference)
-    writeModelPreference(preference)
+    if (!tiered) {
+      setModelPreference(preference)
+      writeModelPreference(preference)
+      return
+    }
+
+    if (threadId === null) setNewThreadPin(preference)
+    else pinModel(threadId, preference)
   }
+
+  // Start from the stored pins, so the ones another tab wrote since are kept.
+  const pinModel = (pinThreadId: string, pin: ModelPreference | null) => {
+    const pins = withModelPin(readModelPins() ?? modelPins, pinThreadId, pin)
+    setModelPins(pins)
+    writeModelPins(pins)
+  }
+
+  // Leaving a new conversation, or its first message creating the thread, ends its own pin.
+  useEffect(() => {
+    if (threadId !== null) setNewThreadPin(null)
+  }, [threadId])
+
+  // Another tab pinned a model, or went back to Auto.
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key === MODEL_PINS_KEY) setModelPins(readModelPins() ?? {})
+    }
+    window.addEventListener("storage", follow)
+    return () => window.removeEventListener("storage", follow)
+  }, [])
 
   const agentThreads = threads.filter((entry) => entry.id !== threadId)
   const pendingUserForThread =
@@ -897,20 +941,19 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     delegation: transcriptDelegation,
   }
 
-  const modelControlsProps = canChooseModel
-    ? {
-        models,
-        selectedModel,
-        selectedReasoning,
-        modelsLoading: modelsQuery.isLoading,
-        modelsError: modelsQuery.isError,
-        onSelectModel: selectModel,
-        onSelectReasoning: selectReasoning,
-        onResetReasoning: resetReasoning,
-        usingDefaultModel: modelSelection.request === undefined,
-        onResetModelSelection: resetModelSelection,
-      }
-    : {}
+  const modelControlsProps = {
+    models,
+    selectedModel,
+    selectedReasoning,
+    modelsLoading: modelsQuery.isLoading,
+    modelsError: modelsQuery.isError,
+    onSelectModel: selectModel,
+    onSelectReasoning: selectReasoning,
+    onResetReasoning: resetReasoning,
+    usingDefaultModel: modelSelection.request === undefined,
+    onResetModelSelection: resetModelSelection,
+    modelRouting: modelsQuery.data?.languageRouting,
+  }
 
   const composerProps: ConversationComposerProps = {
     onSend: send,
@@ -957,8 +1000,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     selectedModel,
     selectedReasoning,
     usingDefaultModel: modelSelection.request === undefined,
-    /** False with tiers: the chat offers no model choice, so show no model picker. */
-    canChooseModel,
+    /**
+     * What the next message runs on: `"auto"` with tiers and no model pinned, as Sixb picks each
+     * message's model; otherwise the selected model. `resetModelSelection` returns to Auto.
+     */
+    modelChoice: modelSelection.auto ? ("auto" as const) : selectedModel,
+    /** With tiers: a decision model picks each message's model on Auto; without one, `standard`. */
+    modelRouting: modelsQuery.data?.languageRouting,
     selectModel,
     selectReasoning,
     resetReasoning,
@@ -1112,6 +1160,46 @@ function writeModelPreference(preference: ModelPreference | null): void {
     else window.localStorage.setItem(MODEL_PREFERENCE_KEY, JSON.stringify(preference))
   } catch {
     // Restricted browser contexts may disable storage; the in-memory preference still works.
+  }
+}
+
+/** The pins this browser stored, or null when it cannot store any. */
+function readModelPins(): Readonly<Record<string, ModelPreference>> | null {
+  if (typeof window === "undefined") return null
+  try {
+    const value = JSON.parse(window.localStorage.getItem(MODEL_PINS_KEY) ?? "null") as unknown
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return {}
+
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, ModelPreference] =>
+          isModelPreference(entry[1]) && entry[1].model !== undefined
+      )
+    )
+  } catch {
+    return null
+  }
+}
+
+/** Set or clear one conversation's pin; a pin set again becomes the most recent. */
+function withModelPin(
+  pins: Readonly<Record<string, ModelPreference>>,
+  key: string,
+  pin: ModelPreference | null
+): Readonly<Record<string, ModelPreference>> {
+  const entries = Object.entries(pins).filter(([entry]) => entry !== key)
+  if (pin !== null) entries.push([key, pin])
+
+  return Object.fromEntries(entries.slice(-MAX_MODEL_PINS))
+}
+
+function writeModelPins(pins: Readonly<Record<string, ModelPreference>>): void {
+  if (typeof window === "undefined") return
+  try {
+    if (Object.keys(pins).length === 0) window.localStorage.removeItem(MODEL_PINS_KEY)
+    else window.localStorage.setItem(MODEL_PINS_KEY, JSON.stringify(pins))
+  } catch {
+    // Restricted browser contexts may disable storage; the in-memory pins still work.
   }
 }
 

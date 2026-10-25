@@ -116,6 +116,12 @@ export const fr: Translation<AgentMessages> = {
     tools: "Outils",
     reasoning: "Raisonnement",
     via: (name) => `Via ${name}`,
+    title: "Modèle",
+    chip: (name) => `Modèle : ${name}. Le changer`,
+    auto: "Auto",
+    autoRouting: "Sixb choisit le modèle de chaque message",
+    autoStandard: (name) => `Sixb utilise ${name}`,
+    backToAuto: "Revenir à Auto",
   },
   reasoning: {
     thinking: "Réflexion",
