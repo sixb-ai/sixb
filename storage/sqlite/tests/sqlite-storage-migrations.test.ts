@@ -196,6 +196,7 @@ const shippedMigrationIds = [
   "075-artifact-threads",
   "076-agent-approvals",
   "077-agent-approval-resume",
+  "078-subagent-threads",
 ]
 
 afterEach(async () => {
@@ -2799,6 +2800,155 @@ describe("SQLite storage migrations", () => {
           .query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?")
           .all("agent_context_checkpoints")
       ).toContainEqual({ name: "idx_agent_context_checkpoints_thread_latest" })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("gives each earlier child a thread holding its task, under its conversation", () => {
+    // Removal proof: copy the runs without the threads 078 gives them; the copy fails its check
+    // on the threadless children, and the step refuses instead of rebuilding without them.
+    const db = replayedDatabase("078-subagent-threads")
+    try {
+      db.run(`
+        INSERT INTO agent_threads (
+          project_id, id, owner_principal_type, owner_principal_id, status, active_run_id,
+          last_message_at, message_count, created_at, updated_at
+        ) VALUES (
+          'project-a', 'thread-1', 'user', 'usr-1', 'active', NULL, '2026-07-01T12:00:00.000Z', 2,
+          '2026-07-01T12:00:00.000Z', '2026-07-01T12:00:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, kind, thread_id, trigger_message_id, spec, status,
+          created_at
+        ) VALUES (
+          'project-a', 'run-1', 'exec-1', 'conversation', 'thread-1', 'msg-1', NULL, 'succeeded',
+          '2026-07-01T12:00:00.000Z'
+        )
+      `)
+      const insertChild = (id: string, status: string) =>
+        db.run(
+          `
+          INSERT INTO agent_runs (
+            project_id, id, execution_id, kind, parent_run_id, spawn_key, spec, result, status,
+            created_at, completed_at
+          ) VALUES (
+            'project-a', ?, ?, 'subagent', 'run-1', ?, ?, ?, ?, '2026-07-01T12:00:01.000Z', ?
+          )
+        `,
+          [
+            id,
+            `exec-${id}`,
+            `key-${id}`,
+            JSON.stringify({ task: `Task of ${id}` }),
+            status === "succeeded" ? JSON.stringify({ text: "Done." }) : null,
+            status,
+            status === "running" ? null : "2026-07-01T12:00:05.000Z",
+          ]
+        )
+      insertChild(`agt_run_child_${"a".repeat(64)}`, "succeeded")
+      insertChild("legacy-child", "running")
+
+      const applied = migration("078-subagent-threads").up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      expect(
+        db
+          .query(
+            `SELECT id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_id,
+              active_run_id, message_count, created_at, updated_at
+            FROM agent_threads ORDER BY id`
+          )
+          .all()
+      ).toEqual([
+        {
+          id: `agt_thr_child_${"a".repeat(64)}`,
+          kind: "subagent",
+          parent_thread_id: "thread-1",
+          parent_run_id: "run-1",
+          spawn_key: `key-agt_run_child_${"a".repeat(64)}`,
+          owner_principal_id: "usr-1",
+          active_run_id: null,
+          message_count: 1,
+          created_at: "2026-07-01T12:00:01.000Z",
+          updated_at: "2026-07-01T12:00:05.000Z",
+        },
+        {
+          id: "agt_thr_child_legacy-child",
+          kind: "subagent",
+          parent_thread_id: "thread-1",
+          parent_run_id: "run-1",
+          spawn_key: "key-legacy-child",
+          owner_principal_id: "usr-1",
+          active_run_id: "legacy-child",
+          message_count: 1,
+          created_at: "2026-07-01T12:00:01.000Z",
+          updated_at: "2026-07-01T12:00:01.000Z",
+        },
+        {
+          id: "thread-1",
+          kind: "conversation",
+          parent_thread_id: null,
+          parent_run_id: null,
+          spawn_key: null,
+          owner_principal_id: "usr-1",
+          active_run_id: null,
+          message_count: 2,
+          created_at: "2026-07-01T12:00:00.000Z",
+          updated_at: "2026-07-01T12:00:00.000Z",
+        },
+      ])
+      expect(
+        db
+          .query("SELECT id, thread_id, run_id, role, seq, parts FROM agent_messages ORDER BY id")
+          .all()
+      ).toEqual([
+        {
+          id: `agt_msg_child_${"a".repeat(64)}`,
+          thread_id: `agt_thr_child_${"a".repeat(64)}`,
+          run_id: `agt_run_child_${"a".repeat(64)}`,
+          role: "user",
+          seq: 1,
+          parts: JSON.stringify([
+            { type: "text", text: `Task of agt_run_child_${"a".repeat(64)}` },
+          ]),
+        },
+        {
+          id: "agt_msg_child_legacy-child",
+          thread_id: "agt_thr_child_legacy-child",
+          run_id: "legacy-child",
+          role: "user",
+          seq: 1,
+          parts: JSON.stringify([{ type: "text", text: "Task of legacy-child" }]),
+        },
+      ])
+      expect(
+        db
+          .query(
+            "SELECT id, thread_id, trigger_message_id FROM agent_runs WHERE kind = 'subagent' ORDER BY id"
+          )
+          .all()
+      ).toEqual([
+        {
+          id: `agt_run_child_${"a".repeat(64)}`,
+          thread_id: `agt_thr_child_${"a".repeat(64)}`,
+          trigger_message_id: `agt_msg_child_${"a".repeat(64)}`,
+        },
+        {
+          id: "legacy-child",
+          thread_id: "agt_thr_child_legacy-child",
+          trigger_message_id: "agt_msg_child_legacy-child",
+        },
+      ])
+
+      // A child run has a thread from now on, and a conversation's children go with it.
+      expect(() => insertChild("threadless", "queued")).toThrow("CHECK")
+      expect(db.query("PRAGMA foreign_key_check(agent_threads)").all()).toEqual([])
+      db.run("PRAGMA foreign_keys = ON")
+      db.run("DELETE FROM agent_threads WHERE id = 'thread-1'")
+      expect(db.query("SELECT id FROM agent_threads").all()).toEqual([])
     } finally {
       db.close()
     }

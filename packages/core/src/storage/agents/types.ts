@@ -64,9 +64,26 @@ export type TransitionAgentThreadSandboxInput = {
     }
 )
 
+/**
+ * A conversation, or the thread a sub-agent works in. A sub-agent's thread is never listed, and
+ * whoever reads its conversation reads it.
+ */
+export type AgentThreadKind = "conversation" | "subagent"
+
+/** Where a sub-agent's thread comes from: its conversation, the turn that spawned it, and its key. */
+export interface AgentThreadParent {
+  readonly threadId: string
+  /** The turn that spawned it. Its later runs work under the turns that go on with it. */
+  readonly spawnedBy: string
+  readonly key: string
+}
+
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
+  readonly kind: AgentThreadKind
+  /** Set exactly on a sub-agent's thread. */
+  readonly parent?: AgentThreadParent
   /** Who owns/opened the thread. Reuses the canonical auth principal (gains `agent` later for free). */
   readonly ownerPrincipal: Principal
   readonly title?: string
@@ -120,6 +137,7 @@ export interface ForkAgentThreadInput {
   readonly createdAt?: Date
 }
 
+/** Conversations only: a sub-agent's thread is read through its conversation. */
 export interface ListAgentThreadsInput {
   readonly projectId: string
   readonly statuses?: readonly AgentThreadStatus[]
@@ -337,6 +355,11 @@ export interface SubagentRunResult {
 
 export interface SubagentRunRecord extends AgentRunRecordBase {
   readonly kind: "subagent"
+  /** The child's own thread, which holds its task and its work. */
+  readonly threadId: string
+  /** The message of its thread that started the run. */
+  readonly triggerMessageId: string
+  /** The conversation turn the child runs under: its deadline, mode and cancellation. */
   readonly parentRunId: string
   /** Stable parent-selected key that makes repeated tool execution idempotent. */
   readonly spawnKey: string
@@ -365,6 +388,13 @@ export interface CreateSubagentRunInput {
   readonly parentExecutionToken: string
   readonly spawnKey: string
   readonly spec: SubagentRunSpec
+  /**
+   * The child's thread. Its first run creates it, owned by the conversation's owner; a later run
+   * goes into it, and is refused while another run of the thread is active.
+   */
+  readonly thread: { readonly id: string; readonly create: boolean }
+  /** The user message that starts the run, appended to the child's thread with the run's id. */
+  readonly trigger: Pick<AppendAgentMessageInput, "id" | "parts" | "metadata">
   /** Internal safety bound enforced atomically across worker processes. */
   readonly maxActiveChildren: number
   readonly createdAt?: Date
@@ -455,8 +485,9 @@ export interface AgentMessageRecord {
   readonly projectId: string
   readonly threadId: string
   /**
-   * The run that produced this message; `null` for user-authored messages. A message copied by a
-   * fork keeps the run that produced it, which belongs to the thread it was copied from.
+   * The run that produced this message; `null` for user-authored messages. In a sub-agent's thread
+   * every message has one, its trigger too, so a run's messages are deleted whole. A message copied
+   * by a fork keeps the run that produced it, which belongs to the thread it was copied from.
    */
   readonly runId: string | null
   readonly role: AgentMessageRole
@@ -564,7 +595,10 @@ export interface AgentThreadStore {
   /** Atomic run-fenced transition, or explicit idle-thread recreation. */
   transitionSandbox(input: TransitionAgentThreadSandboxInput): Promise<AgentThreadSandboxState>
   create(input: CreateAgentThreadInput): Promise<AgentThreadRecord>
-  /** Create a thread holding a copy of another's finished history, in one transaction. */
+  /**
+   * Create a thread holding a copy of another's finished history, in one transaction. The source's
+   * sub-agent threads are not copied, and a sub-agent's thread is refused.
+   */
   fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null>
   /** The threads found, in first-occurrence input order; a missing one is omitted. */
@@ -573,7 +607,10 @@ export interface AgentThreadStore {
     readonly ids: readonly string[]
   }): Promise<readonly AgentThreadRecord[]>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>
-  /** Add users atomically and return every participant of the thread afterwards. */
+  /**
+   * Add users atomically and return every participant of the thread afterwards. A sub-agent's
+   * thread has none: its readers are its conversation's.
+   */
   addParticipants(
     input: AddAgentThreadParticipantsInput
   ): Promise<readonly AgentThreadParticipantRecord[]>
@@ -586,9 +623,16 @@ export interface AgentThreadStore {
 }
 
 export interface AgentRunStore {
-  /** Persist a queued run and atomically claim the thread's single-flight slot. */
+  /**
+   * Persist a queued turn and atomically claim the thread's single-flight slot. A sub-agent's
+   * thread takes only child runs.
+   */
   create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord>
-  /** Persist or replay one idempotent child run while atomically enforcing parent fan-out. */
+  /**
+   * Persist or replay one idempotent child run while atomically enforcing parent fan-out. In one
+   * transaction it creates the child's thread or takes it (single-flight, as a conversation), then
+   * appends the trigger and the run.
+   */
   createSubagent(input: CreateSubagentRunInput): Promise<SubagentRunRecord>
   /** Transition a queued run to running and install the first delivery's execution token. */
   start(input: StartAgentRunInput): Promise<AgentRunRecord>

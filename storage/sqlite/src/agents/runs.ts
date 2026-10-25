@@ -4,10 +4,14 @@ import {
   assertAgentRunExecution,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
+  assertConversationThreadRow,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
+  assertSubagentThreadTakesRun,
+  newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
+import { AGENT_MESSAGE_CONTENT_VERSION } from "@sixb/core/internal/agents"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -35,7 +39,7 @@ import {
 } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
 import { sqliteHoldsRun } from "./approvals"
-import { type AgentRunRow, rowToRunRecord } from "./rows"
+import { type AgentRunRow, type AgentThreadRow, rowToRunRecord, rowToThreadRecord } from "./rows"
 
 const SQLITE_RUN_ID_BATCH_SIZE = 500
 
@@ -57,8 +61,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
     return this.db.transaction(() => {
       const thread = this.db
-        .query("SELECT active_run_id FROM agent_threads WHERE project_id = ? AND id = ?")
-        .get(input.projectId, input.threadId) as { active_run_id: string | null } | null
+        .query("SELECT id, kind, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.threadId) as Pick<
+        AgentThreadRow,
+        "id" | "kind" | "active_run_id"
+      > | null
 
       if (!thread) {
         throw new AgentStorageError(
@@ -66,6 +73,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
+      assertConversationThreadRow(thread, "takes turns", "SixbSqlite")
       if (thread.active_run_id !== null) {
         throw new AgentStorageError(
           "active_run_exists",
@@ -191,24 +199,54 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
       }
 
+      const createdAt = input.createdAt ?? new Date()
       try {
+        this.claimChildThread(input, parentRow, createdAt)
         this.db
           .query(
             `
             INSERT INTO agent_runs (
-              project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
-              status, attempt, created_at
-            ) VALUES (?, ?, ?, 'subagent', ?, ?, ?, 'queued', 0, ?)
+              project_id, id, execution_id, kind, thread_id, trigger_message_id, parent_run_id,
+              spawn_key, spec, status, attempt, created_at
+            ) VALUES (?, ?, ?, 'subagent', ?, ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
             input.projectId,
             input.id,
             input.executionId,
+            input.thread.id,
+            input.trigger.id,
             input.parentRunId,
             input.spawnKey,
             JSON.stringify(input.spec),
-            (input.createdAt ?? new Date()).toISOString()
+            createdAt.toISOString()
+          )
+        this.db
+          .query(
+            `
+            INSERT INTO agent_messages (
+              project_id, id, thread_id, run_id, role, seq, parts, metadata, content_version,
+              created_at
+            ) VALUES (
+              ?, ?, ?, ?, 'user',
+              (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_messages
+                WHERE project_id = ? AND thread_id = ?),
+              ?, ?, ?, ?
+            )
+          `
+          )
+          .run(
+            input.projectId,
+            input.trigger.id,
+            input.thread.id,
+            input.id,
+            input.projectId,
+            input.thread.id,
+            JSON.stringify(input.trigger.parts),
+            input.trigger.metadata === undefined ? null : JSON.stringify(input.trigger.metadata),
+            AGENT_MESSAGE_CONTENT_VERSION,
+            createdAt.toISOString()
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
@@ -543,8 +581,84 @@ export class SqliteAgentRunStore implements AgentRunStore {
     return row
   }
 
+  /**
+   * The child's thread: its first run creates it, owned by the conversation's owner; a later run
+   * takes it while it is idle. Either way the run is its active run.
+   */
+  private claimChildThread(
+    input: CreateSubagentRunInput,
+    parent: AgentRunRow,
+    createdAt: Date
+  ): void {
+    if (!input.thread.create) {
+      const row = this.db
+        .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.thread.id) as AgentThreadRow | null
+      assertSubagentThreadTakesRun(
+        row ? rowToThreadRecord(row) : null,
+        input,
+        parent.thread_id ?? "",
+        "SixbSqlite"
+      )
+      this.db
+        .query(
+          `
+          UPDATE agent_threads
+          SET active_run_id = ?, message_count = message_count + 1, last_message_at = ?,
+            updated_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.id,
+          createdAt.toISOString(),
+          createdAt.toISOString(),
+          input.projectId,
+          input.thread.id
+        )
+      return
+    }
+
+    const conversation = this.db
+      .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+      .get(input.projectId, parent.thread_id) as AgentThreadRow | null
+    if (!conversation) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[SixbSqlite] Agent thread '${parent.thread_id}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const thread = newSubagentThreadRecord(input, rowToThreadRecord(conversation), createdAt)
+    this.db
+      .query(
+        `
+        INSERT INTO agent_threads (
+          project_id, id, kind, parent_thread_id, parent_run_id, spawn_key, owner_principal_type,
+          owner_principal_id, status, active_run_id, last_message_at, message_count, created_at,
+          updated_at
+        ) VALUES (?, ?, 'subagent', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        thread.projectId,
+        thread.id,
+        conversation.id,
+        input.parentRunId,
+        input.spawnKey,
+        thread.ownerPrincipal.type,
+        thread.ownerPrincipal.id,
+        thread.status,
+        input.id,
+        createdAt.toISOString(),
+        thread.messageCount,
+        createdAt.toISOString(),
+        createdAt.toISOString()
+      )
+  }
+
+  /** A turn releases its conversation, a child run its own thread. */
   private releaseThread(run: AgentRunRow, completedAt: Date): void {
-    if (run.kind !== "conversation") return
     this.db
       .query(
         `

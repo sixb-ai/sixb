@@ -179,6 +179,8 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
       toolNames: [],
       maxSteps: 25,
     },
+    thread: { id: `thread_${childRunId}`, create: true },
+    trigger: { id: `task_${childRunId}`, parts: [{ type: "text", text: "Research the issue." }] },
     maxActiveChildren: 4,
   })
   await storage.aiUsage.recordModelCall({

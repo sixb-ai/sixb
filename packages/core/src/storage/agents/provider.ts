@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../../agents/ids"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
-import type { UserPrincipal } from "../../auth"
+import type { Principal, UserPrincipal } from "../../auth"
 import { isJsonObject, isPlainRecord } from "../../json"
 import { isLanguageModelTier, LANGUAGE_MODEL_TIERS } from "../../models/catalog"
 import { isModelReasoning } from "../../models/language-model"
@@ -259,6 +259,7 @@ export function planAgentThreadFork(
   const thread: AgentThreadRecord = {
     id: input.id,
     projectId: input.projectId,
+    kind: "conversation",
     ownerPrincipal: structuredClone(input.ownerPrincipal),
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.sandboxParams === undefined
@@ -458,6 +459,8 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
     ["model.provider", input.spec.model.provider],
     ["model.modelId", input.spec.model.modelId],
     ["task", input.spec.task],
+    ["thread.id", input.thread.id],
+    ["trigger.id", input.trigger.id],
   ] as const) {
     if (value.trim().length === 0) {
       throw new AgentStorageError(
@@ -503,6 +506,12 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
       `[${prefix}] Subagent run tool names must not be empty.`
     )
   }
+  if (!Array.isArray(input.trigger.parts) || input.trigger.parts.length === 0) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run trigger must have at least one part.`
+    )
+  }
   if (input.createdAt && !Number.isFinite(input.createdAt.getTime())) {
     throw new AgentStorageError(
       "invalid_input",
@@ -523,8 +532,81 @@ export function subagentRunMatchesCreateInput(
     run.executionId === input.executionId &&
     run.parentRunId === input.parentRunId &&
     run.spawnKey === input.spawnKey &&
+    run.threadId === input.thread.id &&
     isDeepStrictEqual(run.spec, input.spec)
   )
+}
+
+/** Refuse what only a conversation does on a sub-agent's thread. */
+export function assertConversationThreadRow(
+  thread: Pick<AgentThreadRecord, "id" | "kind">,
+  /** What is refused, completing "only a conversation …". */
+  operation: string,
+  prefix = "Sixb"
+): void {
+  if (thread.kind === "conversation") return
+  throw new AgentStorageError(
+    "thread_not_conversation",
+    `[${prefix}] Agent thread '${thread.id}' is a sub-agent's: only a conversation ${operation}.`
+  )
+}
+
+/**
+ * The thread a child's first run creates. Its conversation's owner owns it, and its run is active
+ * in it from the start: the trigger is its first and only message.
+ */
+export function newSubagentThreadRecord(
+  input: CreateSubagentRunInput,
+  conversation: { readonly id: string; readonly ownerPrincipal: Principal },
+  createdAt: Date
+): AgentThreadRecord {
+  return {
+    id: input.thread.id,
+    projectId: input.projectId,
+    kind: "subagent",
+    parent: { threadId: conversation.id, spawnedBy: input.parentRunId, key: input.spawnKey },
+    ownerPrincipal: structuredClone(conversation.ownerPrincipal),
+    status: "active",
+    activeRunId: input.id,
+    lastMessageAt: createdAt,
+    messageCount: 1,
+    createdAt,
+    updatedAt: createdAt,
+  }
+}
+
+/**
+ * A later run of a child goes into its thread: the same child of the same conversation, and only
+ * once the thread's previous run has ended, as in a conversation.
+ */
+export function assertSubagentThreadTakesRun(
+  thread: AgentThreadRecord | null,
+  input: CreateSubagentRunInput,
+  conversationId: string,
+  prefix = "Sixb"
+): asserts thread is AgentThreadRecord {
+  if (!thread) {
+    throw new AgentStorageError(
+      "thread_not_found",
+      `[${prefix}] Agent thread '${input.thread.id}' not found for project '${input.projectId}'.`
+    )
+  }
+  if (
+    thread.kind !== "subagent" ||
+    thread.parent?.threadId !== conversationId ||
+    thread.parent.key !== input.spawnKey
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent thread '${thread.id}' is not the thread of child '${input.spawnKey}' of this conversation.`
+    )
+  }
+  if (thread.activeRunId !== null) {
+    throw new AgentStorageError(
+      "active_run_exists",
+      `[${prefix}] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
 }
 
 /** Validate the small durable result returned by a successful child. */

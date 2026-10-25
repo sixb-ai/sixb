@@ -929,6 +929,8 @@ async function startChild(storage: AgentApprovalStorageContractStorage): Promise
       maxSteps: 10,
       approvalMode: "manual",
     },
+    thread: { id: "child_thread_1", create: true },
+    trigger: { id: "child_task_1", parts: [{ type: "text", text: "Pay the overdue invoices." }] },
     maxActiveChildren: 4,
     createdAt: t0,
   })

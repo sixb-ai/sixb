@@ -2102,6 +2102,8 @@ async function createGatewayRuntime(
         maxSteps: 25,
         ...approvalModeOf(options),
       },
+      thread: { id: `thread_${runId}`, create: true },
+      trigger: { id: `task_${runId}`, parts: [{ type: "text", text: "Inspect devices." }] },
       maxActiveChildren: 4,
       createdAt: NOW,
     })

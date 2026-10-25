@@ -114,6 +114,8 @@ export type {
   AgentRunStore,
   AgentStorage,
   AgentStorageErrorCode,
+  AgentThreadKind,
+  AgentThreadParent,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxParams,

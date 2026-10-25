@@ -117,6 +117,7 @@ const SHIPPED_MIGRATIONS = [
   "077-artifact-threads",
   "078-agent-approvals",
   "079-agent-approval-resume",
+  "080-subagent-threads",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -677,6 +678,120 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("gives each earlier child a thread holding its task, under its conversation", async () => {
+    // Removal proof: drop 080's backfill; restoring the run check then fails on the children
+    // that have no thread.
+    const index = indexOf("080-subagent-threads")
+    await withDatabase({ migrateThrough: index }, async ({ storage, sql, migrateThrough }) => {
+      const projectId = "project-a"
+      const digest = "a".repeat(64)
+      await sql.unsafe(`
+        INSERT INTO agent_threads (
+          project_id, id, owner_principal_type, owner_principal_id, status, message_count,
+          created_at, updated_at
+        ) VALUES (
+          'project-a', 'thread-1', 'user', 'usr-1', 'active', 2, '2026-07-01T12:00:00.000Z',
+          '2026-07-01T12:00:00.000Z'
+        )
+      `)
+      const parentExecution = await createTestAgentExecution(storage, { projectId, runId: "run-1" })
+      await sql`
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, kind, thread_id, trigger_message_id, status, created_at
+        ) VALUES (
+          ${projectId}, 'run-1', ${parentExecution}, 'conversation', 'thread-1', 'msg-1',
+          'succeeded', '2026-07-01T12:00:00.000Z'
+        )
+      `
+      for (const [id, status] of [
+        [`agt_run_child_${digest}`, "succeeded"],
+        ["legacy-child", "running"],
+      ] as const) {
+        const executionId = await createTestAgentExecution(storage, {
+          projectId,
+          runId: id,
+          sourceExecutionId: parentExecution,
+        })
+        await sql`
+          INSERT INTO agent_runs (
+            project_id, id, execution_id, kind, parent_run_id, spawn_key, spec, result, status,
+            created_at, completed_at
+          ) VALUES (
+            ${projectId}, ${id}, ${executionId}, 'subagent', 'run-1', ${`key-${id}`},
+            ${JSON.stringify({ task: `Task of ${id}` })}::text::jsonb,
+            ${status === "succeeded" ? JSON.stringify({ text: "Done." }) : null}::text::jsonb,
+            ${status}, '2026-07-01T12:00:01.000Z',
+            ${status === "running" ? null : "2026-07-01T12:00:05.000Z"}
+          )
+        `
+      }
+
+      await migrateThrough(index + 1)
+
+      const children = [
+        { run: `agt_run_child_${digest}`, thread: `agt_thr_child_${digest}`, active: null },
+        { run: "legacy-child", thread: "agt_thr_child_legacy-child", active: "legacy-child" },
+      ]
+      const threads = await storage.agents.threads.getByIds({
+        projectId,
+        ids: children.map((child) => child.thread),
+      })
+      expect(threads).toEqual(
+        children.map((child) => ({
+          id: child.thread,
+          projectId,
+          kind: "subagent",
+          parent: { threadId: "thread-1", spawnedBy: "run-1", key: `key-${child.run}` },
+          ownerPrincipal: { type: "user", id: "usr-1" },
+          title: undefined,
+          status: "active",
+          activeRunId: child.active,
+          lastMessageAt: new Date("2026-07-01T12:00:01.000Z"),
+          messageCount: 1,
+          createdAt: new Date("2026-07-01T12:00:01.000Z"),
+          updatedAt: new Date(
+            child.active ? "2026-07-01T12:00:01.000Z" : "2026-07-01T12:00:05.000Z"
+          ),
+        }))
+      )
+      for (const child of children) {
+        await expect(
+          storage.agents.messages.list({ projectId, threadId: child.thread })
+        ).resolves.toMatchObject({
+          messages: [
+            {
+              runId: child.run,
+              role: "user",
+              seq: 1,
+              parts: [{ type: "text", text: `Task of ${child.run}` }],
+            },
+          ],
+          total: 1,
+        })
+        const run = await storage.agents.runs.getById({ projectId, id: child.run })
+        expect(run).toMatchObject({ kind: "subagent", threadId: child.thread })
+        await expect(
+          storage.agents.messages.getById({
+            projectId,
+            id: run?.kind === "subagent" ? run.triggerMessageId : "",
+          })
+        ).resolves.toMatchObject({ threadId: child.thread, seq: 1 })
+      }
+      await expect(storage.agents.threads.list({ projectId })).resolves.toMatchObject({
+        threads: [{ id: "thread-1", kind: "conversation" }],
+        total: 1,
+      })
+
+      // A child run has a thread from now on, and a conversation's children go with it.
+      const refused = await Promise.resolve(
+        sql`UPDATE agent_runs SET thread_id = NULL WHERE id = 'legacy-child'`
+      ).catch((error: unknown) => error)
+      expect(refused).toMatchObject({ code: "23514" })
+      await sql`DELETE FROM agent_threads WHERE id = 'thread-1'`
+      expect(await sql`SELECT id FROM agent_threads`).toHaveLength(0)
+    })
+  })
+
   test("scopes a run's context checkpoint to its thread and keeps existing ones", async () => {
     // Removal proof: drop 072's DO block; the project-wide constraint stays, and the copy of
     // `run-2`'s checkpoint into another thread violates it.
@@ -693,7 +808,7 @@ describe("Postgres storage migrations", () => {
           return rows.map((row) => row.definition)
         }
 
-        await seedCompactedThread(storage)
+        await seedCompactedThread(storage, sql)
         expect(await uniqueConstraints()).toEqual(["UNIQUE (project_id, created_by_run_id)"])
 
         await migrateThrough(index + 1)
@@ -1922,71 +2037,60 @@ function indexOf(id: string): number {
   return index
 }
 
-/** A thread whose second turn compacted the first, both finished. */
-async function seedCompactedThread(storage: PostgresStorage): Promise<void> {
-  const agents = storage.agents
+/**
+ * A thread whose second turn compacted the first, both finished. Written as rows: it seeds a
+ * schema older than the code reading it.
+ */
+async function seedCompactedThread(storage: PostgresStorage, sql: SQL): Promise<void> {
   const projectId = "project-a"
-  const threadId = "thread-1"
-  const spec = { model: { provider: "test", modelId: "test-model" } }
-  const execution = (token: string) => ({ token, queueLeaseExpiresAt: new Date("2099-01-01") })
-
-  await agents.threads.create({
-    projectId,
-    id: threadId,
-    ownerPrincipal: { type: "user", id: "usr-1" },
-  })
-  const turn = async (runId: string, question: string, answer: string) => {
-    await agents.messages.append({
-      projectId,
-      id: question,
-      threadId,
-      runId: null,
-      role: "user",
-      parts: [{ type: "text", text: question }],
-    })
+  await sql`
+    INSERT INTO agent_threads (
+      project_id, id, owner_principal_type, owner_principal_id, status, message_count, created_at,
+      updated_at
+    ) VALUES (
+      ${projectId}, 'thread-1', 'user', 'usr-1', 'active', 4, '2026-07-01T12:00:00.000Z',
+      '2026-07-01T12:00:00.000Z'
+    )
+  `
+  for (const runId of ["run-1", "run-2"]) {
     const executionId = await createTestAgentExecution(storage, { projectId, runId })
-    await agents.runs.create({
-      projectId,
-      id: runId,
-      executionId,
-      threadId,
-      triggerMessageId: question,
-      spec,
-    })
-    await agents.runs.start({ projectId, id: runId, execution: execution(runId) })
-    return async () => {
-      await agents.messages.append({
-        projectId,
-        id: answer,
-        threadId,
-        runId,
-        role: "assistant",
-        parts: [{ type: "text", text: answer }],
-      })
-      await agents.runs.finish({ projectId, id: runId, executionToken: runId, status: "succeeded" })
-    }
+    await sql`
+      INSERT INTO agent_runs (
+        project_id, id, execution_id, kind, thread_id, trigger_message_id, spec, status, created_at
+      ) VALUES (
+        ${projectId}, ${runId}, ${executionId}, 'conversation', 'thread-1',
+        ${runId === "run-1" ? "question-1" : "question-2"},
+        '{"model":{"provider":"test","modelId":"test-model"}}'::jsonb, 'succeeded',
+        '2026-07-01T12:00:00.000Z'
+      )
+    `
   }
-
-  await (await turn("run-1", "question-1", "answer-1"))()
-  const finishSecond = await turn("run-2", "question-2", "answer-2")
-  await agents.checkpoints.create({
-    projectId,
-    id: "checkpoint-1",
-    threadId,
-    createdByRunId: "run-2",
-    expectedPreviousCheckpointId: null,
-    expectedHeadSeq: 3,
-    executionToken: "run-2",
-    reason: "threshold",
-    summary: "The first question was answered.",
-    summaryFormatVersion: 1,
-    summarizedThroughSeq: 2,
-    observedHeadSeq: 3,
-    estimatedInputTokensBefore: 1_000,
-    estimatedInputTokensAfter: 300,
-    summaryModelId: "test-model",
-  })
-  await finishSecond()
+  for (const [seq, id, runId, role] of [
+    [1, "question-1", null, "user"],
+    [2, "answer-1", "run-1", "assistant"],
+    [3, "question-2", null, "user"],
+    [4, "answer-2", "run-2", "assistant"],
+  ] as const) {
+    await sql`
+      INSERT INTO agent_messages (
+        project_id, id, thread_id, run_id, role, seq, parts, content_version, created_at
+      ) VALUES (
+        ${projectId}, ${id}, 'thread-1', ${runId}, ${role}, ${seq},
+        ${JSON.stringify([{ type: "text", text: id }])}::text::jsonb, 2, '2026-07-01T12:00:00.000Z'
+      )
+    `
+  }
+  await sql`
+    INSERT INTO agent_context_checkpoints (
+      project_id, id, thread_id, created_by_run_id, reason, summary, summary_format_version,
+      summarized_through_seq, observed_head_seq, estimated_input_tokens_before,
+      estimated_input_tokens_after, summary_model_id, created_at
+    ) VALUES (
+      ${projectId}, 'checkpoint-1', 'thread-1', 'run-2', 'threshold',
+      'The first question was answered.', 1, 2, 3, 1000, 300, 'test-model',
+      '2026-07-01T12:00:00.000Z'
+    )
+  `
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {

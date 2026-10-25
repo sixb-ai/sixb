@@ -450,6 +450,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("077-artifact-threads", artifactThreadsSql),
     pgSql("078-agent-approvals", agentApprovalsSql),
     pgSql("079-agent-approval-resume", agentApprovalResumeSql),
+    pgSql("080-subagent-threads", subagentThreadsSql),
   ],
 })
 
@@ -511,3 +512,4 @@ import agentApprovalsSql from "./migrations/078-agent-approvals.sql" with { type
 import agentApprovalResumeSql from "./migrations/079-agent-approval-resume.sql" with {
   type: "text",
 }
+import subagentThreadsSql from "./migrations/080-subagent-threads.sql" with { type: "text" }

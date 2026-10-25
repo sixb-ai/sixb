@@ -1,5 +1,7 @@
 export type AgentStorageErrorCode =
   | "thread_not_found"
+  /** A conversation's operation on a sub-agent's thread: a turn, a fork, a participant. */
+  | "thread_not_conversation"
   | "active_run_exists"
   | "active_child_limit"
   | "run_not_found"

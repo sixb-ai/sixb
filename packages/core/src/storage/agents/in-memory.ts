@@ -23,16 +23,19 @@ import {
   assertAgentRunExecution,
   assertAwaitingApprovalFinish,
   assertConversationAgentRunSpec,
+  assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
   assertSubagentRunResult,
+  assertSubagentThreadTakesRun,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
   LIVE_AGENT_APPROVAL_STATUSES,
   newAgentApprovalRecord,
+  newSubagentThreadRecord,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -223,6 +226,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     const record: AgentThreadRecord = {
       id: input.id,
       projectId: input.projectId,
+      kind: "conversation",
       ownerPrincipal: clone(input.ownerPrincipal),
       ...(sandboxParams === undefined ? {} : { sandboxParams }),
       ...(input.title === undefined ? {} : { title: input.title }),
@@ -246,6 +250,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
         `[Sixb] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
       )
     }
+    assertConversationThreadRow(source, "can be forked")
 
     const forkKey = key(input.projectId, input.id)
     if (this.state.threads.has(forkKey)) {
@@ -324,6 +329,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     const statuses = input.statuses ? new Set(input.statuses) : null
     const filtered = [...this.state.threads.values()]
       .filter((thread) => thread.projectId === input.projectId)
+      .filter((thread) => thread.kind === "conversation")
       .filter((thread) => (statuses ? statuses.has(thread.status) : true))
       .filter((thread) =>
         input.ownerPrincipal ? principalsEqual(thread.ownerPrincipal, input.ownerPrincipal) : true
@@ -354,12 +360,14 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     input: AddAgentThreadParticipantsInput
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     const threadKey = key(input.projectId, input.threadId)
-    if (!this.state.threads.has(threadKey)) {
+    const thread = this.state.threads.get(threadKey)
+    if (!thread) {
       throw new AgentStorageError(
         "thread_not_found",
         `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
     }
+    assertConversationThreadRow(thread, "has participants")
 
     // No `await` from here on: the read and the write are one critical section.
     const existing = this.participantsOf(input.projectId, input.threadId)
@@ -426,6 +434,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
       )
     }
+    assertConversationThreadRow(thread, "takes turns")
     if (thread.activeRunId !== null) {
       throw new AgentStorageError(
         "active_run_exists",
@@ -547,18 +556,72 @@ class InMemoryAgentRunStore implements AgentRunStore {
       )
     }
 
+    // The child's thread: created by its first run, taken by a later one while it is idle.
+    const createdAt = new Date(input.createdAt ?? new Date())
+    const threadKey = key(input.projectId, input.thread.id)
+    const existingThread = this.state.threads.get(threadKey) ?? null
+    let thread: AgentThreadRecord
+    if (input.thread.create) {
+      if (existingThread) {
+        throw new AgentStorageError(
+          "duplicate_id",
+          `[Sixb] Agent thread '${input.thread.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+      const conversation = this.state.threads.get(key(input.projectId, parent.threadId))
+      if (!conversation) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[Sixb] Agent thread '${parent.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+      thread = newSubagentThreadRecord(input, conversation, createdAt)
+    } else {
+      assertSubagentThreadTakesRun(existingThread, input, parent.threadId)
+      thread = {
+        ...existingThread,
+        activeRunId: input.id,
+        messageCount: existingThread.messageCount + 1,
+        lastMessageAt: createdAt,
+        updatedAt: createdAt,
+      }
+    }
+
     const run: SubagentRunRecord = {
       kind: "subagent",
       id: input.id,
       projectId: input.projectId,
       executionId: input.executionId,
+      threadId: input.thread.id,
+      triggerMessageId: input.trigger.id,
       parentRunId: input.parentRunId,
       spawnKey: input.spawnKey,
       spec: clone(input.spec),
       status: "queued",
       attempt: 0,
-      createdAt: new Date(input.createdAt ?? new Date()),
+      createdAt,
     }
+    const trigger: AgentMessageRecord = {
+      id: input.trigger.id,
+      projectId: input.projectId,
+      threadId: input.thread.id,
+      runId: input.id,
+      role: "user",
+      seq: nextMessageSeq(this.state, input.projectId, input.thread.id),
+      parts: clone(input.trigger.parts),
+      ...(input.trigger.metadata === undefined ? {} : { metadata: clone(input.trigger.metadata) }),
+      contentVersion: AGENT_MESSAGE_CONTENT_VERSION,
+      createdAt,
+    }
+    if (this.state.messages.has(key(input.projectId, trigger.id))) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent message '${trigger.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    this.state.threads.set(threadKey, clone(thread))
+    this.state.messages.set(key(input.projectId, trigger.id), clone(trigger))
     this.state.runs.set(runKey, clone(run))
     return clone(run)
   }
@@ -699,9 +762,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
     const filtered = [...this.state.runs.values()]
       .filter((run) => run.projectId === input.projectId)
       .filter((run) => (kinds ? kinds.has(run.kind) : true))
-      .filter((run) =>
-        input.threadId ? run.kind === "conversation" && run.threadId === input.threadId : true
-      )
+      .filter((run) => (input.threadId ? run.threadId === input.threadId : true))
       .filter((run) =>
         input.parentRunId ? run.kind === "subagent" && run.parentRunId === input.parentRunId : true
       )
@@ -774,8 +835,8 @@ class InMemoryAgentRunStore implements AgentRunStore {
     }
   }
 
+  /** A turn releases its conversation, a child run its own thread. */
   private releaseThread(run: AgentRunRecord, completedAt: Date): void {
-    if (run.kind !== "conversation") return
     const threadKey = key(run.projectId, run.threadId)
     const thread = this.state.threads.get(threadKey)
     if (thread && thread.activeRunId === run.id) {
@@ -818,7 +879,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     }
 
     const createdAt = new Date(input.createdAt ?? new Date())
-    const seq = this.nextSeq(input.projectId, input.threadId)
+    const seq = nextMessageSeq(this.state, input.projectId, input.threadId)
     const message: AgentMessageRecord = {
       id: input.id,
       projectId: input.projectId,
@@ -913,16 +974,16 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     const { page, hasMore, total } = applyWindow(filtered, input.offset, input.limit)
     return { messages: page.map(clone), hasMore, total }
   }
+}
 
-  private nextSeq(projectId: string, threadId: string): number {
-    let max = 0
-    for (const message of this.state.messages.values()) {
-      if (message.projectId === projectId && message.threadId === threadId && message.seq > max) {
-        max = message.seq
-      }
+function nextMessageSeq(state: AgentStoreState, projectId: string, threadId: string): number {
+  let max = 0
+  for (const message of state.messages.values()) {
+    if (message.projectId === projectId && message.threadId === threadId && message.seq > max) {
+      max = message.seq
     }
-    return max + 1
   }
+  return max + 1
 }
 
 // ── context checkpoints ──────────────────────────────────────────────────────────────────────

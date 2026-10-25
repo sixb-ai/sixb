@@ -12,8 +12,10 @@ import {
 } from "@sixb/core/internal/agent-execution"
 import {
   type AgentChildApprovalAwaiting,
+  createAgentMessageId,
   createSubagentExecutionId,
   createSubagentRunId,
+  createSubagentThreadId,
   dispatchQueuedSubagentRuns,
   listChildApprovalsAwaiting,
 } from "@sixb/core/internal/agents"
@@ -186,6 +188,9 @@ export class SubagentCoordinator {
           parentExecutionToken: requiredExecutionToken(this.parentRun),
           spawnKey: key,
           spec,
+          // The child works in a thread of its own, which starts with its task.
+          thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
+          trigger: { id: createAgentMessageId(), parts: [{ type: "text", text: task }] },
           maxActiveChildren: this.context.subagentConcurrencyPerRun,
         })
       })

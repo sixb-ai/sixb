@@ -46,6 +46,8 @@ function subagentRunRecord(overrides: Partial<SubagentRunRecord> = {}): Subagent
     id: "agt_run_child_1",
     projectId: "stream-records-tests",
     executionId: "exec_agt_run_child_1",
+    threadId: "agt_thr_child_1",
+    triggerMessageId: "agt_msg_child_1",
     parentRunId: "agt_run_1",
     spawnKey: "research",
     spec: {

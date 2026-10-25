@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import {
+  assertConversationThreadRow,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -118,10 +119,12 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.db
       .transaction(() => {
         const source = this.db
-          .query("SELECT id, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?")
+          .query(
+            "SELECT id, kind, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?"
+          )
           .get(input.projectId, input.sourceThreadId) as Pick<
           AgentThreadRow,
-          "id" | "active_run_id"
+          "id" | "kind" | "active_run_id"
         > | null
 
         if (!source) {
@@ -130,6 +133,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             `[SixbSqlite] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
           )
         }
+        assertConversationThreadRow(source, "can be forked", "SixbSqlite")
 
         const activeRun = source.active_run_id === null ? null : this.findActiveRun(input, source)
 
@@ -275,7 +279,8 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       return { threads: [], hasMore: false, total: 0 }
     }
 
-    const whereClauses = ["project_id = ?"]
+    // A sub-agent's thread is read through its conversation; the list indexes leave it out too.
+    const whereClauses = ["project_id = ?", "kind = 'conversation'"]
     const args: SqliteValue[] = [input.projectId]
 
     if (input.statuses) {
@@ -319,14 +324,15 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.db
       .transaction(() => {
         const thread = this.db
-          .query("SELECT id FROM agent_threads WHERE project_id = ? AND id = ?")
-          .get(input.projectId, input.threadId)
+          .query("SELECT id, kind FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.threadId) as Pick<AgentThreadRow, "id" | "kind"> | null
         if (!thread) {
           throw new AgentStorageError(
             "thread_not_found",
             `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
+        assertConversationThreadRow(thread, "has participants", "SixbSqlite")
 
         const existing = this.selectParticipants(input.projectId, [input.threadId])
         const added = participantsToAdd(input, existing, "SixbSqlite")

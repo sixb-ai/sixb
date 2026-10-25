@@ -24,12 +24,19 @@ export function createAgentRunId(): string {
 
 /** One stable child identity per parent-selected spawn key. */
 export function createSubagentRunId(parentRunId: string, spawnKey: string): string {
-  const digest = createHash("sha256")
-    .update(parentRunId)
-    .update("\0")
-    .update(spawnKey)
-    .digest("hex")
-  return `agt_run_child_${digest}`
+  return `agt_run_child_${spawnDigest(parentRunId, spawnKey)}`
+}
+
+/**
+ * The thread a child works in, named after the turn that spawned it and its key. It shares its
+ * first run's digest: migration `subagent-threads` names the threads of earlier children so.
+ */
+export function createSubagentThreadId(spawningRunId: string, spawnKey: string): string {
+  return `agt_thr_child_${spawnDigest(spawningRunId, spawnKey)}`
+}
+
+function spawnDigest(runId: string, spawnKey: string): string {
+  return createHash("sha256").update(runId).update("\0").update(spawnKey).digest("hex")
 }
 
 /** Stable execution identity paired with a deterministic child run. */
