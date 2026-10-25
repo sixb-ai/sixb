@@ -1,6 +1,7 @@
 import { principalsEqual } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
+  conversationThreadId,
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
   dispatchQueuedSubagentRuns,
@@ -25,8 +26,10 @@ import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
+  AppendAgentMessageInput,
   ConversationAgentRunRecord,
   ExecutionRecord,
+  FinishAgentRunInput,
   SubagentRunRecord,
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
@@ -57,7 +60,7 @@ import {
   resolveSubagentExecutionPlan,
 } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
-import { finishRunOrThrow } from "./finalize"
+import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { type ConversationReaders, conversationReaders } from "./message-authors"
 import { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 import {
@@ -66,7 +69,7 @@ import {
   createConversationAgentEnvironment,
   createSubagentEnvironment,
 } from "./run-environment"
-import { runSubagent } from "./run-subagent"
+import { runSubagent, type SubagentWork, subagentWorkMessage } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
 import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
@@ -610,6 +613,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     let environment: AgentExecutionEnvironment | null = null
     let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
+    const work: SubagentWork = {}
 
     try {
       const currentParent = await context.storage.agents.runs.getById({
@@ -680,9 +684,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         runId: queuedRun.id,
         authorization,
       })
-      const thread = await context.storage.agents.threads.getById({
+      // The child works in its own thread, and publishes into its conversation's gallery.
+      const childThread = await context.storage.agents.threads.getById({
         projectId: context.id,
-        id: currentParent.threadId,
+        id: run.threadId,
+      })
+      if (!childThread) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbAgentWorker] Subagent run '${run.id}' references missing thread '${run.threadId}'.`,
+          { details: agentRunFailureDetails(run) }
+        )
+      }
+      const conversation = await context.storage.agents.threads.getById({
+        projectId: context.id,
+        id: conversationThreadId(childThread),
       })
       const prepared = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
@@ -704,14 +720,22 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         plan,
         run,
-        thread,
+        thread: childThread,
+        conversation,
         ...(durableExecution.requestedBy === undefined
           ? {}
           : { requestedBy: durableExecution.requestedBy }),
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
-      await runSubagent({ context: environment.turnContext, plan, run, runtime })
+      await runSubagent({
+        context: environment.turnContext,
+        plan,
+        run,
+        thread: childThread,
+        runtime,
+        work,
+      })
     } catch (error) {
       if (isLostExecution(error, signal)) return
       if (error instanceof AgentFinalizationError) throw error
@@ -735,7 +759,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         run,
         executionToken,
         aborted ? "cancelled" : "failed",
-        error
+        error,
+        work.parts?.some((part) => part.type !== "step-start")
+          ? subagentWorkMessage(run, work.parts)
+          : undefined
       )
       if (finalized) {
         if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
@@ -1192,7 +1219,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     run: AgentRunRecord,
     executionToken: string,
     status: "failed" | "cancelled",
-    error: unknown
+    error: unknown,
+    /** What the run did, kept with its fate in one transaction. */
+    message?: AppendAgentMessageInput
   ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
     try {
       const completedAt = new Date()
@@ -1204,7 +1233,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
         },
       })
-      const finalized = await finishRunOrThrow(context.storage.agents, {
+      const finish: FinishAgentRunInput = {
         projectId: context.id,
         id: run.id,
         executionToken,
@@ -1215,7 +1244,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         ...(error instanceof AgentTurnInterruptedError
           ? { finishReason: "interrupted" as const }
           : {}),
-      })
+      }
+      const finalized = message
+        ? await appendMessageAndFinishRunOrThrow(context.storage, { message, finish })
+        : await finishRunOrThrow(context.storage.agents, finish)
       return { run: finalized, failure }
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.

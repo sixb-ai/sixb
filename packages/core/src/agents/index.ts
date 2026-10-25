@@ -98,6 +98,7 @@ export {
   AgentToolPublicError,
   AgentToolResultValidationError,
 } from "./errors"
+export { conversationThreadId } from "./thread-access"
 export {
   agentContextCheckpointId,
   createAgentMessageId,

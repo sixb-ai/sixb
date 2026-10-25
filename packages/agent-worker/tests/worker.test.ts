@@ -54,6 +54,7 @@ import {
   createAgentRunExecutionToken,
   createAgentRunId,
   createSubagentRunId,
+  createSubagentThreadId,
   ensureManagedAgentExecutionIdentity,
   holdAgentApprovalCall,
   isAgentToolResult,
@@ -89,6 +90,7 @@ import {
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
+  type AgentThreadRecord,
   type AiUsageStorage,
   type AppendAgentMessageInput,
   type ArtifactRecord,
@@ -7609,6 +7611,89 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("keeps a child's task and its work in a thread of its own, under the conversation", async () => {
+    // Removal proof: finish the child with `finishRunOrThrow` again, without its work message;
+    // its thread then holds the task alone.
+    let childRunId = ""
+    const childCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "zai/glm-5.3-flash",
+      stream: async (options) => {
+        childCalls.push(options)
+        return answerStream("The delegated fact is 42.")
+      },
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const threadId = createSubagentThreadId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      await underFakeTime(() => terminalRun(storage, requested.run.id), "delegating parent")
+
+      const child = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      expect(child).toMatchObject({ kind: "subagent", status: "succeeded", threadId })
+      const conversation = await storage.threads.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.threadId,
+      })
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
+      expect(thread).toMatchObject({
+        kind: "subagent",
+        parent: { threadId: requested.run.threadId, spawnedBy: requested.run.id, key: "research" },
+        ownerPrincipal: conversation?.ownerPrincipal,
+        activeRunId: null,
+        messageCount: 2,
+      })
+
+      const messages = await listMessages(storage, threadId)
+      expect(messages).toMatchObject([
+        {
+          runId: childRunId,
+          role: "user",
+          parts: [{ type: "text", text: "Research the exact delegated fact." }],
+        },
+        {
+          runId: childRunId,
+          role: "assistant",
+          parts: [{ type: "step-start" }, { type: "text", text: "The delegated fact is 42." }],
+        },
+      ])
+      // Its model read its thread: the task, closed by when the thread was created.
+      expect(childCalls[0]?.messages.slice(1)).toEqual([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Research the exact delegated fact." },
+            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time>/) },
+          ],
+        },
+      ])
+
+      // The conversation is still the only thread listed, and holds none of the child's messages.
+      const listed = await storage.threads.list({ projectId: PROJECT_ID })
+      expect(listed.threads.map((listedThread) => listedThread.id)).toEqual([
+        requested.run.threadId,
+      ])
+      const conversationMessages = await listMessages(storage, requested.run.threadId)
+      expect(conversationMessages.some((message) => message.runId === childRunId)).toBe(false)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+
   test("delegates to a tier's model", async () => {
     // Removal proof: drop the tier branch from SubagentCoordinator.resolveModel; the tier is
     // looked up as a model reference and the spawn fails.
@@ -8324,6 +8409,12 @@ describe("AgentWorker", () => {
       expect(parent).toMatchObject({ status: "succeeded", finishReason: "awaiting_approval" })
       // It paused after the step whose wait_agent saw the child end, not before.
       expect(parentCall).toBe(3)
+      // Spawning it again with its key wrote no second task into its thread.
+      const childMessages = await listMessages(
+        storage,
+        createSubagentThreadId(requested.run.id, "close")
+      )
+      expect(childMessages.map((message) => message.role)).toEqual(["user", "assistant"])
     } finally {
       releaseChild()
       await stopUnderFakeTime(worker)
@@ -8653,6 +8744,18 @@ describe("AgentWorker", () => {
       const waited = JSON.stringify(parentCalls[2]?.messages.at(-1))
       expect(waited).toContain(JSON.stringify(message).slice(1, -1))
       expect(waited).not.toContain("Partial")
+
+      // Its thread keeps what it wrote, as an interrupted turn does. Removal proof: record the
+      // child's fate without its work; the thread then holds its task alone.
+      const childThread = createSubagentThreadId(requested.run.id, "research")
+      expect(await listMessages(storage, childThread)).toMatchObject([
+        { role: "user" },
+        {
+          role: "assistant",
+          runId: childRunId,
+          parts: [{ type: "step-start" }, { text: "Partial" }],
+        },
+      ])
     } finally {
       await worker.stop()
     }
@@ -12350,13 +12453,23 @@ describe("agent tools act as the requester", () => {
       nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
       errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
     })
-    // The environment reads only the run's identity and execution token.
+    // The environment reads only the run's identity and execution token, and its thread's.
     const childRun = {
       id: "child-run",
       parentRunId: "parent-run",
       execution,
     } as unknown as SubagentRunRecord
-    const child = await createSubagentEnvironment({ context, plan, run: childRun })
+    const childThread = {
+      id: "child-thread",
+      parent: { threadId: "parent-thread", spawnedBy: "parent-run", key: "quote" },
+      createdAt: new Date(),
+    } as unknown as AgentThreadRecord
+    const child = await createSubagentEnvironment({
+      context,
+      plan,
+      run: childRun,
+      thread: childThread,
+    })
     const openQuote = (environment: typeof task) => {
       const tool = environment.turnContext.tools.find(({ name }) => name === readAttachment.name)
       return tool?.execute(
