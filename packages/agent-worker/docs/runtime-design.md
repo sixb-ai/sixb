@@ -78,11 +78,13 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
 
 - **Ephemeral** ([ephemeral-run-sandbox.ts](../src/ephemeral-run-sandbox.ts)): created for one
   run and destroyed when the run releases it. It is blank for an unbound conversation, a subagent
-  or a workflow node; a workflow step's own `sandbox` factory makes it a workspace from its static
-  recipe, destroyed after its credentials are revoked.
-- **Persistent** ([persistent-run-sandbox.ts](../src/persistent-run-sandbox.ts)): a bound
-  conversation's thread workspace, resumed by each run and saved by `beforeFinalize` before the
-  run's terminal write. Run teardown never destroys it.
+  on a provider without `resume`, or a workflow node; a workflow step's own `sandbox` factory makes
+  it a workspace from its static recipe, destroyed after its credentials are revoked.
+- **Persistent** ([persistent-run-sandbox.ts](../src/persistent-run-sandbox.ts)): a thread's
+  workspace, resumed by each run and saved by `beforeFinalize` before the run's terminal write: a
+  bound conversation's, and on a provider with `resume` a subagent's, blank (see
+  [paused children](#paused-children)). Run teardown never destroys it; only a subagent that ended
+  does, through `beforeFinalize({ discard: true })`.
 
 For a blank sandbox:
 
@@ -123,7 +125,8 @@ heavier investigations that can run in parallel, never a lookup or a second opin
 Each child:
 
 - inherits and independently revalidates the parent's durable authority, and its approval mode;
-- receives all project tools plus an isolated, blank sandbox and scoped Sixb API access;
+- receives all project tools plus an isolated, blank sandbox, kept while it pauses on a provider
+  that resumes sandboxes, and scoped Sixb API access;
 - knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
   time zone and locale, and the memory, which it reads and the gateway refuses to let it save;
 - gets the conversation prompt's data rules, never its rules for talking to the user;
@@ -174,7 +177,7 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   thread under this turn and the same key (`createSubagentRunId(turn, key)`, so a replay finds it,
   with `thread.create: false`). Its trigger holds the outcomes, copied without their caller so the
   child reads them as its own, what came back to its new sandbox (its `out/`, or why none could be
-  kept) and when it continues. The model, task and handed files are the paused child's; the mode
+  kept) unless its workspace is kept, and when it continues. The model, task and handed files are the paused child's; the mode
   and deadline are this turn's. A new message continues none.
 - **A retried resume continues it again.** The retry keeps its trigger, so it continues the child
   again under its own id. The runs of the thread after the pause that ran under the failed
@@ -185,8 +188,26 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   starts like the paused run's last one. Files its tools showed the earlier runs are projected as a
   turn projects its history's (`prepareAgentAttachments` over the thread's messages): kept as
   metadata, at a path in its sandbox, so a request that replays one differs from the live one there.
-  Its sandbox gets the handed files and the paused run's `out/` (`result.files`); at its finish
-  everything under `out/` returns, the inherited files included.
+  At its finish everything under `out/` returns, the inherited files included.
+- **Its workspace is kept on a provider that resumes.** The child's thread holds its own
+  `sandbox_state` (a random name), through the conversation's state machine: the fence is the
+  thread's active run, whatever its kind. Its first run creates it while the model starts, as a
+  blank ephemeral sandbox boots. A pausing run saves it (`stop()`, settled `ready`); the
+  continuation resumes it by name, before its first model call, and finds every file as it left
+  them. The handed files are listed again but not copied, except those under `.sixb/agent`, which
+  every opening and save of a workspace removes. A run that ends without pausing (answered, failed
+  or stopped) destroys it before its terminal write and settles `unavailable`: its files are
+  mid-work, never a point the thread goes on from. A paused child that never continues
+  (superseded, expired, stopped or replaced) keeps its stopped sandbox until the provider's
+  retention removes it: the sandbox contract has no destroy by name.
+- **Otherwise it starts blank again**, with the handed files and the paused run's `out/`
+  (`result.files`), which a pausing child stores in either case: without `resume`; once `resume`
+  reports the state lost (`replace`); or when the run before left the state anything but `ready`
+  (a snapshot that failed at a pause, which still pauses and destroys the VM; a destroyed workspace
+  that a retried turn or an answer after a dead attempt continues; a crash that left it `busy`).
+  In that last case the acquire starts a fresh state under a new name
+  (`startSubagentWorkspaceAgain`), where a conversation would need an explicit recreation, which
+  nobody can do on a child's thread. Either way `resetAt` reaches the system prompt.
 - **The parent waits by the old id.** `wait_agent` resolves the run id of a child of an earlier turn
   of the conversation to its thread's latest run, the one of this turn that continues it when there
   is one, and answers with the id it was given. `spawn_agent` refuses a key a continuation holds:

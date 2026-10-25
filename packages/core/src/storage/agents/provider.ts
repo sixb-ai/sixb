@@ -45,7 +45,13 @@ import {
 
 const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9-]{1,80}$/
 
-/** Shared state machine. Providers must lock the run, then thread, around this decision/write. */
+/**
+ * Shared state machine. Providers must lock the run, then thread, around this decision/write.
+ *
+ * A conversation has a workspace once its sandbox is configured. A sub-agent's thread may keep a
+ * blank one while the sub-agent pauses, fenced by the thread's active run as a turn's is. Its
+ * next run starts a fresh one where a conversation's would need an explicit recreation.
+ */
 export function transitionAgentThreadSandbox(
   thread: AgentThreadRecord | null,
   run: AgentRunRecord | null,
@@ -54,7 +60,9 @@ export function transitionAgentThreadSandbox(
   const fail = (message: string): never => {
     throw new AgentStorageError("invalid_state", `[Sixb] Sandbox ${message}`)
   }
-  if (!thread?.sandboxParams) return fail("is not configured on this thread.")
+  if (!thread || (!thread.sandboxParams && thread.kind !== "subagent")) {
+    return fail("is not configured on this thread.")
+  }
   if (!SANDBOX_NAME_PATTERN.test(input.name)) return fail("name is invalid.")
   const state = thread.sandboxState
   if (input.action === "recreate") {
@@ -72,7 +80,7 @@ export function transitionAgentThreadSandbox(
     }
   }
   if (
-    run?.kind !== "conversation" ||
+    !run ||
     run.threadId !== thread.id ||
     run.status !== "running" ||
     thread.activeRunId !== run.id ||
@@ -84,6 +92,9 @@ export function transitionAgentThreadSandbox(
   }
   if (input.action === "acquire") {
     if (state && state.status !== "new" && state.status !== "ready") {
+      if (thread.kind === "subagent" && state.name !== input.name) {
+        return startSubagentWorkspaceAgain(input)
+      }
       return fail("requires recovery; previous operations may still be in flight.")
     }
     if (state && state.name !== input.name) return fail("name changed.")
@@ -132,6 +143,28 @@ export function transitionAgentThreadSandbox(
     initialized: input.initialized,
     sourceFingerprint: state.sourceFingerprint,
     ...(state.resetAt ? { resetAt: state.resetAt } : {}),
+  }
+}
+
+/**
+ * A sub-agent's thread whose workspace an ended run left destroyed, unsaved or in doubt: the run
+ * that continues it starts from a fresh one, under a new name, and is told its files were reset.
+ * Nobody can recreate a sub-agent's workspace, and the thread's single active run is this one, so
+ * whatever the old name still holds is never opened again.
+ */
+function startSubagentWorkspaceAgain(
+  input: Extract<TransitionAgentThreadSandboxInput, { readonly action: "acquire" }>
+): AgentThreadSandboxState {
+  if (!/^[a-f0-9]{64}$/.test(input.sourceFingerprint)) {
+    throw new AgentStorageError("invalid_state", "[Sixb] Sandbox source fingerprint is invalid.")
+  }
+  return {
+    name: input.name,
+    status: "busy",
+    initialized: false,
+    resetAt: new Date().toISOString(),
+    sourceFingerprint: input.sourceFingerprint,
+    owner: { runId: input.runId, executionToken: input.executionToken },
   }
 }
 

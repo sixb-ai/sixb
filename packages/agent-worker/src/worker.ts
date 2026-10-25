@@ -758,6 +758,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     } catch (error) {
       if (isLostExecution(error, signal)) return
       if (error instanceof AgentFinalizationError) throw error
+      // A child run that fails or is stopped leaves its workspace mid-work: it goes, and a later
+      // continuation of the thread starts again from the handed files and out/. The run's own
+      // error is the one recorded, a save that failed included.
+      try {
+        await environment?.beforeFinalize({ discard: true })
+      } catch (saveError) {
+        if (saveError instanceof AgentExecutionLostError) return
+      }
       if (
         !preparationComplete &&
         !turnSignal.aborted &&

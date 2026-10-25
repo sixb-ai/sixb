@@ -26,6 +26,7 @@ import type {
 } from "@sixb/core/storage"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
+import type { BeforeFinalizeOptions } from "./run-sandbox"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { StreamSink } from "./stream-sink"
 import type { AgentFileBudget } from "./tools/tool-files"
@@ -104,7 +105,7 @@ export interface AgentTurnContext {
   /** Environment-owned failure (for example lost source credentials), not user cancellation. */
   readonly environmentFailureSignal?: AbortSignal
   /** Persistent environments must confirm cleanup/save before any terminal write. */
-  readonly beforeFinalize?: () => Promise<void>
+  readonly beforeFinalize?: (options?: BeforeFinalizeOptions) => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly storage: AgentWorkerStorage

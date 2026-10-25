@@ -55,17 +55,24 @@ async function latestPausedRun(
  * The message a continuation starts with: how each of its calls ended, as its own, or its parent's
  * answer to its question, what came back to its new sandbox, and when it continues. It stays in
  * the thread, so a later continuation replays the same bytes.
+ *
+ * A child whose workspace is kept finds it as it left it, and is told nothing about it here. If
+ * its files turn out lost, its system prompt says so, as a turn's does.
  */
 export function continuationTrigger(input: {
   /** The outcomes as the child reads them, without their caller, or the answer's `mail` part. */
   readonly goesOnWith: readonly AgentMessagePart[]
   readonly paused: SubagentRunRecord
+  /** Whether the sandbox provider keeps the child's workspace while it pauses. */
+  readonly keepsWorkspace: boolean
   readonly createdAt: Date
   readonly timeZone: string
 }): readonly AgentMessagePart[] {
   return [
     ...input.goesOnWith,
-    { type: "text", text: sandboxRestarted(input.paused) },
+    ...(input.keepsWorkspace
+      ? []
+      : [{ type: "text" as const, text: sandboxRestarted(input.paused) }]),
     { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.timeZone)}` },
   ]
 }

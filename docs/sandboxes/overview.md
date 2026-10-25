@@ -160,4 +160,8 @@ Conversation history and published attachments remain available.
 Uncertain state or failed recovery blocks further runs. Use the chat recovery control or
 `sixb.agent.threads.recreateSandbox(thread.id, { expectedSandboxName: thread.sandboxState.name })`.
 Recreation does not recover edits or delete the previous environment.
-Files remain subject to provider retention; workflows and subagents remain ephemeral.
+Files remain subject to provider retention; workflows remain ephemeral.
+
+On a provider that keeps files, such as Vercel, a [sub-agent](../models/overview.md#it-delegates)
+keeps its sandbox while it pauses, and Sixb deletes it once the sub-agent ends. The sandbox of a
+paused sub-agent that never continues is left to provider retention.

@@ -159,6 +159,8 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
 - **A call that waits for your approval pauses it, not the others.** The agent's turn waits for
   its other sub-agents, then pauses. Once you decide, the sub-agent continues where it stopped,
   with its files, and the agent gets its answer.
+- **A paused sub-agent keeps its whole sandbox** on a provider that keeps files, such as Vercel.
+  Elsewhere it gets back the files it was handed and its `out/`, and is told the rest is gone.
 - **In the chat, each sub-agent is a card under the work that started it**: its task, model and
   tier, what it is doing right now, its time and cost, what the agent told it and what it asked,
   the calls it waits on, and the files it made. "Show work" opens its own steps, in a sheet on a
