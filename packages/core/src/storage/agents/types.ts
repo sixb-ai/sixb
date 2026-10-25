@@ -360,6 +360,7 @@ export interface SubagentRunFile {
 
 /** Durable child output returned to its parent by `wait_agent`. */
 export interface SubagentRunResult {
+  /** Empty only for a child that paused on its held calls before it answered. */
   readonly text: string
   /** What the child wrote under `out/`, by path relative to it. */
   readonly files?: readonly SubagentRunFile[]

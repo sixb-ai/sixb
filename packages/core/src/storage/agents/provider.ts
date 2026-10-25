@@ -613,13 +613,17 @@ export function assertSubagentThreadTakesRun(
   }
 }
 
-/** Validate the small durable result returned by a successful child. */
+/**
+ * Validate the small durable result returned by a successful child. A child that paused on its held
+ * calls may not have answered yet, so its text may be empty.
+ */
 export function assertSubagentRunResult(
   result: SubagentRunResult | undefined,
   runId: string,
-  prefix = "Sixb"
+  prefix = "Sixb",
+  paused = false
 ): asserts result is SubagentRunResult {
-  if (typeof result?.text !== "string" || result.text.trim().length === 0) {
+  if (typeof result?.text !== "string" || (!paused && result.text.trim().length === 0)) {
     throw new AgentStorageError(
       "invalid_input",
       `[${prefix}] Succeeded subagent run '${runId}' requires text.`
