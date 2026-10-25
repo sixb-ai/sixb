@@ -17,6 +17,7 @@ import {
   type AgentThreadStore,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
+  type ListAgentThreadChildrenInput,
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
@@ -272,6 +273,29 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       const row = byId.get(id)
       return row ? [rowToThreadRecord(row)] : []
     })
+  }
+
+  async listChildren(input: ListAgentThreadChildrenInput): Promise<readonly AgentThreadRecord[]> {
+    // By `idx_agent_threads_children`, which holds sub-agents' threads only.
+    const turn = input.parentRunId === undefined ? "" : "AND parent_run_id = ?"
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM agent_threads
+        WHERE project_id = ? AND parent_thread_id = ? AND kind = 'subagent' ${turn}
+        ORDER BY created_at ASC, id ASC
+        LIMIT ? OFFSET ?
+      `
+      )
+      .all(
+        input.projectId,
+        input.parentThreadId,
+        ...(input.parentRunId === undefined ? [] : [input.parentRunId]),
+        input.limit ?? 100,
+        input.offset ?? 0
+      ) as AgentThreadRow[]
+    return rows.map(rowToThreadRecord)
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {

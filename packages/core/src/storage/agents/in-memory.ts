@@ -88,6 +88,7 @@ import type {
   ListAgentMessagesResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
+  ListAgentThreadChildrenInput,
   ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
@@ -323,6 +324,19 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       const record = this.state.threads.get(key(params.projectId, id))
       return record ? [clone(record)] : []
     })
+  }
+
+  async listChildren(input: ListAgentThreadChildrenInput): Promise<readonly AgentThreadRecord[]> {
+    const offset = input.offset ?? 0
+    return [...this.state.threads.values()]
+      .filter((thread) => thread.projectId === input.projectId)
+      .filter((thread) => thread.parent?.threadId === input.parentThreadId)
+      .filter((thread) =>
+        input.parentRunId === undefined ? true : thread.parent?.spawnedBy === input.parentRunId
+      )
+      .sort((a, b) => compareByDate(a.createdAt, b.createdAt, a.id, b.id, "asc"))
+      .slice(offset, offset + (input.limit ?? 100))
+      .map(clone)
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {

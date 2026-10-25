@@ -138,6 +138,18 @@ export interface ForkAgentThreadInput {
   readonly createdAt?: Date
 }
 
+/** A conversation's sub-agent threads, oldest first. */
+export interface ListAgentThreadChildrenInput {
+  readonly projectId: string
+  /** The conversation. */
+  readonly parentThreadId: string
+  /** Only those this turn spawned. */
+  readonly parentRunId?: string
+  /** At most this many, 100 by default. */
+  readonly limit?: number
+  readonly offset?: number
+}
+
 /** Conversations only: a sub-agent's thread is read through its conversation. */
 export interface ListAgentThreadsInput {
   readonly projectId: string
@@ -636,6 +648,8 @@ export interface AgentThreadStore {
     readonly ids: readonly string[]
   }): Promise<readonly AgentThreadRecord[]>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>
+  /** The sub-agents' threads of a conversation, by creation and id, all of them or one turn's. */
+  listChildren(input: ListAgentThreadChildrenInput): Promise<readonly AgentThreadRecord[]>
   /**
    * Add users atomically and return every participant of the thread afterwards. A sub-agent's
    * thread has none: its readers are its conversation's.

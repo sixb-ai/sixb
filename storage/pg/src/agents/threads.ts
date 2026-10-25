@@ -16,6 +16,7 @@ import {
   type AgentThreadStore,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
+  type ListAgentThreadChildrenInput,
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
@@ -303,6 +304,22 @@ export class PgAgentThreadStore implements AgentThreadStore {
       const row = byId.get(id)
       return row ? [rowToThreadRecord(row)] : []
     })
+  }
+
+  async listChildren(input: ListAgentThreadChildrenInput): Promise<readonly AgentThreadRecord[]> {
+    // By `idx_agent_threads_children`, which holds sub-agents' threads only.
+    const rows = await this.sql<AgentThreadRow[]>`
+      SELECT *
+      FROM agent_threads
+      WHERE project_id = ${input.projectId}
+        AND parent_thread_id = ${input.parentThreadId}
+        AND kind = 'subagent'
+        ${input.parentRunId === undefined ? this.sql`` : this.sql`AND parent_run_id = ${input.parentRunId}`}
+      ORDER BY created_at ASC, id ASC
+      LIMIT ${input.limit ?? 100}
+      OFFSET ${input.offset ?? 0}
+    `
+    return rows.map(rowToThreadRecord)
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
