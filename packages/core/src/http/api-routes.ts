@@ -460,6 +460,22 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // A sub-agent's files are for people reading its conversation; its parent got them from
+  // `wait_agent`.
+  {
+    operationId: "getAgentChildFileContent",
+    method: "GET",
+    path: "/api/agent-threads/:threadId/child-files/content",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "headAgentChildFileContent",
+    method: "HEAD",
+    path: "/api/agent-threads/:threadId/child-files/content",
+    accessToken: true,
+    agentApi: false,
+  },
   // The Agent reads and saves its memory with `sixb memory` in its sandbox. Its history and deleting
   // a repo are for people, so they stay off the gateway.
   {

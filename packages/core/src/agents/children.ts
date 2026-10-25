@@ -141,6 +141,17 @@ export async function listAgentChildren(
   return readChildren(runtime, conversation, threads)
 }
 
+/** The child that works in `thread`, a sub-agent's thread of `conversation`. */
+export async function readAgentChild(
+  runtime: SixbRuntimeContext,
+  conversation: AgentThreadRecord,
+  thread: AgentThreadRecord
+): Promise<AgentChildView | null> {
+  if (thread.parent?.threadId !== conversation.id) return null
+  const [child] = await readChildren(runtime, conversation, [thread])
+  return child ?? null
+}
+
 /**
  * Stop a child's run at work. A queued one is cancelled here; a running one receives the stop signal
  * its worker obeys, so it is still running when this returns. Who may stop it is the caller's

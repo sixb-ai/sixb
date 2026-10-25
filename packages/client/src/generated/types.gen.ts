@@ -428,6 +428,245 @@ export type ObjectQuerySortField =
       direction?: "asc" | "desc"
     }
 
+export type AgentChild = {
+  id: string
+  threadId: string
+  projectId: string
+  spawnedBy: string
+  key: string
+  task: string
+  model: {
+    provider: string
+    modelId: string
+  }
+  tier?: "light" | "standard" | "heavy"
+  reasoning?:
+    | "provider-default"
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max"
+    | {
+        budgetTokens: number
+      }
+  handedFiles: Array<AgentChildFile>
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+  finishReason?:
+    | "stop"
+    | "length"
+    | "content-filter"
+    | "tool-calls"
+    | "timeout"
+    | "interrupted"
+    | "awaiting_approval"
+    | "awaiting_answer"
+    | "error"
+    | "other"
+    | "unknown"
+  error?: {
+    code:
+      | "internal.unexpected"
+      | "runtime.cancelled"
+      | "agent.execution_failed"
+      | "ai.usage_limit_exceeded"
+      | "ai.usage_limit_unavailable"
+    message: string
+    retryable: boolean
+    at: string
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+    httpStatus?: number
+    redacted?: true
+    truncated?: true
+  }
+  awaiting?: AgentChildAwaiting
+  ended?: AgentChildEnded
+  activeRunId: string | null
+  createdAt: string
+  completedAt?: string
+  usage?: {
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    uncachedInputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    textOutputTokens?: number
+    reasoningOutputTokens?: number
+    /**
+     * Audio content duration in milliseconds; not billed duration.
+     */
+    audioDurationMs?: number
+    /**
+     * Output tokens that encode generated images, within outputTokens.
+     */
+    imageOutputTokens?: number
+    /**
+     * Output tokens that encode generated audio, within outputTokens.
+     */
+    audioOutputTokens?: number
+    /**
+     * Images the call returned.
+     */
+    outputImages?: number
+    /**
+     * Input characters, counted by the provider's own billing rule.
+     */
+    inputCharacters?: number
+    reportingStatus: "complete" | "partial" | "unavailable"
+  }
+  cost?: {
+    amounts: Array<{
+      currency: string
+      amountNanos: string
+    }>
+    ratedCallCount: number
+    unpriceableCallCount: number
+    unvaluedCallCount: number
+  }
+  runs: Array<AgentChildRun>
+}
+
+export type AgentChildRun = {
+  id: string
+  parentRunId: string
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+  finishReason?:
+    | "stop"
+    | "length"
+    | "content-filter"
+    | "tool-calls"
+    | "timeout"
+    | "interrupted"
+    | "awaiting_approval"
+    | "awaiting_answer"
+    | "error"
+    | "other"
+    | "unknown"
+  error?: {
+    code:
+      | "internal.unexpected"
+      | "runtime.cancelled"
+      | "agent.execution_failed"
+      | "ai.usage_limit_exceeded"
+      | "ai.usage_limit_unavailable"
+    message: string
+    retryable: boolean
+    at: string
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+    httpStatus?: number
+    redacted?: true
+    truncated?: true
+  }
+  modelId?: string
+  attempt: number
+  streamId: string
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  result?: {
+    text: string
+    files?: Array<AgentChildFile>
+    filesError?: string
+  }
+  usage?: {
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    uncachedInputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    textOutputTokens?: number
+    reasoningOutputTokens?: number
+    /**
+     * Audio content duration in milliseconds; not billed duration.
+     */
+    audioDurationMs?: number
+    /**
+     * Output tokens that encode generated images, within outputTokens.
+     */
+    imageOutputTokens?: number
+    /**
+     * Output tokens that encode generated audio, within outputTokens.
+     */
+    audioOutputTokens?: number
+    /**
+     * Images the call returned.
+     */
+    outputImages?: number
+    /**
+     * Input characters, counted by the provider's own billing rule.
+     */
+    inputCharacters?: number
+    reportingStatus: "complete" | "partial" | "unavailable"
+  }
+  cost?: {
+    amounts: Array<{
+      currency: string
+      amountNanos: string
+    }>
+    ratedCallCount: number
+    unpriceableCallCount: number
+    unvaluedCallCount: number
+  }
+}
+
+export type AgentChildFile = {
+  path: string
+  fileRef: {
+    blobId: string
+    digest: string
+    sizeBytes: number
+    fileName?: string
+    mediaType?: string
+    logicalPath?: string
+  }
+}
+
+export type AgentChildAwaiting =
+  | {
+      type: "approval"
+      approvalIds: Array<string>
+    }
+  | {
+      type: "resume"
+    }
+  | {
+      type: "answer"
+      question: {
+        id: string
+        text: string
+      }
+    }
+
+export type AgentChildEnded = {
+  reason: "superseded" | "expired" | "stopped" | "replaced"
+}
+
 export type CreateDeviceAuthorizationData = {
   body: {
     clientName: string
@@ -8405,6 +8644,15 @@ export type GetWorkflowAgentNodeExecutionResponses = {
           state: "output-error"
           errorText: string
         }
+      | {
+          type: "mail"
+          id: string
+          from: "parent"
+          kind: "message" | "answer"
+          inReplyTo?: string
+          text: string
+          afterAnswer?: true
+        }
     >
     diagnostics?: Array<
       | string
@@ -12591,6 +12839,15 @@ export type ListAgentThreadMessagesResponses = {
             state: "output-error"
             errorText: string
           }
+        | {
+            type: "mail"
+            id: string
+            from: "parent"
+            kind: "message" | "answer"
+            inReplyTo?: string
+            text: string
+            afterAnswer?: true
+          }
       >
       annotations: Array<{
         code: "step_limit_reached" | "output_limit_reached"
@@ -12773,8 +13030,10 @@ export type PostAgentThreadMessageResponses = {
     run: {
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -13055,8 +13314,10 @@ export type CancelAgentRunResponses = {
     run: {
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -13254,8 +13515,10 @@ export type RetryAgentRunResponses = {
     run: {
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -13420,8 +13683,10 @@ export type ListAgentThreadRunsResponses = {
     runs: Array<{
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -13583,8 +13848,10 @@ export type GetAgentRunResponses = {
   200: {
     id: string
     projectId: string
+    kind: "conversation" | "subagent"
     threadId: string
     triggerMessageId: string
+    parentRunId?: string
     requestedBy?: {
       type: "user" | "serviceAccount"
       id: string
@@ -13702,6 +13969,335 @@ export type GetAgentRunResponses = {
 }
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
+
+export type CancelAgentRunByIdData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/agent-runs/{runId}/cancel"
+}
+
+export type CancelAgentRunByIdErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type CancelAgentRunByIdError = CancelAgentRunByIdErrors[keyof CancelAgentRunByIdErrors]
+
+export type CancelAgentRunByIdResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    run: {
+      id: string
+      projectId: string
+      kind: "conversation" | "subagent"
+      threadId: string
+      triggerMessageId: string
+      parentRunId?: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      tier?: "light" | "standard" | "heavy"
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
+      approvalMode?: "manual" | "accept-edits" | "auto"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "timeout"
+        | "interrupted"
+        | "awaiting_approval"
+        | "awaiting_answer"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      diagnostics?: Array<{
+        code: "step_limit_reached" | "output_limit_reached"
+        severity: "warning" | "error"
+        scope: "run"
+        message: string
+      }>
+      error?: {
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        httpStatus?: number
+        redacted?: true
+        truncated?: true
+      }
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
+  }
+}
+
+export type CancelAgentRunByIdResponse =
+  CancelAgentRunByIdResponses[keyof CancelAgentRunByIdResponses]
+
+export type ListAgentThreadChildrenData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    runId?: string
+  }
+  url: "/api/agent-threads/{threadId}/children"
+}
+
+export type ListAgentThreadChildrenErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAgentThreadChildrenError =
+  ListAgentThreadChildrenErrors[keyof ListAgentThreadChildrenErrors]
+
+export type ListAgentThreadChildrenResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    children: Array<AgentChild>
+  }
+}
+
+export type ListAgentThreadChildrenResponse =
+  ListAgentThreadChildrenResponses[keyof ListAgentThreadChildrenResponses]
+
+export type GetAgentChildFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+    run: string
+  }
+  url: "/api/agent-threads/{threadId}/child-files/content"
+}
+
+export type GetAgentChildFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetAgentChildFileContentError =
+  GetAgentChildFileContentErrors[keyof GetAgentChildFileContentErrors]
+
+export type GetAgentChildFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetAgentChildFileContentResponse =
+  GetAgentChildFileContentResponses[keyof GetAgentChildFileContentResponses]
+
+export type HeadAgentChildFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+    run: string
+  }
+  url: "/api/agent-threads/{threadId}/child-files/content"
+}
+
+export type HeadAgentChildFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type HeadAgentChildFileContentError =
+  HeadAgentChildFileContentErrors[keyof HeadAgentChildFileContentErrors]
+
+export type HeadAgentChildFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
 
 export type GetAgentPreferencesData = {
   body?: never
@@ -14346,8 +14942,10 @@ export type DecideAgentApprovalResponses = {
     run?: {
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -15167,6 +15765,15 @@ export type ListObservedAgentThreadMessagesResponses = {
             state: "output-error"
             errorText: string
           }
+        | {
+            type: "mail"
+            id: string
+            from: "parent"
+            kind: "message" | "answer"
+            inReplyTo?: string
+            text: string
+            afterAnswer?: true
+          }
       >
       annotations: Array<{
         code: "step_limit_reached" | "output_limit_reached"
@@ -15313,8 +15920,10 @@ export type ListObservedAgentThreadRunsResponses = {
     runs: Array<{
       id: string
       projectId: string
+      kind: "conversation" | "subagent"
       threadId: string
       triggerMessageId: string
+      parentRunId?: string
       requestedBy?: {
         type: "user" | "serviceAccount"
         id: string
@@ -15436,6 +16045,112 @@ export type ListObservedAgentThreadRunsResponses = {
 
 export type ListObservedAgentThreadRunsResponse =
   ListObservedAgentThreadRunsResponses[keyof ListObservedAgentThreadRunsResponses]
+
+export type ListObservedAgentThreadChildrenData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    runId?: string
+  }
+  url: "/api/observed-agent-threads/{threadId}/children"
+}
+
+export type ListObservedAgentThreadChildrenErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListObservedAgentThreadChildrenError =
+  ListObservedAgentThreadChildrenErrors[keyof ListObservedAgentThreadChildrenErrors]
+
+export type ListObservedAgentThreadChildrenResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    children: Array<AgentChild>
+  }
+}
+
+export type ListObservedAgentThreadChildrenResponse =
+  ListObservedAgentThreadChildrenResponses[keyof ListObservedAgentThreadChildrenResponses]
+
+export type GetObservedAgentChildFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+    run: string
+  }
+  url: "/api/observed-agent-threads/{threadId}/child-files/content"
+}
+
+export type GetObservedAgentChildFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetObservedAgentChildFileContentError =
+  GetObservedAgentChildFileContentErrors[keyof GetObservedAgentChildFileContentErrors]
+
+export type GetObservedAgentChildFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetObservedAgentChildFileContentResponse =
+  GetObservedAgentChildFileContentResponses[keyof GetObservedAgentChildFileContentResponses]
 
 export type DeleteAgentMemoryData = {
   body?: never

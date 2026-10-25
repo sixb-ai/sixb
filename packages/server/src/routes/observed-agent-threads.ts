@@ -1,9 +1,11 @@
 import type { AgentThreadView, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
-import { fileContentGetResponses } from "../files/content"
+import { fileContentGetResponses, handleFileContentQueryValidationError } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AgentChildListQuerySchema,
+  AgentChildListResponseSchema,
   AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
   AgentMessagesQuerySchema,
@@ -15,6 +17,11 @@ import {
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import { parseOptionalInt, unconfiguredStorageResponse } from "../utils/http"
+import {
+  AgentChildFileContentQuerySchema,
+  agentChildFileContentResponse,
+  serializeAgentChild,
+} from "./agent-children"
 import {
   agentMessageFileContentResponse,
   handleAgentRouteError,
@@ -169,6 +176,65 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
           description: OBSERVED,
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "listObservedAgentThreadRuns",
+        },
+      }
+    )
+    .get(
+      "/api/observed-agent-threads/:threadId/children",
+      async (context) => {
+        try {
+          const query = AgentChildListQuerySchema.parse(context.query)
+          const result = await requireRequestSixb(context).agent.observed.listChildren(
+            context.params.threadId,
+            query.runId === undefined ? {} : { runId: query.runId }
+          )
+          if (!host.storage.agents) {
+            return unconfiguredStorageResponse(context.set, "Agent storage")
+          }
+          if (!result) {
+            return threadNotFound(context.set)
+          }
+
+          return AgentChildListResponseSchema.parse({
+            children: result.children.map(serializeAgentChild),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, context.set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        query: AgentChildListQuerySchema,
+        response: { 200: AgentChildListResponseSchema, ...errors },
+        detail: {
+          summary: "List the sub-agents of another user's agent conversation",
+          description: OBSERVED,
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "listObservedAgentThreadChildren",
+        },
+      }
+    )
+    .get(
+      "/api/observed-agent-threads/:threadId/child-files/content",
+      async (context) => {
+        try {
+          return await agentChildFileContentResponse(host, context, () =>
+            requireRequestSixb(context).agent.observed.getChild(context.params.threadId)
+          )
+        } catch (error) {
+          return handleAgentRouteError(error, context.set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        query: AgentChildFileContentQuerySchema,
+        error: handleFileContentQueryValidationError,
+        detail: {
+          summary: "Get a file of another user's sub-agent",
+          description: OBSERVED,
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "getObservedAgentChildFileContent",
+          responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
     )

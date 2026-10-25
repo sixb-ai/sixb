@@ -15,6 +15,7 @@ import {
   addConnectorConnection,
   appendTelemetry,
   cancelAgentRun,
+  cancelAgentRunById,
   cancelWorkflowIntervention,
   cancelWorkflowRun,
   captureActivity,
@@ -54,6 +55,7 @@ import {
   getActivitySummary,
   getActivityVisitTimeline,
   getAgent,
+  getAgentChildFileContent,
   getAgentMemory,
   getAgentMessageFileContent,
   getAgentPreferences,
@@ -84,6 +86,7 @@ import {
   getObjectByUniqueProperty,
   getObjectFileContent,
   getObjectType,
+  getObservedAgentChildFileContent,
   getObservedAgentMessageFileContent,
   getObservedAgentThread,
   getPipeline,
@@ -112,6 +115,7 @@ import {
   listAgentApprovals,
   listAgentMemoryRevisions,
   listAgentThreadApprovals,
+  listAgentThreadChildren,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -135,6 +139,7 @@ import {
   listModels,
   listObjects,
   listObjectTypes,
+  listObservedAgentThreadChildren,
   listObservedAgentThreadMessages,
   listObservedAgentThreadRuns,
   listPendingConnectorConnectionRuns,
@@ -209,6 +214,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
+  CancelAgentRunByIdData,
+  CancelAgentRunByIdError,
+  CancelAgentRunByIdResponse,
   CancelAgentRunData,
   CancelAgentRunError,
   CancelAgentRunResponse,
@@ -325,6 +333,9 @@ import type {
   GetActivityVisitTimelineData,
   GetActivityVisitTimelineError,
   GetActivityVisitTimelineResponse,
+  GetAgentChildFileContentData,
+  GetAgentChildFileContentError,
+  GetAgentChildFileContentResponse,
   GetAgentData,
   GetAgentError,
   GetAgentMemoryData,
@@ -417,6 +428,9 @@ import type {
   GetObjectTypeData,
   GetObjectTypeError,
   GetObjectTypeResponse,
+  GetObservedAgentChildFileContentData,
+  GetObservedAgentChildFileContentError,
+  GetObservedAgentChildFileContentResponse,
   GetObservedAgentMessageFileContentData,
   GetObservedAgentMessageFileContentError,
   GetObservedAgentMessageFileContentResponse,
@@ -498,6 +512,9 @@ import type {
   ListAgentThreadApprovalsData,
   ListAgentThreadApprovalsError,
   ListAgentThreadApprovalsResponse,
+  ListAgentThreadChildrenData,
+  ListAgentThreadChildrenError,
+  ListAgentThreadChildrenResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -564,6 +581,9 @@ import type {
   ListObjectsResponse,
   ListObjectTypesData,
   ListObjectTypesResponse,
+  ListObservedAgentThreadChildrenData,
+  ListObservedAgentThreadChildrenError,
+  ListObservedAgentThreadChildrenResponse,
   ListObservedAgentThreadMessagesData,
   ListObservedAgentThreadMessagesError,
   ListObservedAgentThreadMessagesResponse,
@@ -4914,6 +4934,8 @@ export const getAgentRunQueryKey = (options: Options<GetAgentRunData>) =>
 
 /**
  * Get agent run
+ *
+ * A conversation's turn, or a sub-agent's run (`kind: "subagent"`), read through its thread: a sub-agent's run is visible exactly when its conversation is.
  */
 export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
   queryOptions<
@@ -4932,6 +4954,89 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
       return data
     },
     queryKey: getAgentRunQueryKey(options),
+  })
+
+/**
+ * Stop an agent run
+ *
+ * A turn, or a sub-agent's run. Whoever asked for the turn, or the conversation's owner, can stop it, and a sub-agent's run as its turn. A queued run is cancelled at once; a running one is still running in the response, with the stop signal sent. A sub-agent's parent reads that it was stopped.
+ */
+export const cancelAgentRunByIdMutation = (
+  options?: Partial<Options<CancelAgentRunByIdData>>
+): UseMutationOptions<
+  CancelAgentRunByIdResponse,
+  CancelAgentRunByIdError,
+  Options<CancelAgentRunByIdData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CancelAgentRunByIdResponse,
+    CancelAgentRunByIdError,
+    Options<CancelAgentRunByIdData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await cancelAgentRunById({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAgentThreadChildrenQueryKey = (options: Options<ListAgentThreadChildrenData>) =>
+  createQueryKey("listAgentThreadChildren", options)
+
+/**
+ * List the sub-agents of an agent conversation
+ *
+ * A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `runId` keeps those one turn spawned. Each lists every run it took, the one at work by `activeRunId`.
+ */
+export const listAgentThreadChildrenOptions = (options: Options<ListAgentThreadChildrenData>) =>
+  queryOptions<
+    ListAgentThreadChildrenResponse,
+    ListAgentThreadChildrenError,
+    ListAgentThreadChildrenResponse,
+    ReturnType<typeof listAgentThreadChildrenQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreadChildren({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadChildrenQueryKey(options),
+  })
+
+export const getAgentChildFileContentQueryKey = (options: Options<GetAgentChildFileContentData>) =>
+  createQueryKey("getAgentChildFileContent", options)
+
+/**
+ * Get a file of a sub-agent
+ *
+ * A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `threadId` is the sub-agent's thread, `run` one of its runs, and `path` points into it: `/handedFiles/0/fileRef`, or `/files/0/fileRef` for what the run returned.
+ */
+export const getAgentChildFileContentOptions = (options: Options<GetAgentChildFileContentData>) =>
+  queryOptions<
+    GetAgentChildFileContentResponse,
+    GetAgentChildFileContentError,
+    GetAgentChildFileContentResponse,
+    ReturnType<typeof getAgentChildFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentChildFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentChildFileContentQueryKey(options),
   })
 
 export const getAgentPreferencesQueryKey = (options?: Options<GetAgentPreferencesData>) =>
@@ -5418,6 +5523,66 @@ export const listObservedAgentThreadRunsInfiniteOptions = (
       queryKey: listObservedAgentThreadRunsInfiniteQueryKey(options),
     }
   )
+
+export const listObservedAgentThreadChildrenQueryKey = (
+  options: Options<ListObservedAgentThreadChildrenData>
+) => createQueryKey("listObservedAgentThreadChildren", options)
+
+/**
+ * List the sub-agents of another user's agent conversation
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const listObservedAgentThreadChildrenOptions = (
+  options: Options<ListObservedAgentThreadChildrenData>
+) =>
+  queryOptions<
+    ListObservedAgentThreadChildrenResponse,
+    ListObservedAgentThreadChildrenError,
+    ListObservedAgentThreadChildrenResponse,
+    ReturnType<typeof listObservedAgentThreadChildrenQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listObservedAgentThreadChildren({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listObservedAgentThreadChildrenQueryKey(options),
+  })
+
+export const getObservedAgentChildFileContentQueryKey = (
+  options: Options<GetObservedAgentChildFileContentData>
+) => createQueryKey("getObservedAgentChildFileContent", options)
+
+/**
+ * Get a file of another user's sub-agent
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentChildFileContentOptions = (
+  options: Options<GetObservedAgentChildFileContentData>
+) =>
+  queryOptions<
+    GetObservedAgentChildFileContentResponse,
+    GetObservedAgentChildFileContentError,
+    GetObservedAgentChildFileContentResponse,
+    ReturnType<typeof getObservedAgentChildFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObservedAgentChildFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObservedAgentChildFileContentQueryKey(options),
+  })
 
 /**
  * Delete an Agent memory repo

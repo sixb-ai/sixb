@@ -1217,6 +1217,651 @@
         "discriminator": {
           "propertyName": "kind"
         }
+      },
+      "AgentChild": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "spawnedBy": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modelId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["provider", "modelId"],
+            "additionalProperties": false
+          },
+          "tier": {
+            "type": "string",
+            "enum": ["light", "standard", "heavy"]
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "provider-default",
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "budgetTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": ["budgetTokens"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "handedFiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentChildFile"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+          },
+          "finishReason": {
+            "type": "string",
+            "enum": [
+              "stop",
+              "length",
+              "content-filter",
+              "tool-calls",
+              "timeout",
+              "interrupted",
+              "awaiting_approval",
+              "awaiting_answer",
+              "error",
+              "other",
+              "unknown"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "internal.unexpected",
+                  "runtime.cancelled",
+                  "agent.execution_failed",
+                  "ai.usage_limit_exceeded",
+                  "ai.usage_limit_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "details": {
+                "description": "Any JSON-compatible value.",
+                "nullable": true,
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "httpStatus": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              },
+              "redacted": {
+                "type": "boolean",
+                "enum": [true]
+              },
+              "truncated": {
+                "type": "boolean",
+                "enum": [true]
+              }
+            },
+            "required": ["code", "message", "retryable", "at"],
+            "additionalProperties": false
+          },
+          "awaiting": {
+            "$ref": "#/components/schemas/AgentChildAwaiting"
+          },
+          "ended": {
+            "$ref": "#/components/schemas/AgentChildEnded"
+          },
+          "activeRunId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "completedAt": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uncachedInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheReadInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheWriteInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "textOutputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reasoningOutputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "audioDurationMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Audio content duration in milliseconds; not billed duration."
+              },
+              "imageOutputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Output tokens that encode generated images, within outputTokens."
+              },
+              "audioOutputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Output tokens that encode generated audio, within outputTokens."
+              },
+              "outputImages": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Images the call returned."
+              },
+              "inputCharacters": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Input characters, counted by the provider's own billing rule."
+              },
+              "reportingStatus": {
+                "type": "string",
+                "enum": ["complete", "partial", "unavailable"]
+              }
+            },
+            "required": ["reportingStatus"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "amounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    },
+                    "amountNanos": {
+                      "type": "string",
+                      "pattern": "^\\d+$"
+                    }
+                  },
+                  "required": ["currency", "amountNanos"],
+                  "additionalProperties": false
+                }
+              },
+              "ratedCallCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpriceableCallCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unvaluedCallCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["amounts", "ratedCallCount", "unpriceableCallCount", "unvaluedCallCount"],
+            "additionalProperties": false
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentChildRun"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "threadId",
+          "projectId",
+          "spawnedBy",
+          "key",
+          "task",
+          "model",
+          "handedFiles",
+          "status",
+          "activeRunId",
+          "createdAt",
+          "runs"
+        ],
+        "additionalProperties": false
+      },
+      "AgentChildRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "parentRunId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+          },
+          "finishReason": {
+            "type": "string",
+            "enum": [
+              "stop",
+              "length",
+              "content-filter",
+              "tool-calls",
+              "timeout",
+              "interrupted",
+              "awaiting_approval",
+              "awaiting_answer",
+              "error",
+              "other",
+              "unknown"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "internal.unexpected",
+                  "runtime.cancelled",
+                  "agent.execution_failed",
+                  "ai.usage_limit_exceeded",
+                  "ai.usage_limit_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "details": {
+                "description": "Any JSON-compatible value.",
+                "nullable": true,
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "httpStatus": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              },
+              "redacted": {
+                "type": "boolean",
+                "enum": [true]
+              },
+              "truncated": {
+                "type": "boolean",
+                "enum": [true]
+              }
+            },
+            "required": ["code", "message", "retryable", "at"],
+            "additionalProperties": false
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "streamId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "completedAt": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentChildFile"
+                }
+              },
+              "filesError": {
+                "type": "string"
+              }
+            },
+            "required": ["text"],
+            "additionalProperties": false
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uncachedInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheReadInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheWriteInputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "textOutputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reasoningOutputTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "audioDurationMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Audio content duration in milliseconds; not billed duration."
+              },
+              "imageOutputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Output tokens that encode generated images, within outputTokens."
+              },
+              "audioOutputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Output tokens that encode generated audio, within outputTokens."
+              },
+              "outputImages": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Images the call returned."
+              },
+              "inputCharacters": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Input characters, counted by the provider's own billing rule."
+              },
+              "reportingStatus": {
+                "type": "string",
+                "enum": ["complete", "partial", "unavailable"]
+              }
+            },
+            "required": ["reportingStatus"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "amounts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    },
+                    "amountNanos": {
+                      "type": "string",
+                      "pattern": "^\\d+$"
+                    }
+                  },
+                  "required": ["currency", "amountNanos"],
+                  "additionalProperties": false
+                }
+              },
+              "ratedCallCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpriceableCallCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unvaluedCallCount": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["amounts", "ratedCallCount", "unpriceableCallCount", "unvaluedCallCount"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "parentRunId", "status", "attempt", "streamId", "createdAt"],
+        "additionalProperties": false
+      },
+      "AgentChildFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "fileRef": {
+            "type": "object",
+            "properties": {
+              "blobId": {
+                "type": "string"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[a-f0-9]{64}$"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "fileName": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "logicalPath": {
+                "type": "string"
+              }
+            },
+            "required": ["blobId", "digest", "sizeBytes"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["path", "fileRef"],
+        "additionalProperties": false
+      },
+      "AgentChildAwaiting": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["approval"]
+              },
+              "approvalIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["type", "approvalIds"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["resume"]
+              }
+            },
+            "required": ["type"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["answer"]
+              },
+              "question": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "text"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["type", "question"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AgentChildEnded": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": ["superseded", "expired", "stopped", "replaced"]
+          }
+        },
+        "required": ["reason"],
+        "additionalProperties": false
       }
     }
   },
@@ -24954,6 +25599,38 @@
                               "errorText"
                             ],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["mail"]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "from": {
+                                "type": "string",
+                                "enum": ["parent"]
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": ["message", "answer"]
+                              },
+                              "inReplyTo": {
+                                "type": "string"
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "afterAnswer": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["type", "id", "from", "kind", "text"],
+                            "additionalProperties": false
                           }
                         ]
                       }
@@ -37192,6 +37869,38 @@
                                     "errorText"
                                   ],
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["mail"]
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "from": {
+                                      "type": "string",
+                                      "enum": ["parent"]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": ["message", "answer"]
+                                    },
+                                    "inReplyTo": {
+                                      "type": "string"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "afterAnswer": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["type", "id", "from", "kind", "text"],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -38029,10 +38738,17 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
                         "threadId": {
                           "type": "string"
                         },
                         "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "parentRunId": {
                           "type": "string"
                         },
                         "requestedBy": {
@@ -38342,6 +39058,7 @@
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "threadId",
                         "triggerMessageId",
                         "status",
@@ -38809,10 +39526,17 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
                         "threadId": {
                           "type": "string"
                         },
                         "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "parentRunId": {
                           "type": "string"
                         },
                         "requestedBy": {
@@ -39122,6 +39846,7 @@
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "threadId",
                         "triggerMessageId",
                         "status",
@@ -39286,10 +40011,17 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
                         "threadId": {
                           "type": "string"
                         },
                         "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "parentRunId": {
                           "type": "string"
                         },
                         "requestedBy": {
@@ -39599,6 +40331,7 @@
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "threadId",
                         "triggerMessageId",
                         "status",
@@ -39826,10 +40559,17 @@
                           "projectId": {
                             "type": "string"
                           },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["conversation", "subagent"]
+                          },
                           "threadId": {
                             "type": "string"
                           },
                           "triggerMessageId": {
+                            "type": "string"
+                          },
+                          "parentRunId": {
                             "type": "string"
                           },
                           "requestedBy": {
@@ -40139,6 +40879,7 @@
                         "required": [
                           "id",
                           "projectId",
+                          "kind",
                           "threadId",
                           "triggerMessageId",
                           "status",
@@ -40219,6 +40960,7 @@
     "/api/agent-runs/{runId}": {
       "get": {
         "summary": "Get agent run",
+        "description": "A conversation's turn, or a sub-agent's run (`kind: \"subagent\"`), read through its thread: a sub-agent's run is visible exactly when its conversation is.",
         "tags": ["Agent Runs"],
         "operationId": "getAgentRun",
         "parameters": [
@@ -40246,10 +40988,17 @@
                     "projectId": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
                     "threadId": {
                       "type": "string"
                     },
                     "triggerMessageId": {
+                      "type": "string"
+                    },
+                    "parentRunId": {
                       "type": "string"
                     },
                     "requestedBy": {
@@ -40559,6 +41308,7 @@
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "threadId",
                     "triggerMessageId",
                     "status",
@@ -40623,6 +41373,812 @@
             }
           }
         }
+      }
+    },
+    "/api/agent-runs/{runId}/cancel": {
+      "post": {
+        "summary": "Stop an agent run",
+        "description": "A turn, or a sub-agent's run. Whoever asked for the turn, or the conversation's owner, can stop it, and a sub-agent's run as its turn. A queued run is cancelled at once; a running one is still running in the response, with the stop signal sent. A sub-agent's parent reads that it was stopped.",
+        "tags": ["Agent Runs"],
+        "operationId": "cancelAgentRunById",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "parentRunId": {
+                          "type": "string"
+                        },
+                        "requestedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["provider", "modelId"],
+                          "additionalProperties": false
+                        },
+                        "tier": {
+                          "type": "string",
+                          "enum": ["light", "standard", "heavy"]
+                        },
+                        "reasoning": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "provider-default",
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "budgetTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": ["budgetTokens"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "approvalMode": {
+                          "type": "string",
+                          "enum": ["manual", "accept-edits", "auto"]
+                        },
+                        "modelId": {
+                          "type": "string"
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "timeout",
+                            "interrupted",
+                            "awaiting_approval",
+                            "awaiting_answer",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "inputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "outputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
+                            },
+                            "imageOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated images, within outputTokens."
+                            },
+                            "audioOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Output tokens that encode generated audio, within outputTokens."
+                            },
+                            "outputImages": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Images the call returned."
+                            },
+                            "inputCharacters": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Input characters, counted by the provider's own billing rule."
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
+                            }
+                          },
+                          "required": ["reportingStatus"],
+                          "additionalProperties": false
+                        },
+                        "cost": {
+                          "type": "object",
+                          "properties": {
+                            "amounts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "currency": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{3}$"
+                                  },
+                                  "amountNanos": {
+                                    "type": "string",
+                                    "pattern": "^\\d+$"
+                                  }
+                                },
+                                "required": ["currency", "amountNanos"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "ratedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unpriceableCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unvaluedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "amounts",
+                            "ratedCallCount",
+                            "unpriceableCallCount",
+                            "unvaluedCallCount"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "diagnostics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["step_limit_reached", "output_limit_reached"]
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": ["warning", "error"]
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": ["run"]
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "severity", "scope", "message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "streamId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "kind",
+                        "threadId",
+                        "triggerMessageId",
+                        "status",
+                        "attempt",
+                        "streamId",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["run"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/children": {
+      "get": {
+        "summary": "List the sub-agents of an agent conversation",
+        "description": "A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `runId` keeps those one turn spawned. Each lists every run it took, the one at work by `activeRunId`.",
+        "tags": ["Agent Threads"],
+        "operationId": "listAgentThreadChildren",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentChild"
+                      }
+                    }
+                  },
+                  "required": ["children"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/child-files/content": {
+      "get": {
+        "summary": "Get a file of a sub-agent",
+        "description": "A sub-agent is visible exactly when its conversation is: to the thread's owner and participants; observers read it through the observed routes. What it did is its thread's messages, at `GET /api/agent-threads/:threadId/messages` with its `threadId`. `threadId` is the sub-agent's thread, `run` one of its runs, and `path` points into it: `/handedFiles/0/fileRef`, or `/files/0/fileRef` for what the run returned.",
+        "tags": ["Agent Threads"],
+        "operationId": "getAgentChildFileContent",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial file content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          },
+          "501": {
+            "description": "The storage role backing this content is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\/(?:handedFiles|files)(?:\\/|$)"
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "head": {
+        "summary": "Head a file of a sub-agent",
+        "tags": ["Agent Threads"],
+        "operationId": "headAgentChildFileContent",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content headers"
+          },
+          "206": {
+            "description": "Partial file content headers"
+          },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          },
+          "501": {
+            "description": "The storage role backing this content is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\/(?:handedFiles|files)(?:\\/|$)"
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
       }
     },
     "/api/agent/preferences": {
@@ -42340,10 +43896,17 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
                         "threadId": {
                           "type": "string"
                         },
                         "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "parentRunId": {
                           "type": "string"
                         },
                         "requestedBy": {
@@ -42653,6 +44216,7 @@
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "threadId",
                         "triggerMessageId",
                         "status",
@@ -44550,6 +46114,38 @@
                                     "errorText"
                                   ],
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["mail"]
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "from": {
+                                      "type": "string",
+                                      "enum": ["parent"]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": ["message", "answer"]
+                                    },
+                                    "inReplyTo": {
+                                      "type": "string"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "afterAnswer": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["type", "id", "from", "kind", "text"],
+                                  "additionalProperties": false
                                 }
                               ]
                             }
@@ -44933,10 +46529,17 @@
                           "projectId": {
                             "type": "string"
                           },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["conversation", "subagent"]
+                          },
                           "threadId": {
                             "type": "string"
                           },
                           "triggerMessageId": {
+                            "type": "string"
+                          },
+                          "parentRunId": {
                             "type": "string"
                           },
                           "requestedBy": {
@@ -45246,6 +46849,7 @@
                         "required": [
                           "id",
                           "projectId",
+                          "kind",
                           "threadId",
                           "triggerMessageId",
                           "status",
@@ -45338,6 +46942,240 @@
             }
           }
         }
+      }
+    },
+    "/api/observed-agent-threads/{threadId}/children": {
+      "get": {
+        "summary": "List the sub-agents of another user's agent conversation",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.",
+        "tags": ["Agent Threads"],
+        "operationId": "listObservedAgentThreadChildren",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentChild"
+                      }
+                    }
+                  },
+                  "required": ["children"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observed-agent-threads/{threadId}/child-files/content": {
+      "get": {
+        "summary": "Get a file of another user's sub-agent",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.",
+        "tags": ["Agent Threads"],
+        "operationId": "getObservedAgentChildFileContent",
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial file content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          },
+          "501": {
+            "description": "The storage role backing this content is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^\\/(?:handedFiles|files)(?:\\/|$)"
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
       }
     },
     "/api/agent-memory/{repo}": {

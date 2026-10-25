@@ -271,6 +271,21 @@ const AgentApprovalOutcomePartSchema = z.object({
     .optional(),
 })
 
+/**
+ * A message a sub-agent's parent sent it, as it read it before a step: a steer, or the answer to
+ * the question it asked (`inReplyTo`). Only a sub-agent's thread holds one.
+ */
+export const AgentMailPartSchema = z.object({
+  type: z.literal("mail"),
+  id: z.string(),
+  from: z.literal("parent"),
+  kind: z.enum(["message", "answer"]),
+  inReplyTo: z.string().optional(),
+  text: z.string(),
+  /** It came as the sub-agent answered, so it wrote its result again. */
+  afterAnswer: z.literal(true).optional(),
+})
+
 export const AgentMessagePartSchema = z.union([
   AgentTextPartSchema,
   AgentContinuationPartSchema,
@@ -282,6 +297,7 @@ export const AgentMessagePartSchema = z.union([
   AgentContextPartSchema,
   AgentToolCallOutputSchema,
   AgentToolCallErrorSchema,
+  AgentMailPartSchema,
 ])
 
 export const AgentRunDiagnosticSchema = z.object({
@@ -373,8 +389,12 @@ export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 export const AgentRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
+  /** A conversation's turn, or a sub-agent's run in its own thread. */
+  kind: z.enum(["conversation", "subagent"]),
   threadId: z.string(),
   triggerMessageId: z.string(),
+  /** A sub-agent's: the turn it works under, whose deadline, mode and stop it shares. */
+  parentRunId: z.string().optional(),
   requestedBy: AgentAuthorizablePrincipalSchema.optional(),
   status: AgentRunStatusSchema,
   model: LanguageModelRefSchema.optional(),
@@ -442,4 +462,107 @@ export const AgentRunListResponseSchema = z.object({
   runs: z.array(AgentRunSchema),
   hasMore: z.boolean(),
   total: z.number(),
+})
+
+/** A file a turn and its sub-agent hand each other, by its path in the sub-agent's sandbox. */
+export const AgentChildFileSchema = z.object({
+  path: z.string(),
+  fileRef: FileRefSchema,
+})
+
+export const AgentChildRunSchema = z.object({
+  id: z.string(),
+  /** The turn the run worked under: the one that spawned the sub-agent, or one that went on. */
+  parentRunId: z.string(),
+  status: AgentRunStatusSchema,
+  finishReason: AgentRunFinishReasonSchema.optional(),
+  error: AgentRunFailureSchema.optional(),
+  modelId: z.string().optional(),
+  attempt: z.number(),
+  /** Subscribe to it on `/ws/agents` with the run's id while it is at work. */
+  streamId: z.string(),
+  createdAt: z.string(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  /** What it answered, and the files it wrote under `out/`, by path relative to it. */
+  result: z
+    .object({
+      text: z.string(),
+      files: z.array(AgentChildFileSchema).optional(),
+      /** Why none of what it wrote under `out/` came back. */
+      filesError: z.string().optional(),
+    })
+    .optional(),
+  usage: AiUsageSummarySchema.optional(),
+  cost: AiCostSummarySchema.optional(),
+})
+
+/** What a paused sub-agent waits for before it goes on. */
+export const AgentChildAwaitingSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("approval"),
+    /** Its calls still waiting for the turn's requester. */
+    approvalIds: z.array(z.string()),
+  }),
+  /** Its calls were decided: it continues once its turn resumes. */
+  z.object({ type: z.literal("resume") }),
+  /** It paused on the question it asked: a later turn of the conversation answers it. */
+  z.object({
+    type: z.literal("answer"),
+    question: z.object({ id: z.string(), text: z.string() }),
+  }),
+])
+
+/**
+ * Why a paused sub-agent never continues. On its calls: a new message set them aside, one expired,
+ * or its turn was stopped, its requester leaving the conversation among the reasons. On its
+ * question: `replaced`, the Agent spawned another sub-agent under its key.
+ */
+export const AgentChildEndedSchema = z.object({
+  reason: z.enum(["superseded", "expired", "stopped", "replaced"]),
+})
+
+export const AgentChildSchema = z.object({
+  /** Its first run's id: the one `spawn_agent` answered with. */
+  id: z.string(),
+  /** Its own thread: `GET /api/agent-threads/:threadId/messages` reads what it did. */
+  threadId: z.string(),
+  projectId: z.string(),
+  /** The turn that spawned it. */
+  spawnedBy: z.string(),
+  key: z.string(),
+  task: z.string(),
+  model: LanguageModelRefSchema,
+  tier: z.enum(LANGUAGE_MODEL_TIERS).optional(),
+  reasoning: ModelReasoningSchema.optional(),
+  /** What its parent handed it, by path in its sandbox. */
+  handedFiles: z.array(AgentChildFileSchema),
+  /** Its latest run's. */
+  status: AgentRunStatusSchema,
+  /**
+   * `awaiting_approval` or `awaiting_answer`: it paused on held calls or on its question.
+   * `awaiting` says what it waits for, or `ended` why it will not continue.
+   */
+  finishReason: AgentRunFinishReasonSchema.optional(),
+  error: AgentRunFailureSchema.optional(),
+  awaiting: AgentChildAwaitingSchema.optional(),
+  ended: AgentChildEndedSchema.optional(),
+  /** Its run at work, which streams on `/ws/agents`; `null` when none is. */
+  activeRunId: z.string().nullable(),
+  createdAt: z.string(),
+  completedAt: z.string().optional(),
+  /** Every run of it, and what those ran. */
+  usage: AiUsageSummarySchema.optional(),
+  cost: AiCostSummarySchema.optional(),
+  /** Oldest first: the run spawned, then each that continued it. */
+  runs: z.array(AgentChildRunSchema),
+})
+
+export const AgentChildListQuerySchema = z.object({
+  /** Only those this turn of the conversation spawned. */
+  runId: z.string().min(1).optional(),
+})
+
+export const AgentChildListResponseSchema = z.object({
+  children: z.array(AgentChildSchema),
 })

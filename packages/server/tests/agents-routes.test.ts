@@ -1673,11 +1673,10 @@ describe("a sub-agent's thread over HTTP", () => {
     expect((await request("child-thread", {}, other)).status).toBe(404)
     expect((await request("child-thread/messages", {}, other)).status).toBe(404)
 
-    // Turns only, and counted as listed: a child's thread has none. Guard proof: drop `kinds`
-    // from listConversationRuns, and its page is empty with a total of 1.
+    // Its own runs, counted as listed: a conversation's runs are its turns, a child's thread its.
     expect(await (await request("child-thread/runs")).json()).toMatchObject({
-      runs: [],
-      total: 0,
+      runs: [{ id: "child", kind: "subagent", parentRunId: "turn" }],
+      total: 1,
       hasMore: false,
     })
 

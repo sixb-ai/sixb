@@ -43,7 +43,12 @@ import {
   stopAgentTurn,
 } from "./approvals"
 import { cancelAgentRun } from "./cancel"
-import { type AgentChildView, cancelAgentChildRun, listAgentChildren } from "./children"
+import {
+  type AgentChildView,
+  cancelAgentChildRun,
+  listAgentChildren,
+  readAgentChild,
+} from "./children"
 import { AgentRequestError } from "./errors"
 import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
@@ -120,6 +125,8 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
       threadId: string,
       input?: ListAgentChildrenInput
     ): Promise<AgentChildListResult | null>
+    /** The sub-agent that works in a thread, read as `listChildren` lists it. */
+    getChild(threadId: string): Promise<AgentChildView | null>
     /** Who else reads the conversation and talks in it. */
     readonly participants: AgentThreadParticipantsRuntime
     /**
@@ -237,6 +244,8 @@ export interface ObservedAgentThreadsRuntime {
     threadId: string,
     input?: ListAgentChildrenInput
   ): Promise<AgentChildListResult | null>
+  /** The sub-agent that works in a thread; `null` when it is not a sub-agent's. */
+  getChild(threadId: string): Promise<AgentChildView | null>
 }
 
 export interface AgentRunsRuntime {
@@ -767,6 +776,13 @@ export function createAgentRuntime<
           }),
         }
       },
+      getChild: async (threadId) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        const conversation = thread?.parent
+          ? await getVisibleThreadRecord(thread.parent.threadId)
+          : null
+        return thread && conversation ? readAgentChild(runtime, conversation, thread) : null
+      },
       fork: async (threadId) => {
         // Checked before the copy's transaction: an access removed in between can still fork once.
         const readable = await rule.read(threadId)
@@ -899,6 +915,12 @@ function createObservedAgentThreadsRuntime(
       const thread = await getById(threadId)
       if (!thread) return null
       return listThreadRuns(runtime, thread, input)
+    },
+
+    async getChild(threadId) {
+      const thread = await getById(threadId)
+      const conversation = thread?.parent ? await getById(thread.parent.threadId) : null
+      return thread && conversation ? readAgentChild(runtime, conversation, thread) : null
     },
 
     async listChildren(threadId, { runId } = {}) {

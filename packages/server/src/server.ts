@@ -42,6 +42,7 @@ import {
   SharedAccessBoundary,
   type SixbSharedAccessOptions,
 } from "./auth/shared-access"
+import { NamedOpenApiSchemas, openApiOverride } from "./openapi/components"
 import {
   SIXB_ACCESS_TOKEN_SECURITY_SCHEME,
   SIXB_ACCESS_TOKEN_SECURITY_SCHEME_ID,
@@ -59,7 +60,6 @@ import { registerAuthRoutes } from "./routes/auth"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./routes/files"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
-import { jsonValueOpenApiOverride } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 import { limitRequestBody, RequestBodyTooLargeError } from "./utils/request-body"
 
@@ -421,7 +421,7 @@ export function createSixbApi(server: SixbServer) {
             [SIXB_ACCESS_TOKEN_SECURITY_SCHEME_ID]: SIXB_ACCESS_TOKEN_SECURITY_SCHEME,
             [SIXB_SHARED_GRANT_SECURITY_SCHEME_ID]: SIXB_SHARED_GRANT_SECURITY_SCHEME,
           },
-          schemas: ObjectQueryOpenApiSchemas,
+          schemas: { ...ObjectQueryOpenApiSchemas, ...NamedOpenApiSchemas },
         },
         // Every operation needs a session unless it says otherwise; public ones declare `[]`.
         security: SIXB_SESSION_SECURITY_REQUIREMENT,
@@ -435,7 +435,7 @@ export function createSixbApi(server: SixbServer) {
           zodToJsonSchema(schema, {
             $refStrategy: "none",
             target: "openApi3",
-            override: jsonValueOpenApiOverride,
+            override: openApiOverride(),
           }),
       },
     })

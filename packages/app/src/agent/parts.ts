@@ -83,6 +83,8 @@ export function normalizeDurableParts(
       case "continuation":
       case "approval-outcome":
       case "provider-state":
+      // A sub-agent's thread's: what its parent told it reads on its card.
+      case "mail":
         return []
       default:
         // Compile error if the core message part union grows: handle the new kind above.

@@ -39,6 +39,7 @@ interface OpenApiDocument {
   readonly openapi: string
   readonly components?: {
     readonly securitySchemes?: Record<string, unknown>
+    readonly schemas?: Record<string, unknown>
   }
   readonly paths?: Record<string, Record<string, OpenApiOperation>>
   readonly security?: unknown
@@ -234,6 +235,39 @@ describe("OpenAPI docs", () => {
         }
       }
     }
+  })
+
+  // Guard proof: drop the named schemas from openApiOverride; every children route then inlines
+  // the sub-agent and its runs again.
+  test("names a sub-agent's schemas once, for every route that returns one", () => {
+    const json = (value: unknown) => JSON.stringify(value)
+    const ok = (path: string, method: string, status = "200") =>
+      json(
+        (spec.paths?.[path]?.[method]?.responses as Record<string, unknown> | undefined)?.[status]
+      )
+
+    for (const path of [
+      "/api/agent-threads/{threadId}/children",
+      "/api/observed-agent-threads/{threadId}/children",
+    ]) {
+      expect(ok(path, "get")).toContain('"$ref":"#/components/schemas/AgentChild"')
+    }
+
+    // Each component holds the others by reference.
+    const schemas = spec.components?.schemas ?? {}
+    expect(json(schemas.AgentChild)).toContain('"$ref":"#/components/schemas/AgentChildRun"')
+    expect(json(schemas.AgentChild)).toContain('"$ref":"#/components/schemas/AgentChildAwaiting"')
+    expect(json(schemas.AgentChildRun)).toContain('"$ref":"#/components/schemas/AgentChildFile"')
+    expect(json(schemas.AgentChildAwaiting)).toContain('"answer"')
+  })
+
+  // A sub-agent's thread holds the mail its parent sent it, its steers and answers.
+  test("reads a thread's mail parts", () => {
+    const messages = JSON.stringify(
+      spec.paths?.["/api/agent-threads/{threadId}/messages"]?.get?.responses
+    )
+    expect(messages).toContain('"mail"')
+    expect(messages).toContain('"enum":["message","answer"]')
   })
 
   test("documents contextual file content responses", () => {
