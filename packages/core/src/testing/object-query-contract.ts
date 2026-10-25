@@ -168,6 +168,18 @@ const Meeting = defineObjectType({
   ],
 })
 
+const Label = defineObjectType({
+  id: "ContractLabel",
+  name: "Contract Label",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("code", "string", {
+      nullable: true,
+      query: { searchable: true, filterable: true, exact: true, sortable: true },
+    }),
+  ],
+})
+
 export const objectQueryContractOntology = new OntologyRegistry({
   sources: [
     Room,
@@ -179,8 +191,14 @@ export const objectQueryContractOntology = new OntologyRegistry({
     DefaultTextChild,
     Task,
     Meeting,
+    Label,
   ],
 })
+
+// Ascending code-point order: what SQLite's BINARY and PostgreSQL's "C" collation compare.
+// Any linguistic collation reorders case and accents; UTF-16 code units put the emoji
+// (a surrogate pair) before the fullwidth letter.
+const codePointOrder = ["", "B", "a", "b", "z", "Á", "á", "é", "Ａ", "😀"]
 
 /**
  * Runs the shared object-query provider contract against any ObjectStorage.
@@ -615,6 +633,59 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           "room-missing-floor",
         ])
         expect(ids(notFloorTwo)).toEqual(["room-gamma", "room-missing-floor", "room-null-floor"])
+      })
+    })
+
+    test("orders and compares strings by code point, whatever the database collation", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedLabels(fixture)
+
+        const run = (query: ObjectQuery) =>
+          executeObjectQuery(
+            { projectId, query },
+            { ontology: objectQueryContractOntology, storage }
+          )
+        const start: ObjectQuery = { kind: "start", objectTypeId: Label.id }
+        const byCode = (direction: "asc" | "desc", input: ObjectQuery = start): ObjectQuery => ({
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "code", direction }],
+          input,
+        })
+        const where = (predicate: ObjectQueryPredicate) =>
+          run(byCode("asc", { kind: "filter", predicate, input: start }))
+
+        const ascending = await run(byCode("asc"))
+        const descending = await run(byCode("desc"))
+
+        expect(ascending.plan.mode).toBe("pushdown")
+        expect(codes(ascending)).toEqual([...codePointOrder, null])
+        expect(codes(descending)).toEqual([...[...codePointOrder].reverse(), null])
+
+        // A page token resumes in the order that produced it.
+        const paged: unknown[] = []
+        let pageToken: string | undefined
+        do {
+          const page = await run({ kind: "page", pageSize: 3, pageToken, input: byCode("asc") })
+          paged.push(...codes(page))
+          pageToken = page.nextPageToken
+        } while (pageToken)
+
+        expect(paged).toEqual([...codePointOrder, null])
+
+        const range = await where({
+          op: "and",
+          items: [
+            { op: "gte", propertyId: "code", value: "a" },
+            { op: "lt", propertyId: "code", value: "é" },
+          ],
+        })
+
+        expect(codes(range)).toEqual(["a", "b", "z", "Á", "á"])
+        expect(codes(await where({ op: "gt", propertyId: "code", value: "" }))).toEqual(
+          codePointOrder.slice(1)
+        )
+        expect(codes(await where({ op: "lte", propertyId: "code", value: "B" }))).toEqual(["", "B"])
+        expect(codes(await where({ op: "gt", propertyId: "code", value: "Ａ" }))).toEqual(["😀"])
       })
     })
 
@@ -1570,6 +1641,22 @@ async function seedObjectQueryContractData(fixture: MaterializerTestFixture): Pr
   })
 }
 
+// Primary ids run against the code order, so only a sort by code can produce it.
+async function seedLabels(fixture: MaterializerTestFixture): Promise<void> {
+  await fixture.seed({
+    objects: [
+      ...codePointOrder.map((code, index) =>
+        objectSeed(Label.id, `label-${codePointOrder.length - index}`, {
+          id: `label-${codePointOrder.length - index}`,
+          code,
+        })
+      ),
+      objectSeed(Label.id, "label-null", { id: "label-null", code: null }),
+    ],
+    links: [],
+  })
+}
+
 /** Wrap storage so every call's arguments are recorded as JSON before it runs. */
 function recordingCalls<TStorage extends object>(storage: TStorage, received: string[]): TStorage {
   return new Proxy(storage, {
@@ -1614,6 +1701,10 @@ function linkSeed(
 
 function ids(result: QueryObjectsResult): string[] {
   return result.objects.map((row) => row.primaryId)
+}
+
+function codes(result: QueryObjectsResult): unknown[] {
+  return result.objects.map((row) => row.properties.code)
 }
 
 // Sorted primaryIds of the objects hydrated under `linkId` on the parent row.

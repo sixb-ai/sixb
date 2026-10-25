@@ -211,6 +211,10 @@ const { objects } = await sixb
 
 Null and missing values sort last in both directions.
 
+Strings sort and compare (`lt`, `gte`, …) by Unicode code point, the same in every storage and
+whatever the database's collation: uppercase before lowercase, accented letters after `z`
+(`"B" < "a" < "z" < "é"`).
+
 For multiple pages, pass the previous result's `nextPageToken` to `page()`. Keep the query and page
 size the same between requests. Use `includeTotal: false` when you do not need a total count:
 
