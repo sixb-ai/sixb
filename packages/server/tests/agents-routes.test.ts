@@ -796,6 +796,7 @@ describe("agent routes", () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual({
       error: `[Sixb] Agent thread '${thread.id}' already has an active run 'run-active'.`,
+      code: "active_run_exists",
     })
   })
 
@@ -1586,6 +1587,136 @@ describe("agent routes", () => {
     )
     expect(file.status).toBe(200)
     expect(await file.text()).toBe("pipeline export")
+  })
+})
+
+describe("a sub-agent's thread over HTTP", () => {
+  /** The owner's conversation with a running turn, which spawned a child into its own thread. */
+  async function conversationWithChild() {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const owner = await seedSession(storage, "usr_owner")
+    const other = await seedSession(storage, "usr_other")
+    const participant = await seedSession(storage, "usr_participant")
+    const projectId = sixb.id
+    await storage.agents.threads.create({
+      id: "conversation",
+      projectId,
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+    })
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: "conversation",
+      principals: [{ type: "user", id: "usr_participant" }],
+      addedBy: { type: "user", id: "usr_owner" },
+      maxParticipants: 10,
+    })
+    const turn = await createStartedRun(storage, {
+      id: "turn",
+      projectId,
+      threadId: "conversation",
+      triggerMessageId: "msg-1",
+      execution: testExecution("turn-token"),
+    })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId,
+      runId: "child",
+      sourceExecutionId: turn.executionId,
+    })
+    await storage.agents.runs.createSubagent({
+      id: "child",
+      projectId,
+      executionId,
+      parentRunId: "turn",
+      parentExecutionToken: "turn-token",
+      spawnKey: "research",
+      spec: {
+        model: { provider: "test", modelId: "test-model" },
+        task: "Find the late invoices.",
+        toolNames: [],
+        maxSteps: 5,
+        approvalMode: "manual",
+      },
+      thread: { id: "child-thread", create: true },
+      trigger: { id: "child-task", parts: [{ type: "text", text: "Find the late invoices." }] },
+      maxActiveChildren: 4,
+    })
+    const request = (path: string, init: { method?: string; body?: unknown } = {}, as = owner) =>
+      app.fetch(
+        new Request(`http://localhost/api/agent-threads/${path}`, {
+          method: init.method ?? "GET",
+          headers: init.method ? as.csrfHeaders : as.headers,
+          ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        })
+      )
+    return { request, other, participant }
+  }
+
+  test("reads as its conversation does, and is never listed", async () => {
+    const { request, other, participant } = await conversationWithChild()
+
+    const thread = await request("child-thread")
+    expect(thread.status).toBe(200)
+    expect(await thread.json()).toMatchObject({
+      id: "child-thread",
+      kind: "subagent",
+      parent: { threadId: "conversation", spawnedBy: "turn", key: "research" },
+      // The child's own mode, its run's, whoever reads it. Guard proof: resolve it as a
+      // conversation's in getThreadApprovalMode, and the owner reads their own, `auto`.
+      approvalMode: "manual",
+      approvalModeSource: "run",
+    })
+    const messages = await request("child-thread/messages")
+    expect(await messages.json()).toMatchObject({
+      messages: [{ id: "child-task", runId: "child", role: "user" }],
+      total: 1,
+    })
+    expect((await request("child-thread", {}, other)).status).toBe(404)
+    expect((await request("child-thread/messages", {}, other)).status).toBe(404)
+
+    // Turns only, and counted as listed: a child's thread has none. Guard proof: drop `kinds`
+    // from listConversationRuns, and its page is empty with a total of 1.
+    expect(await (await request("child-thread/runs")).json()).toMatchObject({
+      runs: [],
+      total: 0,
+      hasMore: false,
+    })
+
+    const listed = (await (await request("")).json()) as { threads: { id: string }[] }
+    expect(listed.threads.map((each) => each.id)).toEqual(["conversation"])
+    // Nor among what is shared with a participant, who reads it.
+    expect((await request("child-thread", {}, participant)).status).toBe(200)
+    const shared = (await (await request("?sharedWithMe=true", {}, participant)).json()) as {
+      threads: { id: string }[]
+    }
+    expect(shared.threads.map((each) => each.id)).toEqual(["conversation"])
+  })
+
+  test("refuses every write with a 409, and an outsider's with a 404", async () => {
+    const { request, other } = await conversationWithChild()
+    const writes = [
+      { path: "child-thread/messages", method: "POST", body: { text: "Go on." } },
+      { path: "child-thread/fork", method: "POST" },
+      {
+        path: "child-thread/participants",
+        method: "POST",
+        body: { users: [{ type: "user", id: "usr_other" }] },
+      },
+      { path: "child-thread/participants/usr_other", method: "DELETE" },
+      { path: "child-thread/approval-mode", method: "PUT", body: { approvalMode: "manual" } },
+      { path: "child-thread/sandbox/recreate", method: "POST", body: { expectedSandboxName: "x" } },
+      { path: "child-thread/cancel", method: "POST", body: { runId: "child" } },
+      { path: "child-thread/runs/child/retry", method: "POST" },
+    ]
+
+    for (const write of writes) {
+      const refused = await request(write.path, write)
+      expect({ write: write.path, status: refused.status }).toEqual({
+        write: write.path,
+        status: 409,
+      })
+      expect(await refused.json()).toMatchObject({ code: "thread_not_conversation" })
+      expect((await request(write.path, write, other)).status).toBe(404)
+    }
   })
 })
 

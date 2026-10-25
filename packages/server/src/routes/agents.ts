@@ -6,7 +6,7 @@ import {
   type FileRef,
   type SixbHostView,
 } from "@sixb/core"
-import { isRetryableAgentRun } from "@sixb/core/internal/agents"
+import { assertConversationThread, isRetryableAgentRun } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
 import {
@@ -91,6 +91,8 @@ export async function serializeThreads(
     AgentThreadSchema.parse({
       id: thread.id,
       projectId: thread.projectId,
+      kind: thread.kind,
+      parent: thread.parent,
       ownerPrincipal: thread.ownerPrincipal,
       owner: named(thread.ownerPrincipal),
       participants: thread.participants.map((participant) => ({
@@ -215,6 +217,10 @@ export function handleAgentRouteError(
     set.status = 409
     return { error: "This conversation already has a response in progress" }
   }
+  if (error instanceof AgentStorageError && error.code === "thread_not_conversation") {
+    set.status = 409
+    return { error: "Only a conversation takes this change", code: error.code }
+  }
 
   if (error instanceof AgentRequestError) {
     // Core performs visibility checks before workspace state transitions.
@@ -226,6 +232,7 @@ export function handleAgentRouteError(
         set.status = 404
         break
       case "active_run_exists":
+      case "thread_not_conversation":
       case "run_not_retryable":
       case "run_not_active":
       case "sandbox_execution_unavailable":
@@ -362,12 +369,9 @@ export async function readThreadMessages(
     storage.checkpoints.getByRunIds({ projectId, threadId: thread.id, runIds }),
   ])
   // A message's run is written by the store, never by a client: a message a fork copied keeps
-  // the run that produced it, in the source thread, and shows that run's diagnostics.
-  const diagnosticsByRunId = new Map(
-    runs
-      .filter((run) => run.kind === "conversation")
-      .map((run) => [run.id, run.diagnostics ?? []] as const)
-  )
+  // the run that produced it, in the source thread, and shows that run's diagnostics. In a
+  // sub-agent's thread, they are its runs'.
+  const diagnosticsByRunId = new Map(runs.map((run) => [run.id, run.diagnostics ?? []] as const))
   const checkpointsByRunId = new Map(
     checkpoints.map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
   )
@@ -602,6 +606,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           400: AgentRequestErrorResponseSchema,
           403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -641,6 +646,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           400: AgentRequestErrorResponseSchema,
           403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -680,6 +686,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           // Coded: the source's sandbox params may not suit the current sandbox configuration.
           400: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -848,7 +855,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           400: AgentRequestErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
-          409: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           429: AiUsageLimitErrorResponseSchema,
           501: ErrorResponseSchema,
         },
@@ -877,6 +884,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
+          assertConversationThread(thread)
           const parsed = CancelAgentRunBodySchema.parse(body)
           const run = await sixb.agent.runs.getById(parsed.runId)
           if (!run || run.threadId !== thread.id) {
@@ -929,6 +937,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
+          assertConversationThread(thread)
           const failedRun = await sixb.agent.runs.getById(params.runId)
           if (!failedRun || failedRun.threadId !== thread.id) {
             set.status = 404

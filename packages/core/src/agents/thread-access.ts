@@ -3,6 +3,7 @@ import { isRuntimeAllowed } from "../authorization"
 import type { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
+import { AgentRequestError } from "./errors"
 
 /** How the caller takes part in a conversation: its owner, or a user its owner added. */
 export type AgentThreadAccess = "owner" | "participant"
@@ -34,6 +35,9 @@ type RuntimeAuthority = ReturnType<typeof resolveRuntimeAuthorizationForProject>
  * caller (authorization disabled, or system code) reads every thread as its owner. A shared link,
  * a delegated execution or a denied caller reads none. An observer reads every thread through
  * `sixb.agent.observed` instead, without ever being its owner or a participant.
+ *
+ * A sub-agent's thread is read exactly when its conversation is, with the caller's access there:
+ * whoever stops reading the conversation stops reading its children with it.
  */
 export interface AgentThreadAccessRule {
   /** Who acts: the signed-in principal, or the system principal for code without a caller. */
@@ -65,15 +69,33 @@ export function createAgentThreadAccessRule(
     if (blocked) return null
 
     const storage = agents ?? runtime.storage.agents
-    const stored = await storage?.threads.getById({ projectId: runtime.projectId, id: threadId })
+    const getById = (id: string) => storage?.threads.getById({ projectId: runtime.projectId, id })
+    const stored = await getById(threadId)
     if (!stored) return null
 
-    const [thread] = await agentThreadViews(runtime, [stored], storage)
-    const access = thread ? accessIn(thread) : null
+    // One level only: a child's parent is always a conversation, as storage admits no other.
+    const conversation = stored.parent ? await getById(stored.parent.threadId) : stored
+    if (conversation?.kind !== "conversation") return null
+
+    const [thread, readThrough = thread] = await agentThreadViews(
+      runtime,
+      conversation === stored ? [stored] : [stored, conversation],
+      storage
+    )
+    const access = readThrough ? accessIn(readThrough) : null
     return thread && access ? { thread, access } : null
   }
 
   return { caller, read }
+}
+
+/** Refuse what only a conversation takes: a message, a fork, a participant, a mode, a sandbox. */
+export function assertConversationThread(thread: Pick<AgentThreadRecord, "id" | "kind">): void {
+  if (thread.kind === "conversation") return
+  throw new AgentRequestError(
+    "thread_not_conversation",
+    `[Sixb] Agent thread '${thread.id}' is a sub-agent's: it is read through its conversation and takes no change of its own.`
+  )
 }
 
 /**

@@ -134,6 +134,8 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   the task the agent writes, and answers the agent, not the user.
 - **What it publishes lands in the conversation**, like the agent's own
   [artifacts](../artifacts/overview.md).
+- **Its work is a thread you can open**: its task, then what it did, read by whoever reads the
+  conversation. It is never listed with your conversations and takes no messages of its own.
 - **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
   minute before the turn's time is up, the agent stops waiting and answers with what the others
   found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.

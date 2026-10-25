@@ -65,6 +65,7 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   lists each model from its configured definition: name, description, context limits and
   capabilities, never a price, which is not known. The schema restricts selection to configured
   pairs, the worker rechecks them before creating a child, and omitting `model` uses the default.
+  Each child works in a thread of its own, which holds its task and then its work.
   `wait_agent` returns each child's final answer, the text it wrote after its last local tool call
   (else its last text), and the calls it made that wait for approval. It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.

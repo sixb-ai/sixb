@@ -134,6 +134,17 @@ export const AgentThreadSchema = z.object({
     .optional(),
   id: z.string(),
   projectId: z.string(),
+  /** A conversation, or the thread a sub-agent works in: read through its conversation. */
+  kind: z.enum(["conversation", "subagent"]),
+  /** A sub-agent's thread: its conversation, the turn that spawned it, and its key there. */
+  parent: z
+    .object({
+      threadId: z.string(),
+      /** The turn that spawned it; its later runs work under the turns that go on with it. */
+      spawnedBy: z.string(),
+      key: z.string(),
+    })
+    .optional(),
   ownerPrincipal: AgentPrincipalSchema,
   /** The owner, named by their account. */
   owner: AgentMessageAuthorSchema,
@@ -148,7 +159,10 @@ export const AgentThreadSchema = z.object({
   updatedAt: z.string(),
   /** Your mode in this thread, when the thread is read alone. */
   approvalMode: AgentApprovalModeSchema.optional(),
-  /** Where your mode in this thread comes from, with `approvalMode`. */
+  /**
+   * Where your mode in this thread comes from, with `approvalMode`. `run`: a sub-agent's thread,
+   * whose mode is its latest run's, copied from the turn it works under, for every reader.
+   */
   approvalModeSource: AgentApprovalModeSourceSchema.optional(),
 })
 

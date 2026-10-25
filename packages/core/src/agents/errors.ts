@@ -38,6 +38,8 @@ export type AgentRequestErrorCode =
   | "run_not_found"
   | "run_not_retryable"
   | "thread_not_found"
+  /** A conversation's write on a sub-agent's thread: a message, a fork, a participant, a mode. */
+  | "thread_not_conversation"
   | "active_run_exists"
   | "authority_not_inheritable"
   | "invalid_context"

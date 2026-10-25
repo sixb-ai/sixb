@@ -34062,6 +34062,26 @@
                           "projectId": {
                             "type": "string"
                           },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["conversation", "subagent"]
+                          },
+                          "parent": {
+                            "type": "object",
+                            "properties": {
+                              "threadId": {
+                                "type": "string"
+                              },
+                              "spawnedBy": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["threadId", "spawnedBy", "key"],
+                            "additionalProperties": false
+                          },
                           "ownerPrincipal": {
                             "type": "object",
                             "properties": {
@@ -34196,12 +34216,13 @@
                           },
                           "approvalModeSource": {
                             "type": "string",
-                            "enum": ["thread", "default", "fallback"]
+                            "enum": ["thread", "default", "fallback", "run"]
                           }
                         },
                         "required": [
                           "id",
                           "projectId",
+                          "kind",
                           "ownerPrincipal",
                           "owner",
                           "participants",
@@ -34440,6 +34461,26 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
+                        "parent": {
+                          "type": "object",
+                          "properties": {
+                            "threadId": {
+                              "type": "string"
+                            },
+                            "spawnedBy": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["threadId", "spawnedBy", "key"],
+                          "additionalProperties": false
+                        },
                         "ownerPrincipal": {
                           "type": "object",
                           "properties": {
@@ -34574,12 +34615,13 @@
                         },
                         "approvalModeSource": {
                           "type": "string",
-                          "enum": ["thread", "default", "fallback"]
+                          "enum": ["thread", "default", "fallback", "run"]
                         }
                       },
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "ownerPrincipal",
                         "owner",
                         "participants",
@@ -34716,6 +34758,26 @@
                     "projectId": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
+                    },
                     "ownerPrincipal": {
                       "type": "object",
                       "properties": {
@@ -34850,12 +34912,13 @@
                     },
                     "approvalModeSource": {
                       "type": "string",
-                      "enum": ["thread", "default", "fallback"]
+                      "enum": ["thread", "default", "fallback", "run"]
                     }
                   },
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "ownerPrincipal",
                     "owner",
                     "participants",
@@ -35117,6 +35180,26 @@
                     "projectId": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
+                    },
                     "ownerPrincipal": {
                       "type": "object",
                       "properties": {
@@ -35251,12 +35334,13 @@
                     },
                     "approvalModeSource": {
                       "type": "string",
-                      "enum": ["thread", "default", "fallback"]
+                      "enum": ["thread", "default", "fallback", "run"]
                     }
                   },
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "ownerPrincipal",
                     "owner",
                     "participants",
@@ -35319,6 +35403,26 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -35448,6 +35552,26 @@
               }
             }
           },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "501": {
             "description": "Response for status 501",
             "content": {
@@ -35525,6 +35649,26 @@
                         },
                         "projectId": {
                           "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["conversation", "subagent"]
+                        },
+                        "parent": {
+                          "type": "object",
+                          "properties": {
+                            "threadId": {
+                              "type": "string"
+                            },
+                            "spawnedBy": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["threadId", "spawnedBy", "key"],
+                          "additionalProperties": false
                         },
                         "ownerPrincipal": {
                           "type": "object",
@@ -35660,12 +35804,13 @@
                         },
                         "approvalModeSource": {
                           "type": "string",
-                          "enum": ["thread", "default", "fallback"]
+                          "enum": ["thread", "default", "fallback", "run"]
                         }
                       },
                       "required": [
                         "id",
                         "projectId",
+                        "kind",
                         "ownerPrincipal",
                         "owner",
                         "participants",
@@ -35712,6 +35857,26 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -35839,6 +36004,26 @@
                     },
                     "projectId": {
                       "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
                     },
                     "ownerPrincipal": {
                       "type": "object",
@@ -35974,12 +36159,13 @@
                     },
                     "approvalModeSource": {
                       "type": "string",
-                      "enum": ["thread", "default", "fallback"]
+                      "enum": ["thread", "default", "fallback", "run"]
                     }
                   },
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "ownerPrincipal",
                     "owner",
                     "participants",
@@ -38199,6 +38385,9 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -40707,6 +40896,26 @@
                     "projectId": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
+                    },
                     "ownerPrincipal": {
                       "type": "object",
                       "properties": {
@@ -40841,12 +41050,13 @@
                     },
                     "approvalModeSource": {
                       "type": "string",
-                      "enum": ["thread", "default", "fallback"]
+                      "enum": ["thread", "default", "fallback", "run"]
                     }
                   },
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "ownerPrincipal",
                     "owner",
                     "participants",
@@ -40883,6 +41093,26 @@
           },
           "404": {
             "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
             "content": {
               "application/json": {
                 "schema": {
@@ -43076,6 +43306,26 @@
                     "projectId": {
                       "type": "string"
                     },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
+                    },
                     "ownerPrincipal": {
                       "type": "object",
                       "properties": {
@@ -43210,12 +43460,13 @@
                     },
                     "approvalModeSource": {
                       "type": "string",
-                      "enum": ["thread", "default", "fallback"]
+                      "enum": ["thread", "default", "fallback", "run"]
                     }
                   },
                   "required": [
                     "id",
                     "projectId",
+                    "kind",
                     "ownerPrincipal",
                     "owner",
                     "participants",

@@ -98,7 +98,6 @@ export {
   AgentToolPublicError,
   AgentToolResultValidationError,
 } from "./errors"
-export { conversationThreadId } from "./thread-access"
 export {
   agentContextCheckpointId,
   createAgentMessageId,
@@ -181,6 +180,8 @@ export {
   publishAgentRunFinished,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
+export { listSubagentThreadRuns } from "./subagent-runs"
+export { assertConversationThread, conversationThreadId } from "./thread-access"
 export type {
   AgentThreadModelContextMessage,
   ProjectAgentThreadModelContextInput,

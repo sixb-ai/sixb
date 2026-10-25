@@ -11,7 +11,7 @@ import {
 } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
-import { createTestSixb } from "../src/testing"
+import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -218,6 +218,121 @@ describe("reading a shared conversation", () => {
     })
     expect((await system.agent.threads.list()).total).toBe(1)
     expect((await system.agent.threads.list({ sharedWithMe: true })).total).toBe(0)
+  })
+})
+
+/**
+ * The conversation's next turn, running, with a child: the child's thread is read through the
+ * conversation, and no write reaches it.
+ */
+async function childThread(
+  host: Host,
+  owner: Awaited<ReturnType<typeof signedIn>>,
+  threadId: string
+) {
+  const agents = host.storage.agents
+  if (!agents) throw new Error("Expected agent storage.")
+
+  const { run: turn } = await owner.agent.runs.request({ threadId, text: "Ask a child." })
+  await agents.runs.start({
+    projectId,
+    id: turn.id,
+    execution: { token: "turn-token", queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+  })
+  const executionId = await createTestAgentExecution(host.storage, {
+    projectId,
+    runId: "child-run",
+    sourceExecutionId: turn.executionId,
+  })
+  const child = await agents.runs.createSubagent({
+    id: "child-run",
+    projectId,
+    executionId,
+    parentRunId: turn.id,
+    parentExecutionToken: "turn-token",
+    spawnKey: "research",
+    spec: {
+      model: { provider: "test", modelId: "small" },
+      task: "Find the slipped deals.",
+      toolNames: [],
+      maxSteps: 5,
+    },
+    thread: { id: "child-thread", create: true },
+    trigger: { id: "child-task", parts: [{ type: "text", text: "Find the slipped deals." }] },
+    maxActiveChildren: 4,
+  })
+  return { child, childThreadId: child.threadId }
+}
+
+describe("a sub-agent's thread", () => {
+  // Guard proof: drop the sub-agent branch in createAgentThreadAccessRule; Bob, who takes part in
+  // the conversation but not in its child's thread, then reads null.
+  test("is read exactly when its conversation is, with the same access", async () => {
+    const { host } = setup()
+    const { owner, participant, other, thread } = await sharedThread(host)
+    const { childThreadId } = await childThread(host, owner, thread.id)
+    const observer = await signedIn(host, "usr_olivia", {
+      "run:agent": true,
+      "observe:agentThreads": true,
+    })
+
+    expect(await owner.agent.threads.getById(childThreadId)).toMatchObject({
+      id: childThreadId,
+      kind: "subagent",
+      parent: { threadId: thread.id, key: "research" },
+      ownerPrincipal: alice,
+      participants: [],
+    })
+    expect(await participant.agent.threads.getById(childThreadId)).toMatchObject({
+      id: childThreadId,
+    })
+    expect(await other.agent.threads.getById(childThreadId)).toBeNull()
+    expect(await observer.agent.observed.getById(childThreadId)).toMatchObject({
+      id: childThreadId,
+    })
+
+    // Never listed, by its owner or by those it is shared with through its conversation.
+    expect((await owner.agent.threads.list()).threads.map((each) => each.id)).toEqual([thread.id])
+    const shared = await participant.agent.threads.list({ sharedWithMe: true })
+    expect(shared.threads.map((each) => each.id)).toEqual([thread.id])
+
+    // A fork of the conversation is its own: whoever reads only the fork reads no child.
+    const fork = await participant.agent.threads.fork(thread.id)
+    await owner.agent.threads.participants.remove(thread.id, bob)
+    expect(await participant.agent.threads.getById(fork.id)).toMatchObject({ id: fork.id })
+    expect(await participant.agent.threads.getById(childThreadId)).toBeNull()
+  })
+
+  test("takes no message, fork, participant, mode or sandbox of its own", async () => {
+    const { host } = setup()
+    const { owner, thread } = await sharedThread(host)
+    const { childThreadId } = await childThread(host, owner, thread.id)
+    const refused = { code: "thread_not_conversation" }
+
+    await expect(
+      owner.agent.runs.request({ threadId: childThreadId, text: "Go on." })
+    ).rejects.toMatchObject(refused)
+    await expect(owner.agent.threads.fork(childThreadId)).rejects.toMatchObject(refused)
+    await expect(
+      owner.agent.threads.participants.add(childThreadId, [{ type: "user", id: "usr_cleo" }])
+    ).rejects.toMatchObject(refused)
+    await expect(owner.agent.threads.participants.remove(childThreadId, bob)).rejects.toMatchObject(
+      refused
+    )
+    await expect(
+      owner.agent.threads.setApprovalMode(childThreadId, "manual")
+    ).rejects.toMatchObject(refused)
+    await expect(
+      owner.agent.threads.recreateSandbox(childThreadId, { expectedSandboxName: "any" })
+    ).rejects.toMatchObject(refused)
+
+    // Its mode is its run's, copied from its turn when it was spawned: a mode its conversation's
+    // owner chooses later is theirs alone.
+    await owner.agent.threads.setApprovalMode(thread.id, "accept-edits")
+    expect(await owner.agent.threads.getApprovalMode(childThreadId)).toEqual({
+      approvalMode: "auto",
+      approvalModeSource: "run",
+    })
   })
 })
 
