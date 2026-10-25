@@ -4,6 +4,7 @@ import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
 import { lockPgPreparation } from "./preparation-lock"
+import { isTextScalarKind } from "./query-compiler"
 
 export interface PgObjectQueryIndexScope {
   readonly projectId: string
@@ -110,6 +111,22 @@ async function createQueryIndex(
     await connection.unsafe(
       `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(`${name}_overflow`)} ON ${identifier(schema)}.objects (primary_id) WHERE ${scope} AND NOT (${sortIndexBound(definition.index)})`
     )
+
+    // The same definition under another name is an earlier generation of this index, built
+    // with an expression queries no longer use. Writes would keep maintaining it.
+    const superseded = await connection<{ name: string }[]>`
+      SELECT c.relname AS name FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ${schema} AND c.relname LIKE 'sixb_query_%' AND c.relname <> ${name}
+        AND obj_description(c.oid, 'pg_class') = ${JSON.stringify(definition.index)}`
+    for (const previous of superseded) {
+      for (const index of [previous.name, `${previous.name}_overflow`]) {
+        await connection.unsafe(
+          `DROP INDEX CONCURRENTLY IF EXISTS ${identifier(schema)}.${identifier(index)}`
+        )
+      }
+    }
   }
   return name
 }
@@ -150,14 +167,7 @@ function statisticsExpressions(index: PgObjectQueryIndex): string[] {
   if (index.kind === "value") expressions.push(`(properties -> ${literal(index.propertyId)})`)
   if (index.kind === "text")
     expressions.push(`lower(coalesce(properties ->> ${literal(index.propertyId)}, ''))`)
-  if (index.kind === "sort")
-    for (const field of index.fields) {
-      expressions.push(
-        field.scalarKind === "decimal"
-          ? `((properties ->> ${literal(field.propertyId)})::numeric)`
-          : `(NULLIF(properties -> ${literal(field.propertyId)}, 'null'::jsonb))`
-      )
-    }
+  if (index.kind === "sort") for (const field of index.fields) expressions.push(sortValue(field))
   return expressions
 }
 
@@ -220,12 +230,20 @@ function compileIndex(index: PgObjectQueryIndex): string {
       const property = `properties -> ${literal(field.propertyId)}`
       fields.push(
         `(CASE WHEN jsonb_typeof(${property}) IS NULL OR jsonb_typeof(${property}) = 'null' THEN 1 ELSE 0 END)`,
-        `${field.scalarKind === "decimal" ? `((properties ->> ${literal(field.propertyId)})::numeric)` : `(NULLIF(${property}, 'null'::jsonb))`} ${field.direction === "desc" ? "DESC" : "ASC"}`
+        `${sortValue(field)} ${field.direction === "desc" ? "DESC" : "ASC"}`
       )
     }
     fields.push("primary_id")
   }
   return `(${fields.join(", ")}) WHERE ${predicate.join(" AND ")}`
+}
+
+/** The query compiler's ordered value expression; an index serves a sort only when they match. */
+function sortValue(field: Extract<PgObjectQueryIndex, { kind: "sort" }>["fields"][number]): string {
+  const text = `(properties ->> ${literal(field.propertyId)})`
+  if (field.scalarKind === "decimal") return `(${text}::numeric)`
+  if (isTextScalarKind(field.scalarKind)) return `(${text} COLLATE "C")`
+  return `(NULLIF(properties -> ${literal(field.propertyId)}, 'null'::jsonb))`
 }
 
 function literal(value: string): string {
@@ -337,7 +355,8 @@ export async function findPgSortIndexBound(
           fields[i]?.kind === "property" &&
           fields[i].propertyId === field.propertyId &&
           (field.direction ?? "asc") === (fields[i].direction ?? "asc") &&
-          (field.scalarKind === "decimal") === (fields[i].scalarKind === "decimal")
+          (field.scalarKind === "decimal") === (fields[i].scalarKind === "decimal") &&
+          isTextScalarKind(field.scalarKind) === isTextScalarKind(fields[i].scalarKind)
       )
     )
       continue

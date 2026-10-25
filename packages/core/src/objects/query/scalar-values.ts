@@ -112,8 +112,24 @@ function dateTime(value: unknown): number | null {
   return null
 }
 
+/**
+ * Code-point order, as SQLite's BINARY and PostgreSQL's "C" collation compare UTF-8 bytes.
+ * JavaScript's `<` compares UTF-16 code units, which puts a surrogate pair (U+10000 and above)
+ * before U+E000–U+FFFF; only that range needs its units remapped.
+ */
 function compareStrings(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
+  if (left === right) return 0
+
+  const length = Math.min(left.length, right.length)
+  let index = 0
+  while (index < length && left.charCodeAt(index) === right.charCodeAt(index)) index++
+  if (index === length) return left.length - right.length
+
+  return codePointRank(left.charCodeAt(index)) - codePointRank(right.charCodeAt(index))
+}
+
+function codePointRank(unit: number): number {
+  if (unit >= 0xe000) return unit - 0x800
+  if (unit >= 0xd800) return unit + 0x2000
+  return unit
 }

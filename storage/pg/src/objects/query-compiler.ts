@@ -1097,11 +1097,7 @@ function compileExpansionOrder(
     const direction = field.direction === "desc" ? "DESC" : "ASC"
     clauses.push(
       `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END ASC`,
-      `${
-        field.scalarKind === "decimal"
-          ? `(${jsonTextExpression(propertyColumn)})::numeric`
-          : `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
-      } ${direction}`
+      `${orderedValueExpression(field.scalarKind, propertyColumn)} ${direction}`
     )
     args.push(field.propertyId, field.propertyId, field.propertyId)
   }
@@ -1517,6 +1513,14 @@ export function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredi
           args: [predicate.propertyId, predicate.propertyId, predicate.value],
         }
       }
+      if (isTextScalarKind(predicate.scalarKind)) {
+        // The null rank makes the range a prefix of the property's sort index keys.
+        return {
+          sql: `(${nullRankExpression()} = 0 AND ${orderedValueExpression(predicate.scalarKind)} ${op} ?::text)`,
+          args: [predicate.propertyId, predicate.propertyId, predicate.propertyId, predicate.value],
+        }
+      }
+
       return {
         sql: `${jsonValueExpression()} ${op} ?::text::jsonb`,
         args: [predicate.propertyId, jsonbValue(predicate.value)],
@@ -1840,13 +1844,13 @@ function compileKeysetRanges(
     })
     if (value.nullish) return
     const expression = compiledPropertyValueExpression(field, propertyColumn)
-    const parameter = field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"
-    const args = [
-      field.propertyId,
-      field.scalarKind === "decimal" ? value.value : jsonbValue(value.value),
-    ]
-    addRange({ sql: `${expression} ${field.direction === "desc" ? "<" : ">"} ${parameter}`, args })
-    prefix.push({ sql: `${expression} = ${parameter}`, args })
+    const parameter = compiledPropertyParameter(field, value.value)
+    const args = [field.propertyId, parameter.value]
+    addRange({
+      sql: `${expression} ${field.direction === "desc" ? "<" : ">"} ${parameter.sql}`,
+      args,
+    })
+    prefix.push({ sql: `${expression} = ${parameter.sql}`, args })
   })
   return ranges
 }
@@ -1915,14 +1919,11 @@ function compileFieldEquality(
     }
   }
 
+  const parameter = compiledPropertyParameter(field, cursor.value)
+
   return {
-    sql: `(${jsonTypeExpression(propertyColumn)} IS NOT NULL AND ${jsonTypeExpression(propertyColumn)} != 'null' AND ${compiledPropertyValueExpression(field, propertyColumn)} = ${field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"})`,
-    args: [
-      field.propertyId,
-      field.propertyId,
-      field.propertyId,
-      field.scalarKind === "decimal" ? cursor.value : jsonbValue(cursor.value),
-    ],
+    sql: `(${jsonTypeExpression(propertyColumn)} IS NOT NULL AND ${jsonTypeExpression(propertyColumn)} != 'null' AND ${compiledPropertyValueExpression(field, propertyColumn)} = ${parameter.sql})`,
+    args: [field.propertyId, field.propertyId, field.propertyId, parameter.value],
   }
 }
 
@@ -1942,16 +1943,17 @@ function compileFieldAfter(
 
   const rankSql = `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END`
   const valueOperator = field.direction === "desc" ? "<" : ">"
+  const parameter = compiledPropertyParameter(field, cursor.value)
 
   return {
-    sql: `(${rankSql} > 0 OR (${rankSql} = 0 AND ${compiledPropertyValueExpression(field, propertyColumn)} ${valueOperator} ${field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"}))`,
+    sql: `(${rankSql} > 0 OR (${rankSql} = 0 AND ${compiledPropertyValueExpression(field, propertyColumn)} ${valueOperator} ${parameter.sql}))`,
     args: [
       field.propertyId,
       field.propertyId,
       field.propertyId,
       field.propertyId,
       field.propertyId,
-      field.scalarKind === "decimal" ? cursor.value : jsonbValue(cursor.value),
+      parameter.value,
     ],
   }
 }
@@ -2041,9 +2043,39 @@ function compiledPropertyValueExpression(
   field: Extract<CompiledOrderField, { kind: "property" }>,
   propertyColumn = "properties"
 ): string {
-  return field.scalarKind === "decimal"
-    ? `(${jsonTextExpression(propertyColumn)})::numeric`
-    : `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
+  return orderedValueExpression(field.scalarKind, propertyColumn)
+}
+
+/** The parameter a cursor value binds to, typed like `compiledPropertyValueExpression`. */
+function compiledPropertyParameter(
+  field: Extract<CompiledOrderField, { kind: "property" }>,
+  value: unknown
+): { sql: string; value: unknown } {
+  if (field.scalarKind === "decimal") return { sql: "?::numeric", value }
+  if (isTextScalarKind(field.scalarKind)) return { sql: "?::text", value }
+  return { sql: "?::text::jsonb", value: jsonbValue(value) }
+}
+
+/**
+ * The expression a property sorts and range-compares by. Strings compare by code point, as
+ * SQLite and the in-memory store do: JSONB and the database's own collation would order case and
+ * accents linguistically. Sort indexes repeat this expression, collation included.
+ */
+function orderedValueExpression(
+  scalarKind: QueryScalarKind | undefined,
+  propertyColumn = "properties"
+): string {
+  if (scalarKind === "decimal") return `(${jsonTextExpression(propertyColumn)})::numeric`
+  if (isTextScalarKind(scalarKind)) return `((${jsonTextExpression(propertyColumn)}) COLLATE "C")`
+  return `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
+}
+
+export function isTextScalarKind(scalarKind: QueryScalarKind | undefined): boolean {
+  return scalarKind === "string" || scalarKind === "uuid"
+}
+
+function nullRankExpression(propertyColumn = "properties"): string {
+  return `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END`
 }
 
 function columnExpression(
