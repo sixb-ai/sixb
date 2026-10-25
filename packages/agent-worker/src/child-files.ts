@@ -44,6 +44,11 @@ const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", "child
 const SANDBOX_TIMEOUT_MS = 30_000
 const { maxFiles, fileMaxBytes, totalMaxBytes } = SANDBOX_ATTACHMENT_LIMITS
 
+/** Whether `path`, relative to the working directory, is in the run context `.sixb/agent`. */
+function isRunFile(path: string): boolean {
+  return path === ".sixb/agent" || path.startsWith(".sixb/agent/")
+}
+
 /** A file a child returned, copied into its parent's sandbox for the turn. */
 export interface InstalledChildFile extends SubagentRunFile {
   /** Relative to the working directory. */
@@ -171,13 +176,20 @@ export async function prepareHandedFiles(input: {
   readonly projectId: string
   readonly parentRunId: string
   readonly files: readonly SubagentRunFile[]
+  /**
+   * The files are in the sandbox already, as a resumed workspace kept them: listed, not copied,
+   * so what the child changed in them stays. Those under `.sixb/agent` are copied again: every
+   * run starts without that directory.
+   */
+  readonly inSandbox?: boolean
   readonly blobStorage: BlobStorage
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const signal = input.signal ?? NEVER_ABORTED_SIGNAL
   const sandboxFiles: PreparedAgentAttachmentContext["sandboxFiles"][number][] = []
 
-  for (const { path, fileRef } of input.files) {
+  const copied = input.inSandbox ? input.files.filter((file) => isRunFile(file.path)) : input.files
+  for (const { path, fileRef } of copied) {
     const stat = await waitForAbort(input.blobStorage.stat(fileRef.blobId), signal)
     if (stat?.digest !== fileRef.digest) {
       throw new Error(
@@ -398,7 +410,7 @@ async function handedSourcesAt(
  * run's API address. Checked where a path really is; a copy the Agent makes with `cp` is not.
  */
 function assertHandable(relativePath: string, requested: string): void {
-  const runFile = relativePath === ".sixb/agent" || relativePath.startsWith(".sixb/agent/")
+  const runFile = isRunFile(relativePath)
   const handed = HANDED_RUN_DIRECTORIES.some((directory) =>
     `${relativePath}/`.startsWith(directory)
   )

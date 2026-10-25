@@ -2,14 +2,18 @@ import { createHash } from "node:crypto"
 import type { Sandbox, SandboxDefinition, SandboxEnvironment, SandboxFactory } from "@sixb/core"
 import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
-import type { AgentThreadRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
+import type {
+  AgentThreadRecord,
+  ConversationAgentRunRecord,
+  SubagentRunRecord,
+} from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
 import {
   AgentEnvironmentSaveError,
   AgentExecutionLostError,
   assertRunExecutionOwned,
 } from "./errors"
-import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
+import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
@@ -17,33 +21,68 @@ import { prepareWorkspaceRunFiles, WorkspaceRunFilesConflictError } from "./work
 
 interface PersistentRunSandboxInput {
   readonly context: AgentExecutionContext
+  /** A conversation's recipe. A sub-agent's thread has none: its workspace is blank. */
   readonly definition?: SandboxDefinition
   readonly thread: AgentThreadRecord
-  readonly run: ConversationAgentRunRecord
+  readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly signal: AbortSignal
   readonly onAuthFailure: (error: Error) => void
 }
 
+/** A thread's workspace, as one run opened it. */
+export interface PersistentRunSandbox extends RunSandbox {
+  /**
+   * Whether the run found the workspace its thread's last run saved. False when it was created,
+   * for the thread's first run or because the saved files were lost.
+   */
+  readonly resumed: boolean
+}
+
 /**
- * A thread's workspace, kept across its runs: created by the first run from the resolved recipe,
- * resumed by each later one, and saved before every run's terminal write. Never destroyed.
+ * A thread's workspace, kept across its runs: created by the first run, resumed by each later one,
+ * and saved before every run's terminal write. A conversation's is prepared from the resolved
+ * recipe and never destroyed. A sub-agent's is blank, kept while it pauses, and destroyed by a run
+ * that ends without pausing.
  *
  * Resolve current authority before taking any provider action; never trust guest metadata.
  */
-export async function persistentRunSandbox(input: PersistentRunSandboxInput): Promise<RunSandbox> {
-  const { context, definition, thread, signal } = input
+export async function persistentRunSandbox(
+  input: PersistentRunSandboxInput
+): Promise<PersistentRunSandbox> {
+  const { context, signal } = input
   const factory = context.sandboxes
-  if (!definition || !thread.sandboxParams || typeof factory.resume !== "function") {
+  if (typeof factory.resume !== "function") {
     throw sandboxError("requires a configured recipe and persistent sandbox provider.")
   }
-  const recipe = structuredClone(
+  const recipe = await resolveRecipe(input)
+  signal.throwIfAborted()
+  const session = new PersistentSandboxSession(input, recipe, factory.resume.bind(factory))
+
+  // A sub-agent's first run creates a blank workspace its prompt says nothing about: it boots
+  // while the model starts, as an ephemeral sandbox does.
+  const { thread } = input
+  return thread.kind === "subagent" && !thread.sandboxState ? session.openLazily() : session.open()
+}
+
+/** Whether a sub-agent's workspace is kept while it pauses: only on a provider that resumes. */
+export function keepsSubagentWorkspace(factory: SandboxFactory): boolean {
+  return typeof factory.resume === "function"
+}
+
+async function resolveRecipe(input: PersistentRunSandboxInput): Promise<SandboxEnvironment> {
+  const { context, definition, thread, signal } = input
+  // No source, setup or env, and only the Sixb API on the network: an ephemeral child's sandbox.
+  if (thread.kind === "subagent") return {}
+
+  if (!definition || !thread.sandboxParams) {
+    throw sandboxError("requires a configured recipe and persistent sandbox provider.")
+  }
+  return structuredClone(
     await waitForAbort(
       bounded(definition.resolve({ params: thread.sandboxParams, sixb: context.sixb })),
       signal
     )
   )
-  signal.throwIfAborted()
-  return new PersistentSandboxSession(input, recipe, factory.resume.bind(factory)).open()
 }
 
 /** One execution owns acquisition, guarded operations and preservation of its provider session. */
@@ -53,6 +92,7 @@ class PersistentSandboxSession {
   private readonly executionToken: string
   private name: string
   private initialized = false
+  private resumed = false
   private resetAt: string | undefined
   private readonly pending = new Set<Promise<unknown>>()
   private saving: Promise<void> | undefined
@@ -85,7 +125,12 @@ class PersistentSandboxSession {
       .digest("hex")
     if (!run.execution?.token) throw new AgentExecutionLostError(run.id)
     this.executionToken = run.execution.token
-    this.name = thread.sandboxState?.name ?? createAgentThreadSandboxName(context.id, thread.id)
+    // A sub-agent's workspace that its last run left unsaved, destroyed or in doubt starts again
+    // under a new name, from its handed files and out/: nobody could recreate it.
+    const state = thread.sandboxState
+    const reusable =
+      state && (thread.kind !== "subagent" || state.status === "new" || state.status === "ready")
+    this.name = reusable ? state.name : createAgentThreadSandboxName(context.id, thread.id)
     if (
       thread.sandboxState?.sourceFingerprint &&
       thread.sandboxState.sourceFingerprint !== this.sourceFingerprint
@@ -96,7 +141,7 @@ class PersistentSandboxSession {
     }
   }
 
-  async open(): Promise<RunSandbox> {
+  async open(): Promise<PersistentRunSandbox> {
     await this.access.authorize()
     await this.acquireOwnership()
     let session: Sandbox | undefined
@@ -115,6 +160,28 @@ class PersistentSandboxSession {
       throw acquisitionError(error)
     }
     return this.runSandbox(session)
+  }
+
+  /** Open on the first `acquire()`, without the run waiting for it before its first model call. */
+  openLazily(): PersistentRunSandbox {
+    let opened: Promise<PersistentRunSandbox> | undefined
+    let finalized = false
+
+    return {
+      waitBeforeModel: false,
+      resumed: false,
+      acquire: () => {
+        if (finalized) return Promise.reject(sandboxError("is being saved."))
+        opened ??= this.open()
+        return opened.then((sandbox) => sandbox.acquire())
+      },
+      beforeFinalize: async (options) => {
+        finalized = true
+        // Nothing to keep before it opened, nor once its opening failed: that quarantined it.
+        const sandbox = await opened?.catch(() => undefined)
+        await sandbox?.beforeFinalize?.(options)
+      },
+    }
   }
 
   private async acquireOwnership(): Promise<void> {
@@ -142,16 +209,18 @@ class PersistentSandboxSession {
   private async createOrResume(): Promise<Sandbox> {
     await this.assertCanContinue()
     try {
-      return await this.wait(
-        this.initialized
-          ? this.resume(this.name, {
-              ...this.access.sessionOptions,
-              // An empty list confirms that this run's recipe needs no source auth.
-              requestCredentials:
-                this.access.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
-            })
-          : this.create()
+      if (!this.initialized) return await this.wait(this.create())
+
+      const resumed = await this.wait(
+        this.resume(this.name, {
+          ...this.access.sessionOptions,
+          // An empty list confirms that this run's recipe needs no source auth.
+          requestCredentials:
+            this.access.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
+        })
       )
+      this.resumed = true
+      return resumed
     } catch (error) {
       if (!this.initialized || !(error instanceof SandboxStateUnavailableError)) throw error
       await this.replaceLostState()
@@ -203,22 +272,31 @@ class PersistentSandboxSession {
     }
   }
 
-  private runSandbox(session: Sandbox): RunSandbox {
+  private runSandbox(session: Sandbox): PersistentRunSandbox {
     const acquired: AcquiredRunSandbox = {
       sandbox: this.guard(session),
       env: this.access.sessionOptions.env ?? {},
-      promptContext: this.access.promptContext(session, "persistent"),
+      // A sub-agent's prompt describes no workspace, as for its ephemeral sandbox: it finds its
+      // files where it left them, and is told only when they were lost.
+      ...(this.input.thread.kind === "subagent"
+        ? {}
+        : { promptContext: this.access.promptContext(session, "persistent") }),
       resetAt: this.resetAt,
     }
-    // No release: the thread keeps its sandbox. beforeFinalize saves or quarantines it; a lost
-    // execution leaves it to the run's current owner.
+    // No release: the thread keeps its sandbox. beforeFinalize saves or quarantines it, or destroys
+    // a sub-agent's that ended; a lost execution leaves it to the run's current owner.
     return {
       waitBeforeModel: true,
+      resumed: this.resumed,
       acquire: async () => acquired,
-      beforeFinalize: () => {
+      beforeFinalize: (options?: BeforeFinalizeOptions) => {
         if (!this.saving) {
           this.closed = true
-          this.saving = this.preserve(session)
+          this.saving = options?.discard
+            ? this.discard(session)
+            : this.input.thread.kind === "subagent"
+              ? this.keepPaused(session)
+              : this.preserve(session)
         }
         return this.saving
       },
@@ -299,6 +377,59 @@ class PersistentSandboxSession {
       }
       if (error instanceof AgentExecutionLostError) throw error
       throw new AgentEnvironmentSaveError()
+    }
+  }
+
+  /**
+   * Save the workspace of a sub-agent that pauses, which pauses whatever happens here: its handed
+   * files and out/ are stored, so a continuation that finds the workspace unsaved starts again
+   * from them. A stopped VM that could not be saved is destroyed.
+   */
+  private async keepPaused(session: Sandbox): Promise<void> {
+    try {
+      await this.preserve(session)
+    } catch (error) {
+      if (error instanceof AgentExecutionLostError) throw error
+
+      console.error(
+        `[SixbAgentWorker] The workspace of thread '${this.input.thread.id}' could not be saved; its continuation starts again from its handed files and out/.`
+      )
+      await bounded(session.destroy()).catch((cleanup: unknown) => {
+        console.error(
+          `[SixbAgentWorker] The unsaved workspace of thread '${this.input.thread.id}' could not be destroyed; the sandbox provider's retention removes it.`,
+          cleanup
+        )
+      })
+    }
+  }
+
+  /**
+   * Destroy the workspace of a sub-agent run that ends without pausing: answered, failed or
+   * stopped. Its files are mid-work, never a point its thread goes on from; a later continuation
+   * (a retried turn, an answer after a dead attempt) starts again from the handed files and the
+   * paused run's out/. The run's outcome stands whatever happens here, so a failure is reported
+   * and left to the provider's retention.
+   */
+  private async discard(session: Sandbox): Promise<void> {
+    try {
+      await bounded(Promise.allSettled([...this.pending]))
+      await this.assertOwner()
+      await this.access.close()
+      await bounded(session.destroy())
+      await this.settle("unavailable")
+    } catch (error) {
+      if (error instanceof AgentExecutionLostError) throw error
+
+      console.error(
+        `[SixbAgentWorker] The workspace of thread '${this.input.thread.id}' could not be destroyed; the sandbox provider's retention removes it.`,
+        error
+      )
+      try {
+        await this.assertOwner()
+        await this.settle("blocked")
+      } catch {
+        // A state left busy is started again by the thread's next run, as a blocked one is.
+      }
     }
   }
 

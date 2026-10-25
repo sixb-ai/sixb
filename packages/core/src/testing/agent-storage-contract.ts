@@ -1257,6 +1257,77 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("keeps a sub-agent's workspace on its thread, fenced by the thread's active run", async () => {
+      // Removal proofs: require `sandboxParams` again in transitionAgentThreadSandbox, and the
+      // child's acquire is refused as unconfigured; fence on `run.kind === "conversation"` again,
+      // and it is refused as lost; drop `startSubagentWorkspaceAgain`, and the destroyed
+      // workspace cannot be started again.
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({
+          projectId,
+          id: "child_1",
+          execution: execution("child_token", new Date("2099-01-01")),
+        })
+        const acquire = {
+          projectId,
+          id: "thread_child_1",
+          action: "acquire" as const,
+          runId: "child_1",
+          executionToken: "child_token",
+          name: "child-workspace",
+          sourceFingerprint: "b".repeat(64),
+        }
+
+        // The turn it runs under does not own the child's thread.
+        await expectAgentError(
+          storage.threads.transitionSandbox({
+            ...acquire,
+            runId: "parent_1",
+            executionToken: "parent_token",
+          }),
+          "execution_lost"
+        )
+        await expect(storage.threads.transitionSandbox(acquire)).resolves.toMatchObject({
+          name: "child-workspace",
+          status: "busy",
+          owner: { runId: "child_1", executionToken: "child_token" },
+        })
+        await storage.threads.transitionSandbox({
+          ...acquire,
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        await expect(
+          storage.threads.getById({ projectId, id: "thread_child_1" })
+        ).resolves.toMatchObject({
+          sandboxState: { name: "child-workspace", status: "ready", initialized: true },
+        })
+
+        // A run that destroyed it, or left it unsaved, leaves the next a fresh one to start.
+        await storage.threads.transitionSandbox(acquire)
+        await storage.threads.transitionSandbox({
+          ...acquire,
+          action: "settle",
+          status: "unavailable",
+          initialized: true,
+        })
+        await expectAgentError(storage.threads.transitionSandbox(acquire), "invalid_state")
+        await expect(
+          storage.threads.transitionSandbox({ ...acquire, name: "child-workspace-2" })
+        ).resolves.toEqual({
+          name: "child-workspace-2",
+          status: "busy",
+          initialized: false,
+          resetAt: expect.any(String),
+          sourceFingerprint: acquire.sourceFingerprint,
+          owner: { runId: "child_1", executionToken: "child_token" },
+        })
+      })
+    })
+
     test("runs one child run at a time in its thread", async () => {
       // Removal proof: drop the active-run check on a child's thread; `child_2` is admitted while
       // `child_1` still runs.

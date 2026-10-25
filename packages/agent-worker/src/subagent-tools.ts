@@ -69,6 +69,7 @@ import {
 } from "./child-questions"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
+import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import type { TurnChildren } from "./run-agent-turn"
 import { continuationTrigger } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
@@ -947,6 +948,7 @@ export class SubagentCoordinator {
     const parts = continuationTrigger({
       goesOnWith,
       paused,
+      keepsWorkspace: keepsSubagentWorkspace(this.context.sandboxes),
       createdAt,
       timeZone: spec.timeZone ?? this.context.timeZone,
     })

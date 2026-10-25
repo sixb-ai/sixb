@@ -18,7 +18,7 @@ import type {
   SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
-import { waitForAbort } from "./abort"
+import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
@@ -43,8 +43,8 @@ import { assertExecutionOwned, isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
-import { persistentRunSandbox } from "./persistent-run-sandbox"
-import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
+import { keepsSubagentWorkspace, persistentRunSandbox } from "./persistent-run-sandbox"
+import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
   AGENT_ARTIFACTS_MANIFEST,
@@ -75,7 +75,7 @@ export interface AgentExecutionEnvironment {
   /** The run's sandbox and file budget, for the files a parent and its children hand each other. */
   readonly runFiles: AgentRunFiles
   /** Confirm preservation before recording success, cancellation or failure. Idempotent. */
-  beforeFinalize(): Promise<void>
+  beforeFinalize(options?: BeforeFinalizeOptions): Promise<void>
   dispose(): Promise<void>
 }
 
@@ -265,19 +265,62 @@ export async function createConversationAgentEnvironment(
 }
 
 /**
- * Build an isolated environment for one fresh, headless child Agent. It knows the project as its
- * parent does (ontology docs, memory to read), holds the files its parent handed over at their
- * paths, and publishes into its conversation, as its own run.
+ * Build an isolated environment for one headless child Agent. It knows the project as its parent
+ * does (ontology docs, memory to read), holds the files its parent handed over at their paths, and
+ * publishes into its conversation, as its own run.
+ *
+ * On a provider that resumes sandboxes, its thread keeps its workspace while it pauses: the run
+ * that continues it finds every file where it was. Elsewhere, or once those files were lost, it
+ * starts blank, with the handed files and what the paused run left in `out/` given back.
  */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation } = input
+  const { context, run } = input
   const execution = run.execution
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
-  const files = subagentSandboxFiles(run, input.history.paused)
+
+  const workspace = keepsSubagentWorkspace(context.sandboxes)
+    ? await persistentRunSandbox({
+        context,
+        thread: input.thread,
+        run,
+        signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+        // A blank workspace issues no source credentials.
+        onAuthFailure: () => {},
+      })
+    : undefined
+  const sandbox = workspace ?? ephemeralRunSandbox({ context })
+
+  try {
+    return await startSubagentEnvironment({
+      ...input,
+      execution,
+      sandbox,
+      resumed: workspace?.resumed ?? false,
+    })
+  } catch (error) {
+    // Preparation failed before the worker got this environment: the child ends here, so its
+    // workspace goes, as the worker's failure path would destroy it. A lost execution must touch
+    // nothing.
+    if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.({ discard: true })
+    throw error
+  }
+}
+
+async function startSubagentEnvironment(
+  input: CreateSubagentEnvironmentInput & {
+    readonly execution: NonNullable<SubagentRunRecord["execution"]>
+    readonly sandbox: RunSandbox
+    /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
+    readonly resumed: boolean
+  }
+): Promise<AgentExecutionEnvironment> {
+  const { context, plan, run, conversation, execution, sandbox, resumed } = input
+  // Still listed, as handed over, but never copied over what the child made of them.
+  const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
   const [memory, handedContext, historyContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
@@ -287,6 +330,7 @@ export async function createSubagentEnvironment(
           projectId: context.id,
           parentRunId: run.parentRunId,
           files,
+          inSandbox: resumed,
           blobStorage: context.blobStorage,
           signal: input.signal,
         })
@@ -310,7 +354,7 @@ export async function createSubagentEnvironment(
 
   return startAgentEnvironment({
     mode: "subagent",
-    sandbox: ephemeralRunSandbox({ context }),
+    sandbox,
     sandboxSignal: input.signal,
     context,
     plan,
@@ -645,7 +689,8 @@ async function startAgentEnvironment(
     throw error
   }
 
-  const beforeFinalize = () => sandbox.beforeFinalize?.() ?? Promise.resolve()
+  const beforeFinalize = (options?: BeforeFinalizeOptions) =>
+    sandbox.beforeFinalize?.(options) ?? Promise.resolve()
   const artifacts =
     publishing && installedArtifacts
       ? { threadId: publishing.threadId, installed: installedArtifacts }
