@@ -230,6 +230,8 @@ function readsUnreadable(event: StoredDomainEvent, clearance: PropertyClearance)
     case "objects":
     case "telemetry":
       return clearance.unreadableType(event.payload.objectTypeId) !== undefined
+    case "rules":
+      return clearance.unreadableType(event.payload.subject.objectTypeId) !== undefined
     case "links":
       return (
         clearance.unreadableType(event.payload.sourceTypeId) !== undefined ||

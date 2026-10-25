@@ -155,7 +155,7 @@ An omitted property is absent, never `null`, so `null` keeps meaning an empty va
 | Search without `fields` | Searches the other default text fields |
 | Object events | `amount` omitted from `properties` and `propertyChanges` |
 | Object updates and deletions, when a dataset column is marked | Projected properties omitted unless the reader holds every marking a column declares |
-| Events of a type or link the reader cannot read | Not delivered |
+| Events, action runs, and rule states on a type or link the reader cannot read | Not delivered or listed |
 | File stored in `amount` | Not found |
 
 Dataset rows follow the same contract. Marked columns are left out of `columns` and of every row, even when requested:

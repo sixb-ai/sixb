@@ -310,6 +310,39 @@ describe("an object type whose key column carried a marking is unreadable", () =
     expect((await app.sales.actions.runs.list()).runs.map((run) => run.id)).toEqual([runId])
   })
 
+  // Reproduce: drop the rules case from the events runtime's readsUnreadable; the rule event is
+  // delivered. Drop the clearance filter from rules.states.list; the state is listed.
+  test("rule events and states on it are hidden", async () => {
+    const app = await deploy({ lineage: null })
+    const subject = { kind: "object" as const, objectTypeId: Invoice.id, primaryId: "inv-1" }
+
+    const [triggered] = await app.trusted.events.append({
+      events: [
+        {
+          type: "rule.triggered",
+          payload: { ruleId: "invoice-overdue", subject, triggeredAt: "2026-10-02T10:00:00.000Z" },
+        },
+      ],
+    })
+    if (triggered?.type !== "rule.triggered") throw new Error("Expected a rule event")
+    await app.host.storage.rules?.applyTriggered(triggered)
+
+    const rules = (events: readonly StoredDomainEvent[]) =>
+      events.filter((event) => event.topic === "rules")
+
+    expect(rules(await app.sales.events.read())).toEqual([])
+    expect(await app.sales.rules.states.list()).toEqual({ states: [], hasMore: false, total: 0 })
+
+    expect(rules(await app.finance.events.read())).toHaveLength(1)
+    expect((await app.finance.rules.states.list()).states).toEqual([
+      expect.objectContaining({ ruleId: "invoice-overdue", subject }),
+    ])
+
+    await app.fix()
+    expect(rules(await app.sales.events.read())).toHaveLength(1)
+    expect((await app.sales.rules.states.list()).total).toBe(1)
+  })
+
   // Reproduce: drop the try/catch around visible in the events runtime's subscribe; the batch is
   // dropped without a warning.
   test("a subscription drops, with a warning, a batch whose markings cannot be enforced", async () => {

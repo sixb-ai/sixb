@@ -543,7 +543,8 @@ describe("events follow view conditions", () => {
 
   // Reproduce: drop the hiddenBy check for "objects" in decide() of events/view-conditions.ts;
   // the ticket's update is delivered, which reveals that its marked notes read "vip". Dropping it
-  // from namedObjects() fails the link and rule events' read instead of withholding them.
+  // from namedObjects() fails the link and rule events' read instead of withholding them. Dropping
+  // it from rules.states.list in rules/execution.ts fails the listing instead of leaving it empty.
   test("a condition that reads a property the reader is not cleared for hides its type", async () => {
     const deployment = await deploy()
     const { host, trusted, sixbFor } = deployment
@@ -571,6 +572,9 @@ describe("events follow view conditions", () => {
     markAppliedNotes(host)
 
     expect(await shown(sixbFor(["noted"]))).toEqual([])
+    expect(
+      await sixbFor(["noted"]).rules.states.list({ objectTypeId: Ticket.id, primaryId: "t-1" })
+    ).toEqual({ states: [], hasMore: false, total: 0 })
   })
 
   // Reproduce: subscribe without filtering through `visible` in events/execution.ts; the closed
