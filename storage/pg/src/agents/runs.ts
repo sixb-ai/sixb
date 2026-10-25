@@ -333,7 +333,12 @@ export class PgAgentRunStore implements AgentRunStore {
       const run = await this.lockRunning(tx, input.projectId, input.id)
 
       if (input.status === "succeeded" && run.kind === "subagent") {
-        assertSubagentRunResult(input.result, run.id, "SixbPg")
+        assertSubagentRunResult(
+          input.result,
+          run.id,
+          "SixbPg",
+          input.finishReason === "awaiting_approval"
+        )
       }
       if (
         input.status === "succeeded" &&

@@ -699,7 +699,12 @@ class InMemoryAgentRunStore implements AgentRunStore {
       )
     }
     if (input.status === "succeeded" && run.kind === "subagent") {
-      assertSubagentRunResult(input.result, run.id)
+      assertSubagentRunResult(
+        input.result,
+        run.id,
+        "Sixb",
+        input.finishReason === "awaiting_approval"
+      )
     }
     if (input.status === "succeeded" && run.kind === "conversation" && input.result !== undefined) {
       throw new AgentStorageError(

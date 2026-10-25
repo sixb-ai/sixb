@@ -451,6 +451,37 @@ export function runAgentApprovalStorageContractSuite<
       })
     })
 
+    test("a child paused on its held call succeeds before it answers", async () => {
+      await withStorage(async (storage) => {
+        await startTurn(storage)
+        await startChild(storage)
+        const paused = {
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          finishReason: "awaiting_approval",
+          result: { text: "" },
+        } as const
+
+        // Without an answer, only a paused child succeeds, and only while it holds a call.
+        await expectAgentError(
+          storage.agents.runs.finish({ ...paused, finishReason: "stop" }),
+          "invalid_input"
+        )
+        await expectAgentError(storage.agents.runs.finish(paused), "invalid_input")
+        await storage.agents.approvals.request(
+          approvalInput({ callerRunId: "child_1", executionToken: "child_token" })
+        )
+
+        expect(await storage.agents.runs.finish(paused)).toMatchObject({
+          status: "succeeded",
+          finishReason: "awaiting_approval",
+          result: { text: "" },
+        })
+      })
+    })
+
     test("a turn pauses for approval only while it holds a call", async () => {
       await withStorage(async (storage) => {
         await startTurn(storage)

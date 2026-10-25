@@ -389,7 +389,12 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
       }
       if (input.status === "succeeded" && run.kind === "subagent") {
-        assertSubagentRunResult(input.result, run.id, "SixbSqlite")
+        assertSubagentRunResult(
+          input.result,
+          run.id,
+          "SixbSqlite",
+          input.finishReason === "awaiting_approval"
+        )
       }
       if (
         input.status === "succeeded" &&
