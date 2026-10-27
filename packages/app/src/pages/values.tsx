@@ -23,7 +23,15 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { Box, Download, Eye, FileIcon, UserRound } from "lucide-react"
-import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { Link } from "react-router-dom"
 import { objectHref } from "./routes"
 import { CopyButton } from "./section-ui"
@@ -503,6 +511,12 @@ function Field({
   )
 }
 
+/**
+ * Whether an object reference links to its page. A view many people read, such as an agent's
+ * approval card, names the object without sending its readers to the page.
+ */
+export const ObjectRefLinksContext = createContext(true)
+
 function Leaf({
   value,
   position,
@@ -515,8 +529,16 @@ function Leaf({
   readonly path: readonly string[]
 }) {
   const locale = useLocale()
+  const objectLinks = useContext(ObjectRefLinksContext)
   if (position.objectRef) {
     const { objectTypeId, primaryId } = position.objectRef
+    if (!objectLinks) {
+      return (
+        <span className="break-words">
+          {objectTypeId} <span className="text-muted-foreground">{primaryId}</span>
+        </span>
+      )
+    }
     return (
       <Link
         to={objectHref(objectTypeId, primaryId)}

@@ -36,31 +36,29 @@ function thread(id: string, title: string): AgentThread {
 
 const current = thread("current", "Current customer research")
 
-test("compact chat exposes thread history and a direct new-thread action", () => {
-  const html = renderPanel({ compact: true, currentThread: current }, { threadId: current.id })
-
-  expect(html).toContain('aria-label="Thread history. Current: Current customer research"')
-  expect(html).toContain('aria-label="New thread"')
-  expect(html).not.toContain('aria-label="Recent chats"')
-  expect(html).not.toContain(">Operations Assistant</span>")
-  // An unsent conversation is a new thread.
-  expect(renderPanel({ compact: true })).toContain(
-    'aria-label="Thread history. Current: New thread"'
+// Removal proof: drop `threadsButton` from the panel's header; no way to the page shows.
+test("compact chat offers the threads page and a direct new-thread action", () => {
+  const html = renderPanel(
+    { compact: true, currentThread: current, onOpenThreads: noop },
+    { threadId: current.id }
   )
+
+  expect(html).toContain('aria-label="All threads"')
+  expect(html).toContain('aria-label="New thread"')
+  expect(html).not.toContain(">Operations Assistant</span>")
+  // A host with no page to open has no button for it.
+  expect(renderPanel({ compact: true })).not.toContain('aria-label="All threads"')
 })
 
-test("thread history shows a rotating active count while runs are in flight", () => {
+test("the threads button keeps its icon and marks runs in flight", () => {
   const html = renderPanel(
-    { compact: true, currentThread: current, runningThreadCount: 2 },
+    { compact: true, currentThread: current, runningThreadCount: 2, onOpenThreads: noop },
     { threadId: current.id }
   )
 
   expect(html).toContain('data-active-thread-count="2"')
-  expect(html).toContain("animate-spin")
-  expect(html).toContain(
-    'aria-label="2 threads running. Open thread history. Current: Current customer research"'
-  )
-  expect(html).not.toContain("lucide-history")
+  expect(html).toContain('aria-label="All threads. 2 running"')
+  expect(html).toContain("lucide-history")
 })
 
 test("an empty conversation shows host welcome content in place of the agent name", () => {
@@ -273,11 +271,9 @@ function renderPanel(
           composer,
           messagesLoading: false,
           messagesError: null,
-          agentThreads: [thread("recent", "Recent customer research")],
           currentThread: null,
           runningThreadCount: 0,
           onNewChat: noop,
-          onSelectThread: noop,
           ...props,
         })
       )

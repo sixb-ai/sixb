@@ -8,7 +8,6 @@ import {
   getAgentPreferencesQueryKey,
   getAgentThreadOptions,
   getAgentThreadQueryKey,
-  listAgentApprovalsOptions,
   listAgentApprovalsQueryKey,
   listAgentThreadApprovalsOptions,
   listAgentThreadApprovalsQueryKey,
@@ -16,7 +15,6 @@ import {
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
-  listAgentThreadsInfiniteOptions,
   listAgentThreadsQueryKey,
   listModelsOptions,
   postAgentThreadMessageMutation,
@@ -27,7 +25,7 @@ import {
   useAgentActivityStream,
 } from "@sixb/client/hooks"
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser } from "../../session"
 import {
@@ -75,8 +73,8 @@ import {
   threadOwner,
   userPrincipal,
 } from "../sharing"
-import { THREAD_PAGE_SIZE } from "../thread-navigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
+import { useAgentThreadLists } from "./use-thread-lists"
 import { useThreadStream } from "./use-thread-stream"
 
 interface PendingSend {
@@ -91,23 +89,8 @@ interface PendingSend {
 /** Keys of the messages the reader sends, so each keeps its key once it is saved. */
 let sentMessageCount = 0
 
-const THREAD_LIST_QUERY = {
-  limit: String(THREAD_PAGE_SIZE),
-  order: "desc" as const,
-}
-
 /** Enough of a thread's held calls for every card: a turn holds a few, and a thread few turns. */
 const THREAD_APPROVALS_QUERY = { limit: "200" }
-
-/** The calls waiting for the reader across threads, for the thread list. */
-const PENDING_APPROVALS_QUERY = { status: "pending" as const, limit: "200" }
-
-/** The conversations others shared with the reader: one page, newest first. */
-const SHARED_THREAD_LIST_QUERY = {
-  sharedWithMe: "true" as const,
-  limit: String(THREAD_PAGE_SIZE),
-  order: "desc" as const,
-}
 
 const MODEL_PREFERENCE_KEY = "sixb.agent-ui.model-preference"
 const MODEL_PINS_KEY = "sixb.agent-ui.model-pins"
@@ -149,9 +132,7 @@ export type ConversationComposerProps = Pick<
   | "draftContext"
   | "draftNonce"
   | "approvalMode"
-  | "defaultApprovalMode"
   | "onApprovalModeChange"
-  | "onMakeApprovalModeDefault"
   | "awaitingApproval"
 >
 
@@ -218,37 +199,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   // The project activity feed is primary. Poll only as a focus-aware recovery path while the
   // socket is unavailable, rather than opening one connection per background thread.
   const recoveryPollMs = !activityStream.connected || activityStream.error ? 10_000 : false
-  const threadsQuery = useInfiniteQuery({
-    ...listAgentThreadsInfiniteOptions({ query: THREAD_LIST_QUERY }),
-    initialPageParam: { query: THREAD_LIST_QUERY },
-    getNextPageParam: (lastPage, pages) => {
-      if (!lastPage.hasMore) return undefined
-
-      return {
-        query: {
-          ...THREAD_LIST_QUERY,
-          offset: String(pages.length * THREAD_PAGE_SIZE),
-        },
-      }
-    },
+  const { threads, sharedThreads, waitingThreadIds } = useAgentThreadLists({
     refetchInterval: recoveryPollMs,
-  })
-  // Nothing announces a new share or a removal: read the list again when the reader comes back.
-  const sharedThreadsQuery = useInfiniteQuery({
-    ...listAgentThreadsInfiniteOptions({ query: SHARED_THREAD_LIST_QUERY }),
-    initialPageParam: { query: SHARED_THREAD_LIST_QUERY },
-    getNextPageParam: (lastPage, pages) => {
-      if (!lastPage.hasMore) return undefined
-
-      return {
-        query: {
-          ...SHARED_THREAD_LIST_QUERY,
-          offset: String(pages.length * THREAD_PAGE_SIZE),
-        },
-      }
-    },
-    refetchInterval: recoveryPollMs,
-    refetchOnWindowFocus: true,
   })
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
@@ -265,16 +217,6 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   )
   const selectedModel = modelSelection.model
   const selectedReasoning = modelSelection.reasoning
-  const threads = useMemo(
-    () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
-    [threadsQuery.data]
-  )
-
-  const sharedThreads = useMemo(
-    () => sharedThreadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
-    [sharedThreadsQuery.data]
-  )
-
   const threadQuery = useQuery({
     ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
     enabled: threadId !== null,
@@ -346,19 +288,6 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     )
     return pending.length === 0 ? read : [...read, ...pending]
   }, [threadId, approvalsQuery.data, pendingHereQuery.data])
-  const pendingApprovalsQuery = useQuery({
-    ...listAgentApprovalsOptions({ query: PENDING_APPROVALS_QUERY }),
-    refetchInterval: recoveryPollMs,
-    retry: false,
-  })
-  /** The threads where a call waits for the reader. */
-  const waitingThreadIds = useMemo(
-    () =>
-      new Set(
-        (pendingApprovalsQuery.data?.approvals ?? []).map((approval) => approval.threadId)
-      ) as ReadonlySet<string>,
-    [pendingApprovalsQuery.data]
-  )
 
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUserMessage | null>(null)
@@ -668,9 +597,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   /**
    * What the reader's next turns here may change without asking. In a thread it is kept as their
    * own choice there, on every device; in a new conversation, until its first message makes one.
+   * Either way it becomes their default too, so the next conversation starts where they left off.
    */
   const setApprovalMode = (mode: AgentApprovalMode) => {
     setChosenApprovalMode({ threadId, mode })
+    if (mode !== defaultApprovalMode) setDefaultApprovalMode(mode)
     if (threadId === null) return
 
     // Saves run one after the other: until the last choice is saved, the chip keeps showing it.
@@ -831,8 +762,6 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     return () => window.removeEventListener("storage", follow)
   }, [])
 
-  const agentThreads = threads.filter((entry) => entry.id !== threadId)
-
   const sandboxRecovery =
     thread?.sandboxState &&
     !isRunning &&
@@ -881,6 +810,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     isRunning,
     sandboxRecovery: Boolean(sandboxRecovery),
     messages: savedMessages,
+    latestRun,
   })
 
   const reader = user
@@ -893,6 +823,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     reader,
     pending: pendingUser && pendingUser.threadId === threadId ? pendingUser : null,
     sentKeys,
+    runs,
     live,
     presentation,
   })
@@ -1030,9 +961,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     draftContext: draftReseed.context,
     draftNonce: draftReseed.nonce,
     approvalMode,
-    defaultApprovalMode,
     onApprovalModeChange: setApprovalMode,
-    onMakeApprovalModeDefault: setDefaultApprovalMode,
     awaitingApproval,
   }
 
@@ -1067,25 +996,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     selectReasoning,
     resetReasoning,
     resetModelSelection,
-    threads,
     /** Threads with a run in progress, counting this one while its run starts. */
     runningThreadCount,
-    threadsError: threadsQuery.isError,
-    threadsHasMore: threadsQuery.hasNextPage,
-    threadsLoadingMore: threadsQuery.isFetchingNextPage,
-    threadsLoadMoreError: threadsQuery.isFetchNextPageError,
-    loadMoreThreads: () => threadsQuery.fetchNextPage(),
     threadUnavailable,
     currentAgent,
     currentThread: thread,
-    agentThreads,
-    sharedThreads,
-    sharedThreadsTotal: sharedThreadsQuery.data?.pages[0]?.total ?? 0,
-    sharedThreadsError: sharedThreadsQuery.isError,
-    sharedThreadsHasMore: sharedThreadsQuery.hasNextPage,
-    sharedThreadsLoadingMore: sharedThreadsQuery.isFetchingNextPage,
-    sharedThreadsLoadMoreError: sharedThreadsQuery.isFetchNextPageError,
-    loadMoreSharedThreads: () => sharedThreadsQuery.fetchNextPage(),
     access,
     user,
     removedFromThread,

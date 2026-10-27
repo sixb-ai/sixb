@@ -21,12 +21,12 @@ const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
 export function OperationsAssistant() {
   const location = useLocation()
   const navigate = useNavigate()
-  const conversationRoute = useMatch("/chat/:id")
-  const fullPage = conversationRoute !== null
+  const threadRoute = useMatch("/threads/:id")
+  const fullPage = threadRoute !== null
   const currentLocation = `${location.pathname}${location.search}${location.hash}`
   const lastWorkspaceLocation = useRef("/service-cases")
   useEffect(() => {
-    if (!fullPage && location.pathname !== "/" && !location.pathname.startsWith("/agents")) {
+    if (!fullPage && location.pathname !== "/" && location.pathname !== "/threads") {
       lastWorkspaceLocation.current = currentLocation
     }
   }, [currentLocation, fullPage, location.pathname])
@@ -39,7 +39,8 @@ export function OperationsAssistant() {
     value: { path: location.pathname, query: location.search },
   })
   const context = objectContext ? [pageContext, objectContext] : [pageContext]
-  if (location.pathname === "/" || location.pathname.startsWith("/agents")) {
+  // Home is a thread of its own, and the page of every thread fills the screen.
+  if (location.pathname === "/" || location.pathname === "/threads") {
     return null
   }
 
@@ -51,14 +52,15 @@ export function OperationsAssistant() {
       welcomeContent={<NorthlineWordmark className="h-10" />}
       fullPage={fullPage}
       panelClassName={fullPage ? "max-md:[&_[data-agent-conversation-header]]:pl-12" : undefined}
-      threadId={conversationRoute?.params.id}
+      threadId={threadRoute?.params.id}
       onThreadChange={(threadId) => {
-        if (fullPage) navigate(threadId ? `/chat/${encodeURIComponent(threadId)}` : "/")
+        if (fullPage) navigate(threadId ? `/threads/${encodeURIComponent(threadId)}` : "/")
       }}
       onRequestDock={() => navigate(lastWorkspaceLocation.current, { replace: true })}
       onExpandThread={(threadId) => {
-        navigate(`/chat/${encodeURIComponent(threadId)}`)
+        navigate(`/threads/${encodeURIComponent(threadId)}`)
       }}
+      onOpenThreads={() => navigate("/threads")}
     />
   )
 }

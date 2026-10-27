@@ -1628,7 +1628,7 @@ describe("approval mode routes", () => {
 
     expect(await send("GET", "/api/agent/preferences")).toEqual({
       status: 200,
-      body: { approvalMode: "manual", approvalModeSource: "fallback" },
+      body: { approvalMode: "auto", approvalModeSource: "fallback" },
     })
     expect(await send("PUT", "/api/agent/preferences", { approvalMode: "accept-edits" })).toEqual({
       status: 200,

@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { useState } from "react"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom"
 import { OperationsAssistant } from "../../../examples/northline/app/_components/operations-assistant"
-import NorthlineConversationPage from "../../../examples/northline/app/chat/[id]/page"
+import NorthlineThreadPage from "../../../examples/northline/app/threads/[id]/page"
 import { createSixbClient } from "../../client/src"
 import {
   getAgentQueryKey,
@@ -18,6 +18,7 @@ import {
 import { AgentSurface } from "../src/agent/agent-surface"
 import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { AgentChatPage } from "../src/agent/react-router"
+import { AgentThreadRedirect } from "../src/agent/thread-pages"
 import { ArtifactPage } from "../src/artifacts/artifact-page"
 import { type FileSource, messageFileSource } from "../src/artifacts/file-source"
 import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
@@ -144,16 +145,15 @@ test("a pending route change cannot restore the thread cleared by New thread", (
       <AgentSurface threadId={threadId} fullPage persistenceKey={false} />
     </QueryClientProvider>
   )
+  const open = () => ui.container.querySelector("[data-thread-id]")?.getAttribute("data-thread-id")
   const ui = render(view("a"))
   fireEvent.click(ui.getByRole("button", { name: "New thread" }))
   ui.rerender(view(undefined))
-  expect(
-    Boolean(ui.queryByRole("button", { name: "Thread history. Current: Conversation a" }))
-  ).toBe(false)
+  expect(open()).not.toBe("a")
   ui.rerender(view("b"))
-  expect(ui.getByRole("button", { name: "Thread history. Current: Conversation b" })).toBeTruthy()
+  expect(open()).toBe("b")
   ui.rerender(view(undefined))
-  expect(ui.getByRole("button", { name: "Thread history. Current: Conversation b" })).toBeTruthy()
+  expect(open()).toBe("b")
   ui.unmount()
   cache.clear()
 })
@@ -168,7 +168,7 @@ function NorthlineRoutes() {
       </output>
       <OperationsAssistant />
       <Routes>
-        <Route path="/chat/:id" element={<NorthlineConversationPage />} />
+        <Route path="/threads/:id" element={<NorthlineThreadPage />} />
         <Route path="*" element={null} />
       </Routes>
     </>
@@ -176,7 +176,7 @@ function NorthlineRoutes() {
 }
 
 test("Northline expands and minimizes the same conversation and unsent composer", async () => {
-  // Restore OperationsAssistant's /chat early return and the separate chat page AgentPanel
+  // Restore OperationsAssistant's /threads/:id early return and the separate chat page AgentPanel
   // to reproduce: expansion replaces the textarea and discards its draft and explicit context.
   const cache = conversationCache()
   browser.sessionStorage.setItem(
@@ -226,7 +226,7 @@ test("Northline expands and minimizes the same conversation and unsent composer"
   fireEvent.input(input, { target: { value: "Follow up on this case" } })
   fireEvent.keyUp(input, { key: "e" })
   fireEvent.click(ui.getByRole("button", { name: "Expand conversation" }))
-  expect(ui.getByTestId("route").textContent).toBe("/chat/a")
+  expect(ui.getByTestId("route").textContent).toBe("/threads/a")
   expect(ui.container.querySelectorAll("[data-agent-surface=full]")).toHaveLength(1)
   expect(ui.getByRole("textbox", { name: "Message" }) === input).toBe(true)
   expect(input.value).toBe("Follow up on this case")
@@ -242,14 +242,14 @@ test("Northline expands and minimizes the same conversation and unsent composer"
   cache.clear()
 })
 
-test("standalone /agents has an exit even on a direct link", () => {
+test("a conversation's own page has an exit even on a direct link", () => {
   // Remove AgentChatPage's Back to app header action to reproduce the missing in-app exit.
   const cache = conversationCache()
   const ui = render(
     <QueryClientProvider client={cache}>
-      <MemoryRouter initialEntries={["/agents"]}>
+      <MemoryRouter initialEntries={["/threads/a"]}>
         <Routes>
-          <Route path="/agents/:threadId?" element={<AgentChatPage />} />
+          <Route path="/threads/:threadId" element={<AgentChatPage />} />
           <Route path="/" element={<p>Application home</p>} />
         </Routes>
       </MemoryRouter>
@@ -260,6 +260,24 @@ test("standalone /agents has an exit even on a direct link", () => {
   ui.unmount()
   cache.clear()
 })
+
+test("a link saved at a conversation's old address opens it", () => {
+  // Reproduce by sending AgentThreadRedirect to the list whatever the id: the thread never opens.
+  const ui = render(
+    <MemoryRouter initialEntries={["/agents/thr%201"]}>
+      <Routes>
+        <Route path="/agents/:threadId" element={<AgentThreadRedirect />} />
+        <Route path="/threads/:threadId" element={<OpenedThread />} />
+      </Routes>
+    </MemoryRouter>
+  )
+  expect(ui.getByTestId("opened").textContent).toBe("thr 1")
+  ui.unmount()
+})
+
+function OpenedThread() {
+  return <output data-testid="opened">{useParams().threadId}</output>
+}
 
 const REPORT = "art_q3rep9rt00"
 const SHEET = "art_q3n4mbers0"

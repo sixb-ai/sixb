@@ -261,34 +261,6 @@ export function workedMs(view: AgentChild, now: number): number {
 }
 
 /**
- * What children spent together, in the currency the first of them was priced in; nothing until a
- * call was priced.
- */
-export function childrenCost(
-  views: readonly (AgentChild | undefined)[],
-  locale: string
-): string | null {
-  const amounts = views.flatMap((view) => view?.cost?.amounts ?? [])
-  const currency = amounts[0]?.currency
-  if (!currency) return null
-
-  const nanos = amounts
-    .filter((amount) => amount.currency === currency)
-    .reduce((total, amount) => total + BigInt(amount.amountNanos), 0n)
-  const value = Number(nanos) / 1_000_000_000
-  const format = (figure: number) =>
-    new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(figure)
-
-  if (value > 0 && value < 0.01) return `< ${format(0.01)}`
-  return format(value)
-}
-
-/**
  * A child's name, from the key the Agent spawned it with: "supplier-terms" reads "Supplier terms",
  * "checkINV4490" reads "Check INV4490". The key's own capitals stay.
  */

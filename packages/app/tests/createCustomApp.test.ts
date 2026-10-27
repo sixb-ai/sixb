@@ -699,7 +699,11 @@ describe("createCustomApp.dev", () => {
       generatedDir,
       {
         builtInRoutes: [
-          { path: "/agents", moduleSpecifier: "@sixb/app/pages", exportName: "AgentsPage" },
+          {
+            path: "/threads",
+            moduleSpecifier: "@sixb/app/pages",
+            exportName: "ThreadsPage",
+          },
           {
             path: "/observability/logs",
             moduleSpecifier: "@sixb/app/pages",
@@ -712,7 +716,7 @@ describe("createCustomApp.dev", () => {
     const manifest = await readFile(manifestPath, "utf-8")
 
     expect(manifest).toContain('"/observability/logs"')
-    expect(recordedRoutePaths(manifest)).toEqual(["/", "/agents"])
+    expect(recordedRoutePaths(manifest)).toEqual(["/", "/threads"])
   })
 
   // Composed layouts render through the generated routes in nested-layouts.test.tsx.
@@ -852,13 +856,13 @@ describe("createCustomApp.dev", () => {
     expect(html).not.toContain("radial-gradient")
   })
 
-  // A project with its own home, an agents layout, its own members page and a root layout that
-  // narrows Settings: the built-in pages fill in around what the project owns.
+  // A project with its own home, a threads layout, its own members page and a root layout
+  // that narrows Settings: the built-in pages fill in around what the project owns.
   test("adds the built-in pages around the project's own routes, without changing scanRoutes output", async () => {
-    await mkdir(join(tempRoot, "app", "agents"), { recursive: true })
+    await mkdir(join(tempRoot, "app", "threads"), { recursive: true })
     await writeFile(
-      join(tempRoot, "app", "agents", "layout.tsx"),
-      "export default function AgentsLayout({ children }) { return children }\n"
+      join(tempRoot, "app", "threads", "layout.tsx"),
+      "export default function ThreadsLayout({ children }) { return children }\n"
     )
     await mkdir(join(tempRoot, "app", "settings", "members"), { recursive: true })
     await writeFile(
@@ -887,14 +891,13 @@ describe("createCustomApp.dev", () => {
       ])
 
       const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
-      // The default agent routes nest under the project's agents layout.
-      expect(manifest).toContain('import Layout0 from "../../app/agents/layout.tsx"')
+      // The default thread pages nest under the project's threads layout.
+      expect(manifest).toContain('import Layout0 from "../../app/threads/layout.tsx"')
       expect(manifest).toContain(
         "element: createElement(Layout0, { children: createElement(Outlet) })"
       )
       expect(manifest).toContain("{ index: true, element: createElement(BuiltInPage0) },")
-      expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
-      expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
+      expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage1) },')
       // The project's app/page.tsx owns the root, so the built-in home stays out.
       expect(manifest).not.toContain("HomePage")
       for (const page of [
@@ -919,7 +922,10 @@ describe("createCustomApp.dev", () => {
       // builtInRoutesFor and the Settings pages are recorded.
       const recorded = recordedRoutePaths(manifest)
       expect(recorded).toContain("/settings/members")
-      expect(recorded).toContain("/agents/:threadId")
+      expect(recorded).toContain("/threads/:threadId")
+      // The old thread address only redirects.
+      expect(recorded).not.toContain("/agents/:threadId")
+      expect(manifest).toContain('"/agents/:threadId"')
       expect(recorded).toContain("/objects/:objectTypeId/:primaryId")
       for (const path of ["/settings", "/settings/personal", "/observability/activity"]) {
         expect(recorded).not.toContain(path)
@@ -966,7 +972,7 @@ describe("createCustomApp.dev", () => {
       expect(server.watchesSources).toBe(false)
       const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
       expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
-      expect(manifest).toContain("{ AgentsPage as BuiltInPage0 }")
+      expect(manifest).toContain("{ ThreadsPage as BuiltInPage0 }")
       const runtime = await readFile(
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
         "utf-8"
@@ -996,26 +1002,21 @@ describe("createCustomApp.dev", () => {
     }
   })
 
-  test("serves the built-in home until the project adds app/page.tsx, and project agent pages replace the defaults", async () => {
+  test("serves the built-in home until the project adds app/page.tsx, and project thread pages replace the defaults", async () => {
     await rm(join(tempRoot, "app", "page.tsx"))
     await mkdir(join(tempRoot, "app", "quotes"), { recursive: true })
     await writeFile(
       join(tempRoot, "app", "quotes", "page.tsx"),
       "export default function Quotes() { return null }\n"
     )
-    await mkdir(join(tempRoot, "app", "agents", "new", "[draft]"), { recursive: true })
-    await mkdir(join(tempRoot, "app", "agents", "[thread]"), { recursive: true })
+    await mkdir(join(tempRoot, "app", "threads", "[thread]"), { recursive: true })
     await writeFile(
-      join(tempRoot, "app", "agents", "page.tsx"),
-      "export default function Agents() { return null }\n"
+      join(tempRoot, "app", "threads", "page.tsx"),
+      "export default function Threads() { return null }\n"
     )
     await writeFile(
-      join(tempRoot, "app", "agents", "new", "[draft]", "page.tsx"),
-      "export default function NewAgentChat() { return null }\n"
-    )
-    await writeFile(
-      join(tempRoot, "app", "agents", "[thread]", "page.tsx"),
-      "export default function AgentThread() { return null }\n"
+      join(tempRoot, "app", "threads", "[thread]", "page.tsx"),
+      "export default function Thread() { return null }\n"
     )
 
     const app = await createCustomApp({
@@ -1033,11 +1034,11 @@ describe("createCustomApp.dev", () => {
       expect(home).not.toBeNull()
       expect(manifest).toContain(`element: createElement(${home?.[1]})`)
       expect(manifest).toContain('"/quotes"')
-      // Project pages at the agent paths win, whatever their parameters are called.
-      expect(manifest).toContain('"/agents"')
-      expect(manifest).toContain('"/agents/new/:draft"')
-      expect(manifest).toContain('"/agents/:thread"')
-      expect(manifest).not.toContain("AgentsPage")
+      // Project pages at the thread paths win, whatever their parameters are called.
+      expect(manifest).toContain('"/threads"')
+      expect(manifest).toContain('"/threads/:thread"')
+      expect(manifest).not.toContain("{ ThreadsPage as")
+      expect(manifest).not.toContain("{ ThreadPage as")
     } finally {
       await server.stop()
     }

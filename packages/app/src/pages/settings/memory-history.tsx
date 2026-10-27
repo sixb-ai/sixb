@@ -19,6 +19,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { ChevronRight, History, Loader2, MessageSquare, RotateCcw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import { threadPathFromLink } from "../../agent/thread-navigation"
 import { useCurrentUser } from "../../session"
 import { notify } from "../section-page"
 import {
@@ -192,7 +193,7 @@ function useChangeOrigin(): (revision: Revision) => {
     // Someone else's conversation would not open for this person.
     if (source) {
       return mine
-        ? { label: messages.inYourConversation, conversation: source }
+        ? { label: messages.inYourConversation, conversation: threadPathFromLink(source) }
         : { label: messages.inTeammateConversation, conversation: null }
     }
     return { label: mine ? messages.editedByYou : messages.editedByTeammate, conversation: null }

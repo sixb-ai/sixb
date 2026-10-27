@@ -5,8 +5,8 @@ import type { ReactNode } from "react"
 import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
 import type { Agent, AgentContextInput, AgentThread } from "../types"
-import { AgentThreadSwitcher, type SharedThreadList } from "./agent-thread-switcher"
 import { Composer } from "./composer"
+import { ThreadsButton } from "./threads-button"
 import { Transcript, type TranscriptProps } from "./transcript"
 
 export interface ConversationPanelProps {
@@ -20,21 +20,13 @@ export interface ConversationPanelProps {
   readonly messagesError: string | null
   /** The selected durable thread, or null while composing a new one. */
   readonly currentThread: AgentThread | null
-  /** Other chats with this agent, for the header history menu. */
-  readonly agentThreads: readonly AgentThread[]
-  /** Chats other people shared with the reader. */
-  readonly sharedThreads?: SharedThreadList
   /** Runs active across the threads visible to this agent surface. */
   readonly runningThreadCount: number
   /** The threads where a call waits for the reader's approval. */
   readonly waitingThreadIds?: ReadonlySet<string>
-  readonly threadsError?: string | null
-  readonly hasMoreThreads?: boolean
-  readonly loadingMoreThreads?: boolean
-  readonly loadMoreThreadsError?: boolean
-  readonly onLoadMoreThreads?: () => void
   readonly onNewChat: () => void
-  readonly onSelectThread: (threadId: string) => void
+  /** Open the page of every conversation; without it, the header offers no way there. */
+  readonly onOpenThreads?: () => void
   readonly composerPlaceholder?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
@@ -50,17 +42,10 @@ export function ConversationPanel({
   messagesLoading,
   messagesError,
   currentThread,
-  agentThreads,
-  sharedThreads,
   runningThreadCount,
   waitingThreadIds,
-  threadsError,
-  hasMoreThreads,
-  loadingMoreThreads,
-  loadMoreThreadsError,
-  onLoadMoreThreads,
   onNewChat,
-  onSelectThread,
+  onOpenThreads,
   composerPlaceholder,
   ambientContext = [],
   compact = false,
@@ -70,7 +55,6 @@ export function ConversationPanel({
   composerNotice,
 }: ConversationPanelProps) {
   const labels = useAgentMessages()
-  const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
   // brief durable-message load never flashes a centered "Loading…".
   const hasActivity =
@@ -88,33 +72,24 @@ export function ConversationPanel({
     />
   )
 
-  const threadSwitcher = (
-    <AgentThreadSwitcher
-      agentName={name}
-      currentThread={currentThread}
-      threads={agentThreads}
-      sharedThreads={sharedThreads}
+  const threadsButton = onOpenThreads ? (
+    <ThreadsButton
+      currentThreadId={currentThread?.id ?? null}
       runningThreadCount={runningThreadCount}
       waitingThreadIds={waitingThreadIds}
-      threadsError={threadsError}
-      hasMoreThreads={hasMoreThreads}
-      loadingMoreThreads={loadingMoreThreads}
-      loadMoreThreadsError={loadMoreThreadsError}
-      onLoadMoreThreads={onLoadMoreThreads}
-      onSelectThread={onSelectThread}
-      onNewThread={onNewChat}
+      onOpen={onOpenThreads}
     />
-  )
+  ) : null
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" data-thread-id={currentThread?.id}>
       <header
         data-agent-conversation-header=""
         className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
       >
         <div className="ml-auto flex items-center gap-1">
           {headerActions}
-          {threadSwitcher}
+          {threadsButton}
           <Button
             variant="ghost"
             size="icon-lg"
@@ -144,6 +119,11 @@ export function ConversationPanel({
       ) : (
         <>
           <div className="relative flex min-h-0 flex-1 flex-col">
+            {/* Scrolled content fades under the header instead of being cut at its edge. */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-background to-transparent"
+            />
             {messagesLoading && !hasActivity ? (
               <div className="flex flex-1 items-center justify-center">
                 <LoadingInline label={labels.chat.loadingConversation} />

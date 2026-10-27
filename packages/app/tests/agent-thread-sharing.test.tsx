@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-libra
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AgentChat } from "../src/agent/agent-chat"
+import { AgentThreads } from "../src/agent/components/agent-threads"
 import { useAgentConversation } from "../src/agent/hooks/use-agent-conversation"
 import { installDom } from "./helpers/dom"
 
@@ -466,8 +467,8 @@ describe("a shared conversation", () => {
 
     expect(await view.findByText("And by how much?")).toBeDefined()
     // Alice's two questions in a row share one name.
-    expect(view.getAllByText("Alice Martin", { selector: "span" })).toHaveLength(1)
-    expect(view.getAllByText("You", { selector: "span" })).toHaveLength(1)
+    expect(view.getAllByText("Alice Martin", { selector: "p" })).toHaveLength(1)
+    expect(view.getAllByText("You", { selector: "p" })).toHaveLength(1)
   })
 
   // Removal proof: drop the reset on assistant messages in continuedUserMessages.
@@ -481,7 +482,7 @@ describe("a shared conversation", () => {
     const { view } = renderChat("bob", { messages: [messages[0], messages[1], afterAnswer] })
 
     expect(await view.findByText("And Globex, is it on track?")).toBeDefined()
-    expect(view.getAllByText("Alice Martin", { selector: "span" })).toHaveLength(2)
+    expect(view.getAllByText("Alice Martin", { selector: "p" })).toHaveLength(2)
   })
 
   // Removal proof: return null from useConversationAuthors; neither name then shows.
@@ -1089,39 +1090,45 @@ describe("live changes", () => {
   })
 })
 
-describe("thread history", () => {
+describe("the threads page", () => {
   const shared = [thread({ id: "thr_3", title: "Pipeline review", messageCount: 4 })]
 
-  async function openHistory(view: ReturnType<typeof render>) {
-    fireEvent.click(await view.findByRole("button", { name: /^Thread history/ }))
-    return within(await view.findByRole("dialog"))
+  /** The page of every thread, as the reader opens it. */
+  function openThreads(as: "alice" | "bob" | null, scenario: Partial<Scenario> = {}) {
+    const { queryClient, requests } = serve(as, scenario)
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AgentThreads onSelectThread={() => {}} onNewThread={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    return { page: within(view.container), requests }
   }
 
-  // Removal proof: drop the shared FilterButton from AgentThreadSwitcher.
+  // Removal proof: drop the shared Filter from AgentThreads.
   test("lists the conversations shared with the reader apart, with their owner", async () => {
-    const { view } = renderChat("bob", { shared })
+    const { page } = openThreads("bob", { shared })
 
-    const history = await openHistory(view)
-    fireEvent.click(await history.findByRole("button", { name: "Shared with me 1" }))
+    fireEvent.click(await page.findByRole("button", { name: "Shared with me 1" }))
 
-    expect(history.getByText("Pipeline review")).toBeDefined()
-    expect(history.getByText("Alice Martin · 4 messages")).toBeDefined()
+    expect(page.getByText("Pipeline review")).toBeDefined()
+    expect(page.getByText(/Alice Martin/)).toBeDefined()
   })
 
-  // Removal proof: use the own list's error and paging under every filter in AgentThreadSwitcher.
+  // Removal proof: page the own list under every filter in AgentThreads.
   test("counts every shared conversation, and pages and fails on its own", async () => {
-    const { view, requests } = renderChat("bob", {
+    const { page, requests } = openThreads("bob", {
       shared,
       sharedTotal: 51,
       sharedHasMore: true,
       ownHasMore: true,
     })
 
-    const history = await openHistory(view)
-    expect(history.getByRole("button", { name: "Load more threads" })).toBeDefined()
+    expect(await page.findByRole("button", { name: "Load more threads" })).toBeDefined()
 
-    fireEvent.click(await history.findByRole("button", { name: "Shared with me 51" }))
-    fireEvent.click(history.getByRole("button", { name: "Load more threads" }))
+    fireEvent.click(await page.findByRole("button", { name: "Shared with me 51" }))
+    fireEvent.click(page.getByRole("button", { name: "Load more threads" }))
 
     await waitFor(() =>
       expect(requests).toContain(
@@ -1130,34 +1137,28 @@ describe("thread history", () => {
     )
   })
 
-  // Removal proof: drop the shared error line from AgentThreadSwitcher.
+  // Removal proof: drop the shared error from AgentThreads' errors.
   test("says when the shared conversations cannot be read", async () => {
-    const { view } = renderChat("bob", { sharedStatus: 500, ownHasMore: true })
+    const { page } = openThreads("bob", { sharedStatus: 500, ownHasMore: true })
 
-    expect(await view.findByText("Why did Acme slip?")).toBeDefined()
-    const history = await openHistory(view)
-
-    expect(history.getByText("Could not load the conversations shared with you.")).toBeDefined()
-    expect(history.getByRole("button", { name: "Load more threads" })).toBeDefined()
+    expect(await page.findByText("Could not load the threads shared with you.")).toBeDefined()
+    expect(page.getByRole("button", { name: "Load more threads" })).toBeDefined()
   })
 
-  // Removal proof: show messages.empty under every filter in AgentThreadSwitcher.
+  // Removal proof: show messages.empty under every filter in AgentThreads.
   test("an empty shared list says what will appear there", async () => {
-    const { view } = renderChat("bob")
+    const { page } = openThreads("bob")
 
-    const history = await openHistory(view)
-    fireEvent.click(await history.findByRole("button", { name: "Shared with me" }))
+    fireEvent.click(await page.findByRole("button", { name: "Shared with me" }))
 
-    expect(history.getByText("Conversations others share with you appear here.")).toBeDefined()
+    expect(page.getByText("Threads others share with you appear here.")).toBeDefined()
   })
 
   test("nothing to share from, nothing shared with: no filter without a signed-in user", async () => {
-    const { view } = renderChat(null)
+    const { page } = openThreads(null)
 
-    expect(await view.findByText("Why did Acme slip?")).toBeDefined()
-    const history = await openHistory(view)
-
-    expect(history.queryByRole("button", { name: /^Shared with me/ })).toBeNull()
+    expect(await page.findByText("Your threads with the agent appear here.")).toBeDefined()
+    expect(page.queryByRole("button", { name: /^Shared with me/ })).toBeNull()
   })
 })
 

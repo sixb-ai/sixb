@@ -7,10 +7,15 @@ import {
   PopoverTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, Info } from "lucide-react"
+import { Info } from "lucide-react"
 import { useId, useState } from "react"
 import { useAgentMessages } from "../i18n"
 import type { LanguageModel } from "../types"
+import {
+  COMPOSER_MENU_ROW_CLASS_NAME,
+  COMPOSER_MENU_ROW_SELECTED_CLASS_NAME,
+  ComposerMenuCheck,
+} from "./composer-menu"
 import { ProviderLogo } from "./provider-logo"
 
 export function ModelPickerRow({
@@ -19,15 +24,21 @@ export function ModelPickerRow({
   disabled,
   radio = false,
   describedBy,
+  tier,
+  note,
   onSelect,
 }: {
   model: LanguageModel
   selected: boolean
   disabled?: boolean
-  /** A radio of a radio group, under its model's description. */
+  /** A radio of a radio group. */
   radio?: boolean
   /** The id of what else describes the row, such as its tier's label. */
   describedBy?: string
+  /** The tier the row stands for, named at its end when no heading names it. */
+  tier?: { readonly id: string; readonly label: string }
+  /** Said after the name, such as "Default". */
+  note?: string
   onSelect: (model: LanguageModel) => void
 }) {
   const messages = useAgentMessages().models
@@ -35,7 +46,7 @@ export function ModelPickerRow({
   const detailsId = useId()
 
   return (
-    <div className={cn("flex items-center rounded-lg", selected && "bg-muted/60")}>
+    <div className="flex items-center rounded-xl">
       <HoverCard open={detailsOpen} onOpenChange={setDetailsOpen} openDelay={350} closeDelay={150}>
         <HoverCardTrigger asChild>
           <button
@@ -45,8 +56,9 @@ export function ModelPickerRow({
               ? { role: "radio", "aria-checked": selected, tabIndex: selected ? 0 : -1 }
               : { "aria-pressed": selected })}
             aria-describedby={
-              [describedBy, detailsOpen ? detailsId : undefined].filter(Boolean).join(" ") ||
-              undefined
+              [describedBy, tier?.id, detailsOpen ? detailsId : undefined]
+                .filter(Boolean)
+                .join(" ") || undefined
             }
             onFocus={(event) => {
               if (!event.currentTarget.matches(":focus-visible")) event.preventDefault()
@@ -55,22 +67,31 @@ export function ModelPickerRow({
               setDetailsOpen(false)
               onSelect(model)
             }}
-            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+            className={cn(
+              COMPOSER_MENU_ROW_CLASS_NAME,
+              "h-10 flex-1 py-0",
+              selected && COMPOSER_MENU_ROW_SELECTED_CLASS_NAME
+            )}
           >
-            <ProviderLogo model={model} className="size-5" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-foreground">
-                {model.name}
-              </span>
-              {radio && model.description ? (
-                <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                  {model.description}
+            <ProviderLogo model={model} className="size-[18px] shrink-0" />
+            {/* Just the name: a catalog's description is a paragraph, kept for the details card. */}
+            <span
+              className={cn(
+                "flex min-w-0 flex-1 items-baseline gap-2 text-[13.5px] tracking-[-0.005em] text-foreground",
+                selected && "font-medium"
+              )}
+            >
+              <span className="truncate">{model.name}</span>
+              {tier || note ? (
+                <span
+                  id={tier?.id}
+                  className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground"
+                >
+                  {[tier?.label, note].filter(Boolean).join(" · ")}
                 </span>
               ) : null}
             </span>
-            <span className="flex size-5 shrink-0 items-center justify-center">
-              {selected ? <Check className="size-4 text-foreground" aria-hidden="true" /> : null}
-            </span>
+            <ComposerMenuCheck checked={selected} />
           </button>
         </HoverCardTrigger>
         <HoverCardContent

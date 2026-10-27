@@ -14,12 +14,11 @@ export const AGENT_APPROVAL_MODES = ["manual", "accept-edits", "auto"] as const
 
 export type AgentApprovalMode = (typeof AGENT_APPROVAL_MODES)[number]
 
-/**
- * The mode Shift+Tab switches to: between Manual and Accept edits only. Auto is chosen from the menu,
- * never reached by a key pressed in passing; from Auto, the key goes back to Manual.
- */
+/** The mode Shift+Tab switches to: the next one, Manual to Accept edits to Auto and round again. */
 export function toggledApprovalMode(mode: AgentApprovalMode): AgentApprovalMode {
-  return mode === "manual" ? "accept-edits" : "manual"
+  return AGENT_APPROVAL_MODES[
+    (AGENT_APPROVAL_MODES.indexOf(mode) + 1) % AGENT_APPROVAL_MODES.length
+  ]
 }
 
 /** From least to most allowed. */

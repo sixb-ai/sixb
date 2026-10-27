@@ -1,6 +1,5 @@
 import { Spinner } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
-import { Fragment, memo, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef } from "react"
+import { Fragment, memo, type ReactNode, useEffect, useMemo, useRef } from "react"
 import { childFileSource, messageFileSource } from "../../artifacts/file-source"
 import { FileAttachmentCard } from "../components/file-attachment-card"
 import { AssistantBody } from "../components/message-parts"
@@ -116,16 +115,11 @@ export function ChildWork({
         } else if (atWork && live?.runId === run.id && live.parts.length > 0) {
           body = <AssistantBody parts={live.parts} live={live.active} nested />
         } else if (atWork) {
-          // An observer reads no stream: a run's steps come once it ended.
-          body = (
-            <p className="text-[13px] text-muted-foreground shimmer motion-reduce:animate-none">
-              {observed
-                ? labels.stepsLater
-                : run.status === "queued"
-                  ? labels.states.starting
-                  : labels.states.working}
-            </p>
-          )
+          // Its status says it works; until its first step, nothing more to say. An observer reads
+          // no stream: a run's steps come once it ended.
+          body = observed ? (
+            <p className="text-[13px] text-muted-foreground">{labels.stepsLater}</p>
+          ) : null
         } else if (messages.isError) {
           body = <p className="text-[13px] text-muted-foreground">{labels.loadFailed}</p>
         } else if (messages.isLoading || messages.isFetching) {
@@ -202,43 +196,3 @@ const RunWork = memo(function RunWork({
     </>
   )
 })
-
-/**
- * A scrolling box that follows new content while its reader is at its end, and stays where they
- * scrolled otherwise.
- */
-export function FollowingScroll({
-  follow,
-  live,
-  className,
-  children,
-}: {
-  /** Changes when the content grows. */
-  readonly follow: string
-  /** The content is still growing: it opens at its end. Otherwise at its start. */
-  readonly live: boolean
-  readonly className?: string
-  readonly children: ReactNode
-}) {
-  const box = useRef<HTMLDivElement>(null)
-  const atEnd = useRef(live)
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `follow` is the trigger
-  useLayoutEffect(() => {
-    const element = box.current
-    if (element && atEnd.current) element.scrollTop = element.scrollHeight
-  }, [follow])
-
-  return (
-    <div
-      ref={box}
-      onScroll={(event) => {
-        const element = event.currentTarget
-        atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48
-      }}
-      className={cn("scrollbar-thin overflow-y-auto overscroll-contain", className)}
-    >
-      {children}
-    </div>
-  )
-}

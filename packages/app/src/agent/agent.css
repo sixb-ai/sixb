@@ -96,7 +96,6 @@
   pointer-events: none;
   border-radius: 9999px;
   background: var(--muted);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 
 .sixb-reasoning-fill {
@@ -118,10 +117,11 @@
   width: var(--sixb-reasoning-thumb-size);
   height: var(--sixb-reasoning-thumb-size);
   pointer-events: none;
-  border: 1px solid rgb(0 0 0 / 0.1);
   border-radius: 9999px;
   background: white;
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.08),
+    0 1px 3px rgb(0 0 0 / 0.16);
   transition: left var(--sixb-reasoning-motion);
 }
 
@@ -228,6 +228,36 @@
     animation: none;
     transition: none;
   }
+}
+
+/* The composer's one surface: a hairline and a soft lift, no border. Focus darkens the hairline. */
+.sixb-composer-surface {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.03),
+    0 4px 16px rgb(0 0 0 / 0.035);
+  transition: box-shadow 200ms ease;
+}
+
+.sixb-composer-surface:focus-within {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.1),
+    0 1px 2px rgb(0 0 0 / 0.03),
+    0 4px 16px rgb(0 0 0 / 0.045);
+}
+
+.sixb-composer-surface[data-dragging] {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--primary) 40%, transparent),
+    0 4px 16px rgb(0 0 0 / 0.045);
+}
+
+:is(.dark *).sixb-composer-surface {
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.09);
+}
+
+:is(.dark *).sixb-composer-surface:focus-within {
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16);
 }
 
 /* An image the agent is making: a soft glow drifting under a slow sheen, like a print developing. */

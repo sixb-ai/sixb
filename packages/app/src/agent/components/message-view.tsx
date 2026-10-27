@@ -9,10 +9,18 @@ import {
   MarkerContent,
   MarkerIcon,
 } from "@sixb/ui/components"
-import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
+import { cn } from "@sixb/ui/lib/utils"
+import {
+  AlertTriangle,
+  ArrowRight,
+  ChevronRight,
+  Clock3,
+  type LucideIcon,
+  RotateCcw,
+  Unplug,
+} from "lucide-react"
 import { memo, type ReactNode } from "react"
 import type { FileSource } from "../../artifacts/file-source"
-import { PersonAvatar } from "../../artifacts/person-avatar"
 import type { AgentConversationMessage } from "../conversation"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
@@ -83,7 +91,9 @@ function UserMessage({
       ) : null}
       {text ? (
         <Bubble variant="secondary" align="end">
-          <BubbleContent className="whitespace-pre-wrap">{text}</BubbleContent>
+          <BubbleContent className="rounded-2xl px-3.5 py-2 text-[15px] whitespace-pre-wrap">
+            {text}
+          </BubbleContent>
         </Bubble>
       ) : null}
     </div>
@@ -150,12 +160,7 @@ function AssistantMessage({
 export function AuthorLine({ author }: { readonly author: AuthorLabel | undefined }) {
   if (!author) return null
 
-  return (
-    <p className="mt-2 flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-      <PersonAvatar name={author.name} size="xs" />
-      <span>{author.label}</span>
-    </p>
-  )
+  return <p className="mt-2 px-1 text-xs text-muted-foreground">{author.label}</p>
 }
 
 function CompactionResult({ summary }: { summary: string }) {
@@ -198,9 +203,106 @@ export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolea
   )
 }
 
+/**
+ * How a turn ended short of a full answer: one quiet line, its icon tinted by what happened, and at
+ * most one way on. Every ending reads the same way, so only the words and the icon change.
+ */
+function TurnNotice({
+  icon: Icon,
+  tone = "warning",
+  children,
+  action,
+}: {
+  icon?: LucideIcon
+  tone?: "warning" | "error"
+  children: ReactNode
+  action?: ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2" role="status">
+      <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        {Icon ? (
+          <Icon
+            aria-hidden="true"
+            className={cn(
+              "size-4 shrink-0",
+              tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
+            )}
+          />
+        ) : null}
+        <span>{children}</span>
+      </p>
+      {action}
+    </div>
+  )
+}
+
+function TurnAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  disabled: boolean
+}) {
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      className="h-8 rounded-full px-3"
+    >
+      <Icon aria-hidden="true" />
+      {label}
+    </Button>
+  )
+}
+
+/** A turn cut short goes on from what it saved, or runs again when it saved nothing. */
+function PickUpAction({
+  hasProgress,
+  onRetry,
+  onContinue,
+  retrying,
+  continuing,
+}: {
+  hasProgress: boolean
+  onRetry?: () => void
+  onContinue?: () => void
+  retrying: boolean
+  continuing: boolean
+}) {
+  const messages = useAgentMessages().transcript
+  if (hasProgress && onContinue) {
+    return (
+      <TurnAction
+        icon={ArrowRight}
+        label={continuing ? messages.continuing : messages.continue}
+        onClick={onContinue}
+        disabled={continuing}
+      />
+    )
+  }
+  if (!hasProgress && onRetry) {
+    return (
+      <TurnAction
+        icon={RotateCcw}
+        label={retrying ? messages.retrying : messages.tryAgain}
+        onClick={onRetry}
+        disabled={retrying}
+      />
+    )
+  }
+  return null
+}
+
 export function RunCancelledMarker() {
   const messages = useAgentMessages().transcript
-  return <p className="text-sm text-muted-foreground">{messages.stopped}</p>
+  return <TurnNotice>{messages.stopped}</TurnNotice>
 }
 
 export function RunTimeoutMarker({
@@ -221,28 +323,20 @@ export function RunTimeoutMarker({
   const messages = useAgentMessages().transcript
   const limit = formatTurnTimeout(timeoutMs, messages)
   return (
-    <div className="flex flex-wrap items-center gap-2" role="status">
-      <Marker className="text-amber-700 dark:text-amber-400">
-        <MarkerIcon>
-          <Clock3 className="text-amber-600 dark:text-amber-400" />
-        </MarkerIcon>
-        <MarkerContent>
-          {hasProgress ? messages.stoppedAtLimit(limit) : messages.limitBeforeAnswer(limit)}
-        </MarkerContent>
-      </Marker>
-      {hasProgress && onContinue ? (
-        <Button size="sm" onClick={onContinue} disabled={continuing}>
-          <ArrowRight aria-hidden="true" />
-          {continuing ? messages.continuing : messages.continue}
-        </Button>
-      ) : null}
-      {!hasProgress && onRetry ? (
-        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
-          <RotateCcw aria-hidden="true" />
-          {retrying ? messages.retrying : messages.tryAgain}
-        </Button>
-      ) : null}
-    </div>
+    <TurnNotice
+      icon={Clock3}
+      action={
+        <PickUpAction
+          hasProgress={hasProgress}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          retrying={retrying}
+          continuing={continuing}
+        />
+      }
+    >
+      {hasProgress ? messages.stoppedAtLimit(limit) : messages.limitBeforeAnswer(limit)}
+    </TurnNotice>
   )
 }
 
@@ -262,26 +356,20 @@ export function RunInterruptedMarker({
 }) {
   const messages = useAgentMessages().transcript
   return (
-    <div className="flex flex-wrap items-center gap-2" role="status">
-      <Marker className="text-amber-700 dark:text-amber-400">
-        <MarkerIcon>
-          <Unplug className="text-amber-600 dark:text-amber-400" />
-        </MarkerIcon>
-        <MarkerContent>{messages.interrupted}</MarkerContent>
-      </Marker>
-      {hasProgress && onContinue ? (
-        <Button size="sm" onClick={onContinue} disabled={continuing}>
-          <ArrowRight aria-hidden="true" />
-          {continuing ? messages.continuing : messages.continue}
-        </Button>
-      ) : null}
-      {!hasProgress && onRetry ? (
-        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
-          <RotateCcw aria-hidden="true" />
-          {retrying ? messages.retrying : messages.tryAgain}
-        </Button>
-      ) : null}
-    </div>
+    <TurnNotice
+      icon={Unplug}
+      action={
+        <PickUpAction
+          hasProgress={hasProgress}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          retrying={retrying}
+          continuing={continuing}
+        />
+      }
+    >
+      {messages.interrupted}
+    </TurnNotice>
   )
 }
 
@@ -294,15 +382,22 @@ export function RunFailureMarker({
 }) {
   const messages = useAgentMessages().transcript
   return (
-    <div className="flex flex-wrap items-center gap-2" role="status">
-      <p className="text-sm text-muted-foreground">{messages.notStarted}</p>
-      {onRetry ? (
-        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
-          <RotateCcw aria-hidden="true" />
-          {retrying ? messages.retrying : messages.retry}
-        </Button>
-      ) : null}
-    </div>
+    <TurnNotice
+      icon={AlertTriangle}
+      tone="error"
+      action={
+        onRetry ? (
+          <TurnAction
+            icon={RotateCcw}
+            label={retrying ? messages.retrying : messages.retry}
+            onClick={onRetry}
+            disabled={retrying}
+          />
+        ) : null
+      }
+    >
+      {messages.notStarted}
+    </TurnNotice>
   )
 }
 
@@ -326,14 +421,33 @@ export function UserFileAttachment({
   return <FileAttachmentCard fileRef={fileRef} source={source} />
 }
 
-export function RunErrorMarker({ message }: { message: string }) {
+export function RunErrorMarker({
+  message,
+  onContinue,
+  continuing = false,
+}: {
+  message: string
+  onContinue?: () => void
+  continuing?: boolean
+}) {
+  const messages = useAgentMessages().transcript
   return (
-    <Marker className="text-destructive">
-      <MarkerIcon>
-        <AlertTriangle className="text-destructive" />
-      </MarkerIcon>
-      <MarkerContent>{message}</MarkerContent>
-    </Marker>
+    <TurnNotice
+      icon={AlertTriangle}
+      tone="error"
+      action={
+        onContinue ? (
+          <TurnAction
+            icon={ArrowRight}
+            label={continuing ? messages.continuing : messages.continue}
+            onClick={onContinue}
+            disabled={continuing}
+          />
+        ) : null
+      }
+    >
+      {message}
+    </TurnNotice>
   )
 }
 

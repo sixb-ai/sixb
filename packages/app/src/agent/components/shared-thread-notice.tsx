@@ -17,7 +17,7 @@ export function SharedThreadNotice({
   const messages = useAgentMessages().sharing
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-5 pt-1 text-xs text-muted-foreground">
+    <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-1 text-xs text-muted-foreground">
       <PersonAvatar name={owner} size="xs" />
       <span className="min-w-0 truncate">{messages.sharedBy(owner)}</span>
       <span aria-hidden className="shrink-0">

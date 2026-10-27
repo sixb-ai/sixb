@@ -6,6 +6,7 @@ import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { latestWorkLabel } from "../src/agent/activity-label"
 import { type AgentApproval, reportedApprovalOutcomes } from "../src/agent/approvals"
+import { ArtifactPanelRoot } from "../src/agent/artifact-panel"
 import { Transcript } from "../src/agent/components/transcript"
 import { conversationMessages, conversationTurn, READ_ONLY_TURN } from "../src/agent/conversation"
 import { type AgentChild, childTitle } from "../src/agent/delegation/interpret"
@@ -393,7 +394,8 @@ function show(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <ObservedThreadContext.Provider value={options.observed ?? false}>
-          {transcript}
+          {/* A child's thread opens in the conversation's panel, as in the chat. */}
+          <ArtifactPanelRoot scopeKey="thr_1">{transcript}</ArtifactPanelRoot>
         </ObservedThreadContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>
@@ -401,18 +403,68 @@ function show(
   return { view, requests, queryClient }
 }
 
-const card = (view: ReturnType<typeof render>, key: string) => {
+/** The reply's line for its sub-agents. */
+async function lineOf(view: ReturnType<typeof render>) {
+  return waitFor(() => {
+    const found = view.container.querySelector<HTMLElement>("[data-delegation-group] > button")
+    if (!found) throw new Error("Expected the sub-agents' line.")
+    return found
+  })
+}
+
+/** What waits on the reader from one child, under the line. */
+const attentionOf = (view: ReturnType<typeof render>, key: string) => {
   const found = view.container.querySelector<HTMLElement>(`[data-child-key='${key}']`)
-  if (!found) throw new Error(`Expected the card of ${key}.`)
+  if (!found) throw new Error(`Expected what ${key} waits on.`)
   return found
 }
 
-async function cardOf(view: ReturnType<typeof render>, key: string, state?: string) {
-  await waitFor(() => {
-    const found = card(view, key)
-    if (state) expect(found.dataset.childState).toBe(state)
+/** The panel the line opened. */
+async function threadOf(view: ReturnType<typeof render>) {
+  return waitFor(() => {
+    const found = view.baseElement.querySelector<HTMLElement>("[data-agent-slot]")
+    if (!found?.textContent) throw new Error("Expected the open panel.")
+    return found
   })
-  return card(view, key)
+}
+
+/** Open the line's panel, once. */
+async function openPanel(view: ReturnType<typeof render>) {
+  const line = await lineOf(view)
+  if (line.getAttribute("aria-expanded") !== "true") await act(async () => fireEvent.click(line))
+  return threadOf(view)
+}
+
+/** A child's row in the panel's list, once it reads `state`. */
+async function rowOf(view: ReturnType<typeof render>, key: string, state?: string) {
+  await openPanel(view)
+  return waitFor(() => {
+    const found = view.baseElement.querySelector<HTMLElement>(`[data-child-row='${key}']`)
+    if (!found) throw new Error(`Expected the row of ${key}.`)
+    if (state) expect(found.dataset.childState).toBe(state)
+    return found
+  })
+}
+
+/** A child's thread in the panel: straight there for a lone child, through its row otherwise. */
+async function detailOf(view: ReturnType<typeof render>, key: string) {
+  const panel = await openPanel(view)
+  const row = panel.querySelector<HTMLElement>(`[data-child-row='${key}']`)
+  if (row) await act(async () => fireEvent.click(row))
+  return waitFor(() => {
+    const found = view.baseElement.querySelector<HTMLElement>(`[data-child-detail='${key}']`)
+    if (!found) throw new Error(`Expected the thread of ${key}.`)
+    return found
+  })
+}
+
+/** The line once it reads `text`. */
+async function lineSays(view: ReturnType<typeof render>, text: string) {
+  return waitFor(() => {
+    const line = view.container.querySelector<HTMLElement>("[data-delegation-group] > button")
+    expect(line?.textContent).toContain(text)
+    return line as HTMLElement
+  })
 }
 
 /** The socket a card opened on one child run, open and subscribed. */
@@ -452,25 +504,20 @@ function childEvent(runId: string, event: Record<string, unknown>, cursor: strin
 }
 
 describe("a sub-agent in the Agent's reply", () => {
-  // Removal proofs: drop the ChildCards block from AssistantBody's flushWork, and no card shows.
-  // Drop describeDelegationTool from ToolCallRow, and the work reads spawn_agent and its JSON.
-  test("is a card under the work that spawned it, and its spawn and wait read as words", async () => {
+  // Removal proofs: drop the ChildCards block from AssistantBody's flushWork, and no line shows.
+  // Drop the DELEGATION_ROW_TOOLS filter, and a "3 steps" line repeats what the line says.
+  test("is a line under the reply, its spawn and wait not counted again as steps", async () => {
     const { view } = show([spawn("terms"), spawn("history"), wait(["terms", "history"], {})], {
       children: [running("terms"), child("history")],
     })
 
-    expect(await cardOf(view, "terms", "working")).toBeDefined()
-    expect(view.getByRole("region", { name: "Sub-agent: History" })).toBeDefined()
-
-    const worked = view
-      .getAllByRole("button")
-      .find((button) => button.textContent === "Worked· 3 steps")
-    if (!worked) throw new Error("Expected the turn's work.")
-    await act(async () => fireEvent.click(worked))
+    await lineSays(view, "Terms is working…")
+    expect((await lineOf(view)).textContent).toContain("History finished")
+    expect(
+      view.queryAllByRole("button").some((button) => /\d+ steps?/.test(button.textContent ?? ""))
+    ).toBe(false)
 
     const text = view.container.textContent ?? ""
-    expect(text).toContain("Delegated to Terms")
-    expect(text).toContain("Heard back from 2 sub-agents")
     expect(text).not.toContain("spawn_agent")
     expect(text).not.toContain("wait_agent")
     expect(text).not.toContain('"runId"')
@@ -523,32 +570,33 @@ describe("a sub-agent in the Agent's reply", () => {
 
     const expected: Record<string, readonly [string, string]> = {
       queued: ["starting", "Starting…"],
-      working: ["working", "Working…"],
+      // A working row says what it was asked until its stream says what it does; its time ticks.
+      working: ["working", "Look into working."],
       approval: ["approval", "Waiting for approval"],
       answer: ["answer", "Waiting for your answer"],
       resume: ["resume", "Decided · continues when the agent resumes"],
-      done: ["done", "Doneworked 48s"],
+      // A finished row says how long it took; the line says it finished.
+      done: ["done", "48s"],
       failed: ["failed", "Failed · The sandbox stopped."],
       stopped: ["stopped", "Stopped"],
       ended: ["ended", "Didn't continue · a new message moved on first"],
     }
     for (const [key, [state, label]] of Object.entries(expected)) {
-      const found = await cardOf(view, key, state)
-      expect(found.textContent).toContain(label)
+      expect((await rowOf(view, key, state)).textContent).toContain(label)
     }
-    expect(within(card(view, "answer")).getByText("Calendar or fiscal year?")).toBeDefined()
-    expect(card(view, "answer").textContent).toContain(
-      "Reply in the conversation to let it continue."
-    )
+    expect((await lineOf(view)).textContent).toContain("Answer has a question for you")
+    expect(within(attentionOf(view, "answer")).getByText("Calendar or fiscal year?")).toBeDefined()
+    expect(attentionOf(view, "answer").textContent).toContain("Your next message answers it.")
   })
 
-  // Removal proofs: drop the list's refresh as a step starts, and the cost never shows. Drop the
-  // refresh on `agent.run.finished`, and the card keeps saying it works.
-  test("follows a child at work: its cost, its live steps, then how it ended", async () => {
+  // Removal proofs: drop the live label from the thread's status, and it says only "Working…".
+  // Drop the refresh on `agent.run.finished`, and the line keeps saying it works. Money is never
+  // said: a priced child reads the same as an unpriced one.
+  test("follows a child at work: its live steps, then how it ended, never its cost", async () => {
     const scenario: Scenario = { children: [running("terms")] }
     const { view } = show([spawn("terms")], scenario)
-    const terms = await cardOf(view, "terms", "working")
-    expect(terms.textContent).toContain("Working…")
+    await lineSays(view, "Terms is working…")
+    expect((await detailOf(view, "terms")).textContent).toContain("Working…")
 
     const socket = await socketOn("run_terms")
     const priced = running("terms", {
@@ -569,7 +617,6 @@ describe("a sub-agent in the Agent's reply", () => {
         )
       )
     )
-    await waitFor(() => expect(card(view, "terms").textContent).toContain("$0.06"))
 
     const reading = {
       type: "tool-input-available",
@@ -586,7 +633,8 @@ describe("a sub-agent in the Agent's reply", () => {
       { kind: "tool", tool: { toolName: "bash", state: "input-available", input: reading.input } },
     ])
     expect(label).not.toBe("Working…")
-    await waitFor(() => expect(card(view, "terms").textContent).toContain(label))
+    await waitFor(async () => expect((await detailOf(view, "terms")).textContent).toContain(label))
+    expect(view.baseElement.textContent).not.toContain("$")
 
     scenario.children = [child("terms")]
     await act(async () =>
@@ -594,7 +642,7 @@ describe("a sub-agent in the Agent's reply", () => {
         childEvent("run_terms", { type: "agent.run.finished", status: "succeeded" }, "c2")
       )
     )
-    await cardOf(view, "terms", "done")
+    await lineSays(view, "Terms finished")
   })
 
   // Removal proofs: offer Stop without `canStop`, and the second render has one. Drop the
@@ -605,20 +653,17 @@ describe("a sub-agent in the Agent's reply", () => {
       { children: [running("terms")] },
       { canStop: true }
     )
-    const stop = await waitFor(() =>
-      within(card(view, "terms")).getByRole("button", { name: "Stop Terms" })
-    )
+    const terms = await detailOf(view, "terms")
+    const stop = await waitFor(() => within(terms).getByRole("button", { name: "Stop Terms" }))
 
     await act(async () => fireEvent.click(stop))
-    expect(card(view, "terms").textContent).toContain("Stopping…")
+    expect((await detailOf(view, "terms")).textContent).toContain("Stopping…")
     await waitFor(() => expect(requests).toContain("POST /api/agent-runs/run_terms/cancel"))
 
     view.unmount()
     const other = show([spawn("terms")], { children: [running("terms")] }, { canStop: false })
-    await cardOf(other.view, "terms", "working")
-    expect(
-      within(card(other.view, "terms")).queryByRole("button", { name: "Stop Terms" })
-    ).toBeNull()
+    const otherTerms = await detailOf(other.view, "terms")
+    expect(within(otherTerms).queryByRole("button", { name: "Stop Terms" })).toBeNull()
   })
 
   // Removal proofs: drop the caller check from the transcript's unshown calls, and the call has a
@@ -660,13 +705,13 @@ describe("a sub-agent in the Agent's reply", () => {
       { approvals: [approval], stops }
     )
 
-    const pay = await cardOf(view, "pay", "approval")
-    expect(pay.textContent).toContain("Waiting for your approval")
+    await lineSays(view, "Pay needs your approval")
+    const pay = attentionOf(view, "pay")
     expect(pay.querySelector("[data-approval-state=pending]")).not.toBeNull()
     expect(view.container.querySelectorAll("[data-approval-state]")).toHaveLength(1)
-    // The card names the sub-agent already, and says once that it waits.
-    expect(pay.textContent).not.toContain("Asked by the sub-agent")
-    expect(within(pay).getAllByText("Waiting for your approval")).toHaveLength(2)
+    // The line names the sub-agent and says it waits: the card goes straight to the call.
+    expect(pay.textContent).not.toContain("From Pay")
+    expect(within(pay).queryAllByText("Waiting for your approval")).toHaveLength(0)
 
     // The reply paused on it: stopping is waiting no more.
     await act(async () =>
@@ -692,8 +737,10 @@ describe("a sub-agent in the Agent's reply", () => {
       { children: [running("terms")] }
     )
 
-    const terms = await cardOf(view, "terms", "working")
-    const lines = [...terms.querySelectorAll("li")].map((line) => line.textContent)
+    await lineSays(view, "Terms is working…")
+    const lines = [...attentionOf(view, "terms").querySelectorAll("li")].map(
+      (line) => line.textContent
+    )
     expect(lines).toEqual([
       "Asked · Calendar or fiscal year?",
       "Agent answered · The fiscal year.",
@@ -701,9 +748,8 @@ describe("a sub-agent in the Agent's reply", () => {
     ])
   })
 
-  // Removal proof: open the group whatever its children's states, and the settled group lists its
-  // cards on load.
-  test("several read as one group that counts how they stand, folded once all settled", async () => {
+  // Removal proof: build the line from a count instead of lineClauses, and the names are gone.
+  test("several read as one sentence that names them by how they stand, and open as a list", async () => {
     const { view } = show([spawn("terms"), spawn("pay"), spawn("history")], {
       children: [
         running("terms"),
@@ -714,30 +760,41 @@ describe("a sub-agent in the Agent's reply", () => {
         child("history"),
       ],
     })
-    const group = await waitFor(() =>
-      view.getByRole("region", { name: "Sub-agents of this reply" })
-    )
-    await cardOf(view, "pay", "approval")
-    const header = within(group).getAllByRole("button")[0]
-    expect(header?.textContent).toContain("3 sub-agents · 1 waiting · 1 working · 1 done")
-    expect(header?.getAttribute("aria-expanded")).toBe("true")
+    const line = await lineSays(view, "Pay is waiting")
+    expect(line.textContent).toContain("Terms is working…")
+    expect(line.textContent).toContain("History finished")
 
     view.unmount()
     const settled = show([spawn("terms"), spawn("history")], {
       children: [child("terms"), child("history")],
     })
-    const folded = await waitFor(() => {
-      const button = settled.view.getByRole("button", { name: /2 sub-agents · 2 done/ })
-      expect(button.getAttribute("aria-expanded")).toBe("false")
-      return button
-    })
-    expect(card(settled.view, "terms").closest("ul")?.hidden).toBe(true)
-    await act(async () => fireEvent.click(folded))
-    expect(card(settled.view, "terms").closest("ul")?.hidden).toBe(false)
+    const folded = await lineSays(settled.view, "Terms and History finished")
+    expect(folded.getAttribute("aria-expanded")).toBe("false")
+    const panel = await openPanel(settled.view)
+    expect(panel.querySelectorAll("[data-child-row]")).toHaveLength(2)
   })
 
-  // Removal proof: render the work inline on a phone too, and no dialog opens.
-  test("opens its work in a sheet on a phone", async () => {
+  // Removal proof: drop the `[data-agent-slot-frame]` check from the panel's open; focus is lost.
+  test("hands focus back to the line after moving within its panel", async () => {
+    const { view } = show([spawn("terms"), spawn("history")], {
+      children: [child("terms"), child("history")],
+    })
+    const line = await lineOf(view)
+    line.focus()
+    await openPanel(view)
+    const row = await rowOf(view, "terms")
+    row.focus()
+    await act(async () => fireEvent.click(row))
+    const back = await waitFor(() => view.getByRole("button", { name: "All sub-agents" }))
+    back.focus()
+    await act(async () => fireEvent.click(back))
+
+    await act(async () => fireEvent.click(view.getByRole("button", { name: "Close" })))
+    await waitFor(() => expect(document.activeElement).toBe(line))
+  })
+
+  // Removal proof: render the thread inline on a phone too, and no dialog opens.
+  test("opens its thread in a sheet on a phone", async () => {
     dom.happyDOM.setViewport({ width: 375, height: 812 })
     const { view } = show([spawn("terms")], {
       children: [child("terms")],
@@ -752,16 +809,15 @@ describe("a sub-agent in the Agent's reply", () => {
         ],
       },
     })
-    const terms = await cardOf(view, "terms", "done")
 
-    await act(async () => fireEvent.click(within(terms).getByRole("button", { name: /Show work/ })))
+    await act(async () => fireEvent.click(await lineSays(view, "Terms finished")))
     const sheet = await waitFor(() => view.getByRole("dialog"))
     expect(within(sheet).getByText("Terms")).toBeDefined()
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeDefined()
     await waitFor(() => expect(within(sheet).getByText("Net 30 for both.")).toBeDefined())
   })
 
-  // Removal proof: read the work only from the live stream, and a reloaded card has none to show.
+  // Removal proof: read the work only from the live stream, and a reloaded thread has none to show.
   test("after a reload, reads its work from its thread, its continuation after a line", async () => {
     const paused = childRun("run_terms", { finishReason: "awaiting_approval" })
     const continued = childRun("run_terms_2", { parentRunId: "run_2" })
@@ -790,17 +846,16 @@ describe("a sub-agent in the Agent's reply", () => {
         ],
       },
     })
-    const terms = await cardOf(view, "terms", "done")
 
-    await act(async () => fireEvent.click(within(terms).getByRole("button", { name: /Show work/ })))
-    await waitFor(() => expect(terms.textContent).toContain("Sent after approval."))
-    expect(terms.textContent).toContain("I'll ask to send it.")
-    expect(terms.textContent).toContain("Continued after the decision")
+    const thread = await detailOf(view, "terms")
+    await waitFor(() => expect(thread.textContent).toContain("Sent after approval."))
+    expect(thread.textContent).toContain("I'll ask to send it.")
+    expect(thread.textContent).toContain("Continued after the decision")
     expect(requests).toContain("GET /api/agent-threads/thr_terms/messages")
     expect(sockets).toHaveLength(0)
   })
 
-  // Removal proof: retry a 404 like any failure, and the card stays without its fallback.
+  // Removal proof: retry a 404 like any failure, and the thread stays without its fallback.
   test("in a fork without the original, says where its work is and what it answered", async () => {
     const { view, requests } = show(
       [
@@ -811,14 +866,13 @@ describe("a sub-agent in the Agent's reply", () => {
       ],
       { children: [], listStatus: 404 }
     )
-    const terms = await cardOf(view, "terms", "done")
     await waitFor(() => expect(requests).toContain("GET /api/agent-threads/thr_1/children"))
 
-    await act(async () => fireEvent.click(within(terms).getByRole("button", { name: /Show work/ })))
+    const thread = await detailOf(view, "terms")
     await waitFor(() =>
-      expect(terms.textContent).toContain("Its work is in the original conversation.")
+      expect(thread.textContent).toContain("Its work is in the original conversation.")
     )
-    expect(terms.textContent).toContain("Net 30.")
+    expect(thread.textContent).toContain("Net 30.")
   })
 
   // Removal proof: read an observer's children through the turn's own route, and the list 404s.
@@ -836,57 +890,49 @@ describe("a sub-agent in the Agent's reply", () => {
       },
       { observed: true }
     )
-    const terms = await cardOf(view, "terms", "working")
-    expect((await cardOf(view, "pay", "approval")).textContent).toContain("Waiting for approval")
+    expect((await rowOf(view, "pay", "approval")).textContent).toContain("Waiting for approval")
 
     // No stream reaches an observer: its steps come once the run ended, and it says so.
-    await act(async () => fireEvent.click(within(terms).getByRole("button", { name: /Show work/ })))
-    expect(terms.textContent).toContain("At work. Its steps show here once it finishes.")
+    expect((await detailOf(view, "terms")).textContent).toContain(
+      "At work. Its steps show here once it finishes."
+    )
 
     expect(requests).toContain("GET /api/observed-agent-threads/thr_1/children")
     expect(view.queryByRole("button", { name: /^Stop/ })).toBeNull()
     expect(sockets).toHaveLength(0)
   })
 
-  // Removal proofs: count every paused child as waiting for the reader, and Sam's group says "1
-  // waiting for you" in amber. Keep the spawn order, and Pay is not first.
+  // Removal proofs: count every paused child as waiting for the reader, and Sam's line says Pay
+  // needs his approval, in amber. Keep the spawn order, and Pay is not first in the list.
   test("says a call waits for you only to whoever decides it, and lists that child first", async () => {
     const parts = [spawn("terms"), spawn("pay")]
     const children = [running("terms"), payPaused()]
     const reader = show(parts, { children }, { approvals: [payApproval()] })
 
-    const group = await waitFor(() =>
-      reader.view.getByRole("region", { name: "Sub-agents of this reply" })
-    )
-    await cardOf(reader.view, "pay", "approval")
-    expect(within(group).getAllByRole("button")[0]?.textContent).toContain("1 waiting for you")
-    expect(group.className).toContain("border-amber")
-    expect(group.querySelector("li [data-child-key]")?.getAttribute("data-child-key")).toBe("pay")
+    // The amber dot on its avatar, and the card under the line, call for the reader.
+    const readerLine = await lineSays(reader.view, "Pay needs your approval")
+    expect(readerLine.querySelector(".bg-amber-500")).not.toBeNull()
+    const panel = await openPanel(reader.view)
+    expect(panel.querySelector("[data-child-row]")?.getAttribute("data-child-row")).toBe("pay")
 
     reader.view.unmount()
     const sam = show(parts, { children }, { approvals: [payApproval()], decides: false })
-    const other = await waitFor(() =>
-      sam.view.getByRole("region", { name: "Sub-agents of this reply" })
+    const line = await lineSays(sam.view, "Pay is waiting for Dana Reyes")
+    expect(line.textContent).not.toContain("your approval")
+    expect(line.querySelector(".bg-amber-500")).toBeNull()
+    expect((await rowOf(sam.view, "pay", "approval")).textContent).toContain(
+      "Waiting for Dana Reyes's approval"
     )
-    await cardOf(sam.view, "pay", "approval")
-    const summary = within(other).getAllByRole("button")[0]?.textContent ?? ""
-    expect(summary).toContain("1 waiting for Dana Reyes")
-    expect(summary).not.toContain("for you")
-    expect(other.className).not.toContain("border-amber")
-    expect(card(sam.view, "pay").textContent).toContain("Waiting for Dana Reyes's approval")
   })
 
-  // Removal proofs: fold on `settled` alone, and the group shuts on the work the reader opened.
-  // Count `resume` as settled, and a decided child folds its group.
-  test("stays open while the reader has a child's work open, and while a child will continue", async () => {
+  // Removal proofs: close the panel when a sibling finishes, and the reader loses the thread they
+  // opened. Count `resume` as done, and a decided child reads as finished.
+  test("keeps a thread open as its siblings finish, and says when a child will continue", async () => {
     const scenario: Scenario = { children: [running("terms"), child("history")] }
     const { view } = show([spawn("terms"), spawn("history")], scenario)
-    await cardOf(view, "terms", "working")
+    await lineSays(view, "Terms is working…")
 
-    const history = card(view, "history")
-    await act(async () =>
-      fireEvent.click(within(history).getByRole("button", { name: /Show work/ }))
-    )
+    await detailOf(view, "history")
     const socket = await socketOn("run_terms")
     scenario.children = [child("terms"), child("history")]
     await act(async () =>
@@ -894,23 +940,20 @@ describe("a sub-agent in the Agent's reply", () => {
         childEvent("run_terms", { type: "agent.run.finished", status: "succeeded" }, "c1")
       )
     )
-    await cardOf(view, "terms", "done")
-    const header = view.getByRole("button", { name: /2 sub-agents/ })
-    expect(header.getAttribute("aria-expanded")).toBe("true")
+    await lineSays(view, "Terms and History finished")
+    expect(view.baseElement.querySelector("[data-child-detail='history']")).not.toBeNull()
 
     view.unmount()
     const decided = show([spawn("pay"), spawn("history")], {
       children: [payPaused({ awaiting: { type: "resume" } }), child("history")],
     })
-    await cardOf(decided.view, "pay", "resume")
-    const later = decided.view.getByRole("button", { name: /2 sub-agents/ })
-    expect(later.textContent).toContain("1 continues later · 1 done")
-    expect(later.getAttribute("aria-expanded")).toBe("true")
+    const later = await lineSays(decided.view, "Pay continues later")
+    expect(later.textContent).toContain("History finished")
   })
 
-  // Removal proof: put every call of a child in its card, and the resumed turn's call is drawn far
-  // above the reply that waits on it.
-  test("a call it holds under a later turn shows with that turn, and its card points to it", async () => {
+  // Removal proof: put every call of a child under the line, and the resumed turn's call is drawn
+  // far above the reply that waits on it.
+  test("a call it holds under a later turn shows with that turn, and the line points to it", async () => {
     const paused = childRun("run_pay", { finishReason: "awaiting_approval" })
     const continued = childRun("run_pay_2", {
       parentRunId: "run_2",
@@ -922,7 +965,8 @@ describe("a sub-agent in the Agent's reply", () => {
       { approvals: [payApproval("run_2", "run_pay_2")] }
     )
 
-    const pay = await cardOf(view, "pay", "approval")
+    await lineSays(view, "Pay")
+    const pay = await waitFor(() => attentionOf(view, "pay"))
     expect(pay.querySelector("[data-approval-id]")).toBeNull()
     expect(view.container.querySelectorAll("[data-approval-id=apr_pay]")).toHaveLength(1)
     expect(within(pay).getByRole("button", { name: "See its request below" })).toBeDefined()

@@ -7,7 +7,11 @@
  * then keeps the whole graph of a module imported here for its own code: every app with a layout
  * would bundle every page.
  */
-export { AgentsPage } from "./agent/agents-page"
+export {
+  AgentThreadRedirect,
+  ThreadPage,
+  ThreadsPage,
+} from "./agent/thread-pages"
 export { AgentToolViewsProvider } from "./agent/tool-views/registry"
 export { ArtifactPage } from "./artifacts/artifact-page"
 export { ArtifactsPage } from "./artifacts/gallery"

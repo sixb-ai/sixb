@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ArrowUpRight, Bot, ChevronRight, GitBranch, Layers, Workflow, Zap } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { Link } from "react-router-dom"
+import { threadPath } from "../../../agent/thread-navigation"
 import { actionRunHref, workflowRunHref } from "../../routes"
 import { PageSection, Panel, Pill, type Tone } from "../../section-ui"
 import { formatMoney } from "./format"
@@ -141,7 +142,7 @@ function groupLabel(group: Group, messages: AiUsageMessages["calls"]): string {
 function groupHref(group: Group): string | undefined {
   const source = group.attribution
   if (source?.kind === "agent") {
-    return group.canOpenThread ? `/agents/${encodeURIComponent(source.threadId)}` : undefined
+    return group.canOpenThread ? threadPath(source.threadId) : undefined
   }
   if (source?.kind === "workflowAgent" || source?.kind === "workflow") {
     return workflowRunHref(source.workflowRunId)

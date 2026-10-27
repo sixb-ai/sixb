@@ -1162,6 +1162,34 @@
 }
 
 /* Tables */
+.prose .prose-table {
+  max-width: 100%;
+  margin: 0 0 18px;
+  overflow-x: auto;
+}
+
+.prose .prose-table[data-hidden-end] {
+  mask-image: linear-gradient(to left, transparent, black 2.5rem);
+}
+
+.prose .prose-table[data-hidden-start] {
+  mask-image: linear-gradient(to right, transparent, black 2.5rem);
+}
+
+.prose .prose-table[data-hidden-start][data-hidden-end] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 2.5rem,
+    black calc(100% - 2.5rem),
+    transparent
+  );
+}
+
+.prose .prose-table > table {
+  margin-block: 0;
+}
+
 .prose table {
   width: 100%;
   border-collapse: collapse;
@@ -1188,7 +1216,7 @@
 }
 
 .prose th {
-  font-weight: 650;
+  font-weight: 600;
   color: var(--foreground);
 }
 

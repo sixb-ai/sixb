@@ -8,7 +8,7 @@ describe("RunTimeoutMarker", () => {
       <RunTimeoutMarker hasProgress timeoutMs={600_000} onContinue={() => {}} />
     )
 
-    expect(html).toContain("Stopped after reaching the 10-minute turn limit.")
+    expect(html).toContain("Paused at the 10-minute turn limit.")
     expect(html).toContain("Continue")
     expect(html).not.toContain("Try again")
   })

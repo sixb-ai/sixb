@@ -4,7 +4,7 @@ import { useAgentMessages } from "../i18n"
 import { type AgentMessages, en } from "../i18n/en"
 
 export const ACTIVITY_STATUS_ROW_CLASS_NAME =
-  "group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground"
+  "group -ml-1 flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground"
 
 interface ActivityStatusStep {
   readonly afterMs: number

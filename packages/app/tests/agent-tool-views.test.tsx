@@ -58,7 +58,7 @@ function renderBody(parts: readonly NormalizedPart[], views?: readonly AgentTool
 }
 
 function workTriggers(view: ReturnType<typeof renderBody>): HTMLElement[] {
-  return view.getAllByRole("button", { name: /Worked/ })
+  return view.getAllByRole("button", { name: /^\d+ steps?/ })
 }
 
 async function openWork(view: ReturnType<typeof renderBody>) {

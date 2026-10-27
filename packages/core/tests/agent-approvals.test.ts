@@ -187,7 +187,7 @@ async function finishQueued(host: Host, runId: string) {
 
 describe("a turn's approval mode", () => {
   // Guard proof: drop `approvalMode` from the spec in `requestAgentRun`; every turn reads `auto`.
-  // Set `FALLBACK_AGENT_APPROVAL_MODE` back to `auto`; the first turn, with no choice, reads `auto`.
+  // Set `FALLBACK_AGENT_APPROVAL_MODE` to `manual`; the first turn, with no choice, reads `manual`.
   test("comes from the message, then the sender's thread choice, then their default", async () => {
     const { host } = setup()
     const owner = await signedIn(host, alice.id)
@@ -205,14 +205,14 @@ describe("a turn's approval mode", () => {
       return specMode(host, run.id)
     }
 
-    expect(await turn(owner)).toBe("manual")
+    expect(await turn(owner)).toBe("auto")
     expect(await owner.agent.preferences.get()).toEqual({
-      approvalMode: "manual",
+      approvalMode: "auto",
       approvalModeSource: "fallback",
     })
 
-    await owner.agent.preferences.update({ approvalMode: "auto" })
-    expect(await turn(owner)).toBe("auto")
+    await owner.agent.preferences.update({ approvalMode: "manual" })
+    expect(await turn(owner)).toBe("manual")
 
     await owner.agent.threads.setApprovalMode(thread.id, "accept-edits")
     expect(await turn(owner)).toBe("accept-edits")
@@ -222,7 +222,7 @@ describe("a turn's approval mode", () => {
       approvalModeSource: "thread",
     })
     expect(await owner.agent.preferences.get()).toEqual({
-      approvalMode: "auto",
+      approvalMode: "manual",
       approvalModeSource: "default",
     })
   })
@@ -255,15 +255,15 @@ describe("a turn's approval mode", () => {
       maxParticipants: 50,
     })
 
-    await owner.agent.threads.setApprovalMode(thread.id, "auto")
+    await owner.agent.threads.setApprovalMode(thread.id, "manual")
     const { run } = await participant.agent.runs.request({ threadId: thread.id, text: "Go" })
 
-    expect(await specMode(host, run.id)).toBe("manual")
+    expect(await specMode(host, run.id)).toBe("auto")
     expect(await participant.agent.threads.getApprovalMode(thread.id)).toEqual({
-      approvalMode: "manual",
+      approvalMode: "auto",
       approvalModeSource: "fallback",
     })
-    expect((await owner.agent.threads.getApprovalMode(thread.id))?.approvalMode).toBe("auto")
+    expect((await owner.agent.threads.getApprovalMode(thread.id))?.approvalMode).toBe("manual")
   })
 
   test("is refused when it is not a mode", async () => {
@@ -416,9 +416,8 @@ describe("deciding on a held call", () => {
     expect((await owner.agent.threads.getApprovalMode(thread.id))?.approvalMode).toBe(
       "accept-edits"
     )
-    expect((await participant.agent.threads.getApprovalMode(thread.id))?.approvalMode).toBe(
-      "manual"
-    )
+    // The participant keeps their own mode: the fallback, not the owner's raise.
+    expect((await participant.agent.threads.getApprovalMode(thread.id))?.approvalMode).toBe("auto")
   })
 
   // Guard proof: start `allowAlways` from the resolved mode, fallback included; `auto` already runs

@@ -260,7 +260,7 @@ describe("an observed conversation", () => {
       [[run({ status: "failed" })], "I couldn’t get a response started."],
       [
         [run({ status: "failed", finishReason: "timeout" })],
-        "The response reached the configured turn limit before producing an answer.",
+        "The response reached the time limit before producing an answer.",
       ],
     ] as const) {
       const { view, queryClient } = renderThread({ messages: [question], runs })

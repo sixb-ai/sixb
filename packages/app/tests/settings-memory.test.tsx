@@ -254,7 +254,7 @@ describe("the Memory page", () => {
       view
         .getAllByRole("link", { name: "Open the conversation" })
         .map((link) => link.getAttribute("href"))
-    ).toEqual(["/agents/thr_8f2"])
+    ).toEqual(["/threads/thr_8f2"])
   })
 
   test("says what will be remembered when nothing is yet", () => {

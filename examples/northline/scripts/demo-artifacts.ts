@@ -693,8 +693,8 @@ const rows: (readonly [string, string])[] = [
   [
     "Beside a conversation",
     threadId
-      ? `${appUrl}/agents/${encodeURIComponent(threadId)}?artifact=${review.id}`
-      : `${appUrl}/agents/<thread id>?artifact=${review.id}  (start a conversation first)`,
+      ? `${appUrl}/threads/${encodeURIComponent(threadId)}?artifact=${review.id}`
+      : `${appUrl}/threads/<thread id>?artifact=${review.id}  (start a conversation first)`,
   ],
 ]
 const width = Math.max(...rows.map(([label]) => label.length))

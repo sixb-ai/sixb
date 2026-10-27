@@ -1,7 +1,15 @@
 import { badgeLabel, highlightCode } from "@sixb/ui/lib/shiki"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
-import { type ComponentProps, useEffect, useMemo, useState } from "react"
+import {
+  type ComponentProps,
+  isValidElement,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useUiMessages } from "../../lib/i18n/ui"
@@ -22,6 +30,31 @@ const COMPONENTS: Components = {
   pre({ children }) {
     return <>{children}</>
   },
+  // A wide table scrolls inside its own box instead of squeezing a narrow column, and a short
+  // cell (an id, an amount, a date) stays on one line.
+  table({ node: _node, children, ...props }) {
+    return <ScrollTable {...props}>{children}</ScrollTable>
+  },
+  th({ node: _node, children, className, ...props }) {
+    return (
+      <th
+        className={cn(textLength(children) <= SHORT_CELL && "whitespace-nowrap", className)}
+        {...props}
+      >
+        {children}
+      </th>
+    )
+  },
+  td({ node: _node, children, className, ...props }) {
+    return (
+      <td
+        className={cn(textLength(children) <= SHORT_CELL && "whitespace-nowrap", className)}
+        {...props}
+      >
+        {children}
+      </td>
+    )
+  },
   code({ node: _node, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className ?? "")
     if (!match) {
@@ -33,6 +66,51 @@ const COMPONENTS: Components = {
     }
     return <CodeBlock lang={match[1]} code={String(children).replace(/\n$/, "")} />
   },
+}
+
+const SHORT_CELL = 24
+
+/** A table that scrolls sideways, its edges fading only where columns are scrolled out of view. */
+function ScrollTable({ children, ...props }: ComponentProps<"table">) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [hidden, setHidden] = useState({ start: false, end: false })
+
+  useEffect(() => {
+    const box = ref.current
+    if (!box) return
+    const update = () =>
+      setHidden({
+        start: box.scrollLeft > 1,
+        end: box.scrollLeft + box.clientWidth < box.scrollWidth - 1,
+      })
+    update()
+    box.addEventListener("scroll", update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(box)
+    return () => {
+      box.removeEventListener("scroll", update)
+      observer.disconnect()
+    }
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      className="prose-table"
+      data-hidden-start={hidden.start ? "" : undefined}
+      data-hidden-end={hidden.end ? "" : undefined}
+    >
+      <table {...props}>{children}</table>
+    </div>
+  )
+}
+
+function textLength(node: ReactNode): number {
+  if (typeof node === "string" || typeof node === "number") return String(node).length
+  if (Array.isArray(node))
+    return node.reduce((total: number, child) => total + textLength(child), 0)
+  if (isValidElement<{ children?: ReactNode }>(node)) return textLength(node.props.children)
+  return 0
 }
 
 export interface MarkdownProps extends Omit<ComponentProps<"div">, "children"> {

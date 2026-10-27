@@ -55,24 +55,24 @@ const groups = [
   },
 ] as const
 
-// Sits in `AppShellProvider` from the root layout, which also covers the full-screen agent pages.
+// Sits in `AppShellProvider` from the root layout, which also covers the full-screen threads page.
 export function NorthlineShell({ children }: PropsWithChildren) {
   const location = useLocation()
-  const agentsActive = location.pathname.startsWith("/agents")
+  const threadsPageActive = location.pathname === "/threads"
   const homeActive = location.pathname === "/"
-  const conversationActive = homeActive || location.pathname.startsWith("/chat/")
+  const conversationActive = homeActive || location.pathname.startsWith("/threads/")
   // Data and Settings pages bring their own margins, and some fill the height.
   const sectionActive = useCurrentSection() !== null
   useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
     debounceMs: 75,
-    enabled: !agentsActive,
+    enabled: !threadsPageActive,
   })
   useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], {
     debounceMs: 75,
-    enabled: !agentsActive,
+    enabled: !threadsPageActive,
   })
 
-  if (agentsActive) return children
+  if (threadsPageActive) return children
 
   return (
     <>

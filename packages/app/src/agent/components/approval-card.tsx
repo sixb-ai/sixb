@@ -4,8 +4,6 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  ArrowUpRight,
-  Box,
   ChevronRight,
   CircleAlert,
   CircleCheck,
@@ -16,14 +14,13 @@ import {
   Database,
   Globe,
   type LucideIcon,
+  RefreshCw,
   SkipForward,
   Workflow,
 } from "lucide-react"
-import { Fragment, type ReactNode, type Ref, useId, useMemo, useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Fragment, useId, useMemo, useRef, useState } from "react"
 import { humanizeIdentifier } from "../../pages/ontology/lib/labels"
-import { actionRunHref, objectHref, workflowRunHref } from "../../pages/routes"
-import { useValueTypes, ValueTree, valueSchema } from "../../pages/values"
+import { ObjectRefLinksContext, useValueTypes, ValueTree, valueSchema } from "../../pages/values"
 import {
   type AgentApproval,
   type AgentApprovalDecision,
@@ -36,11 +33,13 @@ import {
 } from "../approvals"
 import { capitalize, humanize } from "../bash/interpret"
 import { useDelegationCards } from "../delegation/context"
+import { childTitle } from "../delegation/interpret"
 import { formatRelativeTime } from "../format"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { objectContextTitleQuery } from "../object-context-title"
 import { samePrincipal } from "../sharing"
+import { ACTIVITY_STATUS_ROW_CLASS_NAME } from "./activity-status"
 
 const DAY_MS = 24 * 60 * 60 * 1_000
 
@@ -97,21 +96,26 @@ type DecisionNotice = { readonly tone: "info" | "warning"; readonly text: string
  * One call the agent made that waits for, or waited for, its requester: what it does, to which
  * record, with which values, and whether it stays in the project's data. Whoever asked for the turn
  * approves or denies it here; everyone else reads it, and who decides. A call the thread holds no
- * record of shows only when a message reported how it ended. `inCard`: it sits in the card of the
- * sub-agent that made it, which names it already.
+ * record of shows only when a message reported how it ended.
  */
 export function ApprovalCard({
   held,
-  inCard = false,
+  underCaller = false,
 }: {
   readonly held: HeldCall
-  readonly inCard?: boolean
+  /** Right under the line of the sub-agent that asked, which names it already. */
+  readonly underCaller?: boolean
 }) {
   const messages = useAgentMessages()
   const labels = messages.approvals
   const locale = useLocale()
   const alsoId = useId()
-  const statusRef = useRef<HTMLParagraphElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
+  // The buttons go once a decision lands: the reader's place moves to what now says how it ended.
+  const focusStatus = () =>
+    requestAnimationFrame(() =>
+      sectionRef.current?.querySelector<HTMLElement>("[data-approval-focus]")?.focus()
+    )
   const { approvals: context, outcomes } = useApprovalCards()
   const delegationCards = useDelegationCards()
   const approval = context?.approvals.find((candidate) => candidate.id === held.id) ?? null
@@ -134,8 +138,9 @@ export function ApprovalCard({
 
   const definition = useCallDefinition(call)
   const title = definition.name
+  const effect = effectOf(call, definition, messages)
   // A sub-agent's call says which one asked; its own card comes with the sub-agent's.
-  const caller = approval?.caller ?? reported?.caller
+  const caller = underCaller ? undefined : (approval?.caller ?? reported?.caller)
 
   const canDecide =
     state === "pending" && approval !== null && context?.decide !== undefined
@@ -155,8 +160,6 @@ export function ApprovalCard({
       ?.id === approval.id
   // A waiting call shows what it runs with; a decided one keeps it a click away.
   const waiting = state === "pending" || state === "unknown"
-  const open = waiting || (approval !== null && showInput)
-  const when = approval ? (approval.decidedAt ?? approval.createdAt) : undefined
   const expiredDays = approval
     ? Math.round((Date.parse(approval.expiresAt) - Date.parse(approval.createdAt)) / DAY_MS)
     : 7
@@ -190,7 +193,7 @@ export function ApprovalCard({
       .catch(() => setStopFailed(true))
       .finally(() => {
         setStopping(false)
-        requestAnimationFrame(() => statusRef.current?.focus())
+        focusStatus()
       })
   }
 
@@ -224,245 +227,299 @@ export function ApprovalCard({
       )
       .finally(() => {
         setDeciding(null)
-        // The buttons are gone: keep the reader's place on the card, which now says how it ended.
-        requestAnimationFrame(() => statusRef.current?.focus())
+        focusStatus()
       })
   }
 
-  return (
-    <section
-      aria-label={labels.card(title)}
-      aria-busy={deciding !== null}
-      data-approval-state={state}
-      data-approval-id={held.id}
-      // A sub-agent's card brings the reader here when the call waits under a later turn.
-      tabIndex={-1}
-      className={cn(
-        "min-w-0 overflow-hidden border bg-card text-card-foreground",
-        inCard ? "rounded-xl" : "rounded-2xl",
-        canDecide
-          ? inCard
-            ? "border-amber-500/35"
-            : "border-amber-500/35 shadow-[0_0_0_4px_rgb(245_158_11/0.06),0_1px_2px_0_rgb(0_0_0/0.04)]"
-          : inCard
-            ? "border-border"
-            : "border-border shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]"
-      )}
-    >
-      <div className="px-4 pt-3 pb-3.5 sm:px-5">
-        <div className="flex items-center gap-2">
-          <StatusLine
-            focusRef={statusRef}
-            state={state}
-            requester={requester}
-            canDecide={canDecide}
-            messages={messages}
-            // Its sub-agent's card says already that it waits: said once, for a screen reader.
-            quiet={inCard && state === "pending"}
-          />
-          {when && !(inCard && state === "pending" && !canStop) ? (
-            <span
-              className={cn(
-                "ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground",
-                // On a phone, Stop waiting needs the room more than the time does.
-                canStop && "max-sm:hidden"
-              )}
-            >
-              {formatRelativeTime(when, locale, messages.time)}
-            </span>
-          ) : null}
-          {canStop ? (
-            <button
-              type="button"
-              onClick={stopWaiting}
-              disabled={stopping || deciding !== null}
-              title={labels.stopWaitingHint}
-              className="-my-1 -mr-1.5 shrink-0 rounded-md max-sm:ml-auto px-1.5 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
-            >
-              {stopping ? labels.stoppingWaiting : labels.stopWaiting}
-            </button>
-          ) : null}
-        </div>
-
-        <h3
-          className={cn(
-            "text-[15px]",
-            // Waiting in its sub-agent's card, the card says so: the title leads.
-            inCard && state === "pending" && !canStop ? "mt-0" : "mt-2",
-            "leading-snug font-semibold tracking-[-0.01em] text-foreground"
-          )}
-        >
-          {title}
-        </h3>
-
-        {caller && !inCard ? (
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {labels.fromSubagent(caller.key)}
-          </p>
-        ) : null}
-
+  const subjectLine =
+    (call.kind === "action" && call.subject) || caller ? (
+      <>
         {call.kind === "action" && call.subject ? <Subject subject={call.subject} /> : null}
+        {call.kind === "action" && call.subject && caller ? (
+          <span aria-hidden="true">·</span>
+        ) : null}
+        {caller ? (
+          <span className="truncate">{labels.fromSubagent(childTitle(caller.key))}</span>
+        ) : null}
+      </>
+    ) : null
 
-        {waiting || state === "asked" ? null : (
-          <Outcome
-            state={state}
-            outcome={approval?.outcome ?? reported?.outcome}
-            expiredDays={expiredDays}
-            messages={messages}
-          >
-            {approval ? (
-              <button
-                type="button"
-                aria-expanded={showInput}
-                onClick={() => setShowInput((value) => !value)}
-                className="-ml-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              >
-                <ChevronRight
-                  className={cn("size-3.5 transition-transform", showInput && "rotate-90")}
-                  aria-hidden="true"
-                />
-                {showInput ? labels.hideInput : labels.showInput}
-              </button>
-            ) : null}
-          </Outcome>
-        )}
-      </div>
-
-      {open ? (
-        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-          <CallInput call={call} definition={definition} emptyLabel={labels.noInput} />
-        </div>
-      ) : null}
-
-      {waiting ? <Effect call={call} external={definition.external} messages={messages} /> : null}
-
-      {canDecide ? (
-        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={deciding !== null}
-              onClick={() => decide("deny")}
-              className="h-10 text-muted-foreground hover:text-foreground sm:h-8"
-            >
-              {deciding === "deny" ? <Spinner className="size-3.5" /> : null}
-              {deciding === "deny" ? labels.denying : labels.deny}
-            </Button>
-            <span className="hidden sm:block sm:flex-1" />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={deciding !== null}
-              onClick={() => decide("always")}
-              aria-describedby={alsoApproved > 0 ? alsoId : undefined}
-              className="order-last col-span-2 h-auto min-h-10 py-2 leading-tight whitespace-normal sm:order-none sm:min-h-8 sm:py-1.5"
-            >
-              {deciding === "always" ? <Spinner className="size-3.5" /> : null}
-              {labels.alwaysAllow(alwaysModeLabel)}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={deciding !== null}
-              onClick={() => decide("approve")}
-              className="h-10 sm:h-8 sm:px-4"
-            >
-              {deciding === "approve" ? <Spinner className="size-3.5" /> : null}
-              {deciding === "approve" ? labels.approving : labels.approve}
-            </Button>
-          </div>
-          {alsoApproved > 0 ? (
-            <p id={alsoId} className="mt-2 text-xs text-muted-foreground sm:text-right">
-              {labels.alwaysAllowAlso(alsoApproved)}
-            </p>
-          ) : null}
-        </div>
-      ) : state === "pending" && requester !== null ? (
-        <p className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-          {labels.onlyRequester(requester)}
-        </p>
-      ) : null}
-
+  const notes = (
+    <>
       {notice ? (
         <p
           role="status"
           className={cn(
-            "border-t border-border/60 px-4 py-2.5 text-xs sm:px-5",
+            "text-xs",
             notice.tone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-foreground"
           )}
         >
           {notice.text}
         </p>
       ) : null}
-
       {stopFailed ? (
-        <p
-          role="alert"
-          className="border-t border-border/60 px-4 py-2.5 text-xs text-destructive sm:px-5"
-        >
+        <p role="alert" className="text-xs text-destructive">
           {labels.stopFailed}
         </p>
       ) : null}
-
       {failure ? (
-        <p
-          role="alert"
-          className="border-t border-border/60 px-4 py-2.5 text-xs text-destructive sm:px-5"
-        >
+        <p role="alert" className="text-xs text-destructive">
           {labels.failures[failure]}
         </p>
       ) : null}
+    </>
+  )
+
+  // Decided, the call is a line of the reply's record, as its work is: how it ended, what it was
+  // and to what, its values a click away.
+  if (!waiting) {
+    const when = approval?.decidedAt
+    const detail = outcomeDetail(state, approval?.outcome ?? reported?.outcome, expiredDays, labels)
+    const line = (
+      <>
+        <StatusLine state={state} requester={requester} messages={messages} inline />
+        <span className="text-muted-foreground/60" aria-hidden="true">
+          ·
+        </span>
+        <span className="min-w-0 truncate">
+          <span className="font-medium text-foreground/85">{title}</span>
+          {subjectLine ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="ml-1.5 text-muted-foreground/60" aria-hidden="true">
+                ·
+              </span>
+              {subjectLine}
+            </span>
+          ) : null}
+        </span>
+        {when ? (
+          <span className="shrink-0 text-muted-foreground/70 tabular-nums">
+            <span className="text-muted-foreground/60" aria-hidden="true">
+              ·{" "}
+            </span>
+            {formatRelativeTime(when, locale, messages.time)}
+          </span>
+        ) : null}
+      </>
+    )
+    return (
+      <section
+        ref={sectionRef}
+        aria-label={labels.card(title)}
+        data-approval-state={state}
+        data-approval-id={held.id}
+        tabIndex={-1}
+        className="flex min-w-0 flex-col gap-1 outline-none"
+      >
+        {approval ? (
+          <button
+            data-approval-focus=""
+            type="button"
+            aria-expanded={showInput}
+            onClick={() => setShowInput((value) => !value)}
+            className={cn(
+              ACTIVITY_STATUS_ROW_CLASS_NAME,
+              "outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            )}
+          >
+            {line}
+            <ChevronRight
+              className="size-3.5 shrink-0 opacity-50 transition-[opacity,transform] group-hover:opacity-100 group-aria-expanded:rotate-90"
+              aria-hidden="true"
+            />
+          </button>
+        ) : (
+          // Read without its record, there is nothing more to open.
+          <p data-approval-focus="" tabIndex={-1} className={ACTIVITY_STATUS_ROW_CLASS_NAME}>
+            {line}
+          </p>
+        )}
+        {detail ? <p className="pl-6 text-xs text-muted-foreground">{detail}</p> : null}
+        {showInput && approval ? (
+          <div className="pt-1 pb-1 pl-5">
+            <CallInput call={call} definition={definition} emptyLabel={labels.noInput} />
+            {effect ? (
+              <p className="mt-2 text-xs">
+                <EffectLine effect={effect} />
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="pl-5 empty:hidden">{notes}</div>
+      </section>
+    )
+  }
+
+  // Waiting, it is the one thing in the reply to act on: what, to what, with which values, what it
+  // reaches, then the decision.
+  return (
+    <section
+      ref={sectionRef}
+      aria-label={labels.card(title)}
+      aria-busy={deciding !== null}
+      data-approval-state={state}
+      data-approval-id={held.id}
+      // A sub-agent's line brings the reader here when the call waits under a later turn.
+      tabIndex={-1}
+      className="min-w-0 rounded-2xl bg-card p-4 text-card-foreground shadow-[0_0_0_1px_rgb(0_0_0/0.06),0_1px_2px_rgb(0_0_0/0.03),0_4px_16px_rgb(0_0_0/0.035)] outline-none sm:p-5 dark:shadow-[0_0_0_1px_rgb(255_255_255/0.09)]"
+    >
+      {/* The reader's own to decide: its buttons say so, and the status is for screen readers. For
+          anyone else, it says who decides. Under a sub-agent's line, the line says it already. */}
+      {underCaller ? null : canDecide ? (
+        <p data-approval-focus="" tabIndex={-1} role="status" className="sr-only">
+          {labels.waitingYou}
+        </p>
+      ) : (
+        <div className="mb-2">
+          <StatusLine state={state} requester={requester} messages={messages} />
+        </div>
+      )}
+
+      <div className="flex min-w-0 items-start gap-3">
+        <h3 className="flex min-w-0 flex-1 items-center gap-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-foreground">
+          {canDecide && !underCaller ? (
+            <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+          ) : null}
+          <span className="min-w-0">{title}</span>
+        </h3>
+        {canStop ? (
+          <button
+            type="button"
+            onClick={stopWaiting}
+            disabled={stopping || deciding !== null}
+            title={labels.stopWaitingHint}
+            className="-my-0.5 -mr-2 shrink-0 rounded-full px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+          >
+            {stopping ? labels.stoppingWaiting : labels.stopWaiting}
+          </button>
+        ) : null}
+      </div>
+      {/* To what; and when it only changes records here, that reassurance, quietly beside it. */}
+      <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
+        {subjectLine}
+        {effect?.reach === "records" ? <EffectLine effect={effect} /> : null}
+      </p>
+
+      <div className="mt-3">
+        <CallInput call={call} definition={definition} emptyLabel={labels.noInput} />
+      </div>
+
+      {/* Reaching past the app is the last thing read before saying yes. */}
+      {effect?.reach === "outside" ? (
+        <p className="mt-3.5 border-t border-border/60 pt-3 text-[13px]">
+          <EffectLine effect={effect} />
+        </p>
+      ) : null}
+
+      {canDecide ? (
+        <div className={effect?.reach === "outside" ? "mt-3" : "mt-4"}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("deny")}
+              className="h-8 rounded-full px-4 shadow-none"
+            >
+              {deciding === "deny" ? <Spinner className="size-3.5" /> : null}
+              {deciding === "deny" ? labels.denying : labels.deny}
+            </Button>
+            <span className="flex-1" />
+            {/* Both ways to say yes, side by side: this once, or from now on in this conversation. */}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("always")}
+              title={labels.alwaysAllowHint(alwaysModeLabel)}
+              aria-describedby={alsoApproved > 0 ? alsoId : undefined}
+              className="h-8 rounded-full px-4 shadow-none"
+            >
+              {deciding === "always" ? <Spinner className="size-3.5" /> : null}
+              {/* For a call that reaches outside, it lets every such call run from now on. */}
+              {alwaysMode === "auto" ? labels.alwaysAllowAll : labels.alwaysAllow}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={deciding !== null}
+              onClick={() => decide("approve")}
+              className="h-8 rounded-full px-4 shadow-none"
+            >
+              {deciding === "approve" ? <Spinner className="size-3.5" /> : null}
+              {deciding === "approve" ? labels.approving : labels.approve}
+            </Button>
+          </div>
+          {alsoApproved > 0 ? (
+            <p id={alsoId} className="mt-2 text-xs text-muted-foreground">
+              {labels.alwaysAllowAlso(alsoApproved)}
+            </p>
+          ) : null}
+        </div>
+      ) : state === "pending" && requester !== null ? (
+        <p className="mt-3 text-xs text-muted-foreground">{labels.onlyRequester(requester)}</p>
+      ) : null}
+
+      <div className="mt-3 flex flex-col gap-1 empty:hidden">{notes}</div>
     </section>
   )
 }
 
+/** Where the call stands, for anyone but the one who decides it: their buttons say it already. */
 function StatusLine({
-  focusRef,
   state,
   requester,
-  canDecide,
   messages,
-  quiet = false,
+  inline = false,
 }: {
-  /** Where focus goes once a decision removes the buttons. */
-  readonly focusRef: Ref<HTMLParagraphElement>
   readonly state: CardState
   readonly requester: string | null
-  readonly canDecide: boolean
   readonly messages: AgentMessages
-  /** Read to a screen reader only. */
-  readonly quiet?: boolean
+  /** In a decided call's line: its icon in the tone, its words in the line's. */
+  readonly inline?: boolean
 }) {
-  const labels = messages.approvals
-  const { Icon, label, tone } = statusOf(state, requester, canDecide, messages)
+  const { Icon, label, tone } = statusOf(state, requester, messages)
+  const toneClass = cn(
+    tone === "waiting" && "text-amber-700 dark:text-amber-400",
+    tone === "done" && "text-emerald-600 dark:text-emerald-400",
+    tone === "error" && "text-destructive",
+    tone === "muted" && "text-muted-foreground"
+  )
+  const icon =
+    state === "running" ? (
+      <Spinner className="size-3 shrink-0" />
+    ) : tone === "waiting" ? (
+      <span className="relative flex size-2 shrink-0" aria-hidden="true">
+        <span className="absolute inset-0 rounded-full bg-amber-500/40 motion-safe:animate-ping dark:bg-amber-400/40" />
+        <span className="relative size-2 rounded-full bg-amber-500 dark:bg-amber-400" />
+      </span>
+    ) : (
+      <Icon className={cn("size-3.5 shrink-0", inline && toneClass)} aria-hidden="true" />
+    )
+
+  if (inline) {
+    return (
+      <span className="flex shrink-0 items-center gap-1.5">
+        {icon}
+        <span className={cn(tone === "error" && "text-destructive")}>{label}</span>
+      </span>
+    )
+  }
 
   return (
     <p
-      ref={focusRef}
+      data-approval-focus=""
       tabIndex={-1}
       role="status"
       className={cn(
-        "flex min-w-0 items-center gap-1.5 rounded-sm text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-        quiet && "sr-only",
-        tone === "waiting" && "text-amber-700 dark:text-amber-400",
-        tone === "done" && "text-emerald-700 dark:text-emerald-400",
-        tone === "error" && "text-destructive",
-        tone === "muted" && "text-muted-foreground"
+        "flex min-w-0 items-center gap-2 rounded-sm text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        toneClass
       )}
     >
-      {state === "running" ? (
-        <Spinner className="size-3.5 shrink-0" />
-      ) : (
-        <Icon
-          className={cn("size-3.5 shrink-0", state === "pending" && "motion-safe:animate-pulse")}
-          aria-hidden="true"
-        />
-      )}
+      {icon}
       <span className="truncate">{label}</span>
-      {state === "running" ? <span className="sr-only">{labels.running}</span> : null}
     </p>
   )
 }
@@ -470,7 +527,6 @@ function StatusLine({
 function statusOf(
   state: CardState,
   requester: string | null,
-  canDecide: boolean,
   messages: AgentMessages
 ): {
   readonly Icon: LucideIcon
@@ -482,7 +538,7 @@ function statusOf(
     case "pending":
       return {
         Icon: CirclePause,
-        label: canDecide || requester === null ? labels.waitingYou : labels.waitingOther(requester),
+        label: requester === null ? labels.waitingYou : labels.waitingOther(requester),
         tone: "waiting",
       }
     case "unknown":
@@ -490,17 +546,13 @@ function statusOf(
     case "running":
       return { Icon: CircleCheck, label: `${labels.approved} · ${labels.running}`, tone: "done" }
     case "ran":
-      return { Icon: CircleCheck, label: `${labels.approved} · ${labels.ran}`, tone: "done" }
+      return { Icon: CircleCheck, label: labels.approved, tone: "done" }
     case "failed":
       return { Icon: CircleAlert, label: labels.failed, tone: "error" }
     case "lost":
       return { Icon: CircleAlert, label: labels.notRun, tone: "error" }
     case "denied":
-      return {
-        Icon: CircleSlash,
-        label: `${labels.denied} · ${labels.deniedDetail}`,
-        tone: "muted",
-      }
+      return { Icon: CircleSlash, label: labels.denied, tone: "muted" }
     case "superseded":
       return { Icon: SkipForward, label: labels.superseded, tone: "muted" }
     case "cancelled":
@@ -512,13 +564,15 @@ function statusOf(
   }
 }
 
-/** The record the action acts on: its type, its title, and a link to its page. */
+/**
+ * The record the action acts on: its type and its title. Named, not linked: the card is read by
+ * everyone in the conversation, and the record's page is not theirs to be sent to.
+ */
 function Subject({
   subject,
 }: {
   readonly subject: { readonly objectTypeId: string; readonly primaryId: string }
 }) {
-  const labels = useAgentMessages().approvals
   const queryClient = useQueryClient()
   const objectType = useQuery({
     ...getObjectTypeOptions({ path: { objectTypeId: subject.objectTypeId } }),
@@ -527,30 +581,18 @@ function Subject({
   })
   const title = useQuery(objectContextTitleQuery(queryClient, subject)).data ?? null
   const typeName = objectType.data?.name ?? humanizeIdentifier(subject.objectTypeId)
-  const name = title ?? subject.primaryId
 
   return (
-    <Link
-      to={objectHref(subject.objectTypeId, subject.primaryId)}
-      aria-label={labels.open(`${typeName} ${name}`)}
-      className="group mt-2 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-lg bg-muted/60 py-1 pr-2 pl-1.5 text-[13px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40"
-    >
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-background ring-1 ring-border">
-        <Box className="size-3 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-      </span>
-      <span className="shrink-0 text-muted-foreground">{typeName}</span>
-      <span className="min-w-0 truncate font-medium text-foreground">{name}</span>
-      <ArrowUpRight
-        className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-        aria-hidden="true"
-      />
-    </Link>
+    <span className="min-w-0 truncate">
+      {typeName} <span className="text-foreground">{title ?? subject.primaryId}</span>
+    </span>
   )
 }
 
 /**
  * The values the call runs with, one per line, labelled and formatted as the action or workflow
- * declares them: a date reads as a date, an object reference as a link to it.
+ * declares them: a date reads as a date, an object reference by its title. Not as a link: the
+ * card is read by everyone in the conversation, and the record's page is not theirs to visit.
  */
 function CallInput({
   call,
@@ -579,35 +621,35 @@ function CallInput({
   }
 
   return (
-    <dl className="grid grid-cols-[minmax(4.5rem,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-[13px] leading-5">
-      {entries.map(([key, item]) => {
-        const field = definition.fields?.[key]
-        return (
-          <Fragment key={key}>
-            <dt className="min-w-0 break-words text-muted-foreground">
-              {definition.labels?.[key] ?? sentence(key)}
-            </dt>
-            <dd className="min-w-0 text-foreground">
-              {isEnumSchema(fieldSchemaOf(field)) && typeof item === "string" ? (
-                // A declared choice, shown as the code it is rather than as prose.
-                <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tracking-wide uppercase">
-                  {item}
-                </span>
-              ) : (
-                <ValueTree
-                  value={item}
-                  schema={
-                    definition.fields && field !== undefined
-                      ? valueSchema(fieldSchemaOf(field), valueTypes)
-                      : undefined
-                  }
-                />
-              )}
-            </dd>
-          </Fragment>
-        )
-      })}
-    </dl>
+    <ObjectRefLinksContext.Provider value={false}>
+      <dl className="grid grid-cols-[minmax(4.5rem,max-content)_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-[13px] leading-5">
+        {entries.map(([key, item]) => {
+          const field = definition.fields?.[key]
+          return (
+            <Fragment key={key}>
+              <dt className="min-w-0 break-words text-muted-foreground">
+                {definition.labels?.[key] ?? sentence(key)}
+              </dt>
+              <dd className="min-w-0 text-foreground">
+                {isEnumSchema(fieldSchemaOf(field)) && typeof item === "string" ? (
+                  // A declared choice, shown as the code it is rather than as prose.
+                  <span className="uppercase">{item}</span>
+                ) : (
+                  <ValueTree
+                    value={item}
+                    schema={
+                      definition.fields && field !== undefined
+                        ? valueSchema(fieldSchemaOf(field), valueTypes)
+                        : undefined
+                    }
+                  />
+                )}
+              </dd>
+            </Fragment>
+          )
+        })}
+      </dl>
+    </ObjectRefLinksContext.Provider>
   )
 }
 
@@ -622,111 +664,72 @@ function fieldSchemaOf(field: unknown): unknown {
     : field
 }
 
-/** Whether the call stays in the project's data: the line that tells a reader what is at stake. */
-function Effect({
-  call,
-  external,
-  messages,
-}: {
-  readonly call: CardCall
-  readonly external: boolean | undefined
-  readonly messages: AgentMessages
-}) {
+interface CallEffect {
+  readonly Icon: LucideIcon
+  readonly text: string
+  /** `outside`: it reaches past the app, which is worth a second look before saying yes. */
+  readonly reach: "records" | "outside"
+}
+
+/**
+ * What saying yes does beyond the values: only changes records in this app, or reaches past it —
+ * writing back to the system a record comes from, or acting outside (sending, paying, calling).
+ * The framework knows which kind, not which system, nor whether it can be undone.
+ */
+function effectOf(
+  call: CardCall,
+  definition: CallDefinition,
+  messages: AgentMessages
+): CallEffect | null {
   const effects = messages.approvals.effects
-  const effect =
-    call.kind === "action" ? (call.effect ?? (external ? "external" : undefined)) : null
-  if (call.kind === "action" && effect === undefined) return null
+  if (call.kind === "workflow") {
+    return { Icon: Workflow, text: effects.workflow(sentence(call.workflowId)), reach: "outside" }
+  }
+  const effect = call.effect ?? (definition.external ? "external" : undefined)
+  if (effect === undefined) return null
+  if (effect === "ontology") return { Icon: Database, text: effects.ontology, reach: "records" }
+  // A write-back alone updates the record's own system; anything else acts outside the app.
+  return definition.writeback && !definition.effects
+    ? { Icon: RefreshCw, text: effects.writeback, reach: "outside" }
+    : { Icon: Globe, text: effects.external, reach: "outside" }
+}
 
-  const { Icon, text, tone } =
-    call.kind === "workflow"
-      ? {
-          Icon: Workflow,
-          text: effects.workflow(sentence(call.workflowId)),
-          tone: "strong" as const,
-        }
-      : effect === "external"
-        ? { Icon: Globe, text: effects.external, tone: "strong" as const }
-        : { Icon: Database, text: effects.ontology, tone: "quiet" as const }
-
+function EffectLine({ effect }: { readonly effect: CallEffect }) {
+  const { Icon, text, reach } = effect
   return (
-    <p
+    <span
       className={cn(
-        "flex items-center gap-2 border-t border-border/60 px-4 py-2.5 text-xs sm:px-5",
-        tone === "strong" ? "text-foreground" : "text-muted-foreground"
+        "inline-flex items-center gap-1.5",
+        reach === "outside" ? "text-foreground" : "text-muted-foreground"
       )}
     >
-      <Icon
-        className={cn(
-          "size-3.5 shrink-0",
-          tone === "strong" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
-        )}
-        aria-hidden="true"
-      />
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {text}
-    </p>
+    </span>
   )
 }
 
-/** How a decided call ended, then a way to its values and to the run it started. */
-function Outcome({
-  state,
-  outcome,
-  expiredDays,
-  messages,
-  children,
-}: {
-  readonly state: CardState
-  readonly outcome: AgentApproval["outcome"]
-  readonly expiredDays: number
-  readonly messages: AgentMessages
-  /** The disclosure of the call's values, when the card has them. */
-  readonly children?: ReactNode
-}) {
-  const labels = messages.approvals
-  const detail =
-    state === "superseded"
-      ? labels.supersededDetail
-      : state === "cancelled"
-        ? labels.cancelledDetail
-        : state === "expired"
-          ? labels.expiredDetail(expiredDays)
-          : state === "lost"
-            ? labels.authorityLost
-            : state === "failed"
-              ? failureMessage(outcome)
-              : null
-
-  const runLink =
-    outcome?.kind === "action-run"
-      ? actionRunHref(outcome.runId)
-      : outcome?.kind === "workflow-run"
-        ? workflowRunHref(outcome.runId)
-        : null
-  if (!detail && !runLink && !children) return null
-
-  return (
-    <div className="mt-2.5 space-y-1.5 text-xs text-muted-foreground">
-      {detail ? (
-        <p className={cn((state === "failed" || state === "lost") && "text-destructive")}>
-          {detail}
-        </p>
-      ) : null}
-      {children || runLink ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          {children}
-          {runLink ? (
-            <Link
-              to={runLink}
-              className="inline-flex items-center gap-0.5 rounded-sm font-medium text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              {labels.viewRun}
-              <ArrowUpRight className="size-3" aria-hidden="true" />
-            </Link>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
+/** Why a decided call ended as it did, when its status alone does not say. */
+function outcomeDetail(
+  state: CardState,
+  outcome: AgentApproval["outcome"],
+  expiredDays: number,
+  labels: AgentMessages["approvals"]
+): string | null {
+  switch (state) {
+    case "superseded":
+      return labels.supersededDetail
+    case "cancelled":
+      return labels.cancelledDetail
+    case "expired":
+      return labels.expiredDetail(expiredDays)
+    case "lost":
+      return labels.authorityLost
+    case "failed":
+      return failureMessage(outcome)
+    default:
+      return null
+  }
 }
 
 /** An id as the card names it: "payInvoice" reads "Pay invoice". */
@@ -750,6 +753,10 @@ interface CallDefinition {
   readonly schemas: readonly unknown[]
   /** From the definition, until the record says it: a writeback or effects reach out. */
   readonly external?: boolean
+  /** It writes back to the system its records come from. */
+  readonly writeback?: boolean
+  /** It acts outside the app: sends, pays, calls. */
+  readonly effects?: boolean
 }
 
 const NO_SCHEMAS: readonly unknown[] = []
@@ -793,6 +800,8 @@ function useCallDefinition(call: CardCall): CallDefinition {
       ),
       schemas: action.params.map((param) => param.schema),
       external: action.phases.writeback || action.phases.effects,
+      writeback: action.phases.writeback,
+      effects: action.phases.effects,
     }
   }, [call.kind, callId, action, workflow])
 }

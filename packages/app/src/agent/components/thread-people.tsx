@@ -271,7 +271,7 @@ function AddPeople({
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
           <p
             role="note"
-            className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-300"
+            className="mt-3 flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-300"
           >
             <AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
             <span>{messages.warning}</span>
@@ -285,7 +285,7 @@ function AddPeople({
 
           <Button
             type="button"
-            className="self-end"
+            className="self-end rounded-full"
             disabled={sharing.sharing || !ready}
             onClick={() => void confirm()}
           >

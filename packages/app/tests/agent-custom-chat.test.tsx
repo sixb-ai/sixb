@@ -207,7 +207,6 @@ test("a custom chat draws its own bubbles, with the agent's replies as the chat 
 
   expect(html).toContain('<article data-bubble="mine"><p>Which invoices are overdue?</p></article>')
   const reply = html.slice(html.indexOf('<article data-bubble="agent">'))
-  expect(reply).toContain("Worked")
   expect(reply).toContain("2 steps")
   expect(reply).toContain("Two invoices are overdue.")
   // The project's view placed in the answer comes with the reply.
@@ -237,5 +236,5 @@ test("a custom chat draws a reply's parts itself, each tool call through AgentTo
   // Any other tool: the framework's row to inspect it.
   expect(html).toContain("lookup_customer")
   expect(html).toContain("<p>Two invoices are overdue.</p>")
-  expect(html).not.toContain("Worked")
+  expect(html).not.toContain("2 steps")
 })

@@ -35,9 +35,9 @@ export {
   type AgentToolPartProps,
 } from "./agent/components/agent-message-body"
 export {
-  AgentThreadSwitcher,
-  type AgentThreadSwitcherProps,
-} from "./agent/components/agent-thread-switcher"
+  AgentThreads,
+  type AgentThreadsProps,
+} from "./agent/components/agent-threads"
 export { Composer, type ComposerProps } from "./agent/components/composer"
 export { ContextChips, type ContextChipsProps } from "./agent/components/context-chips"
 export {
@@ -53,6 +53,10 @@ export {
 } from "./agent/components/reasoning-effort-slider"
 export { SandboxRecovery, type SandboxRecoveryProps } from "./agent/components/sandbox-recovery"
 export { ThreadArtifactsMenu } from "./agent/components/thread-artifacts-menu"
+export {
+  ThreadsButton,
+  type ThreadsButtonProps,
+} from "./agent/components/threads-button"
 export { Transcript, type TranscriptProps } from "./agent/components/transcript"
 export type {
   AgentConversationAuthor,

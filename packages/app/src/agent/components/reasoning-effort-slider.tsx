@@ -35,34 +35,34 @@ export function ReasoningEffortSlider({
 
   return (
     <div>
-      <div className="relative flex min-h-6 items-center justify-between gap-2 pr-8">
+      <div className="flex min-h-6 items-center gap-2">
         <span className="text-xs text-muted-foreground">{messages.thinking}</span>
-        <div className="min-w-0 text-center">
-          <span
-            title={messages.descriptions[value]}
-            className={cn(
-              "text-sm font-medium",
-              enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-primary"
-            )}
-          >
-            <span key={value} className="sixb-reasoning-label">
-              {messages.levels[value]}
-            </span>
-          </span>
-        </div>
-        <button
-          type="button"
-          disabled={disabled || value === resetLevel}
-          aria-label={messages.reset}
-          title={messages.useDefault}
-          onClick={() => {
-            if (onReset) onReset()
-            else if (resetLevel) onChange(resetLevel)
-          }}
-          className="absolute top-1/2 right-0 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/60 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-40"
+        <span
+          title={messages.descriptions[value]}
+          className={cn(
+            "ml-auto text-xs font-medium",
+            enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-foreground"
+          )}
         >
-          <RotateCcw className="size-3.5" aria-hidden="true" />
-        </button>
+          <span key={value} className="sixb-reasoning-label">
+            {messages.levels[value]}
+          </span>
+        </span>
+        {value === resetLevel ? null : (
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label={messages.reset}
+            title={messages.useDefault}
+            onClick={() => {
+              if (onReset) onReset()
+              else if (resetLevel) onChange(resetLevel)
+            }}
+            className="-mr-1 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+          </button>
+        )}
       </div>
       <div
         data-max={enhanced}
@@ -115,7 +115,7 @@ export function ReasoningEffortSlider({
               if (level) onChange(level)
             }
           }}
-          className="sixb-reasoning-input focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover"
+          className="sixb-reasoning-input focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-popover"
         />
       </div>
     </div>

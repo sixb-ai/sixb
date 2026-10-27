@@ -44,13 +44,16 @@ export function isContinuableDiagnostic(code: string): boolean {
 
 /**
  * Whether the conversation offers Continue: a turn cut short with its progress saved, or, once
- * nothing runs, a newest answer whose diagnostic says it stopped short of finishing.
+ * nothing runs, a newest answer that stopped short of finishing — by its diagnostic, or because its
+ * run failed after saving it.
  */
 export function offersContinue(input: {
   readonly presentation: ActiveTurnPresentation
   readonly isRunning: boolean
   readonly sandboxRecovery: boolean
   readonly messages: readonly AgentMessage[]
+  /** The newest run in the thread's history. */
+  readonly latestRun?: AgentRun | null
 }): boolean {
   const { presentation } = input
   if (input.sandboxRecovery) return false
@@ -62,7 +65,8 @@ export function offersContinue(input: {
     presentation.kind === "idle" &&
     !input.isRunning &&
     latest?.role === "assistant" &&
-    latest.annotations.some((annotation) => isContinuableDiagnostic(annotation.code))
+    (latest.annotations.some((annotation) => isContinuableDiagnostic(annotation.code)) ||
+      (input.latestRun?.status === "failed" && latest.runId === input.latestRun.id))
   )
 }
 

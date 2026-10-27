@@ -101,13 +101,10 @@ export interface ComposerProps {
   /**
    * What the agent may change without asking in the reader's next turns. With
    * {@link onApprovalModeChange}, the composer shows it as a chip, and Shift+Tab in an empty input
-   * switches between Manual and Accept edits.
+   * cycles through the modes.
    */
   readonly approvalMode?: AgentApprovalMode
-  /** The reader's mode for new conversations, which the chip's menu offers to change. */
-  readonly defaultApprovalMode?: AgentApprovalMode
   readonly onApprovalModeChange?: (mode: AgentApprovalMode) => void
-  readonly onMakeApprovalModeDefault?: (mode: AgentApprovalMode) => void
   /** A turn waits for the reader's approval: the input says how to answer it or move on. */
   readonly awaitingApproval?: boolean
 }
@@ -134,6 +131,13 @@ type ComposerAttachment =
     }
 
 const MAX_HEIGHT_PX = 200
+
+// Send and stop: the one filled control in the box.
+const SEND_BUTTON_CLASS_NAME = cn(
+  "flex size-8 shrink-0 items-center justify-center rounded-full outline-none transition-colors",
+  "bg-foreground text-background hover:bg-foreground/85 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+  "disabled:bg-foreground/25 disabled:text-background dark:disabled:bg-white/20 dark:disabled:text-white/70"
+)
 
 export function composerCanFocus({
   disabled,
@@ -172,9 +176,7 @@ export function Composer({
   ambientContext = [],
   compact = false,
   approvalMode,
-  defaultApprovalMode,
   onApprovalModeChange,
-  onMakeApprovalModeDefault,
   awaitingApproval = false,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
@@ -536,9 +538,8 @@ export function Composer({
   }
 
   // Enter sends; Cmd/Ctrl+Enter and Shift+Enter insert a newline (and let the field grow).
-  // Shift+Tab in an empty input switches between Manual and Accept edits, as in a terminal agent.
-  // Once something is typed, it moves focus back as everywhere else, and Auto is only ever chosen
-  // from the chip's menu.
+  // Shift+Tab in an empty input cycles Manual, Accept edits and Auto, as in a terminal agent. Once
+  // something is typed, it moves focus back as everywhere else.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
       event.key === "Tab" &&
@@ -611,6 +612,8 @@ export function Composer({
       ? messages.attachmentsFailed(failedCount)
       : hint
 
+  const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
+
   return (
     <div ref={rootRef} className={cn("relative bg-background px-4 pt-2 pb-3", className)}>
       {draggingFiles ? (
@@ -620,7 +623,7 @@ export function Composer({
           <DropFilesOverlay compact={compact} />
         )
       ) : null}
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-[46rem]">
         {error ? (
           <Marker role="alert" className="mb-2 items-start text-destructive">
             <MarkerIcon>
@@ -630,10 +633,8 @@ export function Composer({
           </Marker>
         ) : null}
         <div
-          className={cn(
-            "relative rounded-3xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] duration-500",
-            draggingFiles && "border-primary/50 ring-2 ring-primary/15"
-          )}
+          data-dragging={draggingFiles || undefined}
+          className="sixb-composer-surface relative rounded-3xl bg-card"
         >
           <ContextPicker
             open={mention !== null}
@@ -660,7 +661,12 @@ export function Composer({
               ))}
             </div>
           ) : null}
-          <div className="px-4 pt-2.5 pb-1">
+          <div
+            className={cn(
+              "px-4 pb-1",
+              contextEntries.length > 0 || attachments.length > 0 ? "pt-1" : "pt-3.5"
+            )}
+          >
             <Textarea
               ref={textareaRef}
               autoFocus={composerCanFocus({ disabled, pending, running })}
@@ -682,10 +688,10 @@ export function Composer({
                   : (placeholder ?? messages.placeholder)
               }
               aria-label={messages.message}
-              className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
+              className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/80 focus-visible:ring-0 md:text-[15px]"
             />
           </div>
-          <div className="relative flex min-w-0 items-center gap-1 px-2.5 pb-2">
+          <div className="relative flex min-w-0 items-center gap-0.5 px-2 pb-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -701,21 +707,17 @@ export function Composer({
               disabled={!canAttachFiles}
               aria-label={messages.attachFiles}
               className={cn(
-                "flex size-9 shrink-0 items-center justify-center rounded-full text-foreground transition-colors",
-                "hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground"
+                "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors",
+                "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40",
+                "disabled:cursor-not-allowed disabled:opacity-50"
               )}
             >
-              <Plus className="size-5" />
+              <Plus className="size-[18px]" strokeWidth={1.75} />
             </button>
-            {approvalMode !== undefined && onApprovalModeChange ? (
-              <ApprovalModeChip
-                mode={approvalMode}
-                defaultMode={defaultApprovalMode}
-                onChange={changeApprovalMode}
-                onMakeDefault={onMakeApprovalModeDefault}
-              />
+            {showPermissions ? (
+              <ApprovalModeChip mode={approvalMode} onChange={changeApprovalMode} />
             ) : null}
-            <span className="min-w-0 flex-1" />
+            <span className="min-w-2 flex-1" />
             {onSelectModel && onSelectReasoning ? (
               <ModelControls
                 models={models}
@@ -738,16 +740,12 @@ export function Composer({
                 onClick={onStop}
                 disabled={stopping}
                 aria-label={messages.stop}
-                className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
-                  "bg-primary text-primary-foreground hover:bg-primary/90",
-                  "disabled:bg-muted disabled:text-muted-foreground"
-                )}
+                className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
               >
                 {stopping ? (
-                  <Spinner className="size-4" />
+                  <Spinner className="size-3.5" />
                 ) : (
-                  <Square className="size-3.5 fill-current" />
+                  <Square className="size-2.5 fill-current" />
                 )}
               </button>
             ) : (
@@ -756,16 +754,12 @@ export function Composer({
                 onClick={submit}
                 disabled={!canSend}
                 aria-label={messages.send}
-                className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
-                  "bg-primary text-primary-foreground hover:bg-primary/90",
-                  "disabled:bg-muted disabled:text-muted-foreground"
-                )}
+                className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
               >
                 {pending || uploading ? (
-                  <Spinner className="size-4" />
+                  <Spinner className="size-3.5" />
                 ) : (
-                  <ArrowUp className="size-[18px]" />
+                  <ArrowUp className="size-4" strokeWidth={2.25} />
                 )}
               </button>
             )}
@@ -777,9 +771,10 @@ export function Composer({
         {statusHint ? (
           <p
             className={cn(
-              "mt-1.5 px-1 text-[11px] text-muted-foreground",
+              "mt-2 truncate px-4 text-xs text-muted-foreground",
               failedCount > 0 && "text-destructive"
             )}
+            title={statusHint}
           >
             {statusHint}
           </p>

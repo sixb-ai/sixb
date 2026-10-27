@@ -14,6 +14,7 @@ import {
   toggledApprovalMode,
 } from "../src/agent/approvals"
 import { type BashTool, BashToolView } from "../src/agent/bash/bash-tool-view"
+import { AgentThreads } from "../src/agent/components/agent-threads"
 import { conversationMessages, conversationTurn, READ_ONLY_TURN } from "../src/agent/conversation"
 import type { AgentMessage } from "../src/agent/types"
 import { Transcript } from "../src/index"
@@ -263,6 +264,8 @@ interface Scenario {
   resumed?: Record<string, unknown>
   /** Why the turn could not resume, when it could not. */
   refused?: { status: "refused"; code: string; message: string; retrying: boolean }
+  /** The action's definition, as the reader may read it. */
+  action?: Record<string, unknown>
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -273,6 +276,7 @@ function api(scenario: Scenario, requests: string[]) {
     const body = method === "GET" ? "" : await request.text()
     requests.push(`${method} ${url.pathname}${url.search}${body ? ` ${body}` : ""}`)
     const path = url.pathname
+    if (path === "/api/actions/payInvoice" && scenario.action) return Response.json(scenario.action)
 
     if (path === "/api/agent") {
       return Response.json({ name: "Sixb", model: { provider: "test", modelId: "fast" } })
@@ -348,7 +352,11 @@ function api(scenario: Scenario, requests: string[]) {
   }
 }
 
-function renderChat(as: "dana" | "sam", scenario: Partial<Scenario> = {}) {
+function renderChat(
+  as: "dana" | "sam",
+  scenario: Partial<Scenario> = {},
+  options: { readonly page?: boolean } = {}
+) {
   const state: Scenario = {
     thread: thread(),
     messages: conversation(),
@@ -373,7 +381,16 @@ function renderChat(as: "dana" | "sam", scenario: Partial<Scenario> = {}) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <AgentChat threadId="thr_1" onNavigateHome={() => {}} onNavigateThread={() => {}} />
+        {options.page ? (
+          <AgentThreads onSelectThread={() => {}} onNewThread={() => {}} />
+        ) : (
+          <AgentChat
+            threadId="thr_1"
+            onNavigateHome={() => {}}
+            onNavigateThread={() => {}}
+            onOpenThreads={() => {}}
+          />
+        )}
       </MemoryRouter>
     </QueryClientProvider>
   )
@@ -414,7 +431,7 @@ describe("the approval mode chip", () => {
   test("switches the reader's mode in the thread, and the next turn runs in it", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
 
-    const chip = await view.findByRole("button", { name: "Approval mode: Manual. Change it" })
+    const chip = await view.findByRole("button", { name: "Permissions: Manual. Change them" })
     fireEvent.click(chip)
     fireEvent.click(await view.findByRole("radio", { name: /^Auto/ }))
 
@@ -423,7 +440,7 @@ describe("the approval mode chip", () => {
         'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"auto"}'
       )
     )
-    expect(view.getByRole("button", { name: "Approval mode: Auto. Change it" })).toBeDefined()
+    expect(view.getByRole("button", { name: "Permissions: Auto. Change them" })).toBeDefined()
 
     const input = view.getByRole("textbox", { name: "Message" })
     type(input, "Pay it")
@@ -442,9 +459,9 @@ describe("the approval mode chip", () => {
 
   // Removal proof: drop the Shift+Tab branch from the composer's handleKeyDown; nothing is sent.
   // Drop `value.length === 0` from it; typing then no longer lets Shift+Tab move focus back.
-  test("Shift+Tab in an empty message switches between Manual and Accept edits, and says so", async () => {
+  test("Shift+Tab in an empty message cycles the modes, and says so", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
-    await view.findByRole("button", { name: "Approval mode: Manual. Change it" })
+    await view.findByRole("button", { name: "Permissions: Manual. Change them" })
     const input = view.getByRole("textbox", { name: "Message" })
     const modeSaves = () => requests.filter((entry) => entry.includes("/approval-mode"))
 
@@ -454,12 +471,17 @@ describe("the approval mode chip", () => {
         'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"accept-edits"}',
       ])
     )
-    expect(view.getByText("Approval mode: Accept edits")).toBeDefined()
+    expect(view.getByText("Permissions: Accept edits")).toBeDefined()
 
-    // Never on to Auto: back to Manual.
+    // On to Auto, then round to Manual.
     fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
     await waitFor(() => expect(modeSaves()).toHaveLength(2))
     expect(modeSaves()[1]).toBe(
+      'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"auto"}'
+    )
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
+    await waitFor(() => expect(modeSaves()).toHaveLength(3))
+    expect(modeSaves()[2]).toBe(
       'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"manual"}'
     )
 
@@ -468,18 +490,16 @@ describe("the approval mode chip", () => {
     fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
     fireEvent.keyDown(input, { key: "Tab" })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(modeSaves()).toHaveLength(2)
+    expect(modeSaves()).toHaveLength(3)
   })
 
-  test("offers to make the mode the reader's default", async () => {
+  // Removal proof: drop the `setDefaultApprovalMode` call from `setApprovalMode`; no PUT is made.
+  test("a chosen mode becomes the reader's default, with no extra step", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
-    fireEvent.click(await view.findByRole("button", { name: /^Approval mode: Manual/ }))
+    fireEvent.click(await view.findByRole("button", { name: /^Permissions: Manual/ }))
     fireEvent.click(await view.findByRole("radio", { name: /^Accept edits/ }))
-    await view.findByRole("button", { name: /^Approval mode: Accept edits/ })
 
-    fireEvent.click(view.getByRole("button", { name: /^Approval mode: Accept edits/ }))
-    fireEvent.click(await view.findByRole("button", { name: "Use as my default" }))
-
+    await view.findByRole("button", { name: /^Permissions: Accept edits/ })
     await waitFor(() =>
       expect(requests).toContain('PUT /api/agent/preferences {"approvalMode":"accept-edits"}')
     )
@@ -496,14 +516,34 @@ describe("an approval card", () => {
     expect(found.getByRole("heading", { name: "Pay invoice" })).toBeDefined()
     expect(found.getByText("Paid on")).toBeDefined()
     expect(found.getByText("ach")).toBeDefined()
-    expect(found.getByText("Reaches an external system, then updates your data")).toBeDefined()
+    expect(found.getByText("Also acts outside this app")).toBeDefined()
     expect(found.getByRole("button", { name: "Approve" })).toBeDefined()
     expect(found.getByRole("button", { name: "Deny" })).toBeDefined()
-    expect(found.getByRole("button", { name: "Always allow · switches to Auto" })).toBeDefined()
+    // For a call that reaches outside, it lets every such call run: it says so.
+    expect(found.getByRole("button", { name: "Allow all from now on" })).toBeDefined()
+    // The card names the record without sending everyone in the conversation to its page.
+    expect(found.queryByRole("link")).toBeNull()
     // The turn is paused, not finished: the composer says how to move on.
     expect(view.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
       "Approve above, or reply instead"
     )
+  })
+
+  // Removal proof: treat every external action as acting outside in effectOf; a write-back reads
+  // as "Also acts outside this app".
+  test("says a write-back updates the record's own system, not that it acts outside", async () => {
+    const { view } = renderChat("dana", {
+      action: {
+        id: "payInvoice",
+        name: "Pay invoice",
+        params: [],
+        phases: { writeback: true, effects: false },
+      },
+    })
+
+    const found = within(await card(view))
+    expect(await found.findByText("Also updates the system this record comes from")).toBeDefined()
+    expect(found.queryByText("Also acts outside this app")).toBeNull()
   })
 
   // Removal proof: drop `setPendingSend` from `decide`; the resumed turn is not followed.
@@ -518,10 +558,7 @@ describe("an approval card", () => {
         'POST /api/agent-threads/thr_1/approvals/apr_1/decision {"decision":"approve"}'
       )
     )
-    expect(await view.findByText("Approved · Ran")).toBeDefined()
-    expect(view.getByRole("link", { name: "View run" }).getAttribute("href")).toBe(
-      "/observability/runs/actions/act_pay"
-    )
+    expect(await view.findByText("Approved")).toBeDefined()
     // The resumed turn is followed under the card, which keeps its place.
     expect(await view.findByRole("status", { name: "Agent is working" })).toBeDefined()
   })
@@ -535,7 +572,10 @@ describe("an approval card", () => {
     const [first] = await view.findAllByRole("region", { name: /^Approval request/ })
     if (!first) throw new Error("No card.")
     const found = within(first)
-    const always = found.getByRole("button", { name: "Always allow · switches to Auto" })
+    const always = found.getByRole("button", { name: "Allow all from now on" })
+    expect(always.getAttribute("title")).toBe(
+      "Approves this, then sets this conversation to “Auto”"
+    )
     expect(found.getByText("Also approves 1 other request waiting in this reply.")).toBeDefined()
 
     fireEvent.click(always)
@@ -545,7 +585,7 @@ describe("an approval card", () => {
         'POST /api/agent-threads/thr_1/approvals/apr_1/decision {"decision":"approve","always":true}'
       )
     )
-    expect(await view.findByText("You're now in Auto in this conversation.")).toBeDefined()
+    expect(await view.findByText("This conversation is now set to “Auto”.")).toBeDefined()
   })
 
   // Removal proof: drop the `resume` branch of the card's `then`; the card says nothing of it.
@@ -561,7 +601,7 @@ describe("an approval card", () => {
 
     fireEvent.click(within(await card(view)).getByRole("button", { name: "Approve" }))
 
-    expect(await view.findByText("Approved · Ran")).toBeDefined()
+    expect(await view.findByText("Approved")).toBeDefined()
     expect(
       view.getByText("The agent couldn't continue. Send a message to pick up from here.")
     ).toBeDefined()
@@ -593,7 +633,7 @@ describe("an approval card", () => {
       })
     })
 
-    expect(await view.findByText("Denied · Didn't run")).toBeDefined()
+    expect(await view.findByText("Denied")).toBeDefined()
     expect(view.queryByRole("button", { name: "Approve" })).toBeNull()
   })
 
@@ -657,7 +697,7 @@ describe("an approval card", () => {
   test.each([
     ["pending", approval(), "Waiting for your approval"],
     ["running", approval({ status: "approved", decidedAt: at }), "Approved · Running…"],
-    ["ran", ran, "Approved · Ran"],
+    ["ran", ran, "Approved"],
     [
       "failed",
       approval({
@@ -678,7 +718,7 @@ describe("an approval card", () => {
       }),
       "Approved, but it failed",
     ],
-    ["denied", approval({ status: "denied", decidedAt: at }), "Denied · Didn't run"],
+    ["denied", approval({ status: "denied", decidedAt: at }), "Denied"],
     ["superseded", approval({ status: "superseded", decidedAt: at }), "Set aside"],
     ["cancelled", approval({ status: "cancelled", decidedAt: at }), "Stopped"],
     ["expired", approval({ status: "expired", decidedAt: at }), "Expired"],
@@ -761,7 +801,7 @@ describe("an approval card", () => {
 
     const found = view.getByRole("region", { name: /^Approval request/ })
     expect(found.getAttribute("data-approval-state")).toBe("ran")
-    expect(within(found).getByRole("link", { name: "View run" })).toBeDefined()
+    expect(within(found).queryByRole("link")).toBeNull()
     expect(within(found).queryByRole("button", { name: "Approve" })).toBeNull()
   })
 
@@ -775,7 +815,7 @@ describe("an approval card", () => {
 
     expect(
       within(recorded.getByRole("region", { name: /^Approval request/ })).getByText(
-        "Asked by the sub-agent pay-suppliers"
+        "From Pay suppliers"
       )
     ).toBeDefined()
     cleanup()
@@ -803,7 +843,7 @@ describe("an approval card", () => {
 
     expect(
       within(observed.getByRole("region", { name: /^Approval request/ })).getByText(
-        "Asked by the sub-agent pay-suppliers"
+        "From Pay suppliers"
       )
     ).toBeDefined()
   })
@@ -824,26 +864,28 @@ describe("an approval card", () => {
 })
 
 describe("the thread list", () => {
-  // Removal proof: drop `waitingRows` from the switcher; the waiting thread sits among the others.
-  test("puts the conversations waiting for the reader first", async () => {
+  // Removal proof: drop `waiting` from AgentThreads; the waiting thread sits among the others.
+  test("puts the threads waiting for the reader first", async () => {
     const older = "2026-10-20T09:00:00.000Z"
-    const { view } = renderChat("dana", {
-      waiting: [approval({ id: "apr_2", threadId: "thr_2" })],
-      threads: [
-        thread({ id: "thr_3", title: "Q3 software spend", updatedAt: at }),
-        thread({ id: "thr_2", title: "Approve Halvorsen", updatedAt: older }),
-      ],
-    })
+    const { view } = renderChat(
+      "dana",
+      {
+        waiting: [approval({ id: "apr_2", threadId: "thr_2" })],
+        threads: [
+          thread({ id: "thr_3", title: "Q3 software spend", updatedAt: at }),
+          thread({ id: "thr_2", title: "Approve Halvorsen", updatedAt: older }),
+        ],
+      },
+      { page: true }
+    )
 
-    fireEvent.click(await view.findByRole("button", { name: /1 conversation waiting/ }))
-    const dialog = within(await view.findByRole("dialog"))
-    const section = dialog.getByRole("region", { name: "Waiting for you" })
+    const section = await view.findByRole("region", { name: "Waiting for you" })
     expect(within(section).getByRole("button", { name: /^Approve Halvorsen/ })).toBeDefined()
     expect(within(section).queryByRole("button", { name: /^Q3 software spend/ })).toBeNull()
   })
 
-  // Removal proof: drop `waitingThreadIds` from ConversationPanel's switcher; no badge shows.
-  test("counts the other conversations waiting for the reader, and marks them", async () => {
+  // Removal proof: drop `waitingThreadIds` from ConversationPanel's button; no badge shows.
+  test("counts the other threads waiting for the reader, and marks them", async () => {
     const waiting = [
       approval({ id: "apr_2", threadId: "thr_2" }),
       approval({ id: "apr_3", threadId: "thr_3" }),
@@ -854,22 +896,71 @@ describe("the thread list", () => {
     const { view } = renderChat("dana", { waiting })
 
     const history = await view.findByRole("button", {
-      name: /2 conversations waiting for your approval/,
+      name: /2 threads waiting for your approval/,
     })
     expect(history.querySelector("[data-waiting-approval-count]")?.textContent).toBe("2")
 
-    fireEvent.click(history)
-    const dialog = within(await view.findByRole("dialog"))
+    // The page marks every one of them, the open one too.
+    view.unmount()
+    const page = renderChat(
+      "dana",
+      {
+        waiting,
+        threads: [
+          thread(),
+          thread({ id: "thr_2", title: "Approve Halvorsen" }),
+          thread({ id: "thr_3", title: "Q3 software spend" }),
+        ],
+      },
+      { page: true }
+    )
     expect(
-      dialog.getByRole("button", { name: /Pay Northwind, current, Waiting for you/ })
+      await page.view.findByRole("button", { name: /^Pay Northwind, Waiting for you/ })
     ).toBeDefined()
   })
 
   // Removal proof: drop `onApprovalActivity` from the activity stream; no badge.
+  // Removal proof: drop the `working` mark from AgentThreads' Row, or its activity feed; this fails.
+  test("marks the threads the agent is at work in, until the run ends", async () => {
+    const { view, state } = renderChat(
+      "dana",
+      { threads: [thread({ id: "thr_2", title: "Approve Halvorsen", activeRunId: "run_9" })] },
+      { page: true }
+    )
+    const activity = await subscribeActivity()
+
+    const row = await view.findByRole("button", { name: /^Approve Halvorsen, Working,/ })
+    expect(row.hasAttribute("data-thread-working")).toBe(true)
+
+    state.threads = [thread({ id: "thr_2", title: "Approve Halvorsen", activeRunId: null })]
+    await act(async () => {
+      activity.onmessage?.({
+        data: JSON.stringify({
+          type: "activity",
+          event: {
+            schemaVersion: 1,
+            type: "agent.run.activity",
+            projectId: "proj",
+            runId: "run_9",
+            threadId: "thr_2",
+            status: "succeeded",
+            attempt: 0,
+            occurredAt: at,
+          },
+        }),
+      })
+    })
+
+    await waitFor(() =>
+      expect(view.queryByRole("button", { name: /^Approve Halvorsen, Working,/ })).toBeNull()
+    )
+    expect(view.getByRole("button", { name: /^Approve Halvorsen,/ })).toBeDefined()
+  })
+
   test("a call held in another conversation counts as it arrives", async () => {
     const { view, state } = renderChat("dana", { approvals: [], runs: [], messages: [] })
     const activity = await subscribeActivity()
-    await view.findByRole("button", { name: /^Thread history/ })
+    await view.findByRole("button", { name: /^All threads/ })
     expect(view.container.querySelector("[data-waiting-approval-count]")).toBeNull()
 
     state.waiting = [approval({ id: "apr_2", threadId: "thr_2" })]
@@ -915,9 +1006,9 @@ describe("held calls in a command's output", () => {
     expect(heldCallsInOutput({ stdout: "awaiting_approval", exitCode: 4 })).toEqual([])
   })
 
-  test("Shift+Tab never reaches Auto", () => {
+  test("Shift+Tab cycles every mode", () => {
     expect(toggledApprovalMode("manual")).toBe("accept-edits")
-    expect(toggledApprovalMode("accept-edits")).toBe("manual")
+    expect(toggledApprovalMode("accept-edits")).toBe("auto")
     expect(toggledApprovalMode("auto")).toBe("manual")
   })
 
