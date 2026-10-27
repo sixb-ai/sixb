@@ -5,10 +5,10 @@ import { act, fireEvent, render, waitFor, within } from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { latestWorkLabel } from "../src/agent/activity-label"
-import type { AgentApproval } from "../src/agent/approvals"
+import { type AgentApproval, reportedApprovalOutcomes } from "../src/agent/approvals"
 import { Transcript } from "../src/agent/components/transcript"
+import { conversationMessages, conversationTurn, READ_ONLY_TURN } from "../src/agent/conversation"
 import { type AgentChild, childTitle } from "../src/agent/delegation/interpret"
-import { createLiveRunState } from "../src/agent/live-run"
 import { ObservedThreadContext } from "../src/agent/observed-thread"
 import type { AgentMessage } from "../src/agent/types"
 import { installDom } from "./helpers/dom"
@@ -358,11 +358,16 @@ function show(
   client.setConfig({ fetch: api(scenario, requests) })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
+  const messages = conversation(parts)
   const transcript = (
     <Transcript
       threadId="thr_1"
-      messages={conversation(parts)}
-      live={createLiveRunState(null)}
+      messages={conversationMessages({ messages, presentation: { kind: "idle" } })}
+      turn={conversationTurn({
+        ...READ_ONLY_TURN,
+        presentation: { kind: "idle" },
+        activeRunId: null,
+      })}
       {...(options.approvals
         ? {
             approvals: {
@@ -380,6 +385,7 @@ function show(
             },
           }
         : {})}
+      approvalOutcomes={reportedApprovalOutcomes(messages)}
       {...(options.observed ? {} : { delegation: { canStop: () => options.canStop ?? false } })}
     />
   )

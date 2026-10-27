@@ -10,82 +10,74 @@ import {
   MarkerIcon,
 } from "@sixb/ui/components"
 import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
-import { memo } from "react"
-import { type FileSource, messageFileSource } from "../../artifacts/file-source"
+import { memo, type ReactNode } from "react"
+import type { FileSource } from "../../artifacts/file-source"
 import { PersonAvatar } from "../../artifacts/person-avatar"
+import type { AgentConversationMessage } from "../conversation"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
-import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
 import { type AuthorLabel, useMessageAuthors } from "../message-authors"
-import { useObservedThread } from "../observed-thread"
-import { normalizeDurableParts } from "../parts"
-import { useLivePublishes } from "../publish-artifact/use-live-publishes"
 import { isContinuableDiagnostic } from "../run-presentation"
-import type {
-  AgentContextEntryInput,
-  AgentContextInput,
-  AgentFileRef,
-  AgentMessage,
-} from "../types"
+import type { AgentFileRef } from "../types"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-status"
+import { AgentMessageBody } from "./agent-message-body"
 import { ContextChips } from "./context-chips"
 import { FileAttachmentCard } from "./file-attachment-card"
-import { AssistantBody } from "./message-parts"
 
 /**
- * Render a single durable message. System messages are not shown in the reading transcript.
- * `continued`: the previous user message has the same author, so this one does not name them.
- * `onContinue` offers to finish an answer whose diagnostic says it stopped short.
+ * Render a single message of the conversation. `continued`: the previous user message has the same
+ * author, so this one does not name them. `onContinue` offers to finish an answer whose diagnostic
+ * says it stopped short. `after` closes a reply, such as the notice of how its turn ended.
  */
 export const MessageView = memo(function MessageView({
   message,
   continued = false,
   onContinue,
   continuing = false,
+  after,
 }: {
-  readonly message: AgentMessage
+  readonly message: AgentConversationMessage
   readonly continued?: boolean
   readonly onContinue?: () => void
   readonly continuing?: boolean
+  readonly after?: ReactNode
 }) {
   if (message.role === "user") return <UserMessage message={message} continued={continued} />
-  if (message.role === "assistant") {
-    return <AssistantMessage message={message} onContinue={onContinue} continuing={continuing} />
-  }
-  return null
+
+  return (
+    <AssistantMessage
+      message={message}
+      onContinue={onContinue}
+      continuing={continuing}
+      after={after}
+    />
+  )
 })
 
 function UserMessage({
   message,
   continued,
 }: {
-  readonly message: AgentMessage
+  readonly message: AgentConversationMessage
   readonly continued: boolean
 }) {
-  const observed = useObservedThread()
   const authors = useMessageAuthors()
   const text = textOf(message)
-  const files = filePartsOf(message)
-  const context = contextPartsOf(message)
-  if (!text && files.length === 0 && context.length === 0) return null
+  const files = message.parts.flatMap((part) => (part.type === "file" ? [part] : []))
+  const pending = message.status === "pending"
+  if (!text && files.length === 0 && message.context.length === 0) return null
 
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {continued ? null : <AuthorLine author={authors?.authorOf(message)} />}
-      <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
+      {continued ? null : <AuthorLine author={authors?.labelOf(message.author)} />}
+      <ContextChips
+        entries={message.context}
+        className={pending ? "justify-end" : "max-w-[min(90%,40rem)] justify-end"}
+      />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
-          {files.map(({ part, index }) => (
-            <UserFileAttachment
-              key={index}
-              fileRef={part.fileRef}
-              source={agentMessageFileSource(
-                message,
-                part.fileRef,
-                `/parts/${index}/fileRef`,
-                observed
-              )}
-            />
+          {files.map((file, index) => (
+            <UserFileAttachment key={index} fileRef={file.fileRef} source={file.source} />
           ))}
         </div>
       ) : null}
@@ -102,22 +94,19 @@ function AssistantMessage({
   message,
   onContinue,
   continuing,
+  after,
 }: {
-  message: AgentMessage
-  onContinue?: () => void
-  continuing: boolean
+  readonly message: AgentConversationMessage
+  readonly onContinue?: () => void
+  readonly continuing: boolean
+  readonly after?: ReactNode
 }) {
   const messages = useAgentMessages()
-  const observed = useObservedThread()
   return (
     <div className="flex flex-col gap-2">
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
-      <AssistantBody
-        parts={normalizeDurableParts(message.parts, {
-          fileSource: (fileRef, path) => agentMessageFileSource(message, fileRef, path, observed),
-        })}
-      />
-      {message.annotations.map((annotation, index) => (
+      <AgentMessageBody message={message} />
+      {message.diagnostics.map((annotation, index) => (
         // Laid out like the timeout and interrupted markers: notice, then its action.
         <div
           key={`${annotation.code}:${index}`}
@@ -152,6 +141,7 @@ function AssistantMessage({
           ) : null}
         </div>
       ))}
+      {after}
     </div>
   )
 }
@@ -184,91 +174,6 @@ function CompactionResult({ summary }: { summary: string }) {
         </div>
       </CollapsibleContent>
     </Collapsible>
-  )
-}
-
-/** The transient assistant row driven by the live `/ws/agents` stream. */
-export function LiveAssistant({
-  live,
-  keepWorkOpen = false,
-  timeout,
-  interrupted,
-  onRetry,
-  onContinue,
-  retrying = false,
-  continuing = false,
-}: {
-  live: LiveRunState
-  keepWorkOpen?: boolean
-  timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
-  interrupted?: { readonly hasProgress: boolean }
-  onRetry?: () => void
-  onContinue?: () => void
-  retrying?: boolean
-  continuing?: boolean
-}) {
-  const messages = useAgentMessages().transcript
-  useLivePublishes(live)
-  if (live.compacting && live.parts.length === 0) {
-    return <CompactionMarker />
-  }
-  if (isAwaitingFirstToken(live)) {
-    return <ThinkingMarker />
-  }
-  if (timeout) {
-    if (live.parts.length === 0) {
-      return (
-        <RunTimeoutMarker
-          hasProgress={timeout.hasProgress}
-          timeoutMs={timeout.timeoutMs}
-          onRetry={onRetry}
-          onContinue={onContinue}
-          retrying={retrying}
-          continuing={continuing}
-        />
-      )
-    }
-    return (
-      <div className="flex flex-col gap-2">
-        <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
-        <RunTimeoutMarker
-          hasProgress={timeout.hasProgress}
-          timeoutMs={timeout.timeoutMs}
-          onRetry={onRetry}
-          onContinue={onContinue}
-          retrying={retrying}
-          continuing={continuing}
-        />
-      </div>
-    )
-  }
-  if (interrupted) {
-    return (
-      <div className="flex flex-col gap-2">
-        <AssistantBody parts={live.parts} live={keepWorkOpen} />
-        <RunInterruptedMarker
-          hasProgress={interrupted.hasProgress}
-          onRetry={onRetry}
-          onContinue={onContinue}
-          retrying={retrying}
-          continuing={continuing}
-        />
-      </div>
-    )
-  }
-  if (live.finishStatus === "failed" && live.parts.length === 0) {
-    return <RunFailureMarker onRetry={onRetry} retrying={retrying} />
-  }
-  if (live.finishStatus === "cancelled" && live.parts.length === 0) {
-    return <RunCancelledMarker />
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
-      {live.finishStatus === "failed" ? <RunErrorMarker message={messages.notFinished} /> : null}
-      {live.finishStatus === "cancelled" ? <RunCancelledMarker /> : null}
-    </div>
   )
 }
 
@@ -455,39 +360,10 @@ function diagnosticMessage(code: string, messages: AgentMessages["diagnostics"])
     : messages.unknown
 }
 
-function textOf(message: AgentMessage): string {
+/** A user message's text, as one bubble. */
+function textOf(message: AgentConversationMessage): string {
   return message.parts
-    .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-    .map((part) => part.text)
+    .map((part) => (part.type === "text" ? part.text : ""))
     .join("")
     .trim()
-}
-
-function filePartsOf(message: AgentMessage) {
-  return message.parts.flatMap((part, index) =>
-    part.type === "file" ? [{ part: part as Extract<typeof part, { type: "file" }>, index }] : []
-  )
-}
-
-function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
-  return message.parts.flatMap((part) =>
-    part.type === "context"
-      ? [{ context: part.context as AgentContextInput, origin: part.origin }]
-      : []
-  )
-}
-
-function agentMessageFileSource(
-  message: AgentMessage,
-  fileRef: AgentFileRef,
-  path: string,
-  observed: boolean
-): FileSource {
-  return messageFileSource({
-    threadId: message.threadId,
-    messageId: message.id,
-    path,
-    fileRef,
-    observed,
-  })
 }

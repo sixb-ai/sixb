@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MessageView } from "../src/agent/components/message-view"
+import { type AgentConversationMessage, conversationMessages } from "../src/agent/conversation"
 import type { AgentMessage } from "../src/agent/types"
 
 test("only durable compacted responses expose their continuation summary", () => {
@@ -25,7 +26,16 @@ test("only durable compacted responses expose their continuation summary", () =>
   expect(ordinary).not.toContain("Condensed conversation")
 })
 
-function assistantMessage(compaction?: AgentMessage["compaction"]): AgentMessage {
+function assistantMessage(compaction?: AgentMessage["compaction"]): AgentConversationMessage {
+  const [message] = conversationMessages({
+    messages: [savedMessage(compaction)],
+    presentation: { kind: "idle" },
+  })
+  if (!message) throw new Error("The conversation dropped the saved answer.")
+  return message
+}
+
+function savedMessage(compaction?: AgentMessage["compaction"]): AgentMessage {
   return {
     id: "message-1",
     projectId: "project-1",

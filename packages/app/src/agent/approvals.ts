@@ -1,5 +1,6 @@
 import type { DecideAgentApprovalResponse, ListAgentThreadApprovalsResponse } from "@sixb/client"
 import { createContext, useContext } from "react"
+import type { AgentConversationMessage } from "./conversation"
 import type { NormalizedPart } from "./parts"
 import type { AgentMessage, AgentRun } from "./types"
 
@@ -90,14 +91,16 @@ export function heldCallsInParts(parts: readonly NormalizedPart[]): HeldCall[] {
   })
 }
 
-/** The ids of the held calls the transcript's messages already show a card for. */
-export function heldCallIdsInMessages(messages: readonly AgentMessage[]): ReadonlySet<string> {
+/** The ids of the held calls the transcript's replies, saved or streaming, already show a card for. */
+export function heldCallIdsInMessages(
+  messages: readonly AgentConversationMessage[]
+): ReadonlySet<string> {
   const ids = new Set<string>()
   for (const message of messages) {
     if (message.role !== "assistant") continue
 
     for (const part of message.parts) {
-      if (part.type !== "tool-call" || part.toolName !== "bash") continue
+      if (part.type !== "tool" || part.toolName !== "bash") continue
       if (part.state !== "output-available") continue
 
       for (const call of heldCallsInOutput(part.output)) ids.add(call.id)

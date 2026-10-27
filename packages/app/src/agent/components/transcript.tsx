@@ -1,6 +1,4 @@
 import {
-  Bubble,
-  BubbleContent,
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -8,75 +6,56 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@sixb/ui/components"
-import { Fragment, memo, useMemo } from "react"
+import { Fragment, memo, type ReactNode, useMemo } from "react"
 import {
   ApprovalCardsContext,
   type HeldCall,
   heldCallIdsInMessages,
   heldCallOf,
-  heldCallsInParts,
-  isApprovalOutcomeMessage,
-  reportedApprovalOutcomes,
+  type ReportedApprovalOutcome,
   type TranscriptApprovals,
 } from "../approvals"
+import type { AgentConversationMessage, AgentConversationTurn } from "../conversation"
 import { DelegationCardsContext, type TranscriptDelegation } from "../delegation/context"
 import {
-  delegationTools,
   delegationTurns,
   readThreadDelegation,
   type ThreadDelegation,
 } from "../delegation/interpret"
 import { heldInCard } from "../delegation/model"
-import { hasLiveContent, type LiveRunState } from "../live-run"
-import { authorKey, useMessageAuthors } from "../message-authors"
-import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
+import { useAgentMessages } from "../i18n"
+import { principalKey } from "../message-authors"
 import { ApprovalCards } from "./approval-card"
-import { ContextChips } from "./context-chips"
 import {
-  AuthorLine,
-  LiveAssistant,
+  CompactionMarker,
   MessageView,
   ReconnectingMarker,
   RunCancelledMarker,
+  RunErrorMarker,
   RunFailureMarker,
   RunInterruptedMarker,
   RunTimeoutMarker,
   ThinkingMarker,
-  UserFileAttachment,
 } from "./message-view"
 
 export interface TranscriptProps {
   readonly threadId: string | null
-  readonly messages: readonly AgentMessage[]
-  readonly live: LiveRunState
-  /** A just-sent user message echoed locally until durable state catches up. */
-  readonly pendingUserText?: string | null
-  readonly pendingUserAttachments?: readonly AgentFileRef[]
-  readonly pendingUserContext?: readonly AgentContextEntryInput[]
-  /** This client initiated the current turn, so keep the user prompt anchored while it streams. */
+  /** The conversation, as `useAgentConversation` merges it. */
+  readonly messages: readonly AgentConversationMessage[]
+  /** The newest turn, which the markers below the messages tell. */
+  readonly turn: AgentConversationTurn
+  /** This client started the current turn, so keep the user prompt anchored while it streams. */
   readonly anchorCurrentTurn?: boolean
-  /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
-  readonly awaitingResponse?: boolean
-  /** The queued run has crossed the conversational delay threshold. */
-  readonly waitingLonger?: boolean
-  /** The newest run failed before it produced a durable assistant message. */
-  readonly failedBeforeResponse?: boolean
-  readonly cancelledBeforeResponse?: boolean
-  readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
-  /** The newest run lost its worker mid-turn; without saved progress, its stream is not shown. */
-  readonly interrupted?: { readonly hasProgress: boolean }
   readonly onRetry?: () => void
   readonly onContinue?: () => void
-  readonly retrying?: boolean
-  readonly continuing?: boolean
-  /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
-  readonly reconnecting?: boolean
   /**
    * The thread's calls held for approval. Each shows as a card under the work that made it, which
    * its requester answers; without them, as for an observer, the cards show only what the messages
    * report of how each ended.
    */
   readonly approvals?: TranscriptApprovals
+  /** How each held call ended, as the messages that resumed or followed its turn told the agent. */
+  readonly approvalOutcomes?: ReadonlyMap<string, ReportedApprovalOutcome>
   /**
    * What the reader may do with the sub-agents the agent delegated to, each a card under the work
    * that spawned it. Without it, as for an observer, the cards only read.
@@ -84,27 +63,26 @@ export interface TranscriptProps {
   readonly delegation?: TranscriptDelegation
 }
 
+const NO_OUTCOMES: ReadonlyMap<string, ReportedApprovalOutcome> = new Map()
+
 export function Transcript(props: TranscriptProps) {
-  const { approvals, messages, live, threadId, delegation: actions } = props
+  const { approvals, approvalOutcomes, messages, turn, threadId, delegation: actions } = props
   const cards = useMemo(
-    () => ({ approvals: approvals ?? null, outcomes: reportedApprovalOutcomes(messages) }),
-    [approvals, messages]
+    () => ({ approvals: approvals ?? null, outcomes: approvalOutcomes ?? NO_OUTCOMES }),
+    [approvals, approvalOutcomes]
   )
 
-  // The turn streaming now changes with every chunk; its delegation calls far less often.
-  const turns = useMemo(() => delegationTurns(messages), [messages])
-  // Once its answer is stored, the turn that streamed is read from it, never twice.
-  const stored = live.runId !== null && messages.some((message) => message.runId === live.runId)
-  const liveTools = stored ? [] : delegationTools(live.parts)
-  const liveSignature = JSON.stringify(liveTools.map((tool) => [tool.toolName, tool.state]))
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the tools
-  const delegation = useMemo(
-    () => readThreadDelegation([...turns, { runId: live.runId, tools: liveTools }]),
-    [turns, live.runId, liveSignature]
+  // The reply streaming now changes with every chunk; its delegation calls far less often.
+  const turns = delegationTurns(messages)
+  const signature = JSON.stringify(
+    turns.map((entry) => [entry.runId, entry.tools.map((tool) => [tool.toolName, tool.state])])
   )
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the signature stands for the turns
+  const delegation = useMemo(() => readThreadDelegation(turns), [signature])
+  const liveRunId = turn.kind === "responding" ? turn.runId : null
   const children = useMemo(
-    () => ({ threadId, delegation, liveRunId: live.active ? live.runId : null, actions }),
-    [threadId, delegation, live.active, live.runId, actions]
+    () => ({ threadId, delegation, liveRunId, actions }),
+    [threadId, delegation, liveRunId, actions]
   )
 
   return (
@@ -120,46 +98,47 @@ function TranscriptView({
   threadId,
   threadDelegation,
   messages,
-  live,
-  pendingUserText,
-  pendingUserAttachments = [],
-  pendingUserContext = [],
+  turn,
   anchorCurrentTurn,
-  awaitingResponse,
-  waitingLonger,
-  failedBeforeResponse,
-  cancelledBeforeResponse,
-  timeout,
-  interrupted,
   onRetry,
   onContinue,
-  retrying,
-  continuing,
-  reconnecting,
   approvals,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
-  const authors = useMessageAuthors()
+  // Messages one person sends in a row name them once; an answer in between names them again.
+  const continuedKeys = useMemo(() => continuedUserMessages(messages), [messages])
 
-  // The message Sixb writes to resume a turn says only how its calls ended, which their cards
-  // show: leaving it out keeps the resumed answer right under the one it continues.
-  const shownMessages = useMemo(
-    () => messages.filter((message) => !isApprovalOutcomeMessage(message)),
-    [messages]
+  // The reply still streaming, or one whose run ended before it was saved: always the last one.
+  const last = messages.at(-1)
+  const liveReply = last?.role === "assistant" && last.id === null ? last : undefined
+
+  // Bridge the gap between sending and the reply's first content with a thinking shimmer.
+  const showThinking =
+    turn.kind === "responding" &&
+    !liveReply &&
+    !messages.some((message) => message.role === "assistant" && message.runId === turn.runId)
+
+  // A saved thread should open at the newest content, not at the first or last user turn. Only mark
+  // a user row as a scroll anchor while the current UI-initiated turn is in flight: the pending row
+  // anchors, and keeps its place once its saved copy replaces it.
+  const pending = messages.some((message) => message.status === "pending")
+  const shouldAnchorCurrentTurn = Boolean(
+    anchorCurrentTurn && (pending || liveReply || turn.kind !== "idle")
   )
+  const lastUserKey = lastKey(messages, (message) => message.role === "user")
+  const newestSavedKey = lastKey(messages, (message) => message.id !== null)
 
   // A call is answered on the card under the work that made it. One whose command output does not
-  // name it, such as output sent elsewhere, still gets a card, after its turn's answer, and keeps it
-  // once decided. One whose turn has no answer yet closes the transcript.
+  // name it, such as output sent elsewhere, still gets a card, after its turn's saved answer, and
+  // keeps it once decided. One whose turn has no saved answer yet goes after the saved messages.
   const unshown = useMemo(() => {
     const byRun = new Map<string, HeldCall[]>()
     const all = approvals?.approvals ?? []
     if (all.length === 0) return { byRun, trailing: [] as HeldCall[] }
 
-    const shown = new Set([
-      ...heldCallIdsInMessages(messages),
-      ...heldCallsInParts(live.parts).map((call) => call.id),
-    ])
-    const answered = new Set(messages.flatMap((message) => (message.runId ? [message.runId] : [])))
+    const shown = heldCallIdsInMessages(messages)
+    const answered = new Set(
+      messages.flatMap((message) => (message.id !== null && message.runId ? [message.runId] : []))
+    )
     const trailing: HeldCall[] = []
     for (const approval of all) {
       if (shown.has(approval.id)) continue
@@ -172,66 +151,24 @@ function TranscriptView({
       byRun.set(approval.runId, [...(byRun.get(approval.runId) ?? []), heldCallOf(approval)])
     }
     return { byRun, trailing }
-  }, [approvals, messages, live.parts, threadDelegation])
-  // The last message of each turn, where its unshown calls go.
+  }, [approvals, messages, threadDelegation])
+  // The last saved message of each turn, where its unshown calls go.
   const lastOfRun = useMemo(() => {
     const last = new Map<string, string>()
-    for (const message of shownMessages) if (message.runId) last.set(message.runId, message.id)
-    return last
-  }, [shownMessages])
-
-  // Messages one person sends in a row name them once; an answer in between names them again.
-  const { continuedIds, lastUserAuthor } = useMemo(
-    () => userMessageRuns(shownMessages),
-    [shownMessages]
-  )
-  const pendingContinues = authors?.reader !== undefined && lastUserAuthor === authors.reader.key
-
-  // Keep the live row until the finalized assistant message is present in durable state, so the
-  // handoff from streaming to stored content never flashes empty.
-  const finalizedInDurable =
-    live.finalizedMessageId !== null &&
-    messages.some((message) => message.id === live.finalizedMessageId)
-  const showLive =
-    hasLiveContent(live, live.runId) &&
-    !finalizedInDurable &&
-    !(interrupted && !interrupted.hasProgress)
-  const handoffPending = live.finalizedMessageId !== null && !finalizedInDurable
-  // Bridge the gap between sending and the first stream event with a standalone thinking shimmer.
-  const showThinking = Boolean(awaitingResponse) && !showLive && !finalizedInDurable
-
-  // A saved thread should open at the newest content, not at the first or last user turn. Only mark
-  // a user row as a scroll anchor while the current UI-initiated turn is in flight: the optimistic
-  // row anchors first, then the durable user row takes over once it replaces the optimistic echo.
-  const shouldAnchorCurrentTurn = Boolean(
-    anchorCurrentTurn &&
-      (pendingUserText ||
-        pendingUserAttachments.length > 0 ||
-        pendingUserContext.length > 0 ||
-        showLive ||
-        showThinking ||
-        handoffPending ||
-        live.finishStatus !== null)
-  )
-  const anchoredUserMessageId = useMemo(() => {
-    if (
-      pendingUserText ||
-      pendingUserAttachments.length > 0 ||
-      pendingUserContext.length > 0 ||
-      !shouldAnchorCurrentTurn
-    )
-      return null
-    for (let i = shownMessages.length - 1; i >= 0; i--) {
-      if (shownMessages[i].role === "user") return shownMessages[i].id
+    for (const message of messages) {
+      if (message.id !== null && message.runId) last.set(message.runId, message.key)
     }
-    return null
-  }, [
-    shownMessages,
-    pendingUserText,
-    pendingUserAttachments.length,
-    pendingUserContext.length,
-    shouldAnchorCurrentTurn,
-  ])
+    return last
+  }, [messages])
+  // The messages not saved yet, the one just sent and the reply streaming, always come last.
+  const firstUnsaved = messages.findIndex((message) => message.id === null)
+  const trailingAt = firstUnsaved === -1 ? messages.length : firstUnsaved
+  const trailingCards =
+    unshown.trailing.length > 0 ? (
+      <MessageScrollerItem messageId="approvals">
+        <ApprovalCards calls={unshown.trailing} />
+      </MessageScrollerItem>
+    ) : null
 
   return (
     // Let the message-scroller own the complete chat contract: open saved threads at the latest
@@ -242,112 +179,89 @@ function TranscriptView({
       <MessageScroller className="flex-1">
         <MessageScrollerViewport>
           <MessageScrollerContent
-            aria-busy={live.active || showThinking}
+            aria-busy={turn.kind === "responding"}
             className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
           >
-            {shownMessages.map((message, index) => {
+            {messages.map((message, index) => {
               const calls =
-                message.runId && lastOfRun.get(message.runId) === message.id
+                message.runId && lastOfRun.get(message.runId) === message.key
                   ? unshown.byRun.get(message.runId)
                   : undefined
               return (
-                <Fragment key={message.id}>
+                <Fragment key={message.key}>
+                  {index === trailingAt ? trailingCards : null}
                   <TranscriptMessage
                     message={message}
-                    continued={continuedIds.has(message.id)}
-                    scrollAnchor={message.id === anchoredUserMessageId}
+                    continued={continuedKeys.has(message.key)}
+                    scrollAnchor={
+                      message.key === lastUserKey &&
+                      (message.status === "pending" || shouldAnchorCurrentTurn)
+                    }
                     // Only the newest answer can be continued; older ones keep their notice alone.
-                    {...(index === shownMessages.length - 1 && onContinue
-                      ? { onContinue, continuing: Boolean(continuing) }
+                    {...(message.key === newestSavedKey && onContinue
+                      ? { onContinue, continuing: turn.continuing }
+                      : {})}
+                    {...(message === liveReply
+                      ? {
+                          after: (
+                            <TurnEnd
+                              turn={turn}
+                              message={message}
+                              onRetry={onRetry}
+                              onContinue={onContinue}
+                            />
+                          ),
+                        }
                       : {})}
                   />
                   {calls ? (
-                    <MessageScrollerItem messageId={`approvals:${message.id}`}>
+                    <MessageScrollerItem messageId={`approvals:${message.key}`}>
                       <ApprovalCards calls={calls} />
                     </MessageScrollerItem>
                   ) : null}
                 </Fragment>
               )
             })}
-            {unshown.trailing.length > 0 ? (
-              <MessageScrollerItem messageId="approvals">
-                <ApprovalCards calls={unshown.trailing} />
-              </MessageScrollerItem>
-            ) : null}
-            {pendingUserText ||
-            pendingUserAttachments.length > 0 ||
-            pendingUserContext.length > 0 ? (
-              <MessageScrollerItem messageId="pending-user" scrollAnchor>
-                <div className="flex flex-col items-end gap-1.5">
-                  {pendingContinues ? null : <AuthorLine author={authors?.reader} />}
-                  <ContextChips entries={pendingUserContext} className="justify-end" />
-                  {pendingUserAttachments.length > 0 ? (
-                    <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
-                      {pendingUserAttachments.map((fileRef, index) => (
-                        <UserFileAttachment key={`${fileRef.blobId}-${index}`} fileRef={fileRef} />
-                      ))}
-                    </div>
-                  ) : null}
-                  {pendingUserText ? (
-                    <Bubble variant="secondary" align="end">
-                      <BubbleContent className="whitespace-pre-wrap">
-                        {pendingUserText}
-                      </BubbleContent>
-                    </Bubble>
-                  ) : null}
-                </div>
-              </MessageScrollerItem>
-            ) : null}
-            {showLive ? (
-              // The answer is not a turn anchor — it grows into the space below the anchored user
-              // message, so streaming never yanks the reader away from where the turn started.
-              <MessageScrollerItem messageId="live">
-                <LiveAssistant
-                  live={live}
-                  keepWorkOpen={handoffPending}
-                  timeout={timeout}
-                  interrupted={interrupted}
-                  onRetry={onRetry}
-                  onContinue={onContinue}
-                  retrying={retrying}
-                  continuing={continuing}
-                />
-              </MessageScrollerItem>
-            ) : showThinking ? (
+            {trailingAt === messages.length ? trailingCards : null}
+            {liveReply ? null : showThinking && turn.kind === "responding" ? (
               <MessageScrollerItem messageId="thinking">
-                <ThinkingMarker takingLonger={waitingLonger} />
+                {turn.compacting ? (
+                  <CompactionMarker />
+                ) : (
+                  <ThinkingMarker takingLonger={turn.waitingLonger} />
+                )}
               </MessageScrollerItem>
-            ) : timeout ? (
+            ) : turn.kind === "timeout" ? (
               <MessageScrollerItem messageId="run-timeout">
                 <RunTimeoutMarker
-                  hasProgress={timeout.hasProgress}
-                  timeoutMs={timeout.timeoutMs}
+                  hasProgress={turn.hasProgress}
+                  timeoutMs={turn.timeoutMs}
                   onRetry={onRetry}
                   onContinue={onContinue}
-                  retrying={retrying}
-                  continuing={continuing}
+                  retrying={turn.retrying}
+                  continuing={turn.continuing}
                 />
               </MessageScrollerItem>
-            ) : interrupted ? (
+            ) : turn.kind === "interrupted" ? (
               <MessageScrollerItem messageId="run-interrupted">
                 <RunInterruptedMarker
-                  hasProgress={interrupted.hasProgress}
+                  hasProgress={turn.hasProgress}
                   onRetry={onRetry}
                   onContinue={onContinue}
-                  retrying={retrying}
-                  continuing={continuing}
+                  retrying={turn.retrying}
+                  continuing={turn.continuing}
                 />
               </MessageScrollerItem>
-            ) : failedBeforeResponse ? (
+            ) : turn.kind === "failed" ? (
               <MessageScrollerItem messageId="run-failed">
-                <RunFailureMarker onRetry={onRetry} retrying={retrying} />
+                <RunFailureMarker onRetry={onRetry} retrying={turn.retrying} />
               </MessageScrollerItem>
-            ) : cancelledBeforeResponse ? (
+            ) : turn.kind === "cancelled" ? (
               <MessageScrollerItem messageId="run-cancelled">
                 <RunCancelledMarker />
               </MessageScrollerItem>
             ) : null}
-            {live.active && reconnecting ? (
+            {turn.kind === "responding" && turn.reconnecting ? (
               <MessageScrollerItem messageId="reconnecting">
                 <ReconnectingMarker />
               </MessageScrollerItem>
@@ -360,6 +274,49 @@ function TranscriptView({
   )
 }
 
+/** How the turn of a reply that was never saved ended, below what it streamed. */
+function TurnEnd({
+  turn,
+  message,
+  onRetry,
+  onContinue,
+}: {
+  readonly turn: AgentConversationTurn
+  readonly message: AgentConversationMessage
+  readonly onRetry?: () => void
+  readonly onContinue?: () => void
+}) {
+  const labels = useAgentMessages().transcript
+
+  if (turn.kind === "timeout") {
+    return (
+      <RunTimeoutMarker
+        hasProgress={turn.hasProgress}
+        timeoutMs={turn.timeoutMs}
+        onRetry={onRetry}
+        onContinue={onContinue}
+        retrying={turn.retrying}
+        continuing={turn.continuing}
+      />
+    )
+  }
+  if (turn.kind === "interrupted") {
+    return (
+      <RunInterruptedMarker
+        hasProgress={turn.hasProgress}
+        onRetry={onRetry}
+        onContinue={onContinue}
+        retrying={turn.retrying}
+        continuing={turn.continuing}
+      />
+    )
+  }
+  if (message.unfinished === "failed") return <RunErrorMarker message={labels.notFinished} />
+  if (message.unfinished === "cancelled") return <RunCancelledMarker />
+
+  return null
+}
+
 // A live chunk should only reconcile the transient assistant row. Completed rows can contain
 // substantial Markdown, tables, and file previews, so keep their scroller wrappers stable too.
 const TranscriptMessage = memo(function TranscriptMessage({
@@ -368,31 +325,34 @@ const TranscriptMessage = memo(function TranscriptMessage({
   scrollAnchor,
   onContinue,
   continuing,
+  after,
 }: {
-  readonly message: AgentMessage
+  readonly message: AgentConversationMessage
   readonly continued: boolean
   readonly scrollAnchor: boolean
   readonly onContinue?: () => void
   readonly continuing?: boolean
+  readonly after?: ReactNode
 }) {
   return (
-    <MessageScrollerItem messageId={message.id} scrollAnchor={scrollAnchor}>
+    <MessageScrollerItem messageId={message.key} scrollAnchor={scrollAnchor}>
       <MessageView
         message={message}
         continued={continued}
         onContinue={onContinue}
         continuing={continuing}
+        after={after}
       />
     </MessageScrollerItem>
   )
 })
 
 /**
- * The user messages that directly follow another from the same author, and who wrote the last
- * message if it is a user's. An answer between two messages starts a new run.
+ * The user messages that directly follow another from the same author. An answer between two
+ * messages starts a new run.
  */
-function userMessageRuns(messages: readonly AgentMessage[]) {
-  const continuedIds = new Set<string>()
+function continuedUserMessages(messages: readonly AgentConversationMessage[]): Set<string> {
+  const continued = new Set<string>()
   let lastUserAuthor: string | null = null
 
   for (const message of messages) {
@@ -400,12 +360,22 @@ function userMessageRuns(messages: readonly AgentMessage[]) {
       lastUserAuthor = null
       continue
     }
-    if (message.role !== "user") continue
 
-    const key = authorKey(message)
-    if (key !== null && key === lastUserAuthor) continuedIds.add(message.id)
+    const key = message.author ? principalKey(message.author) : null
+    if (key !== null && key === lastUserAuthor) continued.add(message.key)
     lastUserAuthor = key
   }
 
-  return { continuedIds, lastUserAuthor }
+  return continued
+}
+
+function lastKey(
+  messages: readonly AgentConversationMessage[],
+  matches: (message: AgentConversationMessage) => boolean
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message && matches(message)) return message.key
+  }
+  return undefined
 }

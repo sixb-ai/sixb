@@ -138,7 +138,7 @@ export function AgentChat({
         transcript={conversation.transcriptProps}
         composer={conversation.composerProps}
         messagesLoading={conversation.messagesLoading}
-        messagesError={conversation.messagesError}
+        messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}
         runningThreadCount={conversation.runningThreadCount}
         waitingThreadIds={conversation.waitingThreadIds}

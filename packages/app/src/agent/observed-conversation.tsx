@@ -8,8 +8,10 @@ import { Eye } from "lucide-react"
 import { useEffect, useMemo, useRef } from "react"
 import { type ArtifactAuthor, ArtifactPeopleContext } from "../artifacts/people"
 import type { ArtifactTarget } from "../artifacts/target"
+import { reportedApprovalOutcomes } from "./approvals"
 import { ArtifactPanelRoot } from "./artifact-panel"
 import { Transcript } from "./components/transcript"
+import { conversationMessages, conversationTurn, READ_ONLY_TURN } from "./conversation"
 import { useAgentMessages } from "./i18n"
 import { createLiveRunState } from "./live-run"
 import { authorNames, MessageAuthorsContext, messageAuthors, principalKey } from "./message-authors"
@@ -103,12 +105,13 @@ export function ObservedConversation({
     return (author: ArtifactAuthor) => names.get(principalKey(author))
   }, [messagesQuery.data])
 
+  const activeRunId = selectActiveRunId({
+    pendingRun: null,
+    threadActiveRunId: thread.activeRunId ?? null,
+    latestRun: runs[0] ?? null,
+  })
   const presentation = presentActiveTurn({
-    activeRunId: selectActiveRunId({
-      pendingRun: null,
-      threadActiveRunId: thread.activeRunId ?? null,
-      latestRun: runs[0] ?? null,
-    }),
+    activeRunId,
     pendingRun: null,
     streamRun: null,
     live: noLiveRun,
@@ -117,27 +120,23 @@ export function ObservedConversation({
     messagesLoading: messagesQuery.isLoading,
   })
 
+  // The same conversation the reader's own chat draws, without a live reply or any action on it.
+  const conversation = conversationMessages({
+    messages,
+    authors: messagesQuery.data?.authors,
+    observed: true,
+    presentation,
+  })
+  const turn = conversationTurn({ ...READ_ONLY_TURN, presentation, activeRunId })
+
+  const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(messages), [messages])
+
   let content = (
     <Transcript
       threadId={thread.id}
-      messages={messages}
-      live={noLiveRun}
-      awaitingResponse={presentation.kind === "responding"}
-      failedBeforeResponse={presentation.kind === "failed"}
-      cancelledBeforeResponse={presentation.kind === "cancelled"}
-      timeout={
-        presentation.kind === "timeout"
-          ? {
-              hasProgress: presentation.hasProgress,
-              ...(presentation.timeoutMs === undefined
-                ? {}
-                : { timeoutMs: presentation.timeoutMs }),
-            }
-          : undefined
-      }
-      interrupted={
-        presentation.kind === "interrupted" ? { hasProgress: presentation.hasProgress } : undefined
-      }
+      messages={conversation}
+      turn={turn}
+      approvalOutcomes={approvalOutcomes}
     />
   )
   if (messagesQuery.isLoading) {

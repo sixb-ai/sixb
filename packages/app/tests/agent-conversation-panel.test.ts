@@ -7,8 +7,15 @@ import {
   type ConversationPanelProps,
 } from "../src/agent/components/conversation-panel"
 import type { TranscriptProps } from "../src/agent/components/transcript"
+import {
+  type ConversationMessagesInput,
+  conversationMessages,
+  conversationTurn,
+  READ_ONLY_TURN,
+} from "../src/agent/conversation"
 import { createLiveRunState } from "../src/agent/live-run"
-import type { AgentMessage, AgentThread } from "../src/agent/types"
+import type { ActiveTurnPresentation } from "../src/agent/run-presentation"
+import type { AgentMessage, AgentRun, AgentThread } from "../src/agent/types"
 
 function thread(id: string, title: string): AgentThread {
   return {
@@ -79,19 +86,23 @@ test("sandbox recovery remains visible in an empty conversation", () => {
 })
 
 test("replaces an interrupted turn's unsaved stream with a way to run it again", () => {
-  // Regression proof: drop the interrupted check from Transcript's showLive; unsaved text renders.
+  // Regression proof: drop the interrupted check from liveReply in conversationMessages; unsaved
+  // text renders.
   const html = renderPanel(
     {},
     {
       threadId: "thread",
-      live: {
-        ...createLiveRunState("run"),
-        parts: [{ kind: "text", text: "Unsaved partial answer" }],
-        partKeys: ["text#1#t"],
-        finishStatus: "cancelled",
-        finishReason: "interrupted",
-      },
-      interrupted: { hasProgress: false },
+      ...conversation({
+        messages: [question],
+        live: {
+          ...createLiveRunState("run"),
+          parts: [{ kind: "text", text: "Unsaved partial answer" }],
+          partKeys: ["text#1#t"],
+          finishStatus: "cancelled",
+          finishReason: "interrupted",
+        },
+        presentation: { kind: "interrupted", run: interruptedRun, hasProgress: false },
+      }),
       onRetry: () => {},
     }
   )
@@ -105,15 +116,17 @@ test("offers to continue a turn interrupted with its partial answer saved", () =
     {},
     {
       threadId: "thread",
-      live: {
-        ...createLiveRunState("run"),
-        parts: [{ kind: "text", text: "Saved partial answer" }],
-        partKeys: ["text#1#t"],
-        finalizedMessageId: "message",
-        finishStatus: "cancelled",
-        finishReason: "interrupted",
-      },
-      interrupted: { hasProgress: true },
+      ...conversation({
+        live: {
+          ...createLiveRunState("run"),
+          parts: [{ kind: "text", text: "Saved partial answer" }],
+          partKeys: ["text#1#t"],
+          finalizedMessageId: "message",
+          finishStatus: "cancelled",
+          finishReason: "interrupted",
+        },
+        presentation: { kind: "interrupted", run: interruptedRun, hasProgress: true },
+      }),
       onContinue: () => {},
     }
   )
@@ -137,7 +150,9 @@ test("offers Continue on the newest answer that stopped short, not on older ones
     contentVersion: 1,
     createdAt: "2026-10-12T10:00:00.000Z",
   })
-  const messages = [answer("older", "step_limit_reached"), answer("newest", "output_limit_reached")]
+  const { messages } = conversation({
+    messages: [answer("older", "step_limit_reached"), answer("newest", "output_limit_reached")],
+  })
   const html = renderPanel({}, { threadId: "thread", messages, onContinue: () => {} })
   expect(html).toContain("I ran out of room before finishing this answer.")
   expect(html.match(/>Continue</g)).toHaveLength(1)
@@ -146,13 +161,57 @@ test("offers Continue on the newest answer that stopped short, not on older ones
   expect(renderPanel({}, { threadId: "thread", messages })).not.toContain(">Continue<")
   const pending = renderPanel(
     {},
-    { threadId: "thread", messages, onContinue: () => {}, continuing: true }
+    {
+      threadId: "thread",
+      messages,
+      turn: conversationTurn({ ...READ_ONLY_TURN, continuing: true, ...idle }),
+      onContinue: () => {},
+    }
   )
   expect(pending).toContain("Continuing…")
   expect(pending).toMatch(/<button[^>]*disabled=""[^>]*>.*Continuing…/)
 })
 
 const noop = () => {}
+
+const idle = { presentation: { kind: "idle" }, activeRunId: null } as const
+
+const question: AgentMessage = {
+  id: "question",
+  projectId: "project",
+  threadId: "thread",
+  runId: null,
+  role: "user",
+  seq: 1,
+  parts: [{ type: "text", text: "Summarize the incident." }],
+  annotations: [],
+  contentVersion: 1,
+  createdAt: "2026-10-12T10:00:00.000Z",
+}
+
+const interruptedRun: AgentRun = {
+  id: "run",
+  projectId: "project",
+  kind: "conversation",
+  threadId: "thread",
+  triggerMessageId: "question",
+  attempt: 0,
+  streamId: "agents.runs.run",
+  status: "cancelled",
+  finishReason: "interrupted",
+  createdAt: "2026-10-12T10:00:00.000Z",
+}
+
+/** The transcript's messages and turn, merged as the conversation hook merges them. */
+function conversation(
+  input: Partial<ConversationMessagesInput> & { readonly presentation?: ActiveTurnPresentation }
+): Pick<TranscriptProps, "messages" | "turn"> {
+  const presentation = input.presentation ?? idle.presentation
+  return {
+    messages: conversationMessages({ messages: [], ...input, presentation }),
+    turn: conversationTurn({ ...READ_ONLY_TURN, presentation, activeRunId: null }),
+  }
+}
 
 const composer: ConversationPanelProps["composer"] = {
   onSend: noop,
@@ -180,10 +239,7 @@ function renderPanel(
           agent: { name: "Operations Assistant", model: { provider: "test", modelId: "test" } },
           transcript: {
             threadId: null,
-            messages: [],
-            live: createLiveRunState(),
-            awaitingResponse: false,
-            reconnecting: false,
+            ...conversation({}),
             ...transcript,
           },
           composer,

@@ -38,11 +38,13 @@ import {
   type AgentApprovalDecisionFailure,
   type AgentApprovalMode,
   isAwaitingApproval,
+  reportedApprovalOutcomes,
   type TranscriptApprovals,
 } from "../approvals"
 import type { ComposerProps } from "../components/composer"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
+import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
 import type { TranscriptDelegation } from "../delegation/context"
 import { useAgentMessages } from "../i18n"
 import { knownName } from "../message-authors"
@@ -86,13 +88,8 @@ interface PendingSend {
   readonly anchor: boolean
 }
 
-interface PendingUser {
-  readonly threadId: string
-  readonly text: string
-  readonly attachments: readonly AgentFileRef[]
-  readonly context: readonly AgentContextEntryInput[]
-  messageId: string | null
-}
+/** Keys of the messages the reader sends, so each keeps its key once it is saved. */
+let sentMessageCount = 0
 
 const THREAD_LIST_QUERY = {
   limit: String(THREAD_PAGE_SIZE),
@@ -160,10 +157,26 @@ export type ConversationComposerProps = Pick<
 
 export type AgentConversation = ReturnType<typeof useAgentConversation>
 
+/** Why a message, a retry or a stop did not go through, or the approval mode did not change. */
+export type AgentConversationSendError =
+  /** Another answer holds the conversation; `someoneElse` when another person asked for it. */
+  | { readonly code: "busy"; readonly someoneElse: boolean }
+  /** The conversation's sandbox must be recovered before another answer. */
+  | { readonly code: "sandbox" }
+  | { readonly code: "send" | "retry" | "stop" | "approvalMode" }
+
+/** The conversation's messages could not be read. */
+export interface AgentConversationMessagesError {
+  readonly code: "load"
+}
+
+const MESSAGES_LOAD_ERROR: AgentConversationMessagesError = { code: "load" }
+
 /**
- * Everything one conversation with the project's agent needs: its threads, messages, live run and
+ * Everything one conversation with the project's agent needs: its threads, messages, turn and
  * model choice, and the actions on them. Route-independent; the built-in chat and custom chats
- * both render it, typically by spreading `transcriptProps` and `composerProps`.
+ * both render it, by spreading `transcriptProps` and `composerProps` or by drawing `messages` and
+ * `turn` themselves.
  */
 export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConversationInput) {
   const agentMessages = useAgentMessages()
@@ -292,7 +305,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
   })
-  const messages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
+  const savedMessages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
+  const approvalOutcomes = useMemo(() => reportedApprovalOutcomes(savedMessages), [savedMessages])
   const authors = messagesQuery.data?.authors
   const runsQuery = useQuery({
     ...listAgentThreadRunsOptions({
@@ -347,7 +361,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   )
 
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
-  const [pendingUser, setPendingUser] = useState<PendingUser | null>(null)
+  const [pendingUser, setPendingUser] = useState<PendingUserMessage | null>(null)
+  const [sentKeys, setSentKeys] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [sendError, setSendError] = useState<{
     threadId: string | null
     failure: TurnFailure
@@ -381,7 +396,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const { live, run: streamRun, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
   const finalizedMessageInDurable =
     live.finalizedMessageId !== null &&
-    messages.some((message) => message.id === live.finalizedMessageId)
+    savedMessages.some((message) => message.id === live.finalizedMessageId)
 
   useEffect(() => {
     if (!pendingSend || pendingSend.run.id !== activeRunId) return
@@ -409,10 +424,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       setPendingUser(null)
       return
     }
-    if (pendingUser.messageId && messages.some((message) => message.id === pendingUser.messageId)) {
+    if (
+      pendingUser.messageId &&
+      savedMessages.some((message) => message.id === pendingUser.messageId)
+    ) {
       setPendingUser(null)
     }
-  }, [pendingUser, threadId, messages])
+  }, [pendingUser, threadId, savedMessages])
 
   useEffect(() => {
     setSendError((current) => (current && current.threadId === threadId ? current : null))
@@ -450,7 +468,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     streamRun,
     live,
     runs,
-    messages,
+    messages: savedMessages,
     messagesLoading: messagesQuery.isFetching,
   })
   const isRunning = presentation.kind === "responding"
@@ -467,7 +485,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     [pendingRun, streamRun, ...runs].find((run) => run !== null && run.id === activeRunId) ?? null
 
   const stop = () => {
-    if (threadId === null || activeRunId === null) return
+    if (threadId === null || activeRunId === null || !canStop) return
     setStoppingRunId(activeRunId)
     cancelRun.mutate(
       { path: { threadId }, body: { runId: activeRunId } },
@@ -492,10 +510,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     if (isRunning) return
     setSendError(null)
     const targetThreadId = threadId
+    const key = `sent:${++sentMessageCount}`
     let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
-        setPendingUser({ threadId: targetThreadId, text, attachments, context, messageId: null })
+        setPendingUser({
+          key,
+          threadId: targetThreadId,
+          text,
+          attachments,
+          context,
+          messageId: null,
+        })
         const response = await sendWithRequesterSettings((settings) =>
           postMessage.mutateAsync({
             path: { threadId: targetThreadId },
@@ -505,7 +531,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
             },
           })
         )
-        recordAcceptedSend(response.run)
+        recordAcceptedSend(response.run, key)
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: listAgentThreadMessagesQueryKey({ path: { threadId: targetThreadId } }),
@@ -520,7 +546,14 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         body: { title: deriveTitle(text) },
       })
       createdThreadId = created.thread.id
-      setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
+      setPendingUser({
+        key,
+        threadId: createdThreadId,
+        text,
+        attachments,
+        context,
+        messageId: null,
+      })
       const newThreadId = createdThreadId
       // A mode chosen before the thread existed is the reader's choice in it from now on.
       if (chosenHere !== null && chosenHere !== defaultApprovalMode) {
@@ -537,7 +570,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
           },
         })
       )
-      recordAcceptedSend(response.run)
+      recordAcceptedSend(response.run, key)
       // The next new conversation starts from the default again.
       setChosenApprovalMode((current) => (current?.threadId === null ? null : current))
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -570,19 +603,28 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     onThreadCreated(createdThreadId)
   }
 
-  const recordAcceptedSend = (run: AgentRun) => {
+  // The saved message keeps the key the reader's pending copy had.
+  const recordAcceptedSend = (run: AgentRun, key: string) => {
     setPendingSend({ run, anchor: true })
+    setSentKeys((current) => new Map(current).set(run.triggerMessageId, key))
     setPendingUser((current) =>
-      current && current.threadId === run.threadId
-        ? { ...current, messageId: run.triggerMessageId }
-        : current
+      current && current.key === key ? { ...current, messageId: run.triggerMessageId } : current
     )
   }
 
-  const retry = (failedRun: AgentRun) => {
-    if (threadId === null) return
+  /** Run again the turn that never answered. */
+  const retry = () => {
+    if (threadId === null || !canRetry) return
+    if (
+      presentation.kind !== "failed" &&
+      presentation.kind !== "timeout" &&
+      presentation.kind !== "interrupted"
+    ) {
+      return
+    }
+
     retryRun.mutate(
-      { path: { threadId, runId: failedRun.id } },
+      { path: { threadId, runId: presentation.run.id } },
       {
         onSuccess: (response) => {
           setPendingSend({ run: response.run, anchor: true })
@@ -704,8 +746,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   // Sixb writes the continuation for the model, with the cut-short turn's model and reasoning; the
   // transcript shows no message for it.
-  const continueAfterTimeout = async () => {
-    if (isRunning || threadId === null) return
+  const continueTurn = async () => {
+    if (isRunning || threadId === null || !canContinue) return
     setSendError(null)
     try {
       const response = await sendWithRequesterSettings((settings) =>
@@ -785,12 +827,6 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   }, [])
 
   const agentThreads = threads.filter((entry) => entry.id !== threadId)
-  const pendingUserForThread =
-    pendingUser &&
-    pendingUser.threadId === threadId &&
-    !(pendingUser.messageId && messages.some((message) => message.id === pendingUser.messageId))
-      ? pendingUser
-      : null
 
   const sandboxRecovery =
     thread?.sandboxState &&
@@ -811,26 +847,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     (pendingUser && pendingUser.threadId === threadId) || (pendingRun && pendingSend?.anchor)
   )
   const composerPending = postMessage.isPending || createThread.isPending
-  const currentSendError =
+  const currentSendError: AgentConversationSendError | null =
     sendError && sendError.threadId === threadId
-      ? failureMessage(
-          sendError.failure,
-          requestedBySomeoneElse(activeRun, user),
-          labels,
-          agentMessages.approvalModes.saveFailed
-        )
+      ? sendError.failure === "busy"
+        ? { code: "busy", someoneElse: requestedBySomeoneElse(activeRun, user) }
+        : { code: sendError.failure }
       : null
   const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
-  const canStop = canStopRun(activeRun, access, user)
+  const canStop = isRunning && canStopRun(activeRun, access, user)
 
   // Someone else's answer holds a shared thread: the reader keeps typing, and sends once it ends.
   const answeringFor =
-    isRunning && activeRun && requestedBySomeoneElse(activeRun, user)
-      ? (activeRun.requestedBy ?? null)
+    isRunning && activeRun?.requestedBy && requestedBySomeoneElse(activeRun, user)
+      ? activeRun.requestedBy
       : null
-  const answeringName = answeringFor
-    ? (knownName(answeringFor, thread, authors) ?? answeringFor.id)
-    : null
+  const answeringForName = answeringFor ? knownName(answeringFor, thread, authors) : undefined
+  const answeringName = answeringFor ? (answeringForName ?? answeringFor.id) : null
 
   // A turn that never answered can run again, by whoever asked for it, once the sandbox works.
   const canRetry =
@@ -839,6 +871,48 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
         !presentation.hasProgress)) &&
     canRetryRun(presentation.run, user)
+  const canContinue = offersContinue({
+    presentation,
+    isRunning,
+    sandboxRecovery: Boolean(sandboxRecovery),
+    messages: savedMessages,
+  })
+
+  const reader = user
+    ? { type: "user" as const, id: user.id, displayName: user.displayName }
+    : undefined
+  const messages = conversationMessages({
+    messages: savedMessages,
+    authors,
+    thread,
+    reader,
+    pending: pendingUser && pendingUser.threadId === threadId ? pendingUser : null,
+    sentKeys,
+    live,
+    presentation,
+  })
+
+  const turn = conversationTurn({
+    presentation,
+    activeRunId,
+    canStop,
+    canRetry,
+    canContinue,
+    stopping,
+    retrying: retryRun.isPending,
+    continuing: composerPending,
+    waitingLonger,
+    compacting: live.compacting,
+    reconnecting: live.active && reconnecting,
+    answeringFor: answeringFor
+      ? {
+          type: answeringFor.type,
+          id: answeringFor.id,
+          ...(answeringForName === undefined ? {} : { displayName: answeringForName }),
+          isReader: false,
+        }
+      : null,
+  })
 
   /**
    * Stop a turn paused on held calls, as Stop does a running one: its waiting calls are set aside,
@@ -907,37 +981,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
-    live,
-    pendingUserText: pendingUserForThread?.text ?? null,
-    pendingUserAttachments: pendingUserForThread?.attachments ?? [],
-    pendingUserContext: pendingUserForThread?.context ?? [],
+    turn,
     anchorCurrentTurn,
-    awaitingResponse: isRunning,
-    waitingLonger,
-    failedBeforeResponse: presentation.kind === "failed",
-    cancelledBeforeResponse: presentation.kind === "cancelled",
-    timeout:
-      presentation.kind === "timeout"
-        ? {
-            hasProgress: presentation.hasProgress,
-            ...(presentation.timeoutMs === undefined ? {} : { timeoutMs: presentation.timeoutMs }),
-          }
-        : undefined,
-    interrupted:
-      presentation.kind === "interrupted" ? { hasProgress: presentation.hasProgress } : undefined,
-    onRetry: canRetry ? () => retry(presentation.run) : undefined,
-    onContinue: offersContinue({
-      presentation,
-      isRunning,
-      sandboxRecovery: Boolean(sandboxRecovery),
-      messages,
-    })
-      ? continueAfterTimeout
-      : undefined,
-    retrying: retryRun.isPending,
-    continuing: composerPending,
-    reconnecting,
+    onRetry: canRetry ? retry : undefined,
+    onContinue: canContinue ? continueTurn : undefined,
     approvals: transcriptApprovals,
+    approvalOutcomes,
     delegation: transcriptDelegation,
   }
 
@@ -957,7 +1006,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   const composerProps: ConversationComposerProps = {
     onSend: send,
-    error: currentSendError ?? undefined,
+    error: currentSendError
+      ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
+      : undefined,
     disabled: (isRunning && answeringName === null) || Boolean(sandboxRecovery),
     hint: answeringName
       ? agentMessages.sharing.answering(answeringName)
@@ -1033,29 +1084,27 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     access,
     user,
     removedFromThread,
+    /**
+     * The conversation, oldest first: its saved messages, the one the reader just sent, and the
+     * reply streaming in. Each keeps its `key` once saved.
+     */
     messages,
+    /** The message page's authors, with their names. */
     authors,
     messagesLoading: threadId !== null && messagesQuery.isLoading,
-    messagesError: threadId !== null && messagesQuery.isError ? labels.messagesLoadFailed : null,
-    live,
-    reconnecting,
-    pendingUser: pendingUserForThread,
-    anchorCurrentTurn,
-    isRunning,
-    waitingLonger,
-    presentation,
+    messagesError: threadId !== null && messagesQuery.isError ? MESSAGES_LOAD_ERROR : null,
+    /** The newest turn: answering, or how it ended, and what the reader may do with it. */
+    turn,
     sendError: currentSendError,
     draftReseed,
     composerPending,
-    stopping,
-    retrying: retryRun.isPending,
-    canStop,
-    /** Who asked for the answer in flight, when it is someone other than the reader. */
-    answeringFor,
     send,
+    /** Stop the answer in flight, when `turn.canStop`. */
     stop,
+    /** Run again the turn that never answered, when `turn.canRetry`. */
     retry,
-    continueAfterTimeout,
+    /** Finish the answer cut short, when `turn.canContinue`. */
+    continue: continueTurn,
     /** The thread's held calls, oldest first; the transcript shows each as a card. */
     approvals,
     /** Whether the reader decides on a held call: only whoever asked for its turn does. */
@@ -1079,8 +1128,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   }
 }
 
-/** Why a turn did not start or stop, or the mode did not change, as the composer tells it. */
-type TurnFailure = "send" | "busy" | "sandbox" | "retry" | "stop" | "approvalMode"
+/** Why a turn did not start or stop, or the mode did not change. */
+type TurnFailure = AgentConversationSendError["code"]
 
 /** Why a decision did not go through. Once the call ran, the decision stands and never throws. */
 function decisionFailure(error: unknown): AgentApprovalDecisionFailure {
@@ -1105,14 +1154,13 @@ function sendFailure(error: unknown): TurnFailure {
  * can tell.
  */
 function failureMessage(
-  failure: TurnFailure,
-  someoneElseAnswers: boolean,
+  failure: AgentConversationSendError,
   labels: ReturnType<typeof useAgentMessages>["chat"],
   approvalModeFailed: string
 ): string {
-  switch (failure) {
+  switch (failure.code) {
     case "busy":
-      return someoneElseAnswers ? labels.busyOther : labels.busy
+      return failure.someoneElse ? labels.busyOther : labels.busy
     case "sandbox":
       return labels.sandboxUnavailable
     case "retry":
