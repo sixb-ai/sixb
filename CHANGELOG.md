@@ -2,6 +2,73 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-27 — Framework 0.1.22
+
+### Highlights
+
+- Approve what the Agent changes. Each user picks a mode, `manual` (the default), `accept-edits`
+  or `auto`; a call that waits shows as a card in the reply, with Approve, Deny and "Always allow",
+  and the turn resumes once it is decided. `sixb.agent.approvals` and `approvalMode` do the same in
+  code.
+- Let the Agent delegate again: `spawn_agent`, `wait_agent` and `message_agent` run sub-agents in
+  threads of their own, each shown as a card under the work that spawned it. A child can ask its
+  parent a question, hand files back, and keep its workspace while paused.
+- Give the Agent a memory: a user repo and a project repo it reads before each turn and saves to,
+  shown in the chat and correctable in Settings › Memory. `sixb.agent.memory` reads
+  and saves it; `can.manage(agent.memory)` changes the project's.
+- Share a conversation with other members, who read and write in it, or continue it in a
+  conversation of their own. `can.observe(agent.threads)` reads other users' conversations.
+- Configure language tiers, `models.language: { light, standard, heavy }`, and let Sixb pick the
+  tier of each chat turn (Auto), or name a tier in code. Generate images and speech with
+  `sixb.models.image` and `sixb.models.audio.speak`, priced on one rate card per model, and call
+  the catalog from the API and `sixb models` with `can.run(project.models)`. AI usage breaks
+  down by model kind.
+- Add pages (small web apps on live data, keeping state with `sixb.state`), canvases, and live
+  sheets that read queries as their reader. Sheets can be edited, filtered, sorted and totalled,
+  with computed columns, and download as `.xlsx`; a value the reader may not see shows as locked.
+- Grant only some objects of a type with `can.view(Type).where(...)`, including
+  `currentUser()` to match the reading user. Reads, writes, events, telemetry, rules and Actions
+  all follow the condition.
+- Declare unique properties with `prop(..., { unique: true })` and get an object by one, in code,
+  over HTTP and with `sixb objects`. A duplicate fails with `object.unique_violation`.
+- Read the member directory with `sixb.users` and `useUsers`, granted with
+  `can.view(project.users)`; user references show member names, and schedules can start on member
+  events. Members edit their name in Settings › Personal.
+- Redraw the CLI with OpenTUI: `sixb dev` and `sixb deploy` keep a live footer, and every other
+  command prints plain text.
+- Manage GitHub releases and their assets with the GitHub connector, and list directory users with
+  the Microsoft connector.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server, client, and CLI together to `0.1.22`.
+  Upgrade the app to `0.1.14`, the UI to `0.1.6`, CLI core to `0.1.9`, and the model providers,
+  auth strategies and connectors listed below; rebuild application assets.
+- Run the migrations: PostgreSQL `069-artifact-kinds` to `081-subagent-questions`, SQLite
+  `067-artifact-kinds` to `079-subagent-questions`. `073`/`071-unique-values` backfills unique
+  values.
+- A chat turn whose sender chose no approval mode now runs in `manual`: its Actions and workflow
+  starts wait for an approval. Code that requests turns and expects them to act passes
+  `approvalMode`, or sets its principal's default with `sixb.agent.preferences.update`.
+- `LanguageModelRateCard` becomes `ModelRateCard`, and its `unit` field is removed.
+- `can.observe` accepts only the project surfaces it lists.
+
+### Package versions
+
+- `0.1.22`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.14`: `@sixb/app`.
+- `0.1.9`: `@sixb/cli-core`.
+- `0.1.8`: `@sixb/connector-google`, `@sixb/vercel-ai-gateway`.
+- `0.1.7`: `@sixb/auth-magic-link`, `@sixb/auth-oidc`.
+- `0.1.6`: `@sixb/ui`, `create-sixb`, `@sixb/connector-github`.
+- `0.1.5`: `@sixb/anthropic`, `@sixb/azure-ai-foundry`.
+- `0.1.4`: `@sixb/connector-microsoft`, `@sixb/connector-rest`.
+- `0.1.3`: `@sixb/deploy-ssh`.
+- `0.1.2`: `@sixb/model-protocols`, `@sixb/blob-azure`.
+- `0.1.1`: `@sixb/typesafe`.
+
 ## 2026-10-21 — Framework 0.1.21
 
 ### Highlights

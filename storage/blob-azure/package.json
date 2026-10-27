@@ -1,6 +1,6 @@
 {
   "name": "@sixb/blob-azure",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Azure Blob Storage for Sixb fileRef payloads",
   "keywords": [
     "sixb",

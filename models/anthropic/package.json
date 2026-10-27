@@ -1,6 +1,6 @@
 {
   "name": "@sixb/anthropic",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Anthropic model provider for Sixb",
   "keywords": [
     "sixb",
