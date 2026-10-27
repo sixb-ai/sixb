@@ -417,7 +417,7 @@ conversation.messages.map((message) => (
 | `key` | Stays the same from sending or streaming to the saved copy: use it as the React key |
 | `role`, `status` | `user` or `assistant`; `pending` (sent, not saved), `streaming` or `complete` |
 | `author` | Who wrote a user message: `id`, `displayName`, and `isReader` for the person reading |
-| `parts` | `text`, `reasoning`, `file` and `tool`, in order. Draw a tool part with `<AgentToolPart part={part} />` |
+| `parts` | `text`, `reasoning`, `file` and `tool`, in order. A tool part's `state` says which of `input`, `output` and `errorText` it holds, as for a tool view; draw it with `<AgentToolPart part={part} />` |
 | `diagnostics` | Why a saved reply stopped short of finishing |
 | `unfinished` | A reply cut short as it streamed: `failed`, or `cancelled` when someone stopped it |
 

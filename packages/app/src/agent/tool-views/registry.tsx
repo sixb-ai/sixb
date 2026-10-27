@@ -70,7 +70,7 @@ type Output = InferAgentToolOutput<AgentToolDefinition>
 
 // The browser has the tool's types, not its schema: the view takes what the server saved or
 // streamed for the call as the tool's input and output.
-function toolViewProps(tool: NormalizedTool): AgentToolViewProps {
+export function toolViewProps(tool: NormalizedTool): AgentToolViewProps {
   switch (tool.state) {
     case "input-streaming":
       return tool.inputText === undefined

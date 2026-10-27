@@ -9,6 +9,8 @@ import {
   toolResultFiles,
 } from "./parts"
 import type { ActiveTurnPresentation } from "./run-presentation"
+import type { AgentToolViewProps } from "./tool-views/define"
+import { toolViewProps } from "./tool-views/registry"
 import type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -30,20 +32,17 @@ export interface AgentConversationFile {
   readonly source?: AgentFileSource
 }
 
-/** One tool call of a reply, as it streams or as it was saved. */
-export interface AgentConversationToolPart {
+/**
+ * One tool call of a reply, as it streams or as it was saved. Its `state` says which of the call's
+ * input, output and error it holds, as for a tool's view; no tool types them here.
+ */
+export type AgentConversationToolPart = {
   readonly type: "tool"
   readonly toolName: string
   readonly toolCallId?: string
-  readonly state: "input-streaming" | "input-available" | "output-available" | "output-error"
-  readonly input?: unknown
-  /** The input written so far, while the model writes it: partial JSON text. */
-  readonly inputText?: string
-  readonly output?: unknown
-  readonly errorText?: string
   /** Files in a saved rich result, such as the image `view_file` prepared for the model. */
   readonly files?: readonly AgentConversationFile[]
-}
+} & AgentToolViewProps
 
 /**
  * What a message says, in order. Two text parts in a row are two steps of the reply; the built-in
@@ -312,26 +311,22 @@ function savedParts(
           fileRef,
           source: fileSource(fileRef, `/parts/${index}/output/content/${contentIndex}/fileRef`),
         }))
-        result.push(
+        const tool: NormalizedTool =
           part.state === "output-available"
-            ? {
-                type: "tool",
-                toolName: part.toolName,
-                toolCallId: part.toolCallId,
-                state: part.state,
-                input: part.input,
-                output: part.output,
-                ...(files.length === 0 ? {} : { files }),
-              }
+            ? { toolName: part.toolName, state: part.state, input: part.input, output: part.output }
             : {
-                type: "tool",
                 toolName: part.toolName,
-                toolCallId: part.toolCallId,
                 state: part.state,
                 input: part.input,
                 errorText: part.errorText,
               }
-        )
+        result.push({
+          type: "tool",
+          toolName: part.toolName,
+          toolCallId: part.toolCallId,
+          ...toolViewProps(tool),
+          ...(files.length === 0 ? {} : { files }),
+        })
         break
       }
 
@@ -448,8 +443,10 @@ function liveParts(live: LiveRunState): AgentConversationPart[] {
         const toolCallId = key?.startsWith("tool#") ? key.slice("tool#".length) : undefined
         result.push({
           type: "tool",
-          ...part.tool,
+          toolName: part.tool.toolName,
           ...(toolCallId === undefined ? {} : { toolCallId }),
+          ...toolViewProps(part.tool),
+          ...(part.tool.files ? { files: part.tool.files.map(fileOf) } : {}),
         })
         return
       }
