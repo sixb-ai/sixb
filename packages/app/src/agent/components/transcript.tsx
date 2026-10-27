@@ -118,13 +118,15 @@ function TranscriptView({
     !messages.some((message) => message.role === "assistant" && message.runId === turn.runId)
 
   // A saved thread should open at the newest content, not at the first or last user turn. Only mark
-  // a user row as a scroll anchor while the current UI-initiated turn is in flight: the pending row
+  // a row as a scroll anchor while the current UI-initiated turn is in flight: the pending row
   // anchors, and keeps its place once its saved copy replaces it.
   const pending = messages.some((message) => message.status === "pending")
   const shouldAnchorCurrentTurn = Boolean(
     anchorCurrentTurn && (pending || liveReply || turn.kind !== "idle")
   )
-  const lastUserKey = lastKey(messages, (message) => message.role === "user")
+  const anchoredKey = shouldAnchorCurrentTurn
+    ? currentTurnAnchor(messages, turn.kind === "responding" ? turn.runId : liveReply?.runId)
+    : lastKey(messages, (message) => message.status === "pending")
   const newestSavedKey = lastKey(messages, (message) => message.id !== null)
 
   // A call is answered on the card under the work that made it. One whose command output does not
@@ -193,10 +195,7 @@ function TranscriptView({
                   <TranscriptMessage
                     message={message}
                     continued={continuedKeys.has(message.key)}
-                    scrollAnchor={
-                      message.key === lastUserKey &&
-                      (message.status === "pending" || shouldAnchorCurrentTurn)
-                    }
+                    scrollAnchor={message.key === anchoredKey}
                     // Only the newest answer can be continued; older ones keep their notice alone.
                     {...(message.key === newestSavedKey && onContinue
                       ? { onContinue, continuing: turn.continuing }
@@ -224,7 +223,7 @@ function TranscriptView({
             })}
             {trailingAt === messages.length ? trailingCards : null}
             {liveReply ? null : showThinking && turn.kind === "responding" ? (
-              <MessageScrollerItem messageId="thinking">
+              <MessageScrollerItem messageId="thinking" scrollAnchor={anchoredKey === THINKING}>
                 {turn.compacting ? (
                   <CompactionMarker />
                 ) : (
@@ -367,6 +366,32 @@ function continuedUserMessages(messages: readonly AgentConversationMessage[]): S
   }
 
   return continued
+}
+
+const THINKING = "thinking"
+
+/**
+ * The row the current turn anchors: the question it answers. A turn Continue started answers none
+ * of the reader's messages, as an answer of an earlier turn follows the last one: it anchors its
+ * own reply instead, or the thinking row until that reply streams.
+ */
+function currentTurnAnchor(
+  messages: readonly AgentConversationMessage[],
+  turnRunId: string | null | undefined
+): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (!message) continue
+    if (message.role === "user") return message.key
+
+    const earlierAnswer = message.id !== null && message.runId !== (turnRunId ?? null)
+    if (earlierAnswer) {
+      const reply = messages.at(-1)
+      return reply?.role === "assistant" && reply.runId === turnRunId ? reply.key : THINKING
+    }
+  }
+
+  return undefined
 }
 
 function lastKey(

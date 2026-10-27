@@ -134,7 +134,8 @@ export interface ConversationMessagesInput {
 /**
  * The conversation as one list. A pending message gives way to its saved copy, and the live reply
  * to its own, keeping their keys; until the copy is there, the pending or live one stands for it.
- * An interrupted turn that saved nothing drops what it streamed.
+ * An interrupted turn that saved nothing drops what it streamed, and the message Continue writes for
+ * the model is not shown.
  */
 export function conversationMessages(input: ConversationMessagesInput): AgentConversationMessage[] {
   const result: AgentConversationMessage[] = []
@@ -143,12 +144,15 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   const answeredRuns = new Set<string>()
 
   for (const message of input.messages) {
-    // The message Sixb writes to resume a turn says only how its calls ended, which their cards
-    // show: leaving it out keeps the resumed answer right under the one it continues.
-    if (message.role === "system" || isApprovalOutcomeMessage(message)) continue
+    if (message.role === "system") continue
 
     savedIds.add(message.id)
     if (message.role === "assistant" && message.runId !== null) answeredRuns.add(message.runId)
+
+    // Continue writes the model a message the reader never wrote: nothing to draw. Neither is the
+    // one a decision resumes a turn with: its calls' cards say how they ended, and the resumed
+    // answer stays right under the one it continues.
+    if (isContinuation(message) || isApprovalOutcomeMessage(message)) continue
 
     // One reply per run: a second one, which nothing writes today, keeps a key of its own.
     const preferred = savedKey(message, input.sentKeys)
@@ -167,6 +171,10 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   if (live) result.push(live)
 
   return result
+}
+
+function isContinuation(message: AgentMessage): boolean {
+  return message.role === "user" && message.parts.some((part) => part.type === "continuation")
 }
 
 function savedKey(message: AgentMessage, sentKeys: ReadonlyMap<string, string> | undefined) {

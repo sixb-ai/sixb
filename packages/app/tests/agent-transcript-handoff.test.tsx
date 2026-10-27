@@ -109,3 +109,55 @@ test("the transcript keeps a turn's rows when their saved copies replace them", 
   expect(view.getAllByText("Three deals slipped.")).toHaveLength(1)
   queryClient.clear()
 })
+
+test("a continued answer anchors the reply that continues it, not the question", () => {
+  // Removal proof: return the last user message's key from currentTurnAnchor whatever follows it;
+  // the question anchors instead.
+  const queryClient = new QueryClient()
+  const continuation: AgentMessage = {
+    ...question,
+    id: "msg_continue",
+    seq: 3,
+    parts: [{ type: "continuation" }],
+  }
+  const ui = (input: Pick<ConversationMessagesInput, "live">) => (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <Transcript
+          threadId="thr_1"
+          anchorCurrentTurn
+          messages={conversationMessages({
+            messages: [question, answer, continuation],
+            presentation: { kind: "responding", queuedRun: null },
+            ...input,
+          })}
+          turn={conversationTurn({
+            ...READ_ONLY_TURN,
+            presentation: { kind: "responding", queuedRun: null },
+            activeRunId: "run_2",
+          })}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  const anchors = () =>
+    Array.from(document.querySelectorAll('[data-scroll-anchor="true"]')).map((row) =>
+      row.getAttribute("data-message-id")
+    )
+
+  const view = render(ui({}))
+  expect(anchors()).toEqual(["thinking"])
+
+  view.rerender(
+    ui({
+      live: {
+        ...createLiveRunState("run_2"),
+        active: true,
+        parts: [{ kind: "text", text: "and two more." }],
+        partKeys: ["text#1#t"],
+      },
+    })
+  )
+  expect(anchors()).toEqual(["run:run_2"])
+  queryClient.clear()
+})
