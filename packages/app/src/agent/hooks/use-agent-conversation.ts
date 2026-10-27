@@ -384,6 +384,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     readonly threadId: string | null
     readonly mode: AgentApprovalMode
   } | null>(null)
+  /** The thread whose answer Continue is asking for, until the API accepts or refuses it. */
+  const [continuingThreadId, setContinuingThreadId] = useState<string | null>(null)
 
   const pendingRun =
     pendingSend && threadId !== null && pendingSend.run.threadId === threadId
@@ -747,15 +749,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   // Sixb writes the continuation for the model, with the cut-short turn's model and reasoning; the
   // transcript shows no message for it.
   const continueTurn = async () => {
-    if (isRunning || threadId === null || !canContinue) return
+    if (isRunning || composerPending || threadId === null || !canContinue) return
     setSendError(null)
+    setContinuingThreadId(threadId)
     try {
       const response = await sendWithRequesterSettings((settings) =>
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
+      setContinuingThreadId(null)
       setPendingSend({ run: response.run, anchor: true })
       await refreshThread(threadId)
     } catch (error) {
+      setContinuingThreadId(null)
       setSendError({ threadId, failure: sendFailure(error) })
       void refreshThread(threadId)
     }
@@ -900,7 +905,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     canContinue,
     stopping,
     retrying: retryRun.isPending,
-    continuing: composerPending,
+    continuing: continuingThreadId !== null && continuingThreadId === threadId,
     waitingLonger,
     compacting: live.compacting,
     reconnecting: live.active && reconnecting,

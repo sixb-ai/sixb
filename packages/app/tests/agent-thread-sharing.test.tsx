@@ -209,6 +209,8 @@ interface Scenario {
   retryStatus: number
   /** Holds the fork's answer until the test lets it go. */
   forkGate?: Promise<void>
+  /** Holds a posted message until the test lets it go. */
+  postGate?: Promise<void>
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -261,6 +263,7 @@ function api(scenario: Scenario, requests: string[]) {
       })
     }
     if (url.pathname === "/api/agent-threads/thr_1/messages") {
+      await scenario.postGate
       scenario.afterPost?.()
       return Response.json(
         { error: "[Sixb] refused", code: scenario.postError.code },
@@ -823,24 +826,28 @@ function ConversationProbe() {
       <output aria-label="errors">
         {JSON.stringify({ send: conversation.sendError, messages: conversation.messagesError })}
       </output>
+      <output aria-label="continuing">{JSON.stringify(conversation.turn.continuing)}</output>
       <button type="button" onClick={() => void conversation.send("And Globex?", [], [])}>
         Send
+      </button>
+      <button type="button" onClick={() => void conversation.continue()}>
+        Continue
       </button>
     </>
   )
 }
 
 function renderConversation(as: "alice" | "bob", scenario: Partial<Scenario> = {}) {
-  const { state, queryClient } = serve(as, scenario)
+  const { state, requests, queryClient } = serve(as, scenario)
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ConversationProbe />
     </QueryClientProvider>
   )
-  const read = (name: "turn" | "errors"): unknown =>
+  const read = (name: "turn" | "errors" | "continuing"): unknown =>
     JSON.parse(view.getByRole("status", { name }).textContent ?? "null")
 
-  return { view, state, read }
+  return { view, state, requests, read }
 }
 
 describe("a turn as data", () => {
@@ -929,6 +936,55 @@ describe("a turn as data", () => {
         canContinue: true,
       })
     )
+  })
+
+  // Removal proof: set turn.continuing from composerPending again; it reads true while a message
+  // is sent.
+  test("a turn is continuing while Continue is asked for, not while a message is sent", async () => {
+    const cutShort = {
+      ...messages[1],
+      annotations: [
+        {
+          code: "output_limit_reached",
+          severity: "warning",
+          scope: "run",
+          message: "Developer copy.",
+        },
+      ],
+    }
+    const gated = () => {
+      let release = () => {}
+      const postGate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { postGate, release: () => act(async () => release()) }
+    }
+    const posted = (requests: readonly string[]) =>
+      requests.some((entry) => entry.startsWith("POST /api/agent-threads/thr_1/messages"))
+
+    const sending = gated()
+    const send = renderConversation("bob", {
+      messages: [messages[0], cutShort],
+      postGate: sending.postGate,
+    })
+    await waitFor(() => expect(send.read("turn")).toMatchObject({ canContinue: true }))
+    fireEvent.click(send.view.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(posted(send.requests)).toBe(true))
+    expect(send.read("continuing")).toBe(false)
+    await sending.release()
+    send.view.unmount()
+
+    const continuing = gated()
+    const resume = renderConversation("bob", {
+      messages: [messages[0], cutShort],
+      postGate: continuing.postGate,
+    })
+    await waitFor(() => expect(resume.read("turn")).toMatchObject({ canContinue: true }))
+    fireEvent.click(resume.view.getByRole("button", { name: "Continue" }))
+    await waitFor(() => expect(posted(resume.requests)).toBe(true))
+    expect(resume.read("continuing")).toBe(true)
+    await continuing.release()
+    await waitFor(() => expect(resume.read("continuing")).toBe(false))
   })
 
   // Removal proof: return labels from the hook again; the errors read as sentences.
