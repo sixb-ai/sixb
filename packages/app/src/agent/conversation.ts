@@ -93,7 +93,10 @@ export interface AgentConversationMessage {
   readonly diagnostics: readonly AgentConversationDiagnostic[]
   /** Earlier turns were condensed before this reply: the summary the agent read instead. */
   readonly compaction?: NonNullable<AgentMessage["compaction"]>
-  /** A reply whose run ended without finishing it: it failed, or someone stopped it. */
+  /**
+   * A reply whose run ended before finishing it: it failed, or someone stopped it. The turn tells
+   * only of a turn that ended without any answer.
+   */
   readonly unfinished?: "failed" | "cancelled"
 }
 
@@ -551,13 +554,13 @@ export type AgentConversationTurn = AgentConversationTurnActions &
         /** Who asked for the answer, when it is someone other than the reader. */
         readonly answeringFor: AgentConversationAuthor | null
       }
-    /** The newest turn failed before it answered. */
+    /** The turn failed without an answer. One that failed mid-answer says so on its reply. */
     | { readonly kind: "failed" }
     /** The turn hit its time limit. With progress saved it can continue, else run again. */
     | { readonly kind: "timeout"; readonly hasProgress: boolean; readonly timeoutMs?: number }
     /** The worker running the turn stopped. With progress saved it can continue, else run again. */
     | { readonly kind: "interrupted"; readonly hasProgress: boolean }
-    /** The turn was stopped before it answered. */
+    /** The turn was stopped without an answer. One stopped mid-answer says so on its reply. */
     | { readonly kind: "cancelled" }
   )
 

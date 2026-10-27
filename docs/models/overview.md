@@ -418,7 +418,8 @@ conversation.messages.map((message) => (
 | `role`, `status` | `user` or `assistant`; `pending` (sent, not saved), `streaming` or `complete` |
 | `author` | Who wrote a user message: `id`, `displayName`, and `isReader` for the person reading |
 | `parts` | `text`, `reasoning`, `file` and `tool`, in order. Draw a tool part with `<AgentToolPart part={part} />` |
-| `diagnostics` | Why a reply stopped short of finishing |
+| `diagnostics` | Why a saved reply stopped short of finishing |
+| `unfinished` | A reply cut short as it streamed: `failed`, or `cancelled` when someone stopped it |
 
 The thinking shimmer and the notice of a turn that ended short are not messages: draw them from
 `conversation.turn`.
@@ -427,7 +428,7 @@ The thinking shimmer and the notice of a turn that ended short are not messages:
 | --- | --- |
 | `idle` | Nothing in progress |
 | `responding` | The agent answers. `waitingLonger` while it queues; `answeringFor` when someone else asked |
-| `failed`, `cancelled` | The turn failed or was stopped before it answered |
+| `failed`, `cancelled` | The turn failed or was stopped without an answer. A started answer cut short says so with `message.unfinished` |
 | `timeout`, `interrupted` | The turn was cut short; `hasProgress` when it saved part of its answer |
 
 `turn.canStop`, `turn.canRetry` and `turn.canContinue` say when `conversation.stop()`,
