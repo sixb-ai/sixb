@@ -51,6 +51,8 @@ export interface AgentSurfaceProps {
   readonly onThreadChange?: (threadId: string | null) => void
   /** Offer an explicit full-page view for the selected thread. */
   readonly onExpandThread?: (threadId: string) => void
+  /** Open the page of every conversation, from the header's button. */
+  readonly onOpenThreads?: () => void
   /** Controlled dock width. Numeric values are pixels. */
   readonly dockWidth?: CSSProperties["width"]
   readonly defaultDockWidth?: number
@@ -86,6 +88,7 @@ export function AgentSurface({
   defaultThreadId = null,
   onThreadChange,
   onExpandThread,
+  onOpenThreads,
   dockWidth,
   defaultDockWidth = DEFAULT_AGENT_SURFACE_WIDTH,
   onDockWidthChange,
@@ -317,6 +320,7 @@ export function AgentSurface({
             composerPlaceholder={composerPlaceholder}
             threadId={currentThreadId}
             onThreadChange={changeThread}
+            onOpenThreads={onOpenThreads}
             welcomeContent={welcomeContent}
             conversationHeaderActions={
               fullPage && onRequestDock ? (

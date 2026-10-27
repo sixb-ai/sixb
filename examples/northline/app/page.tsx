@@ -11,7 +11,7 @@ export default function NorthlineHomePage() {
 
   const changeThread = (nextThreadId: string | null) => {
     if (!nextThreadId) return
-    navigate(`/chat/${encodeURIComponent(nextThreadId)}`)
+    navigate(`/threads/${encodeURIComponent(nextThreadId)}`)
   }
 
   return (
@@ -19,6 +19,7 @@ export default function NorthlineHomePage() {
       <AgentPanel
         threadId={null}
         onThreadChange={changeThread}
+        onOpenThreads={() => navigate("/threads")}
         compact={false}
         welcomeContent={<NorthlineWordmark className="h-16 sm:h-20" />}
         composerPlaceholder="Ask Northline about today’s work"

@@ -74,9 +74,9 @@ export function ParticipantInput({
 
       <div
         className={cn(
-          "flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5 transition-colors",
-          "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30",
-          invalid && "border-destructive focus-within:border-destructive",
+          "flex min-h-10 flex-wrap items-center gap-1.5 rounded-xl bg-muted/60 px-2 py-1.5 transition-colors",
+          "focus-within:bg-muted",
+          invalid && "ring-1 ring-destructive",
           disabled && "opacity-60"
         )}
       >

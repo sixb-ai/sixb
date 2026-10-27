@@ -23,6 +23,9 @@ import { ApprovalCards } from "./approval-card"
 import { FileAttachmentCard } from "./file-attachment-card"
 import { WebSources } from "./web-sources"
 
+/** Calls a sub-agent's row stands for, in the conversation and in its thread. */
+const DELEGATION_ROW_TOOLS: ReadonlySet<string> = new Set(["spawn_agent", "wait_agent"])
+
 /**
  * Render an assistant body from normalized parts. Narration text stays on the main reading path;
  * every run of consecutive reasoning + tool parts collapses into a single "work" disclosure, so a
@@ -64,11 +67,24 @@ export function AssistantBody({
     if (workBuffer.length === 0) return
     const work = workBuffer
     workBuffer = []
-    // A run of only step boundaries has nothing to show.
-    if (work.every((part) => part.kind === "step-start")) return
-    blocks.push(
-      <WorkGroup key={`block-${key++}`} parts={work} inProgress={inProgress} nested={nested} />
+    // Starting and awaiting sub-agents is what their line shows, and a call held for approval is
+    // what its card shows: the work line leaves them out — but not a wait that brought back a
+    // question, which the work keeps on record — and a run of nothing else, or of only step
+    // boundaries, has no line at all.
+    const shown = work.filter(
+      (part) =>
+        !(
+          part.kind === "tool" &&
+          ((DELEGATION_ROW_TOOLS.has(part.tool.toolName) &&
+            childQuestions(part.tool).length === 0) ||
+            (!nested && heldCallsInParts([part]).length > 0))
+        )
     )
+    if (shown.some((part) => part.kind !== "step-start")) {
+      blocks.push(
+        <WorkGroup key={`block-${key++}`} parts={shown} inProgress={inProgress} nested={nested} />
+      )
+    }
     if (nested) return
 
     const held = heldCallsInParts(work)
@@ -173,11 +189,11 @@ function WorkGroup({
 }: {
   parts: readonly NormalizedPart[]
   inProgress: boolean
-  /** Inside a sub-agent's card, where the reader asked to see its work: open, without a scroll. */
+  /** In a sub-agent's thread: closed like the chat's own work line, and without a scroll once open. */
   nested?: boolean
 }) {
   const messages = useAgentMessages()
-  const [open, setOpen] = useState(nested)
+  const [open, setOpen] = useState(false)
   const sources = collectWebSources(parts)
   const searches = parts.flatMap((part) =>
     part.kind === "tool" && part.tool.toolName === "web_search" ? [part.tool] : []
@@ -198,8 +214,9 @@ function WorkGroup({
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
   const liveLabel = latestWorkLabel(parts, messages)
-  const label = hasTools ? messages.activity.worked : messages.activity.reasoning
-  const detail = !inProgress && hasTools ? messages.activity.steps(toolCount) : undefined
+  // Named by what it holds, not in a tense: the same line is read while the turn still works,
+  // while it waits on the reader, and once it is done.
+  const label = hasTools ? messages.activity.steps(toolCount) : messages.activity.reasoning
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
@@ -214,13 +231,12 @@ function WorkGroup({
         ) : (
           <span>{label}</span>
         )}
-        {detail ? <span className="text-muted-foreground/60">· {detail}</span> : null}
-        <ChevronRight className="size-4 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
+        <ChevronRight className="size-3.5 shrink-0 opacity-50 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div
           className={cn(
-            "mt-2 ml-1.5 flex flex-col gap-3 border-l-2 border-border py-0.5 pr-2 pl-3",
+            "mt-2 ml-1 flex flex-col gap-3 border-l border-border py-0.5 pr-2 pl-3.5",
             !nested && "scrollbar-thin max-h-[min(24rem,50vh)] overflow-y-auto overscroll-contain"
           )}
         >

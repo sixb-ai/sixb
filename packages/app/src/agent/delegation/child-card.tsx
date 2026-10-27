@@ -1,36 +1,26 @@
 import { isSixbApiError } from "@sixb/client"
 import { cancelAgentRunByIdMutation } from "@sixb/client/hooks"
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerTitle,
-} from "@sixb/ui/components"
-import { useIsMobile } from "@sixb/ui/hooks"
-import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, ChevronDown, Square, X } from "lucide-react"
-import { memo, useEffect, useId, useRef, useState } from "react"
+import { ArrowDown, ChevronRight } from "lucide-react"
+import { useEffect, useState } from "react"
 import { childFileSource } from "../../artifacts/file-source"
+import { latestWorkLabel } from "../activity-label"
 import { heldCallOf } from "../approvals"
 import { ApprovalCard } from "../components/approval-card"
 import { FileAttachmentCard } from "../components/file-attachment-card"
 import { useAgentMessages } from "../i18n"
 import {
+  AgentAvatar,
   Exchanges,
   ModelChip,
-  Section,
-  StateGlyph,
-  stateLabel,
+  NEEDS_READER_TEXT,
   statusLabel,
-  toneClass,
   WorkedFor,
 } from "./child-parts"
-import { ChildWork, FollowingScroll } from "./child-work"
+import { ChildWork } from "./child-work"
 import { useDelegationCards } from "./context"
-import { type AgentChild, activeRun, childrenCost, childTitle, liveQuestion } from "./interpret"
+import { type AgentChild, activeRun, childTitle, liveQuestion } from "./interpret"
 import type { ChildModel } from "./model"
 import { type ChildrenSource, refreshChildren } from "./use-children"
 
@@ -38,237 +28,161 @@ import { type ChildrenSource, refreshChildren } from "./use-children"
 const STOP_FAILED_MS = 6_000
 
 /**
- * One child: what it was asked, on which model, where it stands and what it does now. Its work opens
- * right under that, or in a sheet on a phone; below are what passed between it and the Agent, the
- * calls it waits on, and the files it made.
+ * A sub-agent in its reply's list of them: its avatar, its name, and on a second line what it does
+ * now or how it ended. Choosing it opens its thread.
  */
-export const ChildCard = memo(function ChildCard({
+export function ChildRow({
+  model,
+  tint,
+  observed,
+  onOpen,
+}: {
+  readonly model: ChildModel
+  /** Its place among its reply's agents, which picks its avatar's tint. */
+  readonly tint: number
+  readonly observed: boolean
+  readonly onOpen: () => void
+}) {
+  const messages = useAgentMessages()
+  const { child, view, state, needsReader } = model
+  const title = childTitle(child.key)
+  const task = view?.task ?? child.task
+  const status = statusLabel(model, { stopping: false, observed, messages })
+  // What it does now, once its stream says; the time on the right already says it works.
+  const doing =
+    state === "working" && model.live && model.live.parts.length > 0
+      ? latestWorkLabel(model.live.parts, messages)
+      : null
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`${messages.delegation.open(title)}, ${status}`}
+      data-child-row={child.key}
+      data-child-state={state}
+      className="group/row -mx-2 flex w-[calc(100%+1rem)] min-w-0 items-center gap-3 rounded-xl px-2 py-2 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40"
+    >
+      <AgentAvatar name={title} state={state} needsReader={needsReader} tint={tint} size="md" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{title}</span>
+        {/* While it works, what it does now; otherwise what it was asked. */}
+        {doing || task ? (
+          <span
+            className={cn(
+              "block truncate text-xs text-muted-foreground",
+              doing && "shimmer motion-reduce:animate-none"
+            )}
+          >
+            {doing ?? task}
+          </span>
+        ) : null}
+      </span>
+      <span
+        className={cn(
+          "max-w-[45%] shrink-0 truncate text-right text-xs tabular-nums",
+          needsReader ? NEEDS_READER_TEXT : "text-muted-foreground"
+        )}
+      >
+        {state === "working" || state === "done" ? <WorkedFor views={[view]} /> : status}
+      </span>
+      <ChevronRight
+        className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover/row:text-muted-foreground"
+        aria-hidden="true"
+      />
+    </button>
+  )
+}
+
+/**
+ * A sub-agent's thread, in the panel: how it stands, the model it runs on and how long it worked,
+ * with a way to stop it while it works; then the task it was given, its work and what it made.
+ */
+export function ChildDetail({
   model,
   source,
   unavailable,
-  grouped = false,
-  announce = true,
-  onWorkOpenChange,
 }: {
   readonly model: ChildModel
   readonly source: ChildrenSource
   readonly unavailable: boolean
-  /** A row of a group, which draws the border around it. */
-  readonly grouped?: boolean
-  /** Say its changes to a screen reader: not while its group is folded. */
-  readonly announce?: boolean
-  /** Its work opened or closed: a group stays open while any is. */
-  readonly onWorkOpenChange?: (childId: string, open: boolean) => void
 }) {
-  const { child, view, live, state, needsReader } = model
   const messages = useAgentMessages()
   const labels = messages.delegation
-  const locale = useLocale()
-  const mobile = useIsMobile()
   const cards = useDelegationCards()
-  const workId = useId()
-  const workButton = useRef<HTMLButtonElement>(null)
+  const { child, view, live, needsReader } = model
   const { runId, observed } = source
-
   const title = childTitle(child.key)
   const task = view?.task ?? child.task
   const run = activeRun(view)
 
-  const [workOpen, setWorkOpen] = useState(false)
-  const openWork = (open: boolean) => {
-    setWorkOpen(open)
-    onWorkOpenChange?.(child.id, open)
-    // A sheet gives the reader back where they were.
-    if (!open && mobile) requestAnimationFrame(() => workButton.current?.focus())
-  }
-
   const stop = useStop(model, source)
   const canStop =
     run !== undefined && runId !== null && (cards?.actions?.canStop(run.parentRunId) ?? false)
-
   const status = statusLabel(model, { stopping: stop.stopping, observed, messages })
-  const shownState = stop.stopping ? "stopped" : state
-  const cost = childrenCost([view], locale)
-  const exchanges = cards?.delegation.exchanges.get(child.id) ?? []
-  const openQuestion =
-    view?.awaiting?.type === "answer"
-      ? view.awaiting.question.text
-      : state === "asking" && live
-        ? liveQuestion(live.parts)
-        : null
   const files = view ? returnedFiles(view) : []
-  const hasWork = view !== undefined || unavailable || model.waited?.text !== undefined
-
-  const work = (
-    <ChildWork
-      view={view}
-      live={live}
-      source={source}
-      unavailable={unavailable}
-      waited={model.waited}
-      enabled={workOpen}
-    />
-  )
-  const follow = `${live?.parts.length ?? 0}:${view?.runs.length ?? 0}`
 
   return (
     <section
       aria-label={labels.card(title)}
-      data-child-state={state}
-      data-child-key={child.key}
-      className={cn(
-        "min-w-0",
-        !grouped &&
-          "overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]",
-        !grouped &&
-          (needsReader
-            ? "border-amber-500/35 shadow-[0_0_0_4px_rgb(245_158_11/0.06),0_1px_2px_0_rgb(0_0_0/0.04)]"
-            : "border-border")
-      )}
+      data-child-detail={child.key}
+      className="flex flex-col gap-5"
     >
-      {/* Said once per change of state, never per step: the visible line moves faster. */}
-      {announce ? (
-        <span className="sr-only" aria-live="polite">
-          {`${title}: ${stateLabel(state, model.waitingOn, observed, messages)}`}
-        </span>
-      ) : null}
-
-      <div className="flex min-w-0 items-start gap-3 px-4 pt-3.5 pb-3">
-        <StateGlyph state={shownState} calm={!needsReader} />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="min-w-0 truncate text-[14px] leading-6 font-semibold tracking-[-0.01em] text-foreground">
-              {title}
-            </h3>
-            <ModelChip child={child} view={view} className="ml-auto max-sm:hidden" />
-          </div>
-          {task ? (
-            <p
-              className={cn(
-                "text-[13px] leading-5 text-muted-foreground",
-                // The whole task once its work is open, where the reader came to read.
-                workOpen && !mobile ? "whitespace-pre-wrap" : "truncate"
-              )}
-              title={task}
-            >
-              {task}
-            </p>
-          ) : null}
-          <ModelChip child={child} view={view} className="mt-2 max-w-full sm:hidden" />
-
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-            {/* What to do never truncates; the facts after it give way first. */}
-            <p className="flex min-w-0 flex-1 basis-48 flex-wrap items-baseline gap-x-1.5 text-xs">
-              <span
-                className={cn(
-                  "font-medium break-words",
-                  toneClass(shownState, needsReader),
-                  state === "working" && !stop.stopping && "shimmer motion-reduce:animate-none"
-                )}
-              >
-                {status}
-              </span>
-              <span className="min-w-0 truncate text-muted-foreground tabular-nums">
-                <WorkedFor views={[view]} />
-                {cost ? ` · ${cost}` : null}
-              </span>
-            </p>
-
-            <div className="ml-auto flex shrink-0 items-center gap-1">
-              {model.heldLater ? (
-                <button
-                  type="button"
-                  onClick={() => revealApproval(model.heldLater?.id)}
-                  className="flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-amber-700 outline-none transition-colors hover:bg-amber-500/10 focus-visible:ring-2 focus-visible:ring-ring/40 dark:text-amber-400 max-sm:h-9"
-                >
-                  <ArrowDown className="size-3.5" aria-hidden="true" />
-                  {labels.viewRequest}
-                </button>
-              ) : null}
-              {canStop ? (
-                <button
-                  type="button"
-                  onClick={stop.stop}
-                  disabled={stop.stopping}
-                  aria-label={labels.stopLabel(title)}
-                  className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60 max-sm:h-9 max-sm:px-2.5"
-                >
-                  <Square className="size-3 fill-current" aria-hidden="true" />
-                  {labels.stop}
-                </button>
-              ) : null}
-              {hasWork ? (
-                <button
-                  ref={workButton}
-                  type="button"
-                  aria-expanded={workOpen}
-                  aria-controls={mobile ? undefined : workId}
-                  aria-haspopup={mobile ? "dialog" : undefined}
-                  aria-label={
-                    workOpen && !mobile ? labels.hideWorkOf(title) : labels.showWorkOf(title)
-                  }
-                  onClick={() => openWork(!workOpen)}
-                  className="flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 max-sm:h-9 max-sm:px-2.5"
-                >
-                  {workOpen && !mobile ? labels.hideWork : labels.showWork}
-                  <ChevronDown
-                    className={cn(
-                      "size-3.5 transition-transform motion-reduce:transition-none",
-                      workOpen && !mobile && "rotate-180",
-                      mobile && "-rotate-90"
-                    )}
-                    aria-hidden="true"
-                  />
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+      <div className="flex min-w-0 items-center gap-3 pt-1">
+        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "truncate font-medium",
+              needsReader ? NEEDS_READER_TEXT : "text-foreground/80"
+            )}
+          >
+            {status}
+          </span>
+          <span className="shrink-0 tabular-nums empty:hidden before:mr-1.5 before:content-['·']">
+            <WorkedFor views={[view]} />
+          </span>
+        </p>
+        <ModelChip child={child} view={view} className="shrink-0 text-xs opacity-80" />
+        {canStop ? (
+          <button
+            type="button"
+            onClick={stop.stop}
+            disabled={stop.stopping}
+            aria-label={labels.stopLabel(title)}
+            className="h-7 shrink-0 rounded-full bg-muted px-3 text-xs font-medium text-foreground outline-none transition-colors hover:bg-foreground hover:text-background focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+          >
+            {labels.stop}
+          </button>
+        ) : null}
       </div>
-
       {stop.failed ? (
-        <p role="alert" className="px-4 pb-3 text-xs text-destructive sm:pl-14">
+        <p role="alert" className="-mt-3 text-xs text-destructive">
           {labels.stopFailed}
         </p>
       ) : null}
 
-      {!mobile && workOpen ? (
-        <div id={workId} className="border-t border-border/60 bg-muted/25">
-          <FollowingScroll
-            follow={follow}
-            live={run !== undefined}
-            className="max-h-[min(28rem,60vh)] px-4 py-3 sm:pl-14"
-          >
-            {work}
-          </FollowingScroll>
+      {/* What the agent asked of it, which opens its thread. */}
+      {task ? (
+        <div>
+          <p className="mb-1.5 text-xs text-muted-foreground">{labels.task}</p>
+          <p className="border-l-2 border-border pl-3 text-sm leading-relaxed whitespace-pre-wrap text-foreground/85">
+            {task}
+          </p>
         </div>
       ) : null}
 
-      {exchanges.length > 0 || openQuestion ? (
-        <Section>
-          <Exchanges
-            exchanges={exchanges}
-            openQuestion={openQuestion}
-            urgent={needsReader || state === "asking"}
-          />
-          {state === "answer" && !observed ? (
-            <p className="mt-1.5 text-xs text-muted-foreground">{labels.answerHint}</p>
-          ) : null}
-        </Section>
-      ) : null}
-
-      {model.approvals.length > 0 ? (
-        <Section>
-          <div className="flex flex-col gap-2.5">
-            {model.approvals.map((approval) => (
-              <ApprovalCard key={approval.id} held={heldCallOf(approval)} inCard />
-            ))}
-          </div>
-        </Section>
-      ) : null}
+      <ChildWork
+        view={view}
+        live={live}
+        source={source}
+        unavailable={unavailable}
+        waited={model.waited}
+        enabled
+      />
 
       {files.length > 0 && view ? (
-        <Section label={labels.made}>
+        <div>
+          <p className="mb-2 text-xs text-muted-foreground">{labels.made}</p>
           <div className="flex flex-wrap gap-2">
             {files.map(({ runId: fileRunId, path, fileRef }) => (
               <FileAttachmentCard
@@ -285,47 +199,73 @@ export const ChildCard = memo(function ChildCard({
               />
             ))}
           </div>
-        </Section>
-      ) : null}
-
-      {mobile ? (
-        <Drawer open={workOpen} onOpenChange={openWork}>
-          <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[88dvh]">
-            <div className="flex items-start gap-3 border-b border-border/70 px-4 pt-2 pb-3">
-              <StateGlyph state={shownState} calm={!needsReader} />
-              <div className="min-w-0 flex-1">
-                <DrawerTitle className="truncate text-[15px] font-semibold">{title}</DrawerTitle>
-                <DrawerDescription
-                  className={cn("text-xs font-medium", toneClass(shownState, needsReader))}
-                >
-                  {status}
-                </DrawerDescription>
-              </div>
-              <DrawerClose
-                aria-label={labels.close}
-                className="-mt-0.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              >
-                <X className="size-4" aria-hidden="true" />
-              </DrawerClose>
-            </div>
-            <FollowingScroll
-              follow={follow}
-              live={run !== undefined}
-              className="min-h-0 flex-1 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]"
-            >
-              {task ? (
-                <p className="mb-3 text-[13px] leading-5 whitespace-pre-wrap text-muted-foreground">
-                  {task}
-                </p>
-              ) : null}
-              {work}
-            </FollowingScroll>
-          </DrawerContent>
-        </Drawer>
+        </div>
       ) : null}
     </section>
   )
-})
+}
+
+/**
+ * What waits on the reader from one sub-agent, under the reply's line: the question it asked, and
+ * the calls it holds for approval. Named when the reply has several, so each says whose it is.
+ */
+export function ChildAttention({
+  model,
+  observed,
+  named,
+}: {
+  readonly model: ChildModel
+  readonly observed: boolean
+  readonly named: boolean
+}) {
+  const labels = useAgentMessages().delegation
+  const cards = useDelegationCards()
+  const { child, view, live, state, needsReader } = model
+  const exchanges = cards?.delegation.exchanges.get(child.id) ?? []
+  const openQuestion =
+    view?.awaiting?.type === "answer"
+      ? view.awaiting.question.text
+      : state === "asking" && live
+        ? liveQuestion(live.parts)
+        : null
+  const asks = exchanges.length > 0 || openQuestion !== null
+  if (!asks && model.approvals.length === 0 && !model.heldLater) return null
+
+  return (
+    <div className="flex flex-col gap-2" data-child-key={child.key}>
+      {asks ? (
+        <div className="pl-[1.875rem]">
+          {named ? (
+            <p className="mb-1 text-xs font-medium text-muted-foreground">
+              {childTitle(child.key)}
+            </p>
+          ) : null}
+          <Exchanges
+            exchanges={exchanges}
+            openQuestion={openQuestion}
+            urgent={needsReader || state === "asking"}
+          />
+          {state === "answer" && !observed ? (
+            <p className="mt-1 text-xs text-muted-foreground">{labels.answerHint}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {model.heldLater ? (
+        <button
+          type="button"
+          onClick={() => revealApproval(model.heldLater?.id)}
+          className="ml-[1.625rem] flex h-7 w-fit items-center gap-1 rounded-full px-2 text-xs font-medium text-amber-700 outline-none transition-colors hover:bg-amber-500/10 focus-visible:ring-2 focus-visible:ring-ring/40 dark:text-amber-400"
+        >
+          <ArrowDown className="size-3.5" aria-hidden="true" />
+          {labels.viewRequest}
+        </button>
+      ) : null}
+      {model.approvals.map((approval) => (
+        <ApprovalCard key={approval.id} held={heldCallOf(approval)} underCaller={!named} />
+      ))}
+    </div>
+  )
+}
 
 /**
  * Stop the child at work, at once: it says it is stopping until its run ends. A failure says so for

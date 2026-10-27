@@ -38,7 +38,6 @@ describe("assistant work dropdowns", () => {
 
     const html = renderToStaticMarkup(createElement(AgentExecutionTrace, { parts }))
 
-    expect(html).toContain("Worked")
     expect(html).toContain("2 steps")
     expect(html).toContain("Dispatch within 90 minutes.")
     expect(normalizeDurableParts(parts)).toContainEqual({
@@ -141,7 +140,7 @@ describe("assistant work dropdowns", () => {
     expect(reasoningStarted).not.toContain(">Working…<")
     // The live work trigger is as wide as its content instead of highlighting the full row.
     expect(renderAssistant([reasoning("Checking records."), tool("search")], true)).toContain(
-      'class="group flex w-fit max-w-full'
+      'class="group -ml-1 flex w-fit max-w-full'
     )
   })
 
@@ -191,7 +190,7 @@ describe("assistant work dropdowns", () => {
       tool("second-tool"),
       { kind: "text", text: "Final result." },
     ])
-    expect(separated.match(/Worked/g)).toHaveLength(2)
+    expect(separated.match(/>\d+ steps?</g)).toHaveLength(2)
     expect(separated).toContain("First update.")
     expect(separated).toContain("Final result.")
 
@@ -203,7 +202,7 @@ describe("assistant work dropdowns", () => {
       reasoning("Second investigation"),
       tool("second-tool"),
     ])
-    expect(whitespace.match(/Worked/g)).toHaveLength(1)
+    expect(whitespace.match(/>\d+ steps?</g)).toHaveLength(1)
   })
 
   test("streams a text-only answer without inventing a work dropdown", () => {

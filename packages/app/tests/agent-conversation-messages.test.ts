@@ -155,6 +155,31 @@ describe("the conversation's messages", () => {
     ).toMatchObject({ key: "run:run_1", status: "complete", unfinished: "cancelled" })
   })
 
+  test("a saved reply whose run failed or was stopped says it did not finish", () => {
+    // Removal proof: drop the `ended` lookup in conversationMessages; the saved reply of a failed run
+    // reads as a finished answer once the thread is opened again.
+    const run = (status: AgentRun["status"]): AgentRun => ({
+      id: "run_1",
+      projectId: "proj",
+      kind: "conversation",
+      threadId: "thr_1",
+      triggerMessageId: question.id,
+      attempt: 0,
+      streamId: "stream_1",
+      status,
+      createdAt: at,
+    })
+    const reply = (status: AgentRun["status"]) =>
+      merge({ messages: [question, answer], runs: [run(status)] }).at(-1)
+
+    expect(reply("failed")).toMatchObject({ id: answer.id, unfinished: "failed" })
+    expect(reply("cancelled")).toMatchObject({ id: answer.id, unfinished: "cancelled" })
+    expect(reply("succeeded")?.unfinished).toBeUndefined()
+    // The marked copy is kept, so a finished reply does not redraw on every render.
+    const input = { messages: [question, answer], runs: [run("failed")] }
+    expect(merge(input).at(-1)).toBe(merge(input).at(-1))
+  })
+
   test("the message Continue writes for the model is not one", () => {
     // Removal proof: drop the isContinuation check in conversationMessages; an empty user message
     // shows between the answer and its continuation.

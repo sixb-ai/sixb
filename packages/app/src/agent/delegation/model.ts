@@ -5,6 +5,7 @@ import {
   type AgentChild,
   type ChildState,
   childState,
+  childTitle,
   isActive,
   liveQuestion,
   type SpawnedChild,
@@ -101,51 +102,126 @@ export function isSettled(state: ChildState): boolean {
   )
 }
 
-/** One part of a group's summary: how many stand where, and whether the reader must act. */
-export interface SummaryPart {
-  readonly text: string
-  readonly urgent: boolean
+/** One clause of a reply's line: some sub-agents by name, and how they stand. */
+export interface LineClause {
+  readonly names: string
+  readonly verb: string
+  /** `urgent`: the reader is the one to act. `live`: still at work. */
+  readonly tone: "urgent" | "live" | "quiet"
 }
 
-/** How a group's children stand, in the order a reader cares: what waits on them first. */
-export function groupSummary(
+/**
+ * A reply's sub-agents as a sentence, its clauses in the order a reader cares about: what waits
+ * on them, what is at work, then how the rest ended. "Terms needs your approval · History is
+ * working", "Terms, History and Disputes finished".
+ */
+export function lineClauses(
   models: readonly ChildModel[],
   messages: AgentMessages
-): SummaryPart[] {
-  const labels = messages.delegation
-  const count = (test: (model: ChildModel) => boolean) => models.filter(test).length
-  const waiting = (model: ChildModel) =>
-    (model.state === "approval" || model.state === "answer") && !model.needsReader
+): readonly LineClause[] {
+  const labels = messages.delegation.line
+  const clause = (
+    test: (model: ChildModel) => boolean,
+    verb: (agents: number) => string,
+    tone: LineClause["tone"]
+  ): LineClause | null => {
+    const named = models.filter(test).map((model) => shortName(childTitle(model.child.key)))
+    return named.length > 0 ? { names: labels.names(named), verb: verb(named.length), tone } : null
+  }
+  const person = personWaitedOn(models)
+  const urgent = [
+    clause((model) => model.needsReader && model.state === "approval", labels.approval, "urgent"),
+    clause((model) => model.needsReader && model.state === "answer", labels.answer, "urgent"),
+  ]
 
-  const forYou = count((model) => model.needsReader)
-  const others = models.filter(waiting)
-  const names = new Set(
-    others.map((model) => (model.waitingOn.kind === "person" ? model.waitingOn.name : ""))
-  )
-  const [name] = names
-  const working = count((model) => isActive(model.state))
-  const later = count((model) => model.state === "resume")
-  const done = count((model) => model.state === "done")
-  const failed = count((model) => model.state === "failed")
-  const stopped = count((model) => model.state === "stopped" || model.state === "ended")
+  // Many, or long-named, read as a count: names would turn the line into a paragraph. Whoever
+  // waits on the reader is still named.
+  // A lone agent is always named, its name shortened if it must be.
+  if (
+    models.length > NAMED_AGENTS ||
+    (models.length > 1 && models.some((model) => !named(model)))
+  ) {
+    const counts = messages.delegation
+    const counted = (
+      test: (model: ChildModel) => boolean,
+      verb: (agents: number) => string,
+      tone: LineClause["tone"]
+    ): LineClause | null => {
+      const agents = models.filter(test).length
+      return agents > 0 ? { names: "", verb: verb(agents), tone } : null
+    }
+    return [
+      { names: counts.count(models.length), verb: "", tone: "quiet" as const },
+      ...urgent,
+      counted(
+        waitingOther,
+        person ? (agents) => counts.waitingOn(agents, person) : counts.waitingOthers,
+        "quiet"
+      ),
+      counted((model) => isActive(model.state), counts.working, "live"),
+      counted((model) => model.state === "resume", counts.later, "quiet"),
+      counted((model) => model.state === "done", counts.done, "quiet"),
+      counted((model) => model.state === "failed", counts.failed, "quiet"),
+      counted(
+        (model) => model.state === "stopped" || model.state === "ended",
+        counts.stopped,
+        "quiet"
+      ),
+    ].filter((part): part is LineClause => part !== null)
+  }
 
   return [
-    forYou > 0 ? { text: labels.waitingYou(forYou), urgent: true } : null,
-    others.length > 0
-      ? {
-          text:
-            names.size === 1 && name
-              ? labels.waitingOn(others.length, name)
-              : labels.waitingOthers(others.length),
-          urgent: false,
-        }
-      : null,
-    working > 0 ? { text: labels.working(working), urgent: false } : null,
-    later > 0 ? { text: labels.later(later), urgent: false } : null,
-    done > 0 ? { text: labels.done(done), urgent: false } : null,
-    failed > 0 ? { text: labels.failed(failed), urgent: false } : null,
-    stopped > 0 ? { text: labels.stopped(stopped), urgent: false } : null,
-  ].filter((part): part is SummaryPart => part !== null)
+    ...urgent,
+    clause(
+      waitingOther,
+      person ? (agents) => labels.waitingOn(agents, person) : labels.waiting,
+      "quiet"
+    ),
+    clause((model) => model.state === "asking", labels.asking, "live"),
+    clause((model) => model.state === "working", labels.working, "live"),
+    clause((model) => model.state === "starting", labels.starting, "live"),
+    clause((model) => model.state === "resume", labels.later, "quiet"),
+    clause((model) => model.state === "done", labels.done, "quiet"),
+    clause((model) => model.state === "failed", labels.failed, "quiet"),
+    clause(
+      (model) => model.state === "stopped" || model.state === "ended",
+      labels.stopped,
+      "quiet"
+    ),
+  ].filter((part): part is LineClause => part !== null)
+}
+
+/** Waiting on someone, but not on the reader: their approval or their answer. */
+function waitingOther(model: ChildModel): boolean {
+  return (model.state === "approval" || model.state === "answer") && !model.needsReader
+}
+
+/** The one person the others wait on, when it is one person. */
+function personWaitedOn(models: readonly ChildModel[]): string | null {
+  const people = new Set(
+    models
+      .filter(waitingOther)
+      .map((model) => (model.waitingOn.kind === "person" ? model.waitingOn.name : ""))
+  )
+  const [person] = people
+  return people.size === 1 && person ? person : null
+}
+
+/** The longest a name reads in the line before it is cut at a word; its thread shows it whole. */
+const LINE_NAME_LENGTH = 28
+
+/** Up to this many sub-agents, with short names, the line names each; past it, it counts them. */
+const NAMED_AGENTS = 3
+
+function named(model: ChildModel): boolean {
+  return childTitle(model.child.key).length <= 20
+}
+
+function shortName(name: string): string {
+  if (name.length <= LINE_NAME_LENGTH) return name
+  const cut = name.slice(0, LINE_NAME_LENGTH)
+  const word = cut.lastIndexOf(" ")
+  return `${(word > LINE_NAME_LENGTH / 2 ? cut.slice(0, word) : cut).replace(/[\s,.:;-]+$/, "")}…`
 }
 
 /** What `wait_agent` last said of any of the child's runs. */

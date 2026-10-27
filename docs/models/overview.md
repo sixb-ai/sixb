@@ -163,12 +163,13 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   with its files, and the agent gets its answer.
 - **A paused sub-agent keeps its whole sandbox** on a provider that keeps files, such as Vercel.
   Elsewhere it gets back the files it was handed and its `out/`, and is told the rest is gone.
-- **In the chat, each sub-agent is a card under the work that started it**: its task, model and
-  tier, what it is doing right now, its time and cost, what the agent told it and what it asked,
-  the calls it waits on, and the files it made. "Show work" opens its own steps, in a sheet on a
-  phone. Several read as one group that says how many work and how many wait for you. Whoever may
-  stop the turn can stop a sub-agent at work from its card; once the reply waits on a sub-agent's
-  call, "Stop waiting" on that call stops the reply.
+- **In the chat, a reply's sub-agents are one line under the work that started them**: their
+  avatars and a sentence that names them by how they stand ("Terms and Disputes are working ·
+  History finished"), or counts them when there are many. The line opens them beside the
+  conversation (in a sheet on a phone): each one's task, model, time, steps, answer and the files
+  it made. What the agent told it, what it asked and the calls it waits on stay in the reply under
+  the line. Whoever may stop the turn can stop a sub-agent at work from its thread; once the reply
+  waits on a sub-agent's call, "Stop waiting" on that call stops the reply.
 - **The conversation's owner and participants see its sub-agents**, live or once they ended:
   `GET /api/agent-threads/:threadId/children` lists them (`?runId=` for those one turn spawned),
   each with its thread, runs, status, usage and cost; its thread's messages are what it did. A
@@ -221,23 +222,24 @@ Each user chooses what the agent may change without asking them:
 
 | Mode | Action that only changes Sixb | Action with a writeback or effects | Workflow start |
 | --- | --- | --- | --- |
-| `manual` (default) | waits | waits | waits |
+| `manual` | waits | waits | waits |
 | `accept-edits` | runs | waits | waits |
-| `auto` | runs | runs | runs |
+| `auto` (default) | runs | runs | runs |
 
-In the app, a chip under the message box shows the mode and switches it; in an empty message,
-Shift+Tab switches between Manual and Accept edits. Settings › Personal sets your default. A call
+In the app, the message box shows the mode and switches it, and the mode you pick becomes your
+default for new conversations; in an empty message, Shift+Tab cycles Manual, Accept edits and
+Auto. Settings › Personal sets your default too. A call
 that waits shows as a card in the reply: what it does, to which record, with which values, and
 whether it reaches an external system. Approve, Deny or "Always allow" answer it there, and the
-reply continues under the card. "Always allow" says which mode it switches you to, and which other
+reply continues under the card. Once decided, the card folds to a line that says how it ended and
+opens to its values. "Always allow" says which mode it switches you to, and which other
 waiting calls of the reply it approves with it. "Stop waiting" sets every call of the reply
 aside, for its sender or the conversation's owner. In a shared conversation, the others see the card
 and who decides, and are warned that sending a message sets it aside. The thread list puts the
 conversations waiting for you first.
 
-> **Upgrading from `auto`.** A turn whose sender chose no mode now runs in `manual`: its actions and
-> workflows wait for an approval nobody may be watching for. Code that requests turns and expects
-> them to act, such as an integration or a script, passes `approvalMode` explicitly, or sets its
+> A turn whose sender chose no mode runs in `auto`: nothing waits for an approval. To make the
+> agent ask first, a person picks a stricter mode, and code passes `approvalMode` or sets its
 > principal's default with `preferences.update`.
 
 ```ts
@@ -292,8 +294,11 @@ across conversations.
 
 ## Use in your app
 
-[Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`
-or embed `AgentPanel` in a page and give it context:
+[Sixb apps](../apps/overview.md) include a chat interface. The home page starts a thread, each
+thread has its own page at `/threads/<id>`, and `/threads` lists every thread the person can open,
+their own and those shared with them. The clock button in a thread's header goes there; pass
+`onOpenThreads` to `AgentPanel` or `AgentSurface` to show it in your own chat. To talk with the agent from one of your pages, embed `AgentPanel` and
+give it context:
 
 File: `app/_components/invoice-assistant.tsx`
 
@@ -374,12 +379,13 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 
 | Part | Use it for |
 | --- | --- |
-| `useAgentConversation` | One conversation: messages, the turn, threads, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop`, `retry` and `continue`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
-| `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and one for each sub-agent |
+| `useAgentConversation` | One conversation: messages, the turn, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop`, `retry` and `continue`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
+| `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
 | `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers) and the approval mode chip |
-| `AgentThreadSwitcher` | Search and switch between the person's threads |
+| `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
+| `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
 | `ModelControls` | The model picker on its own, an Auto chip with tiers; `ProviderLogo` and `ReasoningEffortSlider` to build another |
 | `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |

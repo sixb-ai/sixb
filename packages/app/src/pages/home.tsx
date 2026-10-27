@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AgentChat } from "../agent/agent-chat"
+import { THREADS_PATH, threadPath } from "../agent/thread-navigation"
 import { useAppMessages } from "../locale"
 import { readDocumentIdentity } from "../shell/brand"
 import { Mosaic } from "./mosaic"
@@ -27,7 +28,8 @@ export function HomePage() {
           threadId={null}
           welcomeContent={<Welcome />}
           onNavigateHome={() => navigate("/")}
-          onNavigateThread={(threadId) => navigate(`/agents/${encodeURIComponent(threadId)}`)}
+          onNavigateThread={(threadId) => navigate(threadPath(threadId))}
+          onOpenThreads={() => navigate(THREADS_PATH)}
         />
       ) : (
         <Empty />

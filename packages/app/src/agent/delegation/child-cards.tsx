@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef } from "react"
 import { type TranscriptApprovals, useApprovalCards } from "../approvals"
 import type { LiveRunState } from "../live-run"
 import { useObservedThread } from "../observed-thread"
-import { ChildCard } from "./child-card"
 import { ChildGroup } from "./child-group"
 import { useDelegationCards } from "./context"
 import { type AgentChild, activeRun, type SpawnedChild, type ThreadDelegation } from "./interpret"
@@ -17,8 +16,8 @@ import {
 } from "./use-children"
 
 /**
- * The sub-agents a run of the Agent's work spawned, under that work: one card each, or, for
- * several, one group that says how they stand. Each child at work streams to its card.
+ * The sub-agents a run of the Agent's work spawned, under that work: one line that names them and
+ * says how they stand, opening each one's thread. Each child at work streams to it.
  */
 export function ChildCards({ spawned }: { readonly spawned: readonly SpawnedChild[] }) {
   const cards = useDelegationCards()
@@ -86,11 +85,9 @@ export function ChildCards({ spawned }: { readonly spawned: readonly SpawnedChil
       {streaming.map((id) => (
         <ChildStream key={id} runId={id} onEvent={onEvent} />
       ))}
-      {models.length === 1 && models[0] ? (
-        <ChildCard model={models[0]} source={source} unavailable={unavailable} />
-      ) : (
+      {models.length > 0 ? (
         <ChildGroup models={models} source={source} unavailable={unavailable} />
-      )}
+      ) : null}
     </>
   )
 }

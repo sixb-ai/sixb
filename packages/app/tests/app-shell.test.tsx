@@ -146,6 +146,7 @@ test("the agent waits docked beside app pages, but not on Home or without an age
 
   expect(launcher("/quotes", true)).toBe(true)
   expect(launcher("/", true)).toBe(false)
-  expect(launcher("/agents/thread-1", true)).toBe(false)
+  expect(launcher("/threads", true)).toBe(false)
+  expect(launcher("/threads/thread-1", true)).toBe(false)
   expect(launcher("/quotes", false)).toBe(false)
 })

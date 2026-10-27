@@ -1,13 +1,18 @@
 import type { ModelReasoningLevel } from "@sixb/core/models"
-import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronDown, RotateCcw, Search, Shapes } from "lucide-react"
-import { useMemo, useState } from "react"
+import { ChevronDown, Search, Shapes } from "lucide-react"
+import { type ComponentPropsWithoutRef, forwardRef, type ReactNode, useMemo, useState } from "react"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { defaultLanguageModel, defaultReasoningLevel, hasTiers } from "../model-selection"
 import type { LanguageModel } from "../types"
 import { AutoModelChip } from "./auto-model-chip"
+import {
+  COMPOSER_MENU_SECTION_CLASS_NAME,
+  COMPOSER_TRIGGER_CLASS_NAME,
+  ComposerMenu,
+  ComposerMenuScroll,
+} from "./composer-menu"
 import { ModelPickerRow } from "./model-picker-row"
 import { ProviderLogo } from "./provider-logo"
 import { ReasoningEffortSlider } from "./reasoning-effort-slider"
@@ -76,8 +81,6 @@ function ModelListControls({
     : undefined
   const [query, setQuery] = useState("")
   const normalizedQuery = query.trim().toLowerCase()
-  const hasReasoning =
-    selectedModel && selectedModel.reasoningLevels.length > 1 && selectedReasoning
   const visibleModels = useMemo(() => {
     if (!normalizedQuery) return models
     return models.filter((model) =>
@@ -92,129 +95,134 @@ function ModelListControls({
     if (!open) setQuery("")
   }
 
+  // The default model's row follows the project default again instead of pinning that model.
+  const choose = (model: LanguageModel) => {
+    if (onResetToDefault && !usingDefault && defaultModel && sameModel(model, defaultModel)) {
+      onResetToDefault()
+    } else {
+      onSelectModel(model)
+    }
+  }
+
   return (
-    <div className="flex min-w-0">
-      <Popover open={modelOpen} onOpenChange={updateModelOpen}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled || loading || models.length === 0}
-            aria-label={messages.choose}
-            className={cn(
-              "flex h-8 min-w-0 max-w-72 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground outline-none transition-colors",
-              "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
-              "disabled:cursor-default disabled:opacity-60",
-              modelOpen && "bg-muted/60 text-foreground"
-            )}
-          >
-            {selectedModel ? (
+    <ComposerMenu
+      open={modelOpen}
+      onOpenChange={updateModelOpen}
+      title={messages.popover}
+      align="end"
+      trigger={
+        <ModelTrigger
+          name={
+            selectedModel
+              ? selectedModel.name
+              : error
+                ? messages.unavailable
+                : messages.defaultModel
+          }
+          icon={
+            selectedModel ? (
               <ProviderLogo model={selectedModel} className="size-4" />
             ) : (
-              <Shapes className="size-4" aria-hidden="true" />
-            )}
-            <span
-              className="truncate text-foreground"
-              title={
-                usingDefault && defaultSummary
-                  ? messages.defaultSummary(defaultSummary)
-                  : selectedModel?.name
-              }
-            >
-              {selectedModel
-                ? selectedModel.name
-                : error
-                  ? messages.unavailable
-                  : messages.defaultModel}
-            </span>
-            {hasReasoning &&
-            selectedReasoning !== "none" &&
-            selectedReasoning !== "provider-default" ? (
-              <span className="shrink-0 text-muted-foreground">
-                {agentMessages.reasoning.levels[selectedReasoning]}
-              </span>
-            ) : null}
-            <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="end"
-          side="top"
-          sideOffset={10}
-          collisionPadding={8}
-          aria-label={messages.popover}
-          className="flex max-h-[var(--radix-popover-content-available-height)] w-72 max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl p-0 shadow-xl shadow-black/10"
-        >
-          {models.length > 5 ? (
-            <div className="m-1.5 mb-0 flex h-9 shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring/30">
-              <Search className="size-3.5 shrink-0" aria-hidden="true" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={messages.search}
-                aria-label={messages.search}
-                className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-          ) : null}
-          <div
-            className="scrollbar-thin min-h-0 max-h-[min(22rem,50dvh)] space-y-0.5 overflow-y-auto p-1.5"
-            role="group"
-            aria-label={messages.list}
-          >
-            {visibleModels.map((model) => (
-              <ModelPickerRow
-                key={`${model.provider}:${model.modelId}`}
-                model={model}
-                selected={sameModel(model, selectedModel)}
-                disabled={disabled}
-                onSelect={onSelectModel}
-              />
-            ))}
-            {visibleModels.length === 0 ? (
-              <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {messages.empty}
-              </p>
-            ) : null}
-          </div>
-          {hasReasoning ? (
-            <div className="shrink-0 border-t border-border/60 px-4 py-2.5">
-              <ReasoningEffortSlider
-                model={selectedModel}
-                value={selectedReasoning}
-                disabled={disabled}
-                onChange={onSelectReasoning}
-                onReset={onResetReasoning}
-              />
-            </div>
-          ) : null}
-          {defaultSummary && onResetToDefault ? (
-            <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/60 px-4 py-1.5 text-xs">
-              {usingDefault ? (
-                <span className="shrink-0 text-muted-foreground">{messages.default}</span>
-              ) : (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={onResetToDefault}
-                  title={messages.defaultSummary(defaultSummary)}
-                  className="-ml-2 flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
-                >
-                  <RotateCcw className="size-3.5" aria-hidden="true" />
-                  {messages.resetToDefault}
-                </button>
-              )}
-              <span
-                className="min-w-0 flex-1 basis-32 truncate text-right text-muted-foreground"
-                title={defaultSummary}
-              >
-                {defaultSummary}
-              </span>
-            </div>
-          ) : null}
-        </PopoverContent>
-      </Popover>
-    </div>
+              <Shapes className="size-4 shrink-0" aria-hidden="true" />
+            )
+          }
+          level={reasoningLabel(selectedModel, selectedReasoning, agentMessages.reasoning)}
+          open={modelOpen}
+          disabled={disabled || loading || models.length === 0}
+          aria-label={messages.choose}
+          title={
+            usingDefault && defaultSummary
+              ? messages.defaultSummary(defaultSummary)
+              : selectedModel?.name
+          }
+        />
+      }
+    >
+      {/* A short catalog is a list to scan; a long one is searched. */}
+      {models.length > 10 ? (
+        <div className="mx-4 mt-2 flex h-9 shrink-0 items-center gap-2 border-b border-black/[0.06] text-muted-foreground focus-within:border-foreground/30 dark:border-white/[0.07]">
+          <Search className="size-3.5 shrink-0" aria-hidden="true" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={messages.search}
+            aria-label={messages.search}
+            className="min-w-0 flex-1 bg-transparent text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+      ) : null}
+      <ComposerMenuScroll
+        className="flex-1 overscroll-contain p-1.5"
+        role="group"
+        aria-label={messages.list}
+      >
+        {visibleModels.map((model) => (
+          <ModelPickerRow
+            key={`${model.provider}:${model.modelId}`}
+            model={model}
+            selected={sameModel(model, selectedModel)}
+            disabled={disabled}
+            note={defaultModel && sameModel(model, defaultModel) ? messages.default : undefined}
+            onSelect={choose}
+          />
+        ))}
+        {visibleModels.length === 0 ? (
+          <p className="px-3 py-8 text-center text-xs text-muted-foreground">{messages.empty}</p>
+        ) : null}
+      </ComposerMenuScroll>
+      {selectedModel && selectedReasoning ? (
+        <div className={COMPOSER_MENU_SECTION_CLASS_NAME}>
+          <ReasoningEffortSlider
+            model={selectedModel}
+            value={selectedReasoning}
+            disabled={disabled}
+            onChange={onSelectReasoning}
+            onReset={onResetReasoning}
+          />
+        </div>
+      ) : null}
+    </ComposerMenu>
   )
+}
+
+/**
+ * The composer's model control: the model's logo and name, its thinking level in muted text, and
+ * a chevron, as quiet text that fills only when hovered or open.
+ */
+export const ModelTrigger = forwardRef<
+  HTMLButtonElement,
+  {
+    readonly icon: ReactNode
+    readonly name: string
+    readonly level?: string
+    readonly open: boolean
+  } & ComponentPropsWithoutRef<"button">
+>(function ModelTrigger({ icon, name, level, open, className, ...props }, ref) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-expanded={open}
+      {...props}
+      className={cn(COMPOSER_TRIGGER_CLASS_NAME, className)}
+    >
+      {icon}
+      <span className="max-w-[11rem] truncate text-foreground max-sm:max-w-[7rem]">{name}</span>
+      {level ? <span className="shrink-0 text-muted-foreground">{level}</span> : null}
+      <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
+    </button>
+  )
+})
+
+/** The trigger's level: an explicit one the model offers a choice of. */
+export function reasoningLabel(
+  model: LanguageModel | undefined,
+  reasoning: ModelReasoningLevel | undefined,
+  messages: AgentMessages["reasoning"]
+): string | undefined {
+  if (!model || model.reasoningLevels.length <= 1 || !reasoning) return undefined
+  if (reasoning === "none" || reasoning === "provider-default") return undefined
+  return messages.levels[reasoning]
 }
 
 /** "<model> · <level>", omitting a level the provider chooses. */
@@ -225,6 +233,6 @@ function modelSummary(model: LanguageModel, messages: AgentMessages["reasoning"]
     : `${model.name} · ${messages.levels[reasoning]}`
 }
 
-function sameModel(left: LanguageModel, right: LanguageModel | undefined): boolean {
+export function sameModel(left: LanguageModel, right: LanguageModel | undefined): boolean {
   return left.provider === right?.provider && left.modelId === right.modelId
 }

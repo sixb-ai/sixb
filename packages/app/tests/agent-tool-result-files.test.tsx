@@ -79,7 +79,7 @@ describe("a tool's files in the work trace", () => {
       </QueryClientProvider>
     )
     // Open the turn's work, then the call.
-    for (const label of ["Worked", "chart_margins"]) {
+    for (const label of ["1 step", "chart_margins"]) {
       const trigger = view
         .getAllByRole("button")
         .find((button) => button.textContent?.includes(label))

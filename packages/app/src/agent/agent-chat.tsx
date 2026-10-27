@@ -21,6 +21,8 @@ export interface AgentChatProps {
   readonly threadId?: string | null
   readonly onNavigateHome: () => void
   readonly onNavigateThread: (threadId: string) => void
+  /** Open the page of every conversation, from the header's button; without it, there is none. */
+  readonly onOpenThreads?: () => void
   readonly className?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
@@ -42,6 +44,7 @@ export function AgentChat({
   threadId: threadIdInput = null,
   onNavigateHome,
   onNavigateThread,
+  onOpenThreads,
   className,
   ambientContext = [],
   compact = false,
@@ -142,29 +145,8 @@ export function AgentChat({
         currentThread={conversation.currentThread}
         runningThreadCount={conversation.runningThreadCount}
         waitingThreadIds={conversation.waitingThreadIds}
-        threadsError={conversation.threadsError ? messages.chat.threadsLoadFailed : null}
-        hasMoreThreads={conversation.threadsHasMore}
-        loadingMoreThreads={conversation.threadsLoadingMore}
-        loadMoreThreadsError={conversation.threadsLoadMoreError}
-        onLoadMoreThreads={() => void conversation.loadMoreThreads()}
-        agentThreads={conversation.agentThreads}
-        sharedThreads={
-          conversation.user
-            ? {
-                threads: conversation.sharedThreads,
-                total: conversation.sharedThreadsTotal,
-                error: conversation.sharedThreadsError
-                  ? messages.chat.sharedThreadsLoadFailed
-                  : null,
-                hasMore: conversation.sharedThreadsHasMore,
-                loadingMore: conversation.sharedThreadsLoadingMore,
-                loadMoreError: conversation.sharedThreadsLoadMoreError,
-                onLoadMore: () => void conversation.loadMoreSharedThreads(),
-              }
-            : undefined
-        }
         onNewChat={onNavigateHome}
-        onSelectThread={onNavigateThread}
+        onOpenThreads={onOpenThreads}
         sandboxRecovery={
           conversation.sandboxRecoveryProps ? (
             <SandboxRecovery {...conversation.sandboxRecoveryProps} />

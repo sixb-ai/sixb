@@ -51,7 +51,7 @@ describe("a message the Agent sends a child", () => {
     )
     const worked = view
       .getAllByRole("button")
-      .find((button) => button.textContent?.includes("Worked"))
+      .find((button) => / steps?$/.test(button.textContent ?? ""))
     if (!worked) throw new Error("Expected the turn's work.")
     await act(async () => {
       fireEvent.click(worked)

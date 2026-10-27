@@ -1,21 +1,8 @@
 import { listModelsOptions } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import {
-  Bot,
-  Check,
-  CircleDashed,
-  CirclePause,
-  CircleSlash,
-  Clock3,
-  CornerDownRight,
-  LoaderCircle,
-  type LucideIcon,
-  MessageCircleQuestion,
-  Square,
-  X,
-} from "lucide-react"
-import { type ReactNode, useEffect, useState } from "react"
+import { Bot, Check, CornerDownRight, MessageCircleQuestion } from "lucide-react"
+import { useEffect, useState } from "react"
 import { latestWorkLabel } from "../activity-label"
 import { ProviderLogo } from "../components/provider-logo"
 import { useAgentMessages } from "../i18n"
@@ -26,6 +13,7 @@ import {
   type ChildExchange,
   type ChildState,
   formatWorked,
+  isActive,
   type SpawnedChild,
   workedMs,
 } from "./interpret"
@@ -33,83 +21,70 @@ import type { ChildModel, WaitingOn } from "./model"
 
 // The pieces a sub-agent's card and its group are made of.
 
-const GLYPHS: Readonly<
-  Record<
-    ChildState,
-    { readonly Icon: LucideIcon; readonly className: string; readonly spin?: true }
-  >
-> = {
-  starting: { Icon: CircleDashed, className: "bg-muted text-muted-foreground" },
-  working: {
-    Icon: LoaderCircle,
-    className: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-    spin: true,
-  },
-  asking: {
-    Icon: MessageCircleQuestion,
-    className: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
-  },
-  approval: { Icon: CirclePause, className: "bg-amber-500/12 text-amber-600 dark:text-amber-400" },
-  answer: {
-    Icon: MessageCircleQuestion,
-    className: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
-  },
-  resume: { Icon: Clock3, className: "bg-muted text-muted-foreground" },
-  done: { Icon: Check, className: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400" },
-  failed: { Icon: X, className: "bg-muted text-muted-foreground" },
-  stopped: { Icon: Square, className: "bg-muted text-muted-foreground/70" },
-  ended: { Icon: CircleSlash, className: "bg-muted text-muted-foreground" },
-  unknown: { Icon: Bot, className: "bg-muted text-muted-foreground" },
-}
+/**
+ * Soft, opaque tints, given in the order a reply started its agents: two of one reply never share
+ * one, and each keeps its own in the line and the list.
+ */
+const TINTS = [
+  "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+  "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
+  "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  "bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-300",
+] as const
 
 /**
- * Where a child stands at a glance: a turning ring while it works, amber while it waits on
- * someone. `calm`: it waits on someone other than the reader, so it does not call for them.
+ * A sub-agent at a glance: its initial on a tinted disc. It breathes while it works,
+ * an amber dot says it waits on the reader, and one that failed or was stopped turns grey. Several
+ * overlap in a stack.
  */
-export function StateGlyph({
+export function AgentAvatar({
+  name,
   state,
-  size = "md",
-  ringed = false,
-  calm = false,
+  needsReader,
+  size = "sm",
+  stacked = false,
+  tint,
 }: {
+  readonly name: string
+  /** Its place among its reply's agents, which picks its tint. */
+  readonly tint: number
   readonly state: ChildState
+  readonly needsReader: boolean
   readonly size?: "sm" | "md"
-  /** Overlapping others in a stack. */
-  readonly ringed?: boolean
-  readonly calm?: boolean
+  /** Overlapping the one before it in a stack. */
+  readonly stacked?: boolean
 }) {
-  const { Icon, className, spin } = GLYPHS[state]
+  const quiet = state === "failed" || state === "stopped" || state === "ended"
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full",
-        size === "md" ? "mt-0.5 size-7" : "size-5",
-        ringed && "ring-2 ring-card",
-        calm && (state === "approval" || state === "answer")
-          ? "bg-muted text-muted-foreground"
-          : className
+        "relative flex shrink-0 items-center justify-center rounded-full font-semibold ring-2 ring-background select-none",
+        size === "sm" ? "size-5 text-[10px]" : "size-7 text-[12px]",
+        stacked && (size === "sm" ? "-ml-1" : "-ml-2"),
+        quiet ? "bg-muted text-muted-foreground" : (TINTS[tint % TINTS.length] ?? TINTS[0]),
+        isActive(state) && "motion-safe:animate-pulse"
       )}
     >
-      <Icon
-        className={cn(
-          size === "md" ? "size-3.5" : "size-3",
-          state === "stopped" && "scale-75 fill-current",
-          spin && "motion-safe:animate-spin motion-safe:[animation-duration:1.6s]",
-          state === "approval" && !calm && "motion-safe:animate-pulse"
-        )}
-      />
+      {initial(name)}
+      {needsReader ? (
+        <span
+          className={cn(
+            "absolute -right-0.5 -bottom-0.5 rounded-full bg-amber-500 ring-2 ring-background",
+            size === "sm" ? "size-[7px]" : "size-2.5"
+          )}
+        />
+      ) : null}
     </span>
   )
 }
 
-/** The status line's colour: amber only when the reader is the one to act. */
-export function toneClass(state: ChildState, needsReader: boolean): string {
-  if (needsReader || state === "asking") return "text-amber-700 dark:text-amber-400"
-  if (state === "done") return "text-emerald-700 dark:text-emerald-400"
-  if (state === "working") return "text-foreground"
-  return "text-muted-foreground"
+function initial(name: string): string {
+  return Array.from(name.trim())[0]?.toUpperCase() ?? "·"
 }
+
+/** The text of what waits on the reader: the amber their attention goes to. */
+export const NEEDS_READER_TEXT = "text-amber-700 dark:text-amber-400"
 
 /** The status line: what it does right now while it works, else where it stands. */
 export function statusLabel(
@@ -137,7 +112,7 @@ export function statusLabel(
 }
 
 /** Where a child stands, in words: also what a screen reader hears when it changes. */
-export function stateLabel(
+function stateLabel(
   state: ChildState,
   waitingOn: WaitingOn,
   observed: boolean,
@@ -159,13 +134,16 @@ export function stateLabel(
   }
 }
 
-/** How long a child worked, its waits left out, ticking while it works. */
+/**
+ * How long a child worked, its waits left out, ticking while it works. Children work side by side,
+ * so a group says how long its longest took, not their sum.
+ */
 export function WorkedFor({ views }: { readonly views: readonly (AgentChild | undefined)[] }) {
   const labels = useAgentMessages().delegation
   const now = useNow(views.some((view) => activeRun(view) !== undefined))
-  const worked = views.reduce((total, view) => total + (view ? workedMs(view, now) : 0), 0)
+  const worked = Math.max(0, ...views.map((view) => (view ? workedMs(view, now) : 0)))
   if (worked <= 0) return null
-  return <>{labels.worked(formatWorked(worked, labels))}</>
+  return <>{formatWorked(worked, labels)}</>
 }
 
 /** The model a child runs on: its provider's logo, its name, and the tier it came from. */
@@ -192,39 +170,20 @@ export function ModelChip({
   return (
     <span
       className={cn(
-        "inline-flex h-6 max-w-full min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-muted/40 px-2 text-[11px] font-medium text-foreground",
+        "inline-flex max-w-full min-w-0 items-center gap-1.5 text-muted-foreground",
         className
       )}
       title={`${ref.provider} · ${ref.modelId}`}
     >
       {model ? (
-        <ProviderLogo model={model} className="size-3" />
+        <ProviderLogo model={model} className="size-3 opacity-80" />
       ) : (
-        <Bot className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Bot className="size-3 shrink-0" aria-hidden="true" />
       )}
-      <span className="min-w-0 truncate">{name}</span>
-      {tier ? <span className="shrink-0 text-muted-foreground">· {labels.tiers[tier]}</span> : null}
+      <span className="min-w-0 truncate" title={tier ? labels.tiers[tier] : undefined}>
+        {name}
+      </span>
     </span>
-  )
-}
-
-/** A band of the card below its header, its content aligned with the title. */
-export function Section({
-  label,
-  children,
-}: {
-  readonly label?: string
-  readonly children: ReactNode
-}) {
-  return (
-    <div className="border-t border-border/60 px-4 py-3 sm:pl-14">
-      {label ? (
-        <p className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          {label}
-        </p>
-      ) : null}
-      {children}
-    </div>
   )
 }
 
@@ -257,6 +216,15 @@ export function Exchanges({
       {shown.map((exchange, index) => {
         const open = index === lastAsked
         const amber = open && urgent
+        // The question waiting on the reader: its card says so already, so it reads as itself.
+        if (amber) {
+          return (
+            <li key={`${exchange.kind}:${index}`} className="text-sm leading-5 text-foreground">
+              <span className="sr-only">{labels.asks} · </span>
+              {exchange.text}
+            </li>
+          )
+        }
         const Icon =
           exchange.kind === "asked"
             ? MessageCircleQuestion
@@ -287,10 +255,7 @@ export function Exchanges({
             />
             <p className={cn("min-w-0 break-words", !open && "line-clamp-3")} title={exchange.text}>
               <span
-                className={cn(
-                  "font-medium",
-                  amber ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
-                )}
+                className={cn("font-medium", amber ? NEEDS_READER_TEXT : "text-muted-foreground")}
               >
                 {label}
               </span>

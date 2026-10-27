@@ -88,7 +88,6 @@ export interface CustomAppInstance {
 type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
 type BunServeRoute = BunServeRoutes[string]
 const packageRoot = resolve(import.meta.dir, "..")
-const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:threadId"] as const
 // The shell parts a layout imports from `@sixb/app` style themselves with the same Tailwind build.
 const shellSourcePath = join(packageRoot, "src", "shell")
 const builtInPageModule = "@sixb/app/pages"
@@ -730,12 +729,20 @@ export class AppPackagesMissingError extends Error {
 function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
   const projectRoutePatterns = new Set(routes.map((route) => routePatternKey(route.path)))
   const builtInRoutes: BuiltInRouteManifestEntry[] = [
-    ...builtInAgentRoutePaths.map((path) => ({
-      path,
+    { path: "/threads", moduleSpecifier: builtInPageModule, exportName: "ThreadsPage" },
+    {
+      path: "/threads/:threadId",
       moduleSpecifier: builtInPageModule,
-      exportName: "AgentsPage",
-    })),
-    // Home starts conversations that continue on the agent routes, so it ships with them.
+      exportName: "ThreadPage",
+    },
+    {
+      path: "/agents/:threadId",
+      moduleSpecifier: builtInPageModule,
+      exportName: "AgentThreadRedirect",
+      // It only sends the reader on; the conversation it opens records the view.
+      recordsActivity: false,
+    },
+    // Home starts threads that continue under /threads, so it ships with them.
     { path: "/", moduleSpecifier: builtInPageModule, exportName: "HomePage" },
     // Every object has a page, outside any section: grants decide who reads it.
     {

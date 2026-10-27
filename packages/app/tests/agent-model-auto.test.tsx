@@ -274,14 +274,16 @@ describe("the model chip with tiers", () => {
 
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     expect(menu.getAllByRole("radio").map((radio) => radio.textContent)).toEqual([
-      "AutoSixb picks the model of each message",
-      "FlashQuick lookups",
-      "Sonnet",
-      "OpusHard analysis",
+      "AutoPicks the right model for each message",
+      // One model a tier: each name carries its tier, and its radio is described by it. Just
+      // names: a catalog description is a paragraph, kept for the details card.
+      "FlashFast",
+      "SonnetBalanced",
+      "OpusThorough",
     ])
     expect(menu.getByRole("radio", { name: /^Auto/ }).getAttribute("aria-checked")).toBe("true")
-    expect(menu.getByText("Light")).toBeDefined()
-    expect(menu.getByText("Heavy")).toBeDefined()
+    expect(menu.getByText("Fast")).toBeDefined()
+    expect(menu.getByText("Thorough")).toBeDefined()
     // The reasoning belongs to a pinned model: Auto has none.
     expect(view.queryByText("Thinking")).toBeNull()
 
@@ -295,15 +297,16 @@ describe("the model chip with tiers", () => {
     expect(body).toMatchObject({ model: { provider: "gateway", modelId: opus.modelId } })
   })
 
-  // Removal proof: make the × a no-op; the chip keeps Opus and the message asks for it.
-  test("× returns to Auto", async () => {
+  // Removal proof: make `chooseAuto` a no-op; the chip keeps Opus and the message asks for it.
+  test("choosing Auto in the menu unpins the model", async () => {
     const { view, posted } = renderChat()
     await pin(view, "Opus")
 
-    fireEvent.click(view.getByRole("button", { name: "Back to Auto" }))
+    // The menu stays open on a pinned model, for its thinking.
+    const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
+    fireEvent.click(menu.getByRole("radio", { name: /^Auto/ }))
 
     await view.findByRole("button", { name: "Model: Auto. Change it" })
-    expect(view.queryByRole("button", { name: "Back to Auto" })).toBeNull()
     expect(await send(view, posted, "And now?")).not.toHaveProperty("model")
   })
 

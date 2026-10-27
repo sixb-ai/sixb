@@ -10,7 +10,9 @@ import {
 } from "../artifacts/target"
 import { AgentChat, type AgentChatProps } from "./agent-chat"
 import { useRegisteredAgentContext } from "./agent-context-provider"
+import { AgentThreads } from "./components/agent-threads"
 import { useAgentMessages } from "./i18n"
+import { THREADS_PATH, threadPath } from "./thread-navigation"
 
 export type { AgentFileRef } from "./types"
 
@@ -22,8 +24,12 @@ export interface AgentChatPageProps
   readonly routeBase?: string
 }
 
+/**
+ * One conversation on a page of its own, at `${routeBase}/:threadId`. A new conversation starts at
+ * the app's home, and the page of every conversation is `routeBase` itself.
+ */
 export function AgentChatPage({
-  routeBase = "/agents",
+  routeBase = THREADS_PATH,
   className,
   ambientContext,
   conversationHeaderActions,
@@ -49,15 +55,19 @@ export function AgentChatPage({
   )
 
   const onNavigateHome = useCallback(() => {
-    navigate(normalizedRouteBase)
-  }, [navigate, normalizedRouteBase])
+    navigate("/")
+  }, [navigate])
 
   const onNavigateThread = useCallback(
     (threadId: string) => {
-      navigate(threadPath(normalizedRouteBase, threadId))
+      navigate(threadPathUnder(normalizedRouteBase, threadId))
     },
     [navigate, normalizedRouteBase]
   )
+
+  const onOpenThreads = useCallback(() => {
+    navigate(normalizedRouteBase)
+  }, [navigate, normalizedRouteBase])
 
   return (
     <section className="fixed inset-0 z-50 flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
@@ -67,6 +77,7 @@ export function AgentChatPage({
         threadId={routeThreadId ?? null}
         onNavigateHome={onNavigateHome}
         onNavigateThread={onNavigateThread}
+        onOpenThreads={onOpenThreads}
         artifactTarget={artifactTarget}
         onArtifactTargetChange={onArtifactTargetChange}
         conversationHeaderActions={
@@ -97,7 +108,39 @@ function normalizeRouteBase(routeBase: string): string {
   return withLeadingSlash.replace(/\/+$/, "") || "/"
 }
 
-function threadPath(routeBase: string, threadId: string): string {
+/**
+ * Every conversation, on a page of its own beside the chat: search them, open one, or start
+ * another.
+ */
+export function AgentThreadsPage() {
+  const messages = useAgentMessages().surface
+  const navigate = useNavigate()
+
+  return (
+    <section className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
+      <AgentThreads
+        className="min-h-0 flex-1"
+        onSelectThread={(threadId) => navigate(threadPath(threadId))}
+        onNewThread={() => navigate("/")}
+        headerActions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            aria-label={messages.backToApp}
+            title={messages.backToApp}
+            onClick={() => navigate("/")}
+            className="-ml-2"
+          >
+            <ArrowLeft />
+          </Button>
+        }
+      />
+    </section>
+  )
+}
+
+function threadPathUnder(routeBase: string, threadId: string): string {
   const encoded = encodeURIComponent(threadId)
   return routeBase === "/" ? `/${encoded}` : `${routeBase}/${encoded}`
 }

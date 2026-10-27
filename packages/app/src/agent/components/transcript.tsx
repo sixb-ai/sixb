@@ -211,7 +211,18 @@ function TranscriptView({
                             />
                           ),
                         }
-                      : {})}
+                      : message.unfinished
+                        ? {
+                            after: (
+                              <UnfinishedMarker
+                                unfinished={message.unfinished}
+                                {...(message.key === newestSavedKey && onContinue
+                                  ? { onContinue, continuing: turn.continuing }
+                                  : {})}
+                              />
+                            ),
+                          }
+                        : {})}
                   />
                   {calls ? (
                     <MessageScrollerItem messageId={`approvals:${message.key}`}>
@@ -270,6 +281,24 @@ function TranscriptView({
         <MessageScrollerButton />
       </MessageScroller>
     </MessageScrollerProvider>
+  )
+}
+
+/** A saved reply whose run failed or was stopped before it finished; the newest can go on. */
+function UnfinishedMarker({
+  unfinished,
+  onContinue,
+  continuing = false,
+}: {
+  readonly unfinished: "failed" | "cancelled"
+  readonly onContinue?: () => void
+  readonly continuing?: boolean
+}) {
+  const labels = useAgentMessages().transcript
+  return unfinished === "failed" ? (
+    <RunErrorMarker message={labels.notFinished} onContinue={onContinue} continuing={continuing} />
+  ) : (
+    <RunCancelledMarker />
   )
 }
 

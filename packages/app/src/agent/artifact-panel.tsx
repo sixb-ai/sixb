@@ -9,6 +9,7 @@ import {
 } from "@sixb/ui/components"
 import { useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
+import { ChevronLeft, X } from "lucide-react"
 import {
   createContext,
   memo,
@@ -40,15 +41,36 @@ import {
 } from "./artifact-panel-state"
 import { useAgentMessages } from "./i18n"
 
+/**
+ * A place in the panel a part of the conversation fills itself, such as a sub-agent's thread: the
+ * panel draws its title and close, and the part renders into `slotHost` while it is the one open.
+ */
+export interface SlotTarget {
+  readonly type: "slot"
+  readonly id: string
+  readonly title: string
+  /** A step back within the slot, such as from one sub-agent to all of them: an arrow before the title. */
+  readonly back?: { readonly label: string; readonly onBack: () => void }
+}
+
+export type PanelTarget = ViewerTarget | SlotTarget
+
+/** Identity for "is this target the open one". */
+export function panelTargetKey(target: PanelTarget): string {
+  return target.type === "slot" ? `slot:${target.id}` : viewerTargetKey(target)
+}
+
 export interface ArtifactPanelValue {
   /** What is open, or null when nothing is. */
-  readonly openTarget: ViewerTarget | null
+  readonly openTarget: PanelTarget | null
   /** The open target's identity, or null when nothing is open. */
   readonly openKey: string | null
-  readonly open: (target: ViewerTarget) => void
+  readonly open: (target: PanelTarget) => void
   readonly close: () => void
   /** Where the panel opens: beside the conversation, over the app, or as a dialog. */
   readonly presentation: ArtifactPanelPresentation
+  /** The element an open slot renders into, once the panel has drawn it. */
+  readonly slotHost: HTMLElement | null
 }
 
 interface PanelHandle {
@@ -99,10 +121,11 @@ export function ArtifactPanelRoot({
 }: ArtifactPanelRootProps) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
-  const [localTarget, setLocalTarget] = useState<ViewerTarget | null>(null)
-  const target: ViewerTarget | null = routeTarget ?? localTarget
+  const [localTarget, setLocalTarget] = useState<PanelTarget | null>(null)
+  const target: PanelTarget | null = routeTarget ?? localTarget
   // What the reader followed a reference from, so the panel can take them back.
-  const [trail, setTrail] = useState<readonly ViewerTarget[]>([])
+  const [trail, setTrail] = useState<readonly PanelTarget[]>([])
+  const [slotHost, setSlotHost] = useState<HTMLElement | null>(null)
   const presentation = artifactPanelPresentation({
     compact,
     isMobile: useIsMobile(),
@@ -122,7 +145,7 @@ export function ArtifactPanelRoot({
   }, [scopeKey])
 
   const show = useCallback(
-    (next: ViewerTarget) => {
+    (next: PanelTarget) => {
       if (onRouteTargetChange && next.type === "artifact") {
         setLocalTarget(null)
         onRouteTargetChange(next)
@@ -134,9 +157,12 @@ export function ArtifactPanelRoot({
     [onRouteTargetChange, routeTarget]
   )
   const open = useCallback(
-    (next: ViewerTarget) => {
+    (next: PanelTarget) => {
       const active = typeof document === "undefined" ? null : document.activeElement
-      openerRef.current = active instanceof HTMLElement ? active : null
+      // A move within the open slot keeps where focus returns: what was clicked there goes next.
+      if (!(active instanceof HTMLElement && active.closest("[data-agent-slot-frame]"))) {
+        openerRef.current = active instanceof HTMLElement ? active : null
+      }
       setTrail([])
       show(next)
       reveal()
@@ -155,39 +181,43 @@ export function ArtifactPanelRoot({
   const value = useMemo<ArtifactPanelValue>(
     () => ({
       openTarget: target,
-      openKey: target ? viewerTargetKey(target) : null,
+      openKey: target ? panelTargetKey(target) : null,
       open,
       close,
       presentation,
+      slotHost: target?.type === "slot" ? slotHost : null,
     }),
-    [target, open, close, presentation]
+    [target, open, close, presentation, slotHost]
   )
-  const viewer = target ? (
-    <Viewer
-      target={target}
-      onTargetChange={show}
-      onOpenReference={(next) => {
-        setTrail((current) => [...current, target])
-        show(next)
-      }}
-      chrome={{
-        onClose: close,
-        ...(trail.length > 0
-          ? {
-              onBack: () => {
-                const previous = trail.at(-1)
-                setTrail((current) => current.slice(0, -1))
-                if (previous) show(previous)
-              },
-            }
-          : {}),
-        ...(target.type === "artifact" && pageLinks
-          ? { fullPageHref: artifactTargetHref(target) }
-          : {}),
-        ...(pageLinks ? {} : { withoutPageLink: true }),
-      }}
-    />
-  ) : null
+  const viewer =
+    target?.type === "slot" ? (
+      <SlotFrame title={target.title} back={target.back} onClose={close} hostRef={setSlotHost} />
+    ) : target ? (
+      <Viewer
+        target={target}
+        onTargetChange={show}
+        onOpenReference={(next) => {
+          setTrail((current) => [...current, target])
+          show(next)
+        }}
+        chrome={{
+          onClose: close,
+          ...(trail.length > 0
+            ? {
+                onBack: () => {
+                  const previous = trail.at(-1)
+                  setTrail((current) => current.slice(0, -1))
+                  if (previous) show(previous)
+                },
+              }
+            : {}),
+          ...(target.type === "artifact" && pageLinks
+            ? { fullPageHref: artifactTargetHref(target) }
+            : {}),
+          ...(pageLinks ? {} : { withoutPageLink: true }),
+        }}
+      />
+    ) : null
 
   return (
     <ArtifactPanelContext.Provider value={value}>
@@ -195,7 +225,7 @@ export function ArtifactPanelRoot({
       <ArtifactWorkspace
         idPrefix={idPrefix}
         revealKey={
-          presentation === "panel" && target ? `${viewerTargetKey(target)}:${revealCount}` : null
+          presentation === "panel" && target ? `${panelTargetKey(target)}:${revealCount}` : null
         }
         viewer={presentation === "panel" ? viewer : null}
       >
@@ -236,6 +266,52 @@ export function ArtifactPanelRoot({
           )
         : null}
     </ArtifactPanelContext.Provider>
+  )
+}
+
+/** The panel's frame for a slot: its title and close, and the element the slot renders into. */
+function SlotFrame({
+  title,
+  back,
+  onClose,
+  hostRef,
+}: {
+  readonly title: string
+  readonly back?: SlotTarget["back"]
+  readonly onClose: () => void
+  readonly hostRef: (element: HTMLElement | null) => void
+}) {
+  const messages = useAgentMessages().artifacts
+  return (
+    <div data-agent-slot-frame="" className="flex h-full min-h-0 flex-col">
+      <div className={cn("flex h-12 shrink-0 items-center gap-1 pr-2", back ? "pl-2" : "pl-5")}>
+        {back ? (
+          <button
+            type="button"
+            onClick={back.onBack}
+            aria-label={back.label}
+            title={back.label}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          >
+            <ChevronLeft className="size-4" aria-hidden="true" />
+          </button>
+        ) : null}
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{title}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={messages.close}
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      </div>
+      <div
+        ref={hostRef}
+        data-agent-slot=""
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 pb-6"
+      />
+    </div>
   )
 }
 

@@ -332,7 +332,8 @@ test.each<[string, Partial<ActiveTurnSources>, ActiveTurnPresentation]>([
 
 test("offers to continue only the newest answer that stopped short, once nothing runs", () => {
   // Removal proof: drop the `idle`/`isRunning` checks or read every message's diagnostics in
-  // offersContinue; a running thread or an older notice then offers Continue.
+  // offersContinue; a running thread or an older notice then offers Continue. Drop the failed-run
+  // check, and a reply cut off by a failure offers nothing.
   const cutShort = (code: DiagnosticCode): AgentMessage => ({
     ...assistantMessage("cut-short"),
     annotations: [{ code, severity: "warning", scope: "run", message: "Developer copy." }],
@@ -362,6 +363,18 @@ test("offers to continue only the newest answer that stopped short, once nothing
   ).toBe(false)
   expect(
     offersContinue({ ...idle, sandboxRecovery: true, messages: [cutShort("step_limit_reached")] })
+  ).toBe(false)
+  // A run that failed after saving part of its answer: that answer can be finished.
+  const partial = assistantMessage("failed")
+  const failed = run({ id: "failed", status: "failed" })
+  expect(offersContinue({ ...idle, messages: [partial], latestRun: failed })).toBe(true)
+  expect(offersContinue({ ...idle, messages: [partial, user], latestRun: failed })).toBe(false)
+  expect(
+    offersContinue({
+      ...idle,
+      messages: [partial],
+      latestRun: run({ id: "failed", status: "succeeded" }),
+    })
   ).toBe(false)
   const stopped = { kind: "interrupted" as const, run: run({ id: "stopped", status: "cancelled" }) }
   expect(

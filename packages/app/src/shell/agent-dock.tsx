@@ -2,6 +2,7 @@ import { getAgentOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useLocation, useNavigate } from "react-router-dom"
 import { AgentSurface } from "../agent/agent-surface"
+import { THREADS_PATH, threadPath } from "../agent/thread-navigation"
 import { useAppMessages } from "../locale"
 import { useSectionsEnabled } from "../sections/sections"
 
@@ -17,7 +18,7 @@ export function AgentDock() {
   const enabled = useSectionsEnabled()
   const agent = useQuery({ ...getAgentOptions(), enabled, retry: false, staleTime: 5 * 60_000 })
   const conversationPage =
-    pathname === "/" || pathname === "/agents" || pathname.startsWith("/agents/")
+    pathname === "/" || pathname === THREADS_PATH || pathname.startsWith(`${THREADS_PATH}/`)
   if (!enabled || !agent.data || conversationPage) return null
 
   return (
@@ -25,7 +26,8 @@ export function AgentDock() {
       title={messages.title}
       launcherLabel={messages.open}
       defaultMode="collapsed"
-      onExpandThread={(threadId) => navigate(`/agents/${encodeURIComponent(threadId)}`)}
+      onExpandThread={(threadId) => navigate(threadPath(threadId))}
+      onOpenThreads={() => navigate(THREADS_PATH)}
       persistenceKey="sixb.app.agent-dock.v1"
     />
   )

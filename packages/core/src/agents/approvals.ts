@@ -21,11 +21,11 @@ import type {
 import { publishAgentApprovalActivity } from "./streams/protocol"
 
 /**
- * The mode of a turn whose requester chose none, in the thread or as their default: every action
- * and workflow waits for them. A run admitted before approval modes keeps `auto`
+ * The mode of a turn whose requester chose none, in the thread or as their default: nothing waits
+ * for them until they choose a stricter mode. A run admitted before approval modes is `auto` too
  * ({@link agentRunApprovalMode}).
  */
-const FALLBACK_AGENT_APPROVAL_MODE: AgentApprovalMode = "manual"
+const FALLBACK_AGENT_APPROVAL_MODE: AgentApprovalMode = "auto"
 
 /** How long a held call waits for its requester. */
 export const AGENT_APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1_000

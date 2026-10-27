@@ -132,11 +132,17 @@ describe("document shaping", () => {
   })
 
   test("aligns columns of figures, not columns of names", () => {
-    expect(html).toContain('<th class="sixb-numeric">Revenue</th>')
-    expect(html).toContain('<td class="sixb-numeric">(980)</td>')
+    // Short cells also stay on one line; only the alignment class matters here.
+    const cell = (tag: string, text: string) =>
+      new RegExp(
+        `<${tag} class="[^"]*\\bsixb-numeric\\b[^"]*">${text.replace(/[()%]/g, "\\$&")}</${tag}>`
+      )
+    expect(html).toMatch(cell("th", "Revenue"))
+    expect(html).toMatch(cell("td", "(980)"))
     // Reproduce by matching `\)?` before the unit in NUMERIC_CELL: "(3.2%)" reads as text.
-    expect(html).toContain('<td class="sixb-numeric">(3.2%)</td>')
-    expect(html).toContain("<td>North</td>")
+    expect(html).toMatch(cell("td", "(3.2%)"))
+    expect(html).not.toMatch(cell("td", "North"))
+    expect(html).toContain(">North</td>")
   })
 
   test("gives headings the slugs publishing put in the outline", async () => {

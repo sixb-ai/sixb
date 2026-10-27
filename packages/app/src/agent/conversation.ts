@@ -16,6 +16,7 @@ import type {
   AgentContextInput,
   AgentFileRef,
   AgentMessage,
+  AgentRun,
   AgentThread,
 } from "./types"
 
@@ -128,6 +129,8 @@ export interface ConversationMessagesInput {
   readonly pending?: PendingUserMessage | null
   /** The key each message the reader sent had while pending, by its saved id. */
   readonly sentKeys?: ReadonlyMap<string, string>
+  /** The conversation's runs: a saved reply whose run failed or was stopped says it did not finish. */
+  readonly runs?: readonly AgentRun[]
   /** The run followed live; an observer follows none. */
   readonly live?: LiveRunState | null
   readonly presentation: ActiveTurnPresentation
@@ -144,6 +147,10 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   const keys = new Set<string>()
   const savedIds = new Set<string>()
   const answeredRuns = new Set<string>()
+  const ended = new Map<string, "failed" | "cancelled">()
+  for (const run of input.runs ?? []) {
+    if (run.status === "failed" || run.status === "cancelled") ended.set(run.id, run.status)
+  }
 
   for (const message of input.messages) {
     if (message.role === "system") continue
@@ -161,7 +168,10 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
     const key = keys.has(preferred) ? `message:${message.id}` : preferred
     keys.add(key)
 
-    result.push(savedMessage(message, key, authorOf(message.authorPrincipal, input), input))
+    const saved = savedMessage(message, key, authorOf(message.authorPrincipal, input), input)
+    const unfinished =
+      message.role === "assistant" && message.runId !== null ? ended.get(message.runId) : undefined
+    result.push(unfinished ? unfinishedMessage(saved, unfinished) : saved)
   }
 
   const pending = input.pending
@@ -173,6 +183,20 @@ export function conversationMessages(input: ConversationMessagesInput): AgentCon
   if (live) result.push(live)
 
   return result
+}
+
+const unfinishedEntries = new WeakMap<AgentConversationMessage, AgentConversationMessage>()
+
+/** The same saved reply, marked as one its run ended before finishing; kept stable across renders. */
+function unfinishedMessage(
+  message: AgentConversationMessage,
+  unfinished: "failed" | "cancelled"
+): AgentConversationMessage {
+  const cached = unfinishedEntries.get(message)
+  if (cached?.unfinished === unfinished) return cached
+  const marked = { ...message, unfinished }
+  unfinishedEntries.set(message, marked)
+  return marked
 }
 
 function isContinuation(message: AgentMessage): boolean {

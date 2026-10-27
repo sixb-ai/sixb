@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 
 const SIZES = {
-  xs: { root: "size-4", text: "text-[7px]" },
+  xs: { root: "size-5", text: "text-[9px]" },
   sm: { root: "size-6", text: "text-[9px]" },
   md: { root: "size-8", text: "text-xs" },
 } as const

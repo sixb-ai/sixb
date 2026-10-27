@@ -40,7 +40,7 @@ function ContextChip({
   const messages = useAgentMessages().context
   const label = useAgentContextLabel(context)
   return (
-    <span className="inline-flex max-w-[min(100%,20rem)] items-center gap-1.5 rounded-full border border-border bg-muted/70 py-1 pr-1.5 pl-2 text-xs text-foreground">
+    <span className="inline-flex max-w-[min(100%,20rem)] items-center gap-1.5 rounded-full bg-muted py-1 pr-1.5 pl-2 text-xs text-foreground">
       {context.kind === "object" ? (
         <Box className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       ) : (

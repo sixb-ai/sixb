@@ -12,6 +12,8 @@ export interface AgentPanelProps {
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
   readonly onNewThread?: () => void
+  /** Open the page of every conversation, from the header's button. */
+  readonly onOpenThreads?: () => void
   /** Optional modeless artifact canvas owned by an enclosing application shell. */
   readonly artifactHost?: HTMLElement | null
   /** Keep artifacts beside the chat on desktop instead of opening a modal. */
@@ -31,6 +33,7 @@ export function AgentPanel({
   defaultThreadId = null,
   onThreadChange,
   onNewThread,
+  onOpenThreads,
   artifactHost,
   splitArtifacts,
   conversationHeaderActions,
@@ -68,6 +71,7 @@ export function AgentPanel({
         onNewThread?.()
       }}
       onNavigateThread={changeThread}
+      onOpenThreads={onOpenThreads}
       className={cn("min-h-0 overflow-hidden bg-background", className)}
     />
   )

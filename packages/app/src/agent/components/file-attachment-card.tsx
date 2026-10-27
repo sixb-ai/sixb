@@ -41,7 +41,7 @@ export function FileAttachmentCard({
       state="done"
       data-selected={selected ? "" : undefined}
       className={cn(
-        "w-[20rem] max-w-[80vw] rounded-2xl border-border/70 bg-background shadow-sm",
+        "w-[20rem] max-w-[80vw] rounded-2xl border-transparent bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04)] ring-1 ring-black/[0.06] dark:shadow-none dark:ring-white/10",
         selected &&
           "border-foreground/25 bg-muted/70 shadow-none ring-1 ring-foreground/10 ring-inset",
         className
@@ -121,7 +121,10 @@ function fileIconPresentation(mediaType: string | undefined, fileName: string) {
     normalized?.includes("csv") ||
     /\.(csv|tsv|xls|xlsx)$/i.test(lowerName)
   ) {
-    return { Icon: Table2, className: "bg-emerald-500 text-white" }
+    return {
+      Icon: Table2,
+      className: "bg-emerald-500/[0.08] text-emerald-600 dark:text-emerald-300",
+    }
   }
   if (normalized?.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(lowerName)) {
     return { Icon: FileImage, className: "bg-sky-500/[0.08] text-sky-600 dark:text-sky-300" }

@@ -52,7 +52,7 @@ async function openWork(parts: Parameters<typeof normalizeDurableParts>[0]) {
   )
   const worked = view
     .getAllByRole("button")
-    .find((button) => button.textContent?.includes("Worked"))
+    .find((button) => / steps?$/.test(button.textContent ?? ""))
   if (!worked) throw new Error("Expected the turn's work.")
   await act(async () => {
     fireEvent.click(worked)
