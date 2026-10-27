@@ -189,6 +189,15 @@ test.each<[string, Partial<ActiveTurnSources>, ActiveTurnPresentation]>([
     { kind: "idle" },
   ],
   [
+    // Removal proof: drop answeredLive from failedFromHistory; the runs read back say failed.
+    "a failed run whose partial live content is not saved yet is not a pre-stream failure",
+    {
+      runs: [failed],
+      live: liveState({ runId: "r1", finishStatus: "failed", ...partial }),
+    },
+    { kind: "idle" },
+  ],
+  [
     "a timeout with durable progress offers continuation with its configured duration",
     { runs: [timedOutWithBudget], messages: [assistantMessage("r1")] },
     { kind: "timeout", run: timedOutWithBudget, hasProgress: true, timeoutMs: 600_000 },

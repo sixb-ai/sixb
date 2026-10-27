@@ -182,8 +182,10 @@ export function presentActiveTurn(sources: ActiveTurnSources): ActiveTurnPresent
     return { kind: "interrupted", run: interruptedRun, hasProgress }
   }
 
+  // A run that failed after it streamed content answered in part: its reply says it did not finish.
+  const answeredLive = live.runId === presentationRun?.id && live.parts.length > 0
   const failedFromHistory =
-    !messagesLoading && presentationRun?.status === "failed"
+    !messagesLoading && presentationRun?.status === "failed" && !answeredLive
       ? findPreStreamFailedRun(
           presentationRun === latestRun ? runs : [presentationRun, ...runs],
           messages

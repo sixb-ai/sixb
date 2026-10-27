@@ -14,7 +14,7 @@ import {
   READ_ONLY_TURN,
 } from "../src/agent/conversation"
 import { createLiveRunState } from "../src/agent/live-run"
-import type { ActiveTurnPresentation } from "../src/agent/run-presentation"
+import { type ActiveTurnPresentation, presentActiveTurn } from "../src/agent/run-presentation"
 import type { AgentMessage, AgentRun, AgentThread } from "../src/agent/types"
 
 function thread(id: string, title: string): AgentThread {
@@ -134,6 +134,34 @@ test("offers to continue a turn interrupted with its partial answer saved", () =
   expect(html).toContain("The response was interrupted before it finished.")
   expect(html).toContain("Continue")
   expect(html).not.toContain("Try again")
+})
+
+test("an answer that failed mid-stream says so on its reply, not as a failed turn", () => {
+  // Removal proof: drop answeredLive from presentActiveTurn; the turn reads failed once the runs
+  // are read back, while the transcript still draws the reply that did not finish.
+  const live = {
+    ...createLiveRunState("run"),
+    parts: [{ kind: "text" as const, text: "Two invoices are" }],
+    partKeys: ["text#1#t"],
+    finishStatus: "failed" as const,
+  }
+  const presentation = presentActiveTurn({
+    activeRunId: null,
+    pendingRun: null,
+    streamRun: null,
+    live,
+    runs: [{ ...interruptedRun, status: "failed", finishReason: undefined }],
+    messages: [question],
+    messagesLoading: false,
+  })
+  const transcript = conversation({ messages: [question], live, presentation })
+  const html = renderPanel({}, { threadId: "thread", ...transcript })
+
+  expect(transcript.turn.kind).toBe("idle")
+  expect(transcript.messages.at(-1)).toMatchObject({ id: null, unfinished: "failed" })
+  expect(html).toContain("Two invoices are")
+  expect(html).toContain("I couldn’t finish that response.")
+  expect(html).not.toContain("I couldn’t get a response started.")
 })
 
 test("offers Continue on the newest answer that stopped short, not on older ones", () => {
