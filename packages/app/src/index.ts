@@ -29,6 +29,12 @@ export {
 } from "./agent/approvals"
 export { ArtifactPanelRoot, type ArtifactPanelRootProps } from "./agent/artifact-panel"
 export {
+  AgentMessageBody,
+  type AgentMessageBodyProps,
+  AgentToolPart,
+  type AgentToolPartProps,
+} from "./agent/components/agent-message-body"
+export {
   AgentThreadSwitcher,
   type AgentThreadSwitcherProps,
 } from "./agent/components/agent-thread-switcher"
@@ -48,13 +54,24 @@ export {
 export { SandboxRecovery, type SandboxRecoveryProps } from "./agent/components/sandbox-recovery"
 export { ThreadArtifactsMenu } from "./agent/components/thread-artifacts-menu"
 export { Transcript, type TranscriptProps } from "./agent/components/transcript"
+export type {
+  AgentConversationAuthor,
+  AgentConversationDiagnostic,
+  AgentConversationFile,
+  AgentConversationMessage,
+  AgentConversationPart,
+  AgentConversationToolPart,
+  AgentConversationTurn,
+  AgentFileSource,
+} from "./agent/conversation"
 export {
   type AgentConversation,
+  type AgentConversationMessagesError,
+  type AgentConversationSendError,
   type ConversationComposerProps,
   type UseAgentConversationInput,
   useAgentConversation,
 } from "./agent/hooks/use-agent-conversation"
-export type { LiveRunState } from "./agent/live-run"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
 export {
   type AgentToolView,
@@ -63,6 +80,7 @@ export {
   defineAgentToolView,
 } from "./agent/tool-views/define"
 export type {
+  AgentContextEntryInput,
   AgentFileRef,
   AgentMessage,
   AgentRun,

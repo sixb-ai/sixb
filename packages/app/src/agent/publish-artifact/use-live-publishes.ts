@@ -3,7 +3,7 @@ import { isMobileViewport } from "@sixb/ui/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { useArtifactPanel } from "../artifact-panel"
-import type { LiveRunState } from "../live-run"
+import type { NormalizedPart } from "../parts"
 import { turnArtifacts } from "./interpret"
 
 /** Runs that already opened an artifact in this tab, so a remount does not open it again. */
@@ -16,7 +16,10 @@ const openedRuns = new Set<string>()
  * a dialog would take the reader's focus, and the composer's, while the Agent is still working,
  * so there the card waits to be opened.
  */
-export function useLivePublishes(live: LiveRunState): void {
+export function useLivePublishes(live: {
+  readonly runId: string | null
+  readonly parts: readonly NormalizedPart[]
+}): void {
   const panel = useArtifactPanel()
   const queryClient = useQueryClient()
   const seen = useRef(new Set<string>())

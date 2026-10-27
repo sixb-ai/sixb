@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-libra
 import { useLayoutEffect } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { AgentChat } from "../src/agent/agent-chat"
+import { useAgentConversation } from "../src/agent/hooks/use-agent-conversation"
 import { installDom } from "./helpers/dom"
 
 const browser = installDom([
@@ -200,6 +201,7 @@ interface Scenario {
   sharedStatus: number
   ownHasMore: boolean
   threadStatus: number
+  messagesStatus?: number
   /** How a posted message is refused, and what the thread looks like once it is. */
   postError: { readonly status: number; readonly code: string }
   afterPost?: () => void
@@ -245,6 +247,9 @@ function api(scenario: Scenario, requests: string[]) {
     }
 
     if (url.pathname === "/api/agent-threads/thr_1/messages" && method === "GET") {
+      if (scenario.messagesStatus !== undefined) {
+        return Response.json({ error: "[Sixb] unavailable" }, { status: scenario.messagesStatus })
+      }
       return Response.json({
         messages: scenario.messages,
         authors: [
@@ -301,7 +306,8 @@ function api(scenario: Scenario, requests: string[]) {
   }
 }
 
-function renderChat(as: "alice" | "bob" | null, scenario: Partial<Scenario> = {}) {
+/** Plays the API for a reader, as the scenario says; the test renders what reads it. */
+function serve(as: "alice" | "bob" | null, scenario: Partial<Scenario>) {
   const state: Scenario = {
     thread: thread(),
     messages,
@@ -332,6 +338,12 @@ function renderChat(as: "alice" | "bob" | null, scenario: Partial<Scenario> = {}
         }
       : { authenticated: false, authEnabled: false }
   )
+
+  return { state, requests, queryClient }
+}
+
+function renderChat(as: "alice" | "bob" | null, scenario: Partial<Scenario> = {}) {
+  const { state, requests, queryClient } = serve(as, scenario)
   const onNavigateHome = mock(() => {})
   const onNavigateThread = mock((_threadId: string) => {})
 
@@ -455,7 +467,7 @@ describe("a shared conversation", () => {
     expect(view.getAllByText("You", { selector: "span" })).toHaveLength(1)
   })
 
-  // Removal proof: drop the reset on assistant messages in userMessageRuns.
+  // Removal proof: drop the reset on assistant messages in continuedUserMessages.
   test("an answer in between names the author again", async () => {
     const afterAnswer = {
       ...messages[0],
@@ -787,6 +799,163 @@ describe("who acts on a turn", () => {
     expect(
       await view.findByText("This conversation's sandbox must be recovered before another answer.")
     ).toBeDefined()
+  })
+})
+
+/** A chat of the reader's own, which reads the conversation's turn and errors as data. */
+function ConversationProbe() {
+  const conversation = useAgentConversation({ threadId: "thr_1", onThreadCreated: () => {} })
+  const { kind, canStop, canRetry, canContinue } = conversation.turn
+
+  return (
+    <>
+      <output aria-label="turn">
+        {JSON.stringify({
+          kind,
+          canStop,
+          canRetry,
+          canContinue,
+          ...(conversation.turn.kind === "responding"
+            ? { answeringFor: conversation.turn.answeringFor }
+            : {}),
+        })}
+      </output>
+      <output aria-label="errors">
+        {JSON.stringify({ send: conversation.sendError, messages: conversation.messagesError })}
+      </output>
+      <button type="button" onClick={() => void conversation.send("And Globex?", [], [])}>
+        Send
+      </button>
+    </>
+  )
+}
+
+function renderConversation(as: "alice" | "bob", scenario: Partial<Scenario> = {}) {
+  const { state, queryClient } = serve(as, scenario)
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <ConversationProbe />
+    </QueryClientProvider>
+  )
+  const read = (name: "turn" | "errors"): unknown =>
+    JSON.parse(view.getByRole("status", { name }).textContent ?? "null")
+
+  return { view, state, read }
+}
+
+describe("a turn as data", () => {
+  const running = (requestedBy: typeof alice | typeof bob) => ({
+    thread: thread({ activeRunId: "run_2" }),
+    runs: [run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy })],
+  })
+
+  // Removal proof: drop canStopRun from canStop in useAgentConversation; Bob may stop Alice's.
+  test("an answer in flight says who asked for it, and whether the reader may stop it", async () => {
+    const others = renderConversation("bob", running(alice))
+    await waitFor(() =>
+      expect(others.read("turn")).toEqual({
+        kind: "responding",
+        canStop: false,
+        canRetry: false,
+        canContinue: false,
+        answeringFor: {
+          type: "user",
+          id: "usr_alice",
+          displayName: "Alice Martin",
+          isReader: false,
+        },
+      })
+    )
+    others.view.unmount()
+
+    const own = renderConversation("bob", running(bob))
+    await waitFor(() =>
+      expect(own.read("turn")).toMatchObject({
+        kind: "responding",
+        canStop: true,
+        answeringFor: null,
+      })
+    )
+    own.view.unmount()
+
+    const owner = renderConversation("alice", running(bob))
+    await waitFor(() =>
+      expect(owner.read("turn")).toMatchObject({
+        kind: "responding",
+        canStop: true,
+        answeringFor: { id: "usr_bob", displayName: "Bob Durand" },
+      })
+    )
+  })
+
+  // Removal proof: drop canRetryRun from canRetry in useAgentConversation; Bob may retry it.
+  test("a turn that failed is retried by whoever asked for it", async () => {
+    const failed = { runs: [run({ id: "run_2", status: "failed", requestedBy: alice })] }
+
+    const participant = renderConversation("bob", failed)
+    await waitFor(() =>
+      expect(participant.read("turn")).toEqual({
+        kind: "failed",
+        canStop: false,
+        canRetry: false,
+        canContinue: false,
+      })
+    )
+    participant.view.unmount()
+
+    const requester = renderConversation("alice", failed)
+    await waitFor(() => expect(requester.read("turn")).toMatchObject({ canRetry: true }))
+  })
+
+  test("an answer cut short can be continued", async () => {
+    const cutShort = {
+      ...messages[1],
+      annotations: [
+        {
+          code: "output_limit_reached",
+          severity: "warning",
+          scope: "run",
+          message: "Developer copy.",
+        },
+      ],
+    }
+    const { read } = renderConversation("bob", { messages: [messages[0], cutShort] })
+
+    await waitFor(() =>
+      expect(read("turn")).toEqual({
+        kind: "idle",
+        canStop: false,
+        canRetry: false,
+        canContinue: true,
+      })
+    )
+  })
+
+  // Removal proof: return labels from the hook again; the errors read as sentences.
+  test("errors are codes the chat words itself", async () => {
+    const answering = run({ id: "run_2", status: "running", triggerMessageId: "msg_3" })
+    const busy = renderConversation("bob", {
+      afterPost: () => {
+        busy.state.thread = thread({ activeRunId: "run_2" })
+        busy.state.runs = [answering]
+      },
+    })
+    await waitFor(() => expect(busy.read("turn")).toMatchObject({ kind: "idle" }))
+
+    fireEvent.click(busy.view.getByRole("button", { name: "Send" }))
+
+    await waitFor(() =>
+      expect(busy.read("errors")).toEqual({
+        send: { code: "busy", someoneElse: true },
+        messages: null,
+      })
+    )
+    busy.view.unmount()
+
+    const unreadable = renderConversation("bob", { messagesStatus: 500 })
+    await waitFor(() =>
+      expect(unreadable.read("errors")).toEqual({ send: null, messages: { code: "load" } })
+    )
   })
 })
 

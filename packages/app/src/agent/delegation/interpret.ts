@@ -1,12 +1,7 @@
 import type { AgentChild } from "@sixb/client"
+import { type AgentConversationMessage, normalizedTool } from "../conversation"
 import type { AgentMessages } from "../i18n/en"
-import {
-  type NormalizedPart,
-  type NormalizedTool,
-  normalizeDurableParts,
-  toolResultValue,
-} from "../parts"
-import type { AgentMessage } from "../types"
+import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
 
 // What the parent's own parts say about the sub-agents it delegated to: which it spawned, what it
 // told or answered each, and what each asked. A reader of the thread always has them, even without
@@ -100,24 +95,17 @@ export interface DelegationTurn {
 
 const DELEGATION_TOOLS = new Set(["spawn_agent", "wait_agent", "message_agent"])
 
-/** The delegation calls of each assistant message, oldest first. */
-export function delegationTurns(messages: readonly AgentMessage[]): readonly DelegationTurn[] {
+/** The delegation calls of each reply, oldest first, the one streaming last. */
+export function delegationTurns(
+  messages: readonly AgentConversationMessage[]
+): readonly DelegationTurn[] {
   return messages.flatMap((message) => {
     if (message.role !== "assistant") return []
-    const tools = message.parts.some(
-      (part) => part.type === "tool-call" && DELEGATION_TOOLS.has(part.toolName)
+    const tools = message.parts.flatMap((part) =>
+      part.type === "tool" && DELEGATION_TOOLS.has(part.toolName) ? [normalizedTool(part)] : []
     )
-      ? delegationTools(normalizeDurableParts(message.parts))
-      : []
     return [{ runId: message.runId, tools }]
   })
-}
-
-/** The delegation calls among a turn's parts. */
-export function delegationTools(parts: readonly NormalizedPart[]): readonly NormalizedTool[] {
-  return parts.flatMap((part) =>
-    part.kind === "tool" && DELEGATION_TOOLS.has(part.tool.toolName) ? [part.tool] : []
-  )
 }
 
 /**

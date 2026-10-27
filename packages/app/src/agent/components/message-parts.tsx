@@ -294,12 +294,14 @@ function ToolCallRow({
   return <BuiltInToolRow tool={tool} parts={parts} />
 }
 
-function BuiltInToolRow({
+/** A tool call through the framework's view of the tool, else the generic inspector. */
+export function BuiltInToolRow({
   tool,
-  parts,
+  parts = [],
 }: {
   tool: NormalizedTool
-  parts: readonly NormalizedPart[]
+  /** The rest of its work, which names the children a wait is for. */
+  parts?: readonly NormalizedPart[]
 }) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.activity

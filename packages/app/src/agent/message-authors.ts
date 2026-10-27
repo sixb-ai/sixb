@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo } from "react"
 import type { CurrentUser } from "../session"
 import { isShared, threadOwner, threadParticipants, userPrincipal } from "./sharing"
-import type { AgentMessage, AgentThread } from "./types"
+import type { AgentThread } from "./types"
 
 /** A message page's `authors`: who wrote its messages, with an account's display name. */
 export interface MessageAuthor {
@@ -23,9 +23,10 @@ export interface AuthorLabel {
  * or one shared between several people.
  */
 export interface MessageAuthors {
-  readonly authorOf: (message: AgentMessage) => AuthorLabel | undefined
-  /** The reader, who labels a message they just sent before it is saved. */
-  readonly reader?: AuthorLabel & { readonly key: string }
+  /** How a message names who wrote it, the reader included for a message not saved yet. */
+  readonly labelOf: (
+    author: { readonly type: string; readonly id: string } | undefined
+  ) => AuthorLabel | undefined
 }
 
 export const MessageAuthorsContext = createContext<MessageAuthors | null>(null)
@@ -62,11 +63,6 @@ export function knownName(
   return authors?.find((entry) => principalKey(entry) === key)?.displayName
 }
 
-/** Who wrote a message, by `type:id`, to tell when the next one comes from someone else. */
-export function authorKey(message: AgentMessage): string | null {
-  return message.authorPrincipal ? principalKey(message.authorPrincipal) : null
-}
-
 /** Names each message's author from a map of names; the reader's own say `you`. */
 export function messageAuthors(
   names: ReadonlyMap<string, string>,
@@ -79,14 +75,8 @@ export function messageAuthors(
     return { label: key === reader?.key ? reader.label : name, name }
   }
 
-  const self = reader ? labelOf(reader.key) : undefined
-
   return {
-    authorOf: (message) => {
-      const key = authorKey(message)
-      return key ? labelOf(key) : undefined
-    },
-    ...(reader && self ? { reader: { ...self, key: reader.key } } : {}),
+    labelOf: (author) => (author ? labelOf(principalKey(author)) : undefined),
   }
 }
 

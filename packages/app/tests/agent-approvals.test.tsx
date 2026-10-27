@@ -10,10 +10,11 @@ import {
   type AgentApproval,
   heldCallsInOutput,
   isApprovalOutcomeMessage,
+  reportedApprovalOutcomes,
   toggledApprovalMode,
 } from "../src/agent/approvals"
 import { type BashTool, BashToolView } from "../src/agent/bash/bash-tool-view"
-import { createLiveRunState } from "../src/agent/live-run"
+import { conversationMessages, conversationTurn, READ_ONLY_TURN } from "../src/agent/conversation"
 import type { AgentMessage } from "../src/agent/types"
 import { Transcript } from "../src/index"
 import { installDom } from "./helpers/dom"
@@ -950,13 +951,19 @@ function renderTranscript(
     }),
   })
 
+  const messages = [...base, ...extra] as unknown as AgentMessage[]
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <Transcript
           threadId="thr_1"
-          messages={[...base, ...extra] as unknown as AgentMessage[]}
-          live={createLiveRunState(null)}
+          messages={conversationMessages({ messages, presentation: { kind: "idle" } })}
+          turn={conversationTurn({
+            ...READ_ONLY_TURN,
+            presentation: { kind: "idle" },
+            activeRunId: null,
+          })}
+          approvalOutcomes={reportedApprovalOutcomes(messages)}
           {...(approvals === undefined
             ? {}
             : {

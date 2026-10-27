@@ -374,8 +374,10 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 
 | Part | Use it for |
 | --- | --- |
-| `useAgentConversation` | One conversation: messages, the live run, threads, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop` and `retry`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
+| `useAgentConversation` | One conversation: messages, the turn, threads, models with `modelChoice`, `selectModel` and `resetModelSelection`, `send`, `stop`, `retry` and `continue`; held calls with `approvals`, `canDecide` and `decide`, and the mode with `approvalMode` and `setApprovalMode` |
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and one for each sub-agent |
+| `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
+| `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
 | `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers) and the approval mode chip |
 | `AgentThreadSwitcher` | Search and switch between the person's threads |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
@@ -389,7 +391,49 @@ pins a model, and `selectedModel` is unset; `resetModelSelection()` returns to A
 `ModelControls` show all this as an Auto chip when given `onResetModelSelection` and
 `onResetToDefault` respectively.
 
-Types such as `AgentThread`, `AgentMessage` and `AgentFileRef` are exported alongside them.
+Types such as `AgentThread`, `AgentConversationMessage` and `AgentFileRef` are exported alongside
+them.
+
+#### Draw your own messages
+
+`conversation.messages` is the whole conversation in one list: saved messages, the one just sent,
+and the reply as it streams. Draw each in a bubble of your own, with `AgentMessageBody` for the
+agent's reply as the built-in chat draws it, or from its `parts` for full control:
+
+```tsx
+conversation.messages.map((message) => (
+  <Bubble key={message.key} mine={message.role === "user"}>
+    {message.role === "assistant" ? (
+      <AgentMessageBody message={message} />
+    ) : (
+      message.parts.map((part, index) => part.type === "text" && <p key={index}>{part.text}</p>)
+    )}
+  </Bubble>
+))
+```
+
+| `message` | |
+| --- | --- |
+| `key` | Stays the same from sending or streaming to the saved copy: use it as the React key |
+| `role`, `status` | `user` or `assistant`; `pending` (sent, not saved), `streaming` or `complete` |
+| `author` | Who wrote a user message: `id`, `displayName`, and `isReader` for the person reading |
+| `parts` | `text`, `reasoning`, `file` and `tool`, in order. Draw a tool part with `<AgentToolPart part={part} />` |
+| `diagnostics` | Why a reply stopped short of finishing |
+
+The thinking shimmer and the notice of a turn that ended short are not messages: draw them from
+`conversation.turn`.
+
+| `turn.kind` | |
+| --- | --- |
+| `idle` | Nothing in progress |
+| `responding` | The agent answers. `waitingLonger` while it queues; `answeringFor` when someone else asked |
+| `failed`, `cancelled` | The turn failed or was stopped before it answered |
+| `timeout`, `interrupted` | The turn was cut short; `hasProgress` when it saved part of its answer |
+
+`turn.canStop`, `turn.canRetry` and `turn.canContinue` say when `conversation.stop()`,
+`conversation.retry()` and `conversation.continue()` apply. `conversation.sendError` and
+`conversation.messagesError` are codes, such as `{ code: "busy", someoneElse: true }`, for your
+chat to word.
 
 ## Share a conversation
 

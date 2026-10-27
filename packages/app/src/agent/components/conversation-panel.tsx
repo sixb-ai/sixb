@@ -74,11 +74,8 @@ export function ConversationPanel({
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
   // brief durable-message load never flashes a centered "Loading…".
   const hasActivity =
-    Boolean(transcript.pendingUserText) ||
-    (transcript.pendingUserAttachments?.length ?? 0) > 0 ||
-    (transcript.pendingUserContext?.length ?? 0) > 0 ||
-    transcript.live.parts.length > 0 ||
-    Boolean(transcript.awaitingResponse)
+    transcript.turn.kind === "responding" ||
+    transcript.messages.some((message) => message.id === null)
   const showWelcome =
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
   const renderComposer = (wideClassName?: string) => (
