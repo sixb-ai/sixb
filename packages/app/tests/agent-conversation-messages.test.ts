@@ -155,6 +155,25 @@ describe("the conversation's messages", () => {
     ).toMatchObject({ key: "run:run_1", status: "complete", unfinished: "cancelled" })
   })
 
+  test("the message Continue writes for the model is not one", () => {
+    // Removal proof: drop the isContinuation check in conversationMessages; an empty user message
+    // shows between the answer and its continuation.
+    const continuation = saved({
+      id: "msg_continue",
+      role: "user",
+      authorPrincipal: bob,
+      seq: 3,
+      parts: [{ type: "continuation" }],
+    })
+    const continued = saved({ ...answer, id: "msg_continued", runId: "run_2", seq: 4 })
+
+    expect(keys({ messages: [question, answer, continuation, continued] })).toEqual([
+      `message:${question.id}`,
+      "run:run_1",
+      "run:run_2",
+    ])
+  })
+
   test("names each user message's author, the reader's own included", () => {
     const thread = {
       ownerPrincipal: alice,
