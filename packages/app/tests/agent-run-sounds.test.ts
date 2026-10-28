@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
 import { client } from "@sixb/client"
-import { readRunSounds, watchRun, writeRunSounds } from "../src/agent/run-sounds"
+import { readRunSound, watchRun, writeRunSound } from "../src/agent/run-sounds"
 import { installDom } from "./helpers/dom"
 
 installDom(["document", "HTMLElement", "localStorage"])
@@ -48,13 +48,18 @@ class FakeAudioContext {
   readonly destination = {}
 
   createOscillator() {
-    const oscillator = {
-      frequency: { value: 0 },
+    let frequency = 0
+    return {
+      frequency: {
+        setValueAtTime: (value: number) => {
+          frequency = value
+        },
+        exponentialRampToValueAtTime: () => {},
+      },
       connect: (node: unknown) => node,
-      start: () => notes.push(oscillator.frequency.value),
+      start: () => notes.push(frequency),
       stop: () => {},
     }
-    return oscillator
   }
 
   createGain() {
@@ -231,16 +236,29 @@ describe("a sound when the agent's turn ends", () => {
     expect(notes).toEqual(DONE)
   })
 
-  // Removal proof: drop `!readRunSounds()` from watchRun, and a socket opens.
+  // Removal proof: play "chime" whatever was chosen, and the bell is never heard.
+  test("plays the sound you chose", () => {
+    spyOn(document, "hasFocus").mockReturnValue(false)
+    writeRunSound("bell")
+    watchRun({ id: "run_bell", threadId: "thread" })
+    finish(socketFor("run_bell"), "run_bell", { status: "succeeded" })
+
+    // A struck C6 and its two overtones.
+    expect(notes).toEqual([1046.5, 2093, 3139.5])
+  })
+
+  // Removal proof: drop the "off" check from watchRun, and a socket opens.
   test("turned off in this browser, follows no run", () => {
-    expect(readRunSounds()).toBe(true)
-    writeRunSounds(false)
-    expect(readRunSounds()).toBe(false)
+    expect(readRunSound()).toBe("chime")
+    writeRunSound("off")
+    expect(readRunSound()).toBe("off")
 
     watchRun({ id: "run_off", threadId: "thread" })
     expect(sockets).toEqual([])
+  })
 
-    writeRunSounds(true)
-    expect(localStorage.getItem("sixb:agent-sounds")).toBeNull()
+  test("a choice it does not know reads as the chime", () => {
+    localStorage.setItem("sixb:agent-sounds", "trumpet")
+    expect(readRunSound()).toBe("chime")
   })
 })

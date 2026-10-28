@@ -79,10 +79,9 @@ export const en = {
     signingOut: "Signing out…",
     signOutFailed: "Could not sign out.",
     sounds: "Sounds",
-    soundsDescription: "Know when the agent is done without watching it. Saved in this browser.",
-    soundsLabel: "Play a sound when the agent finishes",
-    soundsHint: "Or when it needs your approval, while you're in another tab, app or conversation.",
-    soundsPreview: "Preview",
+    soundsDescription:
+      "Hear when the agent finishes or needs your approval while you're in another tab, app or conversation. Choose a sound to hear it; it's saved in this browser.",
+    soundChoices: { off: "Off", chime: "Chime", bell: "Bell", pop: "Pop" },
     approvals: "When the agent changes things",
     approvalsDescription:
       "What the agent may do without asking you, in conversations where you haven't chosen a mode. Switch in any conversation from the chip under the message box.",
@@ -462,11 +461,8 @@ export const fr: Translation<SettingsMessages> = {
     signOutFailed: "Impossible de se déconnecter.",
     sounds: "Sons",
     soundsDescription:
-      "Sachez quand l’agent a terminé sans le surveiller. Enregistré dans ce navigateur.",
-    soundsLabel: "Jouer un son quand l’agent a terminé",
-    soundsHint:
-      "Ou quand il attend votre approbation, pendant que vous êtes dans un autre onglet, une autre application ou une autre conversation.",
-    soundsPreview: "Écouter",
+      "Entendez quand l’agent a terminé ou attend votre approbation pendant que vous êtes dans un autre onglet, une autre application ou une autre conversation. Choisissez un son pour l’écouter ; il est enregistré dans ce navigateur.",
+    soundChoices: { off: "Désactivé", chime: "Carillon", bell: "Cloche", pop: "Pop" },
     approvals: "Quand l’agent modifie quelque chose",
     approvalsDescription:
       "Ce que l’agent peut faire sans vous demander, dans les conversations où vous n’avez pas choisi de mode. Changez-le dans n’importe quelle conversation depuis le bouton sous la zone de message.",

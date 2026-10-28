@@ -9,16 +9,22 @@ import {
   updateAgentPreferencesMutation,
   updateAuthProfileMutation,
 } from "@sixb/client/hooks"
-import { Button, Input, Switch, ThemePicker } from "@sixb/ui/components"
+import { Button, Input, ThemePicker } from "@sixb/ui/components"
 import { useOptionalTheme } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, LogOut, Pencil, Volume2 } from "lucide-react"
+import { Loader2, LogOut, Pencil } from "lucide-react"
 import { type SubmitEvent, useEffect, useMemo, useRef, useState } from "react"
 import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../../agent/approvals"
 import { APPROVAL_MODE_ICONS } from "../../agent/components/approval-mode-icons"
 import { useAgentMessages } from "../../agent/i18n"
-import { playRunTone, readRunSounds, writeRunSounds } from "../../agent/run-sounds"
+import {
+  playRunSound,
+  RUN_SOUND_CHOICES,
+  type RunSoundChoice,
+  readRunSound,
+  writeRunSound,
+} from "../../agent/run-sounds"
 import { moveRadioFocus } from "../../agent/utils/radio-group"
 import { useCurrentUser, useSignOut } from "../../session"
 import { notify, SectionPage } from "../section-page"
@@ -28,8 +34,8 @@ import { useSettingsMessages } from "./messages"
 import { SessionsSection } from "./sessions"
 
 /**
- * Settings › Personal: who you are in this project, your groups, how the app looks, whether the
- * agent's turns end with a sound, what it may change without asking, and where you're signed in.
+ * Settings › Personal: who you are in this project, your groups, how the app looks, the sound the
+ * agent's turns end with, what it may change without asking, and where you're signed in.
  */
 export function SettingsPersonalPage() {
   const messages = useSettingsMessages().personal
@@ -150,7 +156,7 @@ export function SettingsPersonalPage() {
           <ThemePicker labels className="self-start" />
         </PageSection>
       ) : null}
-      <RunSoundsSection />
+      <RunSoundSection />
       <ApprovalModeSection />
       <SessionsSection />
     </SectionPage>
@@ -226,46 +232,50 @@ function NameForm({
 }
 
 /**
- * Whether this browser plays a tone when a turn you started ends while you're away from it. Shown
- * only in a project with an agent; a change applies at once.
+ * The sound this browser plays when a turn you started ends while you're away from it, beside the
+ * themes it looks like. Choosing one plays it, the current one too. Shown only in a project with an
+ * agent.
  */
-function RunSoundsSection() {
+function RunSoundSection() {
   const messages = useSettingsMessages().personal
   const agent = useQuery({ ...getAgentOptions(), retry: false, staleTime: 5 * 60_000 })
-  const [on, setOn] = useState(readRunSounds)
+  const [current, setCurrent] = useState(readRunSound)
   if (!agent.data) return null
+
+  const choose = (choice: RunSoundChoice) => {
+    setCurrent(choice)
+    writeRunSound(choice)
+    if (choice !== "off") playRunSound(choice, "done")
+  }
 
   return (
     <PageSection title={messages.sounds} description={messages.soundsDescription}>
-      <Panel>
-        <div className="flex items-center gap-4 px-5 py-3.5">
-          <label htmlFor="agent-run-sounds" className="min-w-0 flex-1">
-            <span className="block text-[0.8125rem] font-medium">{messages.soundsLabel}</span>
-            <span className="block text-[0.8125rem] leading-5 text-muted-foreground">
-              {messages.soundsHint}
-            </span>
-          </label>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="shrink-0 text-muted-foreground"
-            onClick={() => playRunTone("done")}
-          >
-            <Volume2 />
-            {/* On a phone the label keeps the room: the button is its icon. */}
-            <span className="max-sm:sr-only">{messages.soundsPreview}</span>
-          </Button>
-          <Switch
-            id="agent-run-sounds"
-            checked={on}
-            onCheckedChange={(checked) => {
-              setOn(checked)
-              writeRunSounds(checked)
-            }}
-          />
-        </div>
-      </Panel>
+      <div
+        role="radiogroup"
+        aria-label={messages.sounds}
+        onKeyDown={(event) => moveRadioFocus(event, { select: true })}
+        className="inline-flex items-center gap-0.5 self-start rounded-lg bg-muted/70 p-1 ring-1 ring-border/70"
+      >
+        {RUN_SOUND_CHOICES.map((choice) => {
+          const selected = choice === current
+          return (
+            <button
+              key={choice}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => choose(choice)}
+              className={cn(
+                "flex h-8 items-center justify-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
+                selected && "bg-background text-foreground ring-1 ring-border"
+              )}
+            >
+              {messages.soundChoices[choice]}
+            </button>
+          )
+        })}
+      </div>
     </PageSection>
   )
 }

@@ -2,44 +2,77 @@ import { createAgentRunSocket, type ReconnectingSocket } from "@sixb/client"
 import { isActiveAgentRunStatus } from "./run-presentation"
 
 /**
- * A tone when a turn the reader started ends while they are away from it: in another tab or app,
+ * A sound when a turn the reader started ends while they are away from it: in another tab or app,
  * on another page, or in another conversation. Each run is followed on a socket of its own from the
  * moment this tab starts it, so leaving the conversation does not stop the listening; a reload
  * does.
  */
 
-const SOUNDS_KEY = "sixb:agent-sounds"
+const SOUND_KEY = "sixb:agent-sounds"
 
-/** Whether this browser plays a tone when a turn ends: on unless the reader turned it off. */
-export function readRunSounds(): boolean {
+export const RUN_SOUND_CHOICES = ["off", "chime", "bell", "pop"] as const
+export type RunSoundChoice = (typeof RUN_SOUND_CHOICES)[number]
+export type RunSound = Exclude<RunSoundChoice, "off">
+
+/** The sound this browser plays when a turn ends: chime unless the reader chose another. */
+export function readRunSound(): RunSoundChoice {
   try {
-    return globalThis.localStorage?.getItem(SOUNDS_KEY) !== "off"
+    const value = globalThis.localStorage?.getItem(SOUND_KEY)
+    return RUN_SOUND_CHOICES.find((choice) => choice === value) ?? "chime"
   } catch {
-    return true
+    return "chime"
   }
 }
 
-export function writeRunSounds(on: boolean) {
+export function writeRunSound(choice: RunSoundChoice) {
   try {
-    if (on) globalThis.localStorage?.removeItem(SOUNDS_KEY)
-    else globalThis.localStorage?.setItem(SOUNDS_KEY, "off")
+    globalThis.localStorage?.setItem(SOUND_KEY, choice)
   } catch {
     // Ignore storage errors.
   }
 }
 
+/** The turn is over, or one of its calls waits for the reader's decision. */
 export type RunTone = "done" | "waiting"
 
-// Frequencies in Hz, played one after the other.
-const TONES: Record<RunTone, readonly number[]> = {
-  // A rising fifth: the answer is in.
-  done: [659.25, 987.77],
-  // One note twice: a call waits for the reader's decision.
-  waiting: [880, 880],
+/** One note: when it starts and how long it rings, in seconds, and its pitch in Hz. */
+interface Note {
+  readonly frequency: number
+  readonly at: number
+  readonly length: number
+  readonly gain?: number
+  /** The pitch it slides to as it fades. */
+  readonly glideTo?: number
 }
-const NOTE_SECONDS = 0.35
-const NOTE_GAP_SECONDS = 0.12
+
 const PEAK_GAIN = 0.12
+
+const chime = (frequency: number, at: number): Note => ({ frequency, at, length: 0.35 })
+
+// A struck bell: its note, and two quieter overtones that fade sooner.
+const strike = (frequency: number, at: number): readonly Note[] => [
+  { frequency, at, length: 1.4, gain: 0.1 },
+  { frequency: frequency * 2, at, length: 0.7, gain: 0.035 },
+  { frequency: frequency * 3, at, length: 0.4, gain: 0.015 },
+]
+
+const pop = (at: number): Note => ({ frequency: 600, at, length: 0.1, gain: 0.2, glideTo: 300 })
+
+// Each sound says the two apart the same way: waiting repeats itself.
+const SOUNDS: Record<RunSound, Record<RunTone, readonly Note[]>> = {
+  chime: {
+    done: [chime(659.25, 0), chime(987.77, 0.12)],
+    waiting: [chime(880, 0), chime(880, 0.12)],
+  },
+  bell: {
+    done: strike(1046.5, 0),
+    waiting: [...strike(783.99, 0), ...strike(783.99, 0.28)],
+  },
+  pop: {
+    done: [pop(0)],
+    waiting: [pop(0), pop(0.13)],
+  },
+}
 
 let audio: AudioContext | null = null
 
@@ -53,23 +86,25 @@ function audioContext(): AudioContext | null {
   return audio
 }
 
-export function playRunTone(tone: RunTone) {
+export function playRunSound(sound: RunSound, tone: RunTone) {
   const context = audioContext()
   if (!context) return
 
   const start = context.currentTime + 0.02
-  TONES[tone].forEach((frequency, index) => {
-    const at = start + index * NOTE_GAP_SECONDS
+  for (const note of SOUNDS[sound][tone]) {
+    const at = start + note.at
+    const end = at + note.length
     const oscillator = context.createOscillator()
     const gain = context.createGain()
-    oscillator.frequency.value = frequency
+    oscillator.frequency.setValueAtTime(note.frequency, at)
+    if (note.glideTo) oscillator.frequency.exponentialRampToValueAtTime(note.glideTo, end)
     gain.gain.setValueAtTime(0, at)
-    gain.gain.linearRampToValueAtTime(PEAK_GAIN, at + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + NOTE_SECONDS)
+    gain.gain.linearRampToValueAtTime(note.gain ?? PEAK_GAIN, at + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, end)
     oscillator.connect(gain).connect(context.destination)
     oscillator.start(at)
-    oscillator.stop(at + NOTE_SECONDS)
-  })
+    oscillator.stop(end)
+  }
 }
 
 const followed = new Map<string, ReconnectingSocket>()
@@ -79,7 +114,7 @@ const followed = new Map<string, ReconnectingSocket>()
  * end. Call it where the turn starts, close to the reader's click or key.
  */
 export function watchRun(run: { readonly id: string; readonly threadId: string }) {
-  if (typeof window === "undefined" || followed.has(run.id) || !readRunSounds()) return
+  if (typeof window === "undefined" || followed.has(run.id) || readRunSound() === "off") return
   audioContext()
 
   // Closing the socket drops what it still receives, so a run ends once.
@@ -87,8 +122,10 @@ export function watchRun(run: { readonly id: string; readonly threadId: string }
     followed.get(run.id)?.close()
     followed.delete(run.id)
 
+    // The sound chosen now, though the reader may have changed it while the turn ran.
+    const sound = readRunSound()
     const tone = runTone(ended)
-    if (tone && readRunSounds() && !watching(run.threadId)) playRunTone(tone)
+    if (tone && sound !== "off" && !watching(run.threadId)) playRunSound(sound, tone)
   }
 
   followed.set(
