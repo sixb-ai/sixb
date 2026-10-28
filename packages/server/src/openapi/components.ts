@@ -1,3 +1,4 @@
+import type { DocumentDecoration } from "elysia"
 import type { ZodTypeAny, ZodTypeDef } from "zod"
 import {
   ignoreOverride,
@@ -39,6 +40,25 @@ export function openApiOverride(except?: ZodTypeDef): OverrideCallback {
       ? ignoreOverride
       : ({ $ref: `#/components/schemas/${name}` } as JsonSchema7Type)
   }
+}
+
+/** A route's schema as the spec shows it. */
+export function openApiJsonSchema(schema: ZodTypeAny) {
+  return zodToJsonSchema(schema, {
+    $refStrategy: "none",
+    target: "openApi3",
+    override: openApiOverride(),
+  })
+}
+
+type RequestBody = Extract<NonNullable<DocumentDecoration["requestBody"]>, { content: unknown }>
+type OpenApiSchema = RequestBody["content"][string]["schema"]
+
+/** The documented JSON body of a route that reads its body itself, instead of through Elysia. */
+export function jsonRequestBody(schema: ZodTypeAny): RequestBody {
+  // The openApi3 target emits OpenAPI 3.0, which zod-to-json-schema still types as JSON Schema 7.
+  const jsonSchema = openApiJsonSchema(schema) as OpenApiSchema
+  return { required: true, content: { "application/json": { schema: jsonSchema } } }
 }
 
 /** The named schemas, each referencing the others it holds. */

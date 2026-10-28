@@ -24,7 +24,11 @@ function render(node: ReactNode, locale?: string): string {
     name: "Sixb",
     model: { provider: "test", modelId: "fast" },
   })
-  queryClient.setQueryData(listModelsOptions().queryKey, { language: [] })
+  queryClient.setQueryData(listModelsOptions().queryKey, {
+    language: [],
+    audio: { speech: [], transcription: [] },
+    capabilities: { run: false },
+  })
   const tree = <QueryClientProvider client={queryClient}>{node}</QueryClientProvider>
   return renderToStaticMarkup(
     locale ? <LocaleProvider locale={locale}>{tree}</LocaleProvider> : tree

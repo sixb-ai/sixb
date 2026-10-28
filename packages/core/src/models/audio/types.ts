@@ -57,8 +57,16 @@ export interface TranscriptionModel {
   transcribe(request: TranscriptionModelRequest): Promise<TranscriptionModelResult>
 }
 
+/** Audio bytes sent straight to the model, never written to blob storage. */
+export interface AudioData {
+  readonly data: Uint8Array
+  /** An `audio/*` type, such as `audio/webm`. */
+  readonly mediaType: string
+}
+
 export interface AudioTranscribeInput {
-  readonly audio: FileRef
+  /** A stored file, or bytes such as a dictation that should not be kept. */
+  readonly audio: FileRef | AudioData
   readonly model?: TranscriptionModel
   readonly signal?: AbortSignal
 }

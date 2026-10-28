@@ -326,6 +326,28 @@ reads the object itself.
 agentContext.object(Project, project.id, { label: project.name })
 ```
 
+### Dictation
+
+Declare a [transcription model](./configuration.md#audio-transcription) and the chat gets a
+microphone:
+
+```ts
+models: {
+  audio: { transcription: [vercelGateway.transcription("microsoft/mai-transcribe-2")] },
+}
+```
+
+- The microphone turns the composer into a recording bar: the voice as a waveform, a timer,
+  ✕ to cancel and ✓ to finish (or Escape and Enter). The transcript is added to the message, to
+  edit before sending.
+- The audio goes to the project's model, as inline bytes: it is never stored. The browser's own
+  speech recognition, which sends audio to Google or Apple, is never used.
+- Only people granted `can.run(project.models)` see the microphone. Calls count against the
+  same [AI limits](./usage-and-limits.md) as other model calls.
+- A recording stops on its own after five minutes.
+
+Pass `dictation={false}` to `AgentPanel`, `AgentSurface` or `AgentChatPage` to hide it.
+
 ### Build your own chat
 
 `AgentPanel` is assembled from parts that `@sixb/app` exports, so a chat with its own layout keeps
@@ -383,7 +405,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
-| `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers) and the approval mode chip |
+| `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers), the approval mode chip and the [dictation](#dictation) microphone |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |

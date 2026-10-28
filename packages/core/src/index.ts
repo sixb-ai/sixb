@@ -1309,6 +1309,7 @@ export type {
   ActionPhaseDescriptor,
 } from "./actions/descriptor"
 export type {
+  AudioData,
   AudioModelsRuntime,
   AudioSpeakInput,
   AudioSpeakResult,

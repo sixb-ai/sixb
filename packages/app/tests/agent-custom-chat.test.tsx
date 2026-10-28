@@ -86,7 +86,11 @@ function seeded(messages: readonly AgentMessage[], runs: readonly AgentRun[]): Q
     name: "Assistant",
     model: { provider: "test", modelId: "test-model" },
   })
-  queryClient.setQueryData(listModelsOptions().queryKey, { language: [] })
+  queryClient.setQueryData(listModelsOptions().queryKey, {
+    language: [],
+    audio: { speech: [], transcription: [] },
+    capabilities: { run: false },
+  })
   queryClient.setQueryData(
     getAgentThreadOptions({ path: { threadId: thread.id } }).queryKey,
     thread

@@ -1,4 +1,4 @@
-import type { LanguageModelCatalog, LanguageModelTier, SixbHostView } from "@sixb/core"
+import type { AudioData, LanguageModelCatalog, LanguageModelTier, SixbHostView } from "@sixb/core"
 import type { FileRef } from "@sixb/core/blob-storage/server"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 import {
@@ -9,8 +9,10 @@ import {
   type ModelUsage,
 } from "@sixb/core/models"
 import type { Elysia } from "elysia"
+import type { z } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
+import { jsonRequestBody } from "../openapi/components"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { AiUsageLimitErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import {
@@ -23,6 +25,8 @@ import {
   TranscriptionSchema,
 } from "../schemas/models"
 import { handleRouteError } from "../utils/http"
+import { readRequestBodyWithLimit } from "../utils/request-body"
+import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
 
 type ModelKind = "language" | "image" | "speech" | "transcription"
 
@@ -103,6 +107,39 @@ function generationError(error: unknown, set: { status?: number | string }) {
   }
   return handleRouteError(error, set)
 }
+
+/** Allows what a file upload may carry, so minutes of base64 dictation pass the 1 MB default. */
+async function readTranscriptionBody(request: Request): Promise<TranscriptionBody> {
+  const bytes = await readRequestBodyWithLimit(request, DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES)
+
+  let json: unknown
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes))
+  } catch {
+    throw new TypeError("[SixbServer] Transcription request body must be JSON.")
+  }
+
+  const parsed = TranscriptionBodySchema.safeParse(json)
+  if (!parsed.success) {
+    const [issue] = parsed.error.issues
+    throw new TypeError(
+      `[SixbServer] Invalid transcription request: ${issue?.path.join(".") || "body"}: ${issue?.message}`
+    )
+  }
+
+  return parsed.data
+}
+
+/** Inline audio reaches the model as bytes and is never stored; a FileRef is read from storage. */
+function transcriptionAudio(audio: TranscriptionBody["audio"]): FileRef | AudioData {
+  if ("data" in audio) {
+    return { data: Buffer.from(audio.data, "base64"), mediaType: audio.mediaType }
+  }
+
+  return audio as FileRef
+}
+
+type TranscriptionBody = z.infer<typeof TranscriptionBodySchema>
 
 const responses = {
   400: ErrorResponseSchema,
@@ -222,12 +259,19 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
     .post(
       "/api/models/audio/transcriptions",
       async (context) => {
-        const { body, request, set } = context
+        const { request, set } = context
         try {
           const sixb = requireRequestSixb(context)
+          // Refuse before reading what may be minutes of audio, not after.
+          if (!sixb.models.canRun()) {
+            set.status = 403
+            return { error: "[SixbServer] Transcribing audio requires can.run(project.models)." }
+          }
+
+          const body = await readTranscriptionBody(request)
           const entry = selectBinding(catalog()?.audio?.transcription, "transcription", body.model)
           const call = await sixb.models.audio.transcribe({
-            audio: body.audio as FileRef,
+            audio: transcriptionAudio(body.audio),
             model: entry.model,
             signal: request.signal,
           })
@@ -237,9 +281,14 @@ export function registerModelGenerationRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
-        body: TranscriptionBodySchema,
-        response: { 200: TranscriptionSchema, ...responses },
-        detail: detail("transcribeAudio", "Transcribe audio with a transcription model"),
+        // Inline audio passes the server's default body cap, so the handler reads the body itself,
+        // once the caller is known.
+        parse: "none",
+        response: { 200: TranscriptionSchema, 413: ErrorResponseSchema, ...responses },
+        detail: {
+          ...detail("transcribeAudio", "Transcribe audio with a transcription model"),
+          requestBody: jsonRequestBody(TranscriptionBodySchema),
+        },
       }
     )
 }

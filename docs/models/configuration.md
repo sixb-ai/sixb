@@ -378,6 +378,13 @@ depend on the selected model; Sixb does not transcode files or extract audio fro
 Pass a `model` to override the default, listed in `models.audio.transcription` or not, or an
 `AbortSignal` as `signal` to cancel.
 
+Audio you should not keep, such as a dictation, can be passed as bytes instead. It reaches the
+model without being written to blob storage:
+
+```ts
+await sixb.models.audio.transcribe({ audio: { data: bytes, mediaType: "audio/webm" } })
+```
+
 The result contains `output.text`, `usage`, `cost`, and `callId`. Audio-only projects need
 neither a language model nor a sandbox. Calls use the same [accounting and limits](./usage-and-limits.md#audio-transcription)
 as other models. Authorize access to the owning object in the application before accepting
@@ -467,6 +474,9 @@ The same calls are available over HTTP, to a user or service account granted
 defineRole("model.users", { grantedTo: [designers], grants: [can.run(project.models)] })
 ```
 
+`GET /api/models` says in `capabilities.run` whether the caller has it, and
+`sixb.models.canRun()` answers the same in code.
+
 ```text
 POST /api/models/language/generations   { prompt, instructions?, maxOutputTokens?, reasoning? }
 POST /api/models/image/generations      { prompt, n?, size?, aspectRatio?, quality?, style?, seed?, images? }
@@ -476,7 +486,8 @@ POST /api/models/audio/transcriptions   { audio }
 
 Each body takes an optional `model: { provider, modelId }`; without one, the kind's default
 answers. A text request's `model` can also be a [tier](#tiers), such as `"light"`. Reference
-images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files).
+images and audio are `FileRef`s from [`POST /api/files`](../server/overview.md#files). Audio can
+also be sent inline as `{ data, mediaType }`, `data` in base64; it is then never stored.
 The response carries the `callId`, the `model` that answered, `usage` and `cost`, plus `text` or
 `files`:
 

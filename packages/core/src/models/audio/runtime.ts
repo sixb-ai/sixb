@@ -1,18 +1,19 @@
 import { randomUUID } from "node:crypto"
 import { assertModelAccess } from "../../authorization"
-import type { BlobStorage } from "../../blob-storage/types"
+import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ExecutionContext } from "../../execution"
 import type { SixbRuntimeContext } from "../../runtime/types"
 import type { ModelCatalog } from "../catalog"
 import type { ModelCallEndEvent } from "../events"
 import type { AiModelCallRecorder } from "../execution/model-call-recorder"
 import type { ModelExecutionSession } from "../execution/session"
-import { prepareModelInputFile, readModelInputFile } from "../input-file"
+import { prepareModelInputBytes, prepareModelInputFile, readModelInputFile } from "../input-file"
 import { estimateModelCall, type ModelMoney } from "../pricing"
 import { assertTranscriptionModel } from "./catalog"
 import { TranscriptionModelResponseError } from "./errors"
 import { createSpeak } from "./speech"
 import type {
+  AudioData,
   AudioModelsRuntime,
   TranscriptionModel,
   TranscriptionModelResponseMetadata,
@@ -31,17 +32,14 @@ export function createAudioRuntime(
     async transcribe(input) {
       assertModelAccess(runtime, execution, "models.audio.transcribe")
 
-      const { file: audio, mediaType } = prepareModelInputFile(input.audio, "audio")
-      if (!blobs) {
-        throw new Error("[SixbModels] Transcription requires blob storage.")
-      }
+      const { mediaType, sizeBytes, read } = prepareAudio(input.audio, blobs)
 
       const signal = session.signal(input.signal)
       signal.throwIfAborted()
 
       const binding = selectModel(catalog, input.model)
       assertTranscriptionModel(binding)
-      assertFileSupport(binding, audio.sizeBytes, mediaType)
+      assertFileSupport(binding, sizeBytes, mediaType)
 
       const accounting = await session.accounting()
       accounting.assertHealthy()
@@ -53,10 +51,10 @@ export function createAudioRuntime(
           "[SixbModels] Resolved transcription model identity does not match the selected model."
         )
       }
-      assertFileSupport(model, audio.sizeBytes, mediaType)
+      assertFileSupport(model, sizeBytes, mediaType)
 
       signal.throwIfAborted()
-      const bytes = await readModelInputFile(blobs, audio, signal)
+      const bytes = await read(signal)
       accounting.assertHealthy()
 
       const reservationCost = estimateReservationCost(model, bytes.byteLength, mediaType)
@@ -104,6 +102,31 @@ export function createAudioRuntime(
         callId,
       }
     },
+  }
+}
+
+interface PreparedAudio {
+  readonly mediaType: string
+  readonly sizeBytes: number
+  read(signal: AbortSignal): Promise<Uint8Array>
+}
+
+/** Snapshot the caller's audio before the first await: its bytes, or a stored file's reference. */
+function prepareAudio(input: FileRef | AudioData, blobs: BlobStorage | undefined): PreparedAudio {
+  if (typeof input === "object" && input !== null && "data" in input) {
+    const { bytes, mediaType } = prepareModelInputBytes(input, "audio")
+    return { mediaType, sizeBytes: bytes.byteLength, read: async () => bytes }
+  }
+
+  const { file, mediaType } = prepareModelInputFile(input, "audio")
+  if (!blobs) {
+    throw new Error("[SixbModels] Transcribing a stored file requires blob storage.")
+  }
+
+  return {
+    mediaType,
+    sizeBytes: file.sizeBytes,
+    read: (signal) => readModelInputFile(blobs, file, signal),
   }
 }
 

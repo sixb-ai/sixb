@@ -1,4 +1,8 @@
 export { appendDictationText, speechErrorMessage, toSpeechErrorCode } from "./messages"
+export {
+  createRecordingSpeechRecognizer,
+  type RecordingSpeechRecognizerOptions,
+} from "./recording"
 export type {
   SpeechErrorCode,
   SpeechRecognizer,

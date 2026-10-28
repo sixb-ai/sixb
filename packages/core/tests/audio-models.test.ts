@@ -87,6 +87,28 @@ describe("audio transcription", () => {
     expect(reads).toBe(0)
   })
 
+  // Removal proof: return true from canAccessModels; the ungranted principal can run.
+  test("canRun answers what a call enforces", async () => {
+    const { host, sixb } = await setup()
+    const principal = (grants: ReturnType<typeof emptyGrantIndex>) =>
+      bindRequestExecution(host, {
+        request: new Request("http://localhost/models"),
+        authorization: {
+          type: "principal",
+          context: {
+            principal: { type: "user", id: "user" },
+            groupIds: [],
+            roleIds: [],
+            grants,
+          },
+        },
+      })
+
+    expect(sixb.models.canRun()).toBe(true)
+    expect(principal(emptyGrantIndex()).models.canRun()).toBe(false)
+    expect(principal({ ...emptyGrantIndex(), "run:models": true }).models.canRun()).toBe(true)
+  })
+
   test("does not accept a different identity after model resolution", async () => {
     const selected = createTranscriber()
     const { sixb, audio } = await setup({
@@ -126,6 +148,74 @@ describe("audio transcription", () => {
     })
     expect(overview.totals.usage.audioDurationMs).toBe(1250)
     expect(overview.totals.usageCoverage.fieldCallCounts.audioDurationMs).toBe(1)
+  })
+
+  // Removal proof: drop the `data` branch of prepareAudio; the bytes are rejected as a FileRef.
+  test("transcribes audio bytes without storing them", async () => {
+    let received: { audio: Uint8Array; mediaType: string } | undefined
+    const { sixb, blobStorage, storage, identity } = await setup(
+      createTranscriber(async (request) => {
+        received = { audio: request.audio, mediaType: request.mediaType }
+        return { output: { text: "Hello" }, usage: { audioDurationMs: 900 } }
+      })
+    )
+    const put = blobStorage.put.bind(blobStorage)
+    let writes = 0
+    blobStorage.put = async (input) => {
+      writes++
+      return put(input)
+    }
+
+    const result = await sixb.models.audio.transcribe({
+      audio: { data: new Uint8Array([7, 8, 9]), mediaType: "audio/wav; codecs=1" },
+    })
+
+    expect(result.output).toEqual({ text: "Hello" })
+    expect(received).toEqual({ audio: new Uint8Array([7, 8, 9]), mediaType: "audio/wav" })
+    expect(writes).toBe(0)
+    expect(await storage.aiUsage.getLatestForExecution(identity)).toMatchObject({
+      callId: result.callId,
+      usage: { audioDurationMs: 900 },
+    })
+  })
+
+  test("rejects empty, oversized and non-audio bytes before inference", async () => {
+    let calls = 0
+    const { sixb } = await setup(
+      createTranscriber(async () => {
+        calls++
+        return { output: { text: "" } }
+      })
+    )
+
+    for (const [audio, message] of [
+      [{ data: new Uint8Array(), mediaType: "audio/wav" }, "nonempty"],
+      [{ data: new Uint8Array(2048), mediaType: "audio/wav" }, "limit"],
+      [{ data: new Uint8Array([1]), mediaType: "audio/mpeg" }, "not supported"],
+      [{ data: new Uint8Array([1]), mediaType: "text/plain" }, "mediaType"],
+    ] as const) {
+      const error = await sixb.models.audio.transcribe({ audio }).catch((error) => error)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain(message)
+    }
+    expect(calls).toBe(0)
+  })
+
+  // Removal proof: return input.data instead of a copy in prepareModelInputBytes; the edit lands.
+  test("snapshots audio bytes before the first await", async () => {
+    let received: Uint8Array | undefined
+    const { sixb } = await setup(
+      createTranscriber(async (request) => {
+        received = request.audio
+        return { output: { text: "Hello" } }
+      })
+    )
+    const data = new Uint8Array([1, 2, 3])
+
+    const pending = sixb.models.audio.transcribe({ audio: { data, mediaType: "audio/wav" } })
+    data[0] = 9
+    await pending
+    expect(received).toEqual(new Uint8Array([1, 2, 3]))
   })
 
   test("runs a passed model as given, whether or not the catalog lists it", async () => {

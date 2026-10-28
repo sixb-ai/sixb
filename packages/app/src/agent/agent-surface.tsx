@@ -44,6 +44,11 @@ export interface AgentSurfaceProps {
   readonly title?: string
   readonly launcherLabel?: string
   readonly composerPlaceholder?: string
+  /**
+   * A microphone in the composer when the project declares a transcription model and the reader
+   * may call it. False hides it.
+   */
+  readonly dictation?: boolean
   readonly context?: readonly AgentContextInput[]
   /** Controlled thread. The latest value is still remembered for a later dock transition. */
   readonly threadId?: string | null
@@ -83,6 +88,7 @@ export function AgentSurface({
   title,
   launcherLabel,
   composerPlaceholder,
+  dictation,
   context,
   threadId,
   defaultThreadId = null,
@@ -318,6 +324,7 @@ export function AgentSurface({
             compact={!fullPage}
             context={context}
             composerPlaceholder={composerPlaceholder}
+            dictation={dictation}
             threadId={currentThreadId}
             onThreadChange={changeThread}
             onOpenThreads={onOpenThreads}

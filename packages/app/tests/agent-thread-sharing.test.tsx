@@ -227,7 +227,13 @@ function api(scenario: Scenario, requests: string[]) {
     if (url.pathname === "/api/agent") {
       return Response.json({ name: "Sixb", model: { provider: "test", modelId: "fast" } })
     }
-    if (url.pathname === "/api/models") return Response.json({ language: [] })
+    if (url.pathname === "/api/models") {
+      return Response.json({
+        language: [],
+        audio: { speech: [], transcription: [] },
+        capabilities: { run: false },
+      })
+    }
     if (url.pathname === "/api/users") {
       if (!scenario.directory) return Response.json({ error: "[Sixb] Forbidden." }, { status: 403 })
       const search = (url.searchParams.get("search") ?? "").toLowerCase()

@@ -43,6 +43,16 @@ export type SpeechRecognizerHandlers = {
   onResult?(result: SpeechResult): void
   /** Whether sound or speech is currently reaching the microphone. */
   onAudioActivity?(active: boolean): void
+  /**
+   * How loud the microphone is, from 0 (silence) to 1 (shouting), many times a second: enough to
+   * draw a waveform. Recognizers that cannot measure it never call this.
+   */
+  onAudioLevel?(level: number): void
+  /**
+   * The microphone closed before the session ended, a final result may still follow: what a
+   * record-then-transcribe recognizer reports while it transcribes, even when it stopped itself.
+   */
+  onAudioEnd?(): void
   onError?(code: SpeechErrorCode): void
   /** The session finished, whether by `stop`, `abort`, an error, or the browser. */
   onEnd?(): void
