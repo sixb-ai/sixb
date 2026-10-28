@@ -11,6 +11,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { readRunSounds } from "../src/agent/run-sounds"
 import { SectionsProvider, SettingsPersonalPage } from "../src/pages"
 import { notify } from "../src/pages/section-page"
 import { PersonAvatar } from "../src/pages/settings/controls"
@@ -24,6 +25,7 @@ installDom([
   "Element",
   "HTMLElement",
   "HTMLInputElement",
+  "HTMLFormElement",
   "FormData",
   "Event",
   "EventTarget",
@@ -34,6 +36,7 @@ installDom([
   "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
+  "localStorage",
 ])
 const apiUrl = "https://api.sixb.test"
 const originalConfig = client.getConfig()
@@ -255,5 +258,27 @@ describe("what the agent may change, on Settings › Personal", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"))
 
     expect(view.queryByRole("radiogroup", { name: "When the agent changes things" })).toBeNull()
+  })
+})
+
+describe("sounds, on Settings › Personal", () => {
+  afterEach(() => localStorage.clear())
+
+  // Removal proof: drop writeRunSounds from the switch's onCheckedChange; the choice is not kept.
+  test("you turn off the sound in this browser, and it stays off", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
+    const sounds = view.getByRole("switch", { name: /Play a sound when the agent finishes/ })
+    expect(sounds.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(sounds)
+
+    expect(sounds.getAttribute("aria-checked")).toBe("false")
+    expect(readRunSounds()).toBe(false)
+  })
+
+  test("is not offered in a project without an agent", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    expect(view.queryByRole("switch", { name: /Play a sound/ })).toBeNull()
   })
 })

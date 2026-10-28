@@ -63,6 +63,7 @@ import {
   selectActiveRunId,
   shouldShowExtendedWaitingStatus,
 } from "../run-presentation"
+import { watchRun } from "../run-sounds"
 import {
   canRetryRun,
   canStopRun,
@@ -539,6 +540,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
   // The saved message keeps the key the reader's pending copy had.
   const recordAcceptedSend = (run: AgentRun, key: string) => {
+    watchRun(run)
     setPendingSend({ run, anchor: true })
     setSentKeys((current) => new Map(current).set(run.triggerMessageId, key))
     setPendingUser((current) =>
@@ -561,6 +563,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       { path: { threadId, runId: presentation.run.id } },
       {
         onSuccess: (response) => {
+          watchRun(response.run)
           setPendingSend({ run: response.run, anchor: true })
           void refreshThread(threadId)
         },
@@ -666,6 +669,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
             ),
           }
       )
+      if (response.run) watchRun(response.run)
       if (response.run && response.run.threadId === threadId) {
         setPendingSend({ run: response.run, anchor: false })
       }
@@ -691,6 +695,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
       )
       setContinuingThreadId(null)
+      watchRun(response.run)
       setPendingSend({ run: response.run, anchor: true })
       await refreshThread(threadId)
     } catch (error) {
