@@ -1,6 +1,5 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/sixb-wordmark-white.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/brand/sixb-wordmark-black.svg">
   <img alt="Sixb" src="docs/brand/sixb-wordmark-black.svg" width="150">
 </picture>
 
@@ -8,18 +7,18 @@
 
 A TypeScript framework for ontology-powered apps and AI.
 
-Connect your data, define how it relates and changes, and build apps and AI that work with the same model.
+Connect your data, define how it relates and changes, and build apps and AI that work with the same
+model.
 
-[Documentation](https://docs.sixb.ai) · [Get started](#quickstart) · [Discord](https://discord.gg/rPSbZSRDzQ)
+[**Documentation**](https://docs.sixb.ai) · [Get started](#get-started) ·
+[Examples](https://docs.sixb.ai/examples) · [Discord](https://discord.gg/rPSbZSRDzQ)
 
-<a href="https://docs.sixb.ai">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/architecture-dark.svg">
-    <img src="docs/brand/architecture-light.svg" alt="Connect external systems, prepare their data, map it to a shared domain model, and build apps, agents, and workflows. Actions flow back to the source systems." width="100%">
-  </picture>
-</a>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/hero-dark.svg">
+  <img src="docs/brand/hero-light.svg" alt="A terminal creates a Sixb project, a Quote type is defined in TypeScript, and the same quote appears in the app, in the agent's answer and in the Sixb CLI." width="100%">
+</picture>
 
-## Quickstart
+## Get started
 
 With [Bun 1.4.2 or later](https://bun.sh/docs/installation):
 
@@ -30,104 +29,154 @@ bun install
 bun run dev
 ```
 
-No database setup or API keys required. Open your [app](http://localhost:3000) or the
-[API docs](http://localhost:3001/docs).
+Everything runs locally, with no database to set up and no API keys. Your app opens at
+[localhost:3000](http://localhost:3000) and its API reference at
+[localhost:3001/docs](http://localhost:3001/docs).
 
-[Getting started →](https://docs.sixb.ai/get-started)
+## How it works
 
-## One model, shared everywhere
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/how-it-works-dark.png">
+  <img src="docs/brand/how-it-works-light.png" alt="Four layers, one above the other. Connect: systems such as Pipedrive, PandaDoc, QuickBooks, Outlook, Excel and Google Drive. Prepare: a raw table filtered and transformed into a clean one. Model: an organization, contact, quote, project, site and invoice, linked together. Build: an app, an agent and a workflow working on the approved quote, which writes back to PandaDoc." width="100%">
+</picture>
 
-Define your domain in TypeScript. Sixb provides the API, typed queries, and permissions around it.
+Each step maps to folders in your project, which Sixb discovers by convention.
+
+```text
+connectors/    01 Connect   the systems you already run
+syncs/                      bring their data in
+datasets/      02 Prepare   versioned tables
+pipelines/                  clean and join them in SQL
+ontology/      03 Model     object types and the links between them
+projections/                turn rows into objects
+actions/       04 Build     typed changes, with write-back to the source
+workflows/                  multi-step work, with people in the loop
+app/                        your React pages, with the agent built in
+```
+
+## Model your domain
+
+Define each thing your business works with once, in TypeScript.
 
 ```ts
 // ontology/quote.ts
-import { defineObjectType, prop, stringEnum } from "@sixb/core/ontology"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { Customer } from "./customer"
 
 export const Quote = defineObjectType({
   id: "Quote",
   name: "Quote",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("totalCents", "integer", { required: true }),
-    prop("status", stringEnum(["draft", "approved", "sent"]), {
+    prop("amount", "double", { required: true }),
+    prop("status", stringEnum(["draft", "sent", "approved"]), {
       required: true,
       query: { searchable: true, filterable: true },
     }),
   ],
+  links: [link("customer", Customer, { cardinality: "one" })],
 })
 ```
 
-Use that same definition to query from your app, with types carried through to the result.
+Then fill it from the systems you already run. A [sync](https://docs.sixb.ai/syncs) brings their
+rows into a dataset, and a projection maps those rows onto your type. When the source changes, the
+objects follow.
 
 ```ts
-// app/queries/quotes.ts
+// projections/quotes.ts
+import { defineProjection } from "@sixb/core"
+import { crmQuotes } from "../datasets/crm"
+import { Customer } from "../ontology/customer"
+import { Quote } from "../ontology/quote"
+
+export const quotes = defineProjection("quotes", Quote)
+  .fromDataset(crmQuotes)
+  .properties({ id: "quote_id", amount: "amount", status: "status" })
+  .withLinks({
+    customer: { link: Quote.l.customer, sourceField: "customer_id", target: Customer },
+  })
+```
+
+## Put it to work
+
+Query the model from your app. Its types carry through to the result.
+
+```tsx
+// app/quotes/page.tsx
+import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import { Quote } from "../../ontology/quote"
 
-export function listApprovedQuotes() {
-  return objects(Quote)
-    .query()
-    .where((quote) => quote.p.status.eq("approved"))
-    .list()
+const approved = objects(Quote)
+  .query()
+  .where((quote) => quote.p.status.eq("approved"))
+
+export default function ApprovedQuotes() {
+  const quotes = useObjectsQuery(approved)
+
+  return (
+    <ul>
+      {quotes.data?.objects.map((quote) => (
+        <li key={quote.primaryId}>{quote.properties.amount}</li>
+      ))}
+    </ul>
+  )
 }
 ```
 
-[Apps](https://docs.sixb.ai/apps) and [workflows](https://docs.sixb.ai/workflows) share the model and
-its [actions](https://docs.sixb.ai/actions), with [permissions](https://docs.sixb.ai/auth/authorization)
-enforced by the runtime.
+Change it with actions. Each one is typed, checked against the caller's permissions, and can write
+back to the system the data came from.
 
-The built-in [AI agent](https://docs.sixb.ai/models) works with that same model through the Sixb CLI
-in a sandbox. Choose the models it can use. In chat, it inherits the user's permissions; in a
-workflow, you choose its access.
+```ts
+// actions/approve-quote.ts
+import { defineAction } from "@sixb/core"
+import { crm } from "../connectors/crm"
+import { Quote } from "../ontology/quote"
 
-## Built into every app
+export const approveQuote = defineAction("approve-quote")
+  .on(Quote)
+  .params({})
+  .writeback(async ({ target, sixb, run }) => {
+    const client = await sixb.connector(crm)
+    await client.approveQuote(target.primaryId, run.idempotencyKey)
+  })
+  .edits(({ objects, subject }) => {
+    objects(Quote).byId(subject.primaryId).update({ status: "approved" })
+  })
+```
 
-Every Sixb app comes with pages to explore your model, inspect its data, and follow what runs
-through it.
+The built-in [agent](https://docs.sixb.ai/models) works from the same model. It reads your types,
+queries live data and requests actions through the [Sixb CLI](https://docs.sixb.ai/cli), in a
+sandbox. In chat it has the permissions of the person asking; in a
+[workflow](https://docs.sixb.ai/workflows), you decide its access. It runs on the language models
+you configure.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/atlas-ontology-dark.png">
-  <img src="docs/brand/atlas-ontology.png" alt="The ontology graph, with Quote selected and its relationships to customers, facilities, service cases, and visits visible" width="100%">
-</picture>
+## Built in
 
-**Explore the model.** See how your types connect, then inspect their properties, relationships, and actions.
+Every app comes with the pages you need to run it, before you write one of your own:
 
-<details>
-<summary>View a workflow run</summary>
+- **Agent**: ask about your data and get work done, in threads you can share.
+- **Ontology**: browse your types, objects, links, actions, workflows and rules.
+- **Data**: your connectors, syncs, datasets, pipelines and projections, with every run.
+- **Observability**: workflow and action runs, logs, activity and AI usage.
+- **Settings**: your profile and tokens, project members and service accounts.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/atlas-workflow-dark.png">
-  <img src="docs/brand/atlas-workflow.png" alt="A service-response workflow run paused at a human review step before dispatching a work order" width="100%">
-</picture>
+## Example
 
-**Follow the work.** Inspect a workflow run from its input through human review and execution.
+[Northline Mechanical](examples/northline) is a reference app for a fictional building-services
+company. It connects a business system, a field-service platform and building controls around one
+model of customers, equipment and service cases.
 
-</details>
+[Open the app](https://northline.sixb.ai) · [API reference](https://northline.sixb.ai/docs) ·
+[Read the code](examples/northline)
 
-## Built with Sixb
+---
 
-[Northline Mechanical](examples/northline) is a reference app for a fictional building-services company.
-Its interface, assistant, and automation work with the same model of customers, equipment, and service cases.
+Sixb is in active development. Releases on the `0.1.x` line can include breaking changes and
+database migrations, so read the [changelog](CHANGELOG.md) before upgrading.
 
-<a href="https://northline.sixb.ai">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/northline-dashboard-dark.png">
-    <img src="docs/brand/northline-dashboard.png" alt="Northline Operations showing active service cases, equipment signals, and work that needs a decision" width="100%">
-  </picture>
-</a>
-
-[Open app](https://northline.sixb.ai) · [API docs](https://northline.sixb.ai/docs) ·
-[Source](examples/northline)
-
-## Explore further
-
-[Documentation](https://docs.sixb.ai) · [Examples](https://docs.sixb.ai/examples) ·
-[CLI reference](https://docs.sixb.ai/cli) · [Contributing](CONTRIBUTING.md)
-
-Sixb is in active development. Releases on the `0.1.x` line can include breaking changes and database
-migrations. Review the [changelog](CHANGELOG.md) before upgrading.
+[Documentation](https://docs.sixb.ai) · [CLI reference](https://docs.sixb.ai/cli) ·
+[Contributing](CONTRIBUTING.md) · [MIT License](LICENSE)
 
 [![Version](https://img.shields.io/npm/v/@sixb/core?color=black&label=version)](https://www.npmjs.com/package/@sixb/core)
 [![CI](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml)
-
-[MIT License](LICENSE)
