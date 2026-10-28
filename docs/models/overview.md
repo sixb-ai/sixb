@@ -473,7 +473,12 @@ await sixb.agent.runs.request({ threadId: thread.id, text: "Why did Acme slip?" 
   finishes, and a live stream they had open keeps running until that answer ends.
 
 Add a user by id or by their account's email: `{ email: "bob@acme.com" }`. Only active users
-who can use the agent can be added, at most 50 per conversation. Sharing a conversation is
+who can use the agent can be added, at most 50 per conversation.
+
+In the app, the share dialog suggests the people you already share threads with. To let people
+find any colleague by name or email there, grant them the
+[member directory](../auth/members.md#read-the-member-directory), `can.view(project.users)`.
+Without it, they add someone new by typing their full email. Sharing a conversation is
 unrelated to [shared access](../auth/shared-access.md), which gives someone outside your team a
 link to one object.
 

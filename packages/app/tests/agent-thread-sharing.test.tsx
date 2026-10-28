@@ -212,6 +212,8 @@ interface Scenario {
   forkGate?: Promise<void>
   /** Holds a posted message until the test lets it go. */
   postGate?: Promise<void>
+  /** The members `GET /api/users` lists; without them the reader may not read the directory. */
+  directory?: readonly Record<string, unknown>[]
 }
 
 function api(scenario: Scenario, requests: string[]) {
@@ -226,6 +228,14 @@ function api(scenario: Scenario, requests: string[]) {
       return Response.json({ name: "Sixb", model: { provider: "test", modelId: "fast" } })
     }
     if (url.pathname === "/api/models") return Response.json({ language: [] })
+    if (url.pathname === "/api/users") {
+      if (!scenario.directory) return Response.json({ error: "[Sixb] Forbidden." }, { status: 403 })
+      const search = (url.searchParams.get("search") ?? "").toLowerCase()
+      const found = scenario.directory.filter((user) =>
+        `${user.displayName} ${user.email}`.toLowerCase().includes(search)
+      )
+      return Response.json({ users: found, hasMore: false, total: found.length })
+    }
     if (url.pathname === "/api/artifacts") return Response.json({ artifacts: [] })
 
     if (url.pathname === "/api/agent-threads") {
@@ -423,7 +433,7 @@ function type(field: HTMLElement, value: string) {
 
 /** Types an email in the share dialog and presses Enter, which stages it as a chip. */
 function stageEmail(dialog: ReturnType<typeof within>, email: string) {
-  const field = dialog.getByRole("textbox", { name: "Email" })
+  const field = dialog.getByRole("combobox", { name: "Add people" })
   type(field, email)
   fireEvent.keyDown(field, { key: "Enter" })
 }
@@ -443,14 +453,14 @@ describe("a shared conversation", () => {
     }))
     const { view } = renderChat("alice", { thread: thread({ participants: people }) })
 
-    const stack = await view.findByRole("button", { name: "5 people in this conversation" })
+    const stack = await view.findByRole("button", { name: "5 people in this thread" })
     expect(stack.textContent).toBe("AMCPDR+2")
   })
 
   test("a thread only its owner reads offers to share it", async () => {
     const { view } = renderChat("alice", { thread: thread({ participants: [] }) })
 
-    expect(await view.findByRole("button", { name: "Share conversation" })).toBeDefined()
+    expect(await view.findByRole("button", { name: "Share thread" })).toBeDefined()
   })
 
   // Removal proof: pass continued={false} to every TranscriptMessage.
@@ -492,7 +502,7 @@ describe("a shared conversation", () => {
     expect(await view.findByText("Why did Acme slip?")).toBeDefined()
     expect(view.getByText("Alice Martin")).toBeDefined()
     expect(view.getByText("You")).toBeDefined()
-    expect(view.getByText("Alice Martin's conversation")).toBeDefined()
+    expect(view.getByText("Alice Martin's thread")).toBeDefined()
   })
 
   test("a conversation only its owner reads still names who wrote in it, as a copy does", async () => {
@@ -501,7 +511,7 @@ describe("a shared conversation", () => {
     expect(await view.findByText("Three deals slipped.")).toBeDefined()
     // Bob wrote msg_3, so the page has two authors and still names them.
     expect(view.getByText("Bob Durand")).toBeDefined()
-    expect(view.queryByText("Alice Martin's conversation")).toBeNull()
+    expect(view.queryByText("Alice Martin's thread")).toBeNull()
   })
 })
 
@@ -509,7 +519,7 @@ describe("sharing", () => {
   // Removal proof: make AddPeople's region always ready; the warning then shows before anyone.
   test("the owner stages an email, sees the warning, then shares and is told so", async () => {
     const { view, requests } = renderChat("alice", { thread: thread({ participants: [] }) })
-    const dialog = await openPeople(view, /^Share conversation$/)
+    const dialog = await openPeople(view, /^Share thread$/)
 
     expect(dialog.queryByRole("note")).toBeNull()
     expect(dialog.queryByRole("button", { name: /^Share with/ })).toBeNull()
@@ -519,7 +529,7 @@ describe("sharing", () => {
     const staged = within(dialog.getByRole("list", { name: "People to add" }))
     expect(staged.getByText("bob@example.com")).toBeDefined()
     expect(dialog.getByRole("note").textContent).toBe(
-      "Participants will see the whole conversation, including data the agent read with your access, now and in future messages. Some of it may be data they cannot normally see."
+      "They'll see the whole thread, now and later, including data the agent read with your access that they may not normally see."
     )
     expect(requests.some((entry) => entry.startsWith("POST"))).toBe(false)
 
@@ -536,7 +546,7 @@ describe("sharing", () => {
   // Removal proof: stage every entry in ParticipantInput.commit, valid or not.
   test("a malformed email is caught before it is staged", async () => {
     const { view, requests } = renderChat("alice", { thread: thread({ participants: [] }) })
-    const dialog = await openPeople(view, /^Share conversation$/)
+    const dialog = await openPeople(view, /^Share thread$/)
 
     stageEmail(dialog, "dana@")
 
@@ -548,24 +558,86 @@ describe("sharing", () => {
 
   test("several emails stage at once, and the button counts them", async () => {
     const { view } = renderChat("alice", { thread: thread({ participants: [] }) })
-    const dialog = await openPeople(view, /^Share conversation$/)
+    const dialog = await openPeople(view, /^Share thread$/)
 
     stageEmail(dialog, "bob@example.com, chloe@example.com")
 
     expect(dialog.getByRole("button", { name: "Share with 2 people" })).toBeDefined()
   })
 
+  // Removal proof: drop the directory search from usePeopleSuggestions, or `exclude` from it.
+  test("with the member directory, a name finds a colleague, who is added by id", async () => {
+    const chloe = { id: "usr_chloe", email: "chloe.petit@example.com", displayName: "Chloe Petit" }
+    const { view, requests } = renderChat("alice", {
+      thread: thread({ participants: [] }),
+      directory: [
+        { ...users.alice, status: "active" },
+        { ...chloe, status: "active" },
+      ],
+    })
+    const dialog = await openPeople(view, /^Share thread$/)
+    const field = dialog.getByRole("combobox", { name: "Add people" })
+    await waitFor(() =>
+      expect(field.getAttribute("placeholder")).toBe("Add people by name or email")
+    )
+
+    // "a" matches both: the colleague shows, and the reader is never offered to themselves.
+    type(field, "a")
+    const option = await dialog.findByRole("option", { name: /Chloe Petit/ })
+    expect(option.textContent).toContain("chloe.petit@example.com")
+    expect(dialog.queryByRole("option", { name: /Alice Martin/ })).toBeNull()
+
+    type(field, "chlo")
+    await waitFor(() => expect(dialog.getAllByRole("option")).toHaveLength(1))
+    fireEvent.keyDown(field, { key: "Enter" })
+
+    const staged = within(dialog.getByRole("list", { name: "People to add" }))
+    expect(staged.getByText("Chloe Petit")).toBeDefined()
+    fireEvent.click(dialog.getByRole("button", { name: "Share with 1 person" }))
+    await waitFor(() =>
+      expect(requests).toContain(
+        'POST /api/agent-threads/thr_1/participants {"users":[{"type":"user","id":"usr_chloe"}]}'
+      )
+    )
+  })
+
+  // Removal proof: drop `known` from usePeopleSuggestions; nothing is offered without the directory.
+  test("without it, the people the reader works with are offered, and an email still adds", async () => {
+    const fromBob = thread({
+      id: "thr_9",
+      ownerPrincipal: bob,
+      owner: { ...bob, displayName: "Bob Durand" },
+      participants: [
+        { principal: { ...alice, displayName: "Alice Martin" }, addedAt: at, addedBy: bob },
+      ],
+    })
+    const { view } = renderChat("alice", {
+      thread: thread({ participants: [] }),
+      shared: [fromBob],
+    })
+    const dialog = await openPeople(view, /^Share thread$/)
+    const field = dialog.getByRole("combobox", { name: "Add people" })
+
+    fireEvent.focusIn(field)
+    expect(await dialog.findByRole("option", { name: /Bob Durand/ })).toBeDefined()
+    expect(dialog.queryByRole("option", { name: /Alice Martin/ })).toBeNull()
+    expect(field.getAttribute("placeholder")).toBe("Add people by email")
+
+    type(field, "chloe@example.com")
+    expect(await dialog.findByRole("option", { name: "Add chloe@example.com" })).toBeDefined()
+  })
+
   // Removal proof: return "failed" for every error from shareFailure; the line then reads generic.
   test("an email no active member has is refused in our words, never the server's", async () => {
     const { view } = renderChat("alice", { shareStatus: 400 })
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     stageEmail(dialog, "dana@example.com")
     fireEvent.click(dialog.getByRole("button", { name: "Share with 1 person" }))
 
     expect(
       await dialog.findByText(
-        "Couldn't add them: each email must belong to an active member other than you, up to 50 people."
+        "Couldn't add them: each must be an active member other than you, up to 50 people."
       )
     ).toBeDefined()
     expect(dialog.queryByText(/dana@example\.com', which does not exist/)).toBeNull()
@@ -573,27 +645,27 @@ describe("sharing", () => {
 
   test("anything else that stops a share says so plainly", async () => {
     const { view } = renderChat("alice", { shareStatus: 500 })
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     stageEmail(dialog, "dana@example.com")
     fireEvent.click(dialog.getByRole("button", { name: "Share with 1 person" }))
 
-    expect(await dialog.findByText("Couldn't share this conversation.")).toBeDefined()
+    expect(await dialog.findByText("Couldn't share this thread.")).toBeDefined()
   })
 
   // Removal proof: render ParticipantActions for the owner too in ThreadPeople.
   test("the owner's dialog is about people: no copy to make there", async () => {
     const { view } = renderChat("alice")
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     expect(dialog.getByText("Bob Durand")).toBeDefined()
     expect(dialog.queryByRole("button", { name: /^Continue in/ })).toBeNull()
-    expect(dialog.queryByRole("button", { name: "Leave conversation" })).toBeNull()
+    expect(dialog.queryByRole("button", { name: "Leave thread" })).toBeNull()
   })
 
   test("the owner removes a participant", async () => {
     const { view, requests } = renderChat("alice")
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     fireEvent.click(dialog.getByRole("button", { name: "Remove Bob Durand" }))
 
@@ -606,30 +678,30 @@ describe("sharing", () => {
   // Removal proof: show AddPeople for every reader; the email field then shows for Bob.
   test("a participant sees who takes part, adds or removes nobody, and leaves", async () => {
     const { view, requests, onNavigateHome } = renderChat("bob")
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     expect(dialog.getByText("Alice Martin")).toBeDefined()
     expect(dialog.getByText("Owner")).toBeDefined()
-    expect(dialog.queryByPlaceholderText("colleague@example.com")).toBeNull()
+    expect(dialog.queryByRole("combobox")).toBeNull()
     expect(dialog.queryByRole("button", { name: /^Remove / })).toBeNull()
 
-    fireEvent.click(dialog.getByRole("button", { name: "Leave conversation" }))
+    fireEvent.click(dialog.getByRole("button", { name: "Leave thread" }))
     const confirm = within(await view.findByRole("alertdialog"))
-    fireEvent.click(confirm.getByRole("button", { name: "Leave conversation" }))
+    fireEvent.click(confirm.getByRole("button", { name: "Leave thread" }))
 
     await waitFor(() => expect(onNavigateHome).toHaveBeenCalled())
     expect(requests).toContain("DELETE /api/agent-threads/thr_1/participants/usr_bob")
-    expect(await view.findByText("You left the conversation")).toBeDefined()
+    expect(await view.findByText("You left the thread")).toBeDefined()
   })
 
   test("a participant continues in a conversation of their own, then lands in it", async () => {
     const { view, requests, onNavigateThread } = renderChat("bob")
 
-    fireEvent.click(await view.findByRole("button", { name: "Continue in my conversation" }))
+    fireEvent.click(await view.findByRole("button", { name: "Continue in my own thread" }))
 
     await waitFor(() => expect(onNavigateThread).toHaveBeenCalledWith("thr_2"))
     expect(requests).toContain("POST /api/agent-threads/thr_1/fork")
-    expect(await view.findByText("Copied to your conversations")).toBeDefined()
+    expect(await view.findByText("Copied to your threads")).toBeDefined()
   })
 
   // Removal proof: call onForked without checking the current thread in useThreadSharing.fork.
@@ -640,7 +712,7 @@ describe("sharing", () => {
     })
     const { view, requests, onNavigateThread, openThread } = renderChat("bob", { forkGate })
 
-    fireEvent.click(await view.findByRole("button", { name: "Continue in my conversation" }))
+    fireEvent.click(await view.findByRole("button", { name: "Continue in my own thread" }))
     await waitFor(() => expect(requests).toContain("POST /api/agent-threads/thr_1/fork"))
 
     openThread("thr_9")
@@ -657,10 +729,8 @@ describe("sharing", () => {
     const { view } = renderChat(null)
 
     expect(await view.findByText("Why did Acme slip?")).toBeDefined()
-    expect(
-      view.queryByRole("button", { name: /in this conversation$|^Share conversation$/ })
-    ).toBeNull()
-    expect(view.queryByText("Continue in my conversation")).toBeNull()
+    expect(view.queryByRole("button", { name: /in this thread$|^Share thread$/ })).toBeNull()
+    expect(view.queryByText("Continue in my own thread")).toBeNull()
   })
 })
 
@@ -1086,7 +1156,7 @@ describe("live changes", () => {
       })
     )
 
-    expect(await view.findByText("You no longer take part in this conversation.")).toBeDefined()
+    expect(await view.findByText("You no longer take part in this thread.")).toBeDefined()
   })
 })
 
@@ -1170,11 +1240,11 @@ describe("on a phone", () => {
     browser.happyDOM.setViewport({ width: 390, height: 844 })
     const { view } = renderChat("bob")
 
-    const dialog = await openPeople(view, /^2 people in this conversation$/)
+    const dialog = await openPeople(view, /^2 people in this thread$/)
 
     expect(document.querySelector("[data-vaul-drawer]")).not.toBeNull()
     expect(dialog.getByText("Alice Martin")).toBeDefined()
-    expect(dialog.getByRole("button", { name: "Leave conversation" })).toBeDefined()
-    expect(dialog.getByRole("button", { name: "Continue in my conversation" })).toBeDefined()
+    expect(dialog.getByRole("button", { name: "Leave thread" })).toBeDefined()
+    expect(dialog.getByRole("button", { name: "Continue in my own thread" })).toBeDefined()
   })
 })

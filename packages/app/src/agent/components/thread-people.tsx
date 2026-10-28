@@ -26,7 +26,7 @@ import {
 } from "@sixb/ui/components"
 import { useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
-import { AlertTriangle, GitBranchPlus, LogOut, UserPlus, X } from "lucide-react"
+import { Eye, GitBranchPlus, LogOut, UserPlus, X } from "lucide-react"
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react"
 import { PersonAvatar } from "../../artifacts/person-avatar"
 import type { CurrentUser } from "../../session"
@@ -55,9 +55,9 @@ export interface ThreadPeopleProps {
 const STACKED = 3
 
 /**
- * Who takes part in a conversation, from its header: an avatar stack once it is shared, a share
- * button before. It opens a dialog, or a bottom drawer on a phone. The owner adds and removes
- * people; a participant sees who is there, leaves, or continues in a conversation of their own.
+ * Who takes part in a thread, from its header: an avatar stack once it is shared, a share button
+ * before. It opens a dialog, or a bottom drawer on a phone. The owner adds and removes people; a
+ * participant sees who is there, leaves, or continues in a thread of their own.
  */
 export function ThreadPeople({ thread, access, user, sharing }: ThreadPeopleProps) {
   const messages = useAgentMessages().sharing
@@ -76,11 +76,21 @@ export function ThreadPeople({ thread, access, user, sharing }: ThreadPeopleProp
     if (!next) sharing.resetShare()
   }
 
+  // Nobody is suggested twice: not the reader, nor whoever is in the thread.
+  const exclude = new Set(
+    [...people.map((person) => person.principal), ...(user ? [userPrincipal(user)] : [])]
+      .filter((principal) => principal?.type === "user")
+      .map((principal) => principal?.id ?? "")
+  )
+
   const body = (
     <>
-      {access === "owner" ? <AddPeople sharing={sharing} emailRef={emailRef} /> : null}
+      {access === "owner" ? (
+        <AddPeople sharing={sharing} emailRef={emailRef} exclude={exclude} />
+      ) : null}
 
       <PeopleList
+        labelled={access === "owner"}
         owner={owner}
         participants={participants}
         user={user}
@@ -153,7 +163,8 @@ export function ThreadPeople({ thread, access, user, sharing }: ThreadPeopleProp
         <Dialog open={open} onOpenChange={changeOpen}>
           <DialogContent
             showCloseButton={false}
-            className="flex max-h-[calc(100dvh-2rem)] w-[min(calc(100vw-2rem),30rem)] max-w-[30rem] flex-col gap-0 overflow-hidden rounded-2xl p-0"
+            // Held near the top: the dialog grows downward as suggestions open, instead of jumping.
+            className="top-[max(4rem,12dvh)] flex max-h-[calc(100dvh-max(4rem,12dvh)-2rem)] w-[min(calc(100vw-2rem),30rem)] max-w-[30rem] translate-y-0 flex-col gap-0 overflow-hidden rounded-2xl p-0"
           >
             <div className="flex h-16 shrink-0 items-center gap-3 px-5">
               <DialogTitle className="text-lg">{title}</DialogTitle>
@@ -219,9 +230,11 @@ function PanelFooter({ children }: { readonly children: ReactNode }) {
 function AddPeople({
   sharing,
   emailRef,
+  exclude,
 }: {
   readonly sharing: ThreadSharing
   readonly emailRef: RefObject<HTMLInputElement | null>
+  readonly exclude: ReadonlySet<string>
 }) {
   const messages = useAgentMessages().sharing
   const [staged, setStaged] = useState<readonly ParticipantChoice[]>([])
@@ -253,6 +266,7 @@ function AddPeople({
     <section className="mt-4 flex flex-col">
       <ParticipantInput
         staged={staged}
+        exclude={exclude}
         onAdd={stage}
         onRemove={unstage}
         disabled={sharing.sharing}
@@ -271,9 +285,12 @@ function AddPeople({
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
           <p
             role="note"
-            className="mt-3 flex items-start gap-2 rounded-xl bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:text-amber-300"
+            className="mt-3 flex items-start gap-2 px-1 text-xs leading-5 text-muted-foreground"
           >
-            <AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+            <Eye
+              aria-hidden
+              className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+            />
             <span>{messages.warning}</span>
           </p>
 
@@ -299,6 +316,7 @@ function AddPeople({
 }
 
 function PeopleList({
+  labelled,
   owner,
   participants,
   user,
@@ -306,6 +324,8 @@ function PeopleList({
   sharing,
   emailRef,
 }: {
+  /** Under the field that adds people, a heading says these are already in. */
+  readonly labelled: boolean
   readonly owner: ThreadPerson
   readonly participants: readonly ThreadPerson[]
   readonly user: CurrentUser | null
@@ -322,7 +342,10 @@ function PeopleList({
   }
 
   return (
-    <section className="mt-5">
+    <section className="mt-5" aria-label={messages.inThread}>
+      {labelled ? (
+        <h3 className="px-2 pb-1 text-xs font-medium text-muted-foreground">{messages.inThread}</h3>
+      ) : null}
       <ul className="space-y-0.5">
         <PersonRow
           person={owner}
@@ -435,7 +458,12 @@ function LeaveButton({
   return (
     <AlertDialog open={open} onOpenChange={(next) => !sharing.leaving && setOpen(next)}>
       <AlertDialogTrigger asChild>
-        <Button type="button" variant="ghost" className="gap-1.5 text-muted-foreground">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 rounded-full text-muted-foreground"
+        >
           <LogOut />
           {messages.leave}
         </Button>
@@ -474,19 +502,19 @@ function LeaveButton({
 export function ContinueButton({
   label,
   sharing,
-  variant = "outline",
+  variant = "secondary",
   className,
 }: {
   readonly label: string
   readonly sharing: ThreadSharing
-  readonly variant?: "outline" | "link"
+  readonly variant?: "secondary" | "link"
   readonly className?: string
 }) {
   const messages = useAgentMessages().sharing
   const hintId = useId()
 
   return (
-    <span className={cn("flex min-w-0 flex-col gap-1", className)}>
+    <span className={cn("flex min-w-0 flex-col items-start gap-1", className)}>
       <Button
         type="button"
         variant={variant}
@@ -496,7 +524,9 @@ export function ContinueButton({
         onClick={() => void sharing.fork()}
         className={cn(
           "gap-1.5",
-          variant === "link" && "h-auto p-0 text-xs whitespace-nowrap has-[>svg]:px-0"
+          variant === "link"
+            ? "h-auto p-0 text-xs whitespace-nowrap has-[>svg]:px-0"
+            : "rounded-full px-3.5"
         )}
       >
         {sharing.forking ? <Spinner className="size-3.5" /> : <GitBranchPlus />}
