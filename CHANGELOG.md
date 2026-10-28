@@ -2,6 +2,29 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-28 — Framework 0.1.23
+
+### Highlights
+
+- A chat turn whose sender chose no approval mode runs in `auto` again: nothing waits for an
+  approval until the user picks a stricter mode.
+- Redraw the default Agent UI: a threads button and list, a composer menu, and reworked approval,
+  model and delegation cards.
+- Suggest project members when sharing a conversation.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server and CLI together to `0.1.23`. Upgrade
+  the app to `0.1.15` and the UI to `0.1.7`; rebuild application assets.
+
+### Package versions
+
+- `0.1.23`: `@sixb/core`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.15`: `@sixb/app`.
+- `0.1.7`: `@sixb/ui`.
+
 ## 2026-10-27 — Framework 0.1.22
 
 ### Highlights
