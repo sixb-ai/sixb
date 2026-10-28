@@ -306,18 +306,20 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       async ({ request }) => {
         const rawUserCode = new URL(request.url).searchParams.get("user_code")
         if (!rawUserCode) {
-          return authPageResponse(
+          return devicePageResponse(
             [
+              deviceTileEmblem("monitor"),
               "<h1>Authorize a device</h1>",
+              "<p>Enter the code shown on the device you're signing in.</p>",
               '<form method="get" action="/auth/device">',
-              '<input name="user_code" autocomplete="one-time-code" placeholder="BCDF-HJKM" aria-label="Device code" required autofocus>',
+              '<input class="code-input" name="user_code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="BCDF-HJKM" aria-label="Device code" required autofocus>',
               '<button type="submit">Continue</button>',
               "</form>",
             ].join("")
           )
         }
         const userCode = normalizeDeviceUserCode(rawUserCode)
-        if (!userCode) return authPageResponse("<h1>Invalid authorization</h1>", 400)
+        if (!userCode) return invalidDeviceAuthorizationResponse()
         const authorization = await requireAuthStorage(host).deviceAuthorizations.getByUserCode({
           projectId: host.id,
           userCode,
@@ -328,7 +330,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           authorization.status !== "pending" ||
           authorization.expiresAt <= now
         ) {
-          return authPageResponse("<h1>This authorization has expired</h1>", 400)
+          return expiredDeviceAuthorizationResponse()
         }
         const session = await host.auth.getSession(request)
         if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
@@ -338,24 +340,29 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           cookieOptions,
           expiresAt: session.session.expiresAt,
         })
-        const groups = session.groupIds.length
-          ? `<p>Groups: ${escapeHtml(session.groupIds.join(", "))}</p>`
-          : "<p>Groups: none</p>"
-        const response = authPageResponse(
+        const groupLabels = new Map(
+          host.definitions.security.listGroups().map((group) => [group.id, group.label ?? group.id])
+        )
+        const groups = session.groupIds.map((id) => groupLabels.get(id) ?? id).join(", ") || "None"
+        const response = devicePageResponse(
           [
+            deviceLinkEmblem("waiting", accountInitials(session.user)),
             "<h1>Authorize this device?</h1>",
             `<p><strong>${escapeHtml(authorization.clientName)}</strong> is requesting to sign in as you.</p>`,
-            `<p>Code: <strong>${escapeHtml(authorization.userCode)}</strong></p>`,
+            deviceUserCodeHtml(authorization.userCode),
             // Whoever starts a request names it, so the code is what ties it to the user's device.
-            "<p>Authorize it only if you started this sign-in, and the device asking shows this same code.</p>",
-            "<p>It stays signed in until you sign it out or it goes unused for a while.</p>",
-            groups,
-            '<form method="post" action="/auth/device">',
+            '<p class="hint">Authorize it only if you started this sign-in, and the device asking shows this same code.</p>',
+            '<dl class="details">',
+            `<div><dt>Account</dt><dd title="${escapeHtml(session.user.email)}">${escapeHtml(session.user.email)}</dd></div>`,
+            `<div><dt>Groups</dt><dd title="${escapeHtml(groups)}">${escapeHtml(groups)}</dd></div>`,
+            "</dl>",
+            '<form class="actions" method="post" action="/auth/device">',
             `<input type="hidden" name="userCode" value="${escapeHtml(userCode)}">`,
             `<input type="hidden" name="csrfToken" value="${escapeHtml(csrf.token)}">`,
+            '<button class="secondary" name="decision" value="deny" type="submit">Deny</button>',
             '<button name="decision" value="approve" type="submit">Authorize</button>',
-            '<button name="decision" value="deny" type="submit">Deny</button>',
             "</form>",
+            '<p class="footnote">It stays signed in until you sign it out or it goes unused for a while.</p>',
           ].join("")
         )
         if (csrf.setCookie) response.headers.append("set-cookie", csrf.setCookie)
@@ -372,14 +379,21 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
         const csrfCookieName = host.auth.getCookieOptions().csrfCookieName
         if (!verifyCsrfToken(request, { cookieName: csrfCookieName, token: parsed.csrfToken })) {
-          return authPageResponse("<h1>Invalid authorization request</h1>", 403)
+          return devicePageResponse(
+            [
+              deviceTileEmblem("alert"),
+              "<h1>Invalid authorization request</h1>",
+              "<p>Reload the approval page and try again.</p>",
+            ].join(""),
+            { status: 403 }
+          )
         }
         const storage = requireAuthStorage(host)
         const authorization = await storage.deviceAuthorizations.getByUserCode({
           projectId: host.id,
           userCode: parsed.userCode,
         })
-        if (!authorization) return authPageResponse("<h1>Invalid authorization</h1>", 400)
+        if (!authorization) return invalidDeviceAuthorizationResponse()
         const decidedAt = new Date()
         try {
           if (parsed.decision === "approve") {
@@ -400,14 +414,26 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         } catch (error) {
           // The authorization expired or was decided after this page rendered.
           if (error instanceof AuthStorageError && error.code === "invalid_device_authorization") {
-            return authPageResponse("<h1>This authorization has expired</h1>", 400)
+            return expiredDeviceAuthorizationResponse()
           }
           throw error
         }
-        return authPageResponse(
-          parsed.decision === "approve"
-            ? "<h1>Device authorized</h1><p>You can close this window.</p>"
-            : "<h1>Authorization denied</h1><p>You can close this window.</p>"
+        const client = `<strong>${escapeHtml(authorization.clientName)}</strong>`
+        return devicePageResponse(
+          (parsed.decision === "approve"
+            ? [
+                deviceLinkEmblem("approved", accountInitials(session.user)),
+                "<h1>Device authorized</h1>",
+                `<p>${client} is signed in as you.</p>`,
+                '<p class="footnote">You can close this window.<br>Sign it out anytime from Settings &rsaquo; Personal.</p>',
+              ]
+            : [
+                deviceLinkEmblem("denied", accountInitials(session.user)),
+                "<h1>Authorization denied</h1>",
+                `<p>${client} was not signed in.</p>`,
+                '<p class="footnote">You can close this window.</p>',
+              ]
+          ).join("")
         )
       },
       {
@@ -501,14 +527,15 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         // A URL that still names a code belongs to an authorization this browser no longer holds.
         // Stop here rather than start another: a page left open must not keep minting requests.
         if (authorization || url.searchParams.has("user_code")) {
-          const response = authPageResponse(
+          const response = devicePageResponse(
             [
-              authorization?.status === "denied"
-                ? "<h1>Sign-in was denied</h1>"
-                : "<h1>This sign-in request has expired</h1>",
-              `<p><a href="${escapeHtml(deviceSignInPath(url, null))}">Try again</a></p>`,
+              ...(authorization?.status === "denied"
+                ? [deviceLinkEmblem("denied", null), "<h1>Sign-in was denied</h1>"]
+                : [deviceTileEmblem("clock"), "<h1>This sign-in request has expired</h1>"]),
+              "<p>Start again to get a new code.</p>",
+              `<a class="button" href="${escapeHtml(deviceSignInPath(url, null))}">Try again</a>`,
             ].join(""),
-            400
+            { status: 400, title: "Sign in" }
           )
           response.headers.append("set-cookie", clearCookie)
           return response
@@ -1865,25 +1892,118 @@ function deviceVerificationUrl(
 // Reloads itself instead of polling from a script, so the page stays script-free like the other
 // auth pages; the reload that follows the approval is the request that signs the browser in.
 function deviceSignInPendingResponse(userCode: string, verificationUrl: string): Response {
+  return devicePageResponse(
+    [
+      deviceLinkEmblem("waiting", null),
+      "<h1>Continue in your browser</h1>",
+      "<p>Approve this sign-in from a browser where you are signed in. This page continues on its own.</p>",
+      deviceUserCodeHtml(userCode),
+      `<a class="button secondary" href="${escapeHtml(verificationUrl)}" target="_blank" rel="noopener">Open the approval page</a>`,
+      '<p class="status">Waiting for approval</p>',
+    ].join(""),
+    {
+      title: "Sign in",
+      head: `<meta http-equiv="refresh" content="${DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS}">`,
+    }
+  )
+}
+
+function devicePageResponse(
+  body: string,
+  options: { readonly status?: number; readonly title?: string; readonly head?: string } = {}
+): Response {
   return new Response(
     authPageDocument(
-      [
-        "<h1>Continue in your browser</h1>",
-        "<p>Approve this sign-in from a browser where you are signed in. This page continues on its own.</p>",
-        `<p>Code: <strong>${escapeHtml(userCode)}</strong></p>`,
-        `<p><a href="${escapeHtml(verificationUrl)}" target="_blank" rel="noopener">Open the approval page</a></p>`,
-      ].join(""),
-      "Sign in",
-      `<meta http-equiv="refresh" content="${DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS}">`
+      `<div class="device">${body}</div>`,
+      options.title ?? "Authorize device",
+      `${DEVICE_PAGE_STYLE}${options.head ?? ""}`
     ),
     {
-      status: 200,
+      status: options.status ?? 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
       },
     }
   )
+}
+
+function expiredDeviceAuthorizationResponse(): Response {
+  return devicePageResponse(
+    [
+      deviceTileEmblem("clock"),
+      "<h1>This authorization has expired</h1>",
+      "<p>Start the sign-in again on your device to get a new code.</p>",
+    ].join(""),
+    { status: 400 }
+  )
+}
+
+function invalidDeviceAuthorizationResponse(): Response {
+  return devicePageResponse(
+    [
+      deviceTileEmblem("alert"),
+      "<h1>Invalid authorization</h1>",
+      "<p>Check the code shown on your device and enter it again.</p>",
+      '<a class="button" href="/auth/device">Enter the code</a>',
+    ].join(""),
+    { status: 400 }
+  )
+}
+
+// Lucide's outlines, drawn inline so the pages keep loading nothing.
+const DEVICE_ICONS = {
+  monitor:
+    '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  cross: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+} as const
+
+function deviceIcon(name: keyof typeof DEVICE_ICONS): string {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${DEVICE_ICONS[name]}</svg>`
+}
+
+/** The device, the state of its link, and the account: initials, or a person when signed out. */
+function deviceLinkEmblem(
+  state: "waiting" | "approved" | "denied",
+  initials: string | null
+): string {
+  const badge =
+    state === "waiting"
+      ? ""
+      : `<span class="badge">${deviceIcon(state === "approved" ? "check" : "cross")}</span>`
+  return [
+    `<div class="emblem emblem-${state}" aria-hidden="true">`,
+    `<span class="tile">${deviceIcon("monitor")}</span>`,
+    `<span class="link">${badge}</span>`,
+    `<span class="tile tile-account">${initials ? escapeHtml(initials) : deviceIcon("user")}</span>`,
+    "</div>",
+  ].join("")
+}
+
+function deviceTileEmblem(icon: keyof typeof DEVICE_ICONS): string {
+  return `<div class="emblem" aria-hidden="true"><span class="tile">${deviceIcon(icon)}</span></div>`
+}
+
+/** One cell per character, so the code reads the same at a glance on both screens. */
+function deviceUserCodeHtml(userCode: string): string {
+  const cells = [...userCode].map((character) =>
+    character === "-" ? '<span class="code-dash"></span>' : `<span>${escapeHtml(character)}</span>`
+  )
+  return [
+    `<p class="sr-only">Code: ${escapeHtml(userCode)}</p>`,
+    `<div class="code" aria-hidden="true">${cells.join("")}</div>`,
+  ].join("")
+}
+
+function accountInitials(user: UserRecord): string {
+  const words = (user.displayName?.trim() || user.email).split(/\s+/)
+  const first = words[0] ?? ""
+  const last = words.length > 1 ? (words.at(-1) ?? "") : ""
+  return `${[...first][0] ?? ""}${[...last][0] ?? ""}`.toUpperCase()
 }
 
 // The pending cookie carries the preimage of the `requester` hash embedded in
@@ -2269,7 +2389,9 @@ const AUTH_PAGE_STYLE = `<style>
   --primary: #0a0a0a;
   --primary-foreground: #ffffff;
   --border: #e2e2e2;
+  --muted: #f4f4f4;
   --muted-foreground: #5f5f5f;
+  --success: #16a34a;
   --ring: #0a0a0a;
   --radius: 0.5rem;
 }
@@ -2281,7 +2403,9 @@ const AUTH_PAGE_STYLE = `<style>
     --primary: #f4f4f4;
     --primary-foreground: #0a0a0a;
     --border: #262626;
+    --muted: #1c1c1c;
     --muted-foreground: #8a8a8a;
+    --success: #22c55e;
     --ring: #f4f4f4;
   }
 }
@@ -2381,6 +2505,236 @@ button:disabled { cursor: default; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>`
 
+// The device sign-in pages, centered on one picture: the device, the account, and the state of the
+// link between them. Their animations stay on the 2-second cycle of the waiting page's reload, so
+// each reload picks them up where the last one left off.
+const DEVICE_PAGE_STYLE = `<style>
+.device {
+  --line: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  text-align: center;
+}
+.device h1 { margin-top: 1.5rem; }
+.device h1,
+.device p { text-wrap: balance; }
+.device p strong { overflow-wrap: anywhere; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.emblem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 16px -8px rgb(0 0 0 / 0.14);
+}
+.tile svg { width: 1.375rem; height: 1.375rem; }
+.tile-account {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: var(--primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.link {
+  position: relative;
+  width: 4rem;
+  height: 1px;
+  margin: 0 0.5rem;
+  background: linear-gradient(to right, var(--line) 50%, transparent 0) 50% 0 / 6px 1px repeat-x;
+}
+.emblem-waiting .link::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  background: var(--foreground);
+  border-radius: 50%;
+  animation: travel 2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.emblem-approved .link { background: var(--success); }
+.badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.75rem 0 0 -0.75rem;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--background);
+  animation: pop 0.5s 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.badge svg { width: 0.875rem; height: 0.875rem; stroke-width: 3; }
+.badge path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: draw 0.35s 0.4s ease-out forwards;
+}
+.emblem-approved .badge { color: #ffffff; background: var(--success); }
+.emblem-denied .badge {
+  color: var(--muted-foreground);
+  background: var(--muted);
+  box-shadow: 0 0 0 4px var(--background), inset 0 0 0 1px var(--border);
+}
+.code {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) 0.75rem repeat(4, 1fr);
+  gap: 0.25rem;
+  margin-top: 1.5rem;
+}
+.code span {
+  display: grid;
+  place-items: center;
+  height: 2.75rem;
+  font-family: "SF Mono", "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 1.125rem;
+  font-weight: 500;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+.code .code-dash {
+  align-self: center;
+  height: 2px;
+  background: var(--border);
+  border: 0;
+  border-radius: 1px;
+  box-shadow: none;
+}
+.hint { margin-top: 0.875rem; font-size: 0.8125rem; }
+.details {
+  margin: 1.5rem 0 0;
+  padding: 0 0.875rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.details div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.625rem 0;
+}
+.details div + div { border-top: 1px solid var(--border); }
+.details dt { flex: none; color: var(--muted-foreground); }
+.details dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device form { margin-top: 1.5rem; }
+.device input.code-input {
+  height: 3rem;
+  font-family: "SF Mono", "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 1.25rem;
+  font-weight: 500;
+  text-align: center;
+  /* Letter spacing trails the last character; the indent balances it. */
+  text-indent: 0.2em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.device input.code-input::placeholder {
+  color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+}
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.actions button { margin-top: 0; }
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.5rem;
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--primary-foreground);
+  text-decoration: none;
+  background: var(--primary);
+  border-radius: calc(var(--radius) - 2px);
+}
+.button:hover { opacity: 0.9; }
+.button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.device button,
+.button { transition: opacity 0.15s, background-color 0.15s, transform 0.1s; }
+.device button:active,
+.button:active { transform: scale(0.98); }
+.secondary {
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.secondary:hover:not(:disabled) { opacity: 1; background: var(--muted); }
+.footnote { margin-top: 1.25rem; font-size: 0.75rem; }
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  font-size: 0.8125rem;
+}
+.status::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
+  background: currentColor;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes travel {
+  0% { opacity: 0; transform: translateX(0); }
+  20%, 80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(4rem); }
+}
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) {
+  .emblem-waiting .link::after { display: none; }
+  .badge,
+  .badge path,
+  .status::before { animation: none; }
+  .badge path { stroke-dashoffset: 0; }
+}
+</style>`
+
 function authPageDocument(body: string, title = "Sign in", head = ""): string {
   return [
     "<!doctype html>",
@@ -2389,8 +2743,8 @@ function authPageDocument(body: string, title = "Sign in", head = ""): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(title)}</title>`,
-    head,
     AUTH_PAGE_STYLE,
+    head,
     "</head>",
     "<body>",
     '<main class="shell">',
