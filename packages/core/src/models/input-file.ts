@@ -12,14 +12,39 @@ export function prepareModelInputFile(
   }
 
   const file = { ...input }
-  const mediaType = file.mediaType?.split(";", 1)[0]?.trim().toLowerCase()
-  if (!mediaType || !new RegExp(`^${type}/[a-z0-9.+-]+$`).test(mediaType)) {
+  const mediaType = modelInputMediaType(file.mediaType, type)
+  if (!mediaType) {
     throw new TypeError(
       `[SixbModels] ${capitalize(type)} FileRef must declare an ${type} mediaType.`
     )
   }
 
   return { file, mediaType }
+}
+
+/** Copy caller-owned bytes, so changing the array after the call cannot reach the model. */
+export function prepareModelInputBytes(
+  input: { readonly data: unknown; readonly mediaType: unknown },
+  type: "audio"
+): { bytes: Uint8Array; mediaType: string } {
+  if (!(input.data instanceof Uint8Array) || input.data.byteLength === 0) {
+    throw new TypeError(`[SixbModels] ${capitalize(type)} data must be a nonempty Uint8Array.`)
+  }
+
+  const mediaType = modelInputMediaType(input.mediaType, type)
+  if (!mediaType) {
+    throw new TypeError(`[SixbModels] ${capitalize(type)} data must declare an ${type} mediaType.`)
+  }
+
+  return { bytes: input.data.slice(), mediaType }
+}
+
+/** The essence of a media type, such as `audio/webm` for `audio/webm;codecs=opus`. */
+function modelInputMediaType(value: unknown, type: "audio" | "image"): string | undefined {
+  if (typeof value !== "string") return undefined
+
+  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase()
+  return mediaType && new RegExp(`^${type}/[a-z0-9.+-]+$`).test(mediaType) ? mediaType : undefined
 }
 
 function capitalize(type: "audio" | "image"): string {

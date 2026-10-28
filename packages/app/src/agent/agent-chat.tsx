@@ -37,6 +37,11 @@ export interface AgentChatProps {
   readonly onArtifactTargetChange?: (target: ArtifactTarget | null) => void
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
+  /**
+   * A microphone in the composer when the project declares a transcription model and the reader
+   * may call it. False hides it.
+   */
+  readonly dictation?: boolean
 }
 
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
@@ -55,6 +60,7 @@ export function AgentChat({
   onArtifactTargetChange,
   conversationHeaderActions: hostHeaderActions,
   composerPlaceholder,
+  dictation = true,
 }: AgentChatProps) {
   const messages = useAgentMessages()
   const threadId = threadIdInput ?? null
@@ -139,7 +145,11 @@ export function AgentChat({
       <ConversationPanel
         agent={conversation.currentAgent}
         transcript={conversation.transcriptProps}
-        composer={conversation.composerProps}
+        composer={
+          dictation
+            ? conversation.composerProps
+            : { ...conversation.composerProps, dictation: undefined }
+        }
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError ? messages.chat.messagesLoadFailed : null}
         currentThread={conversation.currentThread}

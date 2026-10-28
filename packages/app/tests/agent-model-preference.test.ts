@@ -26,6 +26,9 @@ test("restores the selected model with every supported saved reasoning level", (
   const queryClient = new QueryClient()
   queryClient.setQueryData(listModelsOptions().queryKey, {
     language: [{ ...model, modelId: "default-model", isDefault: true }, model],
+    image: [],
+    audio: { speech: [], transcription: [] },
+    capabilities: { run: false },
   })
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   let saved: string
@@ -113,7 +116,12 @@ test("with tiers, the browser's choice for every conversation pins none", async 
   // and the conversation's choice is Opus, not Auto.
   const chat = async (language: readonly LanguageModel[]) => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(listModelsOptions().queryKey, { language })
+    queryClient.setQueryData(listModelsOptions().queryKey, {
+      language,
+      image: [],
+      audio: { speech: [], transcription: [] },
+      capabilities: { run: false },
+    })
     let conversation: AgentConversation | undefined
 
     function Chat() {

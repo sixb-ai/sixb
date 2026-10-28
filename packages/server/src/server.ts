@@ -10,7 +10,6 @@ import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/
 import type { Server } from "bun"
 import { Elysia, ParseError } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
-import { zodToJsonSchema } from "zod-to-json-schema"
 import {
   type AuthInvitationRedirectContext,
   type AuthInvitationRedirectInput,
@@ -42,7 +41,7 @@ import {
   SharedAccessBoundary,
   type SixbSharedAccessOptions,
 } from "./auth/shared-access"
-import { NamedOpenApiSchemas, openApiOverride } from "./openapi/components"
+import { NamedOpenApiSchemas, openApiJsonSchema } from "./openapi/components"
 import {
   SIXB_ACCESS_TOKEN_SECURITY_SCHEME,
   SIXB_ACCESS_TOKEN_SECURITY_SCHEME_ID,
@@ -406,7 +405,7 @@ export function createSixbApi(server: SixbServer) {
     openapi({
       path: "/docs",
       provider: "swagger-ui",
-      // zodToJsonSchema below emits OpenAPI 3.0 nullable schemas.
+      // openApiJsonSchema below emits OpenAPI 3.0 nullable schemas.
       openapiVersion: "3.0.3",
       documentation: {
         info: {
@@ -431,12 +430,7 @@ export function createSixbApi(server: SixbServer) {
         withCredentials: true,
       },
       mapJsonSchema: {
-        zod: (schema: Parameters<typeof zodToJsonSchema>[0]) =>
-          zodToJsonSchema(schema, {
-            $refStrategy: "none",
-            target: "openApi3",
-            override: openApiOverride(),
-          }),
+        zod: openApiJsonSchema,
       },
     })
   )

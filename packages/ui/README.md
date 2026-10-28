@@ -25,7 +25,7 @@ visual language that works for dense operational tools.
 - **Address lookup** in `src/lib/address`
   - the provider contract, the Photon provider, and address formatters
 - **Speech dictation** in `src/lib/speech` and `src/components/speech`
-  - the recognizer contract, the Web Speech recognizer, and microphone components
+  - the recognizer contract, the Web Speech and recording recognizers, and microphone components
 
 ## Usage
 
@@ -275,9 +275,9 @@ way as address lookup.
 
 | Layer | Import | Purpose |
 | --- | --- | --- |
-| Components | `@sixb/ui/components` | `DictationTextarea`, `DictationButton` |
+| Components | `@sixb/ui/components` | `DictationTextarea`, `DictationButton`, `DictationWaveform` |
 | Hooks | `@sixb/ui/hooks` | `useDictation`, `useSpeechRecognition`, `SpeechRecognitionProvider` |
-| Recognizers | `@sixb/ui/lib/speech` | `SpeechRecognizer` contract, `createWebSpeechRecognizer` |
+| Recognizers | `@sixb/ui/lib/speech` | `SpeechRecognizer` contract, `createWebSpeechRecognizer`, `createRecordingSpeechRecognizer` |
 
 The default recognizer is the browser's own Web Speech API — no key and no setup:
 
@@ -342,18 +342,42 @@ Two behaviors worth knowing:
 - Chrome streams microphone audio to Google's servers for recognition. If that is
   unacceptable for a project, supply a different recognizer.
 
+### Recording Recognizer
+
+`createRecordingSpeechRecognizer` records the microphone and, once stopped, hands the whole
+recording to your `transcribe` function — typically a call to your own transcription model —
+then reports one final result. No interim text, and no audio leaves the browser except through
+`transcribe`:
+
+```tsx
+import { createRecordingSpeechRecognizer } from "@sixb/ui/lib/speech"
+
+const recognizer = createRecordingSpeechRecognizer({
+  transcribe: async (audio, { signal }) => (await myTranscriptionCall(audio, signal)).text,
+})
+```
+
+- It records 16 kHz mono WAV, the format transcription models accept most widely: about
+  1.9 MB a minute.
+  `MediaRecorder` would give WebM in Chrome and MP4 in Safari, which some models refuse.
+- A session ends only on `stop`, `abort`, an error or `maxDurationMs` (five minutes), never on
+  silence: pass `autoRestart: false` to the hooks, or a five-minute stop starts a new recording.
+- Reject `transcribe` with a `TypeError`, as `fetch` does, when the server cannot be reached:
+  the hook then reports a network error instead of an unknown one.
+- It reports the microphone's level about 20 times a second. `DictationWaveform` draws it from
+  the hook's state; `subscribeToAudioLevel` reads it without re-rendering.
+
 ### Adding a Recognizer
 
 Implement `SpeechRecognizer` — `id`, `isSupported()`, and `start(options, handlers)` returning
-a session with `stop()` and `abort()`. The contract is event-driven, so a
-record-then-transcribe backend (MediaRecorder plus a server call) fits by emitting one final
-result when the recording stops and never emitting interim ones. Configure it once at the app
-boundary:
+a session with `stop()` and `abort()`. A record-then-transcribe recognizer calls `onAudioEnd`
+once its microphone closes, even when it stopped itself, so the hook shows it transcribing.
+Configure it once at the app boundary:
 
 ```tsx
 import { SpeechRecognitionProvider } from "@sixb/ui/hooks"
 
-<SpeechRecognitionProvider recognizer={whisperRecognizer}>{children}</SpeechRecognitionProvider>
+<SpeechRecognitionProvider recognizer={recognizer}>{children}</SpeechRecognitionProvider>
 ```
 
 Recognizers must stay free of React imports.

@@ -70,6 +70,10 @@ export const en = {
     removeUnnamedAttachment: "Remove attachment",
     addFiles: "Add files",
     dropFiles: "Drop any file here to attach it to the conversation.",
+    dictationListening: "Listening…",
+    dictationTranscribing: "Transcribing…",
+    cancelDictation: "Cancel dictation",
+    finishDictation: "Done",
   },
   files: {
     spreadsheet: "Spreadsheet",

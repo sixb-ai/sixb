@@ -153,6 +153,7 @@ describe("GET /api/models", () => {
       ],
       image: [],
       audio: { speech: [], transcription: [] },
+      capabilities: { run: true },
     })
   })
 
@@ -212,6 +213,7 @@ describe("GET /api/models", () => {
       language: [],
       image: [],
       audio: { speech: [], transcription: [] },
+      capabilities: { run: true },
     })
   })
 
@@ -316,6 +318,7 @@ describe("GET /api/models", () => {
             },
           ],
         },
+        capabilities: { run: true },
       })
       expect(warning).toHaveBeenCalledTimes(1)
     } finally {

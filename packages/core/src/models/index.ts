@@ -11,6 +11,7 @@ export type {
 } from "./audio/catalog"
 export { SpeechModelResponseError, TranscriptionModelResponseError } from "./audio/errors"
 export type {
+  AudioData,
   AudioModelsRuntime,
   AudioSpeakInput,
   AudioSpeakResult,

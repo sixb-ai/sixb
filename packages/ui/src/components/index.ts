@@ -21,6 +21,7 @@ export { SidebarCollapseToggle } from "./sidebar-collapse-toggle"
 // Sixb speech dictation
 export { DictationButton, type DictationButtonProps } from "./speech/dictation-button"
 export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
+export { DictationWaveform, type DictationWaveformProps } from "./speech/dictation-waveform"
 export { nextTheme, ThemePicker, ThemeSwitcher } from "./theme-switcher"
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion"
 export { Alert, AlertDescription, AlertTitle } from "./ui/alert"

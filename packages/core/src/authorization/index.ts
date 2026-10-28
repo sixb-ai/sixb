@@ -8,6 +8,7 @@ export {
   assertPrivileged,
   assertProviderAccess,
   assertRuntimeAuthorizationBound,
+  canAccessModels,
   evaluate,
   isAllowed,
   isRuntimeAllowed,

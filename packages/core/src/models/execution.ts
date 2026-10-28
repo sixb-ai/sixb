@@ -1,5 +1,5 @@
 import { runModelLoop } from "../agents/model-loop"
-import { assertModelAccess } from "../authorization"
+import { assertModelAccess, canAccessModels } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -124,6 +124,7 @@ export function createModelsRuntime(
   }
 
   const models: ModelsRuntime = {
+    canRun: () => canAccessModels(runtime, execution),
     language: { generate },
     decision: createDecisionRuntime(runtime, execution, catalog, session, "models"),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),

@@ -52,6 +52,11 @@ export interface LanguageModelsRuntime {
 }
 
 export interface ModelsRuntime {
+  /**
+   * Whether this execution may call the models: always for project code and the Agent, and for a
+   * user or service account granted `can.run(project.models)`.
+   */
+  canRun(): boolean
   readonly audio: AudioModelsRuntime
   readonly language: LanguageModelsRuntime
   readonly decision: DecisionModelsRuntime

@@ -147,6 +147,9 @@ function api(language: readonly LanguageModel[], routing: boolean | undefined, p
       return Response.json({
         language,
         ...(routing === undefined ? {} : { languageRouting: routing }),
+        image: [],
+        audio: { speech: [], transcription: [] },
+        capabilities: { run: false },
       })
     }
     if (path === "/api/agent/preferences") {

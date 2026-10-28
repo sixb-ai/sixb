@@ -8,7 +8,16 @@ import {
   MAX_AGENT_CONTEXT_LABEL_LENGTH,
 } from "@sixb/core/agents/context"
 import type { ModelReasoningLevel } from "@sixb/core/models"
-import { Marker, MarkerContent, MarkerIcon, Spinner, Textarea } from "@sixb/ui/components"
+import {
+  DictationButton,
+  Marker,
+  MarkerContent,
+  MarkerIcon,
+  Spinner,
+  Textarea,
+} from "@sixb/ui/components"
+import { useDictation } from "@sixb/ui/hooks"
+import type { SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -46,6 +55,7 @@ import {
 import { ApprovalModeChip } from "./approval-mode-chip"
 import { ContextChips } from "./context-chips"
 import { ContextPicker } from "./context-picker"
+import { DictationBar } from "./dictation-bar"
 import { ModelControls } from "./model-controls"
 
 export interface ComposerProps {
@@ -107,6 +117,11 @@ export interface ComposerProps {
   readonly onApprovalModeChange?: (mode: AgentApprovalMode) => void
   /** A turn waits for the reader's approval: the input says how to answer it or move on. */
   readonly awaitingApproval?: boolean
+  /**
+   * Dictate the message: a microphone records it, and the transcript lands at the end of the
+   * input. Omit for no microphone.
+   */
+  readonly dictation?: SpeechRecognizer
 }
 
 type ComposerAttachment =
@@ -178,6 +193,7 @@ export function Composer({
   approvalMode,
   onApprovalModeChange,
   awaitingApproval = false,
+  dictation,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -198,6 +214,17 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
+  // The transcript is appended to the text as it was when dictation started, so the input stays
+  // read-only until it lands. Recording ends only when the reader stops it: no restarts. A
+  // composer disabled meanwhile, by someone else's turn, only keeps a new dictation from starting.
+  const voice = useDictation({
+    value,
+    onChange: setValue,
+    recognizer: dictation,
+    disabled: !dictation,
+    autoRestart: false,
+  })
+  const wasDictatingRef = useRef(false)
   const wasRunningRef = useRef(Boolean(running))
   const dismissedAmbientRef = useRef(new Set<string>())
   const ambientKey = JSON.stringify(ambientContext.map(agentContextFingerprint))
@@ -242,6 +269,7 @@ export function Composer({
     !pending &&
     !running &&
     !uploading &&
+    !voice.isActive &&
     failedCount === 0
 
   // Reconcile page context by canonical identity. A removed ambient chip stays removed for the
@@ -293,6 +321,17 @@ export function Composer({
     textareaRef.current?.focus()
   }, [draftNonce])
 
+  // However a dictation ends, the focus returns to the input, the caret after any transcript.
+  useEffect(() => {
+    const wasDictating = wasDictatingRef.current
+    wasDictatingRef.current = voice.isActive
+    const input = textareaRef.current
+    if (!wasDictating || voice.isActive || !input) return
+
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+  }, [voice.isActive])
+
   useEffect(() => {
     const wasRunning = wasRunningRef.current
     wasRunningRef.current = Boolean(running)
@@ -335,6 +374,7 @@ export function Composer({
     if (!canSend) return
     onSend(value.trim(), readyAttachments, contextEntries)
     setValue("")
+    voice.reset()
     setAttachments([])
     dismissedAmbientRef.current.clear()
     setContextEntries(ambientContext.map((context) => ({ context, origin: "ambient" })))
@@ -541,6 +581,14 @@ export function Composer({
   // Shift+Tab in an empty input cycles Manual, Accept edits and Auto, as in a terminal agent. Once
   // something is typed, it moves focus back as everywhere else.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // While dictating, Enter finishes and Escape cancels from the input too, as from the bar.
+    if (voice.isActive) {
+      if (event.key === "Enter") voice.stop()
+      else if (event.key === "Escape") voice.abort()
+      else return
+      event.preventDefault()
+      return
+    }
     if (
       event.key === "Tab" &&
       event.shiftKey &&
@@ -610,7 +658,8 @@ export function Composer({
     ? messages.uploadingAttachment
     : failedCount > 0
       ? messages.attachmentsFailed(failedCount)
-      : hint
+      : (voice.error ?? hint)
+  const statusIsError = !uploading && (failedCount > 0 || voice.error !== null)
 
   const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
 
@@ -673,6 +722,7 @@ export function Composer({
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)
+                if (voice.error) voice.reset()
                 setDismissedMention(null)
                 updateMention(event.target.value, event.target.selectionStart)
               }}
@@ -681,87 +731,107 @@ export function Composer({
               }
               onKeyDown={handleKeyDown}
               disabled={disabled}
+              readOnly={voice.isActive}
               rows={1}
               placeholder={
-                awaitingApproval
-                  ? agentMessages.approvals.composerPlaceholder
-                  : (placeholder ?? messages.placeholder)
+                voice.status === "stopping"
+                  ? messages.dictationTranscribing
+                  : voice.isActive
+                    ? messages.dictationListening
+                    : awaitingApproval
+                      ? agentMessages.approvals.composerPlaceholder
+                      : (placeholder ?? messages.placeholder)
               }
               aria-label={messages.message}
               className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/80 focus-visible:ring-0 md:text-[15px]"
             />
           </div>
           <div className="relative flex min-w-0 items-center gap-0.5 px-2 pb-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="sr-only"
-              onChange={(event) => handleFilesSelected(event.target.files)}
-              disabled={!canAttachFiles}
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!canAttachFiles}
-              aria-label={messages.attachFiles}
-              className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors",
-                "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40",
-                "disabled:cursor-not-allowed disabled:opacity-50"
-              )}
-            >
-              <Plus className="size-[18px]" strokeWidth={1.75} />
-            </button>
-            {showPermissions ? (
-              <ApprovalModeChip mode={approvalMode} onChange={changeApprovalMode} />
-            ) : null}
-            <span className="min-w-2 flex-1" />
-            {onSelectModel && onSelectReasoning ? (
-              <ModelControls
-                models={models}
-                selectedModel={selectedModel}
-                selectedReasoning={selectedReasoning}
-                loading={modelsLoading}
-                error={modelsError}
-                disabled={disabled || pending || running}
-                onSelectModel={onSelectModel}
-                onSelectReasoning={onSelectReasoning}
-                onResetReasoning={onResetReasoning}
-                usingDefault={usingDefaultModel}
-                onResetToDefault={onResetModelSelection}
-                routing={modelRouting}
-              />
-            ) : null}
-            {running && onStop ? (
-              <button
-                type="button"
-                onClick={onStop}
-                disabled={stopping}
-                aria-label={messages.stop}
-                className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
-              >
-                {stopping ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <Square className="size-2.5 fill-current" />
-                )}
-              </button>
+            {voice.isActive ? (
+              <DictationBar dictation={voice} doneClassName={SEND_BUTTON_CLASS_NAME} />
             ) : (
-              <button
-                type="button"
-                onClick={submit}
-                disabled={!canSend}
-                aria-label={messages.send}
-                className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
-              >
-                {pending || uploading ? (
-                  <Spinner className="size-3.5" />
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => handleFilesSelected(event.target.files)}
+                  disabled={!canAttachFiles}
+                  aria-hidden="true"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!canAttachFiles}
+                  aria-label={messages.attachFiles}
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors",
+                    "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40",
+                    "disabled:cursor-not-allowed disabled:opacity-50"
+                  )}
+                >
+                  <Plus className="size-[18px]" strokeWidth={1.75} />
+                </button>
+                {showPermissions ? (
+                  <ApprovalModeChip mode={approvalMode} onChange={changeApprovalMode} />
+                ) : null}
+                <span className="min-w-2 flex-1" />
+                {onSelectModel && onSelectReasoning ? (
+                  <ModelControls
+                    models={models}
+                    selectedModel={selectedModel}
+                    selectedReasoning={selectedReasoning}
+                    loading={modelsLoading}
+                    error={modelsError}
+                    disabled={disabled || pending || running}
+                    onSelectModel={onSelectModel}
+                    onSelectReasoning={onSelectReasoning}
+                    onResetReasoning={onResetReasoning}
+                    usingDefault={usingDefaultModel}
+                    onResetToDefault={onResetModelSelection}
+                    routing={modelRouting}
+                  />
+                ) : null}
+                {dictation ? (
+                  <DictationButton
+                    dictation={voice}
+                    disabled={disabled}
+                    variant="ghost"
+                    size="icon-sm"
+                    className="ml-1 bg-transparent text-muted-foreground shadow-none hover:text-foreground"
+                  />
+                ) : null}
+                {running && onStop ? (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    disabled={stopping}
+                    aria-label={messages.stop}
+                    className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
+                  >
+                    {stopping ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <Square className="size-2.5 fill-current" />
+                    )}
+                  </button>
                 ) : (
-                  <ArrowUp className="size-4" strokeWidth={2.25} />
+                  <button
+                    type="button"
+                    onClick={submit}
+                    disabled={!canSend}
+                    aria-label={messages.send}
+                    className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
+                  >
+                    {pending || uploading ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <ArrowUp className="size-4" strokeWidth={2.25} />
+                    )}
+                  </button>
                 )}
-              </button>
+              </>
             )}
           </div>
         </div>
@@ -772,7 +842,7 @@ export function Composer({
           <p
             className={cn(
               "mt-2 truncate px-4 text-xs text-muted-foreground",
-              failedCount > 0 && "text-destructive"
+              statusIsError && "text-destructive"
             )}
             title={statusHint}
           >

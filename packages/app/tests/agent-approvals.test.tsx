@@ -281,7 +281,13 @@ function api(scenario: Scenario, requests: string[]) {
     if (path === "/api/agent") {
       return Response.json({ name: "Sixb", model: { provider: "test", modelId: "fast" } })
     }
-    if (path === "/api/models") return Response.json({ language: [] })
+    if (path === "/api/models") {
+      return Response.json({
+        language: [],
+        audio: { speech: [], transcription: [] },
+        capabilities: { run: false },
+      })
+    }
     if (path === "/api/agent/preferences") {
       if (method === "PUT")
         return Response.json({ ...JSON.parse(body), approvalModeSource: "default" })

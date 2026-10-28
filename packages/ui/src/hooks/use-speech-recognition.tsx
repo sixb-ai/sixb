@@ -86,6 +86,12 @@ export type SpeechRecognitionState = {
   /** Human-readable message, or null. Intentional stops never set this. */
   readonly error: string | null
   readonly errorCode: SpeechErrorCode | null
+  /**
+   * Calls `listener` with each microphone level, from 0 to 1, for a waveform or a meter. Levels
+   * arrive many times a second, so they bypass React state; returns the unsubscribe function.
+   * Only some recognizers measure the level.
+   */
+  readonly subscribeToAudioLevel: (listener: (level: number) => void) => () => void
   readonly start: () => void
   readonly stop: () => void
   readonly abort: () => void
@@ -131,6 +137,7 @@ export function useSpeechRecognition(
   const lastErrorCodeRef = useRef<SpeechErrorCode | null>(null)
   const silentRestartsRef = useRef(0)
   const beginSessionRef = useRef<() => void>(() => {})
+  const levelListenersRef = useRef(new Set<(level: number) => void>())
 
   const onResultRef = useRef(onResult)
   useEffect(() => {
@@ -171,6 +178,15 @@ export function useSpeechRecognition(
           },
           onAudioActivity: (active) => {
             if (sessionRef.current === session) setIsReceivingAudio(active)
+          },
+          onAudioLevel: (level) => {
+            if (sessionRef.current !== session) return
+            for (const listener of levelListenersRef.current) listener(level)
+          },
+          onAudioEnd: () => {
+            if (sessionRef.current !== session) return
+            setIsReceivingAudio(false)
+            setStatus("stopping")
           },
           onResult: (result) => {
             if (sessionRef.current !== session) return
@@ -287,6 +303,13 @@ export function useSpeechRecognition(
 
   const abort = useCallback(() => abortSession(true), [abortSession])
 
+  const subscribeToAudioLevel = useCallback((listener: (level: number) => void) => {
+    levelListenersRef.current.add(listener)
+    return () => {
+      levelListenersRef.current.delete(listener)
+    }
+  }, [])
+
   const reset = useCallback(() => {
     setTranscript("")
     setInterimTranscript("")
@@ -302,6 +325,7 @@ export function useSpeechRecognition(
     interimTranscript,
     error: errorCode === null ? null : speechErrorMessage(errorCode, messages.speech),
     errorCode,
+    subscribeToAudioLevel,
     start,
     stop,
     abort,

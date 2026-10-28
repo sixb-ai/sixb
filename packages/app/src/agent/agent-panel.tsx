@@ -20,6 +20,11 @@ export interface AgentPanelProps {
   readonly splitArtifacts?: boolean
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
+  /**
+   * A microphone in the composer when the project declares a transcription model and the reader
+   * may call it. False hides it.
+   */
+  readonly dictation?: boolean
   readonly compact?: boolean
   readonly className?: string
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
@@ -38,6 +43,7 @@ export function AgentPanel({
   splitArtifacts,
   conversationHeaderActions,
   composerPlaceholder,
+  dictation,
   compact = true,
   className,
   welcomeContent,
@@ -65,6 +71,7 @@ export function AgentPanel({
       splitArtifacts={splitArtifacts}
       conversationHeaderActions={conversationHeaderActions}
       composerPlaceholder={composerPlaceholder}
+      dictation={dictation}
       welcomeContent={welcomeContent}
       onNavigateHome={() => {
         changeThread(null)

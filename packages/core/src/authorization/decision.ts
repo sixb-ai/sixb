@@ -272,13 +272,13 @@ export function assertModelAccess(
   execution: ExecutionContext,
   operation: string
 ): void {
+  if (canAccessModels(runtime, execution)) return
+
   const resolved = resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
   })
-  if (resolved.type === "unrestricted" || execution.executor.type === "agent") return
   if (resolved.type === "principal") {
-    if (isAllowed(resolved.context, { kind: "models.run" })) return
     throw new AuthorizationError(
       "run:models",
       deniedMessage(resolved.context, { kind: "models.run" })
@@ -288,6 +288,19 @@ export function assertModelAccess(
     `delegated:${operation}`,
     `[Sixb] Operation '${operation}' is not covered by delegated authorization.`
   )
+}
+
+/** Whether {@link assertModelAccess} lets this execution call a model. */
+export function canAccessModels(
+  runtime: AuthorizedRuntime & { readonly runtimeAuthorization: RuntimeAuthorization },
+  execution: ExecutionContext
+): boolean {
+  const resolved = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  if (resolved.type === "unrestricted" || execution.executor.type === "agent") return true
+  return resolved.type === "principal" && isAllowed(resolved.context, { kind: "models.run" })
 }
 
 function deniedMessage(

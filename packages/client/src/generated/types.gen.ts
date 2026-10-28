@@ -4369,14 +4369,19 @@ export type TranscribeAudioData = {
       provider: string
       modelId: string
     }
-    audio: {
-      blobId: string
-      digest: string
-      sizeBytes: number
-      fileName?: string
-      mediaType?: string
-      logicalPath?: string
-    }
+    audio:
+      | {
+          blobId: string
+          digest: string
+          sizeBytes: number
+          fileName?: string
+          mediaType?: string
+          logicalPath?: string
+        }
+      | {
+          data: string
+          mediaType: string
+        }
   }
   path?: never
   query?: never
@@ -4400,6 +4405,12 @@ export type TranscribeAudioErrors = {
    * Response for status 404
    */
   404: {
+    error: string
+  }
+  /**
+   * Response for status 413
+   */
+  413: {
     error: string
   }
   /**
@@ -18755,6 +18766,9 @@ export type ListModelsResponses = {
         maxInputBytes: number
         mediaTypes?: Array<string>
       }>
+    }
+    capabilities: {
+      run: boolean
     }
   }
 }

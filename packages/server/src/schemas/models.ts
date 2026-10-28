@@ -138,6 +138,10 @@ export const ModelCatalogSchema = z.object({
     speech: z.array(SpeechModelSchema),
     transcription: z.array(TranscriptionModelSchema),
   }),
+  capabilities: z.object({
+    /** The requester may call these models, through the generation routes or the agent's chat. */
+    run: z.boolean(),
+  }),
 })
 
 export const ModelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS)
@@ -231,9 +235,22 @@ export const FileGenerationSchema = GenerationResultBase.extend({
   warnings: z.array(z.string()),
 })
 
+// One character class and no group: zod's base64() backtracks, and refused minutes of audio.
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
+
+/** Audio sent with the request, base64-encoded: it reaches the model without being stored. */
+export const InlineAudioSchema = z.object({
+  data: z
+    .string()
+    .min(1)
+    .regex(BASE64_PATTERN, "Invalid base64")
+    .refine((data) => data.length % 4 === 0, "Invalid base64"),
+  mediaType: z.string().min(1),
+})
+
 export const TranscriptionBodySchema = GenerationBodyBase.extend({
-  /** Audio uploaded through /api/files. */
-  audio: FileRefSchema,
+  /** Audio uploaded through /api/files, or sent inline, such as a dictation. */
+  audio: z.union([FileRefSchema, InlineAudioSchema]),
 })
 
 export const TranscriptionSchema = GenerationResultBase.extend({

@@ -44,6 +44,7 @@ import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
 import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
 import type { TranscriptDelegation } from "../delegation/context"
+import { projectDictation } from "../dictation"
 import { useAgentMessages } from "../i18n"
 import { knownName } from "../message-authors"
 import {
@@ -134,6 +135,7 @@ export type ConversationComposerProps = Pick<
   | "approvalMode"
   | "onApprovalModeChange"
   | "awaitingApproval"
+  | "dictation"
 >
 
 export type AgentConversation = ReturnType<typeof useAgentConversation>
@@ -963,6 +965,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     approvalMode,
     onApprovalModeChange: setApprovalMode,
     awaitingApproval,
+    dictation: projectDictation(modelsQuery.data),
   }
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery

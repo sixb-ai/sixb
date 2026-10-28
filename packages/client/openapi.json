@@ -13483,133 +13483,51 @@
                     "additionalProperties": false
                   },
                   "audio": {
-                    "type": "object",
-                    "properties": {
-                      "blobId": {
-                        "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "mediaType": {
+                            "type": "string"
+                          },
+                          "logicalPath": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["blobId", "digest", "sizeBytes"],
+                        "additionalProperties": false
                       },
-                      "digest": {
-                        "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
-                      },
-                      "sizeBytes": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "fileName": {
-                        "type": "string"
-                      },
-                      "mediaType": {
-                        "type": "string"
-                      },
-                      "logicalPath": {
-                        "type": "string"
+                      {
+                        "type": "object",
+                        "properties": {
+                          "data": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+                          },
+                          "mediaType": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["data", "mediaType"],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": ["blobId", "digest", "sizeBytes"],
-                    "additionalProperties": false
-                  }
-                },
-                "required": ["audio"],
-                "additionalProperties": false
-              }
-            },
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "model": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "modelId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["provider", "modelId"],
-                    "additionalProperties": false
-                  },
-                  "audio": {
-                    "type": "object",
-                    "properties": {
-                      "blobId": {
-                        "type": "string"
-                      },
-                      "digest": {
-                        "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
-                      },
-                      "sizeBytes": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "fileName": {
-                        "type": "string"
-                      },
-                      "mediaType": {
-                        "type": "string"
-                      },
-                      "logicalPath": {
-                        "type": "string"
-                      }
-                    },
-                    "required": ["blobId", "digest", "sizeBytes"],
-                    "additionalProperties": false
-                  }
-                },
-                "required": ["audio"],
-                "additionalProperties": false
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "model": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "modelId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": ["provider", "modelId"],
-                    "additionalProperties": false
-                  },
-                  "audio": {
-                    "type": "object",
-                    "properties": {
-                      "blobId": {
-                        "type": "string"
-                      },
-                      "digest": {
-                        "type": "string",
-                        "pattern": "^sha256:[a-f0-9]{64}$"
-                      },
-                      "sizeBytes": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "fileName": {
-                        "type": "string"
-                      },
-                      "mediaType": {
-                        "type": "string"
-                      },
-                      "logicalPath": {
-                        "type": "string"
-                      }
-                    },
-                    "required": ["blobId", "digest", "sizeBytes"],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "required": ["audio"],
@@ -13772,6 +13690,23 @@
           },
           "404": {
             "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {
@@ -54722,9 +54657,19 @@
                       },
                       "required": ["speech", "transcription"],
                       "additionalProperties": false
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "run": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["run"],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["language", "image", "audio"],
+                  "required": ["language", "image", "audio", "capabilities"],
                   "additionalProperties": false
                 }
               }

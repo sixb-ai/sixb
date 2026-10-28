@@ -8,6 +8,7 @@ import type {
 } from "@sixb/core/models"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
+import { requireRequestSixb } from "../auth/scope"
 import { languageModelDisplay, rateCardDisplay, resolvedForDisplay } from "../models/display"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ModelCatalogSchema } from "../schemas/models"
@@ -100,7 +101,7 @@ async function serializeTranscriptionModel(
 export function registerModelRoutes(app: Elysia, host: SixbHostView) {
   return app.get(
     "/api/models",
-    async () => {
+    async (context) => {
       const models = host.definitions.models
       const language = models?.language
       const image = models?.image
@@ -134,6 +135,7 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
               )
             : [],
         },
+        capabilities: { run: requireRequestSixb(context).models.canRun() },
       })
     },
     {

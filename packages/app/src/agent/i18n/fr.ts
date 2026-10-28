@@ -66,6 +66,10 @@ export const fr: Translation<AgentMessages> = {
     removeUnnamedAttachment: "Retirer la pièce jointe",
     addFiles: "Ajouter des fichiers",
     dropFiles: "Déposez un fichier ici pour le joindre à la conversation.",
+    dictationListening: "À l’écoute…",
+    dictationTranscribing: "Transcription…",
+    cancelDictation: "Annuler la dictée",
+    finishDictation: "Terminer",
   },
   files: {
     spreadsheet: "Feuille de calcul",

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   type AuthorizationContext,
   InMemoryBlobStorage,
@@ -23,6 +23,8 @@ import {
 import { Elysia } from "elysia"
 import { registerModelCallRoutes } from "../src/routes/model-calls"
 import { registerModelGenerationRoutes } from "../src/routes/model-generations"
+import { registerModelRoutes } from "../src/routes/models"
+import { limitRequestBody } from "../src/utils/request-body"
 
 const projectId = "model-generations"
 const PNG = new Uint8Array([137, 80, 78, 71, 1])
@@ -97,6 +99,7 @@ async function setup(
   options: {
     readonly language?: ModelCatalogInput["language"]
     readonly image?: readonly ImageModel[]
+    readonly transcription?: readonly TranscriptionModel[]
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -116,7 +119,7 @@ async function setup(
     models: {
       language: options.language ?? [writer],
       image: options.image ?? [painter("painter"), painter("sketcher")],
-      audio: { speech: [voice], transcription: [transcriber] },
+      audio: { speech: [voice], transcription: options.transcription ?? [transcriber] },
     },
   })
   const as = (userId: string, granted: boolean) => {
@@ -130,10 +133,12 @@ async function setup(
     app.derive(({ request }) => ({
       sixb: bindRequestExecution(host, { request, authorization: { type: "principal", context } }),
     }))
+    registerModelRoutes(app, host)
     registerModelGenerationRoutes(app, host)
     registerModelCallRoutes(app, host)
     return async (path: string, body?: unknown) => {
-      const response = await app.handle(
+      // Capped as the server caps every request, before any route reads it.
+      const request = limitRequestBody(
         new Request(`http://localhost${path}`, {
           method: body === undefined ? "GET" : "POST",
           ...(body === undefined
@@ -141,6 +146,7 @@ async function setup(
             : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
         })
       )
+      const response = await app.handle(request)
       return { status: response.status, response }
     }
   }
@@ -214,6 +220,85 @@ describe("model generation routes", () => {
       error: "[Sixb] Principal 'plain' is not allowed to call the project's models.",
     })
     expect(calls).toBe(0)
+  })
+
+  // Removal proof: answer `run: true` in GET /api/models; the plain user is told they may run.
+  test("the catalog says whether the requester may call its models", async () => {
+    const { granted, plain } = await setup()
+
+    for (const [request, run] of [
+      [granted, true],
+      [plain, false],
+    ] as const) {
+      const catalog = await request("/api/models")
+      expect(await catalog.response.json()).toMatchObject({ capabilities: { run } })
+    }
+  })
+
+  // Removal proof: pass body.audio through as a FileRef; inline audio is refused as malformed.
+  test("transcribes audio sent inline, without storing it", async () => {
+    const { blobStorage, granted } = await setup()
+    const put = spyOn(blobStorage, "put")
+
+    const transcript = await granted("/api/models/audio/transcriptions", {
+      audio: { data: Buffer.from(MP3).toString("base64"), mediaType: "audio/mpeg" },
+    })
+
+    expect(transcript.status).toBe(200)
+    expect(await transcript.response.json()).toMatchObject({
+      model: { modelId: "ears" },
+      text: "Hello there.",
+    })
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  // Removal proof: drop `parse: "none"` from the route; the server's 1 MB cap refuses the body.
+  // Removal proof: validate `data` with zod's base64(); it refuses a recording this long.
+  test("takes five minutes of inline dictation, past the server's default body cap", async () => {
+    let received = 0
+    const { granted } = await setup({
+      transcription: [
+        {
+          ...transcriber,
+          definition: { ...transcriber.definition, maxInputBytes: 20 * 1024 * 1024 },
+          transcribe: async (request) => {
+            received = request.audio.byteLength
+            return { output: { text: "A long dictation." } }
+          },
+        },
+      ],
+    })
+    // Five minutes of 16 kHz mono 16-bit WAV, what the chat's microphone records at most.
+    const recording = new Uint8Array(5 * 60 * 16_000 * 2)
+
+    const transcript = await granted("/api/models/audio/transcriptions", {
+      audio: { data: Buffer.from(recording).toString("base64"), mediaType: "audio/wav" },
+    })
+
+    expect(transcript.status).toBe(200)
+    expect(received).toBe(recording.byteLength)
+  })
+
+  // Removal proof: drop the canRun() check from the route; the body is read, and refused as 400.
+  test("refuses a caller without the grant before reading the audio", async () => {
+    const { plain } = await setup()
+
+    const refused = await plain("/api/models/audio/transcriptions", { audio: "not read" })
+
+    expect(refused.status).toBe(403)
+  })
+
+  test("refuses a body that is not a transcription request", async () => {
+    const { granted } = await setup()
+
+    for (const [body, message] of [
+      [{ audio: { data: "not base64!", mediaType: "audio/mpeg" } }, "audio"],
+      [{ audio: { blobId: "blob_1" } }, "audio"],
+    ] as const) {
+      const refused = await granted("/api/models/audio/transcriptions", body)
+      expect(refused.status).toBe(400)
+      expect((await refused.response.json()).error).toContain(message)
+    }
   })
 
   test("a request picks a configured model, or is told what is wrong", async () => {
