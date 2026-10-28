@@ -2,6 +2,32 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-28 — Framework 0.1.24
+
+### Highlights
+
+- Dictate a message in the Agent chat. Declaring `models.audio.transcription` adds a microphone to
+  the composer; the recording goes to the project's own model and is never stored.
+- Transcribe audio passed as bytes, `{ data, mediaType }`, without writing it to blob storage.
+- Ask whether the caller may run models with `sixb.models.canRun()`, or `capabilities.run` on
+  `GET /api/models`.
+- Record speech in the browser with `createRecordingSpeechRecognizer` and show it with
+  `DictationWaveform` from `@sixb/ui`.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server and CLI together to `0.1.24`. Upgrade
+  the client to `0.1.23`, the app to `0.1.16` and the UI to `0.1.8`; rebuild application assets.
+
+### Package versions
+
+- `0.1.24`: `@sixb/core`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.23`: `@sixb/client`.
+- `0.1.16`: `@sixb/app`.
+- `0.1.8`: `@sixb/ui`.
+
 ## 2026-10-28 — Framework 0.1.23
 
 ### Highlights
