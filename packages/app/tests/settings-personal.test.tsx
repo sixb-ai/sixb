@@ -267,7 +267,7 @@ describe("sounds, on Settings › Personal", () => {
   // Removal proof: drop writeRunSound from choose(); the choice is not kept.
   test("you choose the sound this browser plays, or none", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
-    view.getByRole("radiogroup", { name: "Sounds" })
+    view.getByRole("radiogroup", { name: "Notification sound" })
     expect(view.getByRole("radio", { name: "Chime" }).getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(view.getByRole("radio", { name: "Bell" }))
@@ -281,6 +281,6 @@ describe("sounds, on Settings › Personal", () => {
   test("is not offered in a project without an agent", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"))
 
-    expect(view.queryByRole("radiogroup", { name: "Sounds" })).toBeNull()
+    expect(view.queryByRole("radiogroup", { name: "Notification sound" })).toBeNull()
   })
 })

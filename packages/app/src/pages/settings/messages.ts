@@ -78,9 +78,9 @@ export const en = {
     signOut: "Sign out",
     signingOut: "Signing out…",
     signOutFailed: "Could not sign out.",
-    sounds: "Sounds",
+    sounds: "Notification sound",
     soundsDescription:
-      "Hear when the agent finishes or needs your approval while you're in another tab, app or conversation. Choose a sound to hear it; it's saved in this browser.",
+      "When the agent finishes or needs your approval while you're elsewhere. Saved in this browser.",
     soundChoices: { off: "Off", chime: "Chime", bell: "Bell", pop: "Pop" },
     approvals: "When the agent changes things",
     approvalsDescription:
@@ -459,9 +459,9 @@ export const fr: Translation<SettingsMessages> = {
     signOut: "Se déconnecter",
     signingOut: "Déconnexion…",
     signOutFailed: "Impossible de se déconnecter.",
-    sounds: "Sons",
+    sounds: "Son de notification",
     soundsDescription:
-      "Entendez quand l’agent a terminé ou attend votre approbation pendant que vous êtes dans un autre onglet, une autre application ou une autre conversation. Choisissez un son pour l’écouter ; il est enregistré dans ce navigateur.",
+      "Quand l’agent a terminé ou attend votre approbation pendant que vous êtes ailleurs. Enregistré dans ce navigateur.",
     soundChoices: { off: "Désactivé", chime: "Carillon", bell: "Cloche", pop: "Pop" },
     approvals: "Quand l’agent modifie quelque chose",
     approvalsDescription:

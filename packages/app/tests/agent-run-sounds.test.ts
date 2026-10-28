@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { client } from "@sixb/client"
 import { readRunSound, watchRun, writeRunSound } from "../src/agent/run-sounds"
 import { installDom } from "./helpers/dom"
@@ -75,6 +75,10 @@ class FakeAudioContext {
   }
 }
 
+/** What the window says of itself: whether it has focus, and what shows at a point. */
+let focused = true
+let hit: Element | null = null
+
 const previous = {
   WebSocket: Object.getOwnPropertyDescriptor(globalThis, "WebSocket"),
   AudioContext: Object.getOwnPropertyDescriptor(globalThis, "AudioContext"),
@@ -87,10 +91,13 @@ beforeAll(() => {
   ] as const) {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
   }
+  document.hasFocus = () => focused
+  document.elementFromPoint = () => hit
 })
 
 afterEach(() => {
-  mock.restore()
+  focused = true
+  hit = null
   sockets.length = 0
   notes.length = 0
   localStorage.clear()
@@ -145,7 +152,7 @@ function showConversation(threadId: string) {
   const message = document.createElement("p")
   transcript.append(message)
   document.body.append(transcript)
-  return spyOn(document, "elementFromPoint").mockReturnValue(message)
+  hit = message
 }
 
 const DONE = [659.25, 987.77]
@@ -154,7 +161,6 @@ const WAITING = [880, 880]
 describe("a sound when the agent's turn ends", () => {
   // Removal proof: drop the tone from watchRun's end, and the reader hears nothing.
   test("plays when a turn ends while you are away from it", () => {
-    spyOn(document, "hasFocus").mockReturnValue(true)
     watchRun({ id: "run_away", threadId: "thread" })
     finish(socketFor("run_away"), "run_away", { status: "succeeded", finishReason: "stop" })
 
@@ -164,22 +170,21 @@ describe("a sound when the agent's turn ends", () => {
 
   // Removal proof: drop `!watching(...)` from the condition, and the first turn plays too.
   test("stays quiet for a turn you watch end, but not once you look elsewhere", () => {
-    const focus = spyOn(document, "hasFocus").mockReturnValue(true)
-    const hit = showConversation("thread")
+    showConversation("thread")
     watchRun({ id: "run_watched", threadId: "thread" })
     finish(socketFor("run_watched"), "run_watched", { status: "succeeded" })
     expect(notes).toEqual([])
 
     // The same conversation on screen, in a window that lost focus.
-    focus.mockReturnValue(false)
+    focused = false
     watchRun({ id: "run_unfocused", threadId: "thread" })
     finish(socketFor("run_unfocused"), "run_unfocused", { status: "succeeded" })
     expect(notes).toEqual(DONE)
 
     // Another conversation on screen.
     notes.length = 0
-    focus.mockReturnValue(true)
-    hit.mockRestore()
+    focused = true
+    document.body.replaceChildren()
     showConversation("another-thread")
     watchRun({ id: "run_elsewhere", threadId: "thread" })
     finish(socketFor("run_elsewhere"), "run_elsewhere", { status: "succeeded" })
@@ -187,7 +192,7 @@ describe("a sound when the agent's turn ends", () => {
   })
 
   test("says a call waits for you, and nothing for a turn someone stopped", () => {
-    spyOn(document, "hasFocus").mockReturnValue(false)
+    focused = false
     watchRun({ id: "run_held", threadId: "thread" })
     finish(socketFor("run_held"), "run_held", {
       status: "succeeded",
@@ -209,7 +214,7 @@ describe("a sound when the agent's turn ends", () => {
   // Removal proofs: drop onRunSnapshot, and nothing plays until the replayed event. Drop the
   // close() from end, and the replayed event plays a second time.
   test("plays once for a run that ended before its socket subscribed", () => {
-    spyOn(document, "hasFocus").mockReturnValue(false)
+    focused = false
     watchRun({ id: "run_quick", threadId: "thread" })
     const socket = socketFor("run_quick")
     socket.onopen?.()
@@ -238,7 +243,7 @@ describe("a sound when the agent's turn ends", () => {
 
   // Removal proof: play "chime" whatever was chosen, and the bell is never heard.
   test("plays the sound you chose", () => {
-    spyOn(document, "hasFocus").mockReturnValue(false)
+    focused = false
     writeRunSound("bell")
     watchRun({ id: "run_bell", threadId: "thread" })
     finish(socketFor("run_bell"), "run_bell", { status: "succeeded" })
