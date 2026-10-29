@@ -102,6 +102,27 @@ test("marking an invoice paid updates its status", async () => {
 })
 ```
 
+## Seed members
+
+A [`ref.user()`](../ontology/properties.md#reference-a-user) property only accepts members who
+exist. Add them with `seedTestUsers` before writing objects that reference them:
+
+```ts
+import { userRef } from "@sixb/core"
+import { seedTestUsers } from "@sixb/core/testing"
+
+const { host, sixb } = createFixture()
+await seedTestUsers(host, [
+  { id: "usr_ava", email: "ava@acme.com", displayName: "Ava Martin" },
+  { id: "usr_ben", email: "ben@acme.com", status: "suspended" },
+])
+
+await sixb.objects(Task).upsert({ properties: { id: "t1", assignee: userRef("usr_ava") } })
+```
+
+Members are active unless you pass `status: "suspended"`, and the member directory lists them in
+the order given. Ids and emails must be unique in the project.
+
 ## Test permissions
 
 Create a caller from the fixture's registered roles. Check both the operation they may perform and one they must not:
