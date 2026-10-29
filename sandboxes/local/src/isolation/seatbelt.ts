@@ -5,6 +5,8 @@ export interface SeatbeltProfileInput {
   readonly workingDirectory: string
   readonly readOnlyPaths: readonly string[]
   readonly readWritePaths: readonly string[]
+  /** Real paths commands may neither read nor write, whatever else allows them. */
+  readonly denyReadPaths: readonly string[]
   readonly network: SandboxNetworkPolicy
 }
 
@@ -32,6 +34,10 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   lines.push('(allow file-write* (subpath "/private/var/folders"))')
   for (const path of input.readWritePaths) {
     lines.push(`(allow file-write* (subpath ${sbplString(path)}))`)
+  }
+  // Last, so they win over every allow above: the profile's last matching rule decides.
+  for (const path of input.denyReadPaths) {
+    lines.push(`(deny file-read* file-write* (subpath ${sbplString(path)}))`)
   }
 
   return `${lines.join("\n")}\n`

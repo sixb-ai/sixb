@@ -7,7 +7,14 @@ export interface BwrapArgvInput {
   readonly workingDirectory: string
   readonly readOnlyPaths: readonly string[]
   readonly readWritePaths: readonly string[]
+  /** Existing real paths commands may not read, with what each is. */
+  readonly denyReadPaths: readonly DeniedPath[]
   readonly network: SandboxNetworkPolicy
+}
+
+export interface DeniedPath {
+  readonly path: string
+  readonly kind: "directory" | "file"
 }
 
 /**
@@ -25,6 +32,12 @@ export function buildBwrapArgv(input: BwrapArgvInput): readonly string[] {
   argv.push("--bind", input.workingDirectory, input.workingDirectory)
   for (const path of input.readWritePaths) {
     argv.push("--bind", path, path)
+  }
+  // Mounted last, over every bind above: a directory shows empty and a file reads as nothing, and
+  // no write reaches the real path.
+  for (const { path, kind } of input.denyReadPaths) {
+    if (kind === "directory") argv.push("--tmpfs", path)
+    else argv.push("--ro-bind", "/dev/null", path)
   }
   argv.push("--proc", "/proc", "--dev", "/dev")
 
