@@ -32,7 +32,7 @@ limitation blocks, and a minimal reproducible example when possible.
 
 - `bun dev` — start the runtime and the app (app on 3000, API on 3001)
 - `bun run build` — production build
-- `bun run typecheck` — generate Sixb types, then run `tsc --noEmit`
+- `bun run typecheck` — generate Sixb types, then type-check with `bun check`
 - `bun run check` — format and lint
 
 ## Project layout

@@ -6,7 +6,7 @@ and act on that model.
 
 ## Quickstart
 
-Sixb runs on **Bun**. Install [Bun](https://bun.sh) **1.4.2 or later**, then create and start your
+Sixb runs on **Bun**. Install [Bun](https://bun.sh) **1.4.4 or later**, then create and start your
 project:
 
 ```bash

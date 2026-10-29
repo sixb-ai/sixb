@@ -7,7 +7,7 @@
     "dev": "sixb dev",
     "check": "sixb check",
     "build": "sixb build",
-    "typecheck": "sixb typegen && tsc --noEmit"
+    "typecheck": "sixb typegen && bun check --no-script"
   },
   "dependencies": {
     "@sixb/app": "^0.1.12",
@@ -36,6 +36,6 @@
     "typescript": "^5.7.0"
   },
   "engines": {
-    "bun": ">=1.4.2"
+    "bun": ">=1.4.4"
   }
 }

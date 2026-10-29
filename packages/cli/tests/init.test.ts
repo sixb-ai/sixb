@@ -57,7 +57,7 @@ describe("sixb init", () => {
     }
 
     expect(packageJson.name).toBe("starter")
-    expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
+    expect(packageJson.scripts.typecheck).toBe("sixb typegen && bun check --no-script")
     // Each release bumps the template's Sixb versions, so they are compared, not pinned.
     const template = JSON.parse(
       await readFile(
