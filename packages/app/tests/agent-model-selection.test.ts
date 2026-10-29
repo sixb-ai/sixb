@@ -134,7 +134,7 @@ test("moving only the effort never pins the default model, and resetting forgets
   })
 })
 
-test("names the defaults the composer follows", () => {
+test("names the model the composer runs, never as a default", () => {
   const render = (usingDefaultModel: boolean, selectedModel: LanguageModel) =>
     renderToStaticMarkup(
       createElement(ComposerSettings, {
@@ -147,8 +147,9 @@ test("names the defaults the composer follows", () => {
         onResetModelSelection: () => {},
       })
     )
-  expect(render(true, fast)).toContain('title="Default · fast · Low"')
+  expect(render(true, fast)).toContain('title="fast · Low"')
   expect(render(false, deep)).toContain('title="deep · Low"')
+  expect(render(true, fast)).not.toContain("Default")
 })
 
 test("with tiers the chip says Auto while no model is pinned", () => {

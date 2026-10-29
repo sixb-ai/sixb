@@ -131,8 +131,6 @@ export const en = {
     search: "Search models",
     list: "Models",
     empty: "No matching models.",
-    default: "Default",
-    defaultSummary: (summary: string) => `Default · ${summary}`,
     details: (name: string) => `Details about ${name}`,
     contextWindow: "Context window",
     tokens: (tokens: number) => count(tokens, "token"),

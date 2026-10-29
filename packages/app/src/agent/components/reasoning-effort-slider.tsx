@@ -37,17 +37,20 @@ export function ReasoningEffortSlider({
     <div>
       <div className="flex min-h-6 items-center gap-2">
         <span className="text-xs text-muted-foreground">{messages.thinking}</span>
-        <span
-          title={messages.descriptions[value]}
-          className={cn(
-            "ml-auto text-xs font-medium",
-            enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-foreground"
-          )}
-        >
-          <span key={value} className="sixb-reasoning-label">
-            {messages.levels[value]}
+        {/* The model's own default has no stop and no name: the outlined thumb says it. */}
+        {selectedIndex < 0 ? null : (
+          <span
+            title={messages.descriptions[value]}
+            className={cn(
+              "ml-auto text-xs font-medium",
+              enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-foreground"
+            )}
+          >
+            <span key={value} className="sixb-reasoning-label">
+              {messages.levels[value]}
+            </span>
           </span>
-        </span>
+        )}
         {value === resetLevel ? null : (
           <button
             type="button"

@@ -21,7 +21,6 @@ export function ModelPickerRow({
   radio = false,
   describedBy,
   tier,
-  note,
   onSelect,
 }: {
   model: LanguageModel
@@ -33,8 +32,6 @@ export function ModelPickerRow({
   describedBy?: string
   /** The tier the row stands for, named at its end when no heading names it. */
   tier?: { readonly id: string; readonly label: string }
-  /** Said after the name, such as "Default". */
-  note?: string
   onSelect: (model: LanguageModel) => void
 }) {
   const messages = useAgentMessages().models
@@ -77,12 +74,12 @@ export function ModelPickerRow({
             >
               {model.name}
             </span>
-            {tier?.label || note ? (
+            {tier?.label ? (
               <span
                 id={tier?.id}
                 className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground"
               >
-                {[tier?.label, note].filter(Boolean).join(" · ")}
+                {tier.label}
               </span>
             ) : null}
           </button>

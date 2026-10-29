@@ -62,7 +62,6 @@ export function ComposerSettings(props: ComposerSettingsProps) {
     modelsError,
     onSelectModel,
     onSelectReasoning,
-    usingDefaultModel,
     onResetModelSelection,
     approvalMode,
     onApprovalModeChange,
@@ -87,7 +86,6 @@ export function ComposerSettings(props: ComposerSettingsProps) {
     ? undefined
     : reasoningLabel(selectedModel, selectedReasoning, agentMessages.reasoning)
   const summary = [name, level, choosesModel ? modeLabel : undefined].filter(Boolean)
-  const tooltip = summary.join(" · ")
 
   return (
     <ComposerMenu
@@ -102,11 +100,7 @@ export function ComposerSettings(props: ComposerSettingsProps) {
           aria-label={agentMessages.settings.chip(summary.join(", "))}
           aria-haspopup="dialog"
           aria-expanded={open}
-          title={
-            choosesModel && !auto && usingDefaultModel
-              ? agentMessages.models.defaultSummary(tooltip)
-              : tooltip
-          }
+          title={summary.join(" · ")}
           data-approval-mode={approvalMode}
           className="group/settings mb-0.5 flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full pr-[9px] pl-[11px] text-[13.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-black/[0.05] focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-60 aria-expanded:bg-black/[0.05] dark:hover:bg-white/[0.08] dark:aria-expanded:bg-white/[0.08]"
         >
@@ -296,11 +290,6 @@ function ModelSection({
                   radio
                   tier={entry.tier}
                   describedBy={entry.describedBy}
-                  note={
-                    !auto && defaultModel && sameModel(entry.model, defaultModel)
-                      ? messages.default
-                      : undefined
-                  }
                   onSelect={choose}
                 />
                 {selected && selectedModel && selectedReasoning && onSelectReasoning ? (

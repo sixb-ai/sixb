@@ -123,8 +123,6 @@ export const fr: Translation<AgentMessages> = {
     search: "Rechercher un modèle",
     list: "Modèles",
     empty: "Aucun modèle correspondant.",
-    default: "Par défaut",
-    defaultSummary: (summary) => `Par défaut · ${summary}`,
     details: (name) => `Détails sur ${name}`,
     contextWindow: "Fenêtre de contexte",
     tokens: (tokens) => count(tokens, "jeton"),
