@@ -289,6 +289,9 @@ async function main() {
         for (const problem of await within(step, page.evaluate(`(${probe})(${slide})`))) {
           problems.push({ ...problem, slide, theme: name })
         }
+        for (const problem of await photoContrast(page, slide, step)) {
+          problems.push({ ...problem, slide, theme: name })
+        }
         if (index === 0) {
           const file = path.join(out, `slide-${String(slide).padStart(2, "0")}.png`)
           await page.screenshot({ path: file, timeout: STEP_MS })
@@ -311,6 +314,153 @@ async function main() {
     if (!stalled) await within("the browser", browser.close(), 5_000).catch(() => {})
     server.close()
   }
+}
+
+/**
+ * Text over a photo, which the probe cannot judge from styles: each text whose center sits over
+ * an image is hidden, the slide is shot without it, and the pixels under its box are read. The
+ * text fails when the darker or lighter tenth of them, whichever is worse, is under WCAG AA
+ * against its color.
+ */
+async function photoContrast(page, slide, step) {
+  try {
+    return await readPhotoContrast(page, slide, step)
+  } catch (error) {
+    // A stall stops the check as the probe's would; any other failure only skips this slide.
+    if (error instanceof Stalled || error?.name === "TimeoutError") throw error
+    return []
+  }
+}
+
+async function readPhotoContrast(page, slide, step) {
+  const candidates = await within(
+    step,
+    page.evaluate((slide) => {
+      const root = document.querySelectorAll("section.slide")[slide - 1]
+      if (!root) return []
+      const found = []
+      for (const element of root.querySelectorAll("*")) {
+        const own = Array.from(element.childNodes).some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== ""
+        )
+        if (!own || element.closest("svg")) continue
+        const rect = element.getBoundingClientRect()
+        if (rect.width < 1 || rect.height < 1) continue
+        const style = getComputedStyle(element)
+        if (style.visibility === "hidden" || Number(style.opacity) === 0) continue
+        const stack = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        const under = stack.slice(Math.max(0, stack.indexOf(element)))
+        let photo = false
+        for (const node of under) {
+          if (/^(img|picture|video|canvas)$/i.test(node.tagName)) { photo = true; break }
+          if (node === element) continue
+          // A solid box between the text and the photo, such as a panel, is the probe's to judge.
+          const color = getComputedStyle(node).backgroundColor
+          const alpha = color.startsWith("rgba") ? Number(color.split(",")[3]?.replace(")", "")) : color === "transparent" ? 0 : 1
+          if (alpha >= 0.99 && !node.contains(root.querySelector("img, picture, video, canvas"))) break
+        }
+        if (!photo) continue
+        const size = Number.parseFloat(style.fontSize)
+        const bold = Number.parseInt(style.fontWeight, 10) >= 700
+        element.setAttribute("data-sixb-photo-text", String(found.length))
+        found.push({
+          index: found.length,
+          rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+          color: style.color,
+          large: size >= 24 || (bold && size >= 18.66),
+          text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60),
+          selector: [element.tagName.toLowerCase(), ...Array.from(element.classList).slice(0, 2)].join("."),
+        })
+      }
+      return found
+    }, slide)
+  )
+  if (!Array.isArray(candidates) || candidates.length === 0) return []
+  const hide = await page.addStyleTag({
+    content: "[data-sixb-photo-text] { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }",
+  })
+  let shot
+  try {
+    shot = await within(step, page.screenshot({ type: "png", timeout: STEP_MS }))
+  } finally {
+    await hide.evaluate((node) => node.remove()).catch(() => {})
+    await page.evaluate(() => {
+      for (const node of document.querySelectorAll("[data-sixb-photo-text]")) node.removeAttribute("data-sixb-photo-text")
+    }).catch(() => {})
+  }
+  return within(
+    step,
+    page.evaluate(
+      async ({ data, candidates, slide }) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${data}`
+        await image.decode()
+        const canvas = document.createElement("canvas")
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext("2d", { willReadFrequently: true })
+        context.drawImage(image, 0, 0)
+        const parse = (color) => {
+          context.clearRect(0, 0, 1, 1)
+          context.fillStyle = color
+          context.fillRect(0, 0, 1, 1)
+          return Array.from(context.getImageData(0, 0, 1, 1).data)
+        }
+        const channel = (value) => {
+          const c = value / 255
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+        }
+        const luminance = ([r, g, b]) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+        const hex = (rgb) => `#${rgb.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`
+        const box = document.querySelectorAll("section.slide")[slide - 1].getBoundingClientRect()
+        const problems = []
+        for (const candidate of candidates) {
+          const { x, y, width, height } = candidate.rect
+          const left = Math.max(0, Math.floor(x))
+          const top = Math.max(0, Math.floor(y))
+          const right = Math.min(canvas.width, Math.ceil(x + width))
+          const bottom = Math.min(canvas.height, Math.ceil(y + height))
+          if (right <= left || bottom <= top) continue
+          const pixels = context.getImageData(left, top, right - left, bottom - top).data
+          const step = Math.max(1, Math.floor(Math.sqrt(((right - left) * (bottom - top)) / 4000)))
+          const samples = []
+          for (let row = 0; row < bottom - top; row += step) {
+            for (let column = 0; column < right - left; column += step) {
+              const at = (row * (right - left) + column) * 4
+              samples.push([pixels[at], pixels[at + 1], pixels[at + 2]])
+            }
+          }
+          if (samples.length === 0) continue
+          const [r, g, b, a] = parse(candidate.color)
+          const text = luminance([r, g, b])
+          // The tenth of the area that reads worst stands for the text's background.
+          const scored = samples
+            .map((sample) => ({ sample, contrast: ratio(text, luminance(sample)) }))
+            .sort((p, q) => p.contrast - q.contrast)
+          const worst = scored[Math.floor(scored.length * 0.1)]
+          const needed = candidate.large ? 3 : 4.5
+          if (a / 255 >= 0.5 && worst.contrast < needed) {
+            problems.push({
+              code: "contrast",
+              rect: {
+                x: Math.round(x - box.left),
+                y: Math.round(y - box.top),
+                width: Math.round(width),
+                height: Math.round(height),
+              },
+              text: candidate.text,
+              selector: candidate.selector,
+              ratio: Math.round(worst.contrast * 100) / 100,
+              colors: [hex([r, g, b]), `${hex(worst.sample)} in the photo`],
+            })
+          }
+        }
+        return problems
+      },
+      { data: shot.toString("base64"), candidates, slide }
+    )
+  )
 }
 
 setTimeout(
