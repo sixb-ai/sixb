@@ -770,6 +770,31 @@ describe("AuthorizedObjectReader", () => {
     expect(backend.links[0].properties?.position).toBe(1)
   })
 
+  // Guard removal: assign every key in detachReadValue. The "__proto__" key then becomes the
+  // copy's prototype instead of a property; copy dates by reference and the provider's row moves.
+  test("detaches query rows with dates and an own __proto__ key as plain values", async () => {
+    const backend = createReadStorage()
+    Object.defineProperty(backend.rows.proposal.properties, "__proto__", {
+      value: { admin: true },
+      enumerable: true,
+    })
+    const reader = createAuthorizedObjectReader({
+      scope: principalScope("detach-values", [Proposal.id]),
+      ontology,
+      objectStorage: backend.storage,
+    })
+
+    const [row] = (
+      await reader.executeQuery({ query: { kind: "start", objectTypeId: Proposal.id } })
+    ).objects
+    expect(Object.getPrototypeOf(row!.properties)).toBe(Object.prototype)
+    expect(Object.hasOwn(row!.properties, "__proto__")).toBe(true)
+    expect((row!.properties as Record<string, unknown>).admin).toBeUndefined()
+
+    row!.createdAt.setTime(0)
+    expect(backend.rows.proposal.createdAt.getTime()).not.toBe(0)
+  })
+
   test("fails closed when a provider returns a hidden endpoint in a paginated link page", async () => {
     const backend = createReadStorage({ ignoreEndpointTypeFilter: true, queryLinksHasMore: true })
     const reader = createAuthorizedObjectReader({

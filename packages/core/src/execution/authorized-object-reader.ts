@@ -939,7 +939,34 @@ function objectStorageForAuthority(
  * application-facing authorization boundary must not retain them.
  */
 function detachReadResult<T>(value: T): T {
-  return structuredClone(value)
+  return detachReadValue(value) as T
+}
+
+/**
+ * Results are plain objects, arrays, dates and primitives, which a direct copy handles several
+ * times faster than structuredClone; anything else falls back to it. On a page of rows this copy
+ * is the largest cost of a query after the read itself.
+ */
+function detachReadValue(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value
+  if (Array.isArray(value)) return value.map(detachReadValue)
+  if (value instanceof Date) return new Date(value.getTime())
+  if (Object.getPrototypeOf(value) !== Object.prototype) return structuredClone(value)
+
+  const copy: Record<string, unknown> = {}
+  for (const key of Object.keys(value)) {
+    const item = detachReadValue((value as Record<string, unknown>)[key])
+    // Parsed JSON can hold an own "__proto__" key, which assignment would turn into a prototype.
+    if (key === "__proto__") {
+      Object.defineProperty(copy, key, {
+        value: item,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
+    } else copy[key] = item
+  }
+  return copy
 }
 
 /** Capture caller-owned values before authorization and execution. */
