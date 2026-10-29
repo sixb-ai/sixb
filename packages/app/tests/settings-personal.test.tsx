@@ -87,13 +87,19 @@ function renderPersonal(
   if (profile) queryClient.setQueryData(getAuthProfileQueryKey(), profile)
   queryClient.setQueryData(getAuthAccessManagementOptionsQueryKey(), { groups: [] })
   queryClient.setQueryData(listAuthSessionsQueryKey(), { sessions: [] })
-  // Without an agent, the page has no approval mode to offer.
-  queryClient.setQueryData(getAgentOptions().queryKey, agent ? { name: "Sixb" } : null)
   if (agent) {
+    queryClient.setQueryData(getAgentOptions().queryKey, {
+      name: "Sixb",
+      model: { provider: "test", modelId: "test-model" },
+    })
     queryClient.setQueryData(getAgentPreferencesQueryKey(), {
       approvalMode: agent.approvalMode,
       approvalModeSource: "fallback",
     })
+  } else {
+    // Without an agent, the page has no approval mode to offer. The server answers with a 404,
+    // which a seeded query cannot hold, so `null` goes in under the key without its data type.
+    queryClient.setQueryData([...getAgentOptions().queryKey], null)
   }
 
   return render(

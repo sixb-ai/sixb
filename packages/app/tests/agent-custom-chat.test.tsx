@@ -88,6 +88,7 @@ function seeded(messages: readonly AgentMessage[], runs: readonly AgentRun[]): Q
   })
   queryClient.setQueryData(listModelsOptions().queryKey, {
     language: [],
+    image: [],
     audio: { speech: [], transcription: [] },
     capabilities: { run: false },
   })
@@ -98,14 +99,14 @@ function seeded(messages: readonly AgentMessage[], runs: readonly AgentRun[]): Q
   queryClient.setQueryData(
     listAgentThreadMessagesOptions({ path: { threadId: thread.id }, query: { order: "asc" } })
       .queryKey,
-    { messages }
+    { messages: [...messages], authors: [], hasMore: false, total: messages.length }
   )
   queryClient.setQueryData(
     listAgentThreadRunsOptions({
       path: { threadId: thread.id },
       query: { limit: "50", order: "desc" },
     }).queryKey,
-    { runs }
+    { runs: [...runs], hasMore: false, total: runs.length }
   )
   return queryClient
 }

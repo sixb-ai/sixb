@@ -227,6 +227,11 @@ defineIntervention("review-with-defaults")
     }
   })
 
+const transactionRef: ObjectRef<"Transaction"> = {
+  objectTypeId: "Transaction",
+  primaryId: "transaction:1",
+}
+
 defineIntervention("bad-default")
   .input({
     invoice: ref(Invoice),
@@ -235,9 +240,7 @@ defineIntervention("bad-default")
     invoice: ref(Invoice),
   })
   // @ts-expect-error default response fields must match the response contract
-  .defaults(() => ({
-    invoice: { objectTypeId: "Transaction", primaryId: "transaction:1" },
-  }))
+  .defaults(() => ({ invoice: transactionRef }))
 
 const workflow = defineWorkflow("reconcile-transaction")
   .input(workflowInput)

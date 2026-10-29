@@ -117,7 +117,7 @@ test("with tiers, the browser's choice for every conversation pins none", async 
   const chat = async (language: readonly LanguageModel[]) => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(listModelsOptions().queryKey, {
-      language,
+      language: [...language],
       image: [],
       audio: { speech: [], transcription: [] },
       capabilities: { run: false },

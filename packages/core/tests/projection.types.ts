@@ -222,12 +222,13 @@ const _Unrelated = defineObjectType({
   name: "Unrelated",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
-// @ts-expect-error — target "unrelated" is not "building" and doesn't extend it
-fromForeignKey({
+const unrelatedForeignKey = {
   link: _Room.l.inBuilding,
   sourceProperty: _Room.p.buildingRef,
   target: _Unrelated,
-})
+}
+// @ts-expect-error — target "unrelated" is not "building" and doesn't extend it
+fromForeignKey(unrelatedForeignKey)
 
 // 12. fromForeignKey accepts direct subtype (extends matches link target)
 const _OfficeBuilding = defineObjectType({
