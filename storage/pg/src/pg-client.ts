@@ -137,10 +137,10 @@ type DirectTlsVerification = "none" | "ca" | "full"
 
 // `sslnegotiation=direct` is read from the connection string, as libpq reads it. Without it,
 // porsager negotiates TLS the classic way: an SSLRequest on a plain TCP socket, then an upgrade of
-// that socket with `tls.connect({ socket })`. Bun 1.4.0–1.4.2 keeps every byte received on such an
-// upgraded socket in memory for good, so a process that reads a lot grows until it is killed.
-// Opening the TLS connection ourselves with `tls.connect({ host, port })` avoids that path, and
-// saves the SSLRequest round trip on every connection.
+// that socket with `tls.connect({ socket })`. Opening the TLS connection ourselves with
+// `tls.connect({ host, port })` saves the SSLRequest round trip on every connection. It also
+// avoids a Bun 1.4.0–1.4.2 bug (fixed by 1.4.4) that keeps every byte received on an upgraded
+// socket in memory for good, so a process that reads a lot grows until it is killed.
 function tlsOptions(options: CreatePgClientOptions): Record<string, unknown> {
   const verification = directTlsVerification(options)
   if (verification === null) {

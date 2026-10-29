@@ -23,6 +23,7 @@ const args = process.argv.slice(2)
 const MINIMUM_BUN_VERSION = "1.4.2"
 
 assertSupportedBunVersion()
+assertBunCheckRanTheChecker()
 
 const VERSION = `sixb v${await readPackageVersion()}`
 
@@ -38,6 +39,22 @@ function assertSupportedBunVersion(): void {
   console.error(
     `[Sixb] Bun ${MINIMUM_BUN_VERSION} or newer is required; this is Bun ${current}. ` +
       "Run `bun upgrade` and try again."
+  )
+  process.exit(1)
+}
+
+/**
+ * A project's `typecheck` script runs `bun check --no-script`. Bun before 1.4.3 has no type
+ * checker, so it runs the project's `check` script — this command — with the flag instead, and an
+ * unknown-option error would not say why.
+ */
+function assertBunCheckRanTheChecker(): void {
+  if (args[0] !== "check" || !args.includes("--no-script")) return
+  if (compareVersions(Bun.version, "1.4.3") >= 0) return
+
+  console.error(
+    `[Sixb] Bun ${Bun.version} has no type checker, so \`bun check\` ran the project's \`check\` ` +
+      "script instead. Run `bun upgrade` and try again."
   )
   process.exit(1)
 }

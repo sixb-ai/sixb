@@ -2,7 +2,10 @@ import { join } from "node:path"
 import type { PublishablePackage } from "./publishable-packages"
 import { packageName } from "./publishable-packages"
 
-/** Bun 1.3.14 packs workspace dependency versions from the lockfile, even after a manifest bump. */
+/**
+ * Bun 1.3.14–1.4.2 pack workspace dependency versions from the lockfile, even after a manifest
+ * bump. 1.4.4 packs the manifest's, but a frozen install still leaves bun.lock stale.
+ */
 export async function assertWorkspaceLockfileVersions(
   root: string,
   packages: readonly PublishablePackage[]
