@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import {
   AGENT_REASONING_LEVELS,
@@ -54,6 +55,7 @@ import { delay } from "./abort"
 import { renderHandedFiles } from "./agent-prompt"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import {
+  CHILD_FILES_DIRECTORY,
   handedFileRefs,
   type InstalledChildFile,
   installChildOutputs,
@@ -70,6 +72,7 @@ import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import type { TurnChildren } from "./run-agent-turn"
+import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { continuationTrigger } from "./subagent-continuation"
 import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -400,7 +403,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
-        "Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes.",
+        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes, under ${posix.join(SANDBOX_CONTEXT_DIRECTORY, CHILD_FILES_DIRECTORY)}/<key>/ this turn.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
