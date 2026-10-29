@@ -163,13 +163,13 @@ export function createAgentToolFiles(input: CreateAgentToolFilesInput): AgentToo
 
         const handle = await input.resolveSandbox()
         input.signal.throwIfAborted()
-        const relativePath = toolFileSandboxRelativePath(input.toolCallId, fileRef, fileName)
-        await handle.sandbox.writeFiles([{ path: relativePath, contents: body.bytes }])
+        const path = toolFileSandboxPath(handle, input.toolCallId, fileRef, fileName)
+        await handle.sandbox.writeFiles([{ path, contents: body.bytes }])
         input.signal.throwIfAborted()
 
         const file = {
           fileRef,
-          sandboxPath: posix.join(handle.sandbox.workingDirectory, relativePath),
+          sandboxPath: posix.resolve(handle.sandbox.workingDirectory, path),
         }
         published = true
         input.onPublished?.(file)
@@ -332,14 +332,16 @@ const SIGNATURE_REQUIRED_MEDIA_TYPES = new Set([
   "image/webp",
 ])
 
-function toolFileSandboxRelativePath(
+/** Where a tool's file goes in the context directory, as the agent names it. */
+function toolFileSandboxPath(
+  handle: AgentSandboxHandle,
   toolCallId: string,
   fileRef: FileRef,
   fileName: string
 ): string {
   const callKey = createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
   const digestKey = fileRef.digest.slice("sha256:".length, "sha256:".length + 12)
-  return posix.join(".sixb", "agent", "tool-files", callKey, `${digestKey}-${fileName}`)
+  return posix.join(handle.contextDirectory, "tool-files", callKey, `${digestKey}-${fileName}`)
 }
 
 function toolFileError(toolName: string, message: string): AgentToolPublicError {

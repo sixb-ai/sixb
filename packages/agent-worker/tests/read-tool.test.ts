@@ -5,6 +5,7 @@ import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { createReadTool, type ReadToolInput, type ReadToolOutput } from "../src/tools/read"
 
 const roots: string[] = []
@@ -247,7 +248,9 @@ async function createHarness(
 }> {
   const root = await tempRoot()
   const sandbox = new TestSandbox(root, result)
-  const definition = createReadTool(() => Promise.resolve({ sandbox, env }))
+  const definition = createReadTool(() =>
+    Promise.resolve({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY, env })
+  )
   const execute = executableTool(definition)
   return {
     root,

@@ -20,7 +20,7 @@ import {
   SandboxFileError,
   type SandboxFileListing,
 } from "./sandbox-files"
-import type { AgentSandboxHandle } from "./sandbox-handle"
+import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 import { AgentFileBudget } from "./tools/tool-files"
 import type { AgentRunFiles } from "./types"
 
@@ -32,26 +32,27 @@ import type { AgentRunFiles } from "./types"
 const CHILD_OUTPUT_DIRECTORY = "out"
 
 /**
- * Where a parent finds them, a directory per spawn key. Under `.sixb/agent`, so they last for the
- * turn, like the run's attachments and artifacts.
+ * Where a parent finds them, a directory per spawn key, in the context directory. They last for
+ * the turn, like the run's attachments and artifacts.
  */
-export const CHILD_FILES_DIRECTORY = ".sixb/agent/children"
+export const CHILD_FILES_DIRECTORY = "children"
 
-/** What a run installs under `.sixb/agent` that holds files worth handing over. */
-const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", "children"].map(
-  (directory) => `.sixb/agent/${directory}/`
-)
+/** What a run installs in its context directory that holds files worth handing over. */
+const HANDED_RUN_DIRECTORIES = ["attachments", "artifacts", "tool-files", CHILD_FILES_DIRECTORY]
 const SANDBOX_TIMEOUT_MS = 30_000
 const { maxFiles, fileMaxBytes, totalMaxBytes } = SANDBOX_ATTACHMENT_LIMITS
 
-/** Whether `path`, relative to the working directory, is in the run context `.sixb/agent`. */
-function isRunFile(path: string): boolean {
-  return path === ".sixb/agent" || path.startsWith(".sixb/agent/")
+/**
+ * Whether `path` is in the run's context directory, both relative to the working directory. A
+ * context directory outside the working directory holds no such path.
+ */
+function isRunFile(path: string, contextDirectory: string): boolean {
+  return path === contextDirectory || path.startsWith(`${contextDirectory}/`)
 }
 
 /** A file a child returned, copied into its parent's sandbox for the turn. */
 export interface InstalledChildFile extends SubagentRunFile {
-  /** Relative to the working directory. */
+  /** As the agent names it: relative to the working directory, or absolute. */
   readonly sandboxPath: string
 }
 
@@ -178,17 +179,21 @@ export async function prepareHandedFiles(input: {
   readonly files: readonly SubagentRunFile[]
   /**
    * The files are in the sandbox already, as a resumed workspace kept them: listed, not copied,
-   * so what the child changed in them stays. Those under `.sixb/agent` are copied again: every
-   * run starts without that directory.
+   * so what the child changed in them stays. Those in the context directory are copied again:
+   * every run starts without it.
    */
   readonly inSandbox?: boolean
+  /** The child's context directory, relative to its working directory or absolute. */
+  readonly contextDirectory: string
   readonly blobStorage: BlobStorage
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const signal = input.signal ?? NEVER_ABORTED_SIGNAL
   const sandboxFiles: PreparedAgentAttachmentContext["sandboxFiles"][number][] = []
 
-  const copied = input.inSandbox ? input.files.filter((file) => isRunFile(file.path)) : input.files
+  const copied = input.inSandbox
+    ? input.files.filter((file) => isRunFile(file.path, input.contextDirectory))
+    : input.files
   for (const { path, fileRef } of copied) {
     const stat = await waitForAbort(input.blobStorage.stat(fileRef.blobId), signal)
     if (stat?.digest !== fileRef.digest) {
@@ -298,9 +303,9 @@ export async function storeChildOutputs(input: {
 
 /**
  * The parent's side: copy what a child wrote under `out/` into the parent's sandbox for the turn,
- * under `.sixb/agent/children/<key>/`. Each file's reference names it by that path, as its
- * `logicalPath`, and by a name no other file of the child shares, so a later turn tells them
- * apart in `$SIXB_ATTACHMENTS`.
+ * under `children/<key>/` in its context directory. Each file's reference names it by that path,
+ * as its `logicalPath`, and by a name no other file of the child shares, so a later turn tells
+ * them apart in `$SIXB_ATTACHMENTS`.
  */
 export async function installChildOutputs(input: {
   readonly files: AgentRunFiles
@@ -311,7 +316,7 @@ export async function installChildOutputs(input: {
   const { signal } = input
   const handle = await input.files.sandbox()
   const childDirectory = childDirectoryName(input.key)
-  const directory = posix.join(CHILD_FILES_DIRECTORY, childDirectory)
+  const directory = posix.join(handle.contextDirectory, CHILD_FILES_DIRECTORY, childDirectory)
 
   const installed: InstalledChildFile[] = []
   const names = new Set<string>()
@@ -320,7 +325,7 @@ export async function installChildOutputs(input: {
     const contents = await readBlob(input.files.blobStorage, fileRef.blobId, signal)
     signal.throwIfAborted()
     await handle.sandbox.writeFiles([
-      { path: posix.join(handle.sandbox.workingDirectory, directory, path), contents },
+      { path: posix.resolve(handle.sandbox.workingDirectory, directory, path), contents },
     ])
 
     const name = `${childDirectory}-${path.split("/").join("-")}`
@@ -373,7 +378,7 @@ async function handedSourcesAt(
   if (realPath === "" || realPath.startsWith("../") || realPath === "..") {
     throw handOffError(`'${path}': it leads outside the sandbox working directory`)
   }
-  assertHandable(realPath, path)
+  assertHandable(handle, realPath, path)
 
   if (entry.kind === "file") {
     return [{ path: childPath, absolutePath: entry.realPath }]
@@ -406,20 +411,24 @@ async function handedSourcesAt(
 }
 
 /**
- * Hands over nothing of the run context under `.sixb/agent` but its files: the context holds the
- * run's API address. Checked where a path really is; a copy the Agent makes with `cp` is not.
+ * Hands over nothing of the run's context directory but its files: the context holds the run's
+ * API address. Checked where a path really is; a copy the Agent makes with `cp` is not.
  */
-function assertHandable(relativePath: string, requested: string): void {
-  const runFile = isRunFile(relativePath)
+function assertHandable(handle: AgentSandboxHandle, relativePath: string, requested: string): void {
+  const contextDirectory = posix.relative(
+    posix.resolve(handle.sandbox.workingDirectory),
+    contextPath(handle)
+  )
+  const runFile = isRunFile(relativePath, contextDirectory)
   const handed = HANDED_RUN_DIRECTORIES.some((directory) =>
-    `${relativePath}/`.startsWith(directory)
+    `${relativePath}/`.startsWith(`${contextDirectory}/${directory}/`)
   )
   if (!runFile || handed) {
     return
   }
 
   throw handOffError(
-    `'${requested}': it is part of the run context Sixb installs under .sixb/agent. Hand over files from your working directory, $SIXB_ATTACHMENT_DIR, $SIXB_ARTIFACTS_DIR or ${CHILD_FILES_DIRECTORY}`
+    `'${requested}': it is part of the run context Sixb installs under ${handle.contextDirectory}. Hand over files from your working directory, $SIXB_ATTACHMENT_DIR, $SIXB_ARTIFACTS_DIR or ${posix.join(handle.contextDirectory, CHILD_FILES_DIRECTORY)}`
   )
 }
 

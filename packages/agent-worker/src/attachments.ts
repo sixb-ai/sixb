@@ -84,6 +84,8 @@ export async function prepareAgentAttachments(input: {
   readonly messages: readonly AgentMessageRecord[]
   readonly blobStorage: BlobStorage
   readonly apiBaseUrl: string
+  /** Where the run's files go: attachments are materialized in it. */
+  readonly contextDirectory: string
   readonly inlineImages: boolean
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
@@ -268,6 +270,7 @@ async function prepareOneAttachment(input: {
   readonly item: AttachmentWorkItem
   readonly blobStorage: BlobStorage
   readonly apiBaseUrl: string
+  readonly contextDirectory: string
   readonly inlineImages: boolean
   readonly sandboxBytes: number
   readonly textInlineBytes: number
@@ -343,7 +346,12 @@ async function prepareOneAttachment(input: {
     }
 
     if (bytes && needsFullBytes && bytes.byteLength === stat.sizeBytes) {
-      sandboxPath = sandboxAttachmentPath(item.message.id, item.sandboxName, fileName)
+      sandboxPath = sandboxAttachmentPath(
+        input.contextDirectory,
+        item.message.id,
+        item.sandboxName,
+        fileName
+      )
       sandboxFile = { key, path: sandboxPath, bytes, fileRef }
       sandboxBytesAdded = stat.sizeBytes
     } else if (!canMaterializeFile) {
@@ -790,10 +798,14 @@ function attachmentContentUrl(input: {
   )}`
 }
 
-function sandboxAttachmentPath(messageId: string, sandboxName: string, fileName: string): string {
+function sandboxAttachmentPath(
+  contextDirectory: string,
+  messageId: string,
+  sandboxName: string,
+  fileName: string
+): string {
   return posix.join(
-    ".sixb",
-    "agent",
+    contextDirectory,
     "attachments",
     safePathSegment(messageId),
     `${safePathSegment(sandboxName)}-${safeFileName(fileName)}`

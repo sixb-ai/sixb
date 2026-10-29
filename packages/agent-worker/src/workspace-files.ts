@@ -1,16 +1,17 @@
 import type { Sandbox } from "@sixb/core"
+import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
 
 /** The script's exit status when the repository claims the directory reserved for run files. */
 const RESERVED_DIRECTORY_CLAIMED = 3
 
-/** The checkout tracks or re-includes `.sixb/agent/`: only the repository's owner can fix it. */
+/** The checkout tracks or re-includes the run files' directory: only its owner can fix that. */
 export class WorkspaceRunFilesConflictError extends Error {
   readonly name = "WorkspaceRunFilesConflictError"
 
   constructor() {
     super(
-      "[SixbAgentWorker] Sandbox repository tracks or re-includes .sixb/agent/, which Sixb reserves for run files. Remove the tracked files (git rm -r --cached .sixb/agent) and any .gitignore rule that re-includes the directory."
+      `[SixbAgentWorker] Sandbox repository tracks or re-includes ${SANDBOX_CONTEXT_DIRECTORY}/, which Sixb reserves for run files. Remove the tracked files (git rm -r --cached ${SANDBOX_CONTEXT_DIRECTORY}) and any .gitignore rule that re-includes the directory.`
     )
   }
 }
@@ -22,7 +23,7 @@ export function workspaceRunFilesScript(hasSource: boolean): string {
   const git = hasSource
     ? `
 git rev-parse --git-dir >/dev/null
-tracked=$(git ls-files -- .sixb/agent)
+tracked=$(git ls-files -- ${SANDBOX_CONTEXT_DIRECTORY})
 test -z "$tracked" || exit ${RESERVED_DIRECTORY_CLAIMED}
 # Managed sources are ordinary clones. Never write through redirected Git metadata.
 test -d .git
@@ -34,16 +35,16 @@ test ! -e .git/info/exclude || test -f .git/info/exclude
 excluded=false
 if test -f .git/info/exclude; then
   while IFS= read -r rule || test -n "$rule"; do
-    if test "$rule" = '/.sixb/agent/'; then excluded=true; break; fi
+    if test "$rule" = '/${SANDBOX_CONTEXT_DIRECTORY}/'; then excluded=true; break; fi
   done < .git/info/exclude
 fi
 if test "$excluded" = false; then
-  printf '\\n/.sixb/agent/\\n' >> .git/info/exclude
+  printf '\\n/${SANDBOX_CONTEXT_DIRECTORY}/\\n' >> .git/info/exclude
 fi
 # Repository ignore rules take precedence over local exclusions. Fail before writing secrets
 # when a repository explicitly re-includes our reserved directory; 1 means "not ignored".
 ignored=0
-git check-ignore -q -- .sixb/agent/ || ignored=$?
+git check-ignore -q -- ${SANDBOX_CONTEXT_DIRECTORY}/ || ignored=$?
 test "$ignored" -ne 1 || exit ${RESERVED_DIRECTORY_CLAIMED}
 test "$ignored" -eq 0
 `
@@ -51,7 +52,7 @@ test "$ignored" -eq 0
   return `set -e
 test ! -L .sixb
 ${git}
-rm -rf -- .sixb/agent`
+rm -rf -- ${SANDBOX_CONTEXT_DIRECTORY}`
 }
 
 /**

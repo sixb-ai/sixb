@@ -18,12 +18,7 @@ import {
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
-import {
-  attachmentKey,
-  modelSupportsInlineImages,
-  prepareAgentAttachments,
-  toolResultAttachmentKey,
-} from "./attachments"
+import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
@@ -104,19 +99,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       projectId,
       threadId: run.threadId,
     }))
-  const attachmentContext =
-    context.attachmentContext ??
-    (context.apiBaseUrl
-      ? await prepareAgentAttachments({
-          projectId,
-          threadId: run.threadId,
-          messages: threadContext.retainedMessages,
-          blobStorage: context.blobStorage,
-          apiBaseUrl: context.apiBaseUrl,
-          inlineImages: modelSupportsInlineImages(plan.model),
-          signal,
-        })
-      : undefined)
+  const { attachmentContext } = context
   const [sentTimes, authors] = await Promise.all([
     loadUserMessageTimes({
       storage: agents,

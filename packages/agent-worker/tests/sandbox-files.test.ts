@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import {
   listSandboxFiles,
   readSandboxFile,
@@ -29,7 +30,10 @@ afterEach(() => {
 })
 
 const signal = new AbortController().signal
-const handle = () => ({ sandbox: new LocalBashSandbox(root) })
+const handle = () => ({
+  sandbox: new LocalBashSandbox(root),
+  contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+})
 
 describe("resolveSandboxPath", () => {
   test("resolves relative and absolute paths inside the working directory", () => {
@@ -88,7 +92,10 @@ describe("listSandboxFiles", () => {
       durationMs: 1,
     })
     await expect(
-      listSandboxFiles({ sandbox }, { directory: root, maxFiles: 10, signal, timeoutMs: 10_000 })
+      listSandboxFiles(
+        { sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY },
+        { directory: root, maxFiles: 10, signal, timeoutMs: 10_000 }
+      )
     ).rejects.toMatchObject({ reason: "failed" })
   })
 

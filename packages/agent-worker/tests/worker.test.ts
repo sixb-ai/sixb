@@ -132,6 +132,7 @@ import {
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "../src/run-environment"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
 import { AgentFileBudget } from "../src/tools/tool-files"
@@ -1089,6 +1090,7 @@ function testSkill(name: string): AgentSkillDefinition {
 function testSystemPrompt(): string {
   return renderAgentSystemPrompt({
     mode: "conversation",
+    contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     skills: [],
   })
 }
@@ -6872,6 +6874,7 @@ describe("AgentWorker", () => {
       messages,
       blobStorage,
       apiBaseUrl: TEST_AGENT_API_BASE_URL,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       inlineImages: true,
     })
 
@@ -8444,7 +8447,7 @@ describe("AgentWorker", () => {
   ) {
     const sandbox = new RecordingSandbox("run-files")
     const runFiles: AgentRunFiles = {
-      sandbox: async () => ({ sandbox }),
+      sandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
       blobStorage: sixb.blobStorage,
       budget: options.budget ?? new AgentFileBudget(),
       installArtifactsFrom: options.installArtifactsFrom ?? (async () => {}),
@@ -10843,6 +10846,7 @@ describe("AgentWorker", () => {
         return await conversationPreparation.prepareAgentConversationContext({
           context,
           plan: executionPlanFor(host),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           ontologyIndex: renderOntologyDocs({
             catalog: host.definitions.agent.ontologyDocs,
             objectTypes: context.sixb.objects.listTypes(),

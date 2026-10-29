@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import type {
   AgentToolAttachments,
   AgentToolRunInfo,
@@ -181,6 +182,7 @@ export async function createConversationAgentEnvironment(
           context,
           plan,
           ontologyIndex: ontologyDocs.index,
+          contextDirectory: sandbox.contextDirectory,
           run,
           ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
           budget: preflight.budget,
@@ -215,6 +217,7 @@ export async function createConversationAgentEnvironment(
       messages,
       blobStorage: context.blobStorage,
       apiBaseUrl,
+      contextDirectory: sandbox.contextDirectory,
       inlineImages,
       signal: sandboxSignal,
     })
@@ -331,6 +334,7 @@ async function startSubagentEnvironment(
           parentRunId: run.parentRunId,
           files,
           inSandbox: resumed,
+          contextDirectory: sandbox.contextDirectory,
           blobStorage: context.blobStorage,
           signal: input.signal,
         })
@@ -343,6 +347,7 @@ async function startSubagentEnvironment(
           messages: history,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
+          contextDirectory: sandbox.contextDirectory,
           inlineImages: modelSupportsInlineImages(plan.model),
           signal: input.signal,
         })
@@ -402,12 +407,6 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  const attachmentContext = await prepareWorkflowInputAttachments({
-    input: input.nodeInput,
-    blobStorage: context.blobStorage,
-    signal: input.signal,
-  })
-
   // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
   // step's lost source credentials end the node through `failure`.
   const failure = new AbortController()
@@ -432,6 +431,12 @@ export async function createWorkflowAgentNodeEnvironment(
         },
       })
     : ephemeralRunSandbox({ context, signal: input.signal })
+  const attachmentContext = await prepareWorkflowInputAttachments({
+    input: input.nodeInput,
+    blobStorage: context.blobStorage,
+    contextDirectory: sandbox.contextDirectory,
+    signal: input.signal,
+  })
 
   try {
     return await startAgentEnvironment({
@@ -544,7 +549,7 @@ async function startAgentEnvironment(
     ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
     ...(threadId ? { threadId } : {}),
   })
-  let ready: Promise<AcquiredRunSandbox>
+  let ready: Promise<ProvisionedRunSandbox>
   const fileRegistry = new AgentSandboxFileRegistry()
   const fileBudget = new AgentFileBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
@@ -601,8 +606,8 @@ async function startAgentEnvironment(
       // As the requester: the turn installs nothing they could not read themselves.
       artifacts: context.sixb.artifacts,
       blobStorage: context.blobStorage,
-      directory: AGENT_ARTIFACTS_DIRECTORY,
-      manifestPath: AGENT_ARTIFACTS_MANIFEST,
+      directory: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_DIRECTORY),
+      manifestPath: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_MANIFEST),
       signal: input.sandboxSignal,
     })
     // Surfaced where provisioning awaits it.
@@ -667,6 +672,7 @@ async function startAgentEnvironment(
 
     systemPrompt = renderAgentSystemPrompt({
       mode,
+      contextDirectory: sandbox.contextDirectory,
       instructions: plan.instructions,
       skills: plan.skills,
       // Workflow prompts are kept lean: their steps get the files without the index.
@@ -836,13 +842,18 @@ interface ProvisionSandboxInput {
   readonly memory?: PrepareAgentSandboxApiContextInput["memory"]
 }
 
-async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredRunSandbox> {
+/** A sandbox acquired for the run, with the run's files installed in its context directory. */
+type ProvisionedRunSandbox = AcquiredRunSandbox & AgentSandboxHandle
+
+async function provisionSandbox(input: ProvisionSandboxInput): Promise<ProvisionedRunSandbox> {
   const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
   const acquired = await input.sandbox.acquire()
   const { sandbox } = acquired
+  const { contextDirectory } = input.sandbox
   try {
     const apiContext = await prepareAgentSandboxApiContext({
       sandbox,
+      contextDirectory,
       apiBaseUrl,
       projectId: context.id,
       ...(actorId === undefined ? {} : { actorId }),
@@ -859,7 +870,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredR
       env: apiContext.env,
       projectId: context.id,
     })
-    return { ...acquired, env: { ...acquired.env, ...apiContext.env } }
+    return { ...acquired, contextDirectory, env: { ...acquired.env, ...apiContext.env } }
   } catch (error) {
     // Give back a half-provisioned sandbox before propagating to the awaiter.
     await input.sandbox.release?.(acquired).catch(() => {})
@@ -868,7 +879,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredR
 }
 
 function disposeEnvironment(
-  ready: Promise<AgentSandboxHandle>,
+  ready: Promise<AcquiredRunSandbox>,
   isSettled: () => boolean,
   sandbox: RunSandbox,
   onDetachedTeardown?: (teardown: Promise<void>) => void

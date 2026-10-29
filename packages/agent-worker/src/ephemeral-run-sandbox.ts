@@ -1,6 +1,5 @@
 import type { Sandbox, SandboxEnvironment, SandboxFactory, SandboxSourceAuth } from "@sixb/core"
-import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
-import type { AgentSandboxHandle } from "./sandbox-handle"
+import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles } from "./workspace-files"
@@ -61,6 +60,7 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
 
   return {
     waitBeforeModel: false,
+    contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     acquire: async () => ({
       sandbox: await context.sandboxes.create({
         environment: {},
@@ -81,6 +81,7 @@ class EphemeralWorkspace implements RunSandbox {
   // The prompt describes every prepared workspace, at least its working directory and that it is
   // discarded, so the first model call waits for it, with or without a source.
   readonly waitBeforeModel = true
+  readonly contextDirectory = SANDBOX_CONTEXT_DIRECTORY
   private readonly workspace: EphemeralWorkspaceInput
   private readonly signal: AbortSignal
   private readonly access: WorkspaceAccess
@@ -137,7 +138,7 @@ class EphemeralWorkspace implements RunSandbox {
     return this.closeCredentials()
   }
 
-  release(acquired: AgentSandboxHandle): Promise<void> {
+  release(acquired: AcquiredRunSandbox): Promise<void> {
     return this.discard(acquired.sandbox)
   }
 

@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import type { BlobStorage, FileRef } from "@sixb/core"
 import { isFileRef } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -11,6 +12,8 @@ const MAX_WORKFLOW_ATTACHMENTS_TOTAL_BYTES = 100 * 1024 * 1024
 export async function prepareWorkflowInputAttachments(input: {
   readonly input: WorkflowIOSnapshot
   readonly blobStorage: BlobStorage
+  /** Where the run's files go: the input's files are materialized in it. */
+  readonly contextDirectory: string
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const refs = workflowInputFileRefs(input.input)
@@ -40,7 +43,11 @@ export async function prepareWorkflowInputAttachments(input: {
       input.signal
     )
     const fileName = safeFileName(item.fileRef.fileName ?? `${item.fileRef.blobId}.bin`)
-    const sandboxPath = `.sixb/agent/attachments/workflow-input/${index}-${fileName}`
+    const sandboxPath = posix.join(
+      input.contextDirectory,
+      "attachments/workflow-input",
+      `${index}-${fileName}`
+    )
     sandboxFiles.push({ key: item.path, path: sandboxPath, bytes, fileRef: item.fileRef })
     totalBytes += bytes.byteLength
     manifest.push({

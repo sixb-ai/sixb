@@ -70,6 +70,8 @@ export async function prepareAgentConversationContext(input: {
   readonly plan: ResolvedAgentExecutionPlan
   /** The ontology files listed in the conversation's prompt. */
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
+  /** Where the run's files go, as the prompt names them. */
+  readonly contextDirectory: string
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
   /** Who can read the run's thread: in a shared one, who wrote what counts toward the estimate. */
@@ -108,6 +110,7 @@ export async function prepareAgentConversationContext(input: {
     systemPrompt: [
       renderAgentSystemPrompt({
         mode: "conversation",
+        contextDirectory: input.contextDirectory,
         instructions: plan.instructions,
         skills: plan.skills,
         ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
