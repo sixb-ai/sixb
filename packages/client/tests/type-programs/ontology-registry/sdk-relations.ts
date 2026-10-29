@@ -6,7 +6,7 @@
  * inference until it overflowed (TS2589). Object types now carry their inferred property values,
  * and rows read them back instead of inferring them again.
  *
- * Guards, each case checked alone with TypeScript 5.9.3 (`bun run typecheck:tests`):
+ * Guards, each case checked alone with TypeScript 5.9.3 (`bun run typecheck:consumers`):
  * - make `TwinObject` (packages/core/src/runtime/types.ts) read `InferObjectProperties` instead of
  *   `ObjectTypeProperties`: both reassignments, the shared read helper and the loose row fail with
  *   TS2589;

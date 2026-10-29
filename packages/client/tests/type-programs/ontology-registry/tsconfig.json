@@ -1,6 +1,6 @@
 {
   // A standalone Sixb project with its own generated ontology registry, checked the way an app is:
-  // `sixb typegen`, then `tsc` against the published declarations (`bun run typecheck:tests`).
+  // `sixb typegen`, then `tsc` against the published declarations (`bun run typecheck:consumers`).
   // It lives in the client package because it checks every surface — server and browser — against
   // the same registry, and only this package may depend on both.
   "extends": "../../../../../tsconfig.base.json",
