@@ -79,17 +79,17 @@ command can run. The profile requires behavior, not an `agentReady` provider fla
 - Standard file utilities must support bounded reads and output collection, including `realpath`,
   `tail`, `head`, `base64`, `find`, `wc`, and `tr`.
 - Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
-- CA certificates must allow the CLI to reach an HTTPS API gateway.
+- CA certificates must allow the CLI to reach an HTTPS Sixb API.
 - The installed CLI, file modes, `PATH`, and run environment must be correct.
-- The CLI must reach and identify the run-scoped API gateway.
+- The CLI must reach the Sixb API with the run's token and identify the project.
 
 `curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
 runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
 after materializing its files, then runs `sixb doctor` to verify the installed CLI contract and
-project identity through the gateway. While the API restarts, `sixb doctor` is retried for at
+project identity through the API. While the API restarts, `sixb doctor` is retried for at
 most eight seconds on a refused connection or a 5xx. An incompatible environment cannot execute a
 sandbox command. Its failure records the provider, profile, failed check, and safe failure
-classification without recording raw command output or the gateway capability URL. Bake shared
+classification without recording raw command output or the run token. Bake shared
 dependencies into versioned images or snapshots; never install packages during an individual run.
 
 ### Optional filesystem persistence

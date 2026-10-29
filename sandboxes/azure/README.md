@@ -135,7 +135,7 @@ It needs a public HTTPS URL reachable from Azure.
 | `https://your-tunnel.ngrok.app` | Yes, for local development |
 | `http://localhost:3002` | No — localhost is inside the remote sandbox |
 | `https://api.example.com:8443` | No — restricted mode supports port 443 only |
-| Azure AI Foundry / model-provider URL | This is not the Sixb API gateway |
+| Azure AI Foundry / model-provider URL | This is not the Sixb API |
 
 For local development, start a tunnel to the port your Sixb API will use:
 

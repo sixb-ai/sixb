@@ -93,7 +93,7 @@ export class SmolvmSandbox implements Sandbox {
     // list. A local image archive and a bare machine both boot offline, so they
     // stay locked to the given policy (no registry egress).
     const basePolicy = options.network ?? { mode: "none" }
-    warnIfLoopbackGateway(basePolicy)
+    warnIfLoopbackApi(basePolicy)
     const needsRegistry = options.cli.image !== undefined && !isLocalImageArchive(options.cli.image)
     const policy = needsRegistry
       ? withRegistryEgress(basePolicy, options.registryHosts ?? [])
@@ -257,19 +257,19 @@ export class SmolvmSandbox implements Sandbox {
 }
 
 /**
- * A microVM has its own network stack, so a gateway advertised on localhost is unreachable from
+ * A microVM has its own network stack, so a Sixb API advertised on localhost is unreachable from
  * inside it under restricted egress. Warn on every affected sandbox with the fix rather than letting
  * the agent fail silently with connection-refused. (Per-sandbox on purpose: a module-level once-flag
  * would silence every sandbox after the first and leak state across tests.)
  */
-function warnIfLoopbackGateway(policy: SandboxNetworkPolicy): void {
+function warnIfLoopbackApi(policy: SandboxNetworkPolicy): void {
   if (policy.mode !== "restricted") {
     return
   }
   const loopback = policy.allow.find((target) => isLoopbackOrigin(target.origin))
   if (loopback) {
     console.warn(
-      `[Sandbox] smolvm runs in a VM and cannot reach the gateway at ${loopback.origin} over localhost. ` +
+      `[Sandbox] smolvm runs in a VM and cannot reach the Sixb API at ${loopback.origin} over localhost. ` +
         "Set the API public origin to the host's LAN IP (e.g. SIXB_API_PUBLIC_ORIGIN=http://<lan-ip>:<port>)."
     )
   }

@@ -132,9 +132,9 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
     }
   })
 
-  test("propagates factory env and the gateway capability URL, with per-call overrides", async () => {
+  test("propagates factory env and the API URL, with per-call overrides", async () => {
     const sandbox = await factory({
-      SIXB_API_BASE_URL: "http://127.0.0.1:3002/__sixb/agent-api/run-1/cap",
+      SIXB_API_BASE_URL: "http://127.0.0.1:3002",
       SIXB_RUN_ID: "run-1",
       TOKEN: "base",
     }).create({ workingDirectory: guest })
@@ -144,15 +144,13 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
         ["-lc", 'echo "$SIXB_RUN_ID@$SIXB_API_BASE_URL $TOKEN"'],
         { env: { TOKEN: "override" } }
       )
-      expect(result.stdout.trim()).toBe(
-        "run-1@http://127.0.0.1:3002/__sixb/agent-api/run-1/cap override"
-      )
+      expect(result.stdout.trim()).toBe("run-1@http://127.0.0.1:3002 override")
     } finally {
       await sandbox.destroy()
     }
   })
 
-  test("warns that a loopback gateway is unreachable from the VM under restricted egress", async () => {
+  test("warns that a loopback API is unreachable from the VM under restricted egress", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {})
     try {
       const sandbox = await factory().create({
@@ -165,7 +163,7 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
       await sandbox.destroy()
       expect(warn).toHaveBeenCalledTimes(1)
       expect(String(warn.mock.calls[0]?.[0])).toContain(
-        "cannot reach the gateway at http://127.0.0.1:3002 over localhost"
+        "cannot reach the Sixb API at http://127.0.0.1:3002 over localhost"
       )
     } finally {
       warn.mockRestore()

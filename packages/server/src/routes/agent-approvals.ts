@@ -64,7 +64,7 @@ function serializeApproval(approval: AgentApprovalRecord, callerKey?: string): S
   })
 }
 
-/** Approval modes and held calls. Session routes only, and never on the agent API gateway. */
+/** Approval modes and held calls. Session routes only, and never open to run tokens. */
 export function registerAgentApprovalRoutes(app: Elysia, host: SixbHostView) {
   const missingStorage = (set: { status?: number | string }) =>
     unconfiguredStorageResponse(set, "Agent storage")

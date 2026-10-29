@@ -28,10 +28,7 @@ import {
   userRef,
 } from "@sixb/core"
 import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
-import {
-  createAgentApiGatewayCapability,
-  createAgentRunExecutionToken,
-} from "@sixb/core/internal/agents"
+import { createAgentRunExecutionToken, createAgentRunToken } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { ImageModel, LanguageModel, ModelCatalogInput } from "@sixb/core/models"
@@ -51,7 +48,7 @@ import { registerAgentRoutes } from "../src/routes/agents"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-const PROJECT_ID = "agent-api-gateway-tests"
+const PROJECT_ID = "agent-run-token-tests"
 const NOW = new Date("2026-06-28T12:00:00.000Z")
 const AGENT_CLI_ARTIFACT = resolve(
   import.meta.dir,
@@ -200,11 +197,11 @@ const noteReaderRole = defineRole("note.reader", {
   grants: [can.view(PrivateNote)],
 })
 
-describe("agent API gateway", () => {
+describe("run tokens", () => {
   test("uses normal privileged API behavior when auth is disabled", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({ auth: false })
+    const { app, apiBaseUrl } = await createRunTokenRuntime({ auth: false })
 
-    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const objectTypes = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
     // The run's auth-disabled execution stays unrestricted: the Agent role deliberately cannot
     // view PrivateNote, so resolving this run as a principal would hide it.
@@ -215,15 +212,12 @@ describe("agent API gateway", () => {
     ])
   })
 
-  test("restores the run's inherited user authority from its capability, not caller credentials", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime()
+  test("restores the run's inherited user authority from its token, not a session cookie", async () => {
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
 
     const objectTypes = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/object-types`, {
-        headers: {
-          authorization: "Bearer attacker",
-          cookie: "sixb_session_app=attacker",
-        },
+      new Request(`${apiBaseUrl}/api/object-types`, {
+        headers: { cookie: "sixb_session_app=attacker" },
       })
     )
     expect(objectTypes.status).toBe(200)
@@ -233,13 +227,9 @@ describe("agent API gateway", () => {
     ])
 
     const count = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/objects/query/count`, {
+      new Request(`${apiBaseUrl}/api/objects/query/count`, {
         method: "POST",
-        headers: {
-          authorization: "Bearer attacker",
-          cookie: "sixb_session_app=attacker",
-          "content-type": "application/json",
-        },
+        headers: { cookie: "sixb_session_app=attacker", "content-type": "application/json" },
         body: JSON.stringify({ query: { kind: "start", objectTypeId: "device" } }),
       })
     )
@@ -251,14 +241,14 @@ describe("agent API gateway", () => {
     // A conversation works for its user; a workflow AI task for the workflow's requester, not the
     // agent's service account.
     for (const executionKind of ["conversation", "workflow"] as const) {
-      const { app, gatewayBaseUrl, sixb } = await createGatewayRuntime({ executionKind })
+      const { app, apiBaseUrl, sixb } = await createRunTokenRuntime({ executionKind })
       await createTestSixb(sixb).objects.upsert("device", {
         id: "fan-2",
         owner: userRef("usr_requester"),
       })
 
       const response = await app.fetch(
-        new Request(`${gatewayBaseUrl}/api/objects/query`, {
+        new Request(`${apiBaseUrl}/api/objects/query`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -279,9 +269,9 @@ describe("agent API gateway", () => {
   })
 
   test("restores child authority without allowing recursive workflows", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({ executionKind: "subagent" })
+    const { app, apiBaseUrl } = await createRunTokenRuntime({ executionKind: "subagent" })
 
-    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const objectTypes = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
     await expect(objectTypes.json()).resolves.toEqual([
       expect.objectContaining({ id: "contract" }),
@@ -289,7 +279,7 @@ describe("agent API gateway", () => {
     ])
 
     const workflow = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+      new Request(`${apiBaseUrl}/api/workflows/inspect-devices/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -302,19 +292,19 @@ describe("agent API gateway", () => {
   })
 
   test("exposes files, links, action history, and authorized workflow runs", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime()
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
 
     const form = new FormData()
     form.set("file", new File([new Uint8Array(1_000_001)], "generated.bin"))
     const upload = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/files`, { method: "POST", body: form })
+      new Request(`${apiBaseUrl}/api/files`, { method: "POST", body: form })
     )
     expect(upload.status).toBe(200)
     const fileRef = await upload.json()
     expect(fileRef).toMatchObject({ fileName: "generated.bin", sizeBytes: 1_000_001 })
 
     const queriedLinks = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/objects/query/links`, {
+      new Request(`${apiBaseUrl}/api/objects/query/links`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -343,7 +333,7 @@ describe("agent API gateway", () => {
     })
 
     const action = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/actions/label-device`, {
+      new Request(`${apiBaseUrl}/api/actions/label-device`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -354,13 +344,13 @@ describe("agent API gateway", () => {
     expect(action.status).toBe(200)
     const actionRun = (await action.json()) as { id: string }
     expect(actionRun).toMatchObject({ actionId: "label-device", status: "succeeded" })
-    const actionRuns = await app.fetch(new Request(`${gatewayBaseUrl}/api/action-runs`))
+    const actionRuns = await app.fetch(new Request(`${apiBaseUrl}/api/action-runs`))
     expect(actionRuns.status).toBe(200)
     await expect(actionRuns.json()).resolves.toMatchObject({
       runs: [expect.objectContaining({ id: actionRun.id, actionId: "label-device" })],
     })
 
-    const workflows = await app.fetch(new Request(`${gatewayBaseUrl}/api/workflows`))
+    const workflows = await app.fetch(new Request(`${apiBaseUrl}/api/workflows`))
     expect(workflows.status).toBe(200)
     await expect(workflows.json()).resolves.toEqual([
       expect.objectContaining({ id: "inspect-devices" }),
@@ -368,11 +358,11 @@ describe("agent API gateway", () => {
       expect.objectContaining({ id: "relabel-devices" }),
     ])
 
-    const workflow = await app.fetch(new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices`))
+    const workflow = await app.fetch(new Request(`${apiBaseUrl}/api/workflows/inspect-devices`))
     expect(workflow.status).toBe(200)
 
     const workflowRequest = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+      new Request(`${apiBaseUrl}/api/workflows/inspect-devices/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input: { document: fileRef } }),
@@ -381,7 +371,7 @@ describe("agent API gateway", () => {
     expect(workflowRequest.status).toBe(202)
     const workflowRun = (await workflowRequest.json()) as { runId: string }
 
-    const workflowRuns = await app.fetch(new Request(`${gatewayBaseUrl}/api/workflow-runs`))
+    const workflowRuns = await app.fetch(new Request(`${apiBaseUrl}/api/workflow-runs`))
     expect(workflowRuns.status).toBe(200)
     const workflowRunHistory = (await workflowRuns.json()) as { runs: readonly unknown[] }
     expect(workflowRunHistory.runs).toEqual(
@@ -391,7 +381,7 @@ describe("agent API gateway", () => {
     )
 
     const workflowDetail = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/workflow-runs/${workflowRun.runId}`)
+      new Request(`${apiBaseUrl}/api/workflow-runs/${workflowRun.runId}`)
     )
     expect(workflowDetail.status).toBe(200)
     await expect(workflowDetail.json()).resolves.toEqual({
@@ -401,14 +391,14 @@ describe("agent API gateway", () => {
 
     const workflowFile = await app.fetch(
       new Request(
-        `${gatewayBaseUrl}/api/workflow-runs/${workflowRun.runId}/files/content?path=${encodeURIComponent("/input/document")}`
+        `${apiBaseUrl}/api/workflow-runs/${workflowRun.runId}/files/content?path=${encodeURIComponent("/input/document")}`
       )
     )
     expect(workflowFile.status).toBe(200)
     expect((await workflowFile.arrayBuffer()).byteLength).toBe(1_000_001)
 
     const completedDetail = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/workflow-runs/completed-workflow-run`)
+      new Request(`${apiBaseUrl}/api/workflow-runs/completed-workflow-run`)
     )
     expect(completedDetail.status).toBe(200)
     await expect(completedDetail.json()).resolves.toEqual({
@@ -424,30 +414,18 @@ describe("agent API gateway", () => {
 
     const completedFile = await app.fetch(
       new Request(
-        `${gatewayBaseUrl}/api/workflow-runs/completed-workflow-run/files/content?path=${encodeURIComponent("/output/document")}`
+        `${apiBaseUrl}/api/workflow-runs/completed-workflow-run/files/content?path=${encodeURIComponent("/output/document")}`
       )
     )
     expect(completedFile.status).toBe(200)
     expect(await completedFile.text()).toBe("workflow result")
   })
 
-  test("keeps the general body limit and rejects recursive workflow starts", async () => {
-    const conversational = await createGatewayRuntime()
-    const oversizedQuery = await conversational.app.fetch(
-      new Request(`${conversational.gatewayBaseUrl}/api/objects/query`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ padding: "x".repeat(1_000_001) }),
-      })
-    )
-    expect(oversizedQuery.status).toBe(413)
-    await expect(oversizedQuery.json()).resolves.toEqual({
-      error: "Agent API gateway request body exceeds 1MB.",
-    })
-
-    const workflowAgent = await createGatewayRuntime({ executionKind: "workflow" })
+  // The API's own body limit applies to run tokens as to any caller, where the server listens.
+  test("rejects recursive workflow starts", async () => {
+    const workflowAgent = await createRunTokenRuntime({ executionKind: "workflow" })
     const recursive = await workflowAgent.app.fetch(
-      new Request(`${workflowAgent.gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+      new Request(`${workflowAgent.apiBaseUrl}/api/workflows/inspect-devices/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -459,16 +437,16 @@ describe("agent API gateway", () => {
     })
 
     const discover = await workflowAgent.app.fetch(
-      new Request(`${workflowAgent.gatewayBaseUrl}/api/workflows`)
+      new Request(`${workflowAgent.apiBaseUrl}/api/workflows`)
     )
     expect(discover.status).toBe(200)
   })
 
   test("saves the requester's memory with the run's own conversation as its source", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
 
     const saved = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/agent-memory/user/revisions`, {
+      new Request(`${apiBaseUrl}/api/agent-memory/user/revisions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -490,12 +468,12 @@ describe("agent API gateway", () => {
         source: "/agents/thread-1",
       }),
     ])
-    const repo = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`))
+    const repo = await app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/user`))
     await expect(repo.json()).resolves.toMatchObject({ revision: 1 })
 
     // Deleting a repo is for people.
     const deleted = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/agent-memory/user`, { method: "DELETE" })
+      new Request(`${apiBaseUrl}/api/agent-memory/user`, { method: "DELETE" })
     )
     expect(deleted.status).toBeGreaterThanOrEqual(400)
     expect(
@@ -505,9 +483,9 @@ describe("agent API gateway", () => {
   })
 
   test("gives a shared conversation the project's memory alone", async () => {
-    // Reproduce by dropping the shared-conversation check in handleAgentApiGatewayRequest: the
+    // Reproduce by dropping the shared-conversation check in resolveRunTokenRequest: the
     // run then reads and saves its requester's own memory.
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
     await storage.agents.threads.addParticipants({
       projectId: PROJECT_ID,
       threadId: "thread-1",
@@ -517,7 +495,7 @@ describe("agent API gateway", () => {
     })
     const save = (repo: string) =>
       app.fetch(
-        new Request(`${gatewayBaseUrl}/api/agent-memory/${repo}/revisions`, {
+        new Request(`${apiBaseUrl}/api/agent-memory/${repo}/revisions`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -533,7 +511,7 @@ describe("agent API gateway", () => {
       await save("user"),
       // A route parameter is percent-decoded: this one names the user's repo too.
       await save("%75ser"),
-      await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`)),
+      await app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/user`)),
     ]) {
       expect(response.status).toBe(403)
       await expect(response.json()).resolves.toEqual(refused)
@@ -548,12 +526,12 @@ describe("agent API gateway", () => {
   })
 
   test("refuses a child agent once its parent run has ended", async () => {
-    // Reproduce by dropping the parent check in handleAgentApiGatewayRequest: the child still reads
+    // Reproduce by dropping the parent check in resolveRunTokenRequest: the child still reads
     // the project, and could still change it, after its turn has ended.
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
       executionKind: "subagent",
     })
-    const read = () => app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const read = () => app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect((await read()).status).toBe(200)
 
     const execution = {
@@ -576,18 +554,18 @@ describe("agent API gateway", () => {
   })
 
   test("lets a child agent read its conversation's memory and save none of it", async () => {
-    // Reproduce by dropping the child's memory check in handleAgentApiGatewayRequest: the save
+    // Reproduce by dropping the child's memory check in resolveRunTokenRequest: the save
     // then lands in the requester's repo, with no conversation as its source.
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
       executionKind: "subagent",
     })
 
-    const read = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`))
+    const read = await app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/user`))
     expect(read.status).toBe(200)
     await expect(read.json()).resolves.toMatchObject({ repo: "user", revision: 0 })
 
     const saved = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/agent-memory/user/revisions`, {
+      new Request(`${apiBaseUrl}/api/agent-memory/user/revisions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -606,11 +584,11 @@ describe("agent API gateway", () => {
   })
 
   test("gives workflow agent nodes no memory", async () => {
-    // Reproduce by dropping the Agent memory check in handleAgentApiGatewayRequest: the node's
+    // Reproduce by dropping the Agent memory check in resolveRunTokenRequest: the node's
     // service account then reaches the project's memory through can.run(agent).
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({ executionKind: "workflow" })
+    const { app, apiBaseUrl } = await createRunTokenRuntime({ executionKind: "workflow" })
 
-    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/project`))
+    const response = await app.fetch(new Request(`${apiBaseUrl}/api/agent-memory/project`))
 
     expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual({
@@ -619,7 +597,7 @@ describe("agent API gateway", () => {
   })
 
   test("can fetch file attachments from the active run thread", async () => {
-    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime()
     const fileRef = await sixb.blobStorage.put({
       body: new TextEncoder().encode("agent attachment"),
       fileName: "attachment.txt",
@@ -641,7 +619,7 @@ describe("agent API gateway", () => {
 
     const response = await app.fetch(
       new Request(
-        `${gatewayBaseUrl}/api/agent-threads/thread-1/messages/msg-1/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+        `${apiBaseUrl}/api/agent-threads/thread-1/messages/msg-1/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
       )
     )
 
@@ -650,7 +628,7 @@ describe("agent API gateway", () => {
     expect(await response.text()).toBe("agent attachment")
   })
 
-  // Removal proof: bind gateway requests with `bindRequestExecution` again in server.ts; the
+  // Removal proof: bind run-token requests with `bindRequestExecution` again in server.ts; the
   // inherited user holds no can.run(project.models), so the call is refused.
   // Removal proof: drop the own-execution check from models/calls.ts; the workflow step's service
   // account cannot view its workflow run, so it cannot download its own image.
@@ -663,13 +641,13 @@ describe("agent API gateway", () => {
       generate: async () => ({ output: { images: [{ data: png, mediaType: "image/png" }] } }),
     }
     for (const executionKind of ["conversation", "subagent", "workflow"] as const) {
-      const { app, gatewayBaseUrl, runId, storage } = await createGatewayRuntime({
+      const { app, apiBaseUrl, runId, storage } = await createRunTokenRuntime({
         executionKind,
         models: { image: [painter] },
       })
 
       const generated = await app.fetch(
-        new Request(`${gatewayBaseUrl}/api/models/image/generations`, {
+        new Request(`${apiBaseUrl}/api/models/image/generations`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ prompt: "a fox" }),
@@ -695,55 +673,68 @@ describe("agent API gateway", () => {
       ).toMatchObject({ callId, modelKind: "image" })
 
       const content = await app.fetch(
-        new Request(`${gatewayBaseUrl}/api/ai/model-calls/${callId}/files/content?path=/files/0`)
+        new Request(`${apiBaseUrl}/api/ai/model-calls/${callId}/files/content?path=/files/0`)
       )
       expect(content.status).toBe(200)
       expect(new Uint8Array(await content.arrayBuffer())).toEqual(png)
     }
   })
 
-  test("rejects a capability after its projected queue ownership expires", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({
+  test("rejects a run token after its projected queue ownership expires", async () => {
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
       queueLeaseExpiresAt: new Date(Date.now() - 1),
     })
 
-    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const response = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(response.status).toBe(403)
   })
 
-  test("rejects invalid capabilities and undocumented routes", async () => {
-    const { app, executionToken, gatewayBaseUrl, runId, storage } = await createGatewayRuntime()
+  // Guard proof: skip `isValidAgentRunToken` in resolveRunTokenRequest; the forged tokens get in.
+  test("rejects forged and ended run tokens, and routes a run token does not open", async () => {
+    const { app, api, apiBaseUrl, executionToken, runId, runToken, storage } =
+      await createRunTokenRuntime()
+    const withToken = (token: string, path = "/api/object-types") =>
+      api.fetch(
+        new Request(`${apiBaseUrl}${path}`, { headers: { authorization: `Bearer ${token}` } })
+      )
 
-    const invalidCapability = await app.fetch(
-      new Request(`http://localhost/__sixb/agent-api/${runId}/bad/api/object-types`)
-    )
-    expect(invalidCapability.status).toBe(403)
+    // Another run's token, one under a stale execution token, and a malformed one.
+    const forged = [
+      createAgentRunToken({ projectId: PROJECT_ID, runId: "run-other", executionToken }),
+      createAgentRunToken({ projectId: PROJECT_ID, runId, executionToken: "stale" }),
+      `${runToken.slice(0, runToken.lastIndexOf("."))}.forged`,
+      "sixb_run_v1_",
+    ]
+    for (const token of forged) {
+      expect((await withToken(token)).status, token).toBe(403)
+    }
 
-    const undocumentedRoute = await app.fetch(
-      new Request(`http://localhost/__sixb/agent-api/${runId}/bad/api/auth/access-tokens`)
-    )
-    expect(undocumentedRoute.status).toBe(404)
+    const unopened = await withToken(runToken, "/api/auth/access-tokens")
+    expect(unopened.status).toBe(403)
+    await expect(unopened.json()).resolves.toEqual({
+      error: "A run token cannot call GET /api/auth/access-tokens.",
+    })
 
     for (const request of [
-      new Request(`${gatewayBaseUrl}/api/objects/device/fan-1`, { method: "PUT", body: "{}" }),
-      new Request(`${gatewayBaseUrl}/api/objects/device/fan-1/links/contract`, {
+      new Request(`${apiBaseUrl}/api/objects/device/fan-1`, { method: "PUT", body: "{}" }),
+      new Request(`${apiBaseUrl}/api/objects/device/fan-1/links/contract`, {
         method: "PUT",
         body: "{}",
       }),
-      new Request(`${gatewayBaseUrl}/api/objects/device/fan-1/telemetry/temperature`, {
+      new Request(`${apiBaseUrl}/api/objects/device/fan-1/telemetry/temperature`, {
         method: "POST",
         body: "{}",
       }),
-      new Request(`${gatewayBaseUrl}/api/workflow-runs/completed-workflow-run/cancel`, {
+      new Request(`${apiBaseUrl}/api/workflow-runs/completed-workflow-run/cancel`, {
         method: "POST",
         body: "{}",
       }),
       new Request(
-        `${gatewayBaseUrl}/api/workflow-runs/completed-workflow-run/nodes/inspectDevice/files/content?path=/output/document`
+        `${apiBaseUrl}/api/workflow-runs/completed-workflow-run/nodes/inspectDevice/files/content?path=/output/document`
       ),
     ]) {
       const response = await app.fetch(request)
-      expect(response.status).toBe(404)
+      expect(response.status).toBe(403)
     }
 
     await storage.agents.runs.finish({
@@ -753,19 +744,19 @@ describe("agent API gateway", () => {
       status: "succeeded",
       completedAt: NOW,
     })
-    const finishedRun = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const finishedRun = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(finishedRun.status).toBe(403)
   })
 
   test("saves and pulls memory from two sandboxes, merging a conflicting save", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime()
+    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime()
     const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-memory-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (request) => app.fetch(request),
+      fetch: (request) => api.fetch(request),
     })
-    const baseUrl = new URL(gatewayBaseUrl)
+    const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
     // Two conversations of the same user, each with its own copy of the repo.
@@ -777,7 +768,7 @@ describe("agent API gateway", () => {
       const file = (path: string) => join(env.SIXB_MEMORY_DIR, "user", path)
       return {
         run: async (...args: string[]) => {
-          const result = await runAgentCli(baseUrl.href, ["memory", ...args], env)
+          const result = await runAgentCli(baseUrl.href, runToken, ["memory", ...args], env)
           return { ...result, json: result.stdout ? JSON.parse(result.stdout) : null }
         },
         read: (path: string) => readFile(file(path), "utf8"),
@@ -861,20 +852,20 @@ describe("agent API gateway", () => {
     }
   })
 
-  test("keeps the generated agent CLI compatible with the real gateway", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime()
-    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-gateway-"))
+  test("keeps the generated agent CLI compatible with the real API", async () => {
+    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime()
+    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-api-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (request) => app.fetch(request),
+      fetch: (request) => api.fetch(request),
     })
-    const baseUrl = new URL(gatewayBaseUrl)
+    const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, runToken, args)
       const invalidQueryPath = join(directory, "invalid-query.json")
       const actionParamsPath = join(directory, "action-params.json")
       const uploadPath = join(directory, "upload.txt")
@@ -1023,15 +1014,15 @@ describe("agent API gateway", () => {
   })
 })
 
-// Removal proof: bind gateway requests with `bindRequestExecution` again in server.ts and every test
+// Removal proof: bind run-token requests with `bindRequestExecution` again in server.ts and every test
 // here fails — what a request starts gets a fresh root `http` execution as parent, a new correlation
 // id, and the agent's service account as requester for a workflow AI task.
-describe("runs gateway requests inside the agent run's execution", () => {
+describe("runs run-token requests inside the agent run's execution", () => {
   test("keeps a conversation's requester and correlation on the actions it requests", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime()
     const agentExecution = await executionById(storage, agentExecutionId)
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl)
 
     await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
       source: { type: "execution", executionId: agentExecutionId },
@@ -1042,11 +1033,11 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   test("makes a subagent's actions children of the subagent's execution", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime({
       executionKind: "subagent",
     })
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl)
 
     await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
       source: { type: "execution", executionId: agentExecutionId },
@@ -1056,12 +1047,12 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   test("keeps the workflow's requester while a workflow AI task keeps its own access", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime({
       executionKind: "workflow",
     })
     labelDeviceRequesters.length = 0
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl)
 
     await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
       source: { type: "execution", executionId: agentExecutionId },
@@ -1076,7 +1067,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
     ])
 
     // The requester can view notes; the task's groups cannot, and they still decide.
-    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const objectTypes = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
     await expect(objectTypes.json()).resolves.toEqual([
       expect.objectContaining({ id: "contract" }),
@@ -1085,7 +1076,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   test("makes a workflow a conversation starts a child of the agent's execution", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, sixb, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, agentExecutionId, sixb, storage } = await createRunTokenRuntime()
     const document = await sixb.blobStorage.put({
       body: new TextEncoder().encode("device report"),
       fileName: "report.txt",
@@ -1093,7 +1084,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
     })
 
     const response = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+      new Request(`${apiBaseUrl}/api/workflows/inspect-devices/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input: { document: fileRefJson(document) } }),
@@ -1112,9 +1103,9 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   test("ignores request and correlation ids the caller sends", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime()
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl, {
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl, {
       "x-correlation-id": "forged-correlation",
       "x-request-id": "forged-request",
     })
@@ -1126,9 +1117,9 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   // Removal proof: pass `attempt: 1` instead of the run's attempt to
-  // bindModelExecutionAttempt in bindAgentGatewayRequestExecution and the usage row's attempt is 1.
+  // bindModelExecutionAttempt in bindAgentRunRequestExecution and the usage row's attempt is 1.
   test("accounts a search's embedding to the run's execution, attempt and requester", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime({
       executionKind: "workflow",
       attempt: 2,
     })
@@ -1145,7 +1136,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
     }
 
     const search = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/objects/query`, {
+      new Request(`${apiBaseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ query: deviceSearchQuery() }),
@@ -1176,14 +1167,14 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   // Removal proof: build the forwarded request without the caller's `signal` in
-  // handleAgentApiGatewayRequest and the embedding runs to its own timeout, never aborted.
+  // resolveRunTokenRequest and the embedding runs to its own timeout, never aborted.
   test("cancels the forwarded work when the caller aborts", async () => {
     let embedding: AbortSignal | undefined
     let embeddingStarted: () => void = () => {}
     const started = new Promise<void>((resolve) => {
       embeddingStarted = resolve
     })
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
       embed: async ({ texts, signal }) => {
         embedding = signal
         embeddingStarted()
@@ -1194,7 +1185,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
 
     const caller = new AbortController()
     const response = app.fetch(
-      new Request(`${gatewayBaseUrl}/api/objects/query`, {
+      new Request(`${apiBaseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ query: deviceSearchQuery() }),
@@ -1211,11 +1202,11 @@ describe("runs gateway requests inside the agent run's execution", () => {
   // Removal proof: restore the `!host.auth.isEnabled()` shortcut in resolveAgentRunAuthState and
   // both fail — the request becomes a root auth-disabled request, unrestricted for a workflow task.
   test("keeps an auth-disabled conversation unrestricted inside its execution", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime({
       auth: false,
     })
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl)
 
     const execution = await actionRunExecution(storage, actionRunId)
     expect(execution).toMatchObject({
@@ -1226,19 +1217,19 @@ describe("runs gateway requests inside the agent run's execution", () => {
   })
 
   test("limits an auth-disabled workflow AI task to its groups", async () => {
-    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, agentExecutionId, storage } = await createRunTokenRuntime({
       auth: false,
       executionKind: "workflow",
     })
 
-    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    const objectTypes = await app.fetch(new Request(`${apiBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
     await expect(objectTypes.json()).resolves.toEqual([
       expect.objectContaining({ id: "contract" }),
       expect.objectContaining({ id: "device" }),
     ])
 
-    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    const actionRunId = await labelDeviceWithRunToken(app, apiBaseUrl)
     await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
       source: { type: "execution", executionId: agentExecutionId },
       requestedBy: { type: "user", id: "usr_requester" },
@@ -1271,13 +1262,13 @@ function abortedOrTimedOut(signal: AbortSignal | undefined, timeoutMs: number): 
   })
 }
 
-async function labelDeviceThroughGateway(
-  app: ReturnType<typeof createSixbApi>,
-  gatewayBaseUrl: string,
+async function labelDeviceWithRunToken(
+  app: AgentApi,
+  apiBaseUrl: string,
   headers: Readonly<Record<string, string>> = {}
 ): Promise<string> {
   const response = await app.fetch(
-    new Request(`${gatewayBaseUrl}/api/actions/label-device`, {
+    new Request(`${apiBaseUrl}/api/actions/label-device`, {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({
@@ -1315,15 +1306,15 @@ const HELD_BY_MODE: Readonly<Record<AgentApprovalMode, readonly GatedCall[]>> = 
 }
 
 describe("agent approval gate", () => {
-  // Guard proof: drop the `gateAgentApiCall` call from `handleAgentApiGatewayRequest`; every held
+  // Guard proof: drop the `gateAgentApiCall` call from `resolveRunTokenRequest`; every held
   // case below finds its run in storage, because the route ran it.
   for (const mode of AGENT_APPROVAL_MODES) {
     test(`${mode} holds exactly ${HELD_BY_MODE[mode].join(", ") || "nothing"}`, async () => {
-      const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: mode })
+      const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: mode })
 
       for (const call of ["ontology action", "external action", "workflow"] as const) {
         const runId = `run-${call.replace(" ", "-")}`
-        const response = await requestGatedCall(app, gatewayBaseUrl, call, runId)
+        const response = await requestGatedCall(app, apiBaseUrl, call, runId)
         const body = (await response.json()) as { status?: string }
 
         const held = HELD_BY_MODE[mode].includes(call)
@@ -1347,12 +1338,12 @@ describe("agent approval gate", () => {
 
   // Guard proof: count only a writeback as external in `prepareActionRequest`; the call runs.
   test("accept-edits holds an action whose effects reach beyond Sixb", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
       approvalMode: "accept-edits",
     })
 
     const response = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/actions/notify-device`, {
+      new Request(`${apiBaseUrl}/api/actions/notify-device`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1367,19 +1358,19 @@ describe("agent approval gate", () => {
   })
 
   test("a turn from before approval modes runs what it asks, as it always did", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
 
-    const response = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_old")
+    const response = await requestGatedCall(app, apiBaseUrl, "external action", "act_old")
 
     expect(response.status).toBe(200)
     expect(await gatedCallRan(storage, "external action", "act_old")).toBe(true)
   })
 
   test("a held call answers what the CLI prints, and asking again holds the same approval", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
 
-    const first = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
-    const again = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const first = await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
+    const again = await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
     const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
 
     const body = {
@@ -1412,15 +1403,15 @@ describe("agent approval gate", () => {
   })
 
   test("an approved call asked again returns its one run", async () => {
-    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime({
       approvalMode: "manual",
     })
-    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
     const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
     if (!approval) throw new Error("Expected a held call.")
 
     const decided = await decideAs(sixb, approval, "approve")
-    const again = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const again = await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
 
     expect(decided.status).toBe(200)
     expect(await decided.json()).toMatchObject({
@@ -1432,15 +1423,15 @@ describe("agent approval gate", () => {
   })
 
   test("a denied call asked again is refused, and never runs", async () => {
-    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime({
       approvalMode: "manual",
     })
-    await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+    await requestGatedCall(app, apiBaseUrl, "workflow", "run_ping")
     const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
     if (!approval) throw new Error("Expected a held call.")
 
     expect((await decideAs(sixb, approval, "deny")).status).toBe(200)
-    const again = await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+    const again = await requestGatedCall(app, apiBaseUrl, "workflow", "run_ping")
 
     expect(again.status).toBe(403)
     expect(await again.json()).toEqual({ error: "The user denied this request. It did not run." })
@@ -1448,20 +1439,20 @@ describe("agent approval gate", () => {
   })
 
   test("a run id that names another held call is refused", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
-    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
 
-    const other = await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_sync")
+    const other = await requestGatedCall(app, apiBaseUrl, "ontology action", "act_sync")
 
     expect(other.status).toBe(409)
     expect(await gatedCallRan(storage, "ontology action", "act_sync")).toBe(false)
   })
 
   test("a call held for approval must name its run", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
 
     const response = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/actions/label-device`, {
+      new Request(`${apiBaseUrl}/api/actions/label-device`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1476,10 +1467,10 @@ describe("agent approval gate", () => {
   })
 
   test("a call the route would refuse is refused, not held", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
 
     const response = await app.fetch(
-      new Request(`${gatewayBaseUrl}/api/actions/sync-device`, {
+      new Request(`${apiBaseUrl}/api/actions/sync-device`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1497,10 +1488,10 @@ describe("agent approval gate", () => {
   // Guard proof: hold `body.input` as it came in `prepareWorkflowCall`, without
   // `prepareBoundWorkflowRequest`; the invalid start is held, and fails only once approved.
   test("a workflow start is held as its run would store it, and refused when its input is not", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
     const start = (input: unknown, runId: string) =>
       app.fetch(
-        new Request(`${gatewayBaseUrl}/api/workflows/relabel-devices/runs`, {
+        new Request(`${apiBaseUrl}/api/workflows/relabel-devices/runs`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ input, runId }),
@@ -1527,12 +1518,12 @@ describe("agent approval gate", () => {
   // Guard proofs: drop `approvalMode` from the child's spec in this test, and the call runs; list
   // the thread's approvals without `serializeApprovals`, and the route names no sub-agent.
   test("a child's call is held for the turn that spawned it, with the child's mode", async () => {
-    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime({
       executionKind: "subagent",
       approvalMode: "manual",
     })
 
-    const response = await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_child")
+    const response = await requestGatedCall(app, apiBaseUrl, "ontology action", "act_child")
 
     expect(response.status).toBe(202)
     expect((await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals).toEqual([
@@ -1549,52 +1540,56 @@ describe("agent approval gate", () => {
   })
 
   test("a workflow AI task runs its calls on its own", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({
       executionKind: "workflow",
     })
 
-    const response = await requestGatedCall(app, gatewayBaseUrl, "external action", "act_task")
+    const response = await requestGatedCall(app, apiBaseUrl, "external action", "act_task")
 
     expect(response.status).toBe(200)
     expect(await gatedCallRan(storage, "external action", "act_task")).toBe(true)
   })
 
   // Guard proof: add the decision route to SIXB_API_ROUTES with `agentApi: true` (and an
-  // `agentEffect` the gate forwards, such as `memory`); the gateway serves it, and an Agent whose
-  // requester may run the Agent approves its own call. The mode routes are PUTs, which the gateway
-  // serves none of.
+  // `agentEffect` the gate forwards, such as `memory`); a run token reaches it, and an Agent whose
+  // requester may run the Agent approves its own call. The mode routes are not open to run tokens
+  // either.
   test("the Agent cannot reach the decision route", async () => {
-    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime({ approvalMode: "manual" })
-    await requestGatedCall(app, gatewayBaseUrl, "external action", "act_sync")
+    const { app, apiBaseUrl, storage } = await createRunTokenRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, apiBaseUrl, "external action", "act_sync")
     const [approval] = (await storage.agents.approvals.list({ projectId: PROJECT_ID })).approvals
     if (!approval) throw new Error("Expected a held call.")
     const path = `/api/agent-threads/thread-1/approvals/${approval.id}/decision`
 
     const response = await app.fetch(
-      new Request(`${gatewayBaseUrl}${path}`, {
+      new Request(`${apiBaseUrl}${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision: "approve" }),
       })
     )
 
-    // The gateway serves no such route: the request never reaches the decision handler.
-    expect(response.status).toBe(404)
-    expect(await response.text()).toBe("NOT_FOUND")
+    // A run token never reaches the route: the request never reaches the decision handler.
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({
+      error: `A run token cannot call POST ${path}.`,
+    })
     expect(
       await storage.agents.approvals.getById({ projectId: PROJECT_ID, id: approval.id })
     ).toMatchObject({ status: "pending" })
   })
 
   test("the generated agent CLI prints a held call and exits with code 4", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({ approvalMode: "manual" })
-    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
-    const baseUrl = new URL(gatewayBaseUrl)
+    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime({
+      approvalMode: "manual",
+    })
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => api.fetch(r) })
+    const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const held = await runAgentCli(baseUrl.href, [
+      const held = await runAgentCli(baseUrl.href, runToken, [
         "actions",
         "request",
         "label-device",
@@ -1618,8 +1613,8 @@ describe("agent approval gate", () => {
 
 describe("approval mode routes", () => {
   test("keep the requester's default and their choice in a thread, and list what waits", async () => {
-    const { app, gatewayBaseUrl, sixb } = await createGatewayRuntime({ approvalMode: "manual" })
-    await requestGatedCall(app, gatewayBaseUrl, "workflow", "run_ping")
+    const { app, apiBaseUrl, sixb } = await createRunTokenRuntime({ approvalMode: "manual" })
+    await requestGatedCall(app, apiBaseUrl, "workflow", "run_ping")
     const routes = asRequester(sixb)
     const send = async (method: string, path: string, body?: unknown) => {
       const response = await routes.handle(jsonRequest(method, path, body))
@@ -1669,12 +1664,11 @@ describe("approval mode routes", () => {
   // Guard proof: drop `run` from the decision route's response; nothing tells the caller the turn
   // resumed, or which turn follows it.
   test("the last decision of a paused turn answers with the turn that resumes it", async () => {
-    const { app, gatewayBaseUrl, sixb, storage, runId, executionToken } =
-      await createGatewayRuntime({
-        approvalMode: "manual",
-        models: { language: [routeLanguageModel] },
-      })
-    await requestGatedCall(app, gatewayBaseUrl, "ontology action", "act_label")
+    const { app, apiBaseUrl, sixb, storage, runId, executionToken } = await createRunTokenRuntime({
+      approvalMode: "manual",
+      models: { language: [routeLanguageModel] },
+    })
+    await requestGatedCall(app, apiBaseUrl, "ontology action", "act_label")
     await storage.agents.runs.finish({
       projectId: PROJECT_ID,
       id: runId,
@@ -1701,8 +1695,8 @@ describe("approval mode routes", () => {
 })
 
 async function requestGatedCall(
-  app: ReturnType<typeof createSixbApi>,
-  gatewayBaseUrl: string,
+  app: AgentApi,
+  apiBaseUrl: string,
   call: GatedCall,
   runId: string
 ): Promise<Response> {
@@ -1715,7 +1709,7 @@ async function requestGatedCall(
         : ["/api/actions/label-device", { subject, runId }]
 
   return app.fetch(
-    new Request(`${gatewayBaseUrl}${path}`, {
+    new Request(`${apiBaseUrl}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -1785,7 +1779,7 @@ function jsonRequest(method: string, path: string, body?: unknown): Request {
 }
 
 describe("agent CLI models", () => {
-  test("the generated agent CLI lists models and writes an image through the gateway", async () => {
+  test("the generated agent CLI lists models and writes an image with its run token", async () => {
     const png = new Uint8Array([137, 80, 78, 71])
     const painter: ImageModel = {
       providerId: "test",
@@ -1793,15 +1787,17 @@ describe("agent CLI models", () => {
       definition: { kind: "image", providerId: "test", modelId: "painter" },
       generate: async () => ({ output: { images: [{ data: png, mediaType: "image/png" }] } }),
     }
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({ models: { image: [painter] } })
+    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime({
+      models: { image: [painter] },
+    })
     const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-models-"))
-    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
-    const baseUrl = new URL(gatewayBaseUrl)
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => api.fetch(r) })
+    const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, runToken, args)
       const listed = await cli(["models", "list", "--kind", "image"])
       expect(listed.exitCode).toBe(0)
       expect(JSON.parse(listed.stdout)).toEqual([
@@ -1826,15 +1822,20 @@ describe("agent CLI models", () => {
   })
 })
 
+interface AgentApi {
+  fetch(request: Request): Promise<Response>
+}
+
 async function runAgentCli(
   baseUrl: string,
+  runToken: string,
   args: readonly string[],
   env: Readonly<Record<string, string>> = {}
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
   // This path-level dependency is intentional: it verifies the exact artifact copied into agent
   // sandboxes without making @sixb/agent-worker a runtime dependency of @sixb/server.
   const child = Bun.spawn([process.execPath, AGENT_CLI_ARTIFACT, ...args], {
-    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl },
+    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl, SIXB_TOKEN: runToken },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -1852,7 +1853,7 @@ async function runAgentCli(
   }
 }
 
-async function createGatewayRuntime(
+async function createRunTokenRuntime(
   options: {
     readonly auth?: boolean
     readonly executionKind?: "conversation" | "subagent" | "workflow"
@@ -1866,8 +1867,12 @@ async function createGatewayRuntime(
     readonly approvalMode?: AgentApprovalMode
   } = {}
 ): Promise<{
-  readonly app: ReturnType<typeof createSixbApi>
-  readonly gatewayBaseUrl: string
+  /** The API as the run's commands call it: with the run token, unless a request names its own. */
+  readonly app: AgentApi
+  /** The API with no credential added, as the agent CLI reaches it with `SIXB_TOKEN`. */
+  readonly api: ReturnType<typeof createSixbApi>
+  readonly apiBaseUrl: string
+  readonly runToken: string
   readonly executionToken: string
   readonly runId: string
   readonly agentExecutionId: string
@@ -2147,20 +2152,27 @@ async function createGatewayRuntime(
     })
   }
 
-  const capability = createAgentApiGatewayCapability({
+  const runToken = createAgentRunToken({
     projectId: PROJECT_ID,
     runId,
     executionToken: execution.token,
   })
-  const app = createSixbApi(
+  const api = createSixbApi(
     new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
 
   return {
-    app,
-    gatewayBaseUrl: `http://localhost/__sixb/agent-api/${encodeURIComponent(
-      runId
-    )}/${encodeURIComponent(capability)}`,
+    app: {
+      fetch: async (request) => {
+        if (request.headers.has("authorization")) return api.fetch(request)
+        const headers = new Headers(request.headers)
+        headers.set("authorization", `Bearer ${runToken}`)
+        return api.fetch(new Request(request, { headers }))
+      },
+    },
+    api,
+    apiBaseUrl: "http://localhost",
+    runToken,
     executionToken: execution.token,
     runId,
     agentExecutionId,

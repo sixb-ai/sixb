@@ -2,10 +2,10 @@
  * The single source of truth for the Sixb HTTP API surface and its auth capabilities.
  *
  * Two views are derived from this one table:
- * - `AGENT_API_ROUTES` (@sixb/core agent gateway) = the `agentApi` rows, projected to {method, path}.
+ * - `AGENT_API_ROUTES` (@sixb/core run tokens) = the `agentApi` rows, projected to {method, path}.
  * - `ACCESS_TOKEN_ROUTES` (@sixb/server bearer boundary) = the `accessToken` rows, with operationId.
  *
- * Because both views are projections of this table, the agent gateway allow-list is structurally a
+ * Because both views are projections of this table, what a run token may call is structurally a
  * subset of the bearer boundary — the invariant below enforces `agentApi ⇒ accessToken` at load
  * time. This table lives in @sixb/core (never @sixb/server) because @sixb/server depends on core,
  * not the reverse; the operationId strings are opaque here.
@@ -17,11 +17,11 @@ export interface SixbApiRoute {
   readonly path: string
   /** The route accepts a bearer access token (enforced by the server access-token boundary). */
   readonly accessToken: boolean
-  /** The route is proxied by the agent API gateway (a strict subset of the accessToken routes). */
+  /** A run token may call the route (a strict subset of the accessToken routes). */
   readonly agentApi: boolean
   /**
-   * What the route changes when the Agent calls it, for every `agentApi` route but a GET. The
-   * gateway holds `action` and `workflow` calls for the requester's approval when their mode asks.
+   * What the route changes when the Agent calls it, for every `agentApi` route but a GET. A run
+   * token's `action` and `workflow` calls wait for the requester's approval when their mode asks.
    */
   readonly agentEffect?: AgentApiEffect
   /** The canonical handler may run under an explicitly selected shared session. */
@@ -230,8 +230,8 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
   },
   // The four write routes. Bearer-capable because their execution facade enforces authorization
   // (`edit:object` / `append:telemetry`), which is exactly the precondition this table requires.
-  // NOT agent-proxied: letting an agent turn write objects on its own is a separate decision, and
-  // the gateway already hands routes an execution SDK, so flipping `agentApi` later needs no
+  // NOT open to run tokens: letting an agent turn write objects on its own is a separate decision,
+  // and a run token's request already runs as its run, so flipping `agentApi` later needs no
   // authorization work — only that decision.
   {
     operationId: "upsertObject",
@@ -295,10 +295,8 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     sharedSession: true,
   },
   {
-    // Bearer-capable (CLI/programmatic existence + range probes) but NOT agent-proxied: the agent
-    // API gateway only forwards GET/POST, and an agent gains nothing from HEAD over GET (a file's
-    // size already travels in its FileRef). Keeping this agentApi:true would throw at gateway
-    // registration ("Unsupported agent API gateway method 'HEAD'") and stop the server booting.
+    // Bearer-capable (CLI/programmatic existence + range probes) but NOT open to run tokens: an
+    // agent gains nothing from HEAD over GET (a file's size already travels in its FileRef).
     operationId: "headObjectFileContent",
     method: "HEAD",
     path: "/api/objects/:objectTypeId/:objectId/files/content",
@@ -477,7 +475,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   // The Agent reads and saves its memory with `sixb memory` in its sandbox. Its history and deleting
-  // a repo are for people, so they stay off the gateway.
+  // a repo are for people, so run tokens can't reach them.
   {
     operationId: "getAgentMemory",
     method: "GET",
@@ -508,7 +506,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   // Artifacts are reachable with an access token, so the CLI and integrations can publish them. The
-  // Agent publishes through its own tool, not the gateway.
+  // Agent publishes through its own tool, not with its run token.
   {
     operationId: "listArtifacts",
     method: "GET",
@@ -829,10 +827,10 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
 ]
 
 /**
- * The table's invariants, enforced at module load. A gateway-proxied route must also be a bearer
- * route, or the gateway would expose a surface the access-token boundary does not recognize. A
- * gateway-proxied route that can change state names what it changes, so a route added later cannot
- * skip the approval gate by accident.
+ * The table's invariants, enforced at module load. A route open to run tokens must also be a bearer
+ * route, or run tokens would reach a surface the access-token boundary does not recognize. One that
+ * can change state names what it changes, so a route added later cannot skip the approval gate by
+ * accident.
  */
 export function assertSixbApiRoutes(routes: readonly SixbApiRoute[]): void {
   for (const route of routes) {

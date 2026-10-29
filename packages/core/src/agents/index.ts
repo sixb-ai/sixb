@@ -11,15 +11,6 @@ export type {
   ToModelMessagesOptions,
 } from "./adapters"
 export { toModelMessages } from "./adapters"
-export type { AgentApiGatewayCapabilityInput, AgentApiRoute } from "./api-gateway"
-export {
-  AGENT_API_GATEWAY_PREFIX,
-  AGENT_API_ROUTES,
-  createAgentApiGatewayCapability,
-  findAgentApiRoute,
-  isAllowedAgentApiRequest,
-  isValidAgentApiGatewayCapability,
-} from "./api-gateway"
 export type { AgentApprovalResume } from "./approval-continuation"
 export { resumeDecidedAgentTurn } from "./approval-continuation"
 export { getAgentApprovalExecutor } from "./approval-executor"
@@ -160,6 +151,16 @@ export type {
   AgentRunScopeHost,
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
+export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
+export {
+  AGENT_API_ROUTES,
+  agentRunTokenRunId,
+  createAgentRunToken,
+  findAgentApiRoute,
+  isAgentRunToken,
+  isAllowedAgentApiRequest,
+  isValidAgentRunToken,
+} from "./run-token"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,

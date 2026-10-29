@@ -110,7 +110,7 @@ export interface AgentTurnContext {
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
-  /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
+  /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
@@ -134,8 +134,8 @@ export interface AgentWorkerOptions {
   /** Queue visibility duration, renewed automatically while a turn executes. Defaults to 60s. */
   readonly leaseMs?: number
   /**
-   * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3001`.
-   * The sandbox receives a run-scoped gateway URL under this origin.
+   * Sixb server origin the run's commands call with their run token, for example
+   * `http://localhost:3001`.
    */
   /** Not required when the worker only processes accounting recovery. */
   readonly apiBaseUrl?: string

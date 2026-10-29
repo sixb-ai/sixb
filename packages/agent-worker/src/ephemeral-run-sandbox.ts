@@ -113,7 +113,7 @@ class EphemeralWorkspace implements RunSandbox {
       await this.assertCanContinue()
       this.access.attach(sandbox)
 
-      // Run files hold the gateway capability: exclude them from Git before any is written.
+      // Run files are the run's, not the repository's: exclude them from Git before any is written.
       await prepareWorkspaceRunFiles(sandbox, this.workspace.recipe.source !== undefined)
       await this.assertCanContinue()
     } catch (error) {

@@ -110,12 +110,12 @@ export function bindDurableAgentExecution(
 }
 
 /**
- * Bind one agent API gateway request to the run's own execution, the way the run's in-process
+ * Bind one run-token request to the run's own execution, the way the run's in-process
  * tools are bound: what the request starts is a child of the run, with the run's requester and
  * correlation. Model calls behind it count toward the attempt the request was admitted under, with
  * a recorder of their own: the worker's in-memory failure state and cancellation do not reach them.
  */
-export function bindAgentGatewayRequestExecution(
+export function bindAgentRunRequestExecution(
   host: AgentExecutionHost,
   input: {
     /** Aborting it cancels the request's model calls. */

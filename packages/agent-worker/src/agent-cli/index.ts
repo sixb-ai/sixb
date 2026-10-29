@@ -31,6 +31,7 @@ function sandboxMode() {
   return {
     kind: "sandbox" as const,
     baseUrl: process.env.SIXB_API_BASE_URL ?? "",
+    ...(process.env.SIXB_TOKEN ? { token: process.env.SIXB_TOKEN } : {}),
     runContextPath: process.env.SIXB_RUN_CONTEXT ?? "",
   }
 }

@@ -51,6 +51,7 @@ import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   agentRunQueueJobId,
+  agentRunTokenRunId,
   createAgentRunExecutionToken,
   createAgentRunId,
   createSubagentRunId,
@@ -1292,6 +1293,7 @@ class RecordingSandbox implements Sandbox {
         exitCode: 0,
         stdout: [
           `base=${env.SIXB_API_BASE_URL ?? ""}`,
+          `token=${env.SIXB_TOKEN ?? ""}`,
           `project=${env.SIXB_PROJECT_ID ?? ""}`,
           `agent=${env.SIXB_ACTOR_ID ?? ""}`,
           `thread=${env.SIXB_THREAD_ID ?? ""}`,
@@ -6638,7 +6640,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
+  test("creates isolated run tokens and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
     const plan = executionPlanFor(sixb)
@@ -6680,16 +6682,18 @@ describe("AgentWorker", () => {
       ])
       const firstBaseUrl = stdoutValue(firstBash.stdout, "base")
       const secondBaseUrl = stdoutValue(secondBash.stdout, "base")
+      const firstToken = stdoutValue(firstBash.stdout, "token")
+      const secondToken = stdoutValue(secondBash.stdout, "token")
 
-      expect(firstBaseUrl).not.toBe(secondBaseUrl)
-      expect(firstBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
-      expect(secondBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
+      // One API, called with each run's own token.
+      expect(firstBaseUrl).toBe("http://sixb-api.local")
+      expect(secondBaseUrl).toBe("http://sixb-api.local")
       expect(new URL(firstBaseUrl).origin).toBe(origins[0])
       expect(new URL(secondBaseUrl).origin).toBe(origins[1])
-      expect(firstBaseUrl).toContain(`/${encodeURIComponent(firstRun.id)}/`)
-      expect(secondBaseUrl).toContain(`/${encodeURIComponent(secondRun.id)}/`)
-      expect(firstBaseUrl).not.toContain("sixb_sat_")
-      expect(secondBaseUrl).not.toContain("sixb_sat_")
+      expect(agentRunTokenRunId(firstToken)).toBe(firstRun.id)
+      expect(agentRunTokenRunId(secondToken)).toBe(secondRun.id)
+      expect(firstToken).not.toContain("sixb_sat_")
+      expect(secondToken).not.toContain("sixb_sat_")
       expect(firstBash.stdout).toContain(`run=${firstRun.id}`)
       expect(secondBash.stdout).toContain(`run=${secondRun.id}`)
       expect(firstBash.stdout).toContain(`thread=${firstRun.threadId}`)
@@ -6777,7 +6781,9 @@ describe("AgentWorker", () => {
       })
       expect(manifest.attachments[0].sandboxPath).toStartWith(".sixb/agent/attachments/")
       expect(manifest.attachments[0].sandboxPath).toEndWith("1-note.txt")
-      expect(manifest.attachments[0].contentUrl).toContain("/__sixb/agent-api/")
+      expect(manifest.attachments[0].contentUrl).toStartWith(
+        "http://sixb-api.local/api/agent-threads/"
+      )
     } finally {
       await environment.dispose()
     }
@@ -10324,9 +10330,8 @@ describe("AgentWorker", () => {
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
       expect(command?.options.cwd).toBe("/workspace")
-      expect(command?.options.env?.SIXB_API_BASE_URL).toStartWith(
-        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(run.id)}/`
-      )
+      expect(command?.options.env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
+      expect(agentRunTokenRunId(command?.options.env?.SIXB_TOKEN ?? "")).toBe(run.id)
       expect(command?.options.env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
       expect(command?.options.timeout).toBe(1234)
       expect(command?.options.signal).toBeInstanceOf(AbortSignal)
@@ -11322,9 +11327,8 @@ describe("AgentWorker", () => {
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "print-sixb-env"])
       const env = command?.options.env
-      expect(env?.SIXB_API_BASE_URL).toStartWith(
-        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(runId)}/`
-      )
+      expect(env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
+      expect(agentRunTokenRunId(env?.SIXB_TOKEN ?? "")).toBe(runId)
       expect(env?.SIXB_PROJECT_ID).toBe(PROJECT_ID)
       expect(env?.SIXB_ACTOR_ID).toBeUndefined()
       expect(env?.SIXB_THREAD_ID).toBe(threadId)

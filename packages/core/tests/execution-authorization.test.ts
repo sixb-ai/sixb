@@ -4,7 +4,7 @@ import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
 import { isSixbError } from "../src/errors/internal"
 import {
-  bindAgentGatewayRequestExecution,
+  bindAgentRunRequestExecution,
   createInheritedAgentExecutionRecord,
   restoreAgentExecutionScope,
 } from "../src/execution/agent"
@@ -883,7 +883,7 @@ describe("agent gateway request binding", () => {
   }
 
   test("binds a request to the run's own execution, as its in-process tools are", () => {
-    const sixb = bindAgentGatewayRequestExecution(host(), {
+    const sixb = bindAgentRunRequestExecution(host(), {
       signal: new AbortController().signal,
       execution,
       actorId: "research",
@@ -903,7 +903,7 @@ describe("agent gateway request binding", () => {
 
   test("refuses a record that belongs to another run", () => {
     expect(() =>
-      bindAgentGatewayRequestExecution(host(), {
+      bindAgentRunRequestExecution(host(), {
         signal: new AbortController().signal,
         execution,
         actorId: "research",
@@ -916,7 +916,7 @@ describe("agent gateway request binding", () => {
 
   test("requires the attempt the request was admitted under", () => {
     expect(() =>
-      bindAgentGatewayRequestExecution(host(), {
+      bindAgentRunRequestExecution(host(), {
         signal: new AbortController().signal,
         execution,
         actorId: "research",
