@@ -13187,7 +13187,14 @@ describe("agent tools act as the requester", () => {
     }
     try {
       expect(JSON.parse(task.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
-        attachments: [{ key: "input.quote", path: "input.quote" }],
+        attachments: [
+          {
+            key: "input.quote",
+            path: "input.quote",
+            materialized: true,
+            sandboxPath: ".sixb/agent/attachments/workflow-input/0-quote.txt",
+          },
+        ],
       })
       expect(JSON.parse(child.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
         attachments: [{ key: "inputs/quote.txt", sandboxPath: "inputs/quote.txt" }],
