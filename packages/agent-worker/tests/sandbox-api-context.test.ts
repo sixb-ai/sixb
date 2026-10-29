@@ -33,6 +33,7 @@ describe("installing a conversation's artifacts", () => {
     await prepareAgentSandboxApiContext({
       sandbox: new LocalBashSandbox(root),
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      runToken: "sixb_run_v1_test",
       apiBaseUrl: "http://gateway.invalid",
       projectId: "artifacts-install",
       runId: "run_1",
@@ -67,6 +68,7 @@ describe("the run's context directory", () => {
     const { env } = await prepareAgentSandboxApiContext({
       sandbox: new LocalBashSandbox(workingDirectory),
       contextDirectory,
+      runToken: "sixb_run_v1_test",
       apiBaseUrl: "http://gateway.invalid",
       projectId: "context-directory",
       runId: "run_1",

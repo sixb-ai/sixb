@@ -296,7 +296,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     try {
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
-      // expiration so the API gateway can fail closed without maintaining another heartbeat.
+      // expiration so a run token can fail closed without maintaining another heartbeat.
       stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
         void this.confirmExecutionOwnership(
           context,
@@ -525,7 +525,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     return {
       thread,
       ...(conversation === undefined ? {} : { conversation }),
-      // The rule the agent API gateway applies to memory: someone who loses access may regain it,
+      // The rule run tokens apply to memory: someone who loses access may regain it,
       // and read back whatever memory the thread held meanwhile.
       shared: participants.length > 0,
       plan,
@@ -1345,8 +1345,8 @@ function buildAgentContext(
     logging: host.logging,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
     ontologyDocs: host.definitions.agent.ontologyDocs,
-    // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway
-    // URL builder, the sandbox run context) consumes it verbatim.
+    // Normalize the server base URL once here, at the boundary. Everything downstream (the sandbox's
+    // API address and run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
     streamSink: isolateStreamSink(
       withAgentActivityStream(

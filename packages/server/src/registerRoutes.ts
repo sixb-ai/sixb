@@ -5,7 +5,6 @@ import type { SharedAccessBoundary } from "./auth/shared-access"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerActivityRoutes } from "./routes/activity"
-import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentApprovalRoutes } from "./routes/agent-approvals"
 import { registerAgentChildRoutes } from "./routes/agent-children"
 import { registerAgentMemoryRoutes } from "./routes/agent-memory"
@@ -52,7 +51,6 @@ export interface HttpRouteOptions {
 }
 
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
-  registerAgentApiGatewayRoutes(app, host)
   registerAiAccountingRoutes(app, host)
   registerModelCallRoutes(app, host)
   registerModelGenerationRoutes(app, host)

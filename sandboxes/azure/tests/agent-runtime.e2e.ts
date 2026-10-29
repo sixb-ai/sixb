@@ -18,11 +18,11 @@ import { createSixbApi, SixbServer } from "../../../packages/server/src/server"
 import { AzureSandboxFactory } from "../src"
 import { buildGuestArtifact } from "./guest-build"
 
-// Explicit second opt-in: this test exposes only run-capability gateway routes through ngrok.
+// Explicit second opt-in: this test exposes only run-token requests through ngrok.
 // Requires an authenticated ngrok CLI and an already prepared Azure disk image.
 const enabled = process.env.SIXB_AZURE_AGENT_E2E === "1"
 test.skipIf(!enabled)(
-  "Azure completes an agent task through the real Sixb gateway over HTTPS",
+  "Azure completes an agent task through the real Sixb API over HTTPS",
   async () => {
     await buildGuestArtifact()
     const imageId = process.env.AZURE_SANDBOX_IMAGE_ID
@@ -94,15 +94,15 @@ test.skipIf(!enabled)(
     const api = createTestSixb(host)
     await api.objects.upsert("Device", { id: "fan-1", label: "Synthetic healthy fan" })
     let app: ReturnType<typeof createSixbApi> | undefined
-    let gatewayRequests = 0
+    let runTokenRequests = 0
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
-        // The public tunnel never exposes normal API routes, the app, filesystem, or admin surfaces.
-        if (!new URL(request.url).pathname.startsWith("/__sixb/agent-api/"))
+        // The public tunnel answers only an Agent's run token: no session, app or admin request.
+        if (!request.headers.get("authorization")?.startsWith("Bearer sixb_run_v1_"))
           return new Response("Not found", { status: 404 })
-        gatewayRequests++
+        runTokenRequests++
         return app ? app.fetch(request) : new Response("Starting", { status: 503 })
       },
     })
@@ -150,9 +150,9 @@ test.skipIf(!enabled)(
       expect(calls).toBe(2)
       expect(replay).toContain("Synthetic healthy fan")
       expect(replay).toContain("exitCode")
-      expect(gatewayRequests).toBeGreaterThanOrEqual(2) // doctor + object read
+      expect(runTokenRequests).toBeGreaterThanOrEqual(2) // doctor + object read
       expect(sessions).toHaveLength(1)
-      console.log("[AzureE2E] Runtime preflight, CLI gateway read and agent completion passed")
+      console.log("[AzureE2E] Runtime preflight, CLI read and agent completion passed")
     } finally {
       // Close public access even when worker/sandbox teardown reports a failure.
       try {

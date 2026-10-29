@@ -171,7 +171,7 @@ the `project` repo, which every conversation builds up, through `sixb.agent.memo
 requester's own access decides what is installed, and installs their latest files under
 `$SIXB_MEMORY_DIR/<repo>/`, with a starter `MEMORY.md` while a repo has none.
 `context/memory.json` records the revision and each file's SHA-256 as installed; `sixb memory
-save` (`src/agent-cli/commands/memory.ts`) sends the files that differ from it through the gateway,
+save` (`src/agent-cli/commands/memory.ts`) sends the files that differ from it with the run token,
 which records the run's thread as the save's source. `src/agent-runtime/memory.ts` holds that
 layout for both sides. A requester with no repo of its own, such as a service account, gets the
 project's alone.
@@ -243,13 +243,12 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `apiBaseUrl`: required for agent execution; Sixb server origin that hosts the agent API gateway. The worker injects a
-  run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, installs the self-documenting `sixb`
-  CLI on `PATH`, writes the run's project skills into `SIXB_SKILLS_DIR` and ontology docs into
-  `SIXB_ONTOLOGY_DIR`, and creates the sandbox
-  with a restricted network policy allowing the server origin. The gateway authorizes scoped
-  ontology, object, telemetry, file publication, action, and workflow routes from the run execution
-  token and restored execution authority; no bearer token is exposed to the sandbox.
+- `apiBaseUrl`: required for agent execution; the Sixb server origin the run's commands call. The
+  worker gives sandboxes this origin as `SIXB_API_BASE_URL` and the run's token as `SIXB_TOKEN`,
+  installs the self-documenting `sixb` CLI on `PATH`, writes the run's project skills into
+  `SIXB_SKILLS_DIR` and ontology docs into `SIXB_ONTOLOGY_DIR`, and creates the sandbox with a
+  restricted network policy allowing the server origin. The run token opens only the routes marked
+  `agentApi`, as the run, while the run holds its execution; it carries no other credential.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `8`.
 - `subagentConcurrency`: maximum number of child agents this worker executes at once, on a lane of

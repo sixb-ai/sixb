@@ -45,7 +45,7 @@ createSixb({
 ```
 
 Each run boots a microVM from the image, runs the agent's sandbox tools, and destroys it.
-Networking is locked to the sixb gateway — no open internet. Boot time scales with image size:
+Networking is locked to the Sixb API — no open internet. Boot time scales with image size:
 on Apple silicon the agent image takes about 10–20 seconds per run, a slim Node image under 2. If
 the archive is missing, `create()` throws a message telling you what to run.
 
@@ -68,12 +68,12 @@ write its working directory.
 
 ## Network policy
 
-The agent worker allows access to the Sixb gateway. When configuring a sandbox directly,
+The agent worker allows access to the Sixb API. When configuring a sandbox directly,
 `network.mode` can disable networking (`"none"`), allow specific hosts (`"restricted"`), or allow
 all outbound traffic (`"all"`).
 
 Restricted policies are enforced by hostname, not port. An allowed host is reachable on any port.
-Use a separate gateway host if other services on the same host must remain inaccessible.
+Use a separate host for the Sixb API if other services on the same host must remain inaccessible.
 
 Registry images need network access to pull at startup. The provider adds Docker Hub hosts to
 restricted policies by default; set `registryHosts` for other registries. Local image archives
@@ -81,13 +81,13 @@ can boot without registry access.
 
 ## Dev note: localhost
 
-A microVM can't reach a gateway on `localhost` — that's the VM's own loopback, not your host. In dev, point the API at your host's LAN IP so the sandbox can reach it:
+A microVM can't reach a Sixb API on `localhost` — that's the VM's own loopback, not your host. In dev, point the API at your host's LAN IP so the sandbox can reach it:
 
 ```bash
 SIXB_API_PUBLIC_ORIGIN=http://<host-lan-ip>:3002
 ```
 
-The provider warns once if it sees a `localhost` gateway. (In production the gateway is already a real address, so this doesn't apply.)
+The provider warns once if it sees a `localhost` Sixb API. (In production the API is already a real address, so this doesn't apply.)
 
 ## Tests
 

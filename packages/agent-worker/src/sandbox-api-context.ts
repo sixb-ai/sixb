@@ -36,6 +36,8 @@ export interface PrepareAgentSandboxApiContextInput {
   /** Where the run's files go: relative to the working directory, or absolute. */
   readonly contextDirectory: string
   readonly apiBaseUrl: string
+  /** What the run's commands call the API with: in their environment only, never in a file. */
+  readonly runToken: string
   readonly projectId: string
   readonly actorId?: string
   readonly threadId?: string
@@ -68,8 +70,8 @@ export async function prepareAgentSandboxApiContext(
   const memoryDir = join(contextDir, "memory")
   const cli = await loadAgentCliAssets()
 
-  // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
-  // api-url.ts), so it is used verbatim — no second normalization pass here.
+  // apiBaseUrl arrives already normalized (see worker.ts), so it is used verbatim. The run token
+  // stays out of run.json: only the commands' environment holds it.
   const runContext = JSON.stringify(
     {
       projectId: input.projectId,
@@ -151,6 +153,7 @@ export async function prepareAgentSandboxApiContext(
   return {
     env: {
       SIXB_API_BASE_URL: input.apiBaseUrl,
+      SIXB_TOKEN: input.runToken,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
       SIXB_ONTOLOGY_DIR: ontologyDir,

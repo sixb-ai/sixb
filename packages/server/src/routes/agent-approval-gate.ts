@@ -1,5 +1,5 @@
 import type { SixbHostView } from "@sixb/core"
-import { bindAgentGatewayRequestExecution } from "@sixb/core/internal/agent-execution"
+import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import {
   agentRunApprovalMode,
   announceAgentApprovals,
@@ -20,12 +20,13 @@ import {
   type WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 import { ZodError, type z } from "zod"
-import type { AgentGatewayRunExecution, RequestAuthState } from "../auth/scope"
+import type { AgentRunRequestExecution, RequestAuthState } from "../auth/scope"
 import { RequestActionBodySchema } from "../schemas/actions"
 import { RequestWorkflowRunBodySchema } from "../schemas/workflows"
 import { handleRouteError } from "../utils/http"
+import { RequestBodyTooLargeError } from "../utils/request-body"
 
-/** What the gateway does with an Agent's call: forward it, or answer it itself. */
+/** What happens to an Agent's call: it goes on to its route, or is answered here. */
 export type AgentApiGate =
   | { readonly kind: "pass" }
   | { readonly kind: "answer"; readonly response: Response }
@@ -34,10 +35,11 @@ export interface AgentApiGateInput {
   readonly host: SixbHostView
   readonly method: string
   readonly upstreamPath: string
-  readonly body: Uint8Array | undefined
+  /** Read only for a call the gate may hold, so other calls' bodies stay unread. */
+  readBody(): Promise<Uint8Array | undefined>
   readonly run: AgentRunRecord | WorkflowAgentNodeRunRecord
   readonly agentExecution: NonNullable<RequestAuthState["agentExecution"]>
-  readonly runExecution: AgentGatewayRunExecution
+  readonly runExecution: AgentRunRequestExecution
   readonly signal: AbortSignal
 }
 
@@ -54,7 +56,8 @@ export async function gateAgentApiCall(input: AgentApiGateInput): Promise<AgentA
   if (agentRunApprovalMode(input.run) === "auto") return { kind: "pass" }
 
   try {
-    const call = effect === "action" ? await prepareActionCall(input) : prepareWorkflowCall(input)
+    const call =
+      effect === "action" ? await prepareActionCall(input) : await prepareWorkflowCall(input)
     return await answerHold(input, input.run, call)
   } catch (error) {
     if (error instanceof GateRefusal) return { kind: "answer", response: error.response }
@@ -79,9 +82,9 @@ async function answerHold(
       call,
     })
   } catch (error) {
-    // The run ended, or its delivery changed, since the gateway checked its capability.
+    // The run ended, or its delivery changed, since its token was checked.
     if (!(error instanceof AgentStorageError)) throw error
-    throw refusal(403, "Agent API gateway capability is not valid for this run.")
+    throw refusal(403, "The run token is not valid: its run has ended or moved.")
   }
 
   switch (hold.kind) {
@@ -110,7 +113,7 @@ function isAgentRun(run: AgentRunRecord | WorkflowAgentNodeRunRecord): run is Ag
 
 /** The Action call as its route would run it: admitted, with its params normalized. */
 async function prepareActionCall(input: AgentApiGateInput): Promise<AgentApprovalCall> {
-  const body = parseBody(input.body, RequestActionBodySchema)
+  const body = parseBody(await readBody(input), RequestActionBodySchema)
   const actionRunId = requiredRunId(body.runId)
 
   try {
@@ -126,8 +129,8 @@ async function prepareActionCall(input: AgentApiGateInput): Promise<AgentApprova
 }
 
 /** The workflow start as its route would run it: admitted, with its input snapshotted. */
-function prepareWorkflowCall(input: AgentApiGateInput): AgentApprovalCall {
-  const body = parseBody(input.body, RequestWorkflowRunBodySchema)
+async function prepareWorkflowCall(input: AgentApiGateInput): Promise<AgentApprovalCall> {
+  const body = parseBody(await readBody(input), RequestWorkflowRunBodySchema)
   const workflowRunId = requiredRunId(body.runId)
 
   try {
@@ -142,7 +145,7 @@ function prepareWorkflowCall(input: AgentApiGateInput): AgentApprovalCall {
 }
 
 function boundSixb(input: AgentApiGateInput): object {
-  return bindAgentGatewayRequestExecution(input.host, {
+  return bindAgentRunRequestExecution(input.host, {
     signal: input.signal,
     ...input.runExecution,
   })
@@ -168,6 +171,15 @@ function pathParam(upstreamPath: string): string {
 }
 
 /** Parsed with the route's own schema, so the gate reads the body the route would. */
+async function readBody(input: AgentApiGateInput): Promise<Uint8Array | undefined> {
+  try {
+    return await input.readBody()
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) throw refusal(413, error.message)
+    throw error
+  }
+}
+
 function parseBody<TSchema extends z.ZodTypeAny>(
   body: Uint8Array | undefined,
   schema: TSchema
@@ -185,7 +197,7 @@ function parseBody<TSchema extends z.ZodTypeAny>(
 /** The gate answers for the call itself: it never reaches its route. */
 class GateRefusal extends Error {
   constructor(readonly response: Response) {
-    super("[SixbServer] The agent API gateway answered the call itself.")
+    super("[SixbServer] The Agent's call was answered before its route.")
   }
 }
 

@@ -18,7 +18,6 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["GET", "/favicon.ico", "browser chrome"],
   ["GET", "/health", "liveness probe"],
   ["GET", "/ready", "readiness probe"],
-  ["POST", "/__sixb/agent-api/objects", "gateway authenticates with the run's own token"],
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/files/downloads/payload.signature", "the signed token is the credential"],
   ["HEAD", "/api/files/downloads/payload.signature", "media fetchers probe before reading"],
@@ -100,12 +99,11 @@ describe("classifyRoute", () => {
     }
   })
 
-  test("the /__sixb prefix is public only for the agent gateway", () => {
-    // A blanket GET rule for /__sixb used to sit beside the gateway rule. It was a
-    // second, narrower fail-open: the app serves its own /__sixb/runtime.json from its
-    // own server, so nothing on the API needed it.
+  test("nothing under the /__sixb prefix is public", () => {
+    // The app serves its own /__sixb/runtime.json from its own server, and run tokens reach the
+    // normal routes, so nothing on the API under /__sixb needs to skip authentication.
     expect(classifyRoute(request("GET", "/__sixb/runtime.json")).kind).toBe("api")
-    expect(classifyRoute(request("GET", "/__sixb/agent-api/objects")).kind).toBe("public")
+    expect(classifyRoute(request("POST", "/__sixb/agent-api/objects")).kind).toBe("api")
   })
 
   test("classifies the three authenticated families", () => {

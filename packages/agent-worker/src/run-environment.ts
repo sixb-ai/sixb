@@ -22,7 +22,7 @@ import type {
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
-import { createAgentApiGatewayBaseUrl } from "./api-url"
+import { runTokenFor } from "./api-url"
 import {
   type InstalledArtifacts,
   installArtifactsPublishedBy,
@@ -143,8 +143,8 @@ export async function createConversationAgentEnvironment(
   input: CreateConversationAgentEnvironmentInput
 ): Promise<ConversationAgentExecutionEnvironment> {
   const { context, plan, run, preflight } = input
-  const apiBaseUrl = createAgentApiGatewayBaseUrl({
-    apiBaseUrl: context.apiBaseUrl,
+  const { apiBaseUrl } = context
+  const runToken = runTokenFor({
     projectId: context.id,
     runId: run.id,
     executionToken: run.execution?.token,
@@ -248,6 +248,7 @@ export async function createConversationAgentEnvironment(
         blobStorage: context.blobStorage,
       }),
       apiBaseUrl,
+      runToken,
       attachmentContext,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -381,8 +382,8 @@ async function startSubagentEnvironment(
       files,
       blobStorage: context.blobStorage,
     }),
-    apiBaseUrl: createAgentApiGatewayBaseUrl({
-      apiBaseUrl: context.apiBaseUrl,
+    apiBaseUrl: context.apiBaseUrl,
+    runToken: runTokenFor({
       projectId: context.id,
       runId: run.id,
       executionToken: execution.token,
@@ -458,8 +459,8 @@ export async function createWorkflowAgentNodeEnvironment(
         input: input.nodeInput,
         blobStorage: context.blobStorage,
       }),
-      apiBaseUrl: createAgentApiGatewayBaseUrl({
-        apiBaseUrl: context.apiBaseUrl,
+      apiBaseUrl: context.apiBaseUrl,
+      runToken: runTokenFor({
         projectId: context.id,
         runId: run.nodeRunId,
         executionToken: execution.token,
@@ -509,6 +510,8 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
   readonly runId: string
   readonly threadId?: string
   readonly apiBaseUrl: string
+  /** What the run's commands call the API with, as `$SIXB_TOKEN`. */
+  readonly runToken: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
   readonly ontologyDocs?: RenderedOntologyDocs
@@ -640,6 +643,7 @@ async function startAgentEnvironment(
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
+    runToken: input.runToken,
     attachmentContext,
     // A conversation's memory section names the memory skill; other runs never see it.
     skills: input.memory && mode === "conversation" ? [...plan.skills, MEMORY_SKILL] : plan.skills,
@@ -834,6 +838,7 @@ interface ProvisionSandboxInput {
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
+  readonly runToken: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
@@ -855,6 +860,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       sandbox,
       contextDirectory,
       apiBaseUrl,
+      runToken: input.runToken,
       projectId: context.id,
       ...(actorId === undefined ? {} : { actorId }),
       ...(run.threadId ? { threadId: run.threadId } : {}),

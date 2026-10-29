@@ -322,12 +322,12 @@ var SANDBOX_MAIN_HELP = `Sixb agent CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
+The CLI uses the run's SIXB_API_BASE_URL and SIXB_TOKEN. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and API gateway
+  sixb doctor                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -374,7 +374,7 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
-var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and API gateway
+var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run's SIXB_API_BASE_URL and SIXB_TOKEN. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and its API access
   sixb context                        Print the current run context
 `, "").replace(`
 When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
@@ -1962,10 +1962,10 @@ async function runInstanceCli(input) {
 function createInstanceApiClient(mode) {
   return new ApiClient({
     baseUrl: mode.baseUrl,
-    ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
+    ...mode.token ? { authorization: `Bearer ${mode.token}` } : {},
     missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
-    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API gateway could not be reached." : "The Sixb API could not be reached.",
-    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and gateway." : "Run 'sixb status' to verify the current profile."
+    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
+    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
   });
 }
 // src/agent-cli/commands/memory.ts
@@ -2332,6 +2332,7 @@ function sandboxMode() {
   return {
     kind: "sandbox",
     baseUrl: process.env.SIXB_API_BASE_URL ?? "",
+    ...process.env.SIXB_TOKEN ? { token: process.env.SIXB_TOKEN } : {},
     runContextPath: process.env.SIXB_RUN_CONTEXT ?? ""
   };
 }

@@ -1,7 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
-import { bindAgentGatewayRequestExecution } from "@sixb/core/internal/agent-execution"
+import { bindAgentRunRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
@@ -33,7 +33,7 @@ import {
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "./auth/csrf"
 import type { SixbAuthExperienceOptions } from "./auth/experience"
 import { ServerAuthGuard } from "./auth/guard"
-import { consumeInternalRequestAuthState } from "./auth/scope"
+import { type RunTokenDecision, requestRunToken, resolveRunTokenRequest } from "./auth/run-token"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "./auth/session-cookies"
 import {
@@ -234,6 +234,7 @@ export function createSixbApi(server: SixbServer) {
     Request,
     Awaited<ReturnType<SharedAccessBoundary["resolveRequest"]>>
   >()
+  const preparedRunToken = new WeakMap<Request, RunTokenDecision>()
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
   const apiBrowserPolicy = server.getApiBrowserPolicy()
 
@@ -261,7 +262,17 @@ export function createSixbApi(server: SixbServer) {
       maxAge: 600,
     })
   )
+  app.onRequest(async ({ request }) => {
+    // An Agent's commands, as their run: decided before Elysia parses the body, which the approval
+    // gate reads from a copy. No session, share or cookie speaks for such a request.
+    const runToken = requestRunToken(request)
+    if (runToken === undefined) return undefined
+    const decision = await resolveRunTokenRequest({ host, request, token: runToken })
+    preparedRunToken.set(request, decision)
+    return decision.kind === "deny" ? decision.response : undefined
+  })
   app.onRequest(async ({ request, set }) => {
+    if (preparedRunToken.has(request)) return undefined
     // Resolve Share intent before Elysia parses route inputs. Otherwise an unsupported route or an
     // invalid shared session could escape through a route-specific 4xx before this boundary ran.
     // CORS is registered first so allowed app origins can read these generic boundary responses.
@@ -286,6 +297,18 @@ export function createSixbApi(server: SixbServer) {
   // never choose between a principal SDK and the ambient runtime themselves.
   app
     .derive(async ({ request }) => {
+      const runToken = preparedRunToken.get(request)
+      preparedRunToken.delete(request)
+      if (runToken?.kind === "allow") {
+        const { runExecution, ...agentState } = runToken.state
+        return {
+          auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: null,
+          ...agentState,
+          sixb: bindAgentRunRequestExecution(host, { signal: request.signal, ...runExecution }),
+        }
+      }
+
       const shared =
         preparedSharedAccess.get(request) ?? (await sharedAccess.resolveRequest(request))
       preparedSharedAccess.delete(request)
@@ -312,17 +335,6 @@ export function createSixbApi(server: SixbServer) {
               },
             },
           }),
-        }
-      }
-
-      const internalAuthState = consumeInternalRequestAuthState(request)
-      if (internalAuthState) {
-        const { runExecution, ...agentState } = internalAuthState
-        return {
-          auth: { kind: "allow" as const, session: null },
-          sharedAccessCookies: null,
-          ...agentState,
-          sixb: bindAgentGatewayRequestExecution(host, { signal: request.signal, ...runExecution }),
         }
       }
 
