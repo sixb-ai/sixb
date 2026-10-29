@@ -26,6 +26,19 @@ async function linkDependencies(projectRoot: string, packages: readonly string[]
   }
 }
 
+// Every page's policy names the listed frame origins: keep the developer's own list, such as one
+// Bun loads from a local .env, out of the headers these tests compare.
+const ambientFrameOrigins = process.env.SIXB_APP_FRAME_ORIGINS
+
+beforeEach(() => {
+  delete process.env.SIXB_APP_FRAME_ORIGINS
+})
+
+afterEach(() => {
+  if (ambientFrameOrigins === undefined) delete process.env.SIXB_APP_FRAME_ORIGINS
+  else process.env.SIXB_APP_FRAME_ORIGINS = ambientFrameOrigins
+})
+
 async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
   return await Promise.all(paths.map(async (path) => (await stat(path)).mtimeMs))
 }
@@ -214,6 +227,50 @@ describe("createCustomApp.start", () => {
       await split.stop()
       await same.stop()
     }
+  })
+
+  // Reproduce: pass [] for frameOrigins to htmlResponse or sharedHtmlResponse in start().
+  test("frames the sites SIXB_APP_FRAME_ORIGINS lists, on app and shared pages", async () => {
+    const app = await createCustomApp({ rootDir: tempRoot })
+    process.env.SIXB_APP_FRAME_ORIGINS =
+      "https://Contoso.sharepoint.com/, https://api.test, https://www.youtube-nocookie.com"
+    const server = await app.start({
+      host: "127.0.0.1",
+      port: 0,
+      apiBaseUrl: "https://api.test/v1",
+    })
+    // Read when the server starts, like public env: a change takes a restart.
+    process.env.SIXB_APP_FRAME_ORIGINS = "https://changed-after-start.test"
+
+    try {
+      // The API's origin, listed again, is not repeated.
+      const listed =
+        "https://api.test https://contoso.sharepoint.com https://www.youtube-nocookie.com"
+      for (const route of ["/", "/dashboard/devices"]) {
+        const response = await fetch(`http://127.0.0.1:${server.port}${route}`)
+        expect(response.headers.get("content-security-policy"), route).toBe(`frame-src ${listed}`)
+      }
+
+      const shared = await fetch(`http://127.0.0.1:${server.port}/shared/shr_1/reports/report-1`)
+      const csp = shared.headers.get("content-security-policy") ?? ""
+      expect(csp).toContain(`frame-src ${listed};`)
+      expect(csp).toContain("default-src 'none'")
+    } finally {
+      await server.stop()
+    }
+  })
+
+  // Reproduce: drop readAppFrameOrigins from start(), and the server starts with no list at all.
+  test("refuses to start with a frame origin that is not exact", async () => {
+    const app = await createCustomApp({ rootDir: tempRoot })
+    process.env.SIXB_APP_FRAME_ORIGINS = "https://*.sharepoint.com"
+
+    const error = await app.start({ host: "127.0.0.1", port: 0 }).catch((error) => error)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain(
+      "[SixbCustomApp] SIXB_APP_FRAME_ORIGINS: 'https://*.sharepoint.com' is a wildcard."
+    )
   })
 
   // Regression proof: drop the `/__sixb/assets/` branch from start() and the icon request is
@@ -437,6 +494,7 @@ describe("createCustomApp.dev", () => {
   test("delivers public env before the development app entry, also behind a TLS-terminating proxy", async () => {
     const previous = process.env.SIXB_PUBLIC_TEST_KEY
     process.env.SIXB_PUBLIC_TEST_KEY = "dev-runtime-sentinel"
+    process.env.SIXB_APP_FRAME_ORIGINS = "https://frames.example.test"
     const app = await createCustomApp({
       rootDir: tempRoot,
       authEnabled: false,
@@ -475,9 +533,11 @@ describe("createCustomApp.dev", () => {
       })
       expect(proxied.status).toBe(200)
       expect(await proxied.text()).toContain('<div id="root"></div>')
-      // In development too, the page frames only the API's artifact frames: here, its own origin.
-      // Reproduce by dropping the policy from spaHtmlRoute.
-      expect(proxied.headers.get("content-security-policy")).toBe("frame-src 'self'")
+      // In development too, the page frames only the API's artifact frames, here its own origin,
+      // and the listed sites. Reproduce by dropping the policy from spaHtmlRoute.
+      expect(proxied.headers.get("content-security-policy")).toBe(
+        "frame-src 'self' https://frames.example.test"
+      )
     } finally {
       await server?.stop()
       if (previous === undefined) delete process.env.SIXB_PUBLIC_TEST_KEY

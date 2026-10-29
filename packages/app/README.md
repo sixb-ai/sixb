@@ -216,6 +216,14 @@ Tailwind's source detection is scoped to `app/`, and the CLI is resolved from th
 
 `createCustomApp().start(options)` serves the built app from `.sixb/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Sixb API origin with credentials.
 
+Every app and shared page, in `dev()` too, carries `frame-src` for the API's origin plus the sites
+in `SIXB_APP_FRAME_ORIGINS`, read when `dev()` or `start()` starts. That directive is what keeps an
+artifact frame's own navigations on those origins (its sandbox already denies popups and top
+navigation), so the list takes exact origins only: a wildcard would let an artifact send what it
+reads to any site it matches. When the browser refuses an `<iframe>` the page itself rendered, the
+generated runtime names the variable in the console; an artifact frame's refused navigation stays
+unexplained.
+
 Shared links require the built-in server in V1; static SPA fallbacks and external hosting adapters
 are unsupported. It serves the isolated shell with a fresh CSP nonce, `no-store`, `no-referrer`,
 and no eager asset loading. App and API must be same-site (`SameSite=Strict` cookies).
