@@ -2,6 +2,29 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-29 — Framework 0.1.25
+
+### Highlights
+
+- Embed other sites in pages: `SIXB_APP_FRAME_ORIGINS` lists the exact origins an `<iframe>` may
+  load, in production and in `sixb dev`.
+- Redraw the device sign-in pages: the code shows one character per cell on both screens, and the
+  account and its groups sit above Deny and Authorize.
+- Check text over photos in Agent slides: a text box with too little contrast against the image
+  under it is reported, and edge-to-edge photos no longer count as running into the footer.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server and CLI together to `0.1.25`. Upgrade
+  the app to `0.1.17`; rebuild application assets.
+
+### Package versions
+
+- `0.1.25`: `@sixb/core`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.17`: `@sixb/app`.
+
 ## 2026-10-28 — Framework 0.1.24
 
 ### Highlights
