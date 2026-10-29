@@ -20,6 +20,11 @@ export interface LocalSandboxFactoryOptions<in out TParams extends ParamsConfig 
   readonly isolation?: LocalIsolation
   readonly readOnlyPaths?: readonly string[]
   readonly readWritePaths?: readonly string[]
+  /**
+   * Paths commands may neither read nor change, such as the project's `.env` or its database.
+   * Needs an isolation backend: creation fails without one.
+   */
+  readonly denyReadPaths?: readonly string[]
   /** Default env merged into every sandbox the factory creates. */
   readonly env?: Readonly<Record<string, string>>
   /** Default timeout, in milliseconds, applied when none is specified. */
@@ -52,6 +57,7 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
       isolation: this.defaults.isolation,
       readOnlyPaths: this.defaults.readOnlyPaths,
       readWritePaths: this.defaults.readWritePaths,
+      denyReadPaths: this.defaults.denyReadPaths,
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.configuration.network,
       env: { ...this.configuration.env, ...options.env },

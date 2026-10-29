@@ -7,6 +7,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -36,6 +37,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network,
     })
 
@@ -48,6 +50,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: ["/etc/secrets"],
       readWritePaths: ["/private/var/cache/agent"],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -55,11 +58,27 @@ describe("buildSeatbeltProfile", () => {
     expect(profile).not.toContain("/etc/secrets")
   })
 
+  test("denied paths come last, so no allow above reads or writes them", () => {
+    const profile = buildSeatbeltProfile({
+      workingDirectory: "/private/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      denyReadPaths: ["/Users/ada/acme", "/private/tmp/wd/.env"],
+      network: { mode: "none" },
+    })
+
+    expect(profile.trimEnd().split("\n").slice(-2)).toEqual([
+      '(deny file-read* file-write* (subpath "/Users/ada/acme"))',
+      '(deny file-read* file-write* (subpath "/private/tmp/wd/.env"))',
+    ])
+  })
+
   test("escapes quotes and backslashes in subpath strings", () => {
     const profile = buildSeatbeltProfile({
       workingDirectory: '/tmp/with "quotes"\\and\\backslashes',
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 

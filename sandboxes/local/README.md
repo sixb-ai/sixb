@@ -31,6 +31,7 @@ export const sixb = createSixb({
     isolation: "auto",
     readOnlyPaths: [process.cwd()],
     readWritePaths: [".sixb/agent-work"],
+    denyReadPaths: [".env"],
     timeout: 120_000,
   }),
 })
@@ -40,6 +41,7 @@ export const sixb = createSixb({
 | --- | --- |
 | `isolation` | `"auto"` (default) picks the backend for the platform; `"seatbelt"` and `"bwrap"` demand a specific one; `"none"` disables confinement. |
 | `readOnlyPaths` / `readWritePaths` | Additional read-only mounts for bwrap and writable paths for OS sandbox backends. These do not prevent reading other host files. |
+| `denyReadPaths` | Paths commands can neither read nor change, such as the project's `.env` or its database. Needs an isolation backend: creation fails without one. |
 | `env` | Default environment merged into every sandbox. Only `PATH`, `HOME`, `LANG`, and `TMPDIR` are inherited from the host — nothing else leaks in. |
 | `timeout` | Default command timeout, overridable per run. |
 | `network` | Default network policy, overridable per run. |
@@ -57,6 +59,16 @@ For real isolation, use a provider that puts a boundary around the workload:
 
 Pin `isolation` to `"seatbelt"` or `"bwrap"` to require that backend. Creation fails if it is
 unavailable instead of falling back to an ordinary child process.
+
+## Denied paths
+
+Commands can read every host file their user can, except the paths in `denyReadPaths`. Relative
+paths resolve against the current directory when the sandbox is created.
+
+- **macOS (seatbelt):** reading or writing a denied path fails, including one created after the
+  sandbox.
+- **Linux (bwrap):** a denied directory shows up empty and a denied file reads as empty; writes
+  never reach them. A path that doesn't exist yet when the sandbox is created isn't covered.
 
 ## Network policy
 

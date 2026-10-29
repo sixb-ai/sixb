@@ -9,6 +9,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -48,6 +49,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network,
     })
 
@@ -62,6 +64,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: ["/usr", "/opt/data"],
       readWritePaths: ["/var/cache/agent"],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -82,6 +85,29 @@ describe("buildBwrapArgv", () => {
       "--bind",
       "/var/cache/agent",
       "/var/cache/agent",
+    ])
+  })
+
+  test("denied paths are covered after every bind: a directory by an empty tmpfs, a file by /dev/null", () => {
+    const argv = buildBwrapArgv({
+      command: "cat",
+      args: [],
+      workingDirectory: "/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: ["/var/cache/agent"],
+      denyReadPaths: [
+        { path: "/home/ada/acme", kind: "directory" },
+        { path: "/tmp/wd/.env", kind: "file" },
+      ],
+      network: { mode: "none" },
+    })
+
+    expect(argv.slice(argv.indexOf("/var/cache/agent") + 2, argv.indexOf("--proc"))).toEqual([
+      "--tmpfs",
+      "/home/ada/acme",
+      "--ro-bind",
+      "/dev/null",
+      "/tmp/wd/.env",
     ])
   })
 })

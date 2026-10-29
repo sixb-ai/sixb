@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, join, resolve, sep } from "node:path"
 import {
   type CommandResult,
   type RunCommandOptions,
@@ -14,7 +14,7 @@ import {
   type SandboxStatus,
 } from "@sixb/core"
 import { exec } from "@sixb/core/sandboxes"
-import { buildBwrapArgv } from "./isolation/bwrap"
+import { buildBwrapArgv, type DeniedPath } from "./isolation/bwrap"
 import {
   detectIsolation,
   type IsolationProbe,
@@ -31,9 +31,17 @@ export interface LocalSandboxOptions extends SandboxSessionOptions {
   readonly isolation?: LocalIsolation
   readonly readOnlyPaths?: readonly string[]
   readonly readWritePaths?: readonly string[]
+  /**
+   * Paths commands may neither read nor change, such as a project's `.env` or its database. Needs
+   * an isolation backend: creation fails without one.
+   */
+  readonly denyReadPaths?: readonly string[]
 }
 
 const HOST_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "TMPDIR"] as const
+
+/** A denied path as the OS sandbox sees it; one that did not exist at creation has no kind. */
+type ResolvedDeniedPath = Pick<DeniedPath, "path"> & Partial<Pick<DeniedPath, "kind">>
 
 export class LocalSandbox implements Sandbox {
   readonly id: string
@@ -47,6 +55,7 @@ export class LocalSandbox implements Sandbox {
   private readonly network: SandboxNetworkPolicy
   private readonly readOnlyPaths: readonly string[]
   private readonly readWritePaths: readonly string[]
+  private readonly denyReadPaths: readonly ResolvedDeniedPath[]
   private readonly inFlight = new Set<AbortController>()
   private readonly cleanupWorkingDirectory: boolean
 
@@ -59,6 +68,7 @@ export class LocalSandbox implements Sandbox {
     readonly network: SandboxNetworkPolicy
     readonly readOnlyPaths: readonly string[]
     readonly readWritePaths: readonly string[]
+    readonly denyReadPaths: readonly ResolvedDeniedPath[]
     readonly cleanupWorkingDirectory: boolean
   }) {
     this.id = input.id
@@ -69,6 +79,7 @@ export class LocalSandbox implements Sandbox {
     this.network = input.network
     this.readOnlyPaths = input.readOnlyPaths
     this.readWritePaths = input.readWritePaths
+    this.denyReadPaths = input.denyReadPaths
     this.cleanupWorkingDirectory = input.cleanupWorkingDirectory
     this.currentStatus = "running"
   }
@@ -84,6 +95,12 @@ export class LocalSandbox implements Sandbox {
   static async create(options: LocalSandboxOptions = {}): Promise<LocalSandbox> {
     const requested = options.isolation ?? "auto"
     const backend = await resolveBackend(requested)
+    const denyReadPaths = await resolveDeniedPaths(options.denyReadPaths ?? [])
+    if (denyReadPaths.length > 0 && backend === "none") {
+      throw new SandboxIsolationUnavailableError(
+        "[Sandbox] denyReadPaths needs an isolation backend, and none is in use: install the backend for this platform, or drop denyReadPaths."
+      )
+    }
 
     const id = options.id ?? randomUUID()
     const { workingDirectory, generated } = await resolveWorkingDirectory(
@@ -105,6 +122,7 @@ export class LocalSandbox implements Sandbox {
       network,
       readOnlyPaths: options.readOnlyPaths ?? [],
       readWritePaths: options.readWritePaths ?? [],
+      denyReadPaths,
       cleanupWorkingDirectory: generated,
     })
   }
@@ -207,6 +225,10 @@ export class LocalSandbox implements Sandbox {
         workingDirectory: this.workingDirectory,
         readOnlyPaths: this.readOnlyPaths,
         readWritePaths: this.readWritePaths,
+        // A path missing when the sandbox was created has nothing to mount over.
+        denyReadPaths: this.denyReadPaths.filter(
+          (path): path is DeniedPath => path.kind !== undefined
+        ),
         network: this.network,
       })
     }
@@ -215,6 +237,7 @@ export class LocalSandbox implements Sandbox {
         workingDirectory: this.workingDirectory,
         readOnlyPaths: this.readOnlyPaths,
         readWritePaths: this.readWritePaths,
+        denyReadPaths: this.denyReadPaths.map(({ path }) => path),
         network: this.network,
       })
       return buildSeatbeltArgv({ profile, command, args })
@@ -256,6 +279,25 @@ async function resolveBackend(requested: LocalIsolation): Promise<ResolvedIsolat
 
   throw new SandboxIsolationUnavailableError(
     `[Sandbox] isolation '${requested}' is not available on this host (${probe.message})`
+  )
+}
+
+/**
+ * Each denied path as the OS sandbox sees it: absolute, its links followed, and what it is. One that
+ * does not exist yet is named under its parent's real path, as macOS reports it once created.
+ */
+async function resolveDeniedPaths(
+  paths: readonly string[]
+): Promise<readonly ResolvedDeniedPath[]> {
+  return Promise.all(
+    paths.map(async (path): Promise<ResolvedDeniedPath> => {
+      const absolute = resolve(path)
+      const real = await realpath(absolute).catch(() => undefined)
+      if (real) return { path: real, kind: (await stat(real)).isDirectory() ? "directory" : "file" }
+
+      const parent = await realpath(dirname(absolute)).catch(() => dirname(absolute))
+      return { path: join(parent, basename(absolute)) }
+    })
   )
 }
 
