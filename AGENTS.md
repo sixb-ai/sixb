@@ -163,7 +163,7 @@ repo's `typecheck` chain reads source.
   `afterEach`, because a fake-timer test that times out never reaches its own `finally`. A
   production option that exists only to shorten a test's wait is a test-only seam — don't add one.
 - Await a rejection that might never settle as `await promise.catch((error) => error)`, not
-  `expect(promise).rejects`: on Bun 1.4.2 the latter hangs the whole file past the per-test
+  `expect(promise).rejects`: on Bun 1.4.4 the latter hangs the whole file past the per-test
   timeout, so a regression shows up as a guard stall instead of a named failure.
 - A negative check must be able to fail. Asserting that a spy was not called before the async work
   that would call it could run, or that nothing arrived during a quiet window, passes either way.
