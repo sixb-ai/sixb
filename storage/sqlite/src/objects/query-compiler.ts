@@ -698,12 +698,12 @@ function compileExpansionsObject(
   return { sql: `json_object(${parts.join(", ")})`, args }
 }
 
-// One expansion's hydrated value. `row_number()` numbers a parent's links by the
-// order from `compileExpansionOrder` (the expansion's `orderBy` against the target
-// object's properties, then an identity tiebreak); `WHERE _ord <= N` keeps the
-// top-N per parent in-DB; each retained neighbour becomes a JSON object; and the
-// value is an ordered array ("many") or the first element or null ("one"). The
-// cardinality is core-resolved before pushdown.
+// One expansion's hydrated value. A parent's links are read in the order from
+// `compileExpansionOrder` (the expansion's `orderBy` against the target object's
+// properties, then an identity tiebreak) and `LIMIT N` keeps the top-N per parent
+// in-DB; each retained neighbour becomes a JSON object; and the value is an
+// ordered array ("many", numbered by `row_number()` for `json_group_array`) or the
+// first neighbour or null ("one"). The cardinality is core-resolved before pushdown.
 function compileExpansionValue(
   expansion: ObjectExpansion,
   parent: ExpansionParent,
@@ -736,8 +736,7 @@ function compileExpansionValue(
     whereArgs.push(expansion.sourceObjectTypeId)
   }
 
-  const inner = `
-    SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
+  const from = `
     FROM ${ctx.source.linksTable} AS ${edge}
     JOIN ${ctx.source.objectsTable} AS ${target}
       ON ${target}.project_id = ${edge}.project_id
@@ -745,12 +744,13 @@ function compileExpansionValue(
      AND ${target}.primary_id = ${neighborId}
     WHERE ${whereParts.join(" AND ")}
   `
-  const innerArgs = [...child.args, ...order.args, ...whereArgs]
 
+  // ORDER BY ... LIMIT stops at the kept neighbours, so only they are built as JSON. Filtering
+  // on row_number() would build every neighbour first, in a co-routine per parent.
   if (expansion.cardinality === "one") {
     return {
-      sql: `(SELECT ${ranked}.elem FROM (${inner}) AS ${ranked} WHERE ${ranked}._ord = 1)`,
-      args: innerArgs,
+      sql: `(SELECT ${child.sql} ${from} ORDER BY ${order.sql} LIMIT 1)`,
+      args: [...child.args, ...whereArgs, ...order.args],
     }
   }
 
@@ -759,8 +759,13 @@ function compileExpansionValue(
   // rather than the quoted JSON text the subquery column hands back.
   const limit = expansion.limit ?? DEFAULT_EXPANSION_FANOUT
   return {
-    sql: `COALESCE((SELECT json_group_array(json(${ranked}.elem) ORDER BY ${ranked}._ord) FROM (${inner}) AS ${ranked} WHERE ${ranked}._ord <= ?), '[]')`,
-    args: [...innerArgs, limit],
+    sql: `COALESCE((SELECT json_group_array(json(${ranked}.elem) ORDER BY ${ranked}._ord) FROM (
+      SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
+      ${from}
+      ORDER BY ${order.sql}
+      LIMIT ?
+    ) AS ${ranked}), '[]')`,
+    args: [...child.args, ...order.args, ...whereArgs, ...order.args, limit],
   }
 }
 
