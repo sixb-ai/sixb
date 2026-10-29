@@ -70,6 +70,24 @@ export const fr: Translation<AgentMessages> = {
     dictationTranscribing: "Transcription…",
     cancelDictation: "Annuler la dictée",
     finishDictation: "Terminer",
+    add: "Ajouter des fichiers et plus",
+    mention: "Mentionner un enregistrement",
+    commands: "Commandes",
+  },
+  commands: {
+    list: "Commandes",
+    auto: "Laisser Auto choisir le modèle",
+    model: (name) => `Utiliser ${name}`,
+    modes: {
+      manual: "Demander avant chaque action",
+      "accept-edits": "Autoriser les modifications sans demander",
+      auto: "Tout lancer sans demander",
+    },
+  },
+  settings: {
+    title: "Modèle et autorisations",
+    chip: (summary) => `${summary}. Changer le modèle et les autorisations`,
+    permissions: "Autorisations",
   },
   files: {
     spreadsheet: "Feuille de calcul",
@@ -100,10 +118,8 @@ export const fr: Translation<AgentMessages> = {
     unnamed: "Contexte",
   },
   models: {
-    choose: "Choisir le modèle et l’effort de raisonnement",
     unavailable: "Modèles indisponibles",
     defaultModel: "Modèle par défaut",
-    popover: "Modèle et effort de raisonnement",
     search: "Rechercher un modèle",
     list: "Modèles",
     empty: "Aucun modèle correspondant.",
@@ -120,9 +136,8 @@ export const fr: Translation<AgentMessages> = {
     reasoning: "Raisonnement",
     via: (name) => `Via ${name}`,
     title: "Modèle",
-    chip: (name) => `Modèle : ${name}. Le changer`,
     auto: "Auto",
-    autoRouting: "Choisit le bon modèle pour chaque message",
+    autoRouting: "Le meilleur modèle pour chaque message",
     autoStandard: (name) => `Sixb utilise ${name}`,
   },
   reasoning: {
@@ -782,22 +797,21 @@ export const fr: Translation<AgentMessages> = {
   },
   approvalModes: {
     title: "Que peut faire l’agent sans demander ?",
-    chip: (mode) => `Autorisations : ${mode}. Les changer`,
     changed: (mode) => `Autorisations : ${mode}`,
     shortcut: "Maj+Tab dans un message vide passe au mode suivant",
     modes: {
       manual: {
-        label: "Manuel",
-        description: "Demande avant chaque action ou workflow que l’agent lance",
+        label: "Demander d’abord",
+        description: "Vous demande avant chaque action ou workflow.",
       },
       "accept-edits": {
-        label: "Modifications acceptées",
+        label: "Modifications permises",
         description:
-          "Modifie vos données sans demander. Demande avant de contacter d’autres systèmes ou de lancer un workflow",
+          "Modifie vos données de lui-même. Demande avant de contacter d’autres systèmes ou de lancer un workflow.",
       },
       auto: {
-        label: "Auto",
-        description: "Lance toutes les actions et tous les workflows sans demander",
+        label: "Accès complet",
+        description: "Lance toutes les actions et tous les workflows sans demander.",
       },
     },
     saveFailed: "Impossible de changer ce que l’agent peut faire. Réessayez.",

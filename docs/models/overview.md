@@ -226,9 +226,10 @@ Each user chooses what the agent may change without asking them:
 | `accept-edits` | runs | waits | waits |
 | `auto` (default) | runs | runs | runs |
 
-In the app, the message box shows the mode and switches it, and the mode you pick becomes your
-default for new conversations; in an empty message, Shift+Tab cycles Manual, Accept edits and
-Auto. Settings › Personal sets your default too. A call
+In the app, the composer's settings chip shows the mode and switches it, as Ask first (`manual`),
+Allow edits (`accept-edits`) or Full access (`auto`), and the mode you pick becomes your default
+for new conversations. In an empty message, Shift+Tab cycles the modes, and `/ask`, `/edits` and
+`/full` switch to one. Settings › Personal sets your default too. A call
 that waits shows as a card in the reply: what it does, to which record, with which values, and
 whether it reaches an external system. Approve, Deny or "Always allow" answer it there, and the
 reply continues under the card. Once decided, the card folds to a line that says how it ended and
@@ -411,22 +412,34 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
-| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, the model picker (an Auto chip with tiers), the approval mode chip and the [dictation](#dictation) microphone |
+| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, and the [dictation](#dictation) microphone |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
-| `ModelControls` | The model picker on its own, an Auto chip with tiers; `ProviderLogo` and `ReasoningEffortSlider` to build another |
+| `ComposerSettings` | The composer's chip on its own: the model with its thinking, and the permissions; `ProviderLogo` and `ReasoningEffortSlider` to build another |
 | `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |
 | `useRegisteredAgentContext` | The context open pages set with `useAgentContext` |
 
 With [tiers](./configuration.md#tiers), `conversation.modelChoice` is `"auto"` until the person
 pins a model, and `selectedModel` is unset; `resetModelSelection()` returns to Auto.
 `conversation.modelRouting` says whether a decision model picks on Auto. `Composer` and
-`ModelControls` show all this as an Auto chip when given `onResetModelSelection` and
-`onResetToDefault` respectively.
+`ComposerSettings` show all this as Auto when given `onResetModelSelection`.
 
 Types such as `AgentThread`, `AgentConversationMessage` and `AgentFileRef` are exported alongside
 them.
+
+#### Slash commands
+
+A message that is one slash word is a command: `/auto`, one per model (`/claude-opus-5-5`), and
+`/ask`, `/edits` and `/full` for the permissions. Enter runs the highlighted one; Escape closes
+the list and sends the text as typed. Add your own with `commands`, listed after the built-in ones:
+
+```tsx
+<Composer
+  {...conversation.composerProps}
+  commands={[{ name: "summary", label: "Summarize this page", run: () => summarize() }]}
+/>
+```
 
 #### Draw your own messages
 

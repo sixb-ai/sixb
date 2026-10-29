@@ -138,8 +138,9 @@ test("with tiers, the browser's choice for every conversation pins none", async 
 
     return {
       modelChoice: conversation?.modelChoice,
-      picker: html.includes('aria-label="Choose model and reasoning effort"'),
-      auto: html.includes('aria-label="Model: Auto. Change it"'),
+      // The chip names the model it runs: the pinned one, or Auto.
+      picker: html.includes('aria-label="Opus, High'),
+      auto: html.includes('aria-label="Auto'),
       posted,
     }
   }

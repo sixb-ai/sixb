@@ -26,7 +26,6 @@ import {
   File as FileIcon,
   FileText,
   Image as ImageIcon,
-  Plus,
   Square,
   Table2,
   UploadCloud,
@@ -45,7 +44,6 @@ import {
 import { createPortal } from "react-dom"
 import { type AgentApprovalMode, toggledApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
-import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/context-display"
 import {
@@ -53,11 +51,23 @@ import {
   findAgentContextMention,
   removeAgentContextMention,
 } from "../utils/context-mention"
-import { ApprovalModeChip } from "./approval-mode-chip"
-import { ContextChips } from "./context-chips"
+import { ComposerAddMenu } from "./composer-add-menu"
+import {
+  builtInCommands,
+  type ComposerCommand,
+  ComposerCommandList,
+  commandQuery,
+  matchCommands,
+} from "./composer-commands"
+import { ComposerSettings } from "./composer-settings"
+import {
+  COMPOSER_CHIP_CLASS_NAME,
+  COMPOSER_CHIP_REMOVE_CLASS_NAME,
+  COMPOSER_CHIP_THUMB_CLASS_NAME,
+  ContextChips,
+} from "./context-chips"
 import { ContextPicker } from "./context-picker"
 import { DictationBar } from "./dictation-bar"
-import { ModelControls } from "./model-controls"
 
 export interface ComposerProps {
   readonly onSend: (
@@ -124,6 +134,11 @@ export interface ComposerProps {
    * input. Omit for no microphone.
    */
   readonly dictation?: SpeechRecognizer
+  /**
+   * Slash commands of your own, listed after the built-in ones (`/auto`, one per model, `/ask`,
+   * `/edits`, `/full`). A command is typed as the whole message and runs with Enter.
+   */
+  readonly commands?: readonly ComposerCommand[]
 }
 
 type ComposerAttachment =
@@ -149,9 +164,15 @@ type ComposerAttachment =
 
 const MAX_HEIGHT_PX = 200
 
-// Send and stop: the one filled control in the box.
+// The microphone and Cancel: round, quiet until hovered.
+const ICON_BUTTON_CLASS_NAME = cn(
+  "flex size-10 shrink-0 items-center justify-center rounded-full text-foreground/80 outline-none transition-colors",
+  "hover:bg-black/[0.05] focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50 dark:hover:bg-white/[0.08]"
+)
+
+// Send, stop and Done: the one filled control in the box.
 const SEND_BUTTON_CLASS_NAME = cn(
-  "flex size-8 shrink-0 items-center justify-center rounded-full outline-none transition-colors",
+  "sixb-composer-send flex size-10 shrink-0 items-center justify-center rounded-full outline-none transition-colors",
   "bg-foreground text-background hover:bg-foreground/85 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-card",
   "disabled:bg-foreground/25 disabled:text-background dark:disabled:bg-white/20 dark:disabled:text-white/70"
 )
@@ -195,6 +216,7 @@ export function Composer({
   onApprovalModeChange,
   awaitingApproval = false,
   dictation,
+  commands = [],
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -207,11 +229,19 @@ export function Composer({
   const [mention, setMention] = useState<AgentContextMention | null>(null)
   const [dismissedMention, setDismissedMention] = useState<string | null>(null)
   const [activeContextResult, setActiveContextResult] = useState(0)
+  const [activeCommand, setActiveCommand] = useState(0)
+  // A command list the reader closed with Escape stays closed for that text.
+  const [dismissedCommand, setDismissedCommand] = useState<string | null>(null)
+  // The text no longer fits beside the controls: it gets a row of its own.
+  const [wraps, setWraps] = useState(false)
   const [draggingFiles, setDraggingFiles] = useState(false)
   // Said once the mode changes from the keyboard, where the chip itself may be out of sight.
   const [modeAnnouncement, setModeAnnouncement] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const sizerRef = useRef<HTMLSpanElement>(null)
+  // The text's width in a single row, measured while it has one.
+  const inlineWidthRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
@@ -262,10 +292,18 @@ export function Composer({
   )
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
+  const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
+  const commandText = commandQuery(value)
+  const commandMatches =
+    commandText === null || dismissedCommand === value || voice.isActive
+      ? []
+      : matchCommands(allCommands(), commandText).slice(0, 6)
+  const commandsOpen = commandMatches.length > 0
   // Files alone are a message too.
   const canSend =
     (value.trim().length > 0 || readyAttachments.length > 0) &&
     mention === null &&
+    !commandsOpen &&
     !disabled &&
     !pending &&
     !running &&
@@ -350,6 +388,15 @@ export function Composer({
     }
   }, [disabled, pending])
 
+  // A draft that no longer fits in one row beside the controls takes a row of its own, with the
+  // controls under it. The row's width is measured while the draft still has it, so the box only
+  // folds back once the text fits there again.
+  const expanded =
+    wraps ||
+    value.includes("\n") ||
+    attachments.length > 0 ||
+    contextEntries.length > 0 ||
+    (voice.isActive && value.trim().length > 0)
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
   // render a scrollbar in browsers configured to always show scroll bars.
@@ -357,10 +404,15 @@ export function Composer({
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
+    if (!expanded) inlineWidthRef.current = el.clientWidth
+    const sizer = sizerRef.current
+    setWraps(
+      sizer !== null && inlineWidthRef.current > 0 && sizer.offsetWidth > inlineWidthRef.current
+    )
     el.style.height = "auto"
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
-  }, [value, attachments.length, contextEntries.length])
+  }, [value, attachments.length, contextEntries.length, expanded])
 
   const submit = () => {
     if (!canSend) return
@@ -584,9 +636,50 @@ export function Composer({
     )
   }
 
+  function allCommands(): readonly ComposerCommand[] {
+    const choosesModel = onSelectModel !== undefined && onSelectReasoning !== undefined
+    return [
+      ...builtInCommands({
+        models,
+        onSelectModel: choosesModel ? onSelectModel : undefined,
+        onResetModelSelection: choosesModel ? onResetModelSelection : undefined,
+        // Called on Enter, long after the render that lists it.
+        onApprovalModeChange: showPermissions ? (mode) => changeApprovalMode(mode) : undefined,
+        messages: agentMessages.commands,
+      }),
+      ...commands,
+    ]
+  }
+
+  const runCommand = (command: ComposerCommand) => {
+    command.run()
+    setValue("")
+    setActiveCommand(0)
+    setDismissedCommand(null)
+    textareaRef.current?.focus()
+  }
+
+  // Types at the caret, as the `+` menu's mention and command do, and keeps the focus there.
+  const insertAtCaret = (text: string) => {
+    const el = textareaRef.current
+    const start = el?.selectionStart ?? value.length
+    const end = el?.selectionEnd ?? value.length
+    const spaced = start > 0 && !/\s/.test(value[start - 1] ?? "") ? ` ${text}` : text
+    const next = `${value.slice(0, start)}${spaced}${value.slice(end)}`
+    const caret = start + spaced.length
+    setValue(next)
+    setDismissedMention(null)
+    updateMention(next, caret)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(caret, caret)
+    })
+  }
+
   // Enter sends; Cmd/Ctrl+Enter and Shift+Enter insert a newline (and let the field grow).
-  // Shift+Tab in an empty input cycles Manual, Accept edits and Auto, as in a terminal agent. Once
-  // something is typed, it moves focus back as everywhere else.
+  // Shift+Tab in an empty input cycles Ask first, Allow edits and Full access, as in a terminal
+  // agent; once something is typed, it moves focus back as everywhere else. A slash command being
+  // typed runs on Enter instead of being sent.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     // While dictating, Enter finishes and Escape cancels from the input too, as from the bar.
     if (voice.isActive) {
@@ -610,6 +703,32 @@ export function Composer({
       event.preventDefault()
       changeApprovalMode(toggledApprovalMode(approvalMode))
       return
+    }
+    if (commandsOpen) {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        setDismissedCommand(value)
+        return
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault()
+        const direction = event.key === "ArrowDown" ? 1 : -1
+        setActiveCommand(
+          (current) => (current + direction + commandMatches.length) % commandMatches.length
+        )
+        return
+      }
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey
+      ) {
+        event.preventDefault()
+        const command = commandMatches[activeCommand % commandMatches.length]
+        if (command) runCommand(command)
+        return
+      }
     }
     if (mention) {
       if (event.key === "Escape") {
@@ -668,7 +787,10 @@ export function Composer({
       : (voice.error ?? hint)
   const statusIsError = !uploading && (failedCount > 0 || voice.error !== null)
 
-  const showPermissions = approvalMode !== undefined && onApprovalModeChange !== undefined
+  const hasDraft = value.trim().length > 0 || readyAttachments.length > 0
+  // With a microphone, send appears once there is something to send; it waits there otherwise. A
+  // command being typed is run, not sent.
+  const showSend = (hasDraft && !commandsOpen) || pending || uploading || running || !dictation
 
   return (
     <div ref={rootRef} className={cn("relative bg-background px-4 pt-2 pb-3", className)}>
@@ -688,10 +810,7 @@ export function Composer({
             <MarkerContent>{error}</MarkerContent>
           </Marker>
         ) : null}
-        <div
-          data-dragging={draggingFiles || undefined}
-          className="sixb-composer-surface relative rounded-3xl bg-card"
-        >
+        <div className="relative">
           <ContextPicker
             open={mention !== null}
             query={mentionQuery}
@@ -701,28 +820,79 @@ export function Composer({
             onActiveIndexChange={setActiveContextResult}
             onSelect={selectContextResult}
           />
-          <ContextChips
-            entries={contextEntries}
-            onRemove={removeContext}
-            className="px-4 pt-3 pb-1"
+          <ComposerCommandList
+            open={commandsOpen}
+            query={commandText ?? ""}
+            commands={commandMatches}
+            activeIndex={activeCommand % Math.max(commandMatches.length, 1)}
+            onActiveIndexChange={setActiveCommand}
+            onRun={runCommand}
           />
-          {attachments.length > 0 ? (
-            <div className="flex flex-wrap gap-2 px-4 pt-3 pb-1">
-              {attachments.map((attachment) => (
-                <AttachmentPreview
-                  key={attachment.id}
-                  attachment={attachment}
-                  onRemove={() => removeAttachment(attachment.id)}
-                />
-              ))}
-            </div>
-          ) : null}
+          {/*
+            One row while the draft fits beside the controls; once it doesn't, the draft gets a row
+            of its own and the controls sit under it. Attachments and context lead, on their own row.
+          */}
           <div
-            className={cn(
-              "px-4 pb-1",
-              contextEntries.length > 0 || attachments.length > 0 ? "pt-1" : "pt-3.5"
-            )}
+            data-dragging={draggingFiles || undefined}
+            data-expanded={expanded || undefined}
+            className="group/composer sixb-composer-surface relative flex flex-wrap items-end gap-0.5 rounded-[30px] p-2.5 data-[expanded]:gap-y-1 data-[expanded]:rounded-[26px]"
           >
+            {/* The draft on one line, to tell when it stops fitting there. */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none invisible absolute inset-0 overflow-hidden"
+            >
+              <span
+                ref={sizerRef}
+                className="absolute whitespace-pre px-2 text-[16px] tracking-[-0.012em]"
+              >
+                {value}
+              </span>
+            </span>
+            {contextEntries.length > 0 || attachments.length > 0 ? (
+              <div className="order-first flex basis-full flex-wrap gap-1.5 px-0.5 pt-0.5 pb-1">
+                <ContextChips
+                  entries={contextEntries}
+                  onRemove={removeContext}
+                  className="contents"
+                />
+                {attachments.map((attachment) => (
+                  <AttachmentChip
+                    key={attachment.id}
+                    attachment={attachment}
+                    onRemove={() => removeAttachment(attachment.id)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="sr-only"
+              onChange={(event) => handleFilesSelected(event.target.files)}
+              disabled={!canAttachFiles}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+            {voice.isActive ? null : (
+              <>
+                <ComposerAddMenu
+                  disabled={disabled}
+                  onAddFiles={canAttachFiles ? () => fileInputRef.current?.click() : undefined}
+                  onMention={() => insertAtCaret("@")}
+                  onCommand={
+                    value.length === 0 && allCommands().length > 0
+                      ? () => insertAtCaret("/")
+                      : undefined
+                  }
+                />
+                <span
+                  aria-hidden="true"
+                  className="hidden flex-1 group-data-[expanded]/composer:block"
+                />
+              </>
+            )}
             <Textarea
               ref={textareaRef}
               autoFocus={composerCanFocus({ disabled, pending })}
@@ -731,6 +901,7 @@ export function Composer({
                 setValue(event.target.value)
                 if (voice.error) voice.reset()
                 setDismissedMention(null)
+                setActiveCommand(0)
                 updateMention(event.target.value, event.target.selectionStart)
               }}
               onSelect={(event) =>
@@ -751,63 +922,48 @@ export function Composer({
                       : (placeholder ?? messages.placeholder)
               }
               aria-label={messages.message}
-              className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none placeholder:text-muted-foreground/80 focus-visible:ring-0 md:text-[15px]"
+              className={cn(
+                "max-h-[200px] min-h-10 min-w-0 flex-1 resize-none overflow-y-hidden rounded-none border-0 bg-transparent px-2 py-2 text-[16px] leading-6 tracking-[-0.012em] shadow-none placeholder:text-muted-foreground focus-visible:ring-0 md:text-[16px] dark:bg-transparent",
+                "group-data-[expanded]/composer:order-[-1] group-data-[expanded]/composer:basis-full group-data-[expanded]/composer:px-2.5 group-data-[expanded]/composer:pt-1.5 group-data-[expanded]/composer:pb-1",
+                // While dictating, the text being spoken into stays; an empty field makes way.
+                voice.isActive && "read-only:text-muted-foreground",
+                voice.isActive && value.trim().length === 0 && "hidden"
+              )}
             />
-          </div>
-          <div className="relative flex min-w-0 items-center gap-0.5 px-2 pb-2">
             {voice.isActive ? (
-              <DictationBar dictation={voice} doneClassName={SEND_BUTTON_CLASS_NAME} />
+              <DictationBar
+                dictation={voice}
+                buttonClassName={ICON_BUTTON_CLASS_NAME}
+                doneClassName={SEND_BUTTON_CLASS_NAME}
+              />
             ) : (
               <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="sr-only"
-                  onChange={(event) => handleFilesSelected(event.target.files)}
-                  disabled={!canAttachFiles}
-                  aria-hidden="true"
+                <ComposerSettings
+                  models={models}
+                  selectedModel={selectedModel}
+                  selectedReasoning={selectedReasoning}
+                  modelsLoading={modelsLoading}
+                  modelsError={modelsError}
+                  onSelectModel={onSelectModel}
+                  onSelectReasoning={onSelectReasoning}
+                  onResetReasoning={onResetReasoning}
+                  usingDefaultModel={usingDefaultModel}
+                  onResetModelSelection={onResetModelSelection}
+                  modelRouting={modelRouting}
+                  approvalMode={showPermissions ? approvalMode : undefined}
+                  onApprovalModeChange={showPermissions ? changeApprovalMode : undefined}
+                  disabled={disabled || pending || running}
                 />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!canAttachFiles}
-                  aria-label={messages.attachFiles}
-                  className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors",
-                    "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40",
-                    "disabled:cursor-not-allowed disabled:opacity-50"
-                  )}
-                >
-                  <Plus className="size-[18px]" strokeWidth={1.75} />
-                </button>
-                {showPermissions ? (
-                  <ApprovalModeChip mode={approvalMode} onChange={changeApprovalMode} />
-                ) : null}
-                <span className="min-w-2 flex-1" />
-                {onSelectModel && onSelectReasoning ? (
-                  <ModelControls
-                    models={models}
-                    selectedModel={selectedModel}
-                    selectedReasoning={selectedReasoning}
-                    loading={modelsLoading}
-                    error={modelsError}
-                    disabled={disabled || pending || running}
-                    onSelectModel={onSelectModel}
-                    onSelectReasoning={onSelectReasoning}
-                    onResetReasoning={onResetReasoning}
-                    usingDefault={usingDefaultModel}
-                    onResetToDefault={onResetModelSelection}
-                    routing={modelRouting}
-                  />
-                ) : null}
                 {dictation ? (
                   <DictationButton
                     dictation={voice}
                     disabled={disabled}
                     variant="ghost"
-                    size="icon-sm"
-                    className="ml-1 bg-transparent text-muted-foreground shadow-none hover:text-foreground"
+                    size="icon"
+                    className={cn(
+                      ICON_BUTTON_CLASS_NAME,
+                      "bg-transparent shadow-none [&_svg]:size-5"
+                    )}
                   />
                 ) : null}
                 {running && onStop ? (
@@ -816,29 +972,29 @@ export function Composer({
                     onClick={onStop}
                     disabled={stopping}
                     aria-label={messages.stop}
-                    className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
+                    className={SEND_BUTTON_CLASS_NAME}
                   >
                     {stopping ? (
-                      <Spinner className="size-3.5" />
+                      <Spinner className="size-4" />
                     ) : (
-                      <Square className="size-2.5 fill-current" />
+                      <Square className="size-3 fill-current" />
                     )}
                   </button>
-                ) : (
+                ) : showSend ? (
                   <button
                     type="button"
                     onClick={submit}
                     disabled={!canSend}
                     aria-label={messages.send}
-                    className={cn(SEND_BUTTON_CLASS_NAME, "ml-1")}
+                    className={SEND_BUTTON_CLASS_NAME}
                   >
                     {pending || uploading ? (
-                      <Spinner className="size-3.5" />
+                      <Spinner className="size-4" />
                     ) : (
-                      <ArrowUp className="size-4" strokeWidth={2.25} />
+                      <ArrowUp className="size-[18px]" strokeWidth={2.4} />
                     )}
                   </button>
-                )}
+                ) : null}
               </>
             )}
           </div>
@@ -890,7 +1046,7 @@ function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
   )
 }
 
-function AttachmentPreview({
+function AttachmentChip({
   attachment,
   onRemove,
 }: {
@@ -902,69 +1058,52 @@ function AttachmentPreview({
   const fileName = attachment.status === "ready" ? attachment.fileRef.fileName : attachment.fileName
   const mediaType =
     attachment.status === "ready" ? attachment.fileRef.mediaType : attachment.mediaType
-  const { Icon, label, tone } = fileKind(fileName, mediaType, agentMessages.files)
-  const subtitle =
+  const Icon = fileIcon(fileName, mediaType)
+  const status =
     attachment.status === "uploading"
       ? messages.uploading
       : attachment.status === "error"
         ? messages.uploadFailed
-        : label
+        : null
 
   return (
-    <div
-      className={cn(
-        "relative flex max-w-full items-center gap-3 rounded-2xl border border-border bg-background py-2 pr-10 pl-2 shadow-sm",
-        attachment.status === "error" && "border-destructive/40"
-      )}
+    <span
+      className={cn(COMPOSER_CHIP_CLASS_NAME, "pr-1.5")}
       title={attachment.status === "error" ? messages.uploadError : fileName}
     >
-      <div
-        className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-xl text-white",
-          tone === "green" && "bg-emerald-500",
-          tone === "red" && "bg-red-500",
-          tone === "blue" && "bg-blue-500",
-          tone === "zinc" && "bg-zinc-500"
-        )}
-      >
+      <span className={COMPOSER_CHIP_THUMB_CLASS_NAME}>
         {attachment.status === "uploading" ? (
-          <Spinner className="size-5" />
+          <Spinner className="size-3" />
         ) : (
-          <Icon className="size-5" />
+          <Icon className="size-3" strokeWidth={2} aria-hidden="true" />
         )}
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">
-          {fileName || agentMessages.files.file}
-        </p>
-        <p
+      </span>
+      <span className="min-w-0 flex-1 truncate">{fileName || agentMessages.files.file}</span>
+      {status ? (
+        <span
           className={cn(
-            "truncate text-xs text-muted-foreground",
+            "shrink-0 text-xs text-muted-foreground",
             attachment.status === "error" && "text-destructive"
           )}
         >
-          {subtitle}
-        </p>
-      </div>
+          {status}
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={onRemove}
         aria-label={
           fileName ? messages.removeAttachment(fileName) : messages.removeUnnamedAttachment
         }
-        className="absolute top-2 right-2 flex size-5 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
+        className={COMPOSER_CHIP_REMOVE_CLASS_NAME}
       >
-        <X className="size-3.5" />
+        <X className="size-[11px]" strokeWidth={2.6} />
       </button>
-    </div>
+    </span>
   )
 }
 
-function fileKind(
-  fileName: string | undefined,
-  mediaType: string | undefined,
-  messages: AgentMessages["files"]
-) {
+function fileIcon(fileName: string | undefined, mediaType: string | undefined) {
   const normalizedName = fileName?.toLowerCase() ?? ""
   const normalizedType = mediaType?.toLowerCase() ?? ""
   if (
@@ -972,21 +1111,22 @@ function fileKind(
     normalizedType.includes("csv") ||
     /\.(csv|tsv|xls|xlsx)$/i.test(normalizedName)
   ) {
-    return { Icon: Table2, label: messages.spreadsheet, tone: "green" as const }
+    return Table2
   }
   if (
     normalizedType.startsWith("image/") ||
     /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(normalizedName)
   ) {
-    return { Icon: ImageIcon, label: messages.image, tone: "blue" as const }
+    return ImageIcon
   }
-  if (normalizedType === "application/pdf" || normalizedName.endsWith(".pdf")) {
-    return { Icon: FileText, label: messages.pdf, tone: "red" as const }
+  if (
+    normalizedType === "application/pdf" ||
+    normalizedType.startsWith("text/") ||
+    /\.(pdf|txt|md|json|yaml|yml)$/i.test(normalizedName)
+  ) {
+    return FileText
   }
-  if (normalizedType.startsWith("text/") || /\.(txt|md|json|yaml|yml)$/i.test(normalizedName)) {
-    return { Icon: FileText, label: messages.document, tone: "zinc" as const }
-  }
-  return { Icon: FileIcon, label: messages.file, tone: "zinc" as const }
+  return FileIcon
 }
 
 function attachmentId(): string {

@@ -217,13 +217,17 @@ describe("what the agent may change, on Settings › Personal", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
 
     const group = view.getByRole("radiogroup", { name: "When the agent changes things" })
-    expect(view.getByRole("radio", { name: /^Manual/ }).getAttribute("aria-checked")).toBe("true")
+    expect(view.getByRole("radio", { name: /^Ask first/ }).getAttribute("aria-checked")).toBe(
+      "true"
+    )
     expect(group).toBeDefined()
 
-    fireEvent.click(view.getByRole("radio", { name: /^Auto/ }))
+    fireEvent.click(view.getByRole("radio", { name: /^Full access/ }))
 
     await waitFor(() =>
-      expect(view.getByRole("radio", { name: /^Auto/ }).getAttribute("aria-checked")).toBe("true")
+      expect(view.getByRole("radio", { name: /^Full access/ }).getAttribute("aria-checked")).toBe(
+        "true"
+      )
     )
     expect(sent).toEqual([{ approvalMode: "auto" }])
   })
@@ -236,15 +240,15 @@ describe("what the agent may change, on Settings › Personal", () => {
       return Response.json({ approvalMode: "accept-edits", approvalModeSource: "default" })
     })
     const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
-    const manual = view.getByRole("radio", { name: /^Manual/ })
+    const manual = view.getByRole("radio", { name: /^Ask first/ })
     expect(manual.getAttribute("tabindex")).toBe("0")
-    expect(view.getByRole("radio", { name: /^Auto/ }).getAttribute("tabindex")).toBe("-1")
+    expect(view.getByRole("radio", { name: /^Full access/ }).getAttribute("tabindex")).toBe("-1")
 
     manual.focus()
     fireEvent.keyDown(manual, { key: "ArrowDown" })
 
     await waitFor(() => expect(sent).toEqual([{ approvalMode: "accept-edits" }]))
-    expect(document.activeElement).toBe(view.getByRole("radio", { name: /^Accept edits/ }))
+    expect(document.activeElement).toBe(view.getByRole("radio", { name: /^Allow edits/ }))
   })
 
   test("is not offered in a project without an agent", () => {

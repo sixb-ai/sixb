@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { ModelControls } from "../src/agent/components/model-controls"
+import { ComposerSettings } from "../src/agent/components/composer-settings"
 import {
   type ModelPreference,
   preferenceWithoutReasoning,
@@ -135,32 +135,32 @@ test("moving only the effort never pins the default model, and resetting forgets
 })
 
 test("names the defaults the composer follows", () => {
-  const render = (usingDefault: boolean, selectedModel: LanguageModel) =>
+  const render = (usingDefaultModel: boolean, selectedModel: LanguageModel) =>
     renderToStaticMarkup(
-      createElement(ModelControls, {
+      createElement(ComposerSettings, {
         models,
         selectedModel,
         selectedReasoning: "low",
-        usingDefault,
+        usingDefaultModel,
         onSelectModel: () => {},
         onSelectReasoning: () => {},
-        onResetToDefault: () => {},
+        onResetModelSelection: () => {},
       })
     )
   expect(render(true, fast)).toContain('title="Default · fast · Low"')
-  expect(render(false, deep)).toContain('title="deep"')
+  expect(render(false, deep)).toContain('title="deep · Low"')
 })
 
-test("ModelControls with tiers is the Auto chip, Auto when no model is pinned", () => {
-  // Removal proof: drop the tiers branch from ModelControls; it shows "Default model".
+test("with tiers the chip says Auto while no model is pinned", () => {
+  // Removal proof: drop the tiers branch from ComposerSettings; it shows "Default model".
   const html = renderToStaticMarkup(
-    createElement(ModelControls, {
+    createElement(ComposerSettings, {
       models: tiers,
       onSelectModel: () => {},
       onSelectReasoning: () => {},
-      onResetToDefault: () => {},
+      onResetModelSelection: () => {},
     })
   )
-  expect(html).toContain('aria-label="Model: Auto. Change it"')
+  expect(html).toContain('aria-label="Auto. Change model and permissions"')
   expect(html).not.toContain("Default model")
 })
