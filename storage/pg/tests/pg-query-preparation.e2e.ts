@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import {
   defineObjectType,
+  link,
   type ObjectQuery,
   OntologyRegistry,
   prepareObjectQueries,
@@ -12,6 +13,12 @@ import { compilePgObjectQuery } from "../src/objects/query-compiler"
 import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
+
+const Author = defineObjectType({
+  id: "Author",
+  name: "Author",
+  properties: [prop("id", "string", { primary: true, required: true })],
+})
 
 const Article = defineObjectType({
   id: "Article",
@@ -27,6 +34,7 @@ const Article = defineObjectType({
       query: { searchable: true, filterable: true, facet: true, sortable: true },
     }),
   ],
+  links: [link("author", Author, { cardinality: "one" })],
   query: {
     indexes: [
       {
@@ -40,9 +48,11 @@ const Article = defineObjectType({
     ],
   },
 })
-const ontology = new OntologyRegistry({ sources: [Article] })
+const ontology = new OntologyRegistry({ sources: [Author, Article] })
 let storage: PostgresStorage
 let sql: SQL
+// One fixture: its commits are numbered, and a second would reuse the first one's idempotency keys.
+let fixture: ReturnType<typeof createMaterializerTestFixture>
 beforeAll(async () => {
   const created = await createTestStorage()
   storage = created.storage
@@ -52,8 +62,9 @@ beforeAll(async () => {
     max: 2,
   })
   await sql.unsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+  fixture = createMaterializerTestFixture({ projectId: "publication", ontology, storage })
   const result = await prepareObjectQueries({ projectId: "publication", ontology, storage })
-  expect(result.objectTypes).toBe(1)
+  expect(result.objectTypes).toBe(2)
   expect(result.indexes).toBeGreaterThan(0)
 })
 afterAll(async () => {
@@ -66,7 +77,6 @@ afterAll(async () => {
 // Omit the overflow page from query-compiler.ts: pagination silently loses that object.
 test("ontology preparation supports another project's materializer, long values, pages and facets", async () => {
   const long = Array.from({ length: 300 }, (_, i) => Bun.hash(`word-${i}`).toString(16)).join("")
-  const fixture = createMaterializerTestFixture({ projectId: "publication", ontology, storage })
   await fixture.seed({
     objects: [
       {
@@ -128,7 +138,7 @@ test("ontology preparation supports another project's materializer, long values,
   })
   expect(exact.count).toBe(1)
   const again = await prepareObjectQueries({ projectId: "publication", ontology, storage })
-  expect(again.objectTypes).toBe(1)
+  expect(again.objectTypes).toBe(2)
   expect(
     (await storage.objects.countObjects!({ projectId: "publication", query: base })).count
   ).toBe(4)
@@ -149,4 +159,67 @@ test("implicit ascending sorts discover their prepared bounded index", async () 
   expect(await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "publication", query)).toContain(
     "octet_length"
   )
+})
+
+// The bounded read merges an indexed and an overflow branch (the long title), then expands the
+// merged page once. Guard removal: skip that expansion in compilePgObjectQuery and every Article
+// comes back without its Author.
+test("a prepared sorted page expands links of indexed and overflow rows alike", async () => {
+  const long = Array.from({ length: 300 }, (_, i) => Bun.hash(`title-${i}`).toString(16)).join("")
+  const author = (articleId: string, authorId: string) => ({
+    ref: {
+      source: { objectTypeId: "Article", primaryId: articleId },
+      linkId: "author",
+      target: { objectTypeId: "Author", primaryId: authorId },
+    },
+  })
+  await fixture.seed({
+    objects: [
+      { ref: { objectTypeId: "Author", primaryId: "ann" }, properties: { id: "ann" } },
+      { ref: { objectTypeId: "Author", primaryId: "bo" }, properties: { id: "bo" } },
+      {
+        ref: { objectTypeId: "Article", primaryId: "short" },
+        properties: { id: "short", title: "beta", state: "draft" },
+      },
+      {
+        ref: { objectTypeId: "Article", primaryId: "long" },
+        properties: { id: "long", title: long, state: "draft" },
+      },
+    ],
+    links: [author("short", "ann"), author("long", "bo")],
+  })
+  const page: ObjectQuery = {
+    kind: "page",
+    pageSize: 20,
+    input: {
+      kind: "sort",
+      input: { kind: "start", objectTypeId: "Article" },
+      fields: [
+        { kind: "property", propertyId: "title", direction: "asc", scalarKind: "string" },
+        { kind: "property", propertyId: "state", direction: "desc", scalarKind: "string" },
+      ],
+    },
+  }
+  const expanded: ObjectQuery = {
+    kind: "expand",
+    input: page,
+    expansions: [{ linkId: "author", direction: "outgoing", cardinality: "one", limit: 1 }],
+  }
+  expect(
+    await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "publication", expanded)
+  ).toContain("octet_length")
+
+  const plain = await storage.objects.queryObjects!({ projectId: "publication", query: page })
+  const result = await storage.objects.queryObjects!({ projectId: "publication", query: expanded })
+  expect(result.objects.map((row) => row.primaryId)).toEqual(
+    plain.objects.map((row) => row.primaryId)
+  )
+  const authors = new Map(
+    result.objects.map((row) => {
+      const author = row.links?.author
+      return [row.primaryId, author && "primaryId" in author ? author.primaryId : null]
+    })
+  )
+  expect(authors.get("short")).toBe("ann")
+  expect(authors.get("long")).toBe("bo")
 })

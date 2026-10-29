@@ -134,11 +134,15 @@ export function compilePgObjectQuery(
   )
   if (options.sortIndexBound && source === DEFAULT_OBJECT_QUERY_SOURCE) {
     let bounded = query
-    while (bounded.kind === "expand") bounded = bounded.input
+    const expansions: (readonly ObjectExpansion[])[] = []
+    while (bounded.kind === "expand") {
+      expansions.unshift(bounded.expansions)
+      bounded = bounded.input
+    }
     if (bounded.kind === "page" || bounded.kind === "limit") {
       const branches = [options.sortIndexBound, `NOT (${options.sortIndexBound})`].map(
         (startPredicate, branch) =>
-          compileObjectQueryInternal(projectId, query, {
+          compileObjectQueryInternal(projectId, bounded, {
             probeLimit: options.includeTotal === false,
             source,
             startPredicate,
@@ -150,11 +154,19 @@ export function compilePgObjectQuery(
         bounded.kind === "page"
           ? bounded.pageSize + 1
           : bounded.limit + (options.includeTotal === false ? 1 : 0)
-      compiled = {
-        ...compiled,
+      // Links are expanded once, for the page the branches merge into: each further reference
+      // to objects costs the planner a few milliseconds over its prepared indexes.
+      let rows: CompiledPredicate = {
         sql: `SELECT * FROM ((${branches[0]!.sql}) UNION ALL (${branches[1]!.sql})) AS input ORDER BY ${compiled.order.sql} LIMIT ?`,
         args: [...branches[0]!.args, ...branches[1]!.args, ...compiled.order.args, limit],
       }
+      for (const expansion of expansions) {
+        rows = expandRows({ ...rows, order: compiled.order }, expansion, {
+          probeLimit: options.includeTotal === false,
+          source,
+        })
+      }
+      compiled = { ...compiled, ...rows }
     }
   }
   const traversal = !options.correlatedTraversal && boundedTraversal(query)
@@ -926,22 +938,8 @@ function compileExpand(
   ctx: CompileContext
 ): CompiledPgObjectQuery {
   const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
-  const expand = compileExpansionsObject(
-    expansions,
-    { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
-    "",
-    ctx
-  )
-  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
-  const sql = `
-    SELECT input.*, ${expand.sql} AS _expand
-    FROM (${input.sql}) AS input
-    ORDER BY ${inputOrder.sql}
-  `
-
   return {
-    sql,
-    args: [...expand.args, ...input.args, ...inputOrder.args],
+    ...expandRows(input, expansions, ctx),
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
     vectorProbe: input.vectorProbe,
@@ -950,6 +948,29 @@ function compileExpand(
     hasMore: input.hasMore,
     trimRows: input.trimRows,
     nextPageToken: input.nextPageToken,
+  }
+}
+
+/** Add the `_expand` column to already selected, ordered rows, keeping their order. */
+function expandRows(
+  input: { readonly sql: string; readonly args: readonly unknown[]; readonly order: CompiledOrder },
+  expansions: readonly ObjectExpansion[],
+  ctx: CompileContext
+): CompiledPredicate {
+  const expand = compileExpansionsObject(
+    expansions,
+    { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
+    "",
+    ctx
+  )
+  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  return {
+    sql: `
+    SELECT input.*, ${expand.sql} AS _expand
+    FROM (${input.sql}) AS input
+    ORDER BY ${inputOrder.sql}
+  `,
+    args: [...expand.args, ...input.args, ...inputOrder.args],
   }
 }
 
