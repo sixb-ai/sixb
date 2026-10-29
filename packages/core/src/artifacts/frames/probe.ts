@@ -130,6 +130,13 @@ export function layoutProbe(scope: number | "page"): LayoutProblem[] {
         Number.parseFloat(footer.paddingTop) -
         Number.parseFloat(footer.lineHeight) -
         Number.parseFloat(footer.borderTopWidth)
+  // The footer's rule spans these columns; a deck may narrow it beside an edge-to-edge image.
+  const footerLeft = box.left + (Number.parseFloat(footer.left) || 0)
+  const footerRight = box.right - (Number.parseFloat(footer.right) || 0)
+  // An image that reaches the slide's bottom edge is drawn behind the footer on purpose: a
+  // backdrop or an edge-to-edge photo. The kit's footer sits over it.
+  const bleeds = (element: Element, rect: DOMRect) =>
+    /^(img|picture|video|canvas)$/i.test(element.tagName) && rect.bottom >= box.bottom - 1
   const outside: Element[] = []
   // A box that scrolls sideways holds what is wider than the window, as a wide table's does.
   const scrolls = (element: Element) => {
@@ -156,7 +163,13 @@ export function layoutProbe(scope: number | "page"): LayoutProblem[] {
     ) {
       outside.push(element)
       report("outside", element)
-    } else if (rect.bottom > footerTop + 1 && rect.top < box.bottom) {
+    } else if (
+      rect.bottom > footerTop + 1 &&
+      rect.top < box.bottom &&
+      rect.right > footerLeft + 1 &&
+      rect.left < footerRight - 1 &&
+      !bleeds(element, rect)
+    ) {
       outside.push(element)
       report("footer", element)
     }
