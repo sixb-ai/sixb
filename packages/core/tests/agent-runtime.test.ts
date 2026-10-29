@@ -200,6 +200,35 @@ describe("single project Agent", () => {
     }
   })
 
+  test("takes files sent without text as the whole message", async () => {
+    // Proven by removal: require text again in triggerParts; the screenshot alone is refused.
+    const { host, storage } = setup()
+    const sixb = await userScope(host, "owner")
+    const screenshot = await host.blobStorage.put({
+      body: new Uint8Array([137, 80, 78, 71]),
+      fileName: "image.png",
+      mediaType: "image/png",
+    })
+
+    const { run } = await sixb.agent.runs.request({ attachments: [screenshot] })
+
+    const trigger = await storage.agents.messages.getById({
+      projectId: host.id,
+      id: run.triggerMessageId,
+    })
+    expect(trigger?.parts).toEqual([{ type: "file", fileRef: screenshot }])
+
+    // Blank words are no text: with nothing else, there is no message.
+    const refused = await sixb.agent.runs
+      .request({ threadId: run.threadId, text: "  ", context: [] })
+      .catch((error) => error)
+    expect(refused).toMatchObject({
+      code: "invalid_message",
+      message:
+        "[Sixb] An Agent message needs text or attachments, or `continue: true` to continue the previous answer.",
+    })
+  })
+
   test("rejects removed selectors and unknown models before creating history", async () => {
     const { host, storage } = setup()
     const sixb = createTestSixb(host)

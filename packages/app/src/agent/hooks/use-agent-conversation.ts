@@ -475,8 +475,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }
 
       if (!currentAgent) return
+      const title = deriveTitle(text, attachments)
       const created = await createThread.mutateAsync({
-        body: { title: deriveTitle(text) },
+        body: title ? { title } : {},
       })
       createdThreadId = created.thread.id
       setPendingUser({
@@ -792,7 +793,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
   const canStop = isRunning && canStopRun(activeRun, access, user)
 
-  // Someone else's answer holds a shared thread: the reader keeps typing, and sends once it ends.
+  // Someone else's answer holds a shared thread: the composer names whose.
   const answeringFor =
     isRunning && activeRun?.requestedBy && requestedBySomeoneElse(activeRun, user)
       ? activeRun.requestedBy
@@ -947,7 +948,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     error: currentSendError
       ? failureMessage(currentSendError, labels, agentMessages.approvalModes.saveFailed)
       : undefined,
-    disabled: (isRunning && answeringName === null) || Boolean(sandboxRecovery),
+    // Whoever's answer is in flight, the reader writes the next message, and sends it once it ends.
+    disabled: Boolean(sandboxRecovery),
     hint: answeringName
       ? agentMessages.sharing.answering(answeringName)
       : othersWaiting
@@ -1105,7 +1107,8 @@ function messageBody(
   settings: RequesterSettings
 ) {
   return {
-    text,
+    // Files sent alone are the whole message.
+    ...(text ? { text } : {}),
     ...(selection === undefined ? {} : selection),
     ...settings,
     ...(attachments.length === 0 ? {} : { attachments: [...attachments] }),
@@ -1190,9 +1193,13 @@ function isModelPreference(value: unknown): value is ModelPreference {
   )
 }
 
-function deriveTitle(text: string): string {
+/** The first line of the message, else the first file's name; empty leaves the thread untitled. */
+function deriveTitle(text: string, attachments: readonly AgentFileRef[]): string {
   const firstLine = text.split("\n")[0]?.trim() ?? ""
-  return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}...`
+  const title = firstLine || attachments.map((file) => file.fileName?.trim() ?? "").find(Boolean)
+  if (!title) return ""
+
+  return title.length <= 60 ? title : `${title.slice(0, 57)}...`
 }
 
 function useExtendedWaitingStatus(run: Pick<AgentRun, "status" | "createdAt"> | null): boolean {

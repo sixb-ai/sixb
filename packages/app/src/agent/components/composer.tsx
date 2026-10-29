@@ -33,6 +33,7 @@ import {
   X,
 } from "lucide-react"
 import {
+  type ClipboardEvent,
   type KeyboardEvent,
   useCallback,
   useEffect,
@@ -68,7 +69,8 @@ export interface ComposerProps {
   readonly pending?: boolean
   /**
    * A run is in flight: the send button becomes a stop button that calls {@link onStop}, or stays
-   * disabled without one, when the reader may not stop someone else's answer.
+   * disabled without one, when the reader may not stop someone else's answer. The reader writes
+   * the next message meanwhile, and sends it once the run ends.
    */
   readonly running?: boolean
   /** A stop has been requested and we're waiting for the run to end. */
@@ -157,9 +159,8 @@ const SEND_BUTTON_CLASS_NAME = cn(
 export function composerCanFocus({
   disabled,
   pending,
-  running,
-}: Pick<ComposerProps, "disabled" | "pending" | "running">): boolean {
-  return !disabled && !pending && !running
+}: Pick<ComposerProps, "disabled" | "pending">): boolean {
+  return !disabled && !pending
 }
 
 export function Composer({
@@ -225,7 +226,6 @@ export function Composer({
     autoRestart: false,
   })
   const wasDictatingRef = useRef(false)
-  const wasRunningRef = useRef(Boolean(running))
   const dismissedAmbientRef = useRef(new Set<string>())
   const ambientKey = JSON.stringify(ambientContext.map(agentContextFingerprint))
 
@@ -262,8 +262,9 @@ export function Composer({
   )
   const failedCount = attachments.filter((attachment) => attachment.status === "error").length
   const canAttachFiles = !disabled && !pending
+  // Files alone are a message too.
   const canSend =
-    value.trim().length > 0 &&
+    (value.trim().length > 0 || readyAttachments.length > 0) &&
     mention === null &&
     !disabled &&
     !pending &&
@@ -333,17 +334,8 @@ export function Composer({
   }, [voice.isActive])
 
   useEffect(() => {
-    const wasRunning = wasRunningRef.current
-    wasRunningRef.current = Boolean(running)
-    if (!wasRunning || !composerCanFocus({ disabled, pending, running })) return
-
-    const frame = requestAnimationFrame(() => textareaRef.current?.focus())
-    return () => cancelAnimationFrame(frame)
-  }, [disabled, pending, running])
-
-  useEffect(() => {
     const focusWhenAvailable = () => {
-      if (!composerCanFocus({ disabled, pending, running })) return
+      if (!composerCanFocus({ disabled, pending })) return
       textareaRef.current?.focus()
     }
     const handleVisibilityChange = () => {
@@ -356,7 +348,7 @@ export function Composer({
       window.removeEventListener("focus", focusWhenAvailable)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
     }
-  }, [disabled, pending, running])
+  }, [disabled, pending])
 
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
@@ -380,6 +372,8 @@ export function Composer({
     setContextEntries(ambientContext.map((context) => ({ context, origin: "ambient" })))
     setMention(null)
     if (fileInputRef.current) fileInputRef.current.value = ""
+    // Stop replaces the send button a click left the focus on: the next message starts here.
+    textareaRef.current?.focus()
   }
 
   const insertNewline = () => {
@@ -451,6 +445,19 @@ export function Composer({
     },
     [startUpload]
   )
+
+  // A pasted screenshot or copied image uploads as a dropped file does. Text wins: Excel or Word
+  // copy a picture of the selection beside its text, and whoever pastes cells wants the text.
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = clipboardFiles(event.clipboardData)
+    if (files.length === 0 || event.clipboardData.getData("text/plain").trim()) return
+
+    event.preventDefault()
+    if (!canAttachFiles) return
+    for (const file of files) {
+      startUpload(file)
+    }
+  }
 
   useEffect(() => {
     const resetDragState = () => {
@@ -718,7 +725,7 @@ export function Composer({
           >
             <Textarea
               ref={textareaRef}
-              autoFocus={composerCanFocus({ disabled, pending, running })}
+              autoFocus={composerCanFocus({ disabled, pending })}
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)
@@ -730,6 +737,7 @@ export function Composer({
                 updateMention(event.currentTarget.value, event.currentTarget.selectionStart)
               }
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               disabled={disabled}
               readOnly={voice.isActive}
               rows={1}
@@ -991,6 +999,17 @@ function mentionKey(candidate: AgentContextMention): string {
 
 function hasDraggedFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files")
+}
+
+/** The files a paste carries; a browser that lists none may still hold them as items. */
+function clipboardFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.files)
+  if (files.length > 0) return files
+
+  return Array.from(data.items).flatMap((item) => {
+    const file = item.kind === "file" ? item.getAsFile() : null
+    return file ? [file] : []
+  })
 }
 
 function contextLabel(label: string): { readonly label?: string } {

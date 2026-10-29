@@ -349,7 +349,7 @@ export const AgentMessageListResponseSchema = z.object({
 
 export const PostAgentMessageBodySchema = z
   .object({
-    /** Required unless `continue` is set. */
+    /** Required unless `continue` is set or `attachments` are the whole message. */
     text: z.string().trim().min(1).optional(),
     /** Continue the previous answer after it reached the turn limit, without text of its own. */
     continue: z.literal(true).optional(),

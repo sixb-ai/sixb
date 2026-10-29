@@ -176,6 +176,15 @@ const messages = [
   },
 ]
 
+/** What `POST /api/files` answers for a pasted screenshot. */
+const screenshotRef = {
+  blobId: `sha256-${"a".repeat(64)}`,
+  digest: `sha256:${"a".repeat(64)}`,
+  sizeBytes: 4,
+  fileName: "image.png",
+  mediaType: "image/png",
+}
+
 function run(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
@@ -243,7 +252,11 @@ function api(scenario: Scenario, requests: string[]) {
       return Response.json({ users: found, hasMore: false, total: found.length })
     }
     if (url.pathname === "/api/artifacts") return Response.json({ artifacts: [] })
+    if (url.pathname === "/api/files") return Response.json(screenshotRef, { status: 201 })
 
+    if (url.pathname === "/api/agent-threads" && method === "POST") {
+      return Response.json({ thread: thread() }, { status: 201 })
+    }
     if (url.pathname === "/api/agent-threads") {
       if (url.searchParams.get("sharedWithMe") !== "true") {
         return Response.json({ threads: [], hasMore: scenario.ownHasMore, total: 0 })
@@ -759,6 +772,24 @@ describe("who acts on a turn", () => {
     )
   })
 
+  // Removal proof: disable the composer again while the reader's own answer runs.
+  test("while their own answer streams, the reader writes the next message", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ activeRunId: "run_2" }),
+      runs: [
+        run({ id: "run_2", status: "running", triggerMessageId: "msg_3", requestedBy: alice }),
+      ],
+    })
+
+    expect(await view.findByRole("button", { name: "Stop generating" })).toBeDefined()
+    const composer = view.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
+    expect(composer.disabled).toBe(false)
+
+    type(composer, "And Globex?")
+    expect(composer.value).toBe("And Globex?")
+    expect(view.queryByRole("button", { name: "Send message" })).toBeNull()
+  })
+
   // Removal proof: pass stop unconditionally as composerProps.onStop in useAgentConversation.
   test("a participant cannot stop someone else's answer, but stops their own", async () => {
     const running = (requestedBy: typeof alice | typeof bob) => ({
@@ -881,6 +912,56 @@ describe("who acts on a turn", () => {
     ).toBeDefined()
   })
 })
+
+describe("a message of files alone", () => {
+  // Removal proof: send `text` unconditionally in messageBody; the API refuses an empty one.
+  test("a pasted screenshot goes out alone, without text", async () => {
+    const { view, requests } = renderChat("alice")
+
+    await pasteScreenshotAndSend(view)
+
+    const body = await posted(requests, "POST /api/agent-threads/thr_1/messages")
+    expect(body).not.toHaveProperty("text")
+    expect(body.attachments).toEqual([screenshotRef])
+  })
+
+  // Removal proof: title the thread from the text alone; it stays untitled.
+  test("a new conversation started with a screenshot is titled after it", async () => {
+    const { requests, queryClient } = serve("alice", {})
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AgentChat threadId={null} onNavigateHome={() => {}} onNavigateThread={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    await pasteScreenshotAndSend(view)
+
+    expect(await posted(requests, "POST /api/agent-threads")).toEqual({ title: "image.png" })
+  })
+})
+
+/** Pastes a screenshot in the composer, waits for its upload, and sends it alone. */
+async function pasteScreenshotAndSend(view: ReturnType<typeof render>) {
+  const composer = await view.findByRole("textbox", { name: "Message" })
+  const file = new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" })
+
+  fireEvent.paste(composer, { clipboardData: { files: [file], items: [], getData: () => "" } })
+  const send = view.getByRole("button", { name: "Send message" }) as HTMLButtonElement
+  await waitFor(() => expect(send.disabled).toBe(false))
+  fireEvent.click(send)
+}
+
+/** The JSON body of the first request to `route`, once it is made. */
+async function posted(
+  requests: readonly string[],
+  route: string
+): Promise<Record<string, unknown>> {
+  const sent = () => requests.find((entry) => entry.startsWith(`${route} {`))
+  await waitFor(() => expect(sent()).toBeDefined())
+  return JSON.parse(sent()!.slice(route.length + 1))
+}
 
 /** A chat of the reader's own, which reads the conversation's turn and errors as data. */
 function ConversationProbe() {
