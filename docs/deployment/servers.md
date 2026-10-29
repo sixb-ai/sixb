@@ -16,7 +16,7 @@ Add the SSH target to the project:
 bun add @sixb/deploy-ssh
 ```
 
-The server runs the Bun version that `packageManager` pins in `package.json`, such as `"packageManager": "bun@1.4.2"`. A project created with `bun create sixb` pins it already.
+The server runs the Bun version that `packageManager` pins in `package.json`, such as `"packageManager": "bun@1.4.4"`. A project created with `bun create sixb` pins it already.
 
 ## Describe the deployment
 

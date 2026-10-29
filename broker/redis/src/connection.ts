@@ -298,8 +298,8 @@ export class RedisConnectionManager {
  * Bun rejects this command before enqueueing it when the native client has failed permanently.
  * The code alone is insufficient: other connection-closed errors can reject an in-flight write.
  * Keep this narrow; timeouts, disconnects, and Redis script errors must not replay writes.
- * Verified against Bun 1.4.2's send_rejection() and send():
- * https://github.com/oven-sh/bun/blob/bun-v1.4.2/src/runtime/valkey_jsc/valkey.rs
+ * Verified against Bun 1.4.4's send_rejection() and send(), unchanged since 1.4.2:
+ * https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/valkey_jsc/valkey.rs
  */
 function isUnsentCommandOnFailedConnection(error: unknown): boolean {
   return (
