@@ -64,7 +64,7 @@ export type {
   ValueType,
   ValueTypeRefSchema,
 } from "./types"
-export type { CurrentUserRef, UserRef } from "./user-ref"
+export type { CurrentUserRef, UserEmailColumn, UserRef } from "./user-ref"
 export { currentUser, userRef } from "./user-ref"
 
 // ── Registry ──────────────────────────────────────────────

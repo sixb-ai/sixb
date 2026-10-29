@@ -13,6 +13,7 @@ import type {
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { DatasetChanges } from "@sixb/core/lake-storage"
+import { loadMemberEmails } from "./member-emails"
 import { buildObjectProjectionPlan } from "./object-projection-plan"
 import { mapLinkProjectionRow } from "./run-link-projection"
 import { mapObjectProjectionRow, objectProjectionReadColumns } from "./run-object-projection"
@@ -65,6 +66,7 @@ export async function prepareIncrementalReplacement(input: {
       projection,
       dataset,
       primaryPropertyId,
+      members: await loadMemberEmails(runtime, projection),
       correlation: { runId: execution.run.id, versionId: identity.datasetVersion.versionId },
     })
     mapRow = (row) => mapObjectProjectionRow(plan, row)

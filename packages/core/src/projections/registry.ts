@@ -234,6 +234,7 @@ function cloneObjectProjectionDefinition(
     objectTypeId: projection.objectTypeId,
     datasetId: projection.datasetId,
     properties: { ...projection.properties },
+    ...(projection.users ? { users: { ...projection.users } } : {}),
     links: Object.fromEntries(
       Object.entries(projection.links).map(([linkId, descriptor]) => [
         linkId,

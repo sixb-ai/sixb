@@ -61695,6 +61695,13 @@
                               "type": "string"
                             }
                           },
+                          "users": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string",
+                              "enum": ["email"]
+                            }
+                          },
                           "links": {
                             "type": "object",
                             "additionalProperties": {
@@ -63646,6 +63653,13 @@
                           "type": "object",
                           "additionalProperties": {
                             "type": "string"
+                          }
+                        },
+                        "users": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "enum": ["email"]
                           }
                         },
                         "links": {

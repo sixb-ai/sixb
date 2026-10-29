@@ -13,6 +13,7 @@ import type {
 } from "../datasets"
 import type { LinkToken, PropertyToken } from "../ontology/tokens"
 import type { ObjectLink, ObjectType, Property, Schema } from "../ontology/types"
+import { isUserEmailColumn, type UserEmailColumn } from "../ontology/user-ref"
 import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
@@ -22,6 +23,7 @@ import type {
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionTarget,
+  ProjectionUserKey,
   SourceEditConflictResolution,
   TelemetryProjectionDefinition,
   TelemetryProjectionPropertyMapping,
@@ -108,7 +110,10 @@ type ProjectionSchemaByDatasetColumnType = {
   readonly fileRef: "fileRef"
 }
 
-/** Projections cannot map user references yet, even nested ones; registration rejects them too. */
+/**
+ * A dataset column cannot hold user references, even nested ones: only `userRef.fromEmail` fills a
+ * `ref.user()` property. Registration rejects the rest too.
+ */
 type SchemaContainsUserRef<TSchema> = TSchema extends "userRef"
   ? true
   : TSchema extends { type: "array"; items: infer TItems }
@@ -192,11 +197,24 @@ type TimestampDatasetColumnNameOf<TDataset extends DatasetDefinition> =
       }[DatasetColumnNameOf<TDataset>]
 
 type ProjectionMappingFor<TObjectType extends ObjectType, TDataset extends DatasetDefinition> = {
-  readonly [TPropertyId in PropertyIdOf<TObjectType>]?: DatasetColumnNameCompatibleWithSchema<
+  readonly [TPropertyId in PropertyIdOf<TObjectType>]?: ProjectionPropertySource<
     TDataset,
-    PropertyById<TObjectType, TPropertyId>["schema"]
+    PropertyById<TObjectType, TPropertyId>
   >
 }
+
+/**
+ * What fills one property: a compatible column, or for a `ref.user()` property a string column of
+ * member emails. A required one is left out, since an email no member has leaves it empty.
+ */
+type ProjectionPropertySource<
+  TDataset extends DatasetDefinition,
+  TProperty extends Property,
+> = TProperty["schema"] extends "userRef"
+  ? TProperty extends { readonly required: true }
+    ? never
+    : UserEmailColumn<StringDatasetColumnNameOf<TDataset>>
+  : DatasetColumnNameCompatibleWithSchema<TDataset, TProperty["schema"]>
 
 type ExactProjectionMapping<TObjectType extends ObjectType, TMapping> = TMapping & {
   readonly [TKey in Exclude<keyof TMapping, PropertyIdOf<TObjectType>>]: never
@@ -469,7 +487,7 @@ function buildObjectTypeProjection<const TObjectType extends ObjectType>(
         properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
           mapping: ExactProjectionMapping<TObjectType, TMapping>
         ): ObjectProjectionBuilder<TObjectType, TDataset> {
-          const propertyMapping = mapping as Record<string, string>
+          const { propertyMapping, users } = lowerPropertyMapping(mapping)
           validatePropertyMapping(objectType, propertyMapping)
 
           return objectProjectionBuilder({
@@ -477,6 +495,7 @@ function buildObjectTypeProjection<const TObjectType extends ObjectType>(
             objectType,
             datasetId,
             propertyMapping,
+            users,
             links: {},
             conflictResolution: { strategy: "editsWin" },
           })
@@ -509,6 +528,28 @@ function buildObjectTypeProjection<const TObjectType extends ObjectType>(
   }
 }
 
+/** Splits each `userRef.fromEmail(column)` into its column and the key it matches members by. */
+function lowerPropertyMapping(mapping: Readonly<Record<string, unknown>>): {
+  readonly propertyMapping: Record<string, string>
+  readonly users: Record<string, ProjectionUserKey>
+} {
+  const propertyMapping: Record<string, string> = {}
+  const users: Record<string, ProjectionUserKey> = {}
+  for (const [propertyId, source] of Object.entries(mapping)) {
+    if (isUserEmailColumn(source)) {
+      propertyMapping[propertyId] = source.column
+      users[propertyId] = "email"
+    } else if (typeof source === "string") {
+      propertyMapping[propertyId] = source
+    } else {
+      throw new ProjectionValidationError(
+        `Property '${propertyId}' must map a dataset column name or userRef.fromEmail(column).`
+      )
+    }
+  }
+  return { propertyMapping, users }
+}
+
 function objectProjectionBuilder<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
@@ -517,6 +558,7 @@ function objectProjectionBuilder<
   readonly objectType: TObjectType
   readonly datasetId: string
   readonly propertyMapping: Readonly<Record<string, string>>
+  readonly users: Readonly<Record<string, ProjectionUserKey>>
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   readonly conflictResolution: SourceEditConflictResolution
 }): ObjectProjectionBuilder<TObjectType, TDataset> {
@@ -528,6 +570,7 @@ function objectProjectionBuilder<
     objectTypeId: input.objectType.id,
     datasetId: input.datasetId,
     properties: { ...input.propertyMapping },
+    ...(Object.keys(input.users).length > 0 ? { users: { ...input.users } } : {}),
     links: { ...input.links },
     conflictResolution: { ...input.conflictResolution },
   }
@@ -947,6 +990,7 @@ export function isObjectProjectionDefinition(value: unknown): value is ObjectPro
     typeof value.objectTypeId === "string" &&
     typeof value.datasetId === "string" &&
     isRecord(value.properties) &&
+    (value.users === undefined || isRecord(value.users)) &&
     isRecord(value.links) &&
     isSourceEditConflictResolution(value.conflictResolution)
   )

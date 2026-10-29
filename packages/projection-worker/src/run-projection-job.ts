@@ -224,14 +224,14 @@ async function materializeProjection(
       try {
         const entries =
           incremental?.entries ??
-          replacementEntries(
+          (await replacementEntries(
             input,
             validated.projection,
             validated.dataset,
             execution,
             validated.version.rowCount,
             signal
-          )
+          ))
         await getOntologyMutationRuntime(input.runtime).replaceProjection({
           source: { projectionId: validated.projection.id },
           datasetVersion: input.job.datasetVersion,
@@ -248,7 +248,7 @@ async function materializeProjection(
   }
 }
 
-function replacementEntries(
+async function replacementEntries(
   input: RunProjectionJobInput,
   projection: Exclude<ProjectionDefinition, { readonly _tag: "TelemetryProjectionDefinition" }>,
   dataset: ValidatedProjectionJob["dataset"],

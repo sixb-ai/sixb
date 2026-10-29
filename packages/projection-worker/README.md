@@ -38,6 +38,8 @@ await worker.start()
 - `QueueDelivery` owns liveness; the opaque execution token fences every durable write.
 - Retryable failures use capped exponential backoff and remain retryable without an attempt limit.
 - Semantic outcomes live in `ontology_commits`; run records contain lifecycle and physical progress.
+- A projection that maps `userRef.fromEmail` reads the member directory once per run, before its
+  first row, so every row of the run resolves against the same members. It needs auth storage.
 
 ## Vector indexing
 

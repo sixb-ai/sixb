@@ -6,6 +6,7 @@ import {
   type ObjectProjectionDefinition,
 } from "@sixb/core"
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
+import { loadMemberEmails } from "./member-emails"
 import {
   buildObjectProjectionPlan,
   type ObjectProjectionPlan,
@@ -16,20 +17,21 @@ import { ReplacementProgress } from "./replacement-progress"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
 import { isBlank, throwIfAborted } from "./utils"
 
-export function mapObjectProjectionEntries(input: {
+export async function mapObjectProjectionEntries(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly execution: ClaimedProjectionExecution
   readonly expectedRows?: number
   readonly signal: AbortSignal
-}): AsyncIterable<ProjectionSourceEntry> {
+}): Promise<AsyncIterable<ProjectionSourceEntry>> {
   const { runtime, projection, dataset, execution, expectedRows, signal } = input
   const plan = buildObjectProjectionPlan({
     ontology: runtime.ontology,
     projection,
     dataset,
     primaryPropertyId: runtime.ontology.getPrimaryPropertyId(projection.objectTypeId),
+    members: await loadMemberEmails(runtime, projection),
     correlation: {
       runId: execution.run.id,
       versionId: execution.run.identity.datasetVersion.versionId,

@@ -171,8 +171,9 @@ To match the user who runs a query, use [`currentUser()`](../objects/querying.md
 instead of a fixed ID: `task.p.assignee.eq(currentUser())`. It only stands for that user in a query
 predicate, so a property cannot store it.
 
-User references are set by your code, actions, and workflows. Projections, telemetry properties,
-link properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a
+User references are set by your code, actions, and workflows, or by a projection that
+[matches members by email](../projections/overview.md#point-to-members). Telemetry properties, link
+properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a
 person who is part of your domain rather than a project member, such as a customer contact, define
 an object type.
 

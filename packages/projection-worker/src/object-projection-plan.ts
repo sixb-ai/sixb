@@ -9,6 +9,7 @@ import {
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { parseDatasetTimestamp } from "@sixb/core/internal/projections"
+import { type MemberEmails, normalizeEmail } from "./member-emails"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import { isPlainObject } from "./utils"
@@ -42,6 +43,8 @@ interface ProjectedPropertyPlan {
   readonly columnName: string
   readonly columnType: DatasetColumnDefinition["type"]
   readonly schema: Schema
+  /** Set when the column holds a member's email: the members it resolves against. */
+  readonly members?: MemberEmails
 }
 
 type CollectPropertiesResult =
@@ -59,12 +62,14 @@ export function buildObjectProjectionPlan(input: {
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly primaryPropertyId: string
+  /** Required when the projection maps users: see `loadMemberEmails`. */
+  readonly members?: MemberEmails
   readonly correlation?: {
     readonly runId: string
     readonly versionId: string
   }
 }): ObjectProjectionPlan {
-  const { ontology, projection, dataset, primaryPropertyId, correlation } = input
+  const { ontology, projection, dataset, primaryPropertyId, members, correlation } = input
 
   return {
     projection,
@@ -74,6 +79,7 @@ export function buildObjectProjectionPlan(input: {
       ontology,
       projection,
       dataset,
+      members,
       correlation,
     }),
   }
@@ -149,12 +155,13 @@ function buildProjectedPropertyPlans(input: {
   readonly ontology: OntologyDefinitionCatalog
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
+  readonly members: MemberEmails | undefined
   readonly correlation?: {
     readonly runId: string
     readonly versionId: string
   }
 }): ReadonlyMap<string, ProjectedPropertyPlan> {
-  const { ontology, projection, dataset, correlation } = input
+  const { ontology, projection, dataset, members, correlation } = input
   const errorDetails = projectionPlanErrorDetails({ projection, dataset, correlation })
   const objectType = ontology.getObjectTypeById(projection.objectTypeId)
   if (!objectType) {
@@ -196,6 +203,15 @@ function buildProjectedPropertyPlans(input: {
       )
     }
 
+    const resolvesMembers = projection.users?.[propertyId] === "email"
+    if (resolvesMembers && !members) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbProjectionWorker] Projection '${projection.id}' property '${propertyId}' resolves members by email, but its plan has no member directory.`,
+        { details: { ...errorDetails, objectTypeId: objectType.id, propertyId } }
+      )
+    }
+
     propertyPlans.set(propertyId, {
       propertyId,
       columnName,
@@ -208,6 +224,7 @@ function buildProjectedPropertyPlans(input: {
           columnName,
         },
       }),
+      ...(resolvesMembers ? { members } : {}),
     })
   }
 
@@ -248,6 +265,14 @@ function collectProperties(
         ok: false,
         errorMessage: `[SixbProjectionWorker] Projection '${projection.id}' has no property plan for '${propertyId}'.`,
       }
+    }
+
+    if (propertyPlan.members) {
+      // Row validation has proven the column a string. An email no member has leaves it empty.
+      const userId =
+        typeof value === "string" ? propertyPlan.members.get(normalizeEmail(value)) : undefined
+      if (userId !== undefined) properties[propertyId] = { type: "user", id: userId }
+      continue
     }
 
     const normalized = normalizeProjectedValue({

@@ -21062,6 +21062,9 @@ export type ListProjectionsResponses = {
       properties: {
         [key: string]: string
       }
+      users?: {
+        [key: string]: "email"
+      }
       links: {
         [key: string]: {
           linkId: string
@@ -21662,6 +21665,9 @@ export type GetProjectionResponses = {
         datasetId: string
         properties: {
           [key: string]: string
+        }
+        users?: {
+          [key: string]: "email"
         }
         links: {
           [key: string]: {

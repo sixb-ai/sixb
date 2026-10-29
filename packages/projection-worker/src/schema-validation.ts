@@ -124,19 +124,16 @@ export function assertProjectionCompatibleWithDataset(input: {
       }
 
       const column = requireColumn(columnsByName, columnName, context)
-      if (
-        !isDatasetColumnCompatibleWithSchema(
-          column.type,
-          property.schema,
-          ontology.getValueTypesById(),
-          {
-            ...context,
-            objectTypeId: objectType.id,
-            propertyId,
-            columnName,
-          }
-        )
-      ) {
+      const compatible =
+        projection.users?.[propertyId] === "email"
+          ? column.type === "string"
+          : isDatasetColumnCompatibleWithSchema(
+              column.type,
+              property.schema,
+              ontology.getValueTypesById(),
+              { ...context, objectTypeId: objectType.id, propertyId, columnName }
+            )
+      if (!compatible) {
         throw invalidProjectionDefinition(
           `[SixbProjectionWorker] Projection '${projection.id}' maps dataset column '${column.name}' (${column.type}) to incompatible property '${propertyId}'.`,
           {
