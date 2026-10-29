@@ -567,14 +567,15 @@ for the user's approval prints \`"status": "awaiting_approval"\` and exits with 
   users: `Usage:
   sixb users list [options]
   sixb users search <text> [options]
-  sixb users get <user-id>
+  sixb users get <user-id|email>
 
 Options:
   --status active|suspended|all       Defaults to active
   --limit <1-${CLI_LIMITS.users.maximum}>                     Defaults to ${CLI_LIMITS.users.default}
   --offset <n>                        Non-negative; defaults to 0
 
-\`users search\` matches part of a display name or email, ignoring case. Each member is
+\`users search\` matches part of a display name or email, ignoring case; \`users get\` takes an
+exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   models: `Usage:
@@ -1851,7 +1852,18 @@ async function users(api, args) {
     return writeText(GROUP_HELP.users);
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "users get", 1);
-    return writeJson(await api.get(`/api/users/${encodeURIComponent(positionals[0] ?? "")}`));
+    const user = positionals[0]?.trim();
+    if (!user)
+      fail("users get requires a user id or email.");
+    if (!user.includes("@")) {
+      return writeJson(await api.get(`/api/users/${encodeURIComponent(user)}`));
+    }
+    const page = await api.get("/api/users", { email: user });
+    const [member] = isRecord(page) && Array.isArray(page.users) ? page.users : [];
+    if (member === undefined) {
+      throw new CliError({ code: "not_found", message: `No member has the email '${user}'.` }, EXIT_API);
+    }
+    return writeJson(member);
   }
   if (sub === "list") {
     const { options } = parseCommandArgs(rest, LIST_FLAGS, "users list");
@@ -1873,6 +1885,9 @@ function listQuery(options) {
     limit: String(limit),
     ...options["--offset"] === undefined ? {} : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }
   };
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // ../cli-core/src/commands/workflows.ts
