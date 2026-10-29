@@ -101,3 +101,7 @@ export function preferenceWithoutReasoning(
   const model = selection.request?.model
   return model ? { model } : null
 }
+
+export function sameModel(left: LanguageModel, right: LanguageModel | undefined): boolean {
+  return left.provider === right?.provider && left.modelId === right.modelId
+}

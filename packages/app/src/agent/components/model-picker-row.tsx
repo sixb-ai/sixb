@@ -11,11 +11,7 @@ import { Info } from "lucide-react"
 import { useId, useState } from "react"
 import { useAgentMessages } from "../i18n"
 import type { LanguageModel } from "../types"
-import {
-  COMPOSER_MENU_ROW_CLASS_NAME,
-  COMPOSER_MENU_ROW_SELECTED_CLASS_NAME,
-  ComposerMenuCheck,
-} from "./composer-menu"
+import { COMPOSER_MENU_ROW_CLASS_NAME } from "./composer-menu"
 import { ProviderLogo } from "./provider-logo"
 
 export function ModelPickerRow({
@@ -25,7 +21,6 @@ export function ModelPickerRow({
   radio = false,
   describedBy,
   tier,
-  note,
   onSelect,
 }: {
   model: LanguageModel
@@ -37,8 +32,6 @@ export function ModelPickerRow({
   describedBy?: string
   /** The tier the row stands for, named at its end when no heading names it. */
   tier?: { readonly id: string; readonly label: string }
-  /** Said after the name, such as "Default". */
-  note?: string
   onSelect: (model: LanguageModel) => void
 }) {
   const messages = useAgentMessages().models
@@ -67,31 +60,28 @@ export function ModelPickerRow({
               setDetailsOpen(false)
               onSelect(model)
             }}
+            // The chosen row's highlight is its wrapper's, which also holds its thinking.
             className={cn(
               COMPOSER_MENU_ROW_CLASS_NAME,
-              "h-10 flex-1 py-0",
-              selected && COMPOSER_MENU_ROW_SELECTED_CLASS_NAME
+              "flex-1",
+              selected && "hover:bg-transparent dark:hover:bg-transparent"
             )}
           >
             <ProviderLogo model={model} className="size-[18px] shrink-0" />
             {/* Just the name: a catalog's description is a paragraph, kept for the details card. */}
             <span
-              className={cn(
-                "flex min-w-0 flex-1 items-baseline gap-2 text-[13.5px] tracking-[-0.005em] text-foreground",
-                selected && "font-medium"
-              )}
+              className={cn("min-w-0 flex-1 truncate text-foreground", selected && "font-medium")}
             >
-              <span className="truncate">{model.name}</span>
-              {tier || note ? (
-                <span
-                  id={tier?.id}
-                  className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground"
-                >
-                  {[tier?.label, note].filter(Boolean).join(" · ")}
-                </span>
-              ) : null}
+              {model.name}
             </span>
-            <ComposerMenuCheck checked={selected} />
+            {tier?.label ? (
+              <span
+                id={tier?.id}
+                className="shrink-0 text-xs font-normal whitespace-nowrap text-muted-foreground"
+              >
+                {tier.label}
+              </span>
+            ) : null}
           </button>
         </HoverCardTrigger>
         <HoverCardContent

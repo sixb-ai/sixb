@@ -39,13 +39,17 @@ export {
   type AgentThreadsProps,
 } from "./agent/components/agent-threads"
 export { Composer, type ComposerProps } from "./agent/components/composer"
+export type { ComposerCommand } from "./agent/components/composer-commands"
+export {
+  ComposerSettings,
+  type ComposerSettingsProps,
+} from "./agent/components/composer-settings"
 export { ContextChips, type ContextChipsProps } from "./agent/components/context-chips"
 export {
   ContextPicker,
   type ContextPickerProps,
   type ContextPickerResult,
 } from "./agent/components/context-picker"
-export { ModelControls, type ModelControlsProps } from "./agent/components/model-controls"
 export { ProviderLogo, type ProviderLogoProps } from "./agent/components/provider-logo"
 export {
   ReasoningEffortSlider,

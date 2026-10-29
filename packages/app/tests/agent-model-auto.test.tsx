@@ -248,20 +248,25 @@ async function send(view: ReturnType<typeof render>, posted: Posted, text: strin
   return posted[count]
 }
 
+/** The composer's settings chip, named after the model the next message runs on. */
+function settingsChip(model: string): RegExp {
+  return new RegExp(`^${model}\\b.*\\. Change model and permissions$`)
+}
+
 async function pin(view: ReturnType<typeof render>, name: string) {
-  fireEvent.click(await view.findByRole("button", { name: "Model: Auto. Change it" }))
+  fireEvent.click(await view.findByRole("button", { name: settingsChip("Auto") }))
   const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
   fireEvent.click(menu.getByRole("radio", { name: new RegExp(`^${name}`) }))
-  await view.findByRole("button", { name: `Model: ${name}. Change it` })
+  await view.findByRole("button", { name: settingsChip(name) })
 }
 
 describe("the model chip with tiers", () => {
-  // Removal proof: drop the tiers branch from ModelControls; no Auto chip shows.
+  // Removal proof: drop the tiers branch from ComposerSettings; no Auto chip shows.
   test("starts on Auto, and a message asks for no model", async () => {
     const { view, posted } = renderChat()
 
-    expect(await view.findByRole("button", { name: "Model: Auto. Change it" })).toBeDefined()
-    expect(view.queryByRole("button", { name: "Choose model and reasoning effort" })).toBeNull()
+    expect(await view.findByRole("button", { name: settingsChip("Auto") })).toBeDefined()
+    expect(view.queryByRole("button", { name: settingsChip("Sonnet") })).toBeNull()
 
     const body = await send(view, posted, "Which invoices are due?")
     expect(body).toMatchObject({ text: "Which invoices are due?" })
@@ -273,11 +278,11 @@ describe("the model chip with tiers", () => {
   // the chip stays on Auto and the message asks for nothing.
   test("lists Auto then each tier, and a model chosen in it is pinned with its reasoning", async () => {
     const { view, posted } = renderChat()
-    fireEvent.click(await view.findByRole("button", { name: "Model: Auto. Change it" }))
+    fireEvent.click(await view.findByRole("button", { name: settingsChip("Auto") }))
 
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     expect(menu.getAllByRole("radio").map((radio) => radio.textContent)).toEqual([
-      "AutoPicks the right model for each message",
+      "AutoBest model for each message",
       // One model a tier: each name carries its tier, and its radio is described by it. Just
       // names: a catalog description is a paragraph, kept for the details card.
       "FlashFast",
@@ -292,7 +297,7 @@ describe("the model chip with tiers", () => {
 
     fireEvent.click(menu.getByRole("radio", { name: /^Opus/ }))
 
-    await view.findByRole("button", { name: "Model: Opus. Change it" })
+    await view.findByRole("button", { name: settingsChip("Opus") })
     expect(menu.getByRole("radio", { name: /^Opus/ }).getAttribute("aria-checked")).toBe("true")
     expect(view.getByText("Thinking")).toBeDefined()
 
@@ -309,7 +314,7 @@ describe("the model chip with tiers", () => {
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     fireEvent.click(menu.getByRole("radio", { name: /^Auto/ }))
 
-    await view.findByRole("button", { name: "Model: Auto. Change it" })
+    await view.findByRole("button", { name: settingsChip("Auto") })
     expect(await send(view, posted, "And now?")).not.toHaveProperty("model")
   })
 
@@ -321,13 +326,11 @@ describe("the model chip with tiers", () => {
     first.view.unmount()
 
     const reloaded = renderChat()
-    expect(
-      await reloaded.view.findByRole("button", { name: "Model: Opus. Change it" })
-    ).toBeDefined()
+    expect(await reloaded.view.findByRole("button", { name: settingsChip("Opus") })).toBeDefined()
     reloaded.view.unmount()
 
     const other = renderChat({ threadId: "thr_2" })
-    expect(await other.view.findByRole("button", { name: "Model: Auto. Change it" })).toBeDefined()
+    expect(await other.view.findByRole("button", { name: settingsChip("Auto") })).toBeDefined()
   })
 
   // Removal proof: drop pinModel from showCreatedThread; the new thread's pin is lost.
@@ -350,10 +353,10 @@ describe("the model chip with tiers", () => {
     await pin(view, "Flash")
 
     open("thr_1")
-    await view.findByRole("button", { name: "Model: Auto. Change it" })
+    await view.findByRole("button", { name: settingsChip("Auto") })
     open(null)
 
-    expect(await view.findByRole("button", { name: "Model: Auto. Change it" })).toBeDefined()
+    expect(await view.findByRole("button", { name: settingsChip("Auto") })).toBeDefined()
     expect(storedPins()).toEqual({})
   })
 
@@ -361,7 +364,7 @@ describe("the model chip with tiers", () => {
   // drop the storage listener, the chip misses the other tab's pin.
   test("pins from another tab are kept, and followed", async () => {
     const { view } = renderChat()
-    await view.findByRole("button", { name: "Model: Auto. Change it" })
+    await view.findByRole("button", { name: settingsChip("Auto") })
 
     const opusPin = { model: { provider: "gateway", modelId: opus.modelId } }
     browser.localStorage.setItem(PINS_KEY, JSON.stringify({ thr_2: opusPin }))
@@ -374,10 +377,10 @@ describe("the model chip with tiers", () => {
         new browser.StorageEvent("storage", { key: PINS_KEY }) as unknown as Event
       )
     })
-    expect(await view.findByRole("button", { name: "Model: Opus. Change it" })).toBeDefined()
+    expect(await view.findByRole("button", { name: settingsChip("Opus") })).toBeDefined()
   })
 
-  // Removal proof: only call onChooseAuto with a model pinned; the stale pin stays stored.
+  // Removal proof: only reset the selection with a model pinned; the stale pin stays stored.
   test("Auto clears a pin whose model left the catalog", async () => {
     browser.localStorage.setItem(
       PINS_KEY,
@@ -385,7 +388,7 @@ describe("the model chip with tiers", () => {
     )
     const { view } = renderChat()
 
-    fireEvent.click(await view.findByRole("button", { name: "Model: Auto. Change it" }))
+    fireEvent.click(await view.findByRole("button", { name: settingsChip("Auto") }))
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     fireEvent.click(menu.getByRole("radio", { name: /^Auto/ }))
 
@@ -395,18 +398,18 @@ describe("the model chip with tiers", () => {
   // Removal proof: always describe Auto as routing; without a decision model it names none.
   test("says what Auto runs without a decision model", async () => {
     const { view } = renderChat({ routing: false })
-    fireEvent.click(await view.findByRole("button", { name: "Model: Auto. Change it" }))
+    fireEvent.click(await view.findByRole("button", { name: settingsChip("Auto") }))
 
     const menu = within(await view.findByRole("radiogroup", { name: "Model" }))
     expect(menu.getByRole("radio", { name: /^Auto/ }).textContent).toBe("AutoSixb uses Sonnet")
   })
 
-  // Removal proof: drop the Drawer branch from AutoModelChip; the menu opens in a popover.
+  // Removal proof: drop the Drawer branch from ComposerMenu; the menu opens in a popover.
   test("on a phone, the menu opens as a bottom sheet", async () => {
     browser.happyDOM.setViewport({ width: 375, height: 812 })
     const { view } = renderChat()
 
-    fireEvent.click(await view.findByRole("button", { name: "Model: Auto. Change it" }))
+    fireEvent.click(await view.findByRole("button", { name: settingsChip("Auto") }))
 
     const sheet = await waitFor(() => {
       const found = document.querySelector<HTMLElement>("[data-slot=drawer-content]")
@@ -419,12 +422,13 @@ describe("the model chip with tiers", () => {
 })
 
 describe("the model picker with a list", () => {
-  // Removal proof: take the tiers branch of ModelControls whatever the catalog; the list shows Auto.
+  // Removal proof: take the tiers branch of ComposerSettings whatever the catalog; the list shows
+  // Auto.
   test("is unchanged: the default model, and no Auto", async () => {
     const { view } = renderChat({ language: list })
 
-    const picker = await view.findByRole("button", { name: "Choose model and reasoning effort" })
+    const picker = await view.findByRole("button", { name: settingsChip("Sonnet") })
     await waitFor(() => expect(picker.textContent).toContain("Sonnet"))
-    expect(view.queryByRole("button", { name: "Model: Auto. Change it" })).toBeNull()
+    expect(view.queryByRole("button", { name: settingsChip("Auto") })).toBeNull()
   })
 })

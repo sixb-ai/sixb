@@ -74,6 +74,27 @@ export const en = {
     dictationTranscribing: "Transcribing…",
     cancelDictation: "Cancel dictation",
     finishDictation: "Done",
+    /** The `+` menu: what a message can carry besides its text. */
+    add: "Add files and more",
+    mention: "Mention a record",
+    commands: "Commands",
+  },
+  /** Slash commands, typed as the whole message: `/opus`, `/ask`. */
+  commands: {
+    list: "Commands",
+    auto: "Let Auto pick the model",
+    model: (name: string) => `Use ${name}`,
+    modes: {
+      manual: "Ask before every action",
+      "accept-edits": "Allow edits without asking",
+      auto: "Run everything without asking",
+    },
+  },
+  /** The composer's one control for how the agent works: the model and the permissions. */
+  settings: {
+    title: "Model and permissions",
+    chip: (summary: string) => `${summary}. Change model and permissions`,
+    permissions: "Permissions",
   },
   files: {
     spreadsheet: "Spreadsheet",
@@ -105,15 +126,11 @@ export const en = {
     unnamed: "Context",
   },
   models: {
-    choose: "Choose model and reasoning effort",
     unavailable: "Models unavailable",
     defaultModel: "Default model",
-    popover: "Model and reasoning effort",
     search: "Search models",
     list: "Models",
     empty: "No matching models.",
-    default: "Default",
-    defaultSummary: (summary: string) => `Default · ${summary}`,
     details: (name: string) => `Details about ${name}`,
     contextWindow: "Context window",
     tokens: (tokens: number) => count(tokens, "token"),
@@ -124,11 +141,10 @@ export const en = {
     tools: "Tools",
     reasoning: "Reasoning",
     via: (name: string) => `Via ${name}`,
-    /** With tiers: the model menu, and its first choice. */
     title: "Model",
-    chip: (name: string) => `Model: ${name}. Change it`,
+    /** With tiers: the first choice of the model list. */
     auto: "Auto",
-    autoRouting: "Picks the right model for each message",
+    autoRouting: "Best model for each message",
     autoStandard: (name: string) => `Sixb uses ${name}`,
   },
   reasoning: {
@@ -747,25 +763,24 @@ export const en = {
     left: "You left the thread",
     copied: "Copied to your threads",
   },
-  /** What the agent may change without asking: the composer's chip and its menu. */
+  /** What the agent may change without asking: the composer's permissions and Settings. */
   approvalModes: {
     title: "What can the agent do without asking?",
-    chip: (mode: string) => `Permissions: ${mode}. Change them`,
     changed: (mode: string) => `Permissions: ${mode}`,
     shortcut: "Shift+Tab in an empty message switches to the next mode",
     modes: {
       manual: {
-        label: "Manual",
-        description: "Asks before each action or workflow the agent requests",
+        label: "Ask first",
+        description: "Checks with you before each action or workflow.",
       },
       "accept-edits": {
-        label: "Accept edits",
+        label: "Allow edits",
         description:
-          "Changes your data without asking. Asks before reaching other systems or starting workflows",
+          "Changes your data on its own. Asks before reaching other systems or starting workflows.",
       },
       auto: {
-        label: "Auto",
-        description: "Runs every action and workflow without asking",
+        label: "Full access",
+        description: "Runs every action and workflow without asking.",
       },
     },
     saveFailed: "Couldn't change what the agent may do. Try again.",

@@ -101,7 +101,7 @@ describe("Composer attachments", () => {
     const notPrevented = fireEvent.paste(view.input(), { clipboardData: clipboard([screenshot()]) })
 
     expect(notPrevented).toBe(false)
-    expect(await view.findByText("Image")).toBeDefined()
+    expect(await view.findByLabelText("Remove image.png")).toBeDefined()
     expect(uploads).toEqual(["POST /api/files"])
     // Removal proof: require text again in canSend; the button stays disabled.
     await waitFor(() => expect(view.send().disabled).toBe(false))
@@ -131,7 +131,7 @@ describe("Composer attachments", () => {
 
     expect(fireEvent.paste(view.input(), { clipboardData: data })).toBe(false)
 
-    expect(await view.findByText("Image")).toBeDefined()
+    expect(await view.findByLabelText("Remove image.png")).toBeDefined()
     expect(uploads).toEqual(["POST /api/files"])
   })
 

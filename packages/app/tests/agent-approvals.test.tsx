@@ -429,24 +429,28 @@ function type(field: HTMLElement, value: string) {
   fireEvent.keyUp(field, { key: value.at(-1) })
 }
 
+/** The composer's settings chip, whose name ends with the approval mode's label. */
+const settingsChip = (mode: string) => new RegExp(`(^|, )${mode}\\. Change model and permissions$`)
+
 const card = (view: ReturnType<typeof render>) =>
   view.findByRole("region", { name: /^Approval request/ })
 
-describe("the approval mode chip", () => {
-  // Removal proof: drop `setApprovalMode` from the composer props; the chip is gone, and so is the PUT.
+describe("the permissions in the composer", () => {
+  // Removal proof: drop `setApprovalMode` from the composer props; the permissions are gone, and so
+  // is the PUT.
   test("switches the reader's mode in the thread, and the next turn runs in it", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
 
-    const chip = await view.findByRole("button", { name: "Permissions: Manual. Change them" })
+    const chip = await view.findByRole("button", { name: settingsChip("Ask first") })
     fireEvent.click(chip)
-    fireEvent.click(await view.findByRole("radio", { name: /^Auto/ }))
+    fireEvent.click(await view.findByRole("radio", { name: /^Full access/ }))
 
     await waitFor(() =>
       expect(requests).toContain(
         'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"auto"}'
       )
     )
-    expect(view.getByRole("button", { name: "Permissions: Auto. Change them" })).toBeDefined()
+    expect(view.getByRole("button", { name: settingsChip("Full access") })).toBeDefined()
 
     const input = view.getByRole("textbox", { name: "Message" })
     type(input, "Pay it")
@@ -467,7 +471,7 @@ describe("the approval mode chip", () => {
   // Drop `value.length === 0` from it; typing then no longer lets Shift+Tab move focus back.
   test("Shift+Tab in an empty message cycles the modes, and says so", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
-    await view.findByRole("button", { name: "Permissions: Manual. Change them" })
+    await view.findByRole("button", { name: settingsChip("Ask first") })
     const input = view.getByRole("textbox", { name: "Message" })
     const modeSaves = () => requests.filter((entry) => entry.includes("/approval-mode"))
 
@@ -477,9 +481,9 @@ describe("the approval mode chip", () => {
         'PUT /api/agent-threads/thr_1/approval-mode {"approvalMode":"accept-edits"}',
       ])
     )
-    expect(view.getByText("Permissions: Accept edits")).toBeDefined()
+    expect(view.getByText("Permissions: Allow edits")).toBeDefined()
 
-    // On to Auto, then round to Manual.
+    // On to Full access, then round to Ask first.
     fireEvent.keyDown(input, { key: "Tab", shiftKey: true })
     await waitFor(() => expect(modeSaves()).toHaveLength(2))
     expect(modeSaves()[1]).toBe(
@@ -502,10 +506,10 @@ describe("the approval mode chip", () => {
   // Removal proof: drop the `setDefaultApprovalMode` call from `setApprovalMode`; no PUT is made.
   test("a chosen mode becomes the reader's default, with no extra step", async () => {
     const { view, requests } = renderChat("dana", { approvals: [], runs: [], messages: [] })
-    fireEvent.click(await view.findByRole("button", { name: /^Permissions: Manual/ }))
-    fireEvent.click(await view.findByRole("radio", { name: /^Accept edits/ }))
+    fireEvent.click(await view.findByRole("button", { name: settingsChip("Ask first") }))
+    fireEvent.click(await view.findByRole("radio", { name: /^Allow edits/ }))
 
-    await view.findByRole("button", { name: /^Permissions: Accept edits/ })
+    await view.findByRole("button", { name: settingsChip("Allow edits") })
     await waitFor(() =>
       expect(requests).toContain('PUT /api/agent/preferences {"approvalMode":"accept-edits"}')
     )
@@ -580,7 +584,7 @@ describe("an approval card", () => {
     const found = within(first)
     const always = found.getByRole("button", { name: "Allow all from now on" })
     expect(always.getAttribute("title")).toBe(
-      "Approves this, then sets this conversation to “Auto”"
+      "Approves this, then sets this conversation to “Full access”"
     )
     expect(found.getByText("Also approves 1 other request waiting in this reply.")).toBeDefined()
 
@@ -591,7 +595,7 @@ describe("an approval card", () => {
         'POST /api/agent-threads/thr_1/approvals/apr_1/decision {"decision":"approve","always":true}'
       )
     )
-    expect(await view.findByText("This conversation is now set to “Auto”.")).toBeDefined()
+    expect(await view.findByText("This conversation is now set to “Full access”.")).toBeDefined()
   })
 
   // Removal proof: drop the `resume` branch of the card's `then`; the card says nothing of it.
