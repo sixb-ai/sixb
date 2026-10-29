@@ -8,6 +8,7 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   link,
+  type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   param,
   prop,
@@ -234,13 +235,98 @@ describe("userRef registration", () => {
           datasetsById: new Map([[tasks.id, tasks]]),
         })
     ).toThrow(
-      '[Sixb] Projection "tasks": property "Task.reviewers" holds user references (ref.user()), which projections cannot map yet.'
+      '[Sixb] Projection "tasks": property "Task.reviewers" holds user references (ref.user()), which a dataset column cannot hold. Map a ref.user() property from a column of member emails with userRef.fromEmail(column)'
     )
     // Authoring the same mapping does not type-check either.
     defineProjection("typed-tasks", Task)
       .fromDataset(tasks)
       // @ts-expect-error user references cannot be mapped from a dataset column
       .properties({ id: "task_id", reviewers: "reviewer_ids" })
+  })
+})
+
+describe("userRef.fromEmail", () => {
+  const tasks = defineDataset("tasks", {
+    schema: [
+      col("task_id", "string"),
+      col("assignee_email", "string", { nullable: true }),
+      col("assignee_count", "int64"),
+      col("reviewer_emails", "json"),
+    ],
+  })
+
+  function register(
+    properties: Readonly<Record<string, string>>,
+    users: Readonly<Record<string, string>>,
+    ontology: ObjectTypeWithPropertyTokens = Task
+  ) {
+    const projection = {
+      _tag: "ObjectProjectionDefinition" as const,
+      id: "tasks",
+      objectTypeId: ontology.id,
+      datasetId: tasks.id,
+      properties,
+      users: users as Readonly<Record<string, "email">>,
+      links: {},
+    }
+    return () =>
+      new ProjectionRegistry({
+        projections: [projection],
+        ontology: new OntologyRegistry({ sources: [ontology] }),
+        datasetsById: new Map([[tasks.id, tasks]]),
+      })
+  }
+
+  test("lowers to the email column and the key members are matched by", () => {
+    const projection = defineProjection("tasks", Task)
+      .fromDataset(tasks)
+      .properties({ id: "task_id", assignee: userRef.fromEmail("assignee_email") })
+
+    expect(projection.properties).toEqual({ id: "task_id", assignee: "assignee_email" })
+    expect(projection.users).toEqual({ assignee: "email" })
+    expect(register(projection.properties, { assignee: "email" })).not.toThrow()
+    // A projection that maps no users carries no `users`, so its revision is unchanged.
+    expect(
+      "users" in defineProjection("plain", Task).fromDataset(tasks).properties({ id: "task_id" })
+    ).toBe(false)
+    expect(() => userRef.fromEmail(" ")).toThrow(
+      "[Sixb] userRef.fromEmail() needs a dataset column name."
+    )
+  })
+
+  // Guard: `validateUserMapping` in `projections/validation.ts`; without it each one registers.
+  test("maps only an optional ref.user() property from a string column", () => {
+    const RequiredTask = defineObjectType({
+      id: "RequiredTask",
+      name: "Required task",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("assignee", ref.user(), { required: true }),
+      ],
+    })
+
+    expect(register({ id: "task_id", title: "assignee_email" }, { title: "email" })).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromEmail() maps property "Task.title", which is not a single ref.user() property.'
+    )
+    expect(
+      register({ id: "task_id", reviewers: "reviewer_emails" }, { reviewers: "email" })
+    ).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromEmail() maps property "Task.reviewers", which is not a single ref.user() property.'
+    )
+    expect(register({ id: "task_id", assignee: "assignee_count" }, { assignee: "email" })).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromEmail() maps property "Task.assignee" from column "assignee_count", which must be a string column.'
+    )
+    expect(
+      register({ id: "task_id", assignee: "assignee_email" }, { assignee: "email" }, RequiredTask)
+    ).toThrow(
+      '[Sixb] Projection "tasks": userRef.fromEmail() cannot map required property "RequiredTask.assignee": a row whose email no member has would leave it empty.'
+    )
+    expect(register({ id: "task_id", assignee: "assignee_email" }, { assignee: "login" })).toThrow(
+      '[Sixb] Projection "tasks": property "Task.assignee" matches members by unknown key "login".'
+    )
+    expect(register({ id: "task_id" }, { assignee: "email" })).toThrow(
+      'Projection "tasks": user property "assignee" must be in property mapping'
+    )
   })
 })
 

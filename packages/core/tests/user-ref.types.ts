@@ -1,8 +1,11 @@
 import {
   type CurrentUserRef,
+  col,
   currentUser,
   defineAction,
+  defineDataset,
   defineObjectType,
+  defineProjection,
   type InferObjectProperties,
   type InferSchema,
   type ObjectWhereBuilder,
@@ -11,6 +14,7 @@ import {
   prop,
   ref,
   type Sixb,
+  type UserEmailColumn,
   type UserRef,
   userRef,
 } from "../src"
@@ -91,3 +95,53 @@ export const assignToCurrentUser = defineAction("assignToCurrentUser")
     // @ts-expect-error an edit cannot store currentUser() either
     objects(Task).create({ id: "t1", assignee: currentUser() })
   })
+
+const tasks = defineDataset("tasks", {
+  schema: [
+    col("task_id", "string"),
+    col("title", "string"),
+    col("assignee_email", "string", { nullable: true }),
+    col("assignee_count", "int64"),
+  ],
+})
+
+const AssignedTask = defineObjectType({
+  id: "AssignedTask",
+  name: "Assigned task",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("assignee", ref.user(), { required: true }),
+  ],
+})
+
+export type UserEmailColumnInference = [
+  Expect<
+    Equal<ReturnType<typeof userRef.fromEmail<"assignee_email">>, UserEmailColumn<"assignee_email">>
+  >,
+]
+
+export function userEmailMappings(): void {
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    .properties({ id: "task_id", title: "title", assignee: userRef.fromEmail("assignee_email") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error member emails come from a string column
+    .properties({ id: "task_id", assignee: userRef.fromEmail("assignee_count") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error only a ref.user() property resolves a member
+    .properties({ id: "task_id", title: userRef.fromEmail("assignee_email") })
+
+  defineProjection("tasks", Task)
+    .fromDataset(tasks)
+    // @ts-expect-error a list of user references has no email column form
+    .properties({ id: "task_id", reviewers: userRef.fromEmail("assignee_email") })
+
+  defineProjection("tasks", AssignedTask)
+    .fromDataset(tasks)
+    // @ts-expect-error an email no member has would leave a required property empty
+    .properties({ id: "task_id", assignee: userRef.fromEmail("assignee_email") })
+}

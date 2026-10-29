@@ -62,6 +62,36 @@ export const invoiceProjection = defineProjection("invoices", Invoice)
   })
 ```
 
+## Point to members
+
+When a column names a project member by email, map a [`ref.user()`](../ontology/properties.md#reference-a-user)
+property with `userRef.fromEmail(column)`. The property holds that member's user reference, so
+queries can match it with `currentUser()` and expand it into the member's profile.
+
+File: `projections/calendar-events.ts`
+
+```ts
+import { defineProjection, userRef } from "@sixb/core"
+import { calendarEvents } from "../datasets/calendar-events"
+import { CalendarEvent } from "../ontology/calendar-event"
+
+export const calendarEventProjection = defineProjection("calendar-events", CalendarEvent)
+  .fromDataset(calendarEvents)
+  .properties({
+    id: "event_id",
+    organizerEmail: "organizer_email",
+    organizer: userRef.fromEmail("organizer_email"),
+  })
+```
+
+- The column must be a `string` column, and the property a single `ref.user()` property that is not
+  required.
+- Emails match regardless of case. A suspended member still matches.
+- A row whose email no member has leaves the property empty. Map the column to a string property
+  as well, like `organizerEmail` here, to keep the address.
+- A row is matched when a run projects it. Someone who joins later is matched the next time a
+  dataset version changes their row.
+
 ## Project relationships from a separate dataset
 
 For many-to-many relationships, target a link instead of an object type. Each row identifies the

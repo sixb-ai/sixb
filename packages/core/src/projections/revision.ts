@@ -198,6 +198,16 @@ function normalizeProjectionDefinition(projection: ProjectionDefinition): JsonVa
       properties: Object.fromEntries(
         Object.entries(projection.properties).sort(([left], [right]) => compareStrings(left, right))
       ),
+      // Written only when set: projections that map no users keep their revision.
+      ...(projection.users
+        ? {
+            users: Object.fromEntries(
+              Object.entries(projection.users).sort(([left], [right]) =>
+                compareStrings(left, right)
+              )
+            ),
+          }
+        : {}),
       links: Object.fromEntries(
         Object.entries(projection.links)
           .sort(([left], [right]) => compareStrings(left, right))

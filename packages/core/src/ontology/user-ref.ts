@@ -13,14 +13,48 @@ import type { Schema, ValueType } from "./types"
 export type UserRef = Extract<Principal, { readonly type: "user" }>
 
 /**
- * Build a reference to one user, for writes and query predicates:
- * `where(({ p }) => p.assignee.eq(userRef(userId)))`.
+ * A dataset column that names a member by email, mapped to a `ref.user()` property of a
+ * projection. Built with `userRef.fromEmail(column)`.
  */
-export function userRef(id: string): UserRef {
-  if (typeof id !== "string" || !id.trim()) {
-    throw new OntologyValidationError("[Sixb] User reference id must not be empty.")
+export interface UserEmailColumn<TColumn extends string = string> {
+  readonly kind: "userEmailColumn"
+  readonly column: TColumn
+}
+
+export const userRef: {
+  /**
+   * Build a reference to one user, for writes and query predicates:
+   * `where(({ p }) => p.assignee.eq(userRef(userId)))`.
+   */
+  (id: string): UserRef
+  /**
+   * Map a `ref.user()` property of a projection from a string column holding the member's email:
+   * `.properties({ organizer: userRef.fromEmail("organizer_email") })`.
+   *
+   * The match ignores case. A row whose email no member has leaves the property empty.
+   */
+  fromEmail<const TColumn extends string>(column: TColumn): UserEmailColumn<TColumn>
+} = Object.assign(
+  (id: string): UserRef => {
+    if (typeof id !== "string" || !id.trim()) {
+      throw new OntologyValidationError("[Sixb] User reference id must not be empty.")
+    }
+    return Object.freeze({ type: "user" as const, id })
+  },
+  {
+    fromEmail<const TColumn extends string>(column: TColumn): UserEmailColumn<TColumn> {
+      if (typeof column !== "string" || !column.trim()) {
+        throw new OntologyValidationError("[Sixb] userRef.fromEmail() needs a dataset column name.")
+      }
+      return Object.freeze({ kind: "userEmailColumn" as const, column })
+    },
   }
-  return Object.freeze({ type: "user" as const, id })
+)
+
+export function isUserEmailColumn(value: unknown): value is UserEmailColumn {
+  if (typeof value !== "object" || value === null) return false
+  const record = value as Record<string, unknown>
+  return record.kind === "userEmailColumn" && typeof record.column === "string"
 }
 
 /** Exactly `{ type: "user", id }` with a nonblank id and no other field. */

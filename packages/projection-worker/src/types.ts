@@ -6,6 +6,7 @@ import type {
 } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
+  AuthUserStore,
   ProjectionRunClaim,
   ProjectionRunFailureCode,
   ProjectionRunRecord,
@@ -17,6 +18,8 @@ export interface ProjectionWorkerContext {
   readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
+  /** The member directory, for projections that resolve members by email. */
+  readonly users?: Pick<AuthUserStore, "list">
   readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
   readonly projections: Pick<SixbDefinitions["projections"], "getById">
 }

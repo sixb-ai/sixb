@@ -40,6 +40,9 @@ export interface ForeignKeyDescriptor {
   readonly targetObjectTypeId: string
 }
 
+/** What a column mapped to a `ref.user()` property identifies its member by. */
+export type ProjectionUserKey = "email"
+
 /** Resolves competing source-projection and managed-edit values for projected properties. */
 export type SourceEditConflictResolution =
   | { readonly strategy: "editsWin" }
@@ -60,6 +63,11 @@ export interface ObjectProjectionDefinition {
   readonly datasetId: string
   /** Maps object type property id -> dataset column name. */
   readonly properties: Readonly<Record<string, string>>
+  /**
+   * The `ref.user()` properties whose column names a member: property id -> what the column holds.
+   * The property stores that member's reference. Omitted when the projection maps no users.
+   */
+  readonly users?: Readonly<Record<string, ProjectionUserKey>>
   /** Maps link id -> FK descriptor. Empty `{}` when no FK links are projected. */
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
   /** Defaults to `editsWin` when omitted by a legacy lowered definition. */

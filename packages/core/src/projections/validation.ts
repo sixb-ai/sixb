@@ -286,6 +286,8 @@ export function validateTelemetryProjectionFieldMapping(
  * 5. The primary property is included in the property mapping.
  * 6. FK link descriptors reference valid links, valid source properties (present in mapping),
  *    and valid target types with primaries.
+ * 7. User references come only from `userRef.fromEmail`: an optional `ref.user()` property mapped
+ *    from a string column.
  *
  * For link projections:
  * 1. `datasetId` exists in the dataset registry.
@@ -388,16 +390,20 @@ export function validateProjectionsAtStartup(
             `on dataset "${projection.datasetId}"`
         )
       }
-      const property = objectType.properties.find((candidate) => candidate.id === propId)
-      if (property?.mode === "telemetry") {
+      const property = objectType.properties.find((candidate) => candidate.id === propId)!
+      if (property.mode === "telemetry") {
         throw new ProjectionValidationError(
           `[Sixb] ${prefix}: source mappings cannot own telemetry property "${projection.objectTypeId}.${propId}"`
         )
       }
-      // A dataset column cannot prove that a user exists and is active, so user references stay
-      // out of source data until a projection can resolve them.
+      const userKey = projection.users?.[propId]
+      if (userKey !== undefined) {
+        validateUserMapping(prefix, projection.objectTypeId, property, userKey, dataset, columnName)
+        continue
+      }
+      // A column cannot prove that the user it names exists, so it never holds user ids: the
+      // projection resolves members from what the source knows them by instead.
       if (
-        property &&
         findPrimitiveSchema(
           property.schema,
           ontology.getValueTypesById(),
@@ -405,7 +411,14 @@ export function validateProjectionsAtStartup(
         )
       ) {
         throw new ProjectionValidationError(
-          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which projections cannot map yet. Set it from an Action or a runtime edit instead.`
+          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which a dataset column cannot hold. Map a ref.user() property from a column of member emails with userRef.fromEmail(column), or set it from an Action or a runtime edit.`
+        )
+      }
+    }
+    for (const propId of Object.keys(projection.users ?? {})) {
+      if (!(propId in projection.properties)) {
+        throw new ProjectionValidationError(
+          `${prefix}: user property "${propId}" must be in property mapping`
         )
       }
     }
@@ -586,6 +599,39 @@ export function validateProjectionsAtStartup(
     objectProjections: validatedObjectProjections,
     linkProjections: validatedLinkProjections,
     telemetryProjections: validatedTelemetryProjections,
+  }
+}
+
+/** A `userRef.fromEmail(column)` mapping: an optional `ref.user()` property from a string column. */
+function validateUserMapping(
+  prefix: string,
+  objectTypeId: string,
+  property: Property,
+  userKey: string,
+  dataset: DatasetDefinition,
+  columnName: string
+): void {
+  const subject = `property "${objectTypeId}.${property.id}"`
+  if (userKey !== "email") {
+    throw new ProjectionValidationError(
+      `[Sixb] ${prefix}: ${subject} matches members by unknown key "${userKey}". Use userRef.fromEmail(column).`
+    )
+  }
+  if (property.schema !== "userRef") {
+    throw new ProjectionValidationError(
+      `[Sixb] ${prefix}: userRef.fromEmail() maps ${subject}, which is not a single ref.user() property.`
+    )
+  }
+  if (property.required === true) {
+    throw new ProjectionValidationError(
+      `[Sixb] ${prefix}: userRef.fromEmail() cannot map required ${subject}: a row whose email no member has would leave it empty.`
+    )
+  }
+  const column = dataset.schema.columns.find((candidate) => candidate.name === columnName)
+  if (column?.type !== "string") {
+    throw new ProjectionValidationError(
+      `[Sixb] ${prefix}: userRef.fromEmail() maps ${subject} from column "${columnName}", which must be a string column.`
+    )
   }
 }
 

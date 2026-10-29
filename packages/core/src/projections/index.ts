@@ -29,6 +29,7 @@ export type {
   ProjectionKind,
   ProjectionTarget,
   ProjectionTargetByKind,
+  ProjectionUserKey,
   SourceEditConflictResolution,
   TelemetryProjectionDefinition,
   TelemetryProjectionPropertyMapping,
