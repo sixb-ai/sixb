@@ -2590,6 +2590,7 @@ describe("SQLite storage migrations", () => {
         )
       `)
       const before = db.query("SELECT * FROM ai_model_call_usage").get()
+      if (!before || typeof before !== "object") throw new Error("expected the seeded usage row")
 
       const applied = costMigration.up(db)
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
@@ -2613,9 +2614,10 @@ describe("SQLite storage migrations", () => {
       for (const step of sqliteStorageMigrations.steps.slice(costIndex + 1)) {
         step.up(db)
       }
-      // Later agent migrations must preserve the native accounting rows and constraints.
+      // Later agent migrations must preserve the native accounting rows and constraints. They add
+      // nullable usage columns, so the original row is a subset of the migrated one.
       expect(db.query("SELECT * FROM ai_model_call_valuations").get()).toEqual(oldCost)
-      expect(db.query("SELECT * FROM ai_model_call_usage").get()).toEqual(before)
+      expect(db.query("SELECT * FROM ai_model_call_usage").get()).toMatchObject(before)
       expect(() => db.run("UPDATE ai_model_call_valuations SET status = 'reported'")).toThrow()
       expect(() => db.run("UPDATE ai_model_call_valuations SET amount_nanos = NULL")).toThrow()
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
