@@ -59,14 +59,16 @@ import { userRef } from "@sixb/core"
 
 const { users } = await sixb.users.list({ search: "ava" })
 const assignee = await sixb.users.get(userRef("usr_1"))
+const ava = await sixb.users.get({ email: "ava@acme.com" })
 ```
 
 | Method | Returns |
 | --- | --- |
 | `list({ status, search, limit, offset })` | `{ users, hasMore, total }`, oldest member first. `status` is `"active"` (the default), `"suspended"`, or `"all"`. `search` matches part of a name or email, ignoring case, and has at most 200 characters. `limit` is 1 to 200, 50 by default. |
 | `get(userRef(id))` | `{ id, email, displayName?, avatarUrl?, status }`, or `null` when no member has this id. |
+| `get({ email })` | The member with exactly this email, ignoring case, suspended or not, or `null`. Use `list({ search })` to match part of an address. |
 
-Over HTTP, `GET /api/users?search=ava&status=all` takes the same options as query parameters, and `GET /api/users/:userId` returns one member or `404`. Both accept [access tokens](#service-accounts-and-tokens). In React, use [`useUsers`](../client/overview.md#list-members). From a terminal or the agent's sandbox, use `sixb users list`, `sixb users search <text>`, and `sixb users get <user-id>`.
+Over HTTP, `GET /api/users?search=ava&status=all` takes the same options as query parameters, and `GET /api/users/:userId` returns one member or `404`. `GET /api/users?email=ava@acme.com` looks a member up by email and returns a page of at most one; it takes no other option. All of them accept [access tokens](#service-accounts-and-tokens). In React, use [`useUsers`](../client/overview.md#list-members). From a terminal or the agent's sandbox, use `sixb users list`, `sixb users search <text>`, and `sixb users get <user-id|email>`.
 
 An object query can include the profiles of the members a property names, with [`expand(Task.p.assignee)`](../objects/querying.md#include-the-members-a-property-names). It reads the same directory and needs the same grant.
 

@@ -267,14 +267,15 @@ for the user's approval prints \`"status": "awaiting_approval"\` and exits with 
   users: `Usage:
   sixb users list [options]
   sixb users search <text> [options]
-  sixb users get <user-id>
+  sixb users get <user-id|email>
 
 Options:
   --status active|suspended|all       Defaults to active
   --limit <1-${CLI_LIMITS.users.maximum}>                     Defaults to ${CLI_LIMITS.users.default}
   --offset <n>                        Non-negative; defaults to 0
 
-\`users search\` matches part of a display name or email, ignoring case. Each member is
+\`users search\` matches part of a display name or email, ignoring case; \`users get\` takes an
+exact email, ignoring case, and finds suspended members too. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   models: `Usage:

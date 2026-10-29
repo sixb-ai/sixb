@@ -137,6 +137,43 @@ describe("GET /api/users", () => {
   })
 })
 
+describe("GET /api/users?email=", () => {
+  test("finds the member with an exact email, suspended or not, as a page of one", async () => {
+    const app = routes(await createHost(), member({ users: true }))
+
+    expect(await get(app, "/api/users?email=Cleo%40ACME.com")).toEqual({
+      status: 200,
+      body: {
+        users: [{ id: "usr_cleo", email: "cleo@acme.com", status: "suspended" }],
+        hasMore: false,
+        total: 1,
+      },
+    })
+    expect((await get(app, "/api/users?email=cleo%40acme")).body).toEqual({
+      users: [],
+      hasMore: false,
+      total: 0,
+    })
+  })
+
+  // Guard: the combined-options check in `routes/users.ts`; without it `status` is ignored.
+  test("takes no other option", async () => {
+    const app = routes(await createHost(), member({ users: true }))
+
+    expect(await get(app, "/api/users?email=ava%40acme.com&status=all")).toEqual({
+      status: 400,
+      body: { error: "[SixbServer] email finds one member and takes no other option." },
+    })
+    expect((await get(app, `/api/users?email=${"a".repeat(321)}`)).status).toBe(422)
+  })
+
+  test("needs can.view(project.users)", async () => {
+    const app = routes(await createHost(), member())
+
+    expect((await get(app, "/api/users?email=dan%40acme.com")).status).toBe(403)
+  })
+})
+
 describe("GET /api/users/:userId", () => {
   test("returns a member, suspended or not, and 404 for an unknown id", async () => {
     const app = routes(await createHost(), member({ users: true }))

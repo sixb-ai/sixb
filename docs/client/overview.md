@@ -168,7 +168,7 @@ function Team() {
 }
 ```
 
-It lists active members unless you pass `status: "suspended"` or `"all"`. `useUser(userRef)` reads one member, from a user reference or an id; its data is `null` when no member has that id. Both require `can.view(project.users)`: without it, `useUsers` fails and `useUser` returns `null`.
+It lists active members unless you pass `status: "suspended"` or `"all"`. `useUser(userRef)` reads one member, from a user reference, an id, or `{ email }`, matched exactly but ignoring case; its data is `null` when no member has it. Both require `can.view(project.users)`: without it, `useUsers` fails and `useUser` returns `null`.
 
 ## Read run logs
 

@@ -33,11 +33,18 @@ export function usersQueryOptions(options: UseUsersOptions = {}) {
   })
 }
 
+/** A member by user reference, id, or email: the email matches exactly, ignoring case. */
+export type UserLookupInput = UserRef | string | { readonly email: string }
+
 /**
  * Query options for one member, for prefetching or `useQuery`. The data is `null` when no member
- * has this id or the reader cannot read the directory.
+ * has this id or email, or the reader cannot read the directory.
  */
-export function userQueryOptions(user: UserRef | string, options: UseUserOptions = {}) {
+export function userQueryOptions(user: UserLookupInput, options: UseUserOptions = {}) {
+  if (typeof user === "object" && "email" in user) {
+    return userByEmailQueryOptions(user.email, options)
+  }
+
   const { client, ...extras } = options
   const path = { userId: typeof user === "string" ? user : user.id }
 
@@ -63,6 +70,30 @@ export function userQueryOptions(user: UserRef | string, options: UseUserOptions
   })
 }
 
+function userByEmailQueryOptions(email: string, options: UseUserOptions) {
+  const { client, ...extras } = options
+  // The server ignores case, so the cache does too.
+  const query = { email: email.trim().toLowerCase() }
+
+  return queryOptions<GetUserResponse | null, Error>({
+    ...extras,
+    queryKey: [{ _id: "user", query }] as const,
+    queryFn: async ({ signal }) => {
+      const { data, error, response } = await listUsers({
+        client,
+        query,
+        signal,
+        responseStyle: "fields",
+        throwOnError: false,
+      })
+      if (response?.status === 403) return null
+      if (error !== undefined) throw error
+
+      return data.users[0] ?? null
+    },
+  })
+}
+
 /**
  * One page of the project's member directory, active members by default. Pass `status: "all"`
  * to include suspended members. Reading it requires `can.view(project.users)`.
@@ -74,11 +105,11 @@ export function useUsers(options: UseUsersOptions = {}): UseQueryResult<ListUser
 }
 
 /**
- * One member of the directory, from a user reference or an id: `null` when no member has it, or
- * without `can.view(project.users)`.
+ * One member of the directory, from a user reference, an id, or `{ email }`: `null` when no member
+ * has it, or without `can.view(project.users)`.
  */
 export function useUser(
-  user: UserRef | string,
+  user: UserLookupInput,
   options: UseUserOptions = {}
 ): UseQueryResult<GetUserResponse | null, Error> {
   const providerClient = useSixbProviderClient()

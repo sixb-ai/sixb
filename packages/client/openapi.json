@@ -61463,6 +61463,16 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 320
+            }
           }
         ],
         "responses": {

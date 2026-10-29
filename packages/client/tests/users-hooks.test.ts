@@ -81,6 +81,22 @@ describe("userQueryOptions", () => {
     await expect(answer(503)).rejects.toBeDefined()
   })
 
+  test("reads one member by exact email, as the directory's page of at most one", async () => {
+    const { client, requests } = createUsersTestClient()
+    const empty = createUsersTestClient(() =>
+      Response.json({ users: [], hasMore: false, total: 0 })
+    )
+
+    const byEmail = userQueryOptions({ email: " Ava@Acme.com " }, { client })
+    const unknown = userQueryOptions({ email: "dan@acme.com" }, { client: empty.client })
+
+    expect(await (byEmail.queryFn as unknown as QueryFn<unknown>)({})).toEqual(ava)
+    expect(await (unknown.queryFn as unknown as QueryFn<unknown>)({})).toBeNull()
+    expect(requests).toEqual(["/api/users?email=ava%40acme.com"])
+    // One cache entry per member, however the email is written.
+    expect(byEmail.queryKey).toEqual(userQueryOptions({ email: "ava@acme.com" }).queryKey)
+  })
+
   // Removal proof: key it with `getUserQueryKey`; `getUserOptions` would then read a cached
   // `null` as a member.
   test("keeps its cache apart from the generated getUserOptions", () => {

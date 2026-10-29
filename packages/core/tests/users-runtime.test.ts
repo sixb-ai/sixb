@@ -92,13 +92,33 @@ describe("sixb.users", () => {
     expect(await sixb.users.get(userRef("usr_missing"))).toBeNull()
   })
 
+  test("gets a member by exact email, ignoring case", async () => {
+    const sixb = createTestSixb(await createHost())
+
+    expect(await sixb.users.get({ email: " Cleo@ACME.com " })).toEqual({
+      id: "usr_cleo",
+      email: "cleo@acme.com",
+      status: "suspended",
+    })
+    // Exact, unlike `list({ search })`: part of an address finds no one.
+    expect(await sixb.users.get({ email: "cleo@acme" })).toBeNull()
+    expect(await sixb.users.get({ email: "dan@acme.com" })).toBeNull()
+  })
+
   test("rejects input it cannot read", async () => {
     const sixb = createTestSixb(await createHost())
     const get = sixb.users.get as (user: unknown) => Promise<unknown>
 
-    await expect(get("usr_ava")).rejects.toThrow(
-      "[Sixb] users.get expects a user reference, such as userRef(id)."
-    )
+    for (const user of ["usr_ava", { email: "ava@acme.com", id: "usr_ava" }, { email: 1 }]) {
+      await expect(get(user)).rejects.toThrow(
+        '[Sixb] users.get expects a user reference, such as userRef(id), or { email: "ava@acme.com" }.'
+      )
+    }
+    for (const email of ["  ", `${"a".repeat(312)}@acme.com`]) {
+      await expect(get({ email })).rejects.toThrow(
+        "[Sixb] users.get email must be nonblank and at most 320 characters."
+      )
+    }
     for (const limit of [0, 201, 1.5]) {
       await expect(sixb.users.list({ limit })).rejects.toThrow(
         "[Sixb] users.list limit must be an integer from 1 to 200."
@@ -127,6 +147,9 @@ describe("sixb.users", () => {
     )
     // Denied before the lookup, so an unknown id reveals nothing either.
     await expect(without.users.get(userRef("usr_missing"))).rejects.toBeInstanceOf(
+      AuthorizationError
+    )
+    await expect(without.users.get({ email: "dan@acme.com" })).rejects.toBeInstanceOf(
       AuthorizationError
     )
 
