@@ -21,7 +21,7 @@ Connect your data, define how it relates and changes, and build apps and AI that
 
 ## Quickstart
 
-With [Bun 1.4.2 or later](https://bun.sh/docs/installation):
+With [Bun 1.4.4 or later](https://bun.sh/docs/installation):
 
 ```bash
 bun create sixb my-app
