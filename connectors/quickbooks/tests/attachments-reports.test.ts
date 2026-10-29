@@ -359,7 +359,7 @@ test("aging reports validate inputs and reject malformed response structures", a
 })
 
 // Removal proof: widen the download return types to Uint8Array (ArrayBufferLike)
-// and run bun run build:types && bun run typecheck:tests. BlobPart rejects that
+// and run bun run typecheck:tests. BlobPart rejects that
 // type because it could contain a SharedArrayBuffer (TypeScript 5.7+).
 test("download results can be passed directly to Blob without a copy or cast", async () => {
   const qb = await client()

@@ -35,43 +35,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Incremental tsc -b state: both the buildinfo AND the emitted .d.ts in
-      # dist must be cached, otherwise tsc -b treats outputs as missing and
-      # rebuilds every project from cold. `sandboxes` and `loggers` are in the
-      # tsconfig.build.json reference graph like the rest, so they belong here too.
-      #
-      # The consumer projects below only keep a buildinfo — they emit nothing. Their
-      # inputs are the emitted .d.ts rather than package source, so the buildinfo
-      # survives any source edit that leaves the public type surface unchanged.
-      - name: Cache tsc build graph
-        uses: actions/cache@v4
-        with:
-          path: |
-            .tsbuild
-            packages/*/.tsbuild
-            connectors/*/.tsbuild
-            deploy/*/.tsbuild
-            storage/*/.tsbuild
-            broker/*/.tsbuild
-            queues/*/.tsbuild
-            auth/*/.tsbuild
-            sandboxes/*/.tsbuild
-            loggers/*/.tsbuild
-            packages/*/dist
-            connectors/*/dist
-            deploy/*/dist
-            storage/*/dist
-            broker/*/dist
-            queues/*/dist
-            auth/*/dist
-            sandboxes/*/dist
-            loggers/*/dist
-            apps/*/.tsbuild
-            examples/*/.tsbuild
-          key: tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
-          restore-keys: |
-            tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
-
       - name: Typecheck
         run: bun run typecheck
 
@@ -104,6 +67,10 @@ jobs:
       # only ever paid to download and re-upload state this job deletes before using it.
       - name: Build
         run: bun run build
+
+      # Checked against the declarations the build just emitted, with the tsc an app runs.
+      - name: Typecheck consumers
+        run: bun run typecheck:consumers
 
       - name: Publish package smoke
         run: bun run test:publish

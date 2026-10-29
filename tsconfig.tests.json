@@ -1,18 +1,15 @@
 {
-  // Type-checks every package's test files against the .d.ts emitted by the
-  // build graph. Package `src` is NOT checked here — that happens in
-  // `tsconfig.build.json` (`bun run build:types`), which runs first. The globs
-  // below cover all build-graph workspace roots, so new packages are picked up
-  // automatically. Examples/docs keep their own `typegen && tsc`.
-  "extends": "./tsconfig.base.json",
+  // Type-checks every package's test files with `bun check` (`bun run typecheck:tests`). The root
+  // `paths` map resolves `@sixb/*` to source, as in the editor, so nothing has to be built first.
+  // The globs below cover all build-graph workspace roots, so new packages are picked up
+  // automatically.
+  "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["bun"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "useDefineForClassFields": true,
-    "noEmit": true,
-    "incremental": true,
-    "tsBuildInfoFile": "./.tsbuild/tsconfig.tests.tsbuildinfo"
+    "noEmit": true
   },
   "include": [
     // Release tooling and its tests are not a package, so they check against source directly.
@@ -31,7 +28,7 @@
     "loggers/*/tests/**/*.ts",
     "auth/*/tests/**/*.ts"
   ],
-  // Each type program owns an ambient ontology registry, so `typecheck:tests` checks it as its own
-  // program after this one instead of leaking that registry into every test file here.
+  // Each type program owns an ambient ontology registry, so `typecheck:consumers` checks it as its
+  // own program instead of leaking that registry into every test file here.
   "exclude": ["*/*/tests/type-programs/**"]
 }

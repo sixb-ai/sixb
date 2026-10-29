@@ -13,7 +13,7 @@
     "dev": "NODE_ENV=development bun run prepare:docs && next dev --port 3004",
     "build": "NODE_ENV=production bun run prepare:docs && next build",
     "start": "next start --port 3004",
-    "typecheck": "bun run generate:docs && next typegen && tsc --noEmit"
+    "typecheck": "bun run generate:docs && next typegen && bun check --no-script"
   },
   "dependencies": {
     "@sixb/ui": "workspace:*",

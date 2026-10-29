@@ -58,7 +58,7 @@ bun test packages/server/tests/
 CI runs these as independent parallel jobs (each does `bun install --frozen-lockfile` first):
 
 - `typecheck`: `bun run typecheck`
-- `build`: `bun run build`, then `bun run test:publish`
+- `build`: `bun run build`, then `bun run typecheck:consumers`, then `bun run test:publish`
 - `client`: `bun run generate:client`, then `git diff --exit-code`
 - `test`: `bun run test:ci`
 - `lint`: `bun run check`
@@ -76,23 +76,27 @@ signaling, and several suite fixtures require local process or network access. I
 elevated sandbox permissions before the first full-suite run instead of rerunning after an expected
 restricted failure.
 
-`typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
-tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks
-test files against the emitted `.d.ts`, and the example/docs apps keep their own
-`typegen && tsc` typecheck (`typecheck:examples`). The old per-package `tsc --noEmit` re-checked
-shared source (notably `@sixb/core`) once per dependent, which made the step the CI bottleneck.
+`typecheck` runs `bun check`, Bun's built-in TypeScript 7 checker, over source: the build graph
+(`-b -p tsconfig.build.json`, every package's `src` once), the test files (`tsconfig.tests.json`),
+the template and the docs app. The root `paths` map resolves `@sixb/*` to source, so nothing has to
+be built first. Every call passes `--no-script`: the root `check` script is Biome, and `bun check`
+runs a package's `check` script instead of the checker when one exists. It emits nothing, so
+declaration-emit errors surface in `build:types` (`tsc -b`, TypeScript 5.9) in the build job.
+
+`typecheck:consumers` checks the examples and the client's ontology-registry type program the way an
+app is checked: with `tsc`, the version apps install, against the emitted `.d.ts`. It needs a prior
+`bun run build` (or `build:types`), which is why CI runs it in the build job.
 
 The root config maps `@sixb/*` to `packages/*/src`, which is right for workspace development and
 wrong for consumer typechecks: it pulls the whole framework into each example's program. Examples
 keep that config as their default because Bun reads it while bundling dev apps. Their typecheck
 scripts alone pass `--paths null`, which clears the inherited mapping and lets `tsc` resolve each
-package's `exports.types`. This is why the steps are chained with `&&`: a consumer type-checked
-without a prior `build:types` fails on unresolved `@sixb/*` imports.
+package's `exports.types`.
 
-That ordering is also the limit of where the override applies. `apps/docs` stays entirely on the
-root config because Vercel deploys it with `prepare:docs && next build` and never emits declarations
-— pointing it at `dist` broke the deployment once already. Anything built or run outside this
-repo's `typecheck` chain reads source.
+That override applies only there. `apps/docs` stays entirely on the root config because Vercel
+deploys it with `prepare:docs && next build` and never emits declarations — pointing it at `dist`
+broke the deployment once already. Anything built or run outside `typecheck:consumers` reads
+source.
 
 ## Architecture
 
