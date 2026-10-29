@@ -341,6 +341,38 @@ describe("Sixb picks the model of each turn", () => {
     expect(decision.evaluate).toHaveBeenCalledTimes(1)
   })
 
+  test("asks nothing for files sent alone, and keeps a warm thread on its model", async () => {
+    // Proven by removal: route only messages with text in routedTurn; the screenshot runs on the
+    // default model and drops the warm heavy thread's prompt cache.
+    const { host, decision, sixb } = await routedSetup()
+    const screenshot = await host.blobStorage.put({
+      body: new Uint8Array([137, 80, 78, 71]),
+      fileName: "image.png",
+      mediaType: "image/png",
+    })
+    setSystemTime(new Date("2026-10-24T10:00:00.000Z"))
+    decision.answer(HEAVY)
+    const first = await sixb.agent.runs.request({ text: "Why did sales drop?" })
+    await finish(host, first.run)
+
+    setSystemTime(new Date("2026-10-24T10:01:00.000Z"))
+    const warm = await sixb.agent.runs.request({
+      threadId: first.run.threadId,
+      attachments: [screenshot],
+    })
+    expect(warm.run.spec).toEqual({ approvalMode: "auto", model: ref("opus"), tier: "heavy" })
+    await finish(host, warm.run)
+
+    // Cold, it aims for standard. Proven by removal: ask the decision model with no words.
+    setSystemTime(new Date("2026-10-24T11:00:00.000Z"))
+    const cold = await sixb.agent.runs.request({
+      threadId: first.run.threadId,
+      attachments: [screenshot],
+    })
+    expect(cold.run.spec).toEqual({ approvalMode: "auto", model: ref("sonnet"), tier: "standard" })
+    expect(decision.evaluate).toHaveBeenCalledTimes(1)
+  })
+
   test("asks nothing for a message it refuses", async () => {
     // Proven by removal: route before the thread's active-run check.
     const { decision, sixb } = await routedSetup()

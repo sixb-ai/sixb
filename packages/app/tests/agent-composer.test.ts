@@ -28,9 +28,11 @@ const model = {
 
 describe("Composer", () => {
   test("requests initial focus only while the input is available", () => {
-    // One availability policy decides initial, return, and completion focus.
+    // One availability policy decides initial and return focus. An answer in flight is not in it:
+    // the reader writes the next message meanwhile.
     expect(renderComposer()).toContain('autofocus=""')
-    for (const unavailable of [{ disabled: true }, { pending: true }, { running: true }]) {
+    expect(renderComposer({ running: true })).toContain('autofocus=""')
+    for (const unavailable of [{ disabled: true }, { pending: true }]) {
       expect(renderComposer(unavailable)).not.toContain('autofocus=""')
     }
   })

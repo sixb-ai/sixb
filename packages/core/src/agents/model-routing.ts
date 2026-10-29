@@ -50,7 +50,10 @@ const TIER_QUESTIONS = {
 
 export interface TurnModelChoice {
   readonly model: LanguageModelEntry
-  /** The decision model's answer; absent when it failed and the turn aimed for `standard`. */
+  /**
+   * The decision model's answer; absent when it failed, or had no words to judge, and the turn
+   * aimed for `standard`.
+   */
   readonly tierProbabilities?: LanguageModelTierProbabilities
 }
 
@@ -84,7 +87,9 @@ export function createTurnModelRouter(
 
   return {
     async choose(text, previous) {
-      const tierProbabilities = await askTier(decision, text)
+      // Files sent alone leave nothing to judge: the turn aims for standard, and the cache rule
+      // keeps a warm thread on its model.
+      const tierProbabilities = text.trim() ? await askTier(decision, text) : undefined
       const tier = tierProbabilities ? tierFor(tierProbabilities) : "standard"
 
       return {

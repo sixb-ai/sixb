@@ -297,7 +297,13 @@ across conversations.
 [Sixb apps](../apps/overview.md) include a chat interface. The home page starts a thread, each
 thread has its own page at `/threads/<id>`, and `/threads` lists every thread the person can open,
 their own and those shared with them. The clock button in a thread's header goes there; pass
-`onOpenThreads` to `AgentPanel` or `AgentSurface` to show it in your own chat. To talk with the agent from one of your pages, embed `AgentPanel` and
+`onOpenThreads` to `AgentPanel` or `AgentSurface` to show it in your own chat.
+
+Files join a message from the `+` button, a drop, or a paste, such as a screenshot. Pasted text
+stays text, even when the app it comes from copies a picture of it too. A message can be files
+alone. While the agent answers, the person writes the next message; it sends once the answer ends.
+
+To talk with the agent from one of your pages, embed `AgentPanel` and
 give it context:
 
 File: `app/_components/invoice-assistant.tsx`
@@ -405,7 +411,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
-| `Composer` | Text, attachments, `@` context, the model picker (an Auto chip with tiers), the approval mode chip and the [dictation](#dictation) microphone |
+| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, the model picker (an Auto chip with tiers), the approval mode chip and the [dictation](#dictation) microphone |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |

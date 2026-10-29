@@ -62,7 +62,10 @@ import { assertConversationThread } from "./thread-access"
 import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
 
 export interface RequestAgentRunInput {
-  /** The user's message that triggers the turn. Omitted only to {@link continue}. */
+  /**
+   * The user's message that triggers the turn. Omitted to {@link continue}, or when
+   * {@link attachments} are the whole message.
+   */
   readonly text?: string
   /**
    * Continue an answer the turn limit cut short, in an existing thread. Sixb writes the
@@ -147,7 +150,7 @@ export async function requestAgentRun(
 
   // Any other turn's spec is checked now, before anything is written. A routed turn holds its
   // router until its model is picked, last.
-  const routed = routedTurn(models.router, selection, input.text)
+  const routed = routedTurn(models.router, selection, input)
   const requested =
     routed ?? (await resolveConversationRunSpec({ models: models.language, selection, settings }))
   assertAttachments(input.attachments)
@@ -572,17 +575,18 @@ interface RoutedTurn {
 
 /**
  * Naming a model or a reasoning opts a turn out of routing: it runs that model, or the default, as
- * chosen. A continuation has no text to judge, and keeps the cut-short turn's model.
+ * chosen. A continuation keeps the cut-short turn's model. A message of files alone is routed with
+ * no words, which the router does not ask about.
  */
 function routedTurn(
   router: TurnModelRouter | undefined,
   selection: Pick<RequestAgentRunInput, "model" | "reasoning">,
-  text: string | undefined
+  input: Pick<RequestAgentRunInput, "text" | "continue">
 ): RoutedTurn | undefined {
-  if (!router || text === undefined) return undefined
+  if (!router || input.continue === true) return undefined
   if (selection.model !== undefined || selection.reasoning !== undefined) return undefined
 
-  return { router, text }
+  return { router, text: input.text ?? "" }
 }
 
 /** The spec of a turn Sixb picks the model for, compared to the thread's previous turn. */
@@ -623,7 +627,10 @@ async function latestConversationRun(
   return runs[0]?.kind === "conversation" ? runs[0] : undefined
 }
 
-/** The words of the user, or the continuation Sixb words for them. */
+/**
+ * The words of the user, or the continuation Sixb words for them. Files alone are a message too:
+ * their parts follow, and the model reads each one's description.
+ */
 function triggerParts(input: RequestAgentRunInput): readonly AgentMessagePart[] {
   if (input.continue === true) {
     if (input.text !== undefined || input.attachments?.length || input.context?.length) {
@@ -634,13 +641,15 @@ function triggerParts(input: RequestAgentRunInput): readonly AgentMessagePart[] 
     }
     return [{ type: "continuation" }]
   }
-  if (typeof input.text !== "string" || input.text.trim().length === 0) {
-    throw new AgentRequestError(
-      "invalid_message",
-      "[Sixb] An Agent message needs text, or `continue: true` to continue the previous answer."
-    )
+  if (typeof input.text === "string" && input.text.trim().length > 0) {
+    return [{ type: "text", text: input.text }]
   }
-  return [{ type: "text", text: input.text }]
+  if (input.attachments?.length) return []
+
+  throw new AgentRequestError(
+    "invalid_message",
+    "[Sixb] An Agent message needs text or attachments, or `continue: true` to continue the previous answer."
+  )
 }
 
 function assertAttachments(attachments: readonly FileRef[] | undefined): void {
