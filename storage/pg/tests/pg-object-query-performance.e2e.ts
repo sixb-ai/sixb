@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { compilePgObjectCountQuery, compilePgObjectQuery } from "../src/objects/query-compiler"
-import { findPgSortIndexBound } from "../src/objects/query-indexes"
+import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
@@ -61,7 +61,7 @@ afterAll(async () => {
 async function explain(query: ObjectQuery) {
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, "bench", query),
+    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
@@ -128,7 +128,7 @@ test("a high-fanout traversal pages through indexed endpoints and preserves tota
   const query: ObjectQuery = { kind: "page", pageSize: 40, input: { ...recent, input: traversed } }
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, "bench", query),
+    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
   })
   expect(compiled.traversalProbe?.limit).toBe(1000)
   const probe = compiled.traversalProbe!
@@ -152,7 +152,7 @@ test("a high-fanout traversal pages through indexed endpoints and preserves tota
   const correlated = compilePgObjectQuery("bench", query, {
     includeTotal: false,
     correlatedTraversal: true,
-    sortIndexBound: await findPgSortIndexBound(sql, "bench", query),
+    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${correlated.sql}`,

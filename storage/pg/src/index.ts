@@ -37,7 +37,7 @@ import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
 import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
-import { PgObjectStorage } from "./objects"
+import { PgObjectStorage, PgSortIndexCatalog } from "./objects"
 import { preparePgObjectQueries } from "./objects/prepare-queries"
 import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./objects/query-indexes"
 
@@ -193,6 +193,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   private readonly schemaName: string
   private readonly shutdownTimeoutSeconds: number
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
+  private readonly sortIndexes = new PgSortIndexCatalog()
 
   constructor(options: PostgresStorageOptions) {
     if (
@@ -240,6 +241,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
 
     this.migrators = createPostgresStorageMigrators(this.sql, this.schemaName)
     const stores = createPostgresStores(this.sql, {
+      sortIndexes: this.sortIndexes,
       maxConcurrentAggregates: options.maxConcurrentAggregates,
       runOntologyOperation: (run) => runPgTransaction(this.sql, run),
       transactionContext: null,
@@ -335,7 +337,11 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     plan: ObjectQueryPreparationPlan
   ): Promise<ObjectQueryPreparationResult> {
     this.assertRootOperationAvailable()
-    return preparePgObjectQueries(this.sql, this.schemaName, plan)
+    try {
+      return await preparePgObjectQueries(this.sql, this.schemaName, plan)
+    } finally {
+      this.sortIndexes.invalidate()
+    }
   }
 
   /** Build workload-specific indexes concurrently, after migrations, outside transactions. */
@@ -343,7 +349,12 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     indexes: readonly PgObjectQueryIndex[]
   ): Promise<readonly string[]> {
     this.assertRootOperationAvailable()
-    return ensurePgObjectQueryIndexes(this.sql, this.schemaName, indexes)
+    try {
+      return await ensurePgObjectQueryIndexes(this.sql, this.schemaName, indexes)
+    } finally {
+      // Even a build that failed partway may have created some of them.
+      this.sortIndexes.invalidate()
+    }
   }
 
   /** Offline maintenance: STORED columns rewrite the objects table before concurrent index builds. */
@@ -385,6 +396,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   ): Storage & { readonly ontology: PgOntologyStorage; readonly aiLimits: PgAiLimitStorage } {
     return {
       ...createPostgresStores(client, {
+        sortIndexes: this.sortIndexes,
         runOntologyOperation: async (run) => run(client),
         transactionContext,
       }),
@@ -403,6 +415,7 @@ function createPostgresStores(
   options: {
     readonly runOntologyOperation: <T>(run: (sql: SQLClient) => Promise<T>) => Promise<T>
     readonly transactionContext: PgOntologyTransactionContext | null
+    readonly sortIndexes: PgSortIndexCatalog
     readonly maxConcurrentAggregates?: number
   }
 ): PostgresStoreSet {
@@ -411,7 +424,7 @@ function createPostgresStores(
   const shareSessions = new PgShareSessionStorage(sql)
   const executions = new PgExecutionStorage(sql, auth, shareSessions)
   return {
-    objects: new PgObjectStorage(sql, options.maxConcurrentAggregates),
+    objects: new PgObjectStorage(sql, options.sortIndexes, options.maxConcurrentAggregates),
     ontology: new PgOntologyStorage({
       sql,
       runRootOperation: options.runOntologyOperation,

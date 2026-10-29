@@ -9,7 +9,7 @@ import {
 import { createMaterializerTestFixture } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { compilePgObjectQuery } from "../src/objects/query-compiler"
-import { findPgSortIndexBound } from "../src/objects/query-indexes"
+import { findPgSortIndexBound, PgSortIndexCatalog } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
@@ -146,5 +146,7 @@ test("implicit ascending sorts discover their prepared bounded index", async () 
       fields: [{ kind: "property", propertyId: "title", scalarKind: "string" }],
     },
   }
-  expect(await findPgSortIndexBound(sql, "publication", query)).toContain("octet_length")
+  expect(await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "publication", query)).toContain(
+    "octet_length"
+  )
 })
