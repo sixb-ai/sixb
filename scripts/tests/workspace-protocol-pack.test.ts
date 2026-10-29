@@ -38,17 +38,14 @@ test("Bun packs exact and compatible workspace protocols to registry ranges", as
     expect(compatible.dependencies).toEqual({ "@sixb-fixture/core": "^0.1.7" })
     expect(exact.peerDependencies).toEqual({ "@sixb-fixture/core": "0.1.7" })
 
-    // Bun 1.3.14 reproduces this with a version-only bump followed by a frozen install:
-    // the manifest advances but packed workspace ranges still use the old lockfile version.
-    // Remove the version comparison in assertWorkspaceLockfileVersions and the rejection below
-    // fails, proving the release gate catches the stale artifact before publication.
+    // A frozen install accepts a version-only bump without refreshing bun.lock. Bun 1.3.14–1.4.2
+    // then packed the old lockfile version; 1.4.4 packs the manifest's. Remove the version
+    // comparison in assertWorkspaceLockfileVersions and the rejection below fails, proving the
+    // release gate catches the stale lockfile whichever Bun packs the release.
     const core = { name: "@sixb-fixture/core", version: "0.1.8" }
     await writePackage(root, "core", core)
     const packages = [{ dir: "packages/core", packageJson: core }]
     await run([process.execPath, "install", "--frozen-lockfile"], root)
-    expect((await packManifest(root, "exact")).peerDependencies).toEqual({
-      "@sixb-fixture/core": "0.1.7",
-    })
     await expect(assertWorkspaceLockfileVersions(root, packages)).rejects.toThrow(
       "manifest 0.1.8, lockfile 0.1.7"
     )

@@ -222,9 +222,9 @@ exact consumers to bump; compatible caret consumers release only when their publ
 longer matches. `bun run test:publish` and the release planner enforce these rules.
 
 After bumping package versions, run `bun install --lockfile-only` and commit `bun.lock` alongside the
-manifests. Bun 1.3.14 resolves packed workspace dependency versions from the lockfile; a frozen install
-accepts version-only manifest changes without refreshing those entries. The publish gate and planner
-reject stale workspace versions before release.
+manifests. A frozen install accepts version-only manifest changes without refreshing those entries,
+and Bun 1.4.2 and earlier pack workspace dependency versions from the lockfile. The publish gate and
+planner reject stale workspace versions before release.
 
 The `create-sixb` template keeps one explicit registry range per Sixb dependency. Do not derive
 those ranges from the `create-sixb` version: independently-versioned packages may cross a
