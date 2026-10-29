@@ -77,9 +77,9 @@ export interface PostgresStorageOptions {
    * Full connection string (e.g. DATABASE_URL). Takes precedence over individual fields.
    *
    * Add `sslnegotiation=direct` (with `sslmode=require`, `verify-ca` or `verify-full`) to open TLS
-   * directly, as libpq does against PostgreSQL 17 or later. It saves a round trip per connection
-   * and avoids a Bun 1.4.0–1.4.2 bug that keeps in memory every byte read over a TLS connection
-   * negotiated the classic way.
+   * directly, as libpq does against PostgreSQL 17 or later. It saves a round trip per connection.
+   * On Bun 1.4.0–1.4.2 it also avoids a bug that keeps in memory every byte read over a TLS
+   * connection negotiated the classic way.
    */
   connectionString?: string
 

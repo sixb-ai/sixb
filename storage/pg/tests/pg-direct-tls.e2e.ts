@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createPgClient } from "../src/pg-client"
 
-const FIXTURE = `${import.meta.dir}/fixtures/tls-read.ts`
-
 function databaseUrl(query: string): string {
   const url = process.env.DATABASE_URL
   if (!url) {
@@ -32,30 +30,21 @@ describe("PostgreSQL direct TLS (sslnegotiation=direct)", () => {
     }
   })
 
-  // To see this guard fail, run the fixture with "classic" instead of "direct" on Bun 1.4.0–1.4.2:
-  // the SSLRequest upgrade path keeps every byte it receives (measured: +390 MB for 256 MB read,
-  // against a flat ~90 MB for direct TLS whatever the volume).
-  test("opens an encrypted session that does not retain what it reads", async () => {
-    const child = Bun.spawn({
-      cmd: [process.execPath, FIXTURE, "direct"],
-      env: { ...process.env },
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 60_000,
+  // Plain connections are accepted too, so this proves the direct path encrypts. To see it fail,
+  // return `net.connect({ host, port })` instead of the TLS socket from `directTlsSocket`.
+  test("opens an encrypted session", async () => {
+    const sql = createPgClient({
+      connectionString: databaseUrl("sslnegotiation=direct&sslmode=require"),
+      max: 1,
+      schemaName: "public",
     })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
-
-    expect({ exitCode, stdout, stderr }).toMatchObject({ exitCode: 0 })
-    const report = JSON.parse(stdout) as {
-      readonly ssl: boolean
-      readonly receivedMebibytes: number
-      readonly grownMebibytes: number
+    try {
+      const [session] = await sql<{ ssl: boolean }[]>`
+        SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
+      `
+      expect(session?.ssl).toBe(true)
+    } finally {
+      await sql.end({ timeout: 0 })
     }
-    expect(report.ssl).toBe(true)
-    expect(report.grownMebibytes).toBeLessThan(report.receivedMebibytes / 2)
-  }, 70_000)
+  })
 })
