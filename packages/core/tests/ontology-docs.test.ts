@@ -287,3 +287,47 @@ test("renders the reader's view of each type, merged with the team's docs", () =
     { path: "crm/Payment.md", summary: "Payment" },
   ])
 })
+
+// Red proof: drop `renderUserProperties` from `renderProperties`; the note line disappears.
+test("tells the reader how to fill and match the user properties it can query", () => {
+  const confidential = defineMarking("confidential")
+  const Task = defineObjectType({
+    id: "Task",
+    name: "Task",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("assignee", ref.user(), { query: { searchable: true, filterable: true } }),
+      prop("reviewers", { type: "array", items: ref.user() }),
+      prop("approver", ref.user(), { markings: [confidential] }),
+    ],
+  })
+  const host = new SixbHost({
+    ontology: [Task, Customer],
+    markings: [confidential],
+    ...createTestRuntimeDeps(),
+  })
+
+  const rendered = renderOntologyDocs({
+    catalog: host.definitions.agent.ontologyDocs,
+    objectTypes: [Task, Customer],
+    valueTypesById: new Map(),
+    actionsFor: () => [],
+    restrictedPropertyIds: (objectTypeId) =>
+      objectTypeId === "Task" ? new Set(["approver"]) : undefined,
+  })
+  const doc = (objectTypeId: string) =>
+    rendered.files.find(
+      (file) => file.path === host.definitions.agent.ontologyDocs.docPathFor(objectTypeId)
+    )?.contents ?? ""
+
+  expect(doc("Task")).toContain(
+    [
+      "| `approver` | userRef (restricted) | — |  |",
+      "",
+      'User properties (`assignee`, `reviewers`) hold `{"type":"user","id":"<user-id>"}`. Find a member\'s id with `sixb users search <name>` or `sixb users get <email>`. In a query, `{"type":"currentUser"}` matches the requesting user.',
+      "",
+    ].join("\n")
+  )
+  expect(doc("Customer")).toStartWith("# Customer\n")
+  expect(doc("Customer")).not.toContain("User properties")
+})

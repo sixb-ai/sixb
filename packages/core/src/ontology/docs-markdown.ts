@@ -12,6 +12,7 @@ import {
   resolveQuerySchema,
 } from "./query-capabilities"
 import type { ObjectLink, ObjectType, PrimitiveSchema, Property, Schema, ValueType } from "./types"
+import { isUserRefPropertySchema } from "./user-ref"
 
 export interface RenderOntologyDocsInput {
   readonly catalog: OntologyDocsCatalog
@@ -123,6 +124,9 @@ function renderProperties(
 ): string | undefined {
   if (objectType.properties.length === 0) return undefined
   const anyRestricted = objectType.properties.some((property) => restricted.has(property.id))
+  const userPropertyIds = objectType.properties
+    .filter((property) => !restricted.has(property.id) && isUserRefPropertySchema(property.schema))
+    .map((property) => code(property.id))
   return [
     "## Properties",
     "",
@@ -145,7 +149,17 @@ function renderProperties(
         property.description ?? "",
       ])
     ),
+    ...(userPropertyIds.length === 0 ? [] : ["", renderUserProperties(userPropertyIds)]),
   ].join("\n")
+}
+
+/** How to fill and match the properties that name members: the doc never lists who they are. */
+function renderUserProperties(propertyIds: readonly string[]): string {
+  return [
+    `User properties (${propertyIds.join(", ")}) hold \`{"type":"user","id":"<user-id>"}\`.`,
+    "Find a member's id with `sixb users search <name>` or `sixb users get <email>`.",
+    'In a query, `{"type":"currentUser"}` matches the requesting user.',
+  ].join(" ")
 }
 
 function queryLabel(property: Property, valueTypesById: ReadonlyMap<string, ValueType>): string {
