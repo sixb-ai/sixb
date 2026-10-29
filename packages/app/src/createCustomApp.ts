@@ -20,6 +20,7 @@ import {
   generateRouteManifest,
 } from "./codegen"
 import { devReloadResponse } from "./dev-reload"
+import { readAppFrameOrigins } from "./frame-origins"
 import { collectPublicEnv, renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { sectionCatalog } from "./sections/catalog"
@@ -354,6 +355,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async dev(devOptions: CustomAppDevOptions = {}) {
       const publicEnv = collectPublicEnv()
+      const frameOrigins = readAppFrameOrigins(process.env)
       const withRuntime = (html: string) =>
         injectRuntimeConfig(html, { apiBaseUrl, authEnabled, publicEnv })
       const host = devOptions.host ?? "0.0.0.0"
@@ -397,17 +399,20 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
                   authEnabled: false,
                   publicEnv,
                 }),
-              apiBaseUrl
+              apiBaseUrl,
+              frameOrigins
             ),
             "/": spaHtmlRoute(() => internalOrigin, {
               shellRoute: privateAppShellRoute,
               transformHtml: withRuntime,
               apiBaseUrl,
+              frameOrigins,
             }),
             "/*": spaHtmlRoute(() => internalOrigin, {
               shellRoute: privateAppShellRoute,
               transformHtml: withRuntime,
               apiBaseUrl,
+              frameOrigins,
             }),
           },
         }) as Parameters<typeof Bun.serve>[0]
@@ -577,6 +582,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async start(startOptions: CustomAppStartOptions = {}) {
       const publicEnv = collectPublicEnv()
+      const frameOrigins = readAppFrameOrigins(process.env)
       const host = startOptions.host ?? "0.0.0.0"
       const port = startOptions.port ?? 3000
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
@@ -629,7 +635,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             if (isAssetRequest(url.pathname)) {
               return notFoundResponse()
             }
-            return sharedHtmlResponse(req, sharedIndexHtml, runtimeApiBaseUrl)
+            return sharedHtmlResponse(req, sharedIndexHtml, runtimeApiBaseUrl, frameOrigins)
           }
 
           if (isSharedNamespace(url.pathname)) {
@@ -637,7 +643,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           }
 
           if (url.pathname === "/" || url.pathname === "") {
-            return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
+            return htmlResponse(req, indexHtml, runtimeApiBaseUrl, frameOrigins)
           }
 
           const resolvedPath = resolveStaticPath(outdir, url.pathname)
@@ -648,7 +654,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
             if (resolvedPath === indexPath) {
-              return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
+              return htmlResponse(req, indexHtml, runtimeApiBaseUrl, frameOrigins)
             }
             return staticFileResponse(req, resolvedPath, staticAssetHeaders(url.pathname))
           }
@@ -660,7 +666,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           const htmlFile = Bun.file(`${resolvedPath}.html`)
           if (await htmlFile.exists()) {
             if (`${resolvedPath}.html` === indexPath) {
-              return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
+              return htmlResponse(req, indexHtml, runtimeApiBaseUrl, frameOrigins)
             }
             return fileResponse(req, htmlFile)
           }
@@ -670,7 +676,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             return fileResponse(req, nestedIndexFile)
           }
 
-          return htmlResponse(req, indexHtml, runtimeApiBaseUrl)
+          return htmlResponse(req, indexHtml, runtimeApiBaseUrl, frameOrigins)
         },
       })
 
@@ -885,7 +891,8 @@ function reservedSixbRoutes(): BunServeRoutes {
 
 function sharedAppDevRoutes(
   html: () => string | Promise<string>,
-  apiBaseUrl: string | undefined
+  apiBaseUrl: string | undefined,
+  frameOrigins: readonly string[]
 ): BunServeRoutes {
   const reject = () => notFoundResponse()
   const guardedHandler = async (request: Request) => {
@@ -893,7 +900,7 @@ function sharedAppDevRoutes(
     if (!isSharedAppRoute(pathname) || isAssetRequest(pathname)) {
       return notFoundResponse()
     }
-    return sharedHtmlResponse(request, await html(), apiBaseUrl)
+    return sharedHtmlResponse(request, await html(), apiBaseUrl, frameOrigins)
   }
 
   return {
@@ -1061,33 +1068,51 @@ function injectRuntimeConfig(
   return `${script}\n${html}`
 }
 
-function htmlResponse(request: Request, html: string, apiBaseUrl: string | undefined): Response {
+function htmlResponse(
+  request: Request,
+  html: string,
+  apiBaseUrl: string | undefined,
+  frameOrigins: readonly string[]
+): Response {
   return new Response(request.method === "HEAD" ? null : html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "content-security-policy": appContentSecurityPolicy(request, apiBaseUrl),
+      "content-security-policy": appContentSecurityPolicy(request, apiBaseUrl, frameOrigins),
     },
   })
 }
 
 /**
- * The policy of the app's own page: it frames only what the API serves, its artifacts' frames.
- * A page in one reads its queries' rows as the reader; its frame opens no window, and the frame's
- * policy keeps what it loads to its files and a few CDNs. This keeps the frame's navigations on the
- * API's origin too, so a page's code cannot send what it reads to another site in an address.
+ * The policy of the app's own page: it frames what the API serves, its artifacts' frames, and the
+ * sites `SIXB_APP_FRAME_ORIGINS` lists. A page in an artifact frame reads its queries' rows as the
+ * reader; its frame opens no window, and the frame's policy keeps what it loads to its files and a
+ * few CDNs. This keeps the frame's navigations on those origins too, so a page's code cannot send
+ * what it reads to any other site in an address.
  *
  * It is the only directive: what a project's own pages load is theirs, but a frame they embed from
- * another site is refused too.
+ * a site the list leaves out is refused too.
  */
-function appContentSecurityPolicy(request: Request, apiBaseUrl: string | undefined): string {
-  return `frame-src ${frameSource(request, apiBaseUrl)}`
+function appContentSecurityPolicy(
+  request: Request,
+  apiBaseUrl: string | undefined,
+  frameOrigins: readonly string[]
+): string {
+  return `frame-src ${frameSources(request, apiBaseUrl, frameOrigins)}`
 }
 
-/** Where an artifact frame comes from: the API's origin, `'self'` when it is the page's own. */
-function frameSource(request: Request, apiBaseUrl: string | undefined): string {
+/**
+ * Where the page's frames may come from: the API's origin, `'self'` when it is the page's own, then
+ * the listed sites.
+ */
+function frameSources(
+  request: Request,
+  apiBaseUrl: string | undefined,
+  frameOrigins: readonly string[]
+): string {
   const { requestOrigin, apiOrigin } = resolveOrigins(request, apiBaseUrl)
-  return apiOrigin === requestOrigin ? "'self'" : apiOrigin
+  const api = apiOrigin === requestOrigin ? "'self'" : apiOrigin
+  return [api, ...frameOrigins.filter((origin) => origin !== apiOrigin)].join(" ")
 }
 
 function resolveOrigins(
@@ -1106,9 +1131,10 @@ function resolveOrigins(
 function sharedHtmlResponse(
   request: Request,
   html: string,
-  apiBaseUrl: string | undefined
+  apiBaseUrl: string | undefined,
+  frameOrigins: readonly string[]
 ): Response {
-  const secured = secureSharedHtml(html, request, { apiBaseUrl })
+  const secured = secureSharedHtml(html, request, { apiBaseUrl, frameOrigins })
   return new Response(request.method === "HEAD" ? null : secured.html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
@@ -1120,7 +1146,7 @@ function sharedHtmlResponse(
 function secureSharedHtml(
   html: string,
   request: Request,
-  options: { readonly apiBaseUrl?: string }
+  options: { readonly apiBaseUrl?: string; readonly frameOrigins: readonly string[] }
 ): { readonly html: string; readonly headers: Record<string, string> } {
   const nonce = randomBytes(18).toString("base64url")
   const { requestOrigin, apiOrigin } = resolveOrigins(request, options.apiBaseUrl)
@@ -1143,7 +1169,7 @@ function secureSharedHtml(
     `media-src ${fileSources.join(" ")}`,
     "font-src 'self' data: https:",
     `connect-src ${connectSources.join(" ")}`,
-    `frame-src ${frameSource(request, options.apiBaseUrl)}`,
+    `frame-src ${frameSources(request, options.apiBaseUrl, options.frameOrigins)}`,
     "manifest-src 'none'",
   ].join("; ")
 
@@ -1324,7 +1350,8 @@ function spaHtmlRoute(
     readonly shellRoute?: string
     readonly transformHtml?: (html: string) => string
     readonly apiBaseUrl?: string
-  } = {}
+    readonly frameOrigins: readonly string[]
+  }
 ): BunServeRoute {
   return getHeadRoute(async (request) => {
     const publicUrl = new URL(request.url)
@@ -1359,7 +1386,7 @@ function spaHtmlRoute(
     responseHeaders.delete("etag")
     responseHeaders.set(
       "content-security-policy",
-      appContentSecurityPolicy(request, options.apiBaseUrl)
+      appContentSecurityPolicy(request, options.apiBaseUrl, options.frameOrigins)
     )
     if (request.method === "HEAD") {
       return new Response(null, {

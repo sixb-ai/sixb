@@ -28,6 +28,8 @@ Origins contain only the scheme, host, and optional port, with no path. They con
 
 Serve these public origins over HTTPS. The app connects to the API; it does not serve API routes itself.
 
+If your pages show another site in an `<iframe>`, set `SIXB_APP_FRAME_ORIGINS` for the app server as well; see [Embed another site](../apps/overview.md#embed-another-site).
+
 ## Run behind a proxy
 
 The API records each client's IP address for sessions and access tokens, and limits CLI login requests per address. Behind a reverse proxy or load balancer, it reads the client from `X-Forwarded-For`, but only the entries appended by proxies it trusts. Entries a client sends itself are ignored.

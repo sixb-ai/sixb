@@ -382,8 +382,24 @@ For agent chat interfaces, use the agent components from `@sixb/app`.
 Place images, fonts, and other static files in `app/public/`. Reference them from the root:
 `app/public/logo.svg` is available at `/logo.svg`.
 
-A page frames only what the API serves, where artifacts open: an `<iframe>` of another site, such
-as a video player, is refused.
+## Embed another site
+
+A page frames only what the API serves, where artifacts open. To show another site in an
+`<iframe>`, such as a video player or a document viewer, list its origin on the app server:
+
+File: `.env`
+
+```dotenv
+SIXB_APP_FRAME_ORIGINS=https://www.youtube-nocookie.com,https://contoso.sharepoint.com
+```
+
+- Give each site's exact origin: scheme, host, and optional port. A wildcard, a path, or a
+  scheme alone stops the app server at startup.
+- List every site the frame loads, including those it redirects to.
+- An artifact's frame may navigate to the sites listed here, so list only sites you trust with
+  your data.
+- Set it wherever the app server runs, in development and in production, then restart it. A frame
+  of a site the list leaves out stays blank, and the browser console names the variable.
 
 Continue with [Querying data](querying-data.md) and [Running actions](actions.md) to connect your
 pages to the domain model. See [Deployment](../deployment/overview.md#start-services) when you are

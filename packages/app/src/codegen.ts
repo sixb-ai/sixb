@@ -717,6 +717,49 @@ function InternalLinkInterceptor({ basename }: { readonly basename?: string }) {
   return null
 }
 
+// The page frames only the API and the sites SIXB_APP_FRAME_ORIGINS lists. The browser logs a
+// refused <iframe> without saying where that list lives: name it, once per site. A site counts
+// only when an <iframe> asked for it: an artifact frame that navigates elsewhere keeps the API's
+// address as its src, and the list is no place for wherever its code tried to go.
+function RefusedFrameReporter() {
+  // Subscribed before the browser can report a frame rendered in the same commit.
+  React.useLayoutEffect(() => {
+    const reported = new Set<string>()
+
+    function onViolation(event: SecurityPolicyViolationEvent) {
+      if (event.effectiveDirective !== "frame-src") return
+
+      const origin = originOf(event.blockedURI)
+      if (!origin || reported.has(origin)) return
+
+      const frames = Array.from(document.querySelectorAll("iframe"))
+      if (!frames.some((frame) => originOf(frame.src) === origin)) return
+
+      reported.add(origin)
+      console.warn(
+        "[SixbApp] The app refused to frame " +
+          origin +
+          ". Add each site a frame loads, redirects included, to SIXB_APP_FRAME_ORIGINS on the " +
+          "app server."
+      )
+    }
+
+    document.addEventListener("securitypolicyviolation", onViolation)
+    return () => document.removeEventListener("securitypolicyviolation", onViolation)
+  }, [])
+
+  return null
+}
+
+function originOf(url: string): string | null {
+  try {
+    const { origin } = new URL(url)
+    return origin === "null" ? null : origin
+  } catch {
+    return null
+  }
+}
+
 function pathInsideApp(pathname: string, basename: string | undefined): string {
   if (
     basename &&
@@ -987,6 +1030,7 @@ function App({ basename }: StartAppOptions) {
         ${sectionsStart}
         <BrowserRouter basename={basename}>
           <ActivityPageView />
+          <RefusedFrameReporter />
           <SharedDocumentLinkInterceptor basename={basename} />
           <InternalLinkInterceptor basename={basename} />
           {basename ? (
