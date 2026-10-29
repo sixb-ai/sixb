@@ -78,6 +78,10 @@ export const en = {
     signOut: "Sign out",
     signingOut: "Signing out…",
     signOutFailed: "Could not sign out.",
+    sounds: "Notification sound",
+    soundsDescription:
+      "When the agent finishes or needs your approval while you're elsewhere. Saved in this browser.",
+    soundChoices: { off: "Off", chime: "Chime", bell: "Bell", pop: "Pop" },
     approvals: "When the agent changes things",
     approvalsDescription:
       "What the agent may do without asking you, in conversations where you haven't chosen a mode. Switch in any conversation from the chip under the message box.",
@@ -455,6 +459,10 @@ export const fr: Translation<SettingsMessages> = {
     signOut: "Se déconnecter",
     signingOut: "Déconnexion…",
     signOutFailed: "Impossible de se déconnecter.",
+    sounds: "Son de notification",
+    soundsDescription:
+      "Quand l’agent a terminé ou attend votre approbation pendant que vous êtes ailleurs. Enregistré dans ce navigateur.",
+    soundChoices: { off: "Désactivé", chime: "Carillon", bell: "Cloche", pop: "Pop" },
     approvals: "Quand l’agent modifie quelque chose",
     approvalsDescription:
       "Ce que l’agent peut faire sans vous demander, dans les conversations où vous n’avez pas choisi de mode. Changez-le dans n’importe quelle conversation depuis le bouton sous la zone de message.",

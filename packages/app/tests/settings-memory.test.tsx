@@ -36,17 +36,19 @@ installDom([
   "cancelAnimationFrame",
 ])
 let sockets: ReturnType<typeof stubWebSockets> | undefined
-const baseUrl = client.getConfig().baseUrl
+let previous: ReturnType<typeof client.getConfig> | undefined
 
 beforeAll(() => {
   sockets = stubWebSockets()
-  // The page's requests need an origin to resolve against.
-  client.setConfig({ baseUrl: "https://app.sixb.test" })
+  previous = client.getConfig()
+  // The page's requests need an origin to resolve against, and reach the `fetch` a test stubs
+  // whatever another file left on the shared client.
+  client.setConfig({ baseUrl: "https://app.sixb.test", fetch: undefined })
 })
 
 afterAll(() => {
   sockets?.restore()
-  client.setConfig({ baseUrl })
+  client.setConfig({ baseUrl: previous?.baseUrl, fetch: previous?.fetch })
 })
 
 const session: GetAuthSessionResponse = {

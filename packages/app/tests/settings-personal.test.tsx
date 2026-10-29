@@ -11,6 +11,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { readRunSound } from "../src/agent/run-sounds"
 import { SectionsProvider, SettingsPersonalPage } from "../src/pages"
 import { notify } from "../src/pages/section-page"
 import { PersonAvatar } from "../src/pages/settings/controls"
@@ -24,6 +25,7 @@ installDom([
   "Element",
   "HTMLElement",
   "HTMLInputElement",
+  "HTMLFormElement",
   "FormData",
   "Event",
   "EventTarget",
@@ -34,6 +36,7 @@ installDom([
   "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
+  "localStorage",
 ])
 const apiUrl = "https://api.sixb.test"
 const originalConfig = client.getConfig()
@@ -255,5 +258,29 @@ describe("what the agent may change, on Settings › Personal", () => {
     const view = renderPersonal(profileOf("Morgan Reyes"))
 
     expect(view.queryByRole("radiogroup", { name: "When the agent changes things" })).toBeNull()
+  })
+})
+
+describe("sounds, on Settings › Personal", () => {
+  afterEach(() => localStorage.clear())
+
+  // Removal proof: drop writeRunSound from choose(); the choice is not kept.
+  test("you choose the sound this browser plays, or none", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"), { approvalMode: "manual" })
+    view.getByRole("radiogroup", { name: "Notification sound" })
+    expect(view.getByRole("radio", { name: "Chime" }).getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(view.getByRole("radio", { name: "Bell" }))
+    expect(view.getByRole("radio", { name: "Bell" }).getAttribute("aria-checked")).toBe("true")
+    expect(readRunSound()).toBe("bell")
+
+    fireEvent.click(view.getByRole("radio", { name: "Off" }))
+    expect(readRunSound()).toBe("off")
+  })
+
+  test("is not offered in a project without an agent", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    expect(view.queryByRole("radiogroup", { name: "Notification sound" })).toBeNull()
   })
 })

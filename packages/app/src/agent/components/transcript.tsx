@@ -179,7 +179,8 @@ function TranscriptView({
     // explicitly resumes following after that override.
     <MessageScrollerProvider key={threadId ?? "draft"} autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1">
-        <MessageScrollerViewport>
+        {/* Run sounds look for the conversation on screen by its thread. */}
+        <MessageScrollerViewport data-agent-thread={threadId ?? undefined}>
           <MessageScrollerContent
             aria-busy={turn.kind === "responding"}
             className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
