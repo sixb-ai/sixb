@@ -6,6 +6,7 @@ import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
 import { assertAgentRuntimeProfile } from "../src/agent-runtime/preflight"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
 
 const PROJECT_ID = "runtime-test"
@@ -393,6 +394,7 @@ describe("agent runtime conformance", () => {
     })
     const context = await prepareAgentSandboxApiContext({
       sandbox,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       apiBaseUrl: `http://127.0.0.1:${server.port}`,
       projectId: PROJECT_ID,
       actorId: "assistant",
@@ -418,6 +420,7 @@ describe("agent runtime conformance", () => {
     sandbox = await createLocalSandbox()
     const context = await prepareAgentSandboxApiContext({
       sandbox,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       apiBaseUrl: "http://gateway.invalid",
       projectId: PROJECT_ID,
       actorId: "assistant",

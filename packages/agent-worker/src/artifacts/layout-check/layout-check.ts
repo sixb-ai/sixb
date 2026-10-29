@@ -10,16 +10,17 @@ import {
   layoutProbe,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
-import type { AgentSandboxHandle } from "../../sandbox-handle"
+import { type AgentSandboxHandle, contextPath } from "../../sandbox-handle"
 import checkScript from "./check.cjs" with { type: "text" }
 
-const LIBRARY = ".sixb/agent/lib/layout-check"
-const CHECKS = ".sixb/agent/checks"
+/** The check's library and each check's files, in the run's context directory. */
+const LIBRARY = "lib/layout-check"
+const CHECKS = "checks"
 /** Chromium's start, a deck's fonts, and two passes over up to 100 slides, or a page at two widths. */
 const CHECK_TIMEOUT_MS = 120_000
 /**
- * Sandboxes the check's library is written in. `.sixb/agent` lasts the run, and each run has its
- * own sandbox object, a lasting sandbox's included, so the library is written once per run.
+ * Sandboxes the check's library is written in. The context directory lasts the run, and each run
+ * has its own sandbox object, a lasting sandbox's included, so the library is written once per run.
  */
 const installed = new WeakSet<Sandbox>()
 
@@ -28,7 +29,7 @@ export type LayoutCheck =
   | {
       readonly status: "checked"
       readonly warnings: readonly LayoutWarning[]
-      /** One per slide, or a page's at each width, relative to the sandbox's working directory. */
+      /** One per slide, or a page's at each width, as the agent names them. */
       readonly screenshots: readonly string[]
     }
   | { readonly status: "skipped"; readonly reason: string }
@@ -106,8 +107,8 @@ export async function checkLayout(
 ): Promise<LayoutCheck> {
   const { sandbox } = input.handle
   const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
-  const library = posix.join(sandbox.workingDirectory, LIBRARY)
-  const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
+  const library = contextPath(input.handle, LIBRARY)
+  const output = contextPath(input.handle, CHECKS, input.name)
   // Each page to open, with the kit and the runtime as its frame serves them. The sandbox has no
   // way to the API: what the version shows from other artifacts is a placeholder, and what its
   // queries return is read beforehand.
@@ -207,8 +208,10 @@ export async function checkLayout(
   }
   const noun = { deck: "deck", page: "page", canvas: "canvas" }[input.layout]
   const reached = { deck: "Slides", page: "Widths", canvas: "Boards" }[input.layout]
-  const relative = (path: string) => posix.relative(sandbox.workingDirectory, path)
-  const screenshots = (report.screenshots ?? []).map(relative)
+  const checks = posix.join(input.handle.contextDirectory, CHECKS, input.name)
+  const screenshots = (report.screenshots ?? []).map((path) =>
+    posix.join(checks, posix.relative(output, path))
+  )
   return {
     status: "checked",
     screenshots,

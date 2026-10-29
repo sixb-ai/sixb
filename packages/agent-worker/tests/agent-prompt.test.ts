@@ -3,6 +3,7 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import { createModelCatalog } from "@sixb/core/models"
 import {
   agentRuntimeFacts,
+  type RenderAgentSystemPromptInput,
   renderAgentSystemPrompt,
   renderCurrentTime,
   renderWorkflowOutputFinalizerPrompt,
@@ -10,6 +11,7 @@ import {
 } from "../src/agent-prompt"
 import { listSandboxModels } from "../src/execution-plan"
 import type { AgentRequester } from "../src/requester"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 const GATEWAY = "vercel-ai-gateway"
@@ -22,10 +24,15 @@ const SKILLS = [
   },
 ] as const
 
+/** A provider sandbox's prompt, which names the run's files under `.sixb/agent`. */
+function renderPrompt(input: Omit<RenderAgentSystemPromptInput, "contextDirectory">): string {
+  return renderAgentSystemPrompt({ contextDirectory: SANDBOX_CONTEXT_DIRECTORY, ...input })
+}
+
 describe("agent system prompt", () => {
   test("marks a durable filesystem reset without discarding conversation context", () => {
     const sandboxResetAt = "2026-01-01T00:00:00.000Z"
-    const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [], sandboxResetAt })
+    const prompt = renderPrompt({ mode: "conversation", skills: [], sandboxResetAt })
     expect(prompt).toContain(`<sandbox_state>\nThe sandbox was reset at ${sandboxResetAt}`)
     expect(prompt).toContain(
       "Local files and uncommitted edits from before that time are not in it, including the paths earlier tool calls used"
@@ -34,9 +41,7 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("read attachments from the current $SIXB_ATTACHMENTS list")
     expect(prompt).not.toContain("published artifacts")
     expect(prompt).toContain("within the user's authorization")
-    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
-      "<sandbox_state>"
-    )
+    expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain("<sandbox_state>")
   })
 
   test.each([
@@ -44,7 +49,7 @@ describe("agent system prompt", () => {
     "read",
     "write",
   ] as const)("describes the workspace without assuming a provider (access=%s)", (authenticatedAccess) => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       workspace: {
@@ -82,7 +87,7 @@ describe("agent system prompt", () => {
   ] as const)("tells a run's workspace it is discarded and when it may push (access=%s)", (authenticatedAccess) => {
     // Regression proof: render persistent retention for every workspace; this prompt then
     // promises files that persist. Ignore the access; a read-only checkout is told to push.
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "workflow-task",
       skills: [],
       workspace: {
@@ -108,10 +113,8 @@ describe("agent system prompt", () => {
   })
 
   test("omits absent workspaces and quotes dynamic metadata as data", () => {
-    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
-      "<workspace>"
-    )
-    const prompt = renderAgentSystemPrompt({
+    expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain("<workspace>")
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       workspace: {
@@ -131,7 +134,7 @@ describe("agent system prompt", () => {
     "  \n ",
   ])("omits absent or blank instructions while preserving the framework prompt: %j", (instructions) => {
     // Regression proof: unconditionally rendering agent_instructions fails this assertion.
-    const prompt = renderAgentSystemPrompt({ mode: "conversation", instructions, skills: [] })
+    const prompt = renderPrompt({ mode: "conversation", instructions, skills: [] })
     expect(prompt).not.toContain("<agent_instructions>")
     expect(prompt).toContain("<sixb_runtime_context>")
     expect(prompt).toContain("You are a conversational agent helping the user")
@@ -143,7 +146,7 @@ describe("agent system prompt", () => {
   })
 
   test("keeps only stable facts in the prompt so it stays cacheable", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "workflow-task",
       skills: [],
       facts: { timeZone: "Europe/Paris", locale: "fr-FR" },
@@ -196,7 +199,7 @@ describe("agent system prompt", () => {
     const project = { timeZone: "UTC", locale: "en" }
 
     function runtimeFacts(requester?: AgentRequester): string {
-      const prompt = renderAgentSystemPrompt({
+      const prompt = renderPrompt({
         mode: "conversation",
         skills: [],
         facts: agentRuntimeFacts({ settings: {}, project, requester }),
@@ -219,7 +222,7 @@ describe("agent system prompt", () => {
       "subagent",
       "workflow-task",
     ] as const)("is stated in %s mode", (mode) => {
-      const prompt = renderAgentSystemPrompt({
+      const prompt = renderPrompt({
         mode,
         skills: [],
         facts: agentRuntimeFacts({
@@ -263,7 +266,7 @@ describe("agent system prompt", () => {
   })
 
   test("renders the canonical conversation mode", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       instructions: "Help the customer.",
       skills: SKILLS,
@@ -298,7 +301,7 @@ describe("agent system prompt", () => {
   })
 
   test("renders the canonical workflow-task mode", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "workflow-task",
       instructions: "Return a decision.",
       skills: SKILLS,
@@ -316,7 +319,7 @@ describe("agent system prompt", () => {
   })
 
   test("renders the canonical subagent mode", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "subagent",
       instructions: "Research one focused question.",
       skills: [],
@@ -345,8 +348,8 @@ describe("agent system prompt", () => {
         repos: [{ repo: "project" as const, entry: "# Shared\n- Revenue is netRevenue\n" }],
       },
     }
-    const conversation = renderAgentSystemPrompt({ mode: "conversation", ...input })
-    const child = renderAgentSystemPrompt({ mode: "subagent", ...input })
+    const conversation = renderPrompt({ mode: "conversation", ...input })
+    const child = renderPrompt({ mode: "subagent", ...input })
 
     for (const shared of [
       "Use the live project environment for objects, telemetry, files, and declared actions.",
@@ -382,9 +385,9 @@ describe("agent system prompt", () => {
 
   test("tells a child to report its changes and held calls, and its parent what to do with them", () => {
     // Removal proof: drop any of these rules; its line fails.
-    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
-    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
-    const workflow = renderAgentSystemPrompt({ mode: "workflow-task", skills: [] })
+    const child = renderPrompt({ mode: "subagent", skills: [] })
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
+    const workflow = renderPrompt({ mode: "workflow-task", skills: [] })
 
     expect(child).toContain("including each change you made to the project's data")
     expect(child).toContain(
@@ -404,8 +407,8 @@ describe("agent system prompt", () => {
   test("tells the Agent when to steer a child, and the child how its messages come", () => {
     // Removal proof: drop the message_agent rule from CONVERSATION_RULES, or the
     // <sixb_parent_message> rule from SUBAGENT_RULES; its line fails.
-    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
-    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
+    const child = renderPrompt({ mode: "subagent", skills: [] })
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(parent).toContain(
       "When a child still at work needs a correction, information it lacks, or a narrower scope, send it a message with message_agent and its key"
@@ -418,8 +421,8 @@ describe("agent system prompt", () => {
   test("tells a child when to ask its parent, and the Agent how to answer it", () => {
     // Removal proof: drop the ask_parent rule from SUBAGENT_RULES, or the question rule from
     // CONVERSATION_RULES; its line fails.
-    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
-    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
+    const child = renderPrompt({ mode: "subagent", skills: [] })
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(child).toContain(
       "When an ambiguity blocks your task and only your parent or the user can settle it, ask your parent with ask_parent"
@@ -437,7 +440,7 @@ describe("agent system prompt", () => {
 
   test("tells the Agent when to delegate and when one generation is enough", () => {
     // Removal proof: drop the delegation rule from CONVERSATION_RULES.
-    const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
+    const prompt = renderPrompt({ mode: "conversation", skills: [] })
 
     expect(prompt).toContain(
       "Delegate with spawn_agent only independent, heavier investigations that can run in parallel, then collect their answers with wait_agent. Never delegate a simple lookup, a second opinion, or a quick generation."
@@ -446,8 +449,8 @@ describe("agent system prompt", () => {
 
   test("tells a parent and its child how they hand each other files", () => {
     // Removal proof: drop either rule; its line fails.
-    const parent = renderAgentSystemPrompt({ mode: "conversation", skills: [] })
-    const child = renderAgentSystemPrompt({ mode: "subagent", skills: [] })
+    const parent = renderPrompt({ mode: "conversation", skills: [] })
+    const child = renderPrompt({ mode: "subagent", skills: [] })
 
     expect(parent).toContain(
       "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait_agent's result, which lists where each file is: under .sixb/agent/children/<key>/ this turn, then in $SIXB_ATTACHMENTS, which keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes is in $SIXB_ARTIFACTS once wait_agent returns, unless it says otherwise."
@@ -460,7 +463,7 @@ describe("agent system prompt", () => {
   })
 
   test("does not advertise a skill catalog when no skills are installed", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       instructions: "Help the customer.",
       skills: [],
@@ -485,7 +488,7 @@ describe("agent system prompt", () => {
   // Removal proof: return [] from renderModelCommands; the image command is missing.
   test("names one command per media model kind the project configures, and none otherwise", () => {
     const base = { mode: "conversation", skills: [] } as const
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       ...base,
       sandboxModels: [
         {
@@ -516,7 +519,7 @@ describe("agent system prompt", () => {
     )
     expect(prompt).not.toContain("sixb models speech")
     expect(prompt).toContain("Each call is billed")
-    expect(renderAgentSystemPrompt(base)).not.toContain("sixb models")
+    expect(renderPrompt(base)).not.toContain("sixb models")
   })
 
   test("lists the language models `sixb models text` can ask, by tier, from their definitions", () => {
@@ -552,7 +555,7 @@ describe("agent system prompt", () => {
       },
     })
 
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       sandboxModels: listSandboxModels(catalog),
@@ -577,7 +580,7 @@ describe("agent system prompt", () => {
     // Removal proof: list a model by its id alone; the two providers' shared id is ambiguous.
     const listed = (provider: string, modelId: string, name?: string) =>
       ({ kind: "language", provider, modelId, ...(name ? { name } : {}) }) as const
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       sandboxModels: [
@@ -598,7 +601,7 @@ describe("agent system prompt", () => {
     )
     // A project's only model is the one the agent runs on: there is no other model to ask.
     expect(
-      renderAgentSystemPrompt({
+      renderPrompt({
         mode: "conversation",
         skills: [],
         sandboxModels: [listed(GATEWAY, "openai/gpt-5.5")],
@@ -606,8 +609,33 @@ describe("agent system prompt", () => {
     ).not.toContain("sixb models")
   })
 
-  test("lists the ontology files it is given and tells the agent to read them first", () => {
+  // Guard proof: write any of these paths as `.sixb/agent/...` again; the last expectation fails.
+  test("names the run's files in its context directory, wherever it is", () => {
     const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      contextDirectory: "/tmp/sixb-agent/run_1",
+      skills: SKILLS,
+      ontologyIndex: [
+        { path: "billing/invoice.md", summary: "Invoice: A bill sent to a customer." },
+      ],
+      memory: { repos: [{ repo: "user", entry: "# Memory: Priya\n" }] },
+    })
+
+    expect(prompt).toContain("Path: /tmp/sixb-agent/run_1/skills/acme-style/SKILL.md")
+    expect(prompt).toContain(
+      "Read a file at /tmp/sixb-agent/run_1/ontology/<path in the tree>, for example /tmp/sixb-agent/run_1/ontology/billing/invoice.md."
+    )
+    expect(prompt).toContain("\n/tmp/sixb-agent/run_1/ontology/\n└── billing/")
+    expect(prompt).toContain("under /tmp/sixb-agent/run_1/children/<key>/ this turn")
+    expect(prompt).toContain(
+      "You have a memory from earlier conversations under /tmp/sixb-agent/run_1/memory/ ($SIXB_MEMORY_DIR):"
+    )
+    expect(prompt).toContain("read /tmp/sixb-agent/run_1/skills/sixb-memory/SKILL.md.")
+    expect(prompt).not.toContain(".sixb/agent")
+  })
+
+  test("lists the ontology files it is given and tells the agent to read them first", () => {
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: SKILLS,
       ontologyIndex: [
@@ -639,7 +667,7 @@ describe("agent system prompt", () => {
     expect(prompt.indexOf("Available Agent Skills")).toBeLessThan(
       prompt.indexOf(".sixb/agent/ontology/\n")
     )
-    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
+    expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain(
       "Ontology reference files"
     )
   })
@@ -657,7 +685,7 @@ describe("agent system prompt", () => {
       { path: "crm/scripts/", summary: "Scripts" },
       { path: "conventions.md", summary: "Naming conventions" },
     ]
-    const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [], ontologyIndex })
+    const prompt = renderPrompt({ mode: "conversation", skills: [], ontologyIndex })
 
     expect(prompt).toContain("There are too many files to list")
     expect(prompt).toContain(
@@ -692,7 +720,7 @@ describe("agent system prompt", () => {
   })
 
   test("closes with the memory section: how to use it, when and how to save, then each MEMORY.md", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       facts: { timeZone: "Europe/Paris", locale: "fr-FR" },
@@ -734,13 +762,11 @@ describe("agent system prompt", () => {
     expect(section).toEndWith(
       '<memory repo="user">\n# Memory: Priya\n\n- Prefers bullets\n</memory>\n</sixb_memory>'
     )
-    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
-      "<sixb_memory>"
-    )
+    expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain("<sixb_memory>")
   })
 
   test("lists the project's memory after the user's, and guards what goes into it", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       memory: {
@@ -779,7 +805,7 @@ describe("agent system prompt", () => {
   })
 
   test("gives a requester with no memory of its own the project's rules alone", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       memory: { repos: [{ repo: "project", entry: "# Shared\n" }] },
@@ -792,7 +818,7 @@ describe("agent system prompt", () => {
   })
 
   test("keeps a memory file from closing its section or opening another", () => {
-    const prompt = renderAgentSystemPrompt({
+    const prompt = renderPrompt({
       mode: "conversation",
       skills: [],
       memory: {

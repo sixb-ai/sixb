@@ -13,7 +13,12 @@ import {
   AgentExecutionLostError,
   assertRunExecutionOwned,
 } from "./errors"
-import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
+import {
+  type AcquiredRunSandbox,
+  type BeforeFinalizeOptions,
+  type RunSandbox,
+  SANDBOX_CONTEXT_DIRECTORY,
+} from "./run-sandbox"
 import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
@@ -169,6 +174,7 @@ class PersistentSandboxSession {
 
     return {
       waitBeforeModel: false,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       resumed: false,
       acquire: () => {
         if (finalized) return Promise.reject(sandboxError("is being saved."))
@@ -287,6 +293,7 @@ class PersistentSandboxSession {
     // a sub-agent's that ended; a lost execution leaves it to the run's current owner.
     return {
       waitBeforeModel: true,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       resumed: this.resumed,
       acquire: async () => acquired,
       beforeFinalize: (options?: BeforeFinalizeOptions) => {

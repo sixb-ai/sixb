@@ -54,7 +54,6 @@ import { delay } from "./abort"
 import { renderHandedFiles } from "./agent-prompt"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import {
-  CHILD_FILES_DIRECTORY,
   handedFileRefs,
   type InstalledChildFile,
   installChildOutputs,
@@ -401,7 +400,7 @@ export class SubagentCoordinator {
         renderSubagentModelGuide(this.models),
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
-        `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes, under ${CHILD_FILES_DIRECTORY}/<key>/ this turn.`,
+        "Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes.",
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),

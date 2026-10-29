@@ -5,6 +5,7 @@ import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
 import type { CommandResult, RunCommandOptions } from "@sixb/core/sandboxes"
 import { checkLayout, layoutWarnings } from "../src/artifacts/layout-check/layout-check"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { LocalBashSandbox } from "./helpers"
 
 type Problem = Parameters<typeof layoutWarnings>[0][number]
@@ -126,10 +127,14 @@ describe("the layout check", () => {
       commands.push({ args, options })
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, ...answer }
     }
-    return { handle: { sandbox: local }, commands, written }
+    return {
+      handle: { sandbox: local, contextDirectory: SANDBOX_CONTEXT_DIRECTORY },
+      commands,
+      written,
+    }
   }
   const check = (
-    handle: { sandbox: LocalBashSandbox; env?: Record<string, string> },
+    handle: { sandbox: LocalBashSandbox; contextDirectory: string; env?: Record<string, string> },
     options: {
       readonly name?: string
       readonly timeoutMs?: number
@@ -291,7 +296,11 @@ exports.chromium = {
         })
         return run(command, args, { ...options, timeout: 5_000 })
       }
-      const handle = { sandbox, env: { SIXB_PLAYWRIGHT: playwright } }
+      const handle = {
+        sandbox,
+        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+        env: { SIXB_PLAYWRIGHT: playwright },
+      }
       const result = await check(handle, { timeoutMs: 600 })
       expect(requested).toEqual([{ deadline: "500", timeout: 600 }])
       expect(result).toEqual({

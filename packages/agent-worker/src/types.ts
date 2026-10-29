@@ -118,6 +118,7 @@ export interface AgentTurnContext {
   readonly systemPrompt: string
   /** Time zone of runs that captured none, used to date their user messages. */
   readonly projectTimeZone: string
+  /** Prepared by the run's environment, which materializes the files in its context directory. */
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved

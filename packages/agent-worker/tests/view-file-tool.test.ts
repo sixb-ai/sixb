@@ -9,6 +9,7 @@ import type {
 import { InMemoryBlobStorage } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../src/attachments"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { AgentSandboxFileRegistry } from "../src/sandbox-file-registry"
 import { createAgentToolFiles } from "../src/tools/tool-files"
 import { createViewFileTool } from "../src/tools/view-file"
@@ -35,7 +36,7 @@ describe("view_file tool", () => {
     let publications = 0
     const viewFile = executableViewFileTool(
       createViewFileTool({
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: () => {
@@ -68,7 +69,7 @@ describe("view_file tool", () => {
     let publications = 0
     const viewFile = executableViewFileTool(
       createViewFileTool({
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: ({ toolCallId, signal }) => {
@@ -78,7 +79,7 @@ describe("view_file tool", () => {
             toolCallId,
             signal,
             blobStorage,
-            resolveSandbox: async () => ({ sandbox }),
+            resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
           })
         },
         toolResultToModelOutput: unusedToolResultProjection,
@@ -132,7 +133,7 @@ describe("view_file tool", () => {
     registry.register(path, fileRef)
     const viewFile = executableViewFileTool(
       createViewFileTool({
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
         attachments: emptyAttachments(),
         registry,
         filesForToolCall: () => {
@@ -166,7 +167,7 @@ describe("view_file tool", () => {
     const registry = new AgentSandboxFileRegistry()
     const viewFile = executableViewFileTool(
       createViewFileTool({
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
         attachments,
         registry,
         filesForToolCall: () => {
@@ -200,7 +201,7 @@ describe("view_file tool", () => {
     const sandbox = new ViewFileSandbox()
     const viewFile = executableViewFileTool(
       createViewFileTool({
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
         attachments: emptyAttachments(),
         registry: new AgentSandboxFileRegistry(),
         filesForToolCall: () => {

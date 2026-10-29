@@ -86,6 +86,12 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
   [paused children](#paused-children)). Run teardown never destroys it; only a subagent that ended
   does, through `beforeFinalize({ discard: true })`.
 
+A `RunSandbox` also names the run's **context directory** (`$SIXB_CONTEXT_DIR`), where the run's
+files go: skills, ontology docs, memory, attachments, artifacts, tool files, children's files and
+the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
+checkout excludes from Git. Every path the worker writes, checks or names in the prompt comes from
+it, as the agent names it: relative to the working directory, or absolute.
+
 For a blank sandbox:
 
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
