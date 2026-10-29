@@ -1,6 +1,6 @@
 import { LANGUAGE_MODEL_TIERS, type ModelReasoningLevel } from "@sixb/core/models"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronDown, Search, Sparkle } from "lucide-react"
+import { ChevronDown, Search } from "lucide-react"
 import { Fragment, useEffect, useId, useMemo, useState } from "react"
 import { AGENT_APPROVAL_MODES, type AgentApprovalMode } from "../approvals"
 import { useAgentMessages } from "../i18n"
@@ -267,7 +267,7 @@ function ModelSection({
         onKeyDown={(event) => moveRadioFocus(event)}
         // Short enough beside the permissions for the menu to fit under a composer in the middle
         // of the page; a long list scrolls, fading out where it continues.
-        className="flex-1 overscroll-contain md:max-h-[max(15rem,min(22rem,calc(100dvh-36rem)))]"
+        className="flex-1 overscroll-contain pb-1.5 md:max-h-[max(15rem,min(22rem,calc(100dvh-36rem)))]"
       >
         {auto ? (
           <>
@@ -356,7 +356,7 @@ function AutoRow({
     >
       {/* Solid, as the provider marks under it are. */}
       <span className="mt-px flex size-[18px] shrink-0 items-center justify-center text-foreground">
-        <Sparkle className="size-4 fill-current" strokeWidth={1.5} aria-hidden="true" />
+        <AutoMark />
       </span>
       <ComposerMenuRowText
         title={messages.auto}
@@ -364,6 +364,15 @@ function AutoRow({
         descriptionId={descriptionId}
       />
     </button>
+  )
+}
+
+/** Auto's mark: a four-pointed star with narrow waists, filled as the provider marks are. */
+function AutoMark() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="size-4">
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+    </svg>
   )
 }
 

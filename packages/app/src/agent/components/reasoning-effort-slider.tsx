@@ -66,6 +66,7 @@ export function ReasoningEffortSlider({
       </div>
       <div
         data-max={enhanced}
+        data-unset={selectedIndex < 0}
         className="sixb-reasoning-slider"
         hidden={levels.length === 0}
         style={{ "--sixb-reasoning-progress": progress } as CSSProperties}

@@ -67,7 +67,7 @@ export function ModelPickerRow({
             className={cn(
               COMPOSER_MENU_ROW_CLASS_NAME,
               "flex-1",
-              selected && "hover:bg-transparent"
+              selected && "hover:bg-transparent dark:hover:bg-transparent"
             )}
           >
             <ProviderLogo model={model} className="size-[18px] shrink-0" />
