@@ -1,9 +1,4 @@
-import type { Broker } from "@sixb/core"
-import {
-  type ReceivedAgentMail,
-  readAgentMail,
-  subscribeAgentInbox,
-} from "@sixb/core/internal/agents"
+import type { AgentRunMail, ReceivedAgentMail } from "@sixb/core/internal/agents"
 
 /**
  * A question a child asked: the id of its mail and what it asks. A child paused on it keeps both in
@@ -40,8 +35,7 @@ export class ChildQuestions {
   #closed = false
 
   constructor(
-    private readonly broker: Broker,
-    private readonly projectId: string,
+    private readonly mail: AgentRunMail,
     private readonly turnRunId: string
   ) {}
 
@@ -52,23 +46,24 @@ export class ChildQuestions {
    */
   listen(): Promise<void> {
     this.#hasChildren = true
-    this.#listening ??= subscribeAgentInbox(
-      this.broker,
-      { projectId: this.projectId, inbox: { runId: this.turnRunId } },
-      { mail: (mail) => this.#receive(mail), childFinished: () => this.#changed() }
-    ).then(
-      (unsubscribe) => {
-        if (this.#closed) unsubscribe()
-        else this.#unsubscribe = unsubscribe
-      },
-      (error: unknown) => {
-        this.#listening = undefined
-        console.error(
-          `[SixbAgentWorker] Agent run '${this.turnRunId}' could not listen for its children's questions; it tries again with its next child.`,
-          error
-        )
-      }
-    )
+    this.#listening ??= this.mail
+      .subscribe(
+        { runId: this.turnRunId },
+        { mail: (mail) => this.#receive(mail), childFinished: () => this.#changed() }
+      )
+      .then(
+        (unsubscribe) => {
+          if (this.#closed) unsubscribe()
+          else this.#unsubscribe = unsubscribe
+        },
+        (error: unknown) => {
+          this.#listening = undefined
+          console.error(
+            `[SixbAgentWorker] Agent run '${this.turnRunId}' could not listen for its children's questions; it tries again with its next child.`,
+            error
+          )
+        }
+      )
     return this.#listening
   }
 
@@ -82,11 +77,7 @@ export class ChildQuestions {
   async refresh(): Promise<void> {
     if (!this.#hasChildren) return
 
-    const page = await readAgentMail(this.broker, {
-      projectId: this.projectId,
-      inbox: { runId: this.turnRunId },
-      ...(this.#cursor === undefined ? {} : { afterCursor: this.#cursor }),
-    })
+    const page = await this.mail.read({ runId: this.turnRunId }, this.#cursor)
     this.#cursor = page.cursor ?? this.#cursor
     this.#receive(page.mail)
   }

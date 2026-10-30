@@ -7,6 +7,7 @@ import {
   NOOP_STREAM_SINK,
   publishAgentRunCancel,
 } from "../src/agents"
+import { AgentStorageError } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 
 const PROJECT_ID = "agent-run-session-tests"
@@ -209,6 +210,65 @@ describe("an agent run session", () => {
 
     await cancelled
     expect(session.cancelled.aborted).toBe(true)
+    session.close()
+  })
+})
+
+describe("an agent run session's children and mail", () => {
+  // Clearing a dead attempt deletes messages from a child's thread: a turn reclaimed by another
+  // delivery must not. Drop assertOwned from clearAttempt in run-session-children.ts; it deletes.
+  test("clears a child's dead attempt only while the turn owns its run", async () => {
+    const { host, storage, run } = await setup()
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!first) throw new Error("Expected the run to be claimed.")
+    await storage.agents.messages.append({
+      id: "message-dead",
+      projectId: PROJECT_ID,
+      threadId: run.threadId,
+      runId: run.id,
+      role: "assistant",
+      parts: [{ type: "text", text: "From a failed attempt." }],
+    })
+    const second = await claimAgentRun(host, { run: first.run, leaseExpiresAt: LEASE })
+    if (!second) throw new Error("Expected the run to be reclaimed.")
+
+    const refused = await first.children
+      .clearAttempt({ threadId: run.threadId, runId: run.id })
+      .catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(AgentStorageError)
+    expect(
+      await storage.agents.messages.getById({ projectId: PROJECT_ID, id: "message-dead" })
+    ).toBeDefined()
+
+    await second.children.clearAttempt({ threadId: run.threadId, runId: run.id })
+    expect(
+      await storage.agents.messages.getById({ projectId: PROJECT_ID, id: "message-dead" })
+    ).toBeNull()
+    first.close()
+    second.close()
+  })
+
+  test("sends mail to a child's thread inbox and reads it back from a cursor", async () => {
+    const { host, run } = await setup()
+    const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!session) throw new Error("Expected the run to be claimed.")
+    const mail = (id: string) =>
+      ({
+        id,
+        fromRunId: run.id,
+        toThreadId: "thread-child",
+        kind: "message",
+        text: id,
+        sentAt: "2026-10-29T12:00:00.000Z",
+      }) as const
+
+    await session.mail.send(mail("first"))
+    const page = await session.mail.read({ threadId: "thread-child" })
+    await session.mail.send(mail("second"))
+    const next = await session.mail.read({ threadId: "thread-child" }, page.cursor)
+
+    expect(page.mail.map((item) => item.id)).toEqual(["first"])
+    expect(next.mail.map((item) => item.id)).toEqual(["second"])
     session.close()
   })
 })

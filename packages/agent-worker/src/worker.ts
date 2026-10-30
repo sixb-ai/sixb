@@ -309,6 +309,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         this.host,
         context,
         run,
+        session,
         prepared.execution,
         runtime.deadline
       )
@@ -674,7 +675,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       // From the first message: one its parent sent while it was queued is read at its first step,
       // and a continuation's first step reads what the runs before it left unread.
-      const inbox = new SubagentInbox(this.host.broker, run, history.messages)
+      const inbox = new SubagentInbox(session.mail, run, history.messages)
       environment = await createSubagentEnvironment({
         context: executionContext,
         plan,
@@ -1089,6 +1090,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       broker: this.host.broker,
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
+      childQueue: this.host.queues.agentChildren,
     }
   }
 

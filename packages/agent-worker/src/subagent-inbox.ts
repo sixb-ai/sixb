@@ -1,15 +1,5 @@
-import {
-  type AgentMailPart,
-  type AgentMessage,
-  AgentToolPublicError,
-  type Broker,
-} from "@sixb/core"
-import {
-  isKnownAgentMailKind,
-  publishAgentMail,
-  readAgentMail,
-  subscribeAgentMail,
-} from "@sixb/core/internal/agents"
+import { type AgentMailPart, type AgentMessage, AgentToolPublicError } from "@sixb/core"
+import { type AgentRunMail, isKnownAgentMailKind } from "@sixb/core/internal/agents"
 import type { SubagentRunRecord } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
 import type { QuestionRef } from "./child-questions"
@@ -48,7 +38,7 @@ export class SubagentInbox {
   #deferred: QuestionRef | undefined
 
   constructor(
-    private readonly broker: Broker,
+    private readonly mail: AgentRunMail,
     private readonly run: SubagentRunRecord,
     /** The child's thread so far: what its earlier runs read is there. */
     thread: readonly Pick<AgentMessage, "parts">[]
@@ -83,7 +73,7 @@ export class SubagentInbox {
     }
     signal.throwIfAborted()
 
-    const { projectId, id: runId, threadId, parentRunId } = this.run
+    const { id: runId, threadId, parentRunId } = this.run
     const id = `${runId}:${callId}`
     this.#asking = id
     let replied!: (reply: ParentReply) => void
@@ -92,29 +82,29 @@ export class SubagentInbox {
     })
     let unsubscribe: (() => void) | undefined
     try {
-      unsubscribe = await subscribeAgentMail(
-        this.broker,
-        { projectId, inbox: { threadId } },
-        (mail) => {
-          const found = mail.find(
-            (item) =>
-              item.fromRunId === parentRunId && item.inReplyTo === id && REPLY_KINDS.has(item.kind)
-          )
-          if (found?.kind === "answer") replied({ kind: "answer", text: found.text })
-          if (found?.kind === "deferred") replied({ kind: "deferred", questionId: id })
+      unsubscribe = await this.mail.subscribe(
+        { threadId },
+        {
+          mail: (mail) => {
+            const found = mail.find(
+              (item) =>
+                item.fromRunId === parentRunId &&
+                item.inReplyTo === id &&
+                REPLY_KINDS.has(item.kind)
+            )
+            if (found?.kind === "answer") replied({ kind: "answer", text: found.text })
+            if (found?.kind === "deferred") replied({ kind: "deferred", questionId: id })
+          },
         }
       )
-      await publishAgentMail(this.broker, {
-        projectId,
-        mail: {
-          id,
-          fromRunId: runId,
-          fromThreadId: threadId,
-          toRunId: parentRunId,
-          kind: "question",
-          text: question,
-          sentAt: new Date().toISOString(),
-        },
+      await this.mail.send({
+        id,
+        fromRunId: runId,
+        fromThreadId: threadId,
+        toRunId: parentRunId,
+        kind: "question",
+        text: question,
+        sentAt: new Date().toISOString(),
       })
 
       const settled = await waitForAbort(reply, signal)
@@ -136,14 +126,10 @@ export class SubagentInbox {
     afterSteps: number,
     options: { readonly afterAnswer?: boolean } = {}
   ): Promise<AgentMessage | undefined> {
-    const { projectId, id: runId, threadId } = this.run
-    let page: Awaited<ReturnType<typeof readAgentMail>>
+    const { id: runId, threadId } = this.run
+    let page: Awaited<ReturnType<AgentRunMail["read"]>>
     try {
-      page = await readAgentMail(this.broker, {
-        projectId,
-        inbox: { threadId },
-        ...(this.#cursor === undefined ? {} : { afterCursor: this.#cursor }),
-      })
+      page = await this.mail.read({ threadId }, this.#cursor)
     } catch (error) {
       console.error(
         `[SixbAgentWorker] Subagent run '${runId}' could not read its inbox; it reads it again at its next step.`,

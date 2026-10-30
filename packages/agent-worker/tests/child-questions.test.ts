@@ -21,6 +21,7 @@ import {
 } from "@sixb/core"
 import {
   agentRunInboxStreamId,
+  agentRunMail,
   agentThreadInboxStreamId,
   createSubagentRunId,
   createSubagentThreadId,
@@ -846,7 +847,7 @@ describe("ChildQuestions", () => {
   // its answer opens again.
   test("counts a question once, and an answered one stays answered when delivered again", async () => {
     const broker = new InMemoryBroker()
-    const questions = new ChildQuestions(broker, projectId, "run_parent")
+    const questions = new ChildQuestions(agentRunMail({ projectId, broker }), "run_parent")
     const mail = {
       id: "run_west:ask",
       fromRunId: "run_west",
