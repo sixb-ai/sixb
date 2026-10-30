@@ -621,7 +621,7 @@ function describeSixb(
         count(arrayLength(parsed?.json), counts.runs)
       )
     case "workflow-runs.get":
-      return withDetail(icon("actions", m.workflowRun), runStatus(parsed?.json, m))
+      return withDetail(icon("actions", m.workflowRun), runStatus(detailRun(parsed?.json), m))
     case "datasets.list":
       return icon("objects", m.listDatasets)
     case "datasets.get":
@@ -643,7 +643,7 @@ function describeSixb(
     case "pipeline-runs.list":
       return icon("actions", m.listPipelineRuns)
     case "pipeline-runs.get":
-      return withDetail(icon("actions", m.pipelineRun), runStatus(parsed?.json, m))
+      return withDetail(icon("actions", m.pipelineRun), runStatus(detailRun(parsed?.json), m))
     case "files.upload":
       return withDetail(icon("object", m.upload), filePath(parsed?.json))
     case "files.download":
@@ -951,6 +951,11 @@ function runOutcome(value: unknown, m: AgentMessages["bash"]): string | undefine
 }
 
 /** A run status in words; statuses Sixb does not know yet are shown as they are. */
+/** A run's detail answers `{ run, steps }` or `{ run, nodes }`: its status is the run's. */
+function detailRun(value: unknown): unknown {
+  return isRecord(value) && isRecord(value.run) ? value.run : value
+}
+
 export function runStatus(value: unknown, m: AgentMessages["bash"] = en.bash): string | undefined {
   if (!isRecord(value) || typeof value.status !== "string") return undefined
   return Object.hasOwn(m.statuses, value.status)

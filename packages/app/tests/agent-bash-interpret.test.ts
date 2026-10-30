@@ -266,6 +266,19 @@ describe("describeBash", () => {
     expect(title).toBe("Read rows of the customer orders dataset")
   })
 
+  // Guard proof: read the status from the output's root again; neither run shows one.
+  test("shows the status of a pipeline or workflow run from its detail", () => {
+    const pipelineRun = describeBash(
+      classifyCommand("sixb pipeline-runs get run-3"),
+      output('{"run":{"id":"run-3","status":"succeeded"},"steps":[]}')
+    )
+    const workflowRun = describeBash(
+      classifyCommand("sixb workflow-runs get run-2"),
+      output('{"run":{"id":"run-2","status":"failed"},"nodes":[]}')
+    )
+    expect(pipelineRun.detail).toBe("succeeded")
+    expect(workflowRun.detail).toBe("failed")
+  })
 
   test("says what a memory save remembered, and when it saved nothing", () => {
     const intent = classifyCommand('sixb memory save user -m "Prefers short bullet summaries"')
