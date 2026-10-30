@@ -70,7 +70,7 @@ Sixb's network policies conservatively where it can:
 | `{ mode: "restricted" }` | Warns and degrades to the configured default network. |
 
 The downgrade matches Sixb's provider contract for backends that cannot enforce restricted egress.
-Use `@sixb/sandboxes-smolvm` or `@sixb/sandboxes-vercel` when the agent gateway must be the only
+Use `@sixb/sandboxes-smolvm` or `@sixb/sandboxes-vercel` when the Sixb API must be the only
 reachable origin.
 
 ## Options

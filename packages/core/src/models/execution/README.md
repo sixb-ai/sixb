@@ -44,7 +44,7 @@ replays accounting only, never inference; see the
 [worker recovery contract](../../../../agent-worker/docs/usage-accounting.md).
 
 An Agent run binds its own recorder to its SDK, so calls from its tools share the run's admission,
-failure state and cancellation. A request through the agent API gateway is served by the server,
+failure state and cancellation. A request with the run's token is served by the server,
 not by the run's worker: it gets its own recorder on the run's execution and current attempt, and
 only its own request cancels it. Direct provider calls bypass this session. Webhook handlers have no
 bound model execution attempt; they must dispatch an action for accounted calls. A process crash

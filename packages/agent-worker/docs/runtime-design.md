@@ -55,7 +55,7 @@ model calls use the run's accounting recorder; a run-token request gets its own,
 Their `attachments` open a manifest key only in a message of the run's own thread, like the
 message file route, or among a workflow task's input files.
 
-Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
+Workflow run detail includes the run's top-level output after success. Responses to a run token omit
 the route's internal node records, and only top-level input/output file paths are available.
 
 ## Usage persistence
@@ -109,7 +109,7 @@ sandbox still booting then is destroyed once it is ready.
 
 A workspace, a thread's or a step's, is ready before the first model call instead, so the system
 prompt can describe the checkout, and its network follows its recipe, which always includes the
-gateway. For a step's workspace:
+Sixb API. For a step's workspace:
 
 - A step whose sandbox fails to provision after model preparation fails the node; it is not
   retried, because the clone and setup may have run.

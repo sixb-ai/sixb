@@ -58,8 +58,8 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   are recorded with unknown final usage and cost, retaining received native IDs. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
-  changes afterward. The run also persists the queue-returned lease expiration for gateway
-  authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
+  changes afterward. The run also persists the queue-returned lease expiration for run-token
+  admission. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
 - Conversations get `spawn_agent`, `wait_agent` and `message_agent`. `spawn_agent` takes a tier or one of the exact
