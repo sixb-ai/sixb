@@ -31,11 +31,11 @@ export type { WorkflowAgentFailurePhase } from "./run-workflow-agent-node"
 export { runWorkflowAgentNode, WorkflowAgentNodeExecutionError } from "./run-workflow-agent-node"
 export { withBuiltInSkills } from "./skills/built-in"
 export { SubagentInbox } from "./subagent-inbox"
+export type { TurnDelegation } from "./subagent-tools"
 export { SubagentCoordinator } from "./subagent-tools"
 export type { AgentTurnRuntime } from "./turn-runtime"
 export { createAgentTurnRuntime } from "./turn-runtime"
 export type {
   AgentExecutionContext,
-  AgentProjectCatalogs,
   AgentRunSettings,
 } from "./types"

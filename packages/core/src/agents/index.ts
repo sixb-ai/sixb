@@ -166,6 +166,8 @@ export {
   interruptedError,
 } from "./run-liveness"
 export type {
+  AgentRunDelegation,
+  AgentRunDelegationModel,
   AgentRunMemory,
   AgentRunPlan,
   AgentRunPlanDefinitions,
@@ -175,6 +177,7 @@ export type {
 } from "./run-plan"
 export {
   listSandboxModels,
+  readAgentRunDelegation,
   readAgentRunMemory,
   readAgentRunPlan,
   renderAgentRunOntologyDocs,

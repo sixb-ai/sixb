@@ -59,6 +59,9 @@ renewLease · cancelled · assertOwned   ownership, and a cancel of the run or o
 modelCalls()                           admission, usage and recovery; opened on first use, inside
                                        the runner's preparation retry
 events · heldCalls                     live records (best effort) and the approvals that hold a run
+plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
+                                       model, SIXB.md, skills, tool names, the requester's ontology
+                                       docs and a turn's delegation models; and the memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
 threads · children · mail              the conversation's messages, a turn's children, and mail
