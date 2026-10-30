@@ -20,6 +20,7 @@ export interface WorkerCreationOptions {
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
   readonly vectorConcurrency?: number
+  readonly subagentConcurrency?: number
   readonly subagentConcurrencyPerRun?: number
 }
 
@@ -54,6 +55,7 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
           : undefined,
         concurrency: options.workerConcurrency?.agent,
         turnTimeoutMs: options.agentTurnTimeoutMs,
+        subagentConcurrency: options.subagentConcurrency,
         subagentConcurrencyPerRun: options.subagentConcurrencyPerRun,
       }),
     unmetRequirement: (options, agentApiRequired) =>

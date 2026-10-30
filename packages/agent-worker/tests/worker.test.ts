@@ -2,6 +2,7 @@ import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "b
 import { join } from "node:path"
 import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
+  AgentDefinitionError,
   type AgentMessagePart,
   type AgentRuntime,
   type AgentSkillDefinition,
@@ -153,6 +154,7 @@ import { normalizeApiBaseUrl } from "../src/api-url"
 import { ChildRunner } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
+import { isTerminalRun } from "../src/run-fate"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -2005,9 +2007,10 @@ async function runChildren(
 }
 
 /** The worker's child runner, for this project. */
-function childRunnerOf(sixb: TestSixb): ChildRunner {
+function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
   const context = workerContextOf(sixb)
   return new ChildRunner({
+    capacity,
     host: sixb,
     context,
     sessions: {
@@ -2039,6 +2042,39 @@ async function startChildren(
     if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
     runner.start(run, { signal, delivery })
   }
+}
+
+/** A project whose storage refuses `times` run claims with `refusal()`, then claims them. */
+function withRefusedClaims(sixb: TestSixb, refusal: () => Error, times: number) {
+  const storage = agentStorageOf(sixb)
+  const runs = storage.runs
+  let refusals = 0
+  const flaky = withStorage(
+    sixb,
+    new Proxy(sixb.storage, {
+      get: (target, property, receiver) =>
+        property === "agents"
+          ? new Proxy(storage, {
+              get: (agents, key, agentsReceiver) =>
+                key === "runs"
+                  ? new Proxy(runs, {
+                      get: (runsTarget, method, runsReceiver) =>
+                        method === "start"
+                          ? async (...args: Parameters<typeof runs.start>) => {
+                              if (refusals < times) {
+                                refusals += 1
+                                throw refusal()
+                              }
+                              return runs.start(...args)
+                            }
+                          : Reflect.get(runsTarget, method, runsReceiver),
+                    })
+                  : Reflect.get(agents, key, agentsReceiver),
+            })
+          : Reflect.get(target, property, receiver),
+    })
+  )
+  return { sixb: flaky, refusals: () => refusals }
 }
 
 function recoverAiModelCall(sixb: TestSixb) {
@@ -9323,6 +9359,9 @@ describe("AgentWorker", () => {
       expect(
         () => new AgentWorker(sixb, workerOptions({ subagentConcurrencyPerRun: value }))
       ).toThrow("Agent worker option subagentConcurrencyPerRun must be a positive integer.")
+      expect(() => new AgentWorker(sixb, workerOptions({ subagentConcurrency: value }))).toThrow(
+        "Agent worker option subagentConcurrency must be a positive integer."
+      )
     }
   })
 
@@ -9405,40 +9444,135 @@ describe("AgentWorker", () => {
       children: [spawned],
     } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
     if (!spawned) throw new Error("Expected the child.")
-    let refused = false
-    const runs = storage.runs
-    const flaky = withStorage(
-      sixb,
-      new Proxy(sixb.storage, {
-        get: (target, property, receiver) =>
-          property === "agents"
-            ? new Proxy(storage, {
-                get: (agents, key, agentsReceiver) =>
-                  key === "runs"
-                    ? new Proxy(runs, {
-                        get: (runsTarget, method, runsReceiver) =>
-                          method === "start"
-                            ? async (...args: Parameters<typeof runs.start>) => {
-                                if (!refused) {
-                                  refused = true
-                                  throw new Error("connection reset")
-                                }
-                                return runs.start(...args)
-                              }
-                            : Reflect.get(runsTarget, method, runsReceiver),
-                      })
-                    : Reflect.get(agents, key, agentsReceiver),
-              })
-            : Reflect.get(target, property, receiver),
-      })
-    )
+    const flaky = withRefusedClaims(sixb, () => new Error("connection reset"), 1)
 
-    await runChildren(flaky, [spawned.runId])
+    await runChildren(flaky.sixb, [spawned.runId])
 
-    expect(refused).toBe(true)
+    expect(flaky.refusals()).toBe(1)
     expect(await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })).toMatchObject({
       status: "succeeded",
     })
+  })
+
+  test("keeps retrying a child's claim for as long as its parent runs", async () => {
+    // Removal proof: give up after the turn's own preparation retries again (claim through
+    // retryPreparationInPlace); the child stays queued and its parent waits on it forever.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const {
+      children: [spawned],
+    } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+    if (!spawned) throw new Error("Expected the child.")
+    const refusals = MAX_AGENT_DELIVERY_ATTEMPTS + 2
+    const flaky = withRefusedClaims(sixb, () => new Error("connection reset"), refusals)
+    const queued = await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
+    if (queued?.kind !== "subagent") throw new Error("Expected the child's run.")
+    const runner = childRunnerOf(flaky.sixb)
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+    // Each retry waits up to five seconds: drive them with fake time.
+    jest.useFakeTimers()
+    try {
+      runner.start(queued, {
+        signal: new AbortController().signal,
+        delivery: {
+          leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          onLeaseRenewed: () => () => {},
+        },
+      })
+      const child = await underFakeTime(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
+          return run && isTerminalRun(run) ? run : null
+        },
+        "the child's end",
+        1_000
+      )
+
+      expect(flaky.refusals()).toBe(refusals)
+      expect(child).toMatchObject({ status: "succeeded" })
+      expect(consoleError).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+      consoleError.mockRestore()
+    }
+  })
+
+  test("ends failed a child its claim refuses for good, so its parent's wait returns", async () => {
+    // Removal proof: return null for a permanent refusal in ChildRunner.claim instead of ending
+    // the child; it stays queued, and the parent waiting on it never hears back.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const {
+      children: [spawned],
+    } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+    if (!spawned) throw new Error("Expected the child.")
+    const flaky = withRefusedClaims(
+      sixb,
+      () => new AgentDefinitionError("[Sixb] The child's model is not configured."),
+      Number.POSITIVE_INFINITY
+    )
+
+    await runChildren(flaky.sixb, [spawned.runId])
+
+    expect(flaky.refusals()).toBe(1)
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })).toMatchObject({
+      status: "failed",
+    })
+  })
+
+  test("runs no more children at once than the worker's subagent concurrency", async () => {
+    // Removal proof: give ChildRunner.takeSlot no limit; the other child starts while the held
+    // one is still running.
+    let releaseHeld!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseHeld = resolve
+    })
+    let heldTask: string | undefined
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        const task = JSON.stringify(options.messages.at(-1))
+        if (heldTask === undefined) {
+          heldTask = task
+          await held
+        }
+        return answerStream("Done.")
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const { children } = await spawnChildOfRunningTurn(
+      sixb,
+      { text: "Delegate twice." },
+      { keys: ["first", "second"] }
+    )
+    const runner = childRunnerOf(sixb, 1)
+    try {
+      await startChildren(
+        sixb,
+        runner,
+        children.map((child) => child.runId)
+      )
+      await waitFor(() => heldTask !== undefined, { label: "a child model call" })
+      const [first, second] = await Promise.all(
+        children.map((child) => storage.runs.getById({ projectId: PROJECT_ID, id: child.runId }))
+      )
+      expect([first?.status, second?.status].sort()).toEqual(["queued", "running"])
+      releaseHeld()
+      await runner.drain()
+      const runs = await Promise.all(
+        children.map((child) => waitForTerminalRun(storage, child.runId))
+      )
+      expect(runs.map((run) => run.status)).toEqual(["succeeded", "succeeded"])
+      const heldKey = heldTask?.includes("Research first.") ? "first" : "second"
+      const heldRun = runs.find((run) => run.kind === "subagent" && run.spawnKey === heldKey)
+      const otherRun = runs.find((run) => run !== heldRun)
+      expect(otherRun?.startedAt?.getTime()).toBeGreaterThanOrEqual(
+        heldRun?.completedAt?.getTime() ?? Number.POSITIVE_INFINITY
+      )
+    } finally {
+      releaseHeld()
+    }
   })
 
   test("ends a child as interrupted when its worker stops", async () => {
