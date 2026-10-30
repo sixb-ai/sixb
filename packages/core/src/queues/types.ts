@@ -187,17 +187,6 @@ export interface AgentRunRequestedQueueJob
     }
   > {}
 
-/** A headless child run uses a reserved lane so waiting parents cannot consume its capacity. */
-export interface SubagentRunRequestedQueueJob
-  extends QueueJob<
-    "agent.subagent-run.requested",
-    {
-      readonly runId: string
-    }
-  > {}
-
-export type SubagentQueueJob = SubagentRunRequestedQueueJob
-
 export interface AgentWorkflowNodeRequestedQueueJob
   extends QueueJob<
     "agent.workflow-node.requested",
@@ -236,8 +225,6 @@ export interface Queues {
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
   readonly workflows: Queue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
   readonly agents: Queue<AgentQueueJob, AgentQueueJobFailureCode>
-  /** Internal capacity reserved for headless child runs. */
-  readonly agentChildren: Queue<SubagentQueueJob, AgentQueueJobFailureCode>
 
   /**
    * Whether these queues can be shared across processes.

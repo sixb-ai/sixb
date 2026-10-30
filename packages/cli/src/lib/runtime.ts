@@ -63,7 +63,6 @@ export interface StartSixbRuntimeOptions {
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
   readonly vectorConcurrency?: number
-  readonly subagentConcurrency?: number
   readonly subagentConcurrencyPerRun?: number
 }
 
@@ -293,7 +292,6 @@ export async function startSixbRuntime(
             : undefined,
           concurrency: options.workerConcurrency?.agent,
           turnTimeoutMs: options.agentTurnTimeoutMs,
-          subagentConcurrency: options.subagentConcurrency,
           subagentConcurrencyPerRun: options.subagentConcurrencyPerRun,
         })
       }

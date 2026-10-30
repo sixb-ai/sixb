@@ -225,7 +225,13 @@ export class SubagentCoordinator {
     private readonly session: AgentRunSession,
     private readonly parentExecution: ExecutionRecord,
     /** When the parent turn times out: no child outlives it. */
-    private readonly parentDeadline: Date
+    private readonly parentDeadline: Date,
+    /**
+     * Run a child this turn spawned or continues, in the turn's own runner: it claims the child's
+     * run, opens its session and environment, and records its fate. Starting a run already
+     * running is a no-op.
+     */
+    private readonly startChild: (run: SubagentRunRecord) => void
   ) {
     const models = host.definitions.models?.language
     if (!models) {
@@ -976,15 +982,7 @@ export class SubagentCoordinator {
     }
 
     signal.throwIfAborted()
-    if (run.status === "queued") {
-      const { failed } = await this.session.children.dispatch(run.id)
-      if (failed !== undefined) {
-        console.error(
-          `[SixbAgent] Could not dispatch subagent run '${run.id}'; reconciliation will retry.`,
-          failed
-        )
-      }
-    }
+    if (run.status === "queued") this.startChild(run)
 
     return {
       runId: run.id,

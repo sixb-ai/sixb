@@ -150,6 +150,7 @@ import {
 } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { normalizeApiBaseUrl } from "../src/api-url"
+import { ChildRunner } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
@@ -1968,14 +1969,16 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
       broker: sixb.broker,
       recoverAiModelCall: recoverAiModelCall(sixb),
       events: NOOP_STREAM_SINK,
-      childQueue: sixb.queues.agentChildren,
       security: sixb.definitions.security,
     },
     run
   )
 }
 
-/** A turn's coordinator as the worker builds it, in a session for its run, which the test started. */
+/**
+ * A turn's coordinator as the worker builds it, in a session for its run, which the test started.
+ * Its children start nowhere: a test runs them with {@link runChildren} when it is ready.
+ */
 async function coordinatorFor(
   sixb: TestSixb,
   parent: ConversationAgentRunRecord,
@@ -1984,7 +1987,43 @@ async function coordinatorFor(
 ): Promise<SubagentCoordinator> {
   const context = await buildAgentWorkerContext(sixb)
   const session = await runSessionOf(sixb, parent)
-  return new SubagentCoordinator(sixb, context, parent, session, execution, deadline)
+  return new SubagentCoordinator(sixb, context, parent, session, execution, deadline, () => {})
+}
+
+/**
+ * Run children as their parent's runner does: the worker's child runner, under a parent delivery
+ * the test holds, whose lease is never renewed. Resolves once every child has ended here.
+ */
+async function runChildren(
+  sixb: TestSixb,
+  runIds: readonly string[],
+  signal = new AbortController().signal
+): Promise<void> {
+  const context = workerContextOf(sixb)
+  const runner = new ChildRunner({
+    host: sixb,
+    context,
+    sessions: {
+      projectId: PROJECT_ID,
+      storage: context.storage,
+      broker: sixb.broker,
+      recoverAiModelCall: context.recoverAiModelCall,
+      events: context.streamSink,
+      security: sixb.definitions.security,
+    },
+    trackTeardown: () => {},
+    reportFailure: () => {},
+  })
+  const delivery = {
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    onLeaseRenewed: () => () => {},
+  }
+  for (const runId of runIds) {
+    const run = await context.storage.agents.runs.getById({ projectId: PROJECT_ID, id: runId })
+    if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
+    runner.start(run, { signal, delivery })
+  }
+  await runner.drain()
 }
 
 function recoverAiModelCall(sixb: TestSixb) {
@@ -2018,16 +2057,15 @@ function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
-async function buildAgentWorkerContext(
+/** The worker's context, as buildAgentContext makes it for this project. */
+function workerContextOf(
   sixb: TestSixb,
   input: { readonly apiBaseUrl?: string } = {}
-): Promise<
-  AgentRunnerContext & Pick<AgentWorkerContext, "storage" | "recoverAiModelCall" | "streamSink">
-> {
+): AgentWorkerContext {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
   }
-  const context: AgentWorkerContext = {
+  return {
     id: sixb.id,
     storage: workerStorageOf(sixb.storage),
     sandboxes: sixb.sandboxes,
@@ -2045,6 +2083,15 @@ async function buildAgentWorkerContext(
     locale: sixb.locale,
     timeZone: sixb.timeZone,
   }
+}
+
+async function buildAgentWorkerContext(
+  sixb: TestSixb,
+  input: { readonly apiBaseUrl?: string } = {}
+): Promise<
+  AgentRunnerContext & Pick<AgentWorkerContext, "storage" | "recoverAiModelCall" | "streamSink">
+> {
+  const context = workerContextOf(sixb, input)
   const runId = "direct-agent-worker-test"
   const executionId = await createTestAgentExecution(context.storage, {
     projectId: PROJECT_ID,
@@ -8142,36 +8189,31 @@ describe("AgentWorker", () => {
       locale: "fr-FR",
     })
     if (!child) throw new Error("Expected the child.")
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const run = await waitForTerminalRun(agentStorageOf(sixb), child.runId)
-      expect(run).toMatchObject({
-        status: "succeeded",
-        spec: { timeZone: "Europe/Paris", locale: "fr-FR" },
-      })
+    await runChildren(sixb, [child.runId])
+    const run = await waitForTerminalRun(agentStorageOf(sixb), child.runId)
+    expect(run).toMatchObject({
+      status: "succeeded",
+      spec: { timeZone: "Europe/Paris", locale: "fr-FR" },
+    })
 
-      const system = systemPromptOf(request?.messages)
-      expect(system).toContain(
-        "<agent_instructions>\nRevenue means netRevenue.\n</agent_instructions>"
-      )
-      expect(system).toContain(
-        ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
-      )
-      expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
-      expect(system).toContain(
-        '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
-      )
-      expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
-      expect(system).not.toContain("Speak like a helpful teammate")
-      expect(system).not.toContain("sixb memory save")
-      // The task is dated as its requester reads the time.
-      expect(JSON.stringify(request?.messages.at(-1))).toContain(
-        renderCurrentTime(run.createdAt, "Europe/Paris")
-      )
-    } finally {
-      await worker.stop()
-    }
+    const system = systemPromptOf(request?.messages)
+    expect(system).toContain(
+      "<agent_instructions>\nRevenue means netRevenue.\n</agent_instructions>"
+    )
+    expect(system).toContain(
+      ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
+    )
+    expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
+    expect(system).toContain(
+      '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
+    )
+    expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
+    expect(system).not.toContain("Speak like a helpful teammate")
+    expect(system).not.toContain("sixb memory save")
+    // The task is dated as its requester reads the time.
+    expect(JSON.stringify(request?.messages.at(-1))).toContain(
+      renderCurrentTime(run.createdAt, "Europe/Paris")
+    )
   })
 
   test("a child publishes into its parent's thread and answers once; a retry takes it back", async () => {
@@ -9160,8 +9202,8 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("a child's wait in the queue counts against its parent's deadline", async () => {
-    // Removal proof: create the child's runtime without `deadline` in executeSubagent; it gets the
+  test("a child that starts late still ends at its parent's deadline", async () => {
+    // Removal proof: create the child's runtime without `deadline` in ChildRunner.run; it gets the
     // worker's ten minutes from its start and outlives its parent.
     const model = new WorkerTestModel({
       modelId: "blocking-child",
@@ -9178,7 +9220,6 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixb(model)
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
 
     jest.useFakeTimers()
     try {
@@ -9191,19 +9232,19 @@ describe("AgentWorker", () => {
         await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
       ).toMatchObject({ spec: { deadline: deadline.toISOString() } })
 
-      // The child waits in the queue for 3 of its parent's 5 seconds.
+      // The child starts 3 of its parent's 5 seconds after it was spawned.
       jest.advanceTimersByTime(3_000)
-      await worker.start()
+      const ran = runChildren(sixb, [spawned.runId])
       const child = await underFakeTime(
         () => terminalRun(storage, spawned.runId),
         "child at its parent's deadline"
       )
+      await ran
 
       expect(child).toMatchObject({ status: "failed", finishReason: "timeout" })
       expect(child.completedAt?.getTime()).toBeGreaterThanOrEqual(deadline.getTime())
       expect(child.completedAt?.getTime()).toBeLessThan(deadline.getTime() + 1_000)
     } finally {
-      await stopUnderFakeTime(worker)
       jest.useRealTimers()
     }
   })
@@ -9267,55 +9308,6 @@ describe("AgentWorker", () => {
       expect(
         () => new AgentWorker(sixb, workerOptions({ subagentConcurrencyPerRun: value }))
       ).toThrow("Agent worker option subagentConcurrencyPerRun must be a positive integer.")
-      expect(() => new AgentWorker(sixb, workerOptions({ subagentConcurrency: value }))).toThrow()
-    }
-  })
-
-  test("runs as many children at once as the worker's subagent concurrency allows", async () => {
-    // Removal proof: give the child lane a claim limit of 4 again; the other child starts while
-    // the held one is still running.
-    let releaseHeld!: () => void
-    const held = new Promise<void>((resolve) => {
-      releaseHeld = resolve
-    })
-    let heldTask: string | undefined
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        const task = JSON.stringify(options.messages.at(-1))
-        if (heldTask === undefined) {
-          heldTask = task
-          await held
-        }
-        return answerStream("Done.")
-      },
-    })
-    const sixb = buildSixb(model)
-    const storage = agentStorageOf(sixb)
-    const { children } = await spawnChildOfRunningTurn(
-      sixb,
-      { text: "Delegate twice." },
-      { keys: ["first", "second"] }
-    )
-    const worker = new AgentWorker(sixb, workerOptions({ subagentConcurrency: 1 }))
-    await worker.start()
-    try {
-      await waitFor(() => heldTask !== undefined, { label: "a child model call" })
-      releaseHeld()
-      const runs = await Promise.all(
-        children.map((child) => waitForTerminalRun(storage, child.runId))
-      )
-      expect(runs.map((run) => run.status)).toEqual(["succeeded", "succeeded"])
-
-      const heldKey = heldTask?.includes("Research first.") ? "first" : "second"
-      const heldRun = runs.find((run) => run.kind === "subagent" && run.spawnKey === heldKey)
-      const otherRun = runs.find((run) => run !== heldRun)
-      expect(otherRun?.startedAt?.getTime()).toBeGreaterThanOrEqual(
-        heldRun?.completedAt?.getTime() ?? Number.POSITIVE_INFINITY
-      )
-    } finally {
-      releaseHeld()
-      await worker.stop()
     }
   })
 
@@ -9359,9 +9351,47 @@ describe("AgentWorker", () => {
     ])
   })
 
-  test("ends a child found running on redelivery as interrupted, once its lease lapses", async () => {
-    // Removal proof: drop the `running` branch in executeSubagent, and the redelivery replays the
-    // child: its model runs again. Drop its lease check, and it ends before its owner's lease does.
+  test("ends a child as interrupted when its worker stops", async () => {
+    // Removal proof: record the child's own abort in ChildRunner.run instead of interruptedError;
+    // it ends cancelled with no finish reason, and its parent cannot tell it to spawn it again.
+    const model = new WorkerTestModel({
+      modelId: "blocking-child",
+      stream: async (options) => untilAborted(options),
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const {
+      children: [spawned],
+    } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+    if (!spawned) throw new Error("Expected the child.")
+    const modelCalls = spyOn(model, "stream")
+    const stop = new AbortController()
+    try {
+      const ran = runChildren(sixb, [spawned.runId], stop.signal)
+      await waitFor(() => modelCalls.mock.calls.length > 0, { label: "the child's model call" })
+      stop.abort(new DOMException("The worker stopped.", "AbortError"))
+      await ran
+
+      expect(
+        await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
+      ).toMatchObject({
+        status: "cancelled",
+        finishReason: "interrupted",
+        error: {
+          message: expect.stringContaining(
+            "Spawn it again with a new key if its answer is still needed"
+          ),
+        },
+      })
+    } finally {
+      modelCalls.mockRestore()
+    }
+  })
+
+  test("ends a child its runner left running once its parent ended and its lease lapsed", async () => {
+    // Removal proof: drop the lapsed-lease branch of requestSubagentCancellation, and the child is
+    // only sent a cancel no runner hears: it never ends. End it without its lease check, and it ends
+    // while the runner that may still hold it could write.
     const model = answerModel()
     const sixb = buildSixb(model)
     const storage = agentStorageOf(sixb)
@@ -9371,21 +9401,28 @@ describe("AgentWorker", () => {
     jest.useFakeTimers()
     try {
       const {
+        parent,
         children: [spawned],
       } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
       if (!spawned) throw new Error("Expected the child.")
-      // A delivery started the child, then died: its job comes back while its lease may still run.
+      // A runner started the child, then died with its parent's turn, whose end was recorded.
       const leaseExpiresAt = new Date(Date.now() + 30_000)
       await storage.runs.start({
         projectId: PROJECT_ID,
         id: spawned.runId,
         execution: { token: createAgentRunExecutionToken(), queueLeaseExpiresAt: leaseExpiresAt },
       })
+      await storage.runs.finish({
+        projectId: PROJECT_ID,
+        id: parent.id,
+        executionToken: parent.execution?.token ?? "",
+        status: "succeeded",
+      })
 
       await worker.start()
       const child = await underFakeTime(
         () => terminalRun(storage, spawned.runId),
-        "redelivered child terminal"
+        "orphaned child terminal"
       )
 
       expect(child).toMatchObject({
@@ -9486,19 +9523,8 @@ describe("AgentWorker", () => {
       })
     )
     const modelCalls = spyOn(model, "stream")
-    const worker = new AgentWorker(workerHost, workerOptions())
-    const completion = observeQueueSettlement(sixb.queues.agentChildren)
-    await worker.start()
     try {
-      await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
-          return takeover ? takeoverToken : run?.status === "failed"
-        },
-        { label: "revoked child delivery" }
-      )
-      await completion.wait()
-      await worker.stop()
+      await runChildren(workerHost, [child.runId])
       const run = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
       expect(run).toMatchObject(
         takeover
@@ -9510,9 +9536,7 @@ describe("AgentWorker", () => {
         status: "running",
       })
     } finally {
-      await worker.stop()
       modelCalls.mockRestore()
-      completion.restore()
     }
   })
 
@@ -9601,11 +9625,8 @@ describe("AgentWorker", () => {
       limit: { meter: "tokens.total", amount: 0 },
     })
     const modelCalls = spyOn(model, "stream")
-    const completion = observeQueueSettlement(sixb.queues.agentChildren)
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
     try {
-      await completion.wait()
+      await runChildren(sixb, [child.runId])
       const result = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
       expect(result).toMatchObject({
         status: "failed",
@@ -9616,9 +9637,7 @@ describe("AgentWorker", () => {
         status: "running",
       })
     } finally {
-      await worker.stop()
       modelCalls.mockRestore()
-      completion.restore()
     }
   })
 

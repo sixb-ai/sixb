@@ -126,7 +126,6 @@ async function main(): Promise<void> {
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
         vectorConcurrency: getFlag("vector-concurrency"),
-        subagentConcurrency: getFlag("subagent-concurrency"),
         subagentConcurrencyPerRun: getFlag("subagent-concurrency-per-run"),
         desktop: hasFlag("desktop"),
       })
@@ -143,7 +142,6 @@ async function main(): Promise<void> {
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlag("concurrency"),
         vectorConcurrency: getFlag("vector-concurrency"),
-        subagentConcurrency: getFlag("subagent-concurrency"),
         subagentConcurrencyPerRun: getFlag("subagent-concurrency-per-run"),
       })
       break
@@ -159,7 +157,6 @@ async function main(): Promise<void> {
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
         vectorConcurrency: getFlag("vector-concurrency"),
-        subagentConcurrency: getFlag("subagent-concurrency"),
         subagentConcurrencyPerRun: getFlag("subagent-concurrency-per-run"),
       })
       break

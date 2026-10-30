@@ -144,18 +144,18 @@ Each child:
   sandbox, listed in its task and in `$SIXB_ATTACHMENTS`, and returns what it writes to `out/`;
 - works in a thread of its own, its run's `threadId`, beside a durable run, usage records and
   stream (see [Child threads](#child-threads));
-- stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
-  the parent's deadline, which its spec carries, so its wait in the queue counts against it. Once
+- stops with its parent: when the parent finishes, is cancelled or times out, or its runner stops.
+  Its wall clock ends at the parent's deadline, which its spec carries, however late it starts. Once
   its parent has ended, the API and the publish transaction refuse it. A child waiting on its
   question when its parent finishes pauses instead: see [questions to the parent](#questions-to-the-parent);
-- is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
-  run actions or published. Its parent decides whether to spawn it again;
+- is never replayed: one its runner stopped with, or left running, ends `interrupted`, since it may
+  already have run actions or published. Its parent decides whether to spawn it again;
 - holds a call its mode does not run on its parent's turn, and pauses: see
   [paused children](#paused-children).
 
-`subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They execute on a
-separate worker lane, sized by `subagentConcurrency`, so waiting parents cannot consume their
-capacity. Child agents cannot delegate again or start workflows.
+`subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They run in the
+parent's runner (see [Child runs](#child-runs)), so a waiting parent never waits on capacity another
+turn holds. Child agents cannot delegate again or start workflows.
 
 The delegation guide lists each model from its configured definition, never its provider catalog,
 so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
@@ -338,6 +338,12 @@ what it waits for (`src/subagent-tools.ts`, `src/child-questions.ts`):
   deadline.
 
 ## Child runs
+
+A child runs in its parent's runner: `spawn_agent` creates its queued run, and the coordinator
+hands it to the runner's `startChild`, which claims it under the parent's delivery, its lease
+renewed with the parent's, and runs it beside the turn. Nothing queues it, so a runner that stops
+takes its children with it; its repair pass ends a child left running once its parent has ended and
+its lease has lapsed.
 
 Child events are recorded in the broker, and reach whoever reads the conversation: the API lists
 its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by

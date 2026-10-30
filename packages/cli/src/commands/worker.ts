@@ -28,7 +28,6 @@ export interface WorkerOptions {
   agentTurnTimeout?: string
   concurrency?: string
   vectorConcurrency?: string
-  subagentConcurrency?: string
   subagentConcurrencyPerRun?: string
 }
 
@@ -40,7 +39,6 @@ export async function runWorker(options: WorkerOptions = {}) {
   const workerConcurrency = resolveSingleWorkerConcurrency(workerType, options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const subagents = resolveSubagentConcurrency({
-    perWorker: options.subagentConcurrency,
     perRun: options.subagentConcurrencyPerRun,
   })
   const entry = await resolveRuntimeEntry({ entry: options.entry })
