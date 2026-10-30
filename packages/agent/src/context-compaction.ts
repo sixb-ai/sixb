@@ -375,7 +375,6 @@ async function generateCheckpointSummary(input: {
       ],
       maxSteps: 1,
       maxOutputTokens,
-      onModelCallEnd: input.runtime.usageRecorder.onModelCallEnd,
       signal: input.runtime.signal,
     })
   } catch (error) {

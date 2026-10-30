@@ -9,12 +9,12 @@ import {
 import { ModelProviderError, ModelStreamError, StructuredOutputError } from "../models/errors"
 import type {
   LanguageModelStreamEvent,
-  ModelCallEndEvent,
   ModelFinishReason,
   ModelStep,
   ModelUiChunk,
   ModelUsage,
 } from "../models/events"
+import { LanguageModelCallMeter } from "../models/language-call"
 import type {
   LanguageModel,
   ModelReasoning,
@@ -30,12 +30,7 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models/messages"
-import {
-  estimateModelCall,
-  type ModelCallCost,
-  type ModelReportedCost,
-  rateModelCall,
-} from "../models/pricing"
+import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -62,7 +57,6 @@ interface ModelLoopOptions {
     input: PrepareModelStepInput
   ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
   readonly onEvent?: (event: ModelUiChunk) => void | Promise<void>
-  readonly onModelCallEnd?: (event: ModelCallEndEvent) => void | Promise<void>
   readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
   /**
    * Asked after each step that ran local tools, once `onStepEnd` settled: `true` ends the loop
@@ -253,29 +247,9 @@ export async function runModelLoop(
       }
     } finally {
       idle.dispose()
-      // Once a stream is accepted, cancellation or protocol failure cannot erase the call.
-      // Only a finish event establishes final meters; interrupted calls remain explicitly unknown.
-      if (accepted) {
-        const facts = accumulator.accounting()
-        const estimate = accumulator.isFinished() ? estimateModelCall(input.model, facts) : cost
-        cost = facts.reportedCost
-          ? rateModelCall({ usage: facts.usage, reported: facts.reportedCost })
-          : estimate
-        await input.onModelCallEnd?.({
-          callId,
-          modelKind: "language",
-          providerId: input.model.providerId,
-          modelId: input.model.modelId,
-          responseId: facts.responseId ?? `${callId}:response`,
-          providerIds: facts.providerIds,
-          responseModelId: facts.responseModelId,
-          usage: facts.usage,
-          cost,
-          ...(facts.reportedCost === undefined ? {} : { estimate }),
-          ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
-          ...(facts.route === undefined ? {} : { route: facts.route }),
-        })
-      }
+      // The step's cost, as the model records the call: the model is what records it (see
+      // AiModelCallRecorder.wrapModel), never the loop that reads it.
+      if (accepted) cost = accumulator.meter.end({ model: input.model, callId }).cost
     }
 
     if (input.signal.aborted && !accumulator.isFinished()) {
@@ -690,13 +664,9 @@ class StreamAccumulator {
   private finished = false
   private finishReason: ModelFinishReason | undefined
   private rawFinishReason: string | undefined
-  private usage: ModelUsage = {}
-  private responseId: string | undefined
-  private providerIds: import("../models/events").ModelProviderIds | undefined
-  private responseModelId: string | undefined
+  /** Who served the call, what it used and what the provider charged. */
+  readonly meter = new LanguageModelCallMeter()
   private projectionError: Error | undefined
-  private reportedCost: ModelReportedCost | undefined
-  private route: import("../models/events").ModelRoute | undefined
 
   constructor(private readonly onEvent: RunModelLoopInput["onEvent"]) {}
 
@@ -715,9 +685,7 @@ class StreamAccumulator {
         return
       case "response-metadata":
         this.requireStarted(event.type)
-        this.responseId = event.id ?? this.responseId
-        if (event.providerIds) this.providerIds = { ...this.providerIds, ...event.providerIds }
-        this.responseModelId = event.modelId ?? this.responseModelId
+        this.meter.accept(event)
         return
       case "text-start":
         await this.startText(event)
@@ -774,9 +742,7 @@ class StreamAccumulator {
         this.finished = true
         this.finishReason = event.finishReason
         this.rawFinishReason = event.rawFinishReason
-        this.usage = event.usage
-        this.reportedCost = event.reportedCost
-        this.route = event.route
+        this.meter.accept(event)
         return
       case "error":
         throw event.error instanceof Error
@@ -812,14 +778,7 @@ class StreamAccumulator {
   }
 
   accounting() {
-    return {
-      usage: this.usage,
-      ...(this.responseId === undefined ? {} : { responseId: this.responseId }),
-      ...(this.providerIds === undefined ? {} : { providerIds: this.providerIds }),
-      ...(this.responseModelId === undefined ? {} : { responseModelId: this.responseModelId }),
-      ...(this.reportedCost === undefined ? {} : { reportedCost: this.reportedCost }),
-      ...(this.route === undefined ? {} : { route: this.route }),
-    }
+    return this.meter.facts()
   }
 
   /**

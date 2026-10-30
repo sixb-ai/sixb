@@ -6,6 +6,7 @@ import {
   type RecordAiModelCallInput,
 } from "../../storage"
 import type { ModelCallEndEvent, ModelUsage } from "../events"
+import { reportModelCalls } from "../language-call"
 import type { LanguageModel } from "../language-model"
 import { ModelUsageRecordingError } from "./errors"
 import {
@@ -48,7 +49,7 @@ interface AiModelCallRecorderInternals {
   readonly recordAccounting?: (input: RecoverAiModelCallInput) => Promise<void>
 }
 
-/** Persist every completed provider call before another billable loop step can start. */
+/** Admit every model call against the execution's limits, and record each before it is over. */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
   private readonly now: () => Date
@@ -85,8 +86,14 @@ export class AiModelCallRecorder {
     return this.input.attempt
   }
 
-  /** Wrap the resolved model so all calls in an execution share admission. */
+  /**
+   * Wrap the resolved model so every call it makes is admitted against the execution's limits and
+   * records itself: the wrapper reads the stream it hands on, and records the call when it finishes,
+   * before its `finish` event reaches the reader, or when it ends otherwise, its usage unknown. Who
+   * reads the stream never reports what the call used.
+   */
   wrapModel(model: LanguageModel): LanguageModel {
+    const recorded = reportModelCalls(model, this.onModelCallEnd)
     return {
       providerId: model.providerId,
       modelId: model.modelId,
@@ -113,7 +120,7 @@ export class AiModelCallRecorder {
           estimatedTotalTokens: estimatedAiModelCallTotalTokens(inputTokens, outputTokenAllowance),
         })
         try {
-          return await model.stream(request)
+          return await recorded.stream(request)
         } catch (error) {
           await this.markCallUnknown(request.callId)
           throw error

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import { reportModelCalls } from "@sixb/core/internal/model-execution"
 import type { ModelMessage } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { type AzureAIFoundryProvider, createAzureAIFoundry } from "../src"
@@ -84,7 +85,10 @@ for (const name of names) {
       const prompt: ModelMessage[] = [{ role: "user", content }]
       const executed: string[] = []
       const result = await runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          inputTokens += event.usage.inputTokens ?? 0
+          outputTokens += event.usage.outputTokens ?? 0
+        }),
         messages: prompt,
         reasoning,
         maxSteps: 3,
@@ -118,10 +122,6 @@ for (const name of names) {
             errorText: () => "Invalid lookup key",
           },
         ],
-        onModelCallEnd: (event) => {
-          inputTokens += event.usage.inputTokens ?? 0
-          outputTokens += event.usage.outputTokens ?? 0
-        },
       })
       console.info(
         "[FoundryContractLive]",

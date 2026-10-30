@@ -1,5 +1,6 @@
 import { afterAll, expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import { reportModelCalls } from "@sixb/core/internal/model-execution"
 import type {
   JsonObject,
   LanguageModel,
@@ -142,7 +143,10 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
         "Call lookup_code once to obtain the secret code, then reply with that code."
       )
       const result = await runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          reportedInput += event.usage.inputTokens ?? 0
+          reportedOutput += event.usage.outputTokens ?? 0
+        }),
         messages: prompt,
         signal: AbortSignal.timeout(60_000),
         maxSteps: 2,
@@ -160,10 +164,6 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
             errorText: () => "lookup failed",
           },
         ],
-        onModelCallEnd: (event) => {
-          reportedInput += event.usage.inputTokens ?? 0
-          reportedOutput += event.usage.outputTokens ?? 0
-        },
       })
       expect(result.status).toBe("completed")
       expect(executions).toBe(1)
@@ -199,16 +199,15 @@ live.skipIf(!reasoning)(
     })
     const prompt = messages("What is 17 times 19? Reply with the number only.")
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        reportedInput += event.usage.inputTokens ?? 0
+        reportedOutput += event.usage.outputTokens ?? 0
+      }),
       messages: prompt,
       signal: AbortSignal.timeout(60_000),
       maxSteps: 1,
       maxOutputTokens: 768,
       reasoning: "low",
-      onModelCallEnd: (event) => {
-        reportedInput += event.usage.inputTokens ?? 0
-        reportedOutput += event.usage.outputTokens ?? 0
-      },
     })
     expect(result.status).toBe("completed")
     const history = toModelMessages([
@@ -476,7 +475,10 @@ live.skipIf(!deepseekReasoning)(
     })
     let executions = 0
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        reportedInput += event.usage.inputTokens ?? 0
+        reportedOutput += event.usage.outputTokens ?? 0
+      }),
       messages: messages("Use lookup_code with key 'secret', then answer with the returned code."),
       maxSteps: 2,
       maxOutputTokens: 768,
@@ -503,10 +505,6 @@ live.skipIf(!deepseekReasoning)(
           errorText: () => "lookup failed",
         },
       ],
-      onModelCallEnd: (event) => {
-        reportedInput += event.usage.inputTokens ?? 0
-        reportedOutput += event.usage.outputTokens ?? 0
-      },
     })
     expect(result.status).toBe("completed")
     expect(executions).toBe(1)
@@ -587,7 +585,10 @@ live.skipIf(!glm)(
     const model = provider().chat(glm!, { definition: { capabilities: { localTools: true } } })
     let executions = 0
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        reportedInput += event.usage.inputTokens ?? 0
+        reportedOutput += event.usage.outputTokens ?? 0
+      }),
       messages: messages("Call lookup_code with key 'secret', then answer with the returned code."),
       maxSteps: 2,
       maxOutputTokens: 768,
@@ -613,10 +614,6 @@ live.skipIf(!glm)(
           errorText: () => "lookup failed",
         },
       ],
-      onModelCallEnd: (event) => {
-        reportedInput += event.usage.inputTokens ?? 0
-        reportedOutput += event.usage.outputTokens ?? 0
-      },
     })
     expect(result.status).toBe("completed")
     expect(executions).toBe(1)

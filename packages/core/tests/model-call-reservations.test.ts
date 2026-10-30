@@ -64,7 +64,6 @@ async function setup(events: () => AsyncIterable<LanguageModelStreamEvent>) {
       maxSteps: 2,
       signal: new AbortController().signal,
       generateCallId: () => `call-${++callIndex}`,
-      onModelCallEnd: recorder.onModelCallEnd,
     })
   return {
     storage,
