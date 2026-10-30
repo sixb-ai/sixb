@@ -38,15 +38,26 @@ export interface GuestCommand {
 
 /**
  * How a provider installs credentials in a guest, all as root:
- * 1. `install` writes the credentials and the forwarder, and has a running forwarder reload. It
- *    exits {@link GUEST_FORWARDER_NOT_RUNNING} when none runs, 3 without Bun or Node.
+ * 1. `install` writes the credentials and the forwarder from its env, and has a running forwarder
+ *    reload. It exits {@link GUEST_FORWARDER_NOT_RUNNING} when none runs, 3 without Bun or Node.
  * 2. `start`, only then, runs the forwarder detached, so it outlives the exec that started it.
  * 3. `ready` waits until every credential origin's socket exists (exit 4 after five seconds).
+ *
+ * A provider that writes root-only files without passing their contents in arguments may write
+ * `files` instead, in the root-only `state` directory, and run `install` without the env entries
+ * that carry them: it writes only what its env holds.
  */
 export interface GuestCredentialsCommands {
   readonly install: GuestCommand
   readonly start: GuestCommand
   readonly ready: GuestCommand
+  readonly files: readonly {
+    readonly path: string
+    readonly contents: string
+    readonly mode: number
+  }[]
+  /** The env entries of `install` that carry the files' contents. */
+  readonly fileEnv: readonly string[]
 }
 
 /**
@@ -97,19 +108,22 @@ export function guestCredentialsCommands(
       },
     },
     start: {
-      argv: [
-        "sh",
-        "-c",
-        'exec "$(command -v bun || command -v node)" "$1"',
-        "sh",
-        `${paths.state}/forwarder.mjs`,
-      ],
+      argv: ["sh", "-c", START_SCRIPT, "sh", `${paths.state}/forwarder.mjs`],
       env: {},
     },
     ready: {
       argv: ["sh", "-c", READY_SCRIPT],
       env: { SIXB_GUEST_EXPECTED_SOCKETS: sockets.join(" ") },
     },
+    files: [
+      {
+        path: `${paths.state}/credentials.json`,
+        contents: JSON.stringify(credentials),
+        mode: 0o600,
+      },
+      { path: `${paths.state}/forwarder.mjs`, contents: program, mode: 0o600 },
+    ],
+    fileEnv: [GUEST_CREDENTIALS_ENV, "SIXB_GUEST_FORWARDER"],
   }
 }
 
@@ -123,9 +137,13 @@ state="$SIXB_GUEST_STATE"
 mkdir -p "$state" "$SIXB_GUEST_SOCKETS"
 chmod 700 "$state"
 chmod 755 "$SIXB_GUEST_SOCKETS"
-printf '%s' "$${GUEST_CREDENTIALS_ENV}" > "$state/credentials.json.next"
-mv "$state/credentials.json.next" "$state/credentials.json"
-printf '%s' "$SIXB_GUEST_FORWARDER" | base64 -d > "$state/forwarder.mjs"
+if [ "\${${GUEST_CREDENTIALS_ENV}+set}" = set ]; then
+  printf '%s' "$${GUEST_CREDENTIALS_ENV}" > "$state/credentials.json.next"
+  mv "$state/credentials.json.next" "$state/credentials.json"
+fi
+if [ -n "\${SIXB_GUEST_FORWARDER:-}" ]; then
+  printf '%s' "$SIXB_GUEST_FORWARDER" | base64 -d > "$state/forwarder.mjs"
+fi
 pid=$(cat "$state/forwarder.pid" 2>/dev/null || true)
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
   kill -HUP "$pid"
@@ -133,6 +151,11 @@ if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
 fi
 command -v bun >/dev/null 2>&1 || command -v node >/dev/null 2>&1 || exit 3
 exit ${GUEST_FORWARDER_NOT_RUNNING}`
+
+// The system bundle as Node's extra CAs: a guest whose egress is inspected signs with its own CA.
+const START_SCRIPT = `[ ! -f /etc/ssl/certs/ca-certificates.crt ] ||
+  export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+exec "$(command -v bun || command -v node)" "$1"`
 
 const READY_SCRIPT = `set -eu
 for socket in $SIXB_GUEST_EXPECTED_SOCKETS; do
