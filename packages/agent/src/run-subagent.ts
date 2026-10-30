@@ -74,7 +74,7 @@ export async function runSubagent(input: {
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
   const generation = await runModelLoop({
-    model: runtime.usageRecorder.wrapModel(plan.model),
+    model: plan.model,
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
@@ -292,7 +292,6 @@ function assertSubagentCanFinalize(input: {
   readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
 }): void {
   throwIfExecutionLost(input.runtime.sourceSignal)
-  input.runtime.usageRecorder.assertHealthy()
   input.sandboxReadiness.throwIfFailed()
   input.runtime.assertCanContinue()
 }

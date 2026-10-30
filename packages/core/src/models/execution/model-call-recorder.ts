@@ -94,6 +94,7 @@ export class AiModelCallRecorder {
    */
   wrapModel(model: LanguageModel): LanguageModel {
     const recorded = reportModelCalls(model, this.onModelCallEnd)
+    // Its settings carried over, which whoever calls the model reads.
     return {
       ...recorded,
       stream: async (request) => {

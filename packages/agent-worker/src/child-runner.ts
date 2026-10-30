@@ -245,10 +245,11 @@ export class ChildRunner {
       const { executionContext, durableExecution, childThread, conversation, plan, history } =
         prepared
       await session.events.publishStarted(run)
-      runtime = createAgentTurnRuntime({ signal: turnSignal, modelCalls: prepared.modelCalls })
+      runtime = createAgentTurnRuntime({ signal: turnSignal })
+      // Project tools run in this process: their model calls bill to the run too.
       bindAgentModelExecution(executionContext.sixb, {
         signal: runtime.signal,
-        accounting: runtime.usageRecorder,
+        accounting: prepared.modelCalls,
       })
       // From the first message: one its parent sent while it was queued is read at its first step,
       // and a continuation's first step reads what the runs before it left unread.
@@ -333,7 +334,10 @@ export class ChildRunner {
     if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
       throw new DOMException("The parent Agent run is no longer active.", "AbortError")
     }
-    const configuredPlan = resolveRunPlan(host.definitions, await session.plan())
+    const runPlan = await session.plan()
+    const configuredPlan = resolveRunPlan(host.definitions, runPlan, {
+      model: await session.models.language(runPlan.model),
+    })
     if (
       !durableExecution ||
       durableExecution.source.type !== "execution" ||
@@ -369,7 +373,7 @@ export class ChildRunner {
       )
     }
     const { conversation } = child
-    const prepared = await prepareAgentModel(configuredPlan)
+    const prepared = prepareAgentModel(configuredPlan)
     const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
     const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
     const modelCalls = await session.modelCalls()

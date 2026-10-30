@@ -143,7 +143,9 @@ export async function runTurnInSession(
   try {
     const threadContext =
       turn.threadContext ?? agentThreadModelContext((await session.context()).history)
-    return await runAgentTurn({ ...turn, session, threadContext })
+    // As the session hands a runner its model: each call admitted and recorded for the run.
+    const model = (await session.modelCalls()).wrapModel(turn.plan.model)
+    return await runAgentTurn({ ...turn, plan: { ...turn.plan, model }, session, threadContext })
   } finally {
     session.close()
   }

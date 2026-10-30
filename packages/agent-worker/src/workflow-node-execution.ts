@@ -28,6 +28,7 @@ import {
 import {
   type AiModelCallRecorder,
   ModelUsageRecordingError,
+  resolveLanguageModel,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -139,7 +140,11 @@ export async function executeWorkflowAgentNode(
       authorization: { type: "principal", context: resolved.context },
       authorPrincipal: resolved.identity.principal,
     })
-    const prepared = await prepareAgentModel(configuredPlan)
+    // The step runs in this process: the worker pins its model and records each call.
+    const prepared = prepareAgentModel({
+      ...configuredPlan,
+      model: usageRecorder.wrapModel(await resolveLanguageModel(configuredPlan.model)),
+    })
     const authorization = { type: "principal" as const, context: resolved.context }
     const propertyClearance = resolveAgentPropertyClearance(
       input.host.definitions.ontology,
@@ -192,7 +197,6 @@ export async function executeWorkflowAgentNode(
       prompt: reserved.prompt,
       createdAt: reserved.createdAt,
       valueTypesById,
-      usageRecorder,
       signal: nodeSignal,
     })
 
