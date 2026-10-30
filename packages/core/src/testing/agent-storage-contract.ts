@@ -1806,6 +1806,59 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("records a running run's cancel once, survives a reclaim, and leaves other states", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        const queued = await createRun(storage, fixture, runInput({ id: "run_queued" }))
+        expect(
+          (await storage.runs.requestCancel({ projectId, id: queued.id })).cancelRequestedAt
+        ).toBeUndefined()
+
+        await storage.threads.create(threadInput({ id: "thread_2" }))
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_1",
+            threadId: "thread_2",
+            execution: execution("exec_1", at("2026-06-23T10:02:00.000Z")),
+          })
+        )
+        const first = await storage.runs.requestCancel({
+          projectId,
+          id: "run_1",
+          at: at("2026-06-23T10:01:00.000Z"),
+        })
+        expect(first.cancelRequestedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+        const again = await storage.runs.requestCancel({
+          projectId,
+          id: "run_1",
+          at: at("2026-06-23T10:01:30.000Z"),
+        })
+        expect(again.cancelRequestedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+
+        // The renewal a runner makes reads it back, and a reclaim keeps it.
+        const renewed = await storage.runs.confirmExecutionOwnership({
+          projectId,
+          id: "run_1",
+          executionToken: "exec_1",
+          queueLeaseExpiresAt: at("2026-06-23T10:03:00.000Z"),
+        })
+        expect(renewed.cancelRequestedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+        const reclaimed = await storage.runs.reclaim({
+          projectId,
+          id: "run_1",
+          execution: execution("exec_2", at("2026-06-23T10:04:00.000Z")),
+        })
+        expect(reclaimed.cancelRequestedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+
+        await expectAgentError(
+          storage.runs.requestCancel({ projectId, id: "run_missing" }),
+          "run_not_found"
+        )
+      })
+    })
+
     test("does not alias stored run records to callers", async () => {
       await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
@@ -2176,6 +2229,37 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           messageCount: 1,
           lastMessageAt: at("2026-06-23T10:00:30.000Z"),
         })
+      })
+    })
+
+    // Guard proof: drop the fence check from deleteByRunId; the stale token deletes the message.
+    test("deletes a run's messages for a fencing run only while it runs under its token", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({ id: "run_1", execution: execution("exec_1") })
+        )
+        await storage.messages.append({
+          id: "msg_asst_1",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Hi." }],
+        })
+        const remove = (executionToken: string) =>
+          storage.messages.deleteByRunId({
+            projectId,
+            threadId: "thr_1",
+            runId: "run_1",
+            fence: { runId: "run_1", executionToken },
+          })
+
+        await expectAgentError(remove("exec_stale"), "execution_lost")
+        expect(await storage.messages.getById({ projectId, id: "msg_asst_1" })).not.toBeNull()
+        await expect(remove("exec_1")).resolves.toBe(1)
       })
     })
 

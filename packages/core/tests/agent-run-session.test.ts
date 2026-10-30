@@ -247,6 +247,36 @@ describe("an agent run session", () => {
   })
 })
 
+describe("a cancel recorded on the run", () => {
+  // Guard proof: drop readCancel from renewLease; the renewal returns and the session runs on.
+  test("cancels the session at its next lease renewal, with no broker cancel", async () => {
+    const { host, storage, run } = await setup()
+    const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!session) throw new Error("Expected the run to be claimed.")
+
+    await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: run.id })
+    expect(session.cancelled.aborted).toBe(false)
+    await session.renewLease(LEASE)
+
+    expect(session.cancelled.aborted).toBe(true)
+    session.close()
+  })
+
+  // Guard proof: drop readCancel(run) from openAgentRunSession; the reclaimed session runs on.
+  test("cancels a session claimed after it", async () => {
+    const { host, storage, run } = await setup()
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!first) throw new Error("Expected the run to be claimed.")
+    first.close()
+    const asked = await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: run.id })
+
+    const second = await claimAgentRun(host, { run: asked, leaseExpiresAt: LEASE })
+
+    expect(second?.cancelled.aborted).toBe(true)
+    second?.close()
+  })
+})
+
 describe("an agent run session's children and mail", () => {
   // Clearing a dead attempt deletes messages from a child's thread: a turn reclaimed by another
   // delivery must not. Drop assertOwned from clearAttempt in run-session-children.ts; it deletes.

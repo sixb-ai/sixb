@@ -1,3 +1,4 @@
+import type { Broker } from "../broker"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentRunRecord,
@@ -56,8 +57,21 @@ export async function cancelAgentRun(
     )
   }
 
-  await publishAgentRunCancel(runtime.broker, { projectId: runtime.projectId, runId: current.id })
+  await requestAgentRunCancel({ ...runtime, storage }, current.id)
   return current
+}
+
+/**
+ * Ask a running turn or child to stop. The cancel is recorded on the run first, so its run token
+ * stops working at once and a runner that never hears the broker learns of it at its next lease
+ * renewal; the broker's cancel then stops a runner that hears it right away.
+ */
+export async function requestAgentRunCancel(
+  host: { readonly projectId: string; readonly broker: Broker; readonly storage: AgentStorage },
+  runId: string
+): Promise<void> {
+  await host.storage.runs.requestCancel({ projectId: host.projectId, id: runId })
+  await publishAgentRunCancel(host.broker, { projectId: host.projectId, runId })
 }
 
 /**

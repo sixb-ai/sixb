@@ -560,7 +560,7 @@ describe("run tokens", () => {
     const refused = await read()
     expect(refused.status).toBe(409)
     await expect(refused.json()).resolves.toEqual({
-      error: "The child agent's parent run has ended.",
+      error: "The child agent's parent run has ended or been stopped.",
     })
   })
 
@@ -689,6 +689,22 @@ describe("run tokens", () => {
       expect(content.status).toBe(200)
       expect(new Uint8Array(await content.arrayBuffer())).toEqual(png)
     }
+  })
+
+  // Guard proof: drop the cancelRequestedAt checks in run-token.ts; both requests still get in.
+  test("refuses a run's token once it is asked to stop, and its child's", async () => {
+    const turn = await createRunTokenRuntime()
+    const child = await createRunTokenRuntime({ executionKind: "subagent" })
+    const read = (runtime: typeof turn) =>
+      runtime.app.fetch(new Request(`${runtime.apiBaseUrl}/api/object-types`))
+    expect((await read(turn)).status).toBe(200)
+    expect((await read(child)).status).toBe(200)
+
+    await turn.storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: turn.runId })
+    await child.storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: "parent-run-1" })
+
+    expect((await read(turn)).status).toBe(403)
+    expect((await read(child)).status).toBe(409)
   })
 
   test("rejects a run token after its projected queue ownership expires", async () => {

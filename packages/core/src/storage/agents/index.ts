@@ -77,6 +77,7 @@ export type {
   RemoveAgentThreadParticipantInput,
   RequestAgentApprovalInput,
   RequestAgentApprovalResult,
+  RequestAgentRunCancelInput,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,

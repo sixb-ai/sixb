@@ -120,6 +120,19 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
 
   async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
     return this.db.transaction(() => {
+      if (input.fence) {
+        const owner = this.db
+          .query(
+            "SELECT 1 AS present FROM agent_runs WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?"
+          )
+          .get(input.projectId, input.fence.runId, input.fence.executionToken)
+        if (!owner) {
+          throw new AgentStorageError(
+            "execution_lost",
+            `[SixbSqlite] Execution token is no longer current on agent run '${input.fence.runId}'.`
+          )
+        }
+      }
       const thread = this.db
         .query("SELECT 1 AS present FROM agent_threads WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.threadId) as { present: number } | null

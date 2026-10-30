@@ -310,6 +310,11 @@ interface AgentRunRecordBase {
   /** Execution attempts: `0` while queued, `1` on first start, incremented on redelivery. */
   readonly attempt: number
   readonly execution?: AgentRunExecution
+  /**
+   * When someone asked a running run to stop. Its run token stops working at once, and its runner
+   * learns of it at its next lease renewal if the broker's cancel never reached it.
+   */
+  readonly cancelRequestedAt?: Date
   readonly createdAt: Date
   readonly startedAt?: Date
   readonly completedAt?: Date
@@ -466,6 +471,12 @@ export interface ConfirmAgentRunExecutionOwnershipInput {
   readonly queueLeaseExpiresAt: Date
 }
 
+export interface RequestAgentRunCancelInput {
+  readonly id: string
+  readonly projectId: string
+  readonly at?: Date
+}
+
 export type FinishAgentRunInput =
   | {
       readonly id: string
@@ -566,6 +577,11 @@ export interface DeleteAgentMessagesByRunInput {
   readonly projectId: string
   readonly threadId: string
   readonly runId: string
+  /**
+   * The run that deletes them, when one does: refused with `execution_lost` unless it still runs
+   * under this token, checked in the same transaction as the delete.
+   */
+  readonly fence?: { readonly runId: string; readonly executionToken: string }
 }
 
 export interface ListAgentMessagesInput {
@@ -693,6 +709,11 @@ export interface AgentRunStore {
    * Implementations must fence by token and must never move the expiration backwards.
    */
   confirmExecutionOwnership(input: ConfirmAgentRunExecutionOwnershipInput): Promise<AgentRunRecord>
+  /**
+   * Record that a running run was asked to stop, keeping the first time it was. A run in any other
+   * state is returned as it is: a queued one is cancelled with `finishQueued`.
+   */
+  requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord>
   /**
    * Finalize a run and release the thread's `activeRunId`. `finishReason: "awaiting_approval"`
    * needs a call the run holds (see `approvals.holdsRun`). A turn that ends any other way cancels
