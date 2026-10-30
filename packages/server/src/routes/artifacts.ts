@@ -129,10 +129,10 @@ async function runTokenArtifacts(
       "[SixbServer] Workflow agent nodes publish no artifacts: they have no conversation."
     )
   }
-  const { runId } = agentExecution
+  // Fenced with the execution the request was admitted under: a run reclaimed since refuses it.
+  const { runId, executionToken } = agentExecution
   const run = await host.storage.agents?.runs.getById({ projectId: host.id, id: runId })
-  const executionToken = run?.execution?.token
-  if (!run || !executionToken || !sixb) throw new AgentExecutionLostError(runId)
+  if (!run || !sixb) throw new AgentExecutionLostError(runId)
 
   return agentRunArtifacts({ projectId: host.id, storage: host.storage }, run, executionToken, () =>
     Promise.resolve(sixb)
@@ -338,7 +338,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Create an artifact",
           description:
-            "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner.",
+            "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner and authored by the run's requester.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "createArtifact",
           security: accessTokenSecurityRequirement("createArtifact"),
@@ -589,7 +589,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Publish an artifact's next version",
           description:
-            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.",
+            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "publishArtifactVersion",
           security: accessTokenSecurityRequirement("publishArtifactVersion"),

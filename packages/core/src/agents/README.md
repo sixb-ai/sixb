@@ -77,5 +77,5 @@ and a session over HTTP runs the same suite.
 ## Outside the session
 
 The worker's loops stay its own: dispatching queued runs, repairing approvals, recovering model-call
-records and finishing runs that never started. Project tools run with the run's execution-bound `sixb`, which reaches storage only through the
-run's authority.
+records and finishing runs that never started. Project tools run with the run's execution-bound
+`sixb`, which reaches storage only through the run's authority.

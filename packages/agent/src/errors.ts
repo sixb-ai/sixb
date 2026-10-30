@@ -1,4 +1,4 @@
-import { AgentToolPublicError, type Storage } from "@sixb/core"
+import { AgentToolPublicError } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
@@ -49,46 +49,6 @@ export function throwIfExecutionLost(signal: AbortSignal): void {
 
 function isLostExecutionReason(reason: unknown): boolean {
   return reason instanceof AgentExecutionLostError || reason instanceof QueueDeliveryLeaseLostError
-}
-
-/** A durable run, or workflow node run, as an ownership fence reads it. */
-interface FencedRun {
-  readonly status: string
-  readonly execution?: { readonly token: string; readonly queueLeaseExpiresAt: Date }
-}
-
-/**
- * Throws {@link AgentExecutionLostError} unless `current` is still running under this delivery's
- * execution token, within its queue lease. Read `current` from storage right before the action it
- * fences; never trust guest metadata.
- */
-export function assertExecutionOwned(fence: {
-  readonly current: FencedRun | null | undefined
-  readonly executionToken: string
-  readonly runId: string
-}): void {
-  const { current, executionToken, runId } = fence
-
-  if (
-    current?.status !== "running" ||
-    current.execution?.token !== executionToken ||
-    current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
-  ) {
-    throw new AgentExecutionLostError(runId)
-  }
-}
-
-/**
- * {@link assertExecutionOwned} for a conversation run. `storage` may be a transaction, so the
- * check and the write it guards commit together.
- */
-export async function assertRunExecutionOwned(
-  storage: Storage,
-  run: { readonly projectId: string; readonly id: string; readonly executionToken: string }
-): Promise<void> {
-  const current = await storage.agents?.runs.getById({ projectId: run.projectId, id: run.id })
-
-  assertExecutionOwned({ current, executionToken: run.executionToken, runId: run.id })
 }
 
 /** Keep an untrusted tool failure as the cause while exposing only a generic message to the model. */

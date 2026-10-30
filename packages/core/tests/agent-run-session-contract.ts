@@ -172,8 +172,9 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       },
     })
   }
-  const open = async <TRun extends AgentRunRecord>(run: TRun) => {
-    const session = await claim(host, { run, leaseExpiresAt: LEASE })
+  /** Claim a run; under a lease already run out, another session may take it over. */
+  const open = async <TRun extends AgentRunRecord>(run: TRun, lease = LEASE) => {
+    const session = await claim(host, { run, leaseExpiresAt: lease })
     if (!session) throw new Error("Expected the run to be claimed.")
     return session
   }
@@ -655,7 +656,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     // the fenced-out session's version lands.
     test("publishes nothing once another session holds the run", async () => {
       const { storage, turn, open, documentFile } = await seedConversation(claim)
-      const first = await open(await turn("run-a", "m1"))
+      const first = await open(await turn("run-a", "m1"), LAPSED)
       const second = await open(first.run)
 
       const refused = await first.artifacts
@@ -668,8 +669,8 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       second.close()
     })
 
-    // Guard proof: drop assertParentActive from the publish transaction; the child's version
-    // lands after its turn ended.
+    // Guard proof: drop assertParentActive from the publish transaction, or its cancel check; the
+    // child's version lands after its turn ended, or was cancelled.
     test("a child publishes into its parent's conversation, and nothing once its parent ended", async () => {
       const { storage, turn, open, documentFile } = await seedConversation(claim)
       const parent = await open(await turn("run-a", "m1"))
@@ -681,6 +682,18 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
         files: await documentFile("# West\n"),
       })
       expect(published.version.origin).toEqual({ threadId: "thr_1", runId: child.run.id })
+      const again = async () =>
+        child.artifacts
+          .publish({
+            artifactId: published.artifact.id,
+            title: "West again",
+            files: await documentFile("# West again\n"),
+          })
+          .catch((error: unknown) => error)
+
+      // A cancel recorded on the parent ends it already, as the run token reads it.
+      await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: parent.run.id })
+      expect(await again()).toMatchObject({ code: "not_allowed" })
 
       await parent.finish({ status: "succeeded" })
       const refused = await child.artifacts

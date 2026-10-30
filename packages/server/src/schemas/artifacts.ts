@@ -237,7 +237,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
     ),
   latest: z
     .object({ version: z.number().int(), author: PrincipalSchema })
