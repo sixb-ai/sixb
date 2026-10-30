@@ -1,7 +1,6 @@
 import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
-import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
   type AgentStepDefinition,
@@ -32,7 +31,6 @@ export interface RunWorkflowAgentNodeInput {
   /** When the node run was created; dates the prompt for the model. */
   readonly createdAt: Date
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly usageRecorder: AiModelCallRecorder
   /** The node's signal, which the caller also applies to its tools' model calls. */
   readonly signal: AbortSignal
 }
@@ -122,7 +120,7 @@ export async function runWorkflowAgentNode(
     })
     phase = "agent-loop"
     const research = await runModelLoop({
-      model: input.usageRecorder.wrapModel(input.plan.model),
+      model: input.plan.model,
       messages: [
         {
           role: "system",
@@ -144,7 +142,6 @@ export async function runWorkflowAgentNode(
         completedSteps.push(step)
       },
     })
-    input.usageRecorder.assertHealthy()
     throwIfEnvironmentFailed()
     if (research.status === "aborted") {
       throw abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
@@ -198,7 +195,7 @@ export async function runWorkflowAgentNode(
     for (let attempt = 1; attempt <= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS; attempt += 1) {
       try {
         const finalization = await runModelLoop({
-          model: input.usageRecorder.wrapModel(input.plan.model),
+          model: input.plan.model,
           messages: finalizerMessages,
           output: {
             name: input.agentStep.id,
@@ -208,7 +205,6 @@ export async function runWorkflowAgentNode(
           maxSteps: 1,
           signal: abortSignal,
         })
-        input.usageRecorder.assertHealthy()
         if (finalization.status === "aborted") {
           throw (
             abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
@@ -217,7 +213,6 @@ export async function runWorkflowAgentNode(
         structuredValue = finalization.output
         break
       } catch (error) {
-        input.usageRecorder.assertHealthy()
         throwIfEnvironmentFailed()
         if (
           attempt >= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS ||

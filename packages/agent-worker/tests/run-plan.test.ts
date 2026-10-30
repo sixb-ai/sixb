@@ -92,8 +92,10 @@ describe("resolveRunPlan", () => {
     ontologyDocs: { files: [], index: [] },
   }
 
-  test("resolves the plan's model and tools, and adds the harness's skills", () => {
-    const resolved = resolveRunPlan(definitionsOf({ models, tools: toolCatalog([lookup]) }), plan)
+  test("resolves the plan's tools, takes the session's model, and adds the harness's skills", () => {
+    const resolved = resolveRunPlan(definitionsOf({ models, tools: toolCatalog([lookup]) }), plan, {
+      model,
+    })
 
     expect(resolved).toEqual({
       model,
@@ -106,16 +108,10 @@ describe("resolveRunPlan", () => {
     expect(Object.isFrozen(resolved)).toBe(true)
   })
 
-  test("fails clearly when a model or tool the plan names is gone", () => {
+  test("fails clearly when a tool the plan names is gone", () => {
     expect(() =>
-      resolveRunPlan(definitionsOf({ models, tools: toolCatalog([lookup]) }), {
-        ...plan,
-        model: { provider: model.providerId, modelId: "removed" },
-      })
-    ).toThrow(/not available in models.language/)
-    expect(() => resolveRunPlan(definitionsOf({ models, tools: toolCatalog([]) }), plan)).toThrow(
-      "Project tool 'lookup' is not available."
-    )
+      resolveRunPlan(definitionsOf({ models, tools: toolCatalog([]) }), plan, { model })
+    ).toThrow("Project tool 'lookup' is not available.")
   })
 })
 

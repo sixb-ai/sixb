@@ -119,13 +119,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   })
 
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
-  // Preflight and the answer share accounting. Direct callers own their runtime.
+  // Preflight and the answer share one signal. Direct callers own their runtime.
   const ownsRuntime = input.runtime === undefined
-  let runtime = input.runtime
-  if (!runtime) {
-    runtime = createAgentTurnRuntime({ signal, modelCalls: await input.session.modelCalls() })
-  }
-  const usageRecorder = runtime.usageRecorder
+  const runtime = input.runtime ?? createAgentTurnRuntime({ signal })
   const abortSignal = AbortSignal.any([
     runtime.signal,
     sandboxReadiness.signal,
@@ -137,7 +133,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
     throwIfExecutionLost(runtime.sourceSignal)
-    usageRecorder.assertHealthy()
     sandboxReadiness.throwIfFailed()
     context.environmentFailureSignal?.throwIfAborted()
     if (!abortSignal.aborted && (error === undefined || !isAbortError(error))) return null
@@ -156,7 +151,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     let result: PausableModelLoopResult
     try {
       result = await runModelLoop({
-        model: usageRecorder.wrapModel(plan.model),
+        model: plan.model,
         messages: [
           {
             role: "system",

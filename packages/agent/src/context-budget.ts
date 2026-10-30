@@ -1,5 +1,4 @@
 import { AgentDefinitionError } from "@sixb/core"
-import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
   type LanguageModel,
@@ -23,12 +22,15 @@ interface AgentModelSelection {
   readonly reasoning?: ModelReasoning
 }
 
-/** Pin the selected model and derive its input/output budgets from the same metadata snapshot. */
-export async function prepareAgentModel(selection: AgentModelSelection): Promise<{
+/**
+ * Derive the model's input and output budgets from its definition, and cap each call's output to
+ * them. The model comes pinned: whoever hands it over resolved it once for the run.
+ */
+export function prepareAgentModel(selection: AgentModelSelection): {
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
-}> {
-  const model = await resolveLanguageModel(selection.model)
+} {
+  const model = selection.model
   const definition = defineLanguageModel(model.definition)
   const budget = resolveAgentContextBudget(selection, definition)
   if (budget.source === "fallback") {

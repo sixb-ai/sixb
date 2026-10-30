@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
   type LanguageModelDefinition,
@@ -45,13 +46,18 @@ function request(content: readonly (ModelTextPart | ModelFilePart)[] = []): Lang
 
 const text = (bytes: number): ModelTextPart => ({ type: "text", text: "a".repeat(bytes) })
 
+/** A model as a session hands it over, pinned once, then budgeted by the harness. */
+async function pinAndPrepare(selection: Parameters<typeof prepareAgentModel>[0]) {
+  return prepareAgentModel({ ...selection, model: await resolveLanguageModel(selection.model) })
+}
+
 describe("agent context budget resolution", () => {
   test("gives each call what its input leaves of the window, never less than the reserve", async () => {
     // Removal proof: return capTokens from outputCeilingTokens; calls whose input fills the window
     // still ask for 64,000 tokens.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
-    const { model, budget } = await prepareAgentModel(base)
+    const { model, budget } = await pinAndPrepare(base)
     for (const bytes of [0, 300_000, 600_000]) await model.stream(request([text(bytes)]))
 
     expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
@@ -71,13 +77,13 @@ describe("agent context budget resolution", () => {
       reasoning: { budgetTokens: 10_000 },
     }
     const outputs = recordOutputs(base.model)
-    const { model, budget } = await prepareAgentModel(base)
+    const { model, budget } = await pinAndPrepare(base)
     await model.stream(request([text(60_000)]))
 
     expect(budget).toMatchObject({ reserveTokens: 10_001, inputBudgetTokens: 22_767 })
     expect(outputs).toEqual([10_001])
     await expect(
-      prepareAgentModel({
+      pinAndPrepare({
         ...selection({ contextWindow: 32_768, maxOutputTokens: 8_192 }),
         reasoning: { budgetTokens: 10_000 },
       })
@@ -89,7 +95,7 @@ describe("agent context budget resolution", () => {
     // image or document may not leave.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
-    const { model } = await prepareAgentModel(base)
+    const { model } = await pinAndPrepare(base)
     await model.stream(
       request([
         { type: "file", data: new URL("https://example.com/a.png"), mediaType: "image/png" },
@@ -124,7 +130,7 @@ describe("agent context budget resolution", () => {
         return { events: (async function* () {})() }
       },
     }
-    const prepared = await prepareAgentModel({ ...base, model })
+    const prepared = await pinAndPrepare({ ...base, model })
     const resolved = prepared.model
     expect(resolved.definition.capabilities.inputMediaTypes).toEqual(["image/png"])
     expect(prepared.budget.windowTokens).toBe(resolved.definition.contextWindow!)
@@ -145,13 +151,13 @@ describe("agent context budget resolution", () => {
     // 32,000-token window has none left.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 }, 32_000)
     const outputs = recordOutputs(base.model)
-    const { model, budget } = await prepareAgentModel(base)
+    const { model, budget } = await pinAndPrepare(base)
     await model.stream(request())
 
     expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
     expect(model.definition.maxOutputTokens).toBe(32_000)
     expect(outputs).toEqual([32_000])
-    const fills = await prepareAgentModel(selection({ contextWindow: 32_000 }, 32_000))
+    const fills = await pinAndPrepare(selection({ contextWindow: 32_000 }, 32_000))
     expect(fills.budget).toMatchObject({ reserveTokens: 8_000, inputBudgetTokens: 24_000 })
   })
 
@@ -170,7 +176,7 @@ describe("agent context budget resolution", () => {
           maxOutputTokens: 32_000,
         }),
     })
-    const prepared = await prepareAgentModel({ model })
+    const prepared = await pinAndPrepare({ model })
     expect(prepared.budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 111_616 })
     expect(prepared.model.definition.maxOutputTokens).toBe(20_000)
   })
@@ -233,7 +239,7 @@ describe("agent context budget resolution", () => {
         }),
       }
     })
-    const prepared = await Promise.all(bindings.map(prepareAgentModel))
+    const prepared = await Promise.all(bindings.map(pinAndPrepare))
     expect(calls).toBe(2)
     expect(prepared.map(({ budget }) => budget.inputBudgetTokens)).toEqual([24_000, 48_000])
     expect(bindings.map(({ model }) => model.definition.contextWindow)).toEqual([
@@ -255,7 +261,7 @@ describe("agent context budget resolution", () => {
           throw new Error("offline")
         },
       })
-      expect((await prepareAgentModel({ ...base, model })).budget.windowTokens).toBe(32_000)
+      expect((await pinAndPrepare({ ...base, model })).budget.windowTokens).toBe(32_000)
     }
     expect(calls).toBe(0)
   })
@@ -276,7 +282,7 @@ describe("agent context budget resolution", () => {
           return base.model
         },
       })
-      const prepared = await prepareAgentModel({ ...base, model })
+      const prepared = await pinAndPrepare({ ...base, model })
       expect(prepared.budget.source).toBe("fallback")
       expect(prepared.model.definition.maxOutputTokens).toBe(16_384)
       expect(modes).toEqual(unavailable ? [false, true] : [false])
@@ -304,10 +310,10 @@ describe("agent context budget resolution", () => {
         }),
     ]) {
       const model = Object.assign(base.model, { resolve })
-      await expect(prepareAgentModel({ ...base, model })).rejects.toThrow()
+      await expect(pinAndPrepare({ ...base, model })).rejects.toThrow()
     }
     const invalid = selection()
     Object.assign(invalid.model, { definition: { ...invalid.model.definition, contextWindow: -1 } })
-    await expect(prepareAgentModel(invalid)).rejects.toThrow()
+    await expect(pinAndPrepare(invalid)).rejects.toThrow()
   })
 })

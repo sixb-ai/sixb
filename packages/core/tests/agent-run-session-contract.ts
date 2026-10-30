@@ -19,9 +19,9 @@ import {
   publishAgentRunCancel,
 } from "../src/agents"
 import { emptyGrantIndex } from "../src/authorization/types"
-import type { LanguageModel } from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
+import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 // What every run session does, however its runner reaches it: in process, as the worker's does,
 // or over HTTP. An implementation runs the suite with how it claims a run; the suite seeds storage
@@ -35,14 +35,19 @@ const LEASE = "2099-01-01T00:00:00.000Z"
 /** A lease already run out: what lets another runner take a run over. */
 const LAPSED = "2000-01-01T00:00:00.000Z"
 
-const TEST_MODEL: LanguageModel = {
+/** The project's one language model: each call answers at once, with its usage. */
+const answeringModel = new MockLanguageModel({
   providerId: "test",
   modelId: "test-model",
-  definition: { kind: "language", providerId: "test", modelId: "test-model", capabilities: {} },
-  async stream() {
-    throw new Error("The session suite calls no model.")
-  },
-}
+  stream: async () =>
+    streamFromArray([
+      { type: "stream-start" },
+      { type: "text-start", id: "text" },
+      { type: "text-delta", id: "text", delta: "Done." },
+      { type: "text-end", id: "text" },
+      { type: "finish", finishReason: "stop", usage: { inputTokens: 12, outputTokens: 3 } },
+    ]),
+})
 
 /** The project a session binds its run's SDK in, over the storage the test seeds. */
 function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
@@ -50,13 +55,12 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
+    models: { language: [answeringModel] },
     storage,
     blobStorage: blobs,
     broker,
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
-    // The model the suite's turns run on, which they may hand their children.
-    models: { language: [TEST_MODEL] },
   })
   return { session: { sdk, definitions: sdk.definitions }, blobs }
 }
@@ -754,6 +758,45 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       const shared = await session.memory({ asOf })
       expect(shared.shared).toBe(true)
       expect(shared.repos.map(({ latest }) => latest.repo)).toEqual(["project"])
+      session.close()
+    })
+  })
+
+  describe("a run's models", () => {
+    // Guard proof: return the resolved model from AgentRunSession.models unwrapped; the call then
+    // reaches the provider unrecorded.
+    test("admit and record each call they make, without the runner reporting it", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const model = await session.models.language({ provider: "test", modelId: "test-model" })
+
+      const stream = await model.stream({
+        callId: "call-1",
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+      for await (const _event of stream.events) {
+        // The reader only reads.
+      }
+
+      const summary = await storage.aiUsage.summarizeExecution({
+        projectId: PROJECT_ID,
+        executionId: session.run.executionId,
+      })
+      expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 12 } })
+      session.close()
+    })
+
+    test("refuse a model the project does not configure", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const refused = await session.models
+        .language({ provider: "test", modelId: "missing" })
+        .catch((error: unknown) => error)
+
+      expect(refused).toMatchObject({ code: "agent.execution_failed" })
       session.close()
     })
   })

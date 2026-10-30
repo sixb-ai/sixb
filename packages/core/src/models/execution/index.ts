@@ -5,7 +5,7 @@ export {
 } from "../catalog"
 export { reportModelCalls } from "../language-call"
 export { resolveLanguageModel } from "../resolve"
-export { ModelUsageRecordingError } from "./errors"
+export { isModelCallAccountingFailure, ModelUsageRecordingError } from "./errors"
 export type {
   AiModelCallAdmissionDecision,
   AiModelCallAdmissionInput,

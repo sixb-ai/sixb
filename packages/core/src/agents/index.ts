@@ -193,6 +193,7 @@ export type {
   AgentRunCheckpoint,
   AgentRunFileStore,
   AgentRunHeldCalls,
+  AgentRunModels,
   AgentRunOutcome,
   AgentRunPeople,
   AgentRunSession,

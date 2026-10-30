@@ -286,10 +286,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
       await session.events.publishStarted(run)
-      runtime = createAgentTurnRuntime({ signal: turnSignal, modelCalls: prepared.modelCalls })
+      runtime = createAgentTurnRuntime({ signal: turnSignal })
+      // Project tools run in this process: their model calls bill to the run too.
       bindAgentModelExecution(prepared.executionContext.sixb, {
         signal: runtime.signal,
-        accounting: runtime.usageRecorder,
+        accounting: prepared.modelCalls,
       })
       delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
         this.requireChildren().start(child, { signal, delivery })
@@ -423,7 +424,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const turn = await session.context()
     const { thread, execution, participants } = turn
     const runPlan = await session.plan()
-    const plan = resolveRunPlan(this.host.definitions, runPlan)
+    const plan = resolveRunPlan(this.host.definitions, runPlan, {
+      model: await session.models.language(runPlan.model),
+    })
     // A turn's plan always carries it; only a child's goes without.
     if (!runPlan.delegation) {
       throw createSixbError(
@@ -454,7 +457,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       files: session.files,
       shared: (conversation?.participants.length ?? 0) > 0,
     })
-    const model = await prepareAgentModel(plan)
+    const model = prepareAgentModel(plan)
     return {
       thread,
       ...(conversation === undefined ? {} : { conversation }),

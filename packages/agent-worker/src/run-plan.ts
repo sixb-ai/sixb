@@ -3,22 +3,20 @@ import type { AgentStepDefinition, AgentToolDefinition, SixbDefinitions } from "
 import { type AgentRunPlan, listSandboxModels } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
+import type { LanguageModel } from "@sixb/core/models"
 
-// The cloud runner holds the project, so it resolves what a plan names to the objects the harness
-// calls: the model, and each project tool with its handler.
+// The cloud runner holds the project, so it resolves the project tools a plan names to their
+// handlers. A turn's model comes from its session; a workflow step's, from the worker.
 
-/** A turn's or a child's plan, with its model and tools resolved and the harness's skills added. */
+/**
+ * A turn's or a child's plan, with its tools resolved and the harness's skills added. Its model is
+ * the session's, which records each call itself.
+ */
 export function resolveRunPlan(
-  definitions: Pick<SixbDefinitions, "models" | "tools">,
-  plan: AgentRunPlan
+  definitions: Pick<SixbDefinitions, "tools">,
+  plan: AgentRunPlan,
+  resolved: { readonly model: LanguageModel }
 ): ResolvedAgentExecutionPlan {
-  const entry = definitions.models?.language?.getByRef(plan.model)
-  if (!entry) {
-    throw createSixbError(
-      "agent.execution_failed",
-      `[SixbAgentWorker] Language model '${plan.model.provider}/${plan.model.modelId}' is not available in models.language.`
-    )
-  }
   const tools = plan.toolNames.map((name): AgentToolDefinition => {
     const tool = definitions.tools.getByName(name)
     if (!tool) {
@@ -32,7 +30,7 @@ export function resolveRunPlan(
   })
   const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs } = plan
   return Object.freeze({
-    model: entry.model,
+    model: resolved.model,
     ontologyDocs,
     ...(instructions === undefined ? {} : { instructions }),
     tools: Object.freeze(tools),

@@ -1,13 +1,17 @@
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { createSixbError } from "../errors/internal"
 import type { AuthorizationRef } from "../execution"
 import { type AgentExecutionHost, bindDurableAgentExecution } from "../execution/agent"
+import type { LanguageModelRef } from "../models/catalog"
 import {
   AiModelCallRecorder,
   createAiModelCallLimitController,
   type ModelCallAccountingStorage,
   type RecoverAiModelCall,
 } from "../models/execution/index"
+import type { LanguageModel } from "../models/language-model"
+import { resolveLanguageModel } from "../models/resolve"
 import type { Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
@@ -85,9 +89,14 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    */
   readonly cancelled: AbortSignal
   /**
-   * The run's model calls. Wrap a model with it, and each call is admitted against the AI limits
-   * of whoever the run works for, and its usage and cost recorded before the next step; a record
-   * that cannot be written is recovered later. Project tools' own model calls bill here too.
+   * The models the run calls. Each call is admitted against the AI limits of whoever the run works
+   * for, and records itself before its reader sees it finish (see
+   * AiModelCallRecorder.wrapModel): the runner never reports what a call used.
+   */
+  readonly models: AgentRunModels
+  /**
+   * What admits and records the run's model calls, for a runner that runs the project's tools in
+   * its own process: their model calls bill to the run too.
    *
    * The first call reads what admission needs, so it belongs in the run's preparation, where a
    * storage blip is retried: a failed read is read again on the next call.
@@ -164,6 +173,12 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
+}
+
+/** The models a run calls, by the ref its plan names. */
+export interface AgentRunModels {
+  /** A language model of the project, resolved once for the session. */
+  language(ref: LanguageModelRef): Promise<LanguageModel>
 }
 
 /** Where a run's files are stored: put one, open or stat one by its blob id. */
@@ -282,6 +297,15 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
+  const openedModelCalls = () => {
+    modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
+      modelCalls = undefined
+      throw error
+    })
+    return modelCalls
+  }
+  // Each model is pinned once per session: a later catalog refresh does not change a run's model.
+  const languageModels = new Map<string, Promise<LanguageModel>>()
   let bound: Promise<BoundRun> | undefined
   const bind = () => {
     bound ??= bindRun(host, run).catch((error: unknown) => {
@@ -319,12 +343,25 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
       pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
     },
-    modelCalls() {
-      modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
-        modelCalls = undefined
-        throw error
-      })
-      return modelCalls
+    modelCalls: openedModelCalls,
+    models: {
+      async language(ref) {
+        const key = `${ref.provider}/${ref.modelId}`
+        let resolved = languageModels.get(key)
+        if (!resolved) {
+          const entry = host.definitions.models?.language?.getByRef(ref)
+          if (!entry) {
+            throw createSixbError(
+              "agent.execution_failed",
+              `[Sixb] Language model '${key}' is not available in models.language.`
+            )
+          }
+          resolved = resolveLanguageModel(entry.model)
+          languageModels.set(key, resolved)
+          resolved.catch(() => languageModels.delete(key))
+        }
+        return (await openedModelCalls()).wrapModel(await resolved)
+      },
     },
     async renewLease(leaseExpiresAt) {
       try {

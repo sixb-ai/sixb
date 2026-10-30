@@ -2091,7 +2091,9 @@ function executionPlanFor(sixb: TestSixb) {
   const plan = readAgentRunPlan(sixb.definitions, { id: "plan", kind: "conversation" } as never, {
     sixb: createTestSixb(sixb),
   })
-  return resolveRunPlan(sixb.definitions, { ...plan, sandboxModels: [] })
+  const model = sixb.definitions.models?.language?.default.model
+  if (!model) throw new Error("Expected a default language model.")
+  return resolveRunPlan(sixb.definitions, { ...plan, sandboxModels: [] }, { model })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -10930,10 +10932,7 @@ describe("AgentWorker", () => {
         },
         run
       )
-      const runtime = createAgentTurnRuntime({
-        signal: new AbortController().signal,
-        modelCalls: await session.modelCalls(),
-      })
+      const runtime = createAgentTurnRuntime({ signal: new AbortController().signal })
       try {
         return await conversationPreparation.prepareAgentConversationContext({
           context,

@@ -12,6 +12,7 @@ import {
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "@sixb/core/internal/agents"
+import { isModelCallAccountingFailure } from "@sixb/core/internal/model-execution"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelTool } from "@sixb/core/models"
 import type {
@@ -262,8 +263,8 @@ export async function prepareAgentConversationContext(input: {
     })
     return { threadContext, ...(compactedMemory ? { memory: compactedMemory } : {}) }
   } catch (error) {
-    // Preserve queue ownership, accounting, deadline, and cancellation failures as their original
-    // run-level outcome instead of relabeling them as a compaction implementation failure.
+    // Preserve lost ownership, cancellation and the model call's own accounting failure as their
+    // original run-level outcome instead of relabeling them as a compaction implementation failure.
     runtime.assertCanContinue()
     const compactionError = normalizeCompactionError(error, run.id)
     await session.events.publishCompactionFailed({
@@ -363,7 +364,7 @@ async function generateCheckpointSummary(input: {
   let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
     result = await runModelLoop({
-      model: input.runtime.usageRecorder.wrapModel(input.plan.model),
+      model: input.plan.model,
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
       messages: [
@@ -379,6 +380,8 @@ async function generateCheckpointSummary(input: {
     })
   } catch (error) {
     input.runtime.assertCanContinue()
+    // The summary's own model call was refused or left unrecorded: that ends the run as it is.
+    if (isModelCallAccountingFailure(error)) throw error
     throw new AgentContextCompactionError(
       "summary_failed",
       input.run.id,
@@ -491,7 +494,7 @@ function requiredHeadSeq(
 
 function normalizeCompactionError(error: unknown, runId: string): AgentContextCompactionError {
   if (error instanceof AgentContextCompactionError) return error
-  if (error instanceof AgentExecutionLostError) throw error
+  if (error instanceof AgentExecutionLostError || isModelCallAccountingFailure(error)) throw error
   return new AgentContextCompactionError(
     "checkpoint_failed",
     runId,
