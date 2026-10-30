@@ -70,6 +70,18 @@ paths resolve against the current directory when the sandbox is created.
 - **Linux (bwrap):** a denied directory shows up empty and a denied file reads as empty; writes
   never reach them. A path that doesn't exist yet when the sandbox is created isn't covered.
 
+## Request credentials
+
+The factory supports request credentials (`supportsRequestCredentials`), such as the run token the
+agent worker adds to every call its commands make to the Sixb API. This process holds them, never
+the commands: `credentialedUrl(url)` returns a `unix:` socket, in a directory only your user can
+open under `/tmp`, that forwards only to `url` and adds the credential that matches the request.
+The commands' environment, files and process arguments never hold it.
+
+An origin may be `http://` as well as `https://`, so a local development API works. With
+`isolation: "none"`, a command can read this process's memory where the OS allows a user's
+processes to inspect one another; the OS sandbox backends don't.
+
 ## Network policy
 
 Seatbelt and bwrap block outbound network when `network.mode` is `"none"`. Both `"restricted"`

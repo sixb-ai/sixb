@@ -258,7 +258,7 @@ function renderRuntimeContext(
   const fileContext =
     mode === "conversation" || mode === "subagent"
       ? [
-          'Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current user attachments are provided directly. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use view_file with a listed sandbox path; if no path is available, download the listed content URL with your run token: curl -fsS -H "Authorization: Bearer $SIXB_TOKEN" -o <file> <content URL>.',
+          "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current user attachments are provided directly. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use view_file with a listed sandbox path; if no path is available, download the listed content URL with `sixb files download url <content URL> --output <file>`.",
           "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies.",
           mode === "conversation"
             ? "Deliver a report, table of data, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. To show a published chart or range in a reply, write ![caption](pinned address), copying the pinned address from $SIXB_ARTIFACTS, or the artifact:<id>@<version> address a child agent reported. Never describe a deliverable that was not published as ready."

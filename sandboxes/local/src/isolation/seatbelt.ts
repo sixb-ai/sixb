@@ -9,6 +9,8 @@ export interface SeatbeltProfileInput {
   /** Real paths commands may neither read nor write, whatever else allows them. */
   readonly denyReadPaths: readonly string[]
   readonly network: SandboxNetworkPolicy
+  /** Where the sandbox's credential forwarder listens, reachable whatever the network. */
+  readonly forwarderDirectory?: string
 }
 
 export interface SeatbeltArgvInput {
@@ -27,6 +29,9 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
 
   if (!allowsOutboundNetwork(input.network)) {
     lines.push("(deny network-outbound)")
+    if (input.forwarderDirectory !== undefined) {
+      lines.push(`(allow network-outbound (subpath ${sbplString(input.forwarderDirectory)}))`)
+    }
   }
 
   lines.push("(deny file-write*)")

@@ -82,7 +82,8 @@ export interface SandboxNetworkTarget {
 export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 /**
- * Host-only credentials injected outside the guest into matching HTTPS requests.
+ * Host-only credentials injected outside the guest into matching requests. Guest commands never
+ * hold them: not in env, files, process arguments or anything else they can read.
  *
  * A credential selects which requests receive its Authorization header. It does not decide what
  * the guest can reach, which is the network policy, nor which resources the token can act on:
@@ -90,7 +91,8 @@ export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
  *
  * Providers apply the same rules so that a credential means the same thing everywhere:
  * - `origin` is one `https://` domain: no port, path, user info, IP address, loopback host or
- *   `*` wildcard.
+ *   `*` wildcard. A provider whose credentials are added on the host it runs on, rather than at a
+ *   remote egress, may also accept an `http://` origin, such as a local development API.
  * - A path is matched case-sensitively against the raw request path. It starts with a single
  *   "/" and is printable ASCII without spaces, control characters, "?", "#", "%", "\\", or "."
  *   and ".." segments. A prefix also ends with "/", so it stops at a segment boundary.
@@ -149,6 +151,14 @@ export interface Sandbox {
   readonly setRequestCredentials?: (
     credentials: readonly SandboxRequestCredential[]
   ) => Promise<void>
+
+  /**
+   * The address guest commands use to reach `url` with this session's request credentials added
+   * outside the guest. It is `url` itself where a firewall adds them, or another address, such as
+   * `unix:/path/to.sock`, that forwards only to `url`. Present on every sandbox of a factory that
+   * advertises `supportsRequestCredentials`.
+   */
+  readonly credentialedUrl?: (url: string) => string
 
   runCommand(
     command: string,

@@ -140,3 +140,34 @@ describe("the run's context directory", () => {
     }
   })
 })
+
+describe("the run's API access", () => {
+  // Guard proof: give commands SIXB_TOKEN whatever the sandbox; the token shows up below.
+  test("a sandbox that adds the run token gives commands its address, never the token", async () => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-api-access-")))
+    const sandbox = Object.assign(new LocalBashSandbox(root), {
+      credentialedUrl: (url: string) => `unix:/tmp/forwarder.sock#${url}`,
+    })
+
+    const { env } = await prepareAgentSandboxApiContext({
+      sandbox,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      apiBaseUrl: "http://api.example.test",
+      runToken: "sixb_run_v1_secret",
+      projectId: "api-access",
+      runId: "run_1",
+      skills: [],
+      ontologyFiles: [],
+    })
+
+    expect(env.SIXB_API_BASE_URL).toBe("unix:/tmp/forwarder.sock#http://api.example.test")
+    expect(env).not.toHaveProperty("SIXB_TOKEN")
+    expect(JSON.stringify(env)).not.toContain("sixb_run_v1_secret")
+    const runContext = readFileSync(
+      join(root, SANDBOX_CONTEXT_DIRECTORY, "context/run.json"),
+      "utf8"
+    )
+    expect(JSON.parse(runContext).apiBaseUrl).toBe(env.SIXB_API_BASE_URL)
+    expect(runContext).not.toContain("sixb_run_v1_secret")
+  })
+})

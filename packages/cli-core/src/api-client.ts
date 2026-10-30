@@ -1,21 +1,33 @@
 import { randomUUID } from "node:crypto"
 import { createWriteStream } from "node:fs"
 import { readFile, rename, rm } from "node:fs/promises"
+import { request as httpRequest } from "node:http"
 import { basename, dirname, join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import type { ReadableStream as NodeReadableStream } from "node:stream/web"
 import { CliError, EXIT_API, fail } from "./output"
 
+/**
+ * A base URL of `unix:<socket path>` reaches the API through a local socket, such as the one a
+ * sandbox's credential forwarder listens on: requests go to `http://localhost` over that socket.
+ */
+const UNIX_BASE_URL_PREFIX = "unix:"
+
 export class ApiClient {
   readonly baseUrl: string
+  private readonly socketPath: string | undefined
   private readonly authorization: string | undefined
   private readonly missingBaseUrlMessage: string
   private readonly unavailableMessage: string
   private readonly unavailableHint: string
 
   constructor(options: ApiClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "")
+    const baseUrl = options.baseUrl.replace(/\/+$/, "")
+    this.socketPath = baseUrl.startsWith(UNIX_BASE_URL_PREFIX)
+      ? baseUrl.slice(UNIX_BASE_URL_PREFIX.length)
+      : undefined
+    this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost"
     this.authorization = options.authorization
     this.missingBaseUrlMessage = options.missingBaseUrlMessage
     this.unavailableMessage = options.unavailableMessage
@@ -107,7 +119,7 @@ export class ApiClient {
     try {
       const headers = new Headers(init.headers)
       if (this.authorization) headers.set("authorization", this.authorization)
-      response = await fetch(url, { ...init, headers })
+      response = await send(url, { ...init, headers }, this.socketPath)
     } catch (error) {
       if (init.signal?.aborted) throw error
       throw new CliError(
@@ -192,4 +204,60 @@ function asRecord(value: unknown): Record<string, unknown> {
 function stringField(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
   const value = record[key]
   return typeof value === "string" ? value : undefined
+}
+
+/** One request, over a Unix socket when the API is behind one. */
+function send(url: URL, init: RequestInit, socketPath: string | undefined): Promise<Response> {
+  if (socketPath === undefined) return fetch(url, init)
+  // Bun's fetch speaks over a Unix socket itself; Node's does not, so it goes through node:http.
+  if (typeof Bun !== "undefined") return fetch(url, { ...init, unix: socketPath })
+  return sendOverNodeSocket(url, init, socketPath)
+}
+
+async function sendOverNodeSocket(
+  url: URL,
+  init: RequestInit,
+  socketPath: string
+): Promise<Response> {
+  // A Request settles the body and its content type (a form's boundary included) as fetch would.
+  const outgoing = new Request(url, init)
+  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined
+  const headers: Record<string, string> = Object.fromEntries(outgoing.headers)
+  if (body) headers["content-length"] = String(body.byteLength)
+
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        socketPath,
+        method: outgoing.method,
+        path: `${url.pathname}${url.search}`,
+        headers: { ...headers, host: "localhost" },
+        ...(init.signal ? { signal: init.signal } : {}),
+      },
+      (response) => {
+        const responseHeaders = new Headers()
+        for (const [name, value] of Object.entries(response.headers)) {
+          for (const each of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            responseHeaders.append(name, each)
+          }
+        }
+        const status = response.statusCode ?? 502
+        const empty = status === 204 || status === 304 || outgoing.method === "HEAD"
+        resolve(
+          new Response(empty ? null : nodeBody(response), {
+            status,
+            statusText: response.statusMessage ?? "",
+            headers: responseHeaders,
+          })
+        )
+      }
+    )
+    request.on("error", reject)
+    request.end(body)
+  })
+}
+
+/** The response body as a web stream: Node's and the global stream types differ only in typing. */
+function nodeBody(response: Readable): ReadableStream<Uint8Array> {
+  return Readable.toWeb(response) as unknown as ReadableStream<Uint8Array>
 }

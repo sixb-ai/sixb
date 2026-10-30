@@ -155,6 +155,10 @@ export {
   runQueueContractSuite,
 } from "./queues-contract"
 export {
+  runSandboxCredentialsContractSuite,
+  type SandboxCredentialsContractSuiteOptions,
+} from "./sandbox-credentials-contract"
+export {
   runSandboxesContractSuite,
   type SandboxesContractCapabilities,
   type SandboxesContractSuiteOptions,

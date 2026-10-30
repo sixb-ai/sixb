@@ -64,6 +64,7 @@ export function sandboxProjectDirectory(session: Sandbox, hasSource: boolean): S
     ...(session.setRequestCredentials
       ? { setRequestCredentials: session.setRequestCredentials.bind(session) }
       : {}),
+    ...(session.credentialedUrl ? { credentialedUrl: session.credentialedUrl.bind(session) } : {}),
     runCommand: (command, args, options) =>
       session.runCommand(command, args, { ...options, cwd: options?.cwd ?? workingDirectory }),
     writeFiles: (files) =>

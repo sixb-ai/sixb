@@ -40,15 +40,14 @@ export interface LocalSandboxFactoryOptions<in out TParams extends ParamsConfig 
 export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
   implements SandboxFactory<TParams>
 {
+  /** Credentials are added by a forwarder in this process; commands never hold them. */
+  readonly supportsRequestCredentials = true
   readonly configuration: SandboxConfig<TParams>
   constructor(private readonly defaults: LocalSandboxFactoryOptions<TParams> = {}) {
     this.configuration = sandboxConfig<TParams>(defaults)
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
-    if (options.requestCredentials !== undefined) {
-      throw new SandboxError("[Sandbox] local does not support secure request credentials.")
-    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] local does not support persistent sandboxes.")
@@ -60,6 +59,9 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
       denyReadPaths: this.defaults.denyReadPaths,
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.configuration.network,
+      ...(options.requestCredentials === undefined
+        ? {}
+        : { requestCredentials: options.requestCredentials }),
       env: { ...this.configuration.env, ...options.env },
       workingDirectory: options.workingDirectory,
     })

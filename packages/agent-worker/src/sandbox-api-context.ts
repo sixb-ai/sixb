@@ -36,7 +36,10 @@ export interface PrepareAgentSandboxApiContextInput {
   /** Where the run's files go: relative to the working directory, or absolute. */
   readonly contextDirectory: string
   readonly apiBaseUrl: string
-  /** What the run's commands call the API with: in their environment only, never in a file. */
+  /**
+   * What the run's commands call the API with. A sandbox that adds it outside the guest gives
+   * them its credentialed address instead; otherwise the token is in their env, never in a file.
+   */
   readonly runToken: string
   readonly projectId: string
   readonly actorId?: string
@@ -69,6 +72,13 @@ export async function prepareAgentSandboxApiContext(
   const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
   const cli = await loadAgentCliAssets()
+  // Where the run's commands reach the API: through the sandbox's credentialed address, which
+  // adds the run token on the way out, or the API itself with the token in their env.
+  const credentialedUrl = input.sandbox.credentialedUrl?.bind(input.sandbox)
+  const apiAccess: Readonly<Record<string, string>> & { readonly SIXB_API_BASE_URL: string } =
+    credentialedUrl
+      ? { SIXB_API_BASE_URL: credentialedUrl(input.apiBaseUrl) }
+      : { SIXB_API_BASE_URL: input.apiBaseUrl, SIXB_TOKEN: input.runToken }
 
   // apiBaseUrl arrives already normalized (see worker.ts), so it is used verbatim. The run token
   // stays out of run.json: only the commands' environment holds it.
@@ -79,7 +89,7 @@ export async function prepareAgentSandboxApiContext(
       ...(input.threadId ? { threadId: input.threadId } : {}),
       runId: input.runId,
       runtimeProfile: AGENT_RUNTIME_PROFILE,
-      apiBaseUrl: input.apiBaseUrl,
+      apiBaseUrl: apiAccess.SIXB_API_BASE_URL,
       attachmentsManifestPath,
       attachmentsDir,
       ...(input.artifacts ? { artifactsManifestPath, artifactsDir } : {}),
@@ -152,8 +162,7 @@ export async function prepareAgentSandboxApiContext(
 
   return {
     env: {
-      SIXB_API_BASE_URL: input.apiBaseUrl,
-      SIXB_TOKEN: input.runToken,
+      ...apiAccess,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
       SIXB_ONTOLOGY_DIR: ontologyDir,

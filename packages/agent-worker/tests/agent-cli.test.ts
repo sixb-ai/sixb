@@ -28,6 +28,19 @@ describe("Sixb agent CLI generated artifact process boundary", () => {
     version: VERSION,
   })
   runAgentCliProcessSmoke({ runtime: "node", command: ["node", artifactPath], version: VERSION })
+  // A sandbox that adds the run token outside its commands gives them a `unix:` address.
+  runAgentCliProcessSmoke({
+    runtime: "bun",
+    command: [process.execPath, artifactPath],
+    version: VERSION,
+    overUnixSocket: true,
+  })
+  runAgentCliProcessSmoke({
+    runtime: "node",
+    command: ["node", artifactPath],
+    version: VERSION,
+    overUnixSocket: true,
+  })
 })
 
 let invocation = 0

@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto"
-import type { Sandbox, SandboxDefinition, SandboxEnvironment, SandboxFactory } from "@sixb/core"
+import type {
+  Sandbox,
+  SandboxDefinition,
+  SandboxEnvironment,
+  SandboxFactory,
+  SandboxRequestCredential,
+} from "@sixb/core"
 import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type {
@@ -31,6 +37,8 @@ interface PersistentRunSandboxInput {
   readonly thread: AgentThreadRecord
   readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly signal: AbortSignal
+  /** The run's credential for the Sixb API, added when the factory adds credentials. */
+  readonly apiCredential: SandboxRequestCredential
   readonly onAuthFailure: (error: Error) => void
 }
 
@@ -115,6 +123,7 @@ class PersistentSandboxSession {
       auth: definition?.auth,
       factory: context.sandboxes,
       apiOrigin: new URL(context.apiBaseUrl).origin,
+      apiCredential: input.apiCredential,
       signal,
       assertOwner: () => this.assertOwner(),
       onAuthFailure,
@@ -319,6 +328,9 @@ class PersistentSandboxSession {
         return session.status
       },
       workingDirectory: session.workingDirectory,
+      ...(session.credentialedUrl
+        ? { credentialedUrl: session.credentialedUrl.bind(session) }
+        : {}),
       runCommand: (command, args, options) =>
         this.track(() =>
           session.runCommand(command, args, {
