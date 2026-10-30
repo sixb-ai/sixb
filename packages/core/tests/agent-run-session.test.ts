@@ -12,6 +12,8 @@ import { createTestAgentExecution } from "../src/testing"
 
 const PROJECT_ID = "agent-run-session-tests"
 const LEASE = "2099-01-01T00:00:00.000Z"
+/** A lease already run out: what lets another runner take a run over. */
+const LAPSED = "2000-01-01T00:00:00.000Z"
 
 afterEach(() => {
   jest.useRealTimers()
@@ -79,11 +81,23 @@ describe("claimAgentRun", () => {
     expect(await claimAgentRun(host, { run, leaseExpiresAt: LEASE })).toBeNull()
   })
 
+  // Removal proof: drop `ifLapsedBy` from startOrReclaim's reclaim; the second claim takes over a
+  // run whose runner still renews its lease.
+  test("leaves a run whose lease has not lapsed to its runner", async () => {
+    const { host, run } = await setup()
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!first) throw new Error("Expected the run to be claimed.")
+
+    expect(await claimAgentRun(host, { run: first.run, leaseExpiresAt: LEASE })).toBeNull()
+    expect((await first.finish({ status: "succeeded" })).status).toBe("succeeded")
+    first.close()
+  })
+
   // The fence the whole session rests on. Return the running run unchanged in startOrReclaim, in
   // place of `runs.reclaim`; the token never rotates and the earlier session keeps writing.
   test("a reclaim fences the earlier session out of every write", async () => {
     const { host, run } = await setup()
-    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
     if (!first) throw new Error("Expected the run to be claimed.")
     const second = await claimAgentRun(host, { run: first.run, leaseExpiresAt: LEASE })
     if (!second) throw new Error("Expected the run to be reclaimed.")
@@ -94,6 +108,24 @@ describe("claimAgentRun", () => {
     )
     expect(await first.renewLease(LEASE).catch((error) => error)).toBeDefined()
     expect((await second.finish({ status: "succeeded" })).status).toBe("succeeded")
+    first.close()
+    second.close()
+  })
+
+  // Removal proof: rethrow the storage error in renewLease without aborting `cancelled`; the
+  // earlier runner keeps calling its model until its next write.
+  test("a renewal that finds the run taken over stops its runner", async () => {
+    const { host, run } = await setup()
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
+    if (!first) throw new Error("Expected the run to be claimed.")
+    const second = await claimAgentRun(host, { run: first.run, leaseExpiresAt: LEASE })
+    if (!second) throw new Error("Expected the run to be reclaimed.")
+
+    expect(await first.renewLease(LEASE).catch((error) => error)).toBeInstanceOf(
+      AgentExecutionLostError
+    )
+    expect(first.cancelled.reason).toBeInstanceOf(AgentExecutionLostError)
+    expect(second.cancelled.aborted).toBe(false)
     first.close()
     second.close()
   })
@@ -220,7 +252,7 @@ describe("an agent run session's children and mail", () => {
   // delivery must not. Drop assertOwned from clearAttempt in run-session-children.ts; it deletes.
   test("clears a child's dead attempt only while the turn owns its run", async () => {
     const { host, storage, run } = await setup()
-    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
     if (!first) throw new Error("Expected the run to be claimed.")
     await storage.agents.messages.append({
       id: "message-dead",
@@ -253,7 +285,7 @@ describe("an agent run session's children and mail", () => {
   // Write it with the token storage holds now in place of the session's; the stale write lands.
   test("writes a context checkpoint only while the turn owns its run", async () => {
     const { host, run } = await setup()
-    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
     if (!first) throw new Error("Expected the run to be claimed.")
     const checkpoint = (id: string) => ({
       id,

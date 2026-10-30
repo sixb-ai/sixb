@@ -451,6 +451,11 @@ export interface ReclaimAgentRunInput {
   readonly id: string
   readonly projectId: string
   readonly execution: AgentRunExecution
+  /**
+   * Take the run over only if the lease last recorded on it ran out by then, checked in the same
+   * write: a renewal that lands first keeps it its runner's. Otherwise `invalid_state`.
+   */
+  readonly ifLapsedBy?: Date
 }
 
 export interface ConfirmAgentRunExecutionOwnershipInput {

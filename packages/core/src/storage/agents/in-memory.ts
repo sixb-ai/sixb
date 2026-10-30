@@ -672,6 +672,13 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
+    if (
+      input.ifLapsedBy &&
+      run.execution &&
+      run.execution.queueLeaseExpiresAt.getTime() > input.ifLapsedBy.getTime()
+    ) {
+      throw leaseStillHeld(input.id)
+    }
     const next: AgentRunRecord = {
       ...run,
       attempt: run.attempt + 1,
@@ -1603,4 +1610,11 @@ function replace<T>(target: Map<string, T>, source: Map<string, T>): void {
   for (const [k, value] of structuredClone(source)) {
     target.set(k, value)
   }
+}
+
+function leaseStillHeld(id: string): AgentStorageError {
+  return new AgentStorageError(
+    "invalid_state",
+    `[Sixb] Agent run '${id}' is still held by its runner, whose lease has not lapsed.`
+  )
 }

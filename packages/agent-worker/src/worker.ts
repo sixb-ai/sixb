@@ -27,7 +27,6 @@ import {
   type AgentRunSession,
   type AgentRunSessionHost,
   AgentTurnInterruptedError,
-  agentRunLeaseLapsed,
   claimAgentRun,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
@@ -670,13 +669,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     message: string
   ): Promise<void> {
     const context = this.requireContext()
+    // One whose lease lapsed has no runner left to obey a cancel: endLapsedAgentRuns, earlier in
+    // the same pass, ends it.
     if (run.status === "running") {
-      // A child runs in its parent's runner. Once its lease lapsed nothing runs it any more, and no
-      // cancel reaches it: it ends here, as a turn left running by a dead delivery does.
-      if (agentRunLeaseLapsed(run)) {
-        await endInterruptedAgentRun(this.sessionHost(context), run, this.leaseMs)
-        return
-      }
       await publishAgentRunCancel(this.host.broker, { projectId: context.id, runId: run.id })
       return
     }

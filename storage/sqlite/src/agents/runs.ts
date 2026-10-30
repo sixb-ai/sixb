@@ -326,7 +326,17 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     return this.db.transaction(() => {
-      this.requireRunning(input.projectId, input.id)
+      const run = this.requireRunning(input.projectId, input.id)
+      if (
+        input.ifLapsedBy &&
+        run.execution_queue_lease_expires_at !== null &&
+        new Date(run.execution_queue_lease_expires_at).getTime() > input.ifLapsedBy.getTime()
+      ) {
+        throw new AgentStorageError(
+          "invalid_state",
+          `[SixbSqlite] Agent run '${input.id}' is still held by its runner, whose lease has not lapsed.`
+        )
+      }
       this.db
         .query(
           `
