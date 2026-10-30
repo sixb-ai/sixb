@@ -13,13 +13,12 @@ import {
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
-import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   type AgentChildApprovalAwaiting,
+  type AgentChildDraft,
   AgentExecutionLostError,
   type AgentRunSession,
   createAgentMessageId,
-  createSubagentExecutionId,
   createSubagentRunId,
   createSubagentThreadId,
   deferredChildQuestion,
@@ -38,8 +37,6 @@ import {
 } from "@sixb/core/models"
 import type {
   ConversationAgentRunRecord,
-  CreateSubagentRunInput,
-  ExecutionRecord,
   SubagentRunFile,
   SubagentRunRecord,
   SubagentRunSpec,
@@ -224,7 +221,6 @@ export class SubagentCoordinator {
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
     private readonly session: AgentRunSession,
-    private readonly parentExecution: ExecutionRecord,
     /** When the parent turn times out: no child outlives it. */
     private readonly parentDeadline: Date,
     /**
@@ -297,11 +293,7 @@ export class SubagentCoordinator {
           child.spawnKey,
           spec,
           signal,
-          {
-            ...continuation,
-            // Each was admitted within the limit; the turn starts with all of them at once.
-            maxActiveChildren: Math.max(this.context.subagentConcurrencyPerRun, paused.length),
-          }
+          continuation
         )
       )
     }
@@ -617,10 +609,7 @@ export class SubagentCoordinator {
       }
       await this.clearDeadAttempts(paused, signal)
       const { spec, continuation } = this.continuationOf(paused, [answer])
-      return this.admit(runId, key, spec, signal, {
-        ...continuation,
-        maxActiveChildren: this.context.subagentConcurrencyPerRun,
-      })
+      return this.admit(runId, key, spec, signal, continuation)
     })
 
     const output: MessageSubagentOutput = {
@@ -867,7 +856,7 @@ export class SubagentCoordinator {
     goesOnWith: readonly AgentMessagePart[]
   ): {
     readonly spec: SubagentRunSpec
-    readonly continuation: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt">
+    readonly continuation: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
   } {
     const spec = this.childSpec({
       task: paused.spec.task,
@@ -928,43 +917,32 @@ export class SubagentCoordinator {
     key: string,
     spec: SubagentRunSpec,
     signal: AbortSignal,
-    continuation?: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt"> & {
-      readonly maxActiveChildren: number
-    }
+    continuation?: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
   ): Promise<SpawnSubagentOutput> {
     // Before it exists, so none of its questions is missed.
     await this.#questions.listen()
-    const executionId = createSubagentExecutionId(runId)
-    const execution = createInheritedAgentExecutionRecord({
-      id: executionId,
-      parent: this.parentExecution,
-      runId,
-    })
 
     let run: SubagentRunRecord
     try {
       run = await this.session.children.spawn({
-        execution,
-        run: {
-          id: runId,
-          executionId,
-          spawnKey: key,
-          spec,
-          ...(continuation ?? {
-            thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
-            trigger: {
-              id: createAgentMessageId(),
-              parts: [
-                { type: "text", text: spec.task },
-                ...(spec.files === undefined
-                  ? []
-                  : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
-              ],
-            },
-            maxActiveChildren: this.context.subagentConcurrencyPerRun,
-          }),
-        },
+        spawnKey: key,
+        spec,
+        ...(continuation ?? {
+          thread: { create: true },
+          trigger: {
+            id: createAgentMessageId(),
+            parts: [
+              { type: "text", text: spec.task },
+              ...(spec.files === undefined
+                ? []
+                : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
+            ],
+          },
+        }),
       })
+      if (run.id !== runId) {
+        throw new Error(`[SixbAgent] Child '${key}' was admitted as '${run.id}', not '${runId}'.`)
+      }
     } catch (error) {
       throw publicSpawnError(error, key, this.context.subagentConcurrencyPerRun)
     }
