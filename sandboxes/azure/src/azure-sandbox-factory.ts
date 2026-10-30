@@ -28,11 +28,14 @@ import {
 } from "./lifecycle"
 import { resolveNetwork } from "./network"
 import type { AzureSandboxFactoryOptions } from "./options"
+import { installAzureCredentials } from "./request-credentials"
 
 /** Ephemeral Azure provider with validated creation-time egress and supervised workloads. */
 export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
   implements SandboxFactory<TParams>
 {
+  /** A root forwarder in the guest adds them; the supervisor runs commands as uid 65534. */
+  readonly supportsRequestCredentials = true
   readonly configuration: SandboxConfig<TParams>
   private readonly client
   private readonly lifecycle: AzureLifecycleOptions
@@ -43,6 +46,12 @@ export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<nev
 
   constructor(options: AzureSandboxFactoryOptions<TParams>) {
     assertEphemeral(options)
+    // A run issues credentials for itself; a factory default would outlive every run.
+    if ("requestCredentials" in options && options.requestCredentials !== undefined) {
+      throw new SandboxError(
+        "[Sandbox] Azure takes request credentials per sandbox, from create(), never as a factory default."
+      )
+    }
     this.configuration = sandboxConfig<TParams>(options)
     this.provisionTimeoutMs = positiveMilliseconds(
       options.provisionTimeoutMs ?? 120_000,
@@ -99,6 +108,9 @@ export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<nev
             signal,
             session.network?.mode !== "none"
           )
+          if (options.requestCredentials?.length) {
+            await installAzureCredentials(this.client, id, options.requestCredentials, signal)
+          }
           signal.throwIfAborted()
           const sandbox = new AzureSandbox(id, this.client, session, this.lifecycle, supervisorRoot)
           return initializeSandboxEnvironment(sandbox, environment, signal)
@@ -125,9 +137,6 @@ export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<nev
 }
 
 function assertEphemeral(options: object): void {
-  if ("requestCredentials" in options && options.requestCredentials !== undefined) {
-    throw new SandboxError("[Sandbox] azure does not support secure request credentials.")
-  }
   if (("persistence" in options && options.persistence !== undefined) || "persistent" in options) {
     throw new SandboxError("[Sandbox] Azure named persistence is not supported; omit persistence.")
   }

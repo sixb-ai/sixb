@@ -318,6 +318,15 @@ Workloads run without capabilities and with no-new-privileges enabled. File publ
 briefly freezes workloads to prevent path-swap races; command deadlines keep running.
 Use a dedicated workspace without symlink components. System directories are rejected.
 
+### Request credentials
+
+The factory supports request credentials (`supportsRequestCredentials`), such as the run token the
+agent worker adds to every call its commands make to the Sixb API. A forwarder runs as root in the
+guest and holds them; `credentialedUrl(url)` is its socket under `/var/lib/sixb-forward`, which
+forwards only to `url` and adds the credential that matches the request. The credentials reach the
+guest through the file API, into root-only files, never in a command's text, and commands run as
+UID 65534, which cannot read them. Pass credentials to `create()`; a factory default is refused.
+
 ## Networking
 
 ```ts

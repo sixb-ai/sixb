@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import {
   GUEST_FORWARDER_NOT_RUNNING,
   type GuestCommand,
   type GuestCredentialPaths,
+  type GuestCredentialsCommands,
   guestCredentialedUrl,
   guestCredentialsCommands,
   type SandboxRequestCredential,
@@ -59,8 +60,7 @@ function setup() {
     }
   }
   // As a provider runs them: the start step only when no forwarder runs, left running.
-  const install = async (credentials: readonly SandboxRequestCredential[]) => {
-    const { install, start, ready } = guestCredentialsCommands(credentials, paths)
+  const runInstall = async ({ install, start, ready }: GuestCredentialsCommands) => {
     const installed = await run(install)
     if (installed === GUEST_FORWARDER_NOT_RUNNING) {
       Bun.spawn([...start.argv], {
@@ -72,6 +72,8 @@ function setup() {
     }
     return run(ready)
   }
+  const install = (credentials: readonly SandboxRequestCredential[]) =>
+    runInstall(guestCredentialsCommands(credentials, paths))
   const socketOf = () => guestCredentialedUrl(origin, paths).slice("unix:".length)
   const call = async (path: string, headers?: Record<string, string>) => {
     const response = await fetch(`http://localhost${path}`, { unix: socketOf(), headers })
@@ -81,7 +83,7 @@ function setup() {
       forwardedFor: string | null
     }
   }
-  return { paths, origin, credential, install, call, socketOf }
+  return { paths, origin, credential, install, runInstall, call, socketOf }
 }
 
 describe("guest credentials", () => {
@@ -144,6 +146,22 @@ describe("guest credentials", () => {
     } finally {
       other.stop(true)
     }
+  })
+
+  // Azure writes root-only files through its API: the install step then carries no secret.
+  test("a provider that writes the files itself installs without them in env", async () => {
+    const { paths, credential, call, runInstall } = setup()
+    const secret = `guest-${randomUUID()}`
+    const commands = guestCredentialsCommands([credential(secret)], paths)
+    mkdirSync(paths.state, { recursive: true, mode: 0o700 })
+    for (const file of commands.files) writeFileSync(file.path, file.contents, { mode: file.mode })
+    const env = Object.fromEntries(
+      Object.entries(commands.install.env).filter(([key]) => !commands.fileEnv.includes(key))
+    )
+    expect(JSON.stringify(env)).not.toContain(secret)
+
+    expect(await runInstall({ ...commands, install: { ...commands.install, env } })).toBe(0)
+    expect((await call("/api/whoami")).authorization).toBe(`Bearer ${secret}`)
   })
 
   test("keeps the credentials root-only and out of the forwarder's arguments", async () => {
