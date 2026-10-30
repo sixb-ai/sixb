@@ -6,7 +6,7 @@ import {
   runModelLoop,
   toModelMessages,
 } from "@sixb/core/internal/agents"
-import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
+import { isAbortError } from "@sixb/core/internal/workers"
 import {
   type AgentRunDiagnostic,
   type AgentRunFinishReason,
@@ -16,7 +16,7 @@ import {
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
-import { AgentTurnTimeoutError } from "./errors"
+import { AgentTurnTimeoutError, throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { type ConversationReaders, loadConversationAuthors } from "./message-authors"
@@ -159,9 +159,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     stoppedByWorker(signal, input.stopSignal) ? { finishReason: "interrupted" as const } : {}
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
-    if (runtime.sourceSignal.reason instanceof QueueDeliveryLeaseLostError) {
-      throw runtime.sourceSignal.reason
-    }
+    throwIfExecutionLost(runtime.sourceSignal)
     usageRecorder.assertHealthy()
     sandboxReadiness.throwIfFailed()
     context.environmentFailureSignal?.throwIfAborted()

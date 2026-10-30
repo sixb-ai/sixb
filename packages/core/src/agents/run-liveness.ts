@@ -1,6 +1,7 @@
 import { captureSixbFailure, withFailureMessage } from "../errors/internal"
 import { AGENT_RUN_FAILURE_CODES, type AgentRunRecord } from "../storage/agents"
-import { AgentExecutionLostError, type AgentRunSessionHost, claimAgentRun } from "./run-session"
+import { AgentExecutionLostError } from "./run-fence"
+import { type AgentRunSessionHost, claimAgentRun } from "./run-session"
 
 // A run is held by whoever renews its lease. Once the lease recorded on the run lapses, its run
 // token fails closed and nothing may write to it any more, so the run can be ended here: by a

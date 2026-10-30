@@ -37,6 +37,7 @@ import {
 } from "./authority"
 import { createAgentRunExecutionToken } from "./ids"
 import type { StreamSink } from "./run-events"
+import { AgentExecutionLostError, fenced, isTerminalOrExecutionGone } from "./run-fence"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
@@ -260,7 +261,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     cancelled,
     events: host.events,
     children: agentRunChildren(host, run, executionToken),
-    mail: agentRunMail(host),
+    mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
@@ -276,18 +277,21 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     async renewLease(leaseExpiresAt) {
       try {
         readCancel(
-          await host.storage.agents.runs.confirmExecutionOwnership({
-            ...fence,
-            queueLeaseExpiresAt: new Date(leaseExpiresAt),
-          })
+          await fenced(
+            run.id,
+            () =>
+              host.storage.agents.runs.confirmExecutionOwnership({
+                ...fence,
+                queueLeaseExpiresAt: new Date(leaseExpiresAt),
+              }),
+            { ended: true }
+          )
         )
       } catch (error) {
-        if (!isTerminalOrExecutionGone(error)) throw error
         // A repair pass ended the run, or another runner took it over: this one stops now rather
         // than at its next write, as it does when its queue lease is lost.
-        const lost = new AgentExecutionLostError(run.id)
-        cancel.abort(lost)
-        throw lost
+        if (error instanceof AgentExecutionLostError) cancel.abort(error)
+        throw error
       }
     },
     async finish(outcome, messages) {
@@ -327,24 +331,28 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       latestModelCall: (executionId) =>
         host.storage.aiUsage.getLatestForExecution({ projectId: host.projectId, executionId }),
       createCheckpoint: (input) =>
-        agents.checkpoints.create({
-          ...input,
-          projectId: host.projectId,
-          createdByRunId: run.id,
-          executionToken,
-        }),
+        fenced(run.id, () =>
+          agents.checkpoints.create({
+            ...input,
+            projectId: host.projectId,
+            createdByRunId: run.id,
+            executionToken,
+          })
+        ),
     },
     people: agentRunPeople(host),
     execution: () =>
       host.storage.executions.getById({ projectId: host.projectId, id: run.executionId }),
     workspace: {
       transition: (input) =>
-        host.storage.agents.threads.transitionSandbox({
-          ...input,
-          projectId: host.projectId,
-          runId: run.id,
-          executionToken,
-        }),
+        fenced(run.id, () =>
+          host.storage.agents.threads.transitionSandbox({
+            ...input,
+            projectId: host.projectId,
+            runId: run.id,
+            executionToken,
+          })
+        ),
     },
     close: cancel.stop,
   }
@@ -436,14 +444,6 @@ export async function watchAgentRunCancel(
   }
 }
 
-/** This session's execution token is stale, so it must make no further durable writes. */
-export class AgentExecutionLostError extends Error {
-  readonly name = "AgentExecutionLostError"
-  constructor(readonly runId: string) {
-    super(`[Sixb] Lost execution ownership of agent run '${runId}'.`)
-  }
-}
-
 /**
  * The run's end could not be recorded: storage stayed unavailable across the retries. The runner
  * leaves the delivery for another attempt rather than acknowledging a run that never ended.
@@ -456,19 +456,6 @@ export class AgentFinalizationError extends Error {
   ) {
     super(`[Sixb] Could not finalize agent execution '${runId}'; storage is unavailable.`, options)
   }
-}
-
-/**
- * Storage outcomes that mean the run is no longer this session's: another delivery owns it, or it
- * already ended. There is nothing more to record either way.
- */
-export function isTerminalOrExecutionGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.code === "execution_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
-  )
 }
 
 async function startOrReclaim<TRun extends AgentRunRecord>(

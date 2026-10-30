@@ -1,7 +1,6 @@
 import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
-import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord } from "@sixb/core/storage"
-import { AgentTurnTimeoutError } from "./errors"
+import { AgentTurnTimeoutError, throwIfExecutionLost } from "./errors"
 import type { AgentTurnContext } from "./types"
 
 export interface AgentTurnRuntime {
@@ -49,9 +48,7 @@ export function createAgentTurnRuntime(input: {
     usageRecorder,
     timedOut: () => timedOut,
     assertCanContinue() {
-      if (input.signal.reason instanceof QueueDeliveryLeaseLostError) {
-        throw input.signal.reason
-      }
+      throwIfExecutionLost(input.signal)
       usageRecorder.assertHealthy()
       if (timedOut) {
         throw new AgentTurnTimeoutError(input.run.id, timeoutMs)

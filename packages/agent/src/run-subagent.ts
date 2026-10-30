@@ -7,7 +7,6 @@ import {
   toModelMessages,
 } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
-import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
 import {
   type AgentRunFinishReason,
@@ -20,6 +19,7 @@ import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent
 import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
+import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -294,9 +294,7 @@ function assertSubagentCanFinalize(input: {
   readonly runtime: AgentTurnRuntime
   readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
 }): void {
-  if (input.runtime.sourceSignal.reason instanceof QueueDeliveryLeaseLostError) {
-    throw input.runtime.sourceSignal.reason
-  }
+  throwIfExecutionLost(input.runtime.sourceSignal)
   input.runtime.usageRecorder.assertHealthy()
   input.sandboxReadiness.throwIfFailed()
   input.runtime.assertCanContinue()

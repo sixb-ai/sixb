@@ -16,6 +16,7 @@ import {
 import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   type AgentChildApprovalAwaiting,
+  AgentExecutionLostError,
   type AgentRunSession,
   createAgentMessageId,
   createSubagentExecutionId,
@@ -512,11 +513,9 @@ export class SubagentCoordinator {
       try {
         await this.session.mail.send({
           ...sent,
-          fromRunId: this.parentRun.id,
           toThreadId: child.threadId,
           kind: "answer",
           inReplyTo: question.id,
-          sentAt: new Date().toISOString(),
         })
       } catch (error) {
         this.#questions.reopen(question)
@@ -527,13 +526,7 @@ export class SubagentCoordinator {
       return output
     }
 
-    await this.session.mail.send({
-      ...sent,
-      fromRunId: this.parentRun.id,
-      toThreadId: child.threadId,
-      kind: "message",
-      sentAt: new Date().toISOString(),
-    })
+    await this.session.mail.send({ ...sent, toThreadId: child.threadId, kind: "message" })
     const toChild = this.#sent.get(child.id) ?? []
     if (!toChild.some((message) => message.id === sent.id)) toChild.push(sent)
     this.#sent.set(child.id, toChild)
@@ -702,12 +695,10 @@ export class SubagentCoordinator {
       try {
         await this.session.mail.send({
           id: `${this.parentRun.id}:deferred:${question.id}`,
-          fromRunId: this.parentRun.id,
           toThreadId: threadId,
           kind: "deferred",
           inReplyTo: question.id,
           text: "",
-          sentAt: new Date().toISOString(),
         })
         deferred.push(question.runId)
       } catch (error) {
@@ -854,10 +845,7 @@ export class SubagentCoordinator {
       )
     }
     if (parent.execution?.token !== requiredExecutionToken(this.parentRun)) {
-      throw new AgentStorageError(
-        "execution_lost",
-        `[SixbAgent] Parent Agent run '${parent.id}' is no longer owned by this execution.`
-      )
+      throw new AgentExecutionLostError(parent.id)
     }
     if ((await children.activeCount()) >= maxActive) {
       throw publicSpawnError(
