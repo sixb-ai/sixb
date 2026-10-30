@@ -115,6 +115,21 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
   async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
     return runPgTransaction(this.sql, async (tx) => {
+      // The run before the thread, the order a spawn takes them in.
+      if (input.fence) {
+        const [owner] = await tx<{ id: string }[]>`
+          SELECT id FROM agent_runs
+          WHERE project_id = ${input.projectId} AND id = ${input.fence.runId}
+            AND status = 'running' AND execution_token = ${input.fence.executionToken}
+          FOR SHARE
+        `
+        if (!owner) {
+          throw new AgentStorageError(
+            "execution_lost",
+            `[SixbPg] Execution token is no longer current on agent run '${input.fence.runId}'.`
+          )
+        }
+      }
       const [thread] = await tx<{ id: string }[]>`
         SELECT id FROM agent_threads
         WHERE project_id = ${input.projectId} AND id = ${input.threadId}

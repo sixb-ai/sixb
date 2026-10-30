@@ -33,7 +33,7 @@ import {
   endInterruptedAgentRun,
   endLapsedAgentRuns,
   isolateStreamSink,
-  publishAgentRunCancel,
+  requestAgentRunCancel,
   sandboxCredentialIssue,
   WorkflowResumeDispatchError,
   withAgentActivityStream,
@@ -672,7 +672,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     // One whose lease lapsed has no runner left to obey a cancel: endLapsedAgentRuns, earlier in
     // the same pass, ends it.
     if (run.status === "running") {
-      await publishAgentRunCancel(this.host.broker, { projectId: context.id, runId: run.id })
+      await requestAgentRunCancel(
+        { projectId: context.id, broker: this.host.broker, storage: context.storage.agents },
+        run.id
+      )
       return
     }
     if (run.status !== "queued") return
@@ -700,7 +703,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         id: run.id,
       })
       if (current?.kind === "subagent" && current.status === "running") {
-        await publishAgentRunCancel(this.host.broker, { projectId: context.id, runId: run.id })
+        await requestAgentRunCancel(
+          { projectId: context.id, broker: this.host.broker, storage: context.storage.agents },
+          run.id
+        )
       }
     }
   }

@@ -25,6 +25,10 @@ fails closed, and `endLapsedAgentRuns` (`run-liveness.ts`) may end it: it reclai
 rotates its token, then records it `cancelled` and `interrupted`. A worker's repair pass runs it,
 so a run ends without a queue job coming back for it.
 
+A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
+token stops working at once, and a runner that never hears the broker reads the cancel at its next
+lease renewal, which aborts the session's `cancelled`.
+
 ## Fencing
 
 Every durable write carries the session's token, and storage refuses it once another delivery

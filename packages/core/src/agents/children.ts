@@ -19,14 +19,13 @@ import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import { resolveTurnAccounting } from "./accounting"
 import { isPausedSubagentRun, turnResumeReadiness } from "./approvals"
-import { cancelQueuedRun } from "./cancel"
+import { cancelQueuedRun, requestAgentRunCancel } from "./cancel"
 import {
   type AgentChildQuestion,
   deferredChildQuestion,
   isAwaitingAnswerRun,
 } from "./child-question"
 import { AgentRequestError } from "./errors"
-import { publishAgentRunCancel } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import type { AgentReasoning } from "./types"
 
@@ -174,7 +173,10 @@ export async function cancelAgentChildRun(
       `[Sixb] Sub-agent run '${run.id}' is not at work: it is ${current?.status ?? run.status}.`
     )
   }
-  await publishAgentRunCancel(runtime.broker, { projectId: runtime.projectId, runId: run.id })
+  await requestAgentRunCancel(
+    { projectId: runtime.projectId, broker: runtime.broker, storage: requireAgents(runtime) },
+    run.id
+  )
   return current
 }
 

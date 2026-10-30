@@ -69,6 +69,7 @@ export interface AgentRunRow {
   attempt: number | string
   execution_token: string | null
   execution_queue_lease_expires_at: Date | string | null
+  cancel_requested_at: Date | string | null
   created_at: Date | string
   started_at: Date | string | null
   completed_at: Date | string | null
@@ -169,6 +170,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
             queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
           }
         : undefined,
+    cancelRequestedAt: row.cancel_requested_at ? new Date(row.cancel_requested_at) : undefined,
     createdAt: new Date(row.created_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,

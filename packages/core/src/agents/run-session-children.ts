@@ -1,17 +1,16 @@
 import type { Broker } from "../broker"
 import { ensureExecutionRecord } from "../execution/durable"
 import type { Storage } from "../storage"
-import {
-  type AgentApprovalRecord,
-  type AgentMessageRecord,
-  type AgentRunRecord,
-  type AgentStorage,
-  AgentStorageError,
-  type CreateSubagentRunInput,
-  type ListAgentMessagesInput,
-  type ListAgentMessagesResult,
-  type ListThreadSubagentsInput,
-  type SubagentRunRecord,
+import type {
+  AgentApprovalRecord,
+  AgentMessageRecord,
+  AgentRunRecord,
+  AgentStorage,
+  CreateSubagentRunInput,
+  ListAgentMessagesInput,
+  ListAgentMessagesResult,
+  ListThreadSubagentsInput,
+  SubagentRunRecord,
 } from "../storage/agents"
 import type { CreateExecutionInput } from "../storage/executions/types"
 import {
@@ -102,17 +101,6 @@ export function agentRunChildren(
   const { projectId } = host
   const agents = host.storage.agents
 
-  /** The turn still owns its run: a reclaim, or its end, fences it out of its children's writes. */
-  const assertOwned = async () => {
-    const current = await agents.runs.getById({ projectId, id: run.id })
-    if (current?.status !== "running" || current.execution?.token !== executionToken) {
-      throw new AgentStorageError(
-        "execution_lost",
-        `[Sixb] Agent run '${run.id}' is no longer owned by this session.`
-      )
-    }
-  }
-
   return {
     get: (runId) => agents.runs.getById({ projectId, id: runId }),
     getMany: (runIds) => agents.runs.getByIds({ projectId, ids: runIds }),
@@ -150,8 +138,12 @@ export function agentRunChildren(
         })
       }),
     async clearAttempt({ threadId, runId }) {
-      await assertOwned()
-      await agents.messages.deleteByRunId({ projectId, threadId, runId })
+      await agents.messages.deleteByRunId({
+        projectId,
+        threadId,
+        runId,
+        fence: { runId: run.id, executionToken },
+      })
     },
   }
 }

@@ -45,6 +45,7 @@ export {
   userCanRunAgent,
 } from "./authority"
 export { defineAgentTool } from "./builders"
+export { requestAgentRunCancel } from "./cancel"
 export type { AgentChildQuestion } from "./child-question"
 export { deferredChildQuestion, isAwaitingAnswerRun } from "./child-question"
 export type {

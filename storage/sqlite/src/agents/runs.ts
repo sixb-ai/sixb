@@ -29,6 +29,7 @@ import {
   type ListAgentRunsResult,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
+  type RequestAgentRunCancelInput,
   type StartAgentRunInput,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
@@ -379,6 +380,21 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         )
         .run(input.queueLeaseExpiresAt.toISOString(), input.projectId, input.id)
+      return this.requireRun(input.projectId, input.id)
+    })()
+  }
+
+  async requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord> {
+    return this.db.transaction(() => {
+      this.db
+        .query(
+          `
+          UPDATE agent_runs
+          SET cancel_requested_at = ?
+          WHERE project_id = ? AND id = ? AND status = 'running' AND cancel_requested_at IS NULL
+        `
+        )
+        .run((input.at ?? new Date()).toISOString(), input.projectId, input.id)
       return this.requireRun(input.projectId, input.id)
     })()
   }

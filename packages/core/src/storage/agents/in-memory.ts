@@ -98,6 +98,7 @@ import type {
   RemoveAgentThreadParticipantInput,
   RequestAgentApprovalInput,
   RequestAgentApprovalResult,
+  RequestAgentRunCancelInput,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,
@@ -712,6 +713,17 @@ class InMemoryAgentRunStore implements AgentRunStore {
     return clone(next)
   }
 
+  async requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord> {
+    const run = this.state.runs.get(key(input.projectId, input.id))
+    if (!run) {
+      throw new AgentStorageError("run_not_found", `[Sixb] Agent run '${input.id}' was not found.`)
+    }
+    if (run.status !== "running" || run.cancelRequestedAt) return clone(run)
+    const next: AgentRunRecord = { ...run, cancelRequestedAt: input.at ?? new Date() }
+    this.state.runs.set(key(input.projectId, input.id), clone(next))
+    return clone(next)
+  }
+
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
     if (!run.execution || run.execution.token !== input.executionToken) {
@@ -957,6 +969,15 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
   }
 
   async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    if (input.fence) {
+      const owner = this.state.runs.get(key(input.projectId, input.fence.runId))
+      if (owner?.status !== "running" || owner.execution?.token !== input.fence.executionToken) {
+        throw new AgentStorageError(
+          "execution_lost",
+          `[Sixb] Execution token is no longer current on agent run '${input.fence.runId}'.`
+        )
+      }
+    }
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {

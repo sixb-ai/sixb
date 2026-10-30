@@ -1311,7 +1311,7 @@ describe("agent routes", () => {
     ])
   })
 
-  test("cancel publishes a stop signal, rejects a finished run, and fences to the thread", async () => {
+  test("cancel records and publishes a stop, rejects a finished run, and fences to the thread", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({
       id: "thread-cancel",
@@ -1337,6 +1337,11 @@ describe("agent routes", () => {
       streamId: agentRunControlStreamId(run.id),
     })
     expect(control.some((record) => record.name === "agent.run.cancel")).toBe(true)
+    // Recorded on the run too, for a runner the broker never reaches. Guard proof: publish only,
+    // as cancelAgentRun did before requestAgentRunCancel.
+    expect(
+      (await storage.agents.runs.getById({ projectId: sixb.id, id: run.id }))?.cancelRequestedAt
+    ).toBeInstanceOf(Date)
 
     // Cancelling a run that has already finished is a 409, not a silent no-op.
     await storage.agents.runs.finish({

@@ -60,8 +60,9 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly run: TRun
   readonly executionToken: string
   /**
-   * Aborts once the run, or any run named in `cancelWith`, is cancelled; and, with an
-   * {@link AgentExecutionLostError}, once a renewal finds the run ended or taken over.
+   * Aborts once the run, or any run named in `cancelWith`, is cancelled: when the broker's cancel
+   * arrives, or at the claim or a lease renewal that reads a cancel recorded on the run. Also aborts,
+   * with an {@link AgentExecutionLostError}, once a renewal finds the run ended or taken over.
    */
   readonly cancelled: AbortSignal
   /**
@@ -87,7 +88,8 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly mail: AgentRunMail
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
-   * once the last lease recorded lapses, so the session renews it as the queue does.
+   * once the last lease recorded lapses, so the session renews it as the queue does. A renewal that
+   * reads a recorded cancel aborts `cancelled`.
    */
   renewLease(leaseExpiresAt: string): Promise<void>
   /**
@@ -241,13 +243,21 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
+  // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
+  // each renewal of its lease.
+  const recordedCancel = new AbortController()
+  const readCancel = (current: AgentRunRecord) => {
+    if (current.cancelRequestedAt) recordedCancel.abort()
+  }
+  readCancel(run)
+  const cancelled = AbortSignal.any([cancel.signal, recordedCancel.signal])
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
 
   return {
     run,
     executionToken,
-    cancelled: cancel.signal,
+    cancelled,
     events: host.events,
     children: agentRunChildren(host, run, executionToken),
     mail: agentRunMail(host),
@@ -265,10 +275,12 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     },
     async renewLease(leaseExpiresAt) {
       try {
-        await host.storage.agents.runs.confirmExecutionOwnership({
-          ...fence,
-          queueLeaseExpiresAt: new Date(leaseExpiresAt),
-        })
+        readCancel(
+          await host.storage.agents.runs.confirmExecutionOwnership({
+            ...fence,
+            queueLeaseExpiresAt: new Date(leaseExpiresAt),
+          })
+        )
       } catch (error) {
         if (!isTerminalOrExecutionGone(error)) throw error
         // A repair pass ended the run, or another runner took it over: this one stops now rather

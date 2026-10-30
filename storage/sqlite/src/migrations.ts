@@ -311,6 +311,7 @@ export const sqliteStorageMigrations = defineMigrations({
       { checksum: checksum(subagentThreadsSql) }
     ),
     sqliteSql("079-subagent-questions", subagentQuestionsSql),
+    sqliteSql("080-agent-run-cancel-requests", agentRunCancelRequestsSql),
   ],
 })
 
@@ -709,3 +710,6 @@ import agentApprovalResumeSql from "./migrations/077-agent-approval-resume.sql" 
 }
 import subagentThreadsSql from "./migrations/078-subagent-threads.sql" with { type: "text" }
 import subagentQuestionsSql from "./migrations/079-subagent-questions.sql" with { type: "text" }
+import agentRunCancelRequestsSql from "./migrations/080-agent-run-cancel-requests.sql" with {
+  type: "text",
+}
