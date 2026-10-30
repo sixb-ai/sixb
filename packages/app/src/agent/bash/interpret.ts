@@ -625,21 +625,21 @@ function describeSixb(
     case "datasets.list":
       return icon("objects", m.listDatasets)
     case "datasets.get":
-      return icon("objects", m.inspectDataset, humanize(intent.args[0]))
+      return icon("objects", m.inspectDataset, humanize(positionals(intent.args)[0]))
     case "datasets.versions":
-      return icon("objects", m.datasetVersions, humanize(intent.args[0]))
+      return icon("objects", m.datasetVersions, humanize(positionals(intent.args)[0]))
     case "datasets.rows":
-      return icon("objects", m.datasetRows, humanize(intent.args[0]))
+      return icon("objects", m.datasetRows, humanize(positionals(intent.args)[0]))
     case "syncs.list":
       return icon("actions", m.listSyncs)
     case "syncs.get":
-      return icon("actions", m.inspectSync, humanize(intent.args[0]))
+      return icon("actions", m.inspectSync, humanize(positionals(intent.args)[0]))
     case "sync-runs.list":
       return icon("actions", m.listSyncRuns)
     case "pipelines.list":
       return icon("actions", m.listPipelines)
     case "pipelines.get":
-      return icon("actions", m.inspectPipeline, humanize(intent.args[0]))
+      return icon("actions", m.inspectPipeline, humanize(positionals(intent.args)[0]))
     case "pipeline-runs.list":
       return icon("actions", m.listPipelineRuns)
     case "pipeline-runs.get":

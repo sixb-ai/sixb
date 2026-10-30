@@ -257,6 +257,16 @@ describe("describeBash", () => {
     expect(title("sixb pipeline-runs list --pipeline daily")).toBe("Listed pipeline runs")
   })
 
+  // Guard proof: name the dataset from intent.args[0] again; it reads "the limit dataset".
+  test("names the dataset when an option comes before its id", () => {
+    const { title } = describeBash(
+      classifyCommand("sixb datasets rows --limit 2 customer_orders"),
+      null
+    )
+    expect(title).toBe("Read rows of the customer orders dataset")
+  })
+
+
   test("says what a memory save remembered, and when it saved nothing", () => {
     const intent = classifyCommand('sixb memory save user -m "Prefers short bullet summaries"')
     const saved = describeBash(
