@@ -35,10 +35,10 @@ case "$2" in
   create) [ "$failOn" = "create" ] && exit 1 ;;
   start) [ "$failOn" = "start" ] && exit 1 ;;
   exec)
-    # The working-directory bootstrap (mkdir) must always succeed; execExit models the guest
-    # command's exit code, which only applies to the caller's runCommand.
+    # The working-directory bootstrap must always succeed; execExit models the guest command's
+    # exit code, which only applies to the caller's runCommand.
     case "$*" in
-      *"-- mkdir "*) exit 0 ;;
+      *"-- sh -c mkdir -p"*) exit 0 ;;
     esac
     printf 'stdout-from-fake'; printf 'stderr-from-fake' 1>&2; exit "$execExit" ;;
 esac
@@ -94,8 +94,9 @@ describe("SmolvmSandbox lifecycle", () => {
           stdout: "stdout-from-fake",
           stderr: "stderr-from-fake",
         })
+        // As the unprivileged user: commands never run as the guest's root.
         expect((await readCalls()).at(-1)).toBe(
-          `machine exec --name cwd-test --workdir ${expected} --env SIXB_RUN_ID=run-1 -- bash -lc echo hi`
+          `machine exec --name cwd-test --workdir ${expected} --env SIXB_RUN_ID=run-1 -- setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all -- bash -lc echo hi`
         )
       }
     } finally {
@@ -119,8 +120,11 @@ describe("SmolvmSandbox lifecycle", () => {
     // The guest filesystem is isolated: no host bind mount. Files arrive via in-guest writeFiles.
     expect(calls[0]).not.toContain("--volume")
     expect(calls[1]).toContain("machine start --name run-1")
-    // The working directory is created in-guest up front so it is a usable --workdir.
-    expect(calls[2]).toBe("machine exec --name run-1 --workdir / -- mkdir -p /workspace")
+    // The working directory is created in-guest up front so it is a usable --workdir, and owned by
+    // the unprivileged user commands run as.
+    expect(calls[2]).toBe(
+      'machine exec --name run-1 --workdir / -- sh -c mkdir -p "$1" && chown 65534:65534 "$1" sh /workspace'
+    )
 
     await sandbox.destroy()
   })
@@ -151,7 +155,7 @@ describe("SmolvmSandbox lifecycle", () => {
     })
     expect(sandbox.workingDirectory).toBe(configured)
     expect((await readCalls()).at(-1)).toBe(
-      `machine exec --name run-2 --workdir / -- mkdir -p ${configured}`
+      `machine exec --name run-2 --workdir / -- sh -c mkdir -p "$1" && chown 65534:65534 "$1" sh ${configured}`
     )
     expect(await stat(configured).catch(() => "absent")).toBe("absent")
     await sandbox.destroy()

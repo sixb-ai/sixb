@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SmolvmSandboxFactory } from "../src/smolvm-sandbox-factory"
@@ -46,13 +46,22 @@ case "$2" in
     done
     shift                        # drop --
     cd "$workdir" || exit 1
-    exec "$@"
+    PATH=${JSON.stringify(join(binDir, "stubs"))}:"$PATH" exec "$@"
     ;;
   *) exit 0 ;;
 esac
 `
   await writeFile(bin, script, "utf-8")
   await chmod(bin, 0o755)
+  // The guest's commands run unprivileged through setpriv, and its files are chowned to that user.
+  // The test runs them as itself, so both are stand-ins: setpriv runs what follows its `--`.
+  await mkdir(join(binDir, "stubs"))
+  const stub = async (name: string, body: string) => {
+    await writeFile(join(binDir, "stubs", name), `#!/bin/sh\n${body}\n`, "utf-8")
+    await chmod(join(binDir, "stubs", name), 0o755)
+  }
+  await stub("setpriv", 'while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"')
+  await stub("chown", "exit 0")
 })
 
 afterAll(async () => {

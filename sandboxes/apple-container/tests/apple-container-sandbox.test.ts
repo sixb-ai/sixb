@@ -1,8 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SandboxNotRunningError } from "@sixb/core"
+import { unprivilegedGuestArgv } from "@sixb/core/sandboxes"
 import { AppleContainerSandbox } from "../src/apple-container-sandbox"
 import {
   AppleContainerSandboxFactory,
@@ -29,6 +30,16 @@ beforeAll(async () => {
   failOncePath = join(binDir, "fake-container-fail-once")
   await writeFile(bin, fakeCliSource(), "utf8")
   await chmod(bin, 0o755)
+  // The guest's commands run unprivileged through setpriv, and its files are chowned to that user.
+  // The fake runs them as the test's own user, so both are stand-ins: setpriv runs what follows
+  // its `--`.
+  await mkdir(join(binDir, "stubs"))
+  const stub = async (name: string, body: string) => {
+    await writeFile(join(binDir, "stubs", name), `#!/bin/sh\n${body}\n`, "utf8")
+    await chmod(join(binDir, "stubs", name), 0o755)
+  }
+  await stub("setpriv", 'while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"')
+  await stub("chown", "exit 0")
 })
 
 afterAll(async () => {
@@ -100,13 +111,13 @@ describe("AppleContainerSandbox lifecycle", () => {
         const result = await sandbox.runCommand("cat", ["cwd-probe.txt"], { cwd })
         expect(result.exitCode).toBe(0)
         expect(result.stdout).toBe(expectedContent)
+        // As the unprivileged user: commands never run as the guest's root.
         expect((await readCalls()).at(-1)).toEqual([
           "exec",
           "--workdir",
           expectedDirectory,
           "cwd-test",
-          "cat",
-          "cwd-probe.txt",
+          ...unprivilegedGuestArgv("cat", ["cwd-probe.txt"]),
         ])
       }
     } finally {
@@ -299,7 +310,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 shift
-exec "$@"
+PATH=${JSON.stringify(join(binDir, "stubs"))}:"$PATH" exec "$@"
 `
 }
 
