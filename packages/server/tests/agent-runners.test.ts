@@ -58,7 +58,7 @@ async function setup() {
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
-  const send = (request: Request) => app.fetch(request)
+  const send = async (request: Request): Promise<Response> => app.fetch(request)
 
   /** A signed-in person who may use the Agent: their session cookie and CSRF pair. */
   async function person(userId: string) {
