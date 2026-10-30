@@ -30,9 +30,10 @@ export function resolveRunPlan(
     }
     return tool
   })
-  const { reasoning, instructions, timeZone, locale, sandboxModels } = plan
+  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs } = plan
   return Object.freeze({
     model: entry.model,
+    ontologyDocs,
     ...(instructions === undefined ? {} : { instructions }),
     tools: Object.freeze(tools),
     skills: withBuiltInSkills(plan.skills),
@@ -44,10 +45,11 @@ export function resolveRunPlan(
 }
 
 /** Resolve a directly configured workflow task into the shared Agent execution contract. */
+/** A workflow step's plan, but for its ontology docs, which its execution's view renders. */
 export function resolveWorkflowAgentStepPlan(
   definitions: Pick<SixbDefinitions, "agent" | "models" | "tools">,
   input: { readonly workflowId: string; readonly step: AgentStepDefinition }
-): ResolvedAgentExecutionPlan {
+): Omit<ResolvedAgentExecutionPlan, "ontologyDocs"> {
   const { workflowId, step } = input
   const models = definitions.models?.language
   // The step's own model runs as given, listed in the catalog or not; a tier's comes from it.

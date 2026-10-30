@@ -1,7 +1,14 @@
 import { createSixbError } from "../errors/internal"
 import type { LanguageModelRef, LanguageModelTier, ModelCatalog } from "../models/catalog"
+import type { PropertyClearance } from "../objects/property-clearance"
+import type { OntologyDocsCatalog } from "../ontology/docs"
+import { type RenderedOntologyDocs, renderOntologyDocs } from "../ontology/docs-markdown"
 import type { SixbDefinitions } from "../runtime/definitions"
+import type { Sixb } from "../runtime/sixb"
 import type { AgentRunRecord } from "../storage/agents"
+import { AgentMemoryError } from "./errors"
+import type { AgentMemoryRepoName } from "./memory"
+import type { AgentMemoryRepoView } from "./memory-execution"
 import type { AgentSkillDefinition } from "./skills"
 import type { AgentReasoning } from "./types"
 
@@ -26,6 +33,8 @@ export interface AgentRunPlan {
   /** The requester's time zone and locale, when the run captured them. */
   readonly timeZone?: string
   readonly locale?: string
+  /** Reference docs for the object types its requester can see, from their own view. */
+  readonly ontologyDocs: RenderedOntologyDocs
 }
 
 export type SandboxModelKind = "language" | "image" | "speech" | "transcription"
@@ -43,7 +52,17 @@ export interface SandboxModel {
 }
 
 /** The definitions a run's plan is read from. */
-export type AgentRunPlanDefinitions = Pick<SixbDefinitions, "agent" | "models" | "tools">
+export type AgentRunPlanDefinitions = Pick<
+  SixbDefinitions,
+  "agent" | "models" | "ontology" | "tools"
+>
+
+/** How a run's requester sees the project: through the run's SDK, with their clearance. */
+export interface AgentRunView {
+  readonly sixb: Pick<Sixb, "objects" | "actions">
+  /** Marked properties the requester cannot read; absent when they read every property. */
+  readonly propertyClearance?: PropertyClearance
+}
 
 /**
  * The plan of a conversation's turn or a child. A turn offers every project tool and skill, on the
@@ -52,13 +71,15 @@ export type AgentRunPlanDefinitions = Pick<SixbDefinitions, "agent" | "models" |
  */
 export function readAgentRunPlan(
   definitions: AgentRunPlanDefinitions,
-  run: AgentRunRecord
+  run: AgentRunRecord,
+  view: AgentRunView
 ): AgentRunPlan {
   const { agent, models, tools } = definitions
   const shared = {
     ...(agent.instructions === undefined ? {} : { instructions: agent.instructions }),
     skills: agent.skills.list(),
     sandboxModels: listSandboxModels(models),
+    ontologyDocs: renderAgentRunOntologyDocs({ ...view, catalog: agent.ontologyDocs }),
   }
 
   if (run.kind === "subagent") {
@@ -137,4 +158,90 @@ export function listSandboxModels(models: ModelCatalog | undefined): readonly Sa
     })
   )
   return [...language, ...media]
+}
+
+/** What a run reads of its memory: each repo its requester reads, now and as of a moment. */
+export interface AgentRunMemory {
+  /** Others take part in the conversation, so the project's memory alone is read. */
+  readonly shared: boolean
+  readonly repos: readonly {
+    readonly latest: AgentMemoryRepoView
+    readonly then: AgentMemoryRepoView
+  }[]
+}
+
+/**
+ * The repos a run's requester can read, each at its latest revision and as of `asOf`. A requester
+ * without a repo of their own, such as a service account, reads the project's alone, and so does a
+ * shared conversation: others read it, so it reaches no one's own memory.
+ */
+export async function readAgentRunMemory(
+  sixb: Pick<Sixb, "agent">,
+  input: { readonly shared: boolean; readonly asOf: Date }
+): Promise<AgentRunMemory> {
+  const names: readonly AgentMemoryRepoName[] = input.shared ? ["project"] : ["user", "project"]
+  const repos = await Promise.all(
+    names.map(async (repo) => {
+      try {
+        const [latest, then] = await Promise.all([
+          sixb.agent.memory.get(repo),
+          sixb.agent.memory.get(repo, { asOf: input.asOf }),
+        ])
+        return [{ latest, then }]
+      } catch (error) {
+        if (error instanceof AgentMemoryError && error.code === "not_allowed") return []
+        throw error
+      }
+    })
+  )
+  return { shared: input.shared, repos: repos.flat() }
+}
+
+/** Requesters with the same view share rendered docs; a project has few distinct views. */
+const renderedOntologyDocs = new WeakMap<OntologyDocsCatalog, Map<string, RenderedOntologyDocs>>()
+const MAX_RENDERED_ONTOLOGY_VIEWS = 16
+
+/** Reference docs for the object types a run's requester can see, from their own view. */
+export function renderAgentRunOntologyDocs(input: {
+  /** The run's SDK, bound as its requester. */
+  readonly sixb: Pick<Sixb, "objects" | "actions">
+  readonly catalog: OntologyDocsCatalog
+  /** Marked properties the requester cannot read; absent when they read every property. */
+  readonly propertyClearance?: PropertyClearance
+}): RenderedOntologyDocs {
+  const { sixb, propertyClearance, catalog } = input
+  const objectTypes = sixb.objects.listTypes()
+  const actionsByType = new Map(
+    objectTypes.map((objectType) => [objectType.id, sixb.actions.listForType(objectType)])
+  )
+  // Definitions are immutable, so the visible types, restricted properties, and requestable actions
+  // determine the output.
+  const key = JSON.stringify(
+    objectTypes.map((objectType) => [
+      objectType.id,
+      [...(propertyClearance?.hiddenProperties(objectType.id)?.ids ?? [])],
+      actionsByType.get(objectType.id)?.map((action) => action.id),
+    ])
+  )
+  const views = renderedOntologyDocs.get(catalog) ?? new Map<string, RenderedOntologyDocs>()
+  renderedOntologyDocs.set(catalog, views)
+  const cached = views.get(key)
+  if (cached) return cached
+
+  const rendered = renderOntologyDocs({
+    catalog,
+    objectTypes,
+    valueTypesById: sixb.objects.getValueTypesById(),
+    actionsFor: (objectType) => actionsByType.get(objectType.id) ?? [],
+    ...(propertyClearance === undefined
+      ? {}
+      : {
+          restrictedPropertyIds: (objectTypeId) =>
+            propertyClearance.hiddenProperties(objectTypeId)?.ids,
+        }),
+  })
+  views.set(key, rendered)
+  const oldest = views.keys().next().value
+  if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
+  return rendered
 }

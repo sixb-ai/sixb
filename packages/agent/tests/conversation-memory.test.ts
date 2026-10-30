@@ -8,6 +8,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { readAgentRunMemory } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { createTestSixb } from "@sixb/core/testing"
 import { loadConversationMemory } from "../src/conversation-memory"
@@ -55,14 +56,24 @@ function setup() {
       changes: input.changes,
       createdAt: input.at,
     })
-  return { sixbAs, save }
+  const sessionAs = (principal: AuthorizablePrincipal, options: { agent?: boolean } = {}) =>
+    sessionOf(sixbAs(principal, options))
+  return { sessionAs, save }
 }
 
 const priya = { type: "user", id: "usr_priya" } as const
 
+/** A run's session as it reads memory: through the run's SDK, bound as its requester. */
+function sessionOf(sixb: Parameters<typeof readAgentRunMemory>[0]) {
+  return {
+    memory: ({ asOf }: { readonly asOf: Date }) =>
+      readAgentRunMemory(sixb, { shared: false, asOf }),
+  }
+}
+
 describe("a conversation's memory", () => {
   test("installs the latest files and shows MEMORY.md as it was at the given time", async () => {
-    const { sixbAs, save } = setup()
+    const { sessionAs, save } = setup()
     await save({
       baseRevision: 0,
       at: minutes(-5),
@@ -78,7 +89,7 @@ describe("a conversation's memory", () => {
     })
 
     const memory = await loadConversationMemory({
-      sixb: sixbAs(priya),
+      session: sessionAs(priya),
       asOf: threadStart,
     })
 
@@ -104,7 +115,7 @@ describe("a conversation's memory", () => {
   })
 
   test("shows the starter MEMORY.md for a repo with no save by then", async () => {
-    const { sixbAs, save } = setup()
+    const { sessionAs, save } = setup()
     await save({
       baseRevision: 0,
       at: minutes(5),
@@ -112,7 +123,7 @@ describe("a conversation's memory", () => {
     })
 
     const memory = await loadConversationMemory({
-      sixb: sixbAs(priya),
+      session: sessionAs(priya),
       asOf: threadStart,
     })
 
@@ -120,7 +131,7 @@ describe("a conversation's memory", () => {
   })
 
   test("shows the project's memory after the user's, to everyone who can run the agent", async () => {
-    const { sixbAs, save } = setup()
+    const { sessionAs, save } = setup()
     await save({
       repoId: "project",
       baseRevision: 0,
@@ -128,7 +139,7 @@ describe("a conversation's memory", () => {
       changes: [{ path: "MEMORY.md", contents: "# Project\n" }],
     })
 
-    const memory = await loadConversationMemory({ sixb: sixbAs(priya), asOf: threadStart })
+    const memory = await loadConversationMemory({ session: sessionAs(priya), asOf: threadStart })
     expect(memory?.prompt.repos).toEqual([
       { repo: "user", entry: "# Memory\n\n" },
       { repo: "project", entry: "# Project\n" },
@@ -137,9 +148,9 @@ describe("a conversation's memory", () => {
   })
 
   test("shows an empty project memory as a starter, so every conversation can add to it", async () => {
-    const { sixbAs } = setup()
+    const { sessionAs } = setup()
 
-    const memory = await loadConversationMemory({ sixb: sixbAs(priya), asOf: threadStart })
+    const memory = await loadConversationMemory({ session: sessionAs(priya), asOf: threadStart })
     expect(memory?.prompt.repos).toEqual([
       { repo: "user", entry: "# Memory\n\n" },
       { repo: "project", entry: "# Memory\n\n" },
@@ -147,7 +158,7 @@ describe("a conversation's memory", () => {
   })
 
   test("gives a requester with no memory of its own the project's alone", async () => {
-    const { sixbAs, save } = setup()
+    const { sessionAs, save } = setup()
     await save({
       repoId: "project",
       baseRevision: 0,
@@ -158,7 +169,7 @@ describe("a conversation's memory", () => {
     expect(
       (
         await loadConversationMemory({
-          sixb: sixbAs({ type: "serviceAccount", id: "svc_reports" }),
+          session: sessionAs({ type: "serviceAccount", id: "svc_reports" }),
           asOf: threadStart,
         })
       )?.prompt.repos
@@ -166,11 +177,11 @@ describe("a conversation's memory", () => {
   })
 
   test("is absent for a requester who cannot run the agent", async () => {
-    const { sixbAs } = setup()
+    const { sessionAs } = setup()
 
     expect(
       await loadConversationMemory({
-        sixb: sixbAs({ type: "serviceAccount", id: "svc_reports" }, { agent: false }),
+        session: sessionAs({ type: "serviceAccount", id: "svc_reports" }, { agent: false }),
         asOf: threadStart,
       })
     ).toBeUndefined()

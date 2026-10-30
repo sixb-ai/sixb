@@ -1,10 +1,6 @@
 import { agentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
-import {
-  type AgentExecutionAuthorization,
-  type AgentRunFileStore,
-  resolveAgentPropertyClearance,
-} from "@sixb/core/internal/agents"
+import type { AgentExecutionAuthorization, AgentRunFileStore } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
 import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -31,10 +27,6 @@ export async function createAgentExecutionContext(input: {
     authorization: input.authorization,
   })
 
-  const propertyClearance = resolveAgentPropertyClearance(
-    input.host.definitions.ontology,
-    input.authorization
-  )
   // A shared thread's system prompt names nobody, so it stays the same whoever sends the turn.
   const requester = input.shared
     ? undefined
@@ -45,7 +37,6 @@ export async function createAgentExecutionContext(input: {
   return {
     ...worker,
     sixb,
-    ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     ...(requester === undefined ? {} : { requester }),
     blobStorage: input.files ?? sixb.blobs,

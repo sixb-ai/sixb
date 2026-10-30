@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { type AgentRunPlanDefinitions, readAgentRunPlan } from "../src/agents"
+import { type AgentRunPlanDefinitions, type AgentRunView, readAgentRunPlan } from "../src/agents"
 import type { AgentSkillDefinition } from "../src/agents/skills"
 import type { LanguageModel } from "../src/models"
 import { createModelCatalog } from "../src/models"
+import { createOntologyDocsCatalog } from "../src/ontology/docs"
 import type { AgentRunRecord } from "../src/storage/agents"
 
 function model(modelId: string, defaultReasoning?: "low" | "high"): LanguageModel {
@@ -36,6 +37,7 @@ function definitions(input: { readonly instructions?: string } = {}): AgentRunPl
   return {
     agent: {
       skills: { list: () => [invoiceReview], getByName: () => invoiceReview },
+      ontologyDocs: createOntologyDocsCatalog({ objectTypes: [] }),
       ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     },
     models,
@@ -46,6 +48,14 @@ function definitions(input: { readonly instructions?: string } = {}): AgentRunPl
   } as unknown as AgentRunPlanDefinitions
 }
 
+/** A requester who sees no object types: the plan's docs hold the project's other docs alone. */
+const VIEW = {
+  sixb: {
+    objects: { listTypes: () => [], getValueTypesById: () => new Map() },
+    actions: { listForType: () => [] },
+  },
+} as unknown as AgentRunView
+
 /** A conversation's turn, with the spec its admission froze, or none for an older one. */
 function turn(spec?: object): AgentRunRecord {
   return { id: "run_1", kind: "conversation", ...(spec ? { spec } : {}) } as AgentRunRecord
@@ -53,7 +63,7 @@ function turn(spec?: object): AgentRunRecord {
 
 describe("a turn's plan", () => {
   test("offers every project tool and skill, with instructions only from SIXB.md", () => {
-    expect(readAgentRunPlan(definitions(), turn())).toEqual({
+    expect(readAgentRunPlan(definitions(), turn(), VIEW)).toEqual({
       model: { provider: "test", modelId: "default" },
       reasoning: "low",
       skills: [invoiceReview],
@@ -62,26 +72,32 @@ describe("a turn's plan", () => {
         { kind: "language", provider: "test", modelId: "default" },
         { kind: "language", provider: "test", modelId: "selected" },
       ],
+      ontologyDocs: { files: [], index: [] },
     })
     expect(
-      readAgentRunPlan(definitions({ instructions: "Answer in French." }), turn()).instructions
+      readAgentRunPlan(definitions({ instructions: "Answer in French." }), turn(), VIEW)
+        .instructions
     ).toBe("Answer in French.")
   })
 
   // Proven by removal: read the model's `defaultReasoning` whenever the spec has none.
   test("keeps the model and reasoning frozen at admission", () => {
     const selected = { model: { provider: "test", modelId: "selected" }, reasoning: "high" }
-    expect(readAgentRunPlan(definitions(), turn(selected))).toMatchObject({
+    expect(readAgentRunPlan(definitions(), turn(selected), VIEW)).toMatchObject({
       model: { provider: "test", modelId: "selected" },
       reasoning: "high",
     })
     const noReasoning = { model: { provider: "test", modelId: "default" } }
-    expect(readAgentRunPlan(definitions(), turn(noReasoning))).not.toHaveProperty("reasoning")
+    expect(readAgentRunPlan(definitions(), turn(noReasoning), VIEW)).not.toHaveProperty("reasoning")
   })
 
   test("fails closed when its model is gone", () => {
     expect(() =>
-      readAgentRunPlan(definitions(), turn({ model: { provider: "test", modelId: "removed" } }))
+      readAgentRunPlan(
+        definitions(),
+        turn({ model: { provider: "test", modelId: "removed" } }),
+        VIEW
+      )
     ).toThrow(/not available in models.language/)
   })
 })
@@ -100,7 +116,7 @@ describe("a child's plan", () => {
       },
     } as unknown as AgentRunRecord
 
-    expect(readAgentRunPlan(definitions(), child)).toMatchObject({
+    expect(readAgentRunPlan(definitions(), child, VIEW)).toMatchObject({
       model: { provider: "test", modelId: "selected" },
       toolNames: ["lookup"],
       timeZone: "Europe/Paris",

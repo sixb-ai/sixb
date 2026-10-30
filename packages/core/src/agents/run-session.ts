@@ -26,6 +26,7 @@ import type { AuthStorage, UserRecord } from "../storage/auth"
 import { turnPausesOnHeldCalls } from "./approvals"
 import {
   type AgentExecutionAuthorization,
+  resolveAgentPropertyClearance,
   resolveInheritedAgentExecutionAuthorization,
   userCanRunAgent,
 } from "./authority"
@@ -38,7 +39,13 @@ import {
   fenced,
   isTerminalOrExecutionGone,
 } from "./run-fence"
-import { type AgentRunPlan, type AgentRunPlanDefinitions, readAgentRunPlan } from "./run-plan"
+import {
+  type AgentRunMemory,
+  type AgentRunPlan,
+  type AgentRunPlanDefinitions,
+  readAgentRunMemory,
+  readAgentRunPlan,
+} from "./run-plan"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
@@ -119,8 +126,16 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * it.
    */
   assertOwned(): Promise<void>
-  /** What the run is set up with: its model, the project's instructions, skills and tools. */
+  /**
+   * What the run is set up with: its model, the project's instructions, skills and tools, and the
+   * ontology docs its requester's view gives.
+   */
   plan(): Promise<AgentRunPlan>
+  /**
+   * The memory its requester reads, now and as of `asOf`: the start of the conversation, or its
+   * latest compaction, which the prompt shows.
+   */
+  memory(input: { readonly asOf: Date }): Promise<AgentRunMemory>
   /**
    * What the run starts from, in one read: a turn's thread, the people it names and its history,
    * or a child's parent, threads and messages.
@@ -267,14 +282,15 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
-  let sdk: Promise<Sixb> | undefined
-  const runSdk = () => {
-    sdk ??= bindRunSdk(host, run).catch((error: unknown) => {
-      sdk = undefined
+  let bound: Promise<BoundRun> | undefined
+  const bind = () => {
+    bound ??= bindRun(host, run).catch((error: unknown) => {
+      bound = undefined
       throw error
     })
-    return sdk
+    return bound
   }
+  const runSdk = async () => (await bind()).sixb
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
   // each renewal of its lease.
@@ -353,7 +369,28 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         authorizationRef: ref,
         security: host.security,
       }),
-    plan: async () => readAgentRunPlan(host.definitions, run),
+    async plan() {
+      const { sixb, authorization } = await bind()
+      const propertyClearance = resolveAgentPropertyClearance(
+        host.definitions.ontology,
+        authorization
+      )
+      return readAgentRunPlan(host.definitions, run, {
+        sixb,
+        ...(propertyClearance === undefined ? {} : { propertyClearance }),
+      })
+    },
+    async memory({ asOf }) {
+      // Others read a shared conversation, so its runs reach no one's own memory.
+      const participants =
+        run.kind === "conversation"
+          ? await agents.threads.listParticipants({
+              projectId: host.projectId,
+              threadIds: [run.threadId],
+            })
+          : []
+      return readAgentRunMemory(await runSdk(), { shared: participants.length > 0, asOf })
+    },
     context: async () => {
       const context = await readAgentRunContext(host, run)
       if (run.kind === "conversation" && context.kind !== "conversation") {
@@ -387,8 +424,13 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
 }
 
+interface BoundRun {
+  readonly sixb: Sixb
+  readonly authorization: AgentExecutionAuthorization
+}
+
 /** The run's SDK, bound to its execution with the authority its requester holds now. */
-async function bindRunSdk(host: AgentRunSessionHost, run: AgentRunRecord): Promise<Sixb> {
+async function bindRun(host: AgentRunSessionHost, run: AgentRunRecord): Promise<BoundRun> {
   const execution = await host.storage.executions.getById({
     projectId: host.projectId,
     id: run.executionId,
@@ -404,7 +446,10 @@ async function bindRunSdk(host: AgentRunSessionHost, run: AgentRunRecord): Promi
     authorizationRef: execution.authorizationRef,
     security: host.security,
   })
-  return bindDurableAgentExecution(host.sdk, { execution, runId: run.id, authorization })
+  return {
+    sixb: bindDurableAgentExecution(host.sdk, { execution, runId: run.id, authorization }),
+    authorization,
+  }
 }
 
 async function openModelCalls(

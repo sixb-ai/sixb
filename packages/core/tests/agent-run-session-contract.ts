@@ -711,6 +711,31 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     })
   })
 
+  describe("a run's memory", () => {
+    // Guard proof: read the user's repo whatever the participants in AgentRunSession.memory; the
+    // shared conversation then reaches its requester's own memory.
+    test("reads the project's memory alone once others take part in the conversation", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const asOf = new Date()
+
+      expect((await session.memory({ asOf })).shared).toBe(false)
+
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thr_1",
+        principals: [{ type: "user", id: "usr_bob" }],
+        addedBy: alice,
+        maxParticipants: 50,
+        addedAt: asOf,
+      })
+      const shared = await session.memory({ asOf })
+      expect(shared.shared).toBe(true)
+      expect(shared.repos.map(({ latest }) => latest.repo)).toEqual(["project"])
+      session.close()
+    })
+  })
+
   describe("a run's files", () => {
     test("stores a file and reads it back", async () => {
       const { turn, open } = await seedConversation(claim)
