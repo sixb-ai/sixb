@@ -256,7 +256,8 @@ List options:
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
-  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>`,
+  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download url <content-url> --output <local-path>`,
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>

@@ -6,6 +6,7 @@ import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
 import { assertAgentRuntimeProfile } from "../src/agent-runtime/preflight"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
+import { runApiCredential } from "../src/api-url"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
 
@@ -380,23 +381,33 @@ describe("agent runtime conformance", () => {
     sandbox = undefined
   })
 
+  // The whole path a run's commands take: the installed CLI, the sandbox's credentialed address
+  // and its forwarder, which adds the run token the commands never hold.
   test("the local worker environment satisfies the provisioned behavioral profile", async () => {
-    sandbox = await createLocalSandbox()
+    const authorizations: (string | null)[] = []
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
+        authorizations.push(request.headers.get("authorization"))
         if (new URL(request.url).pathname === "/api/project") {
           return Response.json({ id: PROJECT_ID, name: "Runtime test" })
         }
         return new Response("Not found", { status: 404 })
       },
     })
+    const apiBaseUrl = `http://127.0.0.1:${server.port}`
+    const runToken = "sixb_run_v1_test"
+    sandbox = await new LocalSandboxFactory({ isolation: "none", network: { mode: "all" } }).create(
+      {
+        requestCredentials: [runApiCredential(apiBaseUrl, runToken)],
+      }
+    )
     const context = await prepareAgentSandboxApiContext({
       sandbox,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-      runToken: "sixb_run_v1_test",
-      apiBaseUrl: `http://127.0.0.1:${server.port}`,
+      runToken,
+      apiBaseUrl,
       projectId: PROJECT_ID,
       actorId: "assistant",
       runId: "run-1",
@@ -412,6 +423,9 @@ describe("agent runtime conformance", () => {
           projectId: PROJECT_ID,
         })
       ).resolves.toBeUndefined()
+      expect(context.env.SIXB_API_BASE_URL).toStartWith("unix:")
+      expect(JSON.stringify(context.env)).not.toContain(runToken)
+      expect(authorizations).toContain(`Bearer ${runToken}`)
     } finally {
       await server.stop(true)
     }

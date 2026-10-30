@@ -243,9 +243,11 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `apiBaseUrl`: required for agent execution; the Sixb server origin the run's commands call. The
-  worker gives sandboxes this origin as `SIXB_API_BASE_URL` and the run's token as `SIXB_TOKEN`,
-  installs the self-documenting `sixb` CLI on `PATH`, writes the run's project skills into
+- `apiBaseUrl`: required for agent execution; the Sixb server origin the run's commands call. On
+  a provider that adds request credentials, the run's token is one of them and commands get the
+  sandbox's credentialed address as `SIXB_API_BASE_URL`, never the token; on any other, they get
+  this origin and the token as `SIXB_TOKEN`. The worker installs the self-documenting `sixb` CLI on
+  `PATH`, writes the run's project skills into
   `SIXB_SKILLS_DIR` and ontology docs into `SIXB_ONTOLOGY_DIR`, and creates the sandbox with a
   restricted network policy allowing the server origin. The run token opens only the routes marked
   `agentApi`, as the run, while the run holds its execution; it carries no other credential.

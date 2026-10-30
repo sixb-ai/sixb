@@ -10,10 +10,12 @@ import {
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
 import { exec } from "@sixb/core/sandboxes"
+import { CredentialForwarder } from "./credential-forwarder"
 import { buildBwrapArgv, type DeniedPath } from "./isolation/bwrap"
 import {
   detectIsolation,
@@ -58,6 +60,7 @@ export class LocalSandbox implements Sandbox {
   private readonly denyReadPaths: readonly ResolvedDeniedPath[]
   private readonly inFlight = new Set<AbortController>()
   private readonly cleanupWorkingDirectory: boolean
+  private readonly forwarder: CredentialForwarder
 
   private constructor(input: {
     readonly id: string
@@ -70,6 +73,7 @@ export class LocalSandbox implements Sandbox {
     readonly readWritePaths: readonly string[]
     readonly denyReadPaths: readonly ResolvedDeniedPath[]
     readonly cleanupWorkingDirectory: boolean
+    readonly forwarder: CredentialForwarder
   }) {
     this.id = input.id
     this.workingDirectory = input.workingDirectory
@@ -81,8 +85,27 @@ export class LocalSandbox implements Sandbox {
     this.readWritePaths = input.readWritePaths
     this.denyReadPaths = input.denyReadPaths
     this.cleanupWorkingDirectory = input.cleanupWorkingDirectory
+    this.forwarder = input.forwarder
     this.currentStatus = "running"
   }
+
+  /** Replace every credential the forwarder adds; see {@link credentialedUrl}. */
+  readonly setRequestCredentials = async (
+    credentials: readonly SandboxRequestCredential[]
+  ): Promise<void> => {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot update request credentials`
+      )
+    }
+    this.forwarder.setCredentials(credentials)
+  }
+
+  /**
+   * A `unix:` socket that forwards to `url` with the matching credential added by this process,
+   * so commands reach `url` without ever holding the credential.
+   */
+  readonly credentialedUrl = (url: string): string => this.forwarder.urlFor(url)
 
   get status(): SandboxStatus {
     return this.currentStatus
@@ -113,6 +136,14 @@ export class LocalSandbox implements Sandbox {
     const network = options.network ?? { mode: "none" }
     warnIfRestrictedDowngraded(network)
 
+    const forwarder = await CredentialForwarder.start()
+    try {
+      forwarder.setCredentials(options.requestCredentials ?? [])
+    } catch (error) {
+      await forwarder.stop()
+      throw error
+    }
+
     return new LocalSandbox({
       id,
       workingDirectory,
@@ -124,6 +155,7 @@ export class LocalSandbox implements Sandbox {
       readWritePaths: options.readWritePaths ?? [],
       denyReadPaths,
       cleanupWorkingDirectory: generated,
+      forwarder,
     })
   }
 
@@ -203,6 +235,7 @@ export class LocalSandbox implements Sandbox {
       controller.abort()
     }
     this.inFlight.clear()
+    await this.forwarder.stop()
   }
 
   async destroy(): Promise<void> {
@@ -239,6 +272,7 @@ export class LocalSandbox implements Sandbox {
         readWritePaths: this.readWritePaths,
         denyReadPaths: this.denyReadPaths.map(({ path }) => path),
         network: this.network,
+        forwarderDirectory: this.forwarder.directory,
       })
       return buildSeatbeltArgv({ profile, command, args })
     }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,6 +16,8 @@ export interface AgentCliProcess {
   readonly runtime: "bun" | "node"
   readonly command: readonly string[]
   readonly version: string
+  /** Reach the API at a `unix:` address, as through a sandbox's credential forwarder. */
+  readonly overUnixSocket?: boolean
 }
 
 export interface CliResult {
@@ -1155,25 +1158,31 @@ const PROCESS_TIMEOUT_MS = 10_000
  */
 export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
   test(
-    `keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}`,
+    `keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}${
+      runtime.overUnixSocket ? " over a Unix socket" : ""
+    }`,
     async () => {
       const actionRun = { id: "run-1", actionId: "dispatch-work-order", status: "succeeded" }
       const workflowRun = { id: "workflow-run-1", workflowId: "review-case", status: "running" }
       const latest = { at: "2026-01-01T00:00:00.000Z", value: 1200 }
-      const api = startTestApi((request) => {
-        if (request.url.pathname.endsWith("/files/content")) return new Response("downloaded bytes")
-        switch (`${request.method} ${request.url.pathname}`) {
-          case "POST /api/files":
-            return json({ ok: true })
-          case "GET /api/objects/Device/fan-1/telemetry/rpm/latest":
-            return json(latest)
-          case "POST /api/actions/dispatch-work-order":
-            return json(actionRun)
-          case "POST /api/workflows/review-case/runs":
-            return json(workflowRun)
-        }
-        return graphApi(request)
-      })
+      const api = startTestApi(
+        (request) => {
+          if (request.url.pathname.endsWith("/files/content"))
+            return new Response("downloaded bytes")
+          switch (`${request.method} ${request.url.pathname}`) {
+            case "POST /api/files":
+              return json({ ok: true })
+            case "GET /api/objects/Device/fan-1/telemetry/rpm/latest":
+              return json(latest)
+            case "POST /api/actions/dispatch-work-order":
+              return json(actionRun)
+            case "POST /api/workflows/review-case/runs":
+              return json(workflowRun)
+          }
+          return graphApi(request)
+        },
+        { overUnixSocket: runtime.overUnixSocket ?? false }
+      )
       const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-process-"))
       try {
         const uploadPath = join(tempDir, "upload.txt")
@@ -1405,7 +1414,10 @@ function graphApi(request: RecordedRequest): Response | undefined {
   }
 }
 
-function startTestApi(handler: TestApiHandler): TestApi {
+function startTestApi(
+  handler: TestApiHandler,
+  options: { readonly overUnixSocket?: boolean } = {}
+): TestApi {
   const requests: RecordedRequest[] = []
   const fetch = async (request: Request): Promise<Response> => {
     const contentType = request.headers.get("content-type") ?? ""
@@ -1423,6 +1435,20 @@ function startTestApi(handler: TestApiHandler): TestApi {
     }
     requests.push(recorded)
     return (await handler(recorded)) ?? json({ error: "Unexpected contract request" }, 404)
+  }
+  if (options.overUnixSocket) {
+    // Under /tmp: a socket's path must fit in about 100 bytes.
+    const directory = mkdtempSync("/tmp/sixb-agent-cli-")
+    const socket = join(directory, "api.sock")
+    const server = Bun.serve({ unix: socket, fetch })
+    return {
+      baseUrl: `unix:${socket}`,
+      requests,
+      close: () => {
+        server.stop(true)
+        rmSync(directory, { recursive: true, force: true })
+      },
+    }
   }
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch })
   return {

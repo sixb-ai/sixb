@@ -1,5 +1,6 @@
 import type {
   Sandbox,
+  SandboxRequestCredential,
   SandboxSource,
   SandboxSourceAuth,
   SandboxSourceCredentials,
@@ -43,6 +44,8 @@ export class WorkspaceAuthSession {
     private readonly input: {
       auth: SandboxSourceAuth
       source: SandboxSource
+      /** Injected with every grant, which replaces the session's whole list. */
+      alongside: readonly SandboxRequestCredential[]
       signal: AbortSignal
       assertOwner(): Promise<void>
       onFailure(error: Error): void
@@ -136,7 +139,7 @@ export class WorkspaceAuthSession {
 
       await this.input.assertOwner()
       if (this.halted) return
-      if (this.inject) await bounded(this.inject(grant.requests))
+      if (this.inject) await bounded(this.inject([...this.input.alongside, ...grant.requests]))
       if (this.halted) return
       for (const previous of this.grants) {
         if (previous !== grant) await this.revoke(previous)

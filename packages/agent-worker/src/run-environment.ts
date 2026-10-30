@@ -22,7 +22,7 @@ import type {
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
-import { runTokenFor } from "./api-url"
+import { runApiCredential, runTokenFor } from "./api-url"
 import {
   type InstalledArtifacts,
   installArtifactsPublishedBy,
@@ -149,6 +149,7 @@ export async function createConversationAgentEnvironment(
     runId: run.id,
     executionToken: run.execution?.token,
   })
+  const apiCredential = runApiCredential(apiBaseUrl, runToken)
   const failure = new AbortController()
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
@@ -160,9 +161,10 @@ export async function createConversationAgentEnvironment(
         thread: input.thread,
         run,
         signal: sandboxSignal,
+        apiCredential,
         onAuthFailure: (error) => failure.abort(error),
       })
-    : ephemeralRunSandbox({ context })
+    : ephemeralRunSandbox({ context, apiCredential })
   let environment: AgentExecutionEnvironment | undefined
   // The prompt shows memory as of the thread's start or its latest compaction (see
   // loadConversationMemory).
@@ -285,6 +287,12 @@ export async function createSubagentEnvironment(
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
+  const runToken = runTokenFor({
+    projectId: context.id,
+    runId: run.id,
+    executionToken: execution.token,
+  })
+  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
 
   const workspace = keepsSubagentWorkspace(context.sandboxes)
     ? await persistentRunSandbox({
@@ -292,17 +300,19 @@ export async function createSubagentEnvironment(
         thread: input.thread,
         run,
         signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+        apiCredential,
         // A blank workspace issues no source credentials.
         onAuthFailure: () => {},
       })
     : undefined
-  const sandbox = workspace ?? ephemeralRunSandbox({ context })
+  const sandbox = workspace ?? ephemeralRunSandbox({ context, apiCredential })
 
   try {
     return await startSubagentEnvironment({
       ...input,
       execution,
       sandbox,
+      runToken,
       resumed: workspace?.resumed ?? false,
     })
   } catch (error) {
@@ -318,11 +328,12 @@ async function startSubagentEnvironment(
   input: CreateSubagentEnvironmentInput & {
     readonly execution: NonNullable<SubagentRunRecord["execution"]>
     readonly sandbox: RunSandbox
+    readonly runToken: string
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
   }
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation, execution, sandbox, resumed } = input
+  const { context, plan, run, conversation, execution, sandbox, runToken, resumed } = input
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
@@ -383,11 +394,7 @@ async function startSubagentEnvironment(
       blobStorage: context.blobStorage,
     }),
     apiBaseUrl: context.apiBaseUrl,
-    runToken: runTokenFor({
-      projectId: context.id,
-      runId: run.id,
-      executionToken: execution.token,
-    }),
+    runToken,
     attachmentContext,
     ontologyDocs: renderRunOntologyDocs(context),
     ...(memory ? { memory } : {}),
@@ -408,6 +415,12 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
+  const runToken = runTokenFor({
+    projectId: context.id,
+    runId: run.nodeRunId,
+    executionToken: execution.token,
+  })
+  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
   // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
   // step's lost source credentials end the node through `failure`.
   const failure = new AbortController()
@@ -422,6 +435,7 @@ export async function createWorkflowAgentNodeEnvironment(
     ? ephemeralRunSandbox({
         context,
         signal: sandboxSignal,
+        apiCredential,
         workspace: {
           runId: run.nodeRunId,
           factory: stepSandbox,
@@ -431,7 +445,7 @@ export async function createWorkflowAgentNodeEnvironment(
           onAuthFailure: (error) => failure.abort(error),
         },
       })
-    : ephemeralRunSandbox({ context, signal: input.signal })
+    : ephemeralRunSandbox({ context, signal: input.signal, apiCredential })
   const attachmentContext = await prepareWorkflowInputAttachments({
     input: input.nodeInput,
     blobStorage: context.blobStorage,
@@ -460,11 +474,7 @@ export async function createWorkflowAgentNodeEnvironment(
         blobStorage: context.blobStorage,
       }),
       apiBaseUrl: context.apiBaseUrl,
-      runToken: runTokenFor({
-        projectId: context.id,
-        runId: run.nodeRunId,
-        executionToken: execution.token,
-      }),
+      runToken,
       attachmentContext,
       ontologyDocs: renderRunOntologyDocs(context),
       errorDetails: input.errorDetails,

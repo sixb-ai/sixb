@@ -2850,7 +2850,12 @@ describe("AgentWorker", () => {
         expect(options).not.toHaveProperty("persistence")
         // Even source-free recipes explicitly confirm current auth requirements on resume.
         expect(options?.requestCredentials).toBeDefined()
-        if (!withSource) expect(options?.requestCredentials).toEqual([])
+        // Without a source, only the run's own credential for the Sixb API.
+        if (!withSource) {
+          expect(options?.requestCredentials?.map((credential) => credential.origin)).toEqual([
+            new URL(TEST_AGENT_API_BASE_URL).origin,
+          ])
+        }
         resumes++
         policies.push(options?.network)
         names.push(name)
@@ -3040,7 +3045,9 @@ describe("AgentWorker", () => {
         async create(options) {
           names.push(options!.persistence!.name)
           if (withSource)
-            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
+            expect(options?.requestCredentials?.at(-1)?.headers.Authorization).toBe(
+              `token-${issued}`
+            )
           const session = Object.assign(new RecordingSandbox(`replacement-${sessions.length}`), {
             setRequestCredentials: async () => {},
           })
@@ -3049,7 +3056,9 @@ describe("AgentWorker", () => {
         },
         async resume(name, options) {
           if (withSource)
-            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
+            expect(options?.requestCredentials?.at(-1)?.headers.Authorization).toBe(
+              `token-${issued}`
+            )
           resumes++
           if (resumes === 1) throw new SandboxStateUnavailableError("expired")
           expect(name).toBe(names[1])
@@ -3634,14 +3643,14 @@ describe("AgentWorker", () => {
     // Every request reaches the provider, at creation and on renewal.
     const targets = (credentials: readonly SandboxRequestCredential[] | undefined) =>
       credentials?.map((credential) => [credential.origin, credential.headers.Authorization])
+    // The run's own credential for the Sixb API comes first, and every renewal keeps it.
+    const run = [api, expect.stringMatching(/^Bearer sixb_run_v1_/)]
     expect(targets(created?.requestCredentials)).toEqual([
+      run,
       [repository, "token-1"],
       [graphql, "token-1"],
     ])
-    expect(targets(injections[0])).toEqual([
-      [repository, "token-2"],
-      [graphql, "token-2"],
-    ])
+    expect(targets(injections[0])).toEqual([run, [repository, "token-2"], [graphql, "token-2"]])
   })
 
   test("reports a repository that claims the run-file directory when a thread acquires it", async () => {
@@ -5178,7 +5187,8 @@ describe("AgentWorker", () => {
       expect(step.createOptions[0]?.persistence).toBeUndefined()
 
       const { events } = step
-      expect(events.slice(0, 2)).toEqual(["create", "clone"])
+      // Created with the run's own credential for the Sixb API, before the clone.
+      expect(events.slice(0, 2)).toEqual(["inject", "clone"])
       expect(events.indexOf("exclude-run-files")).toBeGreaterThan(-1)
       expect(events.indexOf("exclude-run-files")).toBeLessThan(events.indexOf("write-run-files"))
       expect(events.at(-1)).toBe("destroy")
@@ -5230,6 +5240,7 @@ describe("AgentWorker", () => {
 
       expect(step.createOptions[0]?.env).toEqual({ GIT_AUTHOR_NAME: "Step agent" })
       expect(step.createOptions[0]?.requestCredentials).toEqual([
+        expect.objectContaining({ origin: new URL(TEST_AGENT_API_BASE_URL).origin }),
         expect.objectContaining({ headers: { Authorization: "step-secret" } }),
       ])
       expect(system).toContain("Repository access is authenticated outside the sandbox")

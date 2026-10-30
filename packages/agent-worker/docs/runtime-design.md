@@ -18,9 +18,12 @@ Action and returns its terminal run in the same command.
 
 ## Reaching your data
 
-Inside the sandbox, the `sixb` CLI calls the live project API with the run's token
-(`SIXB_TOKEN`), so the agent works against current project data instead of a snapshot. The token
-opens a restricted slice of the API (everything else returns `403`):
+Inside the sandbox, the `sixb` CLI calls the live project API with the run's token, so the agent
+works against current project data instead of a snapshot. On a provider that adds request
+credentials (Vercel's firewall, the local provider's forwarder), the token is added outside the
+guest and commands reach the API at the sandbox's credentialed address; on any other, it is in
+their env as `SIXB_TOKEN`. The token opens a restricted slice of the API (everything else returns
+`403`):
 
 | Area | Routes |
 | --- | --- |

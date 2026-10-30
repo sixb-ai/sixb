@@ -1,4 +1,10 @@
-import type { Sandbox, SandboxEnvironment, SandboxFactory, SandboxSourceAuth } from "@sixb/core"
+import type {
+  Sandbox,
+  SandboxEnvironment,
+  SandboxFactory,
+  SandboxRequestCredential,
+  SandboxSourceAuth,
+} from "@sixb/core"
 import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
@@ -16,6 +22,8 @@ interface BlankRunSandboxInput {
    * booting then would be abandoned to the provider's failure cleanup instead of destroyed.
    */
   readonly signal?: AbortSignal
+  /** The run's credential for the Sixb API, added when the factory adds credentials. */
+  readonly apiCredential: SandboxRequestCredential
   readonly workspace?: undefined
 }
 
@@ -27,6 +35,7 @@ interface WorkspaceRunSandboxInput {
    * sandbox, it must never fire because the run completed.
    */
   readonly signal: AbortSignal
+  readonly apiCredential: SandboxRequestCredential
   readonly workspace: EphemeralWorkspaceInput
 }
 
@@ -57,6 +66,9 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
   if (input.workspace) return new EphemeralWorkspace(input, apiOrigin)
 
   const { context, signal } = input
+  const credentials = context.sandboxes.supportsRequestCredentials
+    ? { requestCredentials: [input.apiCredential] }
+    : {}
 
   return {
     waitBeforeModel: false,
@@ -65,6 +77,7 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
       sandbox: await context.sandboxes.create({
         environment: {},
         network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
+        ...credentials,
         ...(signal ? { signal } : {}),
       }),
     }),
@@ -88,7 +101,7 @@ class EphemeralWorkspace implements RunSandbox {
   private closing: Promise<void> | undefined
 
   constructor(input: WorkspaceRunSandboxInput, apiOrigin: string) {
-    const { workspace, signal } = input
+    const { workspace, signal, apiCredential } = input
     this.workspace = workspace
     this.signal = signal
 
@@ -97,6 +110,7 @@ class EphemeralWorkspace implements RunSandbox {
       auth: workspace.auth,
       factory: workspace.factory,
       apiOrigin,
+      apiCredential,
       signal,
       assertOwner: workspace.assertOwner,
       onAuthFailure: workspace.onAuthFailure,

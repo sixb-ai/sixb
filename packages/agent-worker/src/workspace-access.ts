@@ -19,6 +19,8 @@ interface WorkspaceAccessInput {
   readonly auth?: SandboxSourceAuth
   readonly factory: Pick<SandboxFactory, "supportsRequestCredentials">
   readonly apiOrigin: string
+  /** The run's credential for the Sixb API, added when the provider adds credentials. */
+  readonly apiCredential: SandboxRequestCredential
   readonly signal: AbortSignal
   readonly assertOwner: () => Promise<void>
   readonly onAuthFailure: (error: Error) => void
@@ -26,7 +28,9 @@ interface WorkspaceAccessInput {
 
 /**
  * One run's access to a recipe's source: the session network, the guest environment and the
- * host-side credentials. Credentials never enter workspace state, guest files or env.
+ * host-side credentials, the run's own for the Sixb API among them. It owns the session's whole
+ * credential list, so a renewal of the source's never drops the run's. Credentials never enter
+ * workspace state, guest files or env.
  */
 export class WorkspaceAccess {
   readonly sourceUrl: URL | undefined
@@ -50,9 +54,15 @@ export class WorkspaceAccess {
     return { env: this.env, network: this.network }
   }
 
-  /** The first grant's requests; absent without authentication. */
+  /** The run's API credential and the first grant's requests; absent when there are none. */
   get requestCredentials(): readonly SandboxRequestCredential[] | undefined {
-    return this.credentials
+    const all = [...this.runCredentials, ...(this.credentials ?? [])]
+    return all.length > 0 ? all : undefined
+  }
+
+  /** The run's own credentials, on a provider that adds them outside the guest. */
+  private get runCredentials(): readonly SandboxRequestCredential[] {
+    return this.input.factory.supportsRequestCredentials ? [this.input.apiCredential] : []
   }
 
   /**
@@ -73,6 +83,7 @@ export class WorkspaceAccess {
     this.auth = new WorkspaceAuthSession({
       auth,
       source: recipe.source,
+      alongside: this.runCredentials,
       signal,
       assertOwner,
       onFailure: onAuthFailure,
