@@ -49,6 +49,13 @@ export interface ParentDelivery {
   readonly delivery: Pick<QueueDelivery<AgentQueueJob>, "leaseExpiresAt" | "onLeaseRenewed">
 }
 
+interface RunningChild {
+  readonly parentRunId: string
+  /** Aborted when the parent's turn ends while the child still runs. */
+  readonly ended: AbortController
+  readonly done: Promise<void>
+}
+
 /** What the worker lends its child runner. */
 export interface ChildRunnerDeps {
   readonly host: AgentWorkerHost
@@ -66,7 +73,7 @@ export interface ChildRunnerDeps {
  */
 export class ChildRunner {
   /** Children running here, by run id: a child already running is never started twice. */
-  private readonly running = new Map<string, Promise<void>>()
+  private readonly running = new Map<string, RunningChild>()
 
   constructor(private readonly deps: ChildRunnerDeps) {}
 
@@ -76,38 +83,62 @@ export class ChildRunner {
    */
   start(run: SubagentRunRecord, parent: ParentDelivery): void {
     if (this.running.has(run.id)) return
-    const running = this.run(run, parent).catch((error: unknown) => {
+    const ended = new AbortController()
+    const done = this.run(run, parent, ended.signal).catch((error: unknown) => {
       console.error(`[SixbAgentWorker] Subagent run '${run.id}' failed outside its run.`, error)
     })
-    this.running.set(run.id, running)
-    void running.finally(() => this.running.delete(run.id))
+    this.running.set(run.id, { parentRunId: run.parentRunId, ended, done })
+    void done.finally(() => this.running.delete(run.id))
+  }
+
+  /**
+   * Stop a parent's children still running here, and wait for them to record it. Its end cancels
+   * them through the broker too; this needs no broker, and keeps the parent's delivery, which
+   * renews their lease, open until they have ended.
+   */
+  async stopChildrenOf(parentRunId: string): Promise<void> {
+    const children = [...this.running.values()].filter((child) => child.parentRunId === parentRunId)
+    for (const child of children) {
+      child.ended.abort(new DOMException("The parent Agent run has ended.", "AbortError"))
+    }
+    await Promise.allSettled(children.map((child) => child.done))
   }
 
   /** Wait for every child running here, for a worker that stops. */
   async drain(): Promise<void> {
-    await Promise.allSettled([...this.running.values()])
+    await Promise.allSettled([...this.running.values()].map((child) => child.done))
   }
 
-  private async run(queuedRun: SubagentRunRecord, parent: ParentDelivery): Promise<void> {
+  private async run(
+    queuedRun: SubagentRunRecord,
+    parent: ParentDelivery,
+    parentEnded: AbortSignal
+  ): Promise<void> {
     const { signal, delivery } = parent
-    // A child stops with its parent: cancelling the parent cancels it.
-    const session = await claimAgentRun(this.deps.sessions, {
-      run: queuedRun,
-      modelId: queuedRun.spec.model.modelId,
-      leaseExpiresAt: delivery.leaseExpiresAt,
-      cancelWith: [queuedRun.parentRunId],
-    })
+    const stopped = AbortSignal.any([signal, parentEnded])
+    // A child stops with its parent: cancelling the parent cancels it. Nothing redelivers a child,
+    // so a storage blip is retried here.
+    const session = await retryPreparationInPlace(1, stopped, () =>
+      claimAgentRun(this.deps.sessions, {
+        run: queuedRun,
+        modelId: queuedRun.spec.model.modelId,
+        leaseExpiresAt: delivery.leaseExpiresAt,
+        cancelWith: [queuedRun.parentRunId],
+      })
+    )
     if (!session) return
     const run = session.run
-    const turnSignal = AbortSignal.any([signal, session.cancelled])
+    const turnSignal = AbortSignal.any([stopped, session.cancelled])
     let environment: AgentExecutionEnvironment | null = null
     let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
     const work: SubagentWork = {}
 
     try {
-      // The parent's delivery holds the child's lease too: its renewals renew both.
+      // The parent's delivery holds the child's lease too: its renewals renew both. One that
+      // landed while the child was claimed is recorded now.
       stopOwnershipProjection = projectLease(delivery, session, "subagent")
+      await session.renewLease(delivery.leaseExpiresAt)
       const prepared = await retryPreparationInPlace(1, turnSignal, () =>
         this.prepare(session, queuedRun)
       )
@@ -175,7 +206,7 @@ export class ChildRunner {
       }
       const aborted =
         !(error instanceof ModelUsageRecordingError) &&
-        (signal.aborted || session.cancelled.aborted || isAbortError(error))
+        (stopped.aborted || session.cancelled.aborted || isAbortError(error))
       // A worker stop takes its turns' children with it, and nothing replays them.
       const interrupted = aborted && stoppedByWorker(turnSignal, signal)
       const finalized = await recordFate(
