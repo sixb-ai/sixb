@@ -8,10 +8,10 @@ import type {
   ModelOutput,
 } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
-import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
-import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
+import { BASH_TOOL_SPEC } from "../../../packages/agent/src/tools/bash"
+import { READ_TOOL_SPEC } from "../../../packages/agent/src/tools/read"
+import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent/src/tools/view-file"
 import { createVercelGateway, vercelGateway } from "../src"
 import { isStrictGatewaySchema } from "../src/structured-output"
 

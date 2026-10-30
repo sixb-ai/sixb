@@ -6,7 +6,7 @@ import type {
   LanguageModelStreamEvent,
   ModelMessage,
 } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "../src/messages-accounting"
 import { messagesOutputSchema } from "../src/messages-schema"
 import { createAzureAIFoundry } from "./provider-fixture"

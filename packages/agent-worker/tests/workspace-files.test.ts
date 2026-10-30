@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test"
 import type { Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
-import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
-import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
+import { prepareAgentSandboxApiContext } from "../../agent/src/sandbox-api-context"
 import {
   prepareWorkspaceRunFiles,
   WorkspaceRunFilesConflictError,

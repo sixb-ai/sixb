@@ -654,11 +654,27 @@
         "typescript": "^5.7.0",
       },
     },
+    "packages/agent": {
+      "name": "@sixb/agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/cli-core": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@sixb/sandboxes-local": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:*",
+      },
+    },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
       "version": "0.1.25",
       "dependencies": {
-        "@sixb/cli-core": "workspace:^",
+        "@sixb/agent": "workspace:^",
       },
       "devDependencies": {
         "@sixb/core": "workspace:*",
@@ -1632,6 +1648,8 @@
     "@shikijs/vscode-textmate": ["@shikijs/vscode-textmate@10.0.2", "", {}, "sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg=="],
 
     "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
+
+    "@sixb/agent": ["@sixb/agent@workspace:packages/agent"],
 
     "@sixb/agent-worker": ["@sixb/agent-worker@workspace:packages/agent-worker"],
 

@@ -1,7 +1,7 @@
+import { AgentRequesterLeftThreadError } from "@sixb/agent"
 import { AgentDefinitionError } from "@sixb/core"
 import { isSixbError } from "@sixb/core/internal/errors"
 import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
-import { AgentRequesterLeftThreadError } from "./errors"
 
 /** Bound infrastructure retries before any model or tool has been called. */
 export const MAX_AGENT_DELIVERY_ATTEMPTS = 10

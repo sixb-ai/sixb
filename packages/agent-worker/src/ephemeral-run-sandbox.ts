@@ -1,3 +1,4 @@
+import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "@sixb/agent"
 import type {
   Sandbox,
   SandboxEnvironment,
@@ -5,8 +6,7 @@ import type {
   SandboxRequestCredential,
   SandboxSourceAuth,
 } from "@sixb/core"
-import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
-import type { AgentExecutionContext } from "./types"
+import type { AgentRunnerContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles } from "./workspace-files"
 
@@ -15,7 +15,7 @@ type EphemeralRunSandboxInput = BlankRunSandboxInput | WorkspaceRunSandboxInput
 
 interface BlankRunSandboxInput {
   /** The run's context: its project factory creates the sandbox, which reaches its Sixb API. */
-  readonly context: Pick<AgentExecutionContext, "sandboxes" | "apiBaseUrl">
+  readonly context: Pick<AgentRunnerContext, "sandboxes" | "apiBaseUrl">
   /**
    * Cancels creation: on cancellation, lost ownership, worker shutdown (which aborts the queue
    * delivery) or a deadline. It must never fire because the run completed: a sandbox still
@@ -29,7 +29,7 @@ interface BlankRunSandboxInput {
 
 interface WorkspaceRunSandboxInput {
   /** The run's context: the workspace reaches its Sixb API. */
-  readonly context: Pick<AgentExecutionContext, "apiBaseUrl">
+  readonly context: Pick<AgentRunnerContext, "apiBaseUrl">
   /**
    * Cancels creation, with its clone and setup, and stops credential renewal. As for a blank
    * sandbox, it must never fire because the run completed.

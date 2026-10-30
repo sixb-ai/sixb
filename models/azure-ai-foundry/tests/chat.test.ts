@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { JsonObject, LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { createAzureAIFoundry as create } from "../src"
 import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
 import { createAzureAIFoundry } from "./provider-fixture"

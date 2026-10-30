@@ -34,10 +34,10 @@ import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/model
 import { SandboxStateUnavailableError } from "@sixb/core/sandboxes"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
+import { renderCurrentTime } from "../../agent/src/agent-prompt"
+import { CHILD_WAIT_RECHECK_MS, OTHER_INBOX_RECHECK_MS } from "../../agent/src/subagent-tools"
+import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
-import { renderCurrentTime } from "../src/agent-prompt"
-import { CHILD_WAIT_RECHECK_MS, OTHER_INBOX_RECHECK_MS } from "../src/subagent-tools"
-import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // A child's held call pauses the child durably; once its requester decides, the turn that resumes
 // continues it as the next run of its thread, and its siblings never stop for it.

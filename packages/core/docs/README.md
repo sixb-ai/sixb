@@ -10,7 +10,7 @@ These notes describe implementation contracts. Application developers should sta
 - [Sandbox contract](sandbox-contract.md)
 - [Framework testing](testing-contributors.md)
 
-Related packages: [agent runtime](../../agent-worker/docs/runtime-design.md),
+Related packages: [agent runtime](../../agent/docs/runtime-design.md),
 [usage accounting](../../agent-worker/docs/usage-accounting.md), and
 [CLI execution model](../../cli/docs/execution-model.md). Agent migration notes live in
 [the agent worker package](../../agent-worker/docs/migration.md).

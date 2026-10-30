@@ -4,15 +4,8 @@ import type {
   AgentToolRunInfo,
   OntologyDocsCatalog,
   Principal,
-  SandboxDefinition,
-  SandboxFactory,
 } from "@sixb/core"
-import {
-  type AgentRunSession,
-  conversationThreadId,
-  staticSandboxRecipe,
-  type WorkflowAgentNodeSession,
-} from "@sixb/core/internal/agents"
+import { type AgentRunSession, conversationThreadId } from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -27,7 +20,6 @@ import type {
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
-import { runApiCredential, runTokenFor } from "./api-url"
 import {
   type InstalledArtifacts,
   installArtifactsPublishedBy,
@@ -44,12 +36,10 @@ import { prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
 import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
-import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
-import { keepsSubagentWorkspace, persistentRunSandbox } from "./persistent-run-sandbox"
 import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
@@ -89,9 +79,28 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
   readonly threadContext?: LoadedAgentThreadModelContext
 }
 
+/**
+ * How a runner gives a run its environment: a cloud sandbox, or a folder on a computer. The runner
+ * closes over whatever it opens it from (a factory, the thread's recipe, the run's credentials).
+ */
+export type OpenRunSandbox = (lifecycle: {
+  /** Stops provisioning: cancellation, lost ownership, shutdown, or the run's deadline. */
+  readonly signal: AbortSignal
+  /** Ends the run when its environment can no longer serve it, such as lost source credentials. */
+  readonly onFailure: (error: Error) => void
+}) => Promise<OpenedRunSandbox>
+
+export interface OpenedRunSandbox {
+  readonly sandbox: RunSandbox
+  /** The workspace the run's paused attempt left: it holds that attempt's files already. */
+  readonly resumed?: boolean
+}
+
 interface CreateAgentEnvironmentInput {
   readonly context: AgentExecutionContext
   readonly plan: ResolvedAgentExecutionPlan
+  /** The run's environment, opened by its runner. */
+  readonly openSandbox: OpenRunSandbox
   readonly signal?: AbortSignal
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
@@ -111,7 +120,6 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly conversation?: ConversationReaders
   /** Others were added to the thread, so it reaches the project's memory alone. */
   readonly shared?: boolean
-  readonly sandboxDefinition?: SandboxDefinition
   /** Run preflight only after current sandbox access has been resolved. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
   readonly run: ConversationAgentRunRecord
@@ -138,15 +146,11 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
-  /** The step's session: its sandbox checks the node is still the session's before each action. */
-  readonly session: Pick<WorkflowAgentNodeSession, "assertOwned">
   readonly run: WorkflowAgentNodeRunRecord
   readonly workflowId: string
   readonly stepId: string
   readonly nodeInput: WorkflowIOSnapshot
   readonly errorDetails: AgentErrorDetails
-  /** The step's own sandbox factory. Without one, the node gets the project's blank sandbox. */
-  readonly stepSandbox?: SandboxFactory
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -155,28 +159,14 @@ export async function createConversationAgentEnvironment(
 ): Promise<ConversationAgentExecutionEnvironment> {
   const { context, plan, run, preflight } = input
   const { apiBaseUrl } = context
-  const runToken = runTokenFor({
-    projectId: context.id,
-    runId: run.id,
-    executionToken: run.execution?.token,
-  })
-  const apiCredential = runApiCredential(apiBaseUrl, runToken)
   const failure = new AbortController()
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
     : failure.signal
-  const sandbox = input.thread?.sandboxParams
-    ? await persistentRunSandbox({
-        context,
-        session: input.session,
-        definition: input.sandboxDefinition,
-        thread: input.thread,
-        run,
-        signal: sandboxSignal,
-        apiCredential,
-        onAuthFailure: (error) => failure.abort(error),
-      })
-    : ephemeralRunSandbox({ context, apiCredential })
+  const { sandbox } = await input.openSandbox({
+    signal: sandboxSignal,
+    onFailure: (error) => failure.abort(error),
+  })
   let environment: AgentExecutionEnvironment | undefined
   // The prompt shows memory as of the thread's start or its latest compaction (see
   // loadConversationMemory).
@@ -291,39 +281,19 @@ export async function createConversationAgentEnvironment(
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, run } = input
+  const { run } = input
   const execution = run.execution
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
-  const runToken = runTokenFor({
-    projectId: context.id,
-    runId: run.id,
-    executionToken: execution.token,
+  // A child's workspace is blank, so it has no source credentials to lose.
+  const { sandbox, resumed = false } = await input.openSandbox({
+    signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+    onFailure: () => {},
   })
-  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
-
-  const workspace = keepsSubagentWorkspace(context.sandboxes)
-    ? await persistentRunSandbox({
-        context,
-        session: input.session,
-        thread: input.thread,
-        run,
-        signal: input.signal ?? NEVER_ABORTED_SIGNAL,
-        apiCredential,
-        // A blank workspace issues no source credentials.
-        onAuthFailure: () => {},
-      })
-    : undefined
-  const sandbox = workspace ?? ephemeralRunSandbox({ context, apiCredential })
 
   try {
-    return await startSubagentEnvironment({
-      ...input,
-      execution,
-      sandbox,
-      resumed: workspace?.resumed ?? false,
-    })
+    return await startSubagentEnvironment({ ...input, execution, sandbox, resumed })
   } catch (error) {
     // Preparation failed before the worker got this environment: the child ends here, so its
     // workspace goes, as the worker's failure path would destroy it. A lost execution must touch
@@ -422,12 +392,6 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  const runToken = runTokenFor({
-    projectId: context.id,
-    runId: run.nodeRunId,
-    executionToken: execution.token,
-  })
-  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
   // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
   // step's lost source credentials end the node through `failure`.
   const failure = new AbortController()
@@ -435,24 +399,10 @@ export async function createWorkflowAgentNodeEnvironment(
     ? AbortSignal.any([input.signal, failure.signal])
     : failure.signal
 
-  // A step with its own factory works in a workspace from that factory's static recipe; any
-  // other node in a blank sandbox from the project factory.
-  const { stepSandbox } = input
-  const sandbox = stepSandbox
-    ? ephemeralRunSandbox({
-        context,
-        signal: sandboxSignal,
-        apiCredential,
-        workspace: {
-          runId: run.nodeRunId,
-          factory: stepSandbox,
-          recipe: staticSandboxRecipe(stepSandbox.configuration ?? {}),
-          auth: stepSandbox.configuration?.auth,
-          assertOwner: () => input.session.assertOwned(),
-          onAuthFailure: (error) => failure.abort(error),
-        },
-      })
-    : ephemeralRunSandbox({ context, signal: input.signal, apiCredential })
+  const { sandbox } = await input.openSandbox({
+    signal: sandboxSignal,
+    onFailure: (error) => failure.abort(error),
+  })
   const attachmentContext = await prepareWorkflowInputAttachments({
     input: input.nodeInput,
     blobStorage: context.blobStorage,
@@ -495,7 +445,8 @@ export async function createWorkflowAgentNodeEnvironment(
   }
 }
 
-interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signal"> {
+interface AgentEnvironmentSetup
+  extends Omit<CreateAgentEnvironmentInput, "signal" | "openSandbox"> {
   readonly sandbox: RunSandbox
   /**
    * Run end or environment failure: stops waiting for a sandbox the first model call needs, and

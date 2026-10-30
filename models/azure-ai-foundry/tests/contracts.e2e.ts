@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { type AzureAIFoundryProvider, createAzureAIFoundry } from "../src"
 
 // Opt-in: up to 16 attempts / 16,384 requested output tokens, serial, no retries.

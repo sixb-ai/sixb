@@ -33,9 +33,9 @@ import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
+import { ChildQuestions } from "../../agent/src/child-questions"
+import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
-import { ChildQuestions } from "../src/child-questions"
-import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // A child asks its parent with ask_parent: the parent's wait_agent returns the question at once,
 // and message_agent answers it while the child waits. When the parent's turn ends first, the child

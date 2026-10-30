@@ -95,6 +95,9 @@
       "path": "loggers/pino/tsconfig.build.json"
     },
     {
+      "path": "packages/agent/tsconfig.build.json"
+    },
+    {
       "path": "packages/agent-worker/tsconfig.build.json"
     },
     {

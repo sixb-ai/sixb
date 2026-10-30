@@ -63,11 +63,10 @@ import {
 } from "./child-questions"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
-import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import type { TurnChildren } from "./run-agent-turn"
 import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { continuationTrigger } from "./subagent-continuation"
-import type { AgentRunFiles, AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AgentProjectCatalogs, AgentRunFiles, AgentRunSettings } from "./types"
 
 /**
  * How long a wait for children goes without reading their runs when nothing woke it. A child's
@@ -219,8 +218,8 @@ export class SubagentCoordinator {
   readonly #answers = new Map<string, MessageSubagentOutput>()
 
   constructor(
-    private readonly host: AgentWorkerHost,
-    private readonly context: AgentWorkerContext,
+    private readonly host: AgentProjectCatalogs,
+    private readonly context: AgentRunSettings,
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
     private readonly session: AgentRunSession,
@@ -887,7 +886,7 @@ export class SubagentCoordinator {
     const parts = continuationTrigger({
       goesOnWith,
       paused,
-      keepsWorkspace: keepsSubagentWorkspace(this.context.sandboxes),
+      keepsWorkspace: this.context.keepsChildWorkspaces,
       createdAt,
       timeZone: spec.timeZone ?? this.context.timeZone,
     })
