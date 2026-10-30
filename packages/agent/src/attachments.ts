@@ -1,6 +1,6 @@
 import { posix } from "node:path"
-import type { AgentFileDataProjection, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
-import { isAgentToolResult } from "@sixb/core/internal/agents"
+import type { AgentFileDataProjection, BlobInfo, FileRef } from "@sixb/core"
+import { type AgentRunFileStore, isAgentToolResult } from "@sixb/core/internal/agents"
 import type { LanguageModel } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
@@ -82,7 +82,7 @@ export async function prepareAgentAttachments(input: {
   readonly projectId: string
   readonly threadId: string
   readonly messages: readonly AgentMessageRecord[]
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly apiBaseUrl: string
   /** Where the run's files go: attachments are materialized in it. */
   readonly contextDirectory: string
@@ -136,7 +136,7 @@ export async function prepareAgentAttachments(input: {
 /** Build the bounded, ephemeral projection of a tool-created file for the next model step. */
 export async function prepareAgentToolFileProjection(input: {
   readonly fileRef: FileRef
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly inlineImages: boolean
   readonly signal?: AbortSignal
   readonly sandboxPath?: string
@@ -268,7 +268,7 @@ async function prepareOneAttachment(input: {
   readonly projectId: string
   readonly threadId: string
   readonly item: AttachmentWorkItem
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly apiBaseUrl: string
   readonly contextDirectory: string
   readonly inlineImages: boolean
@@ -446,7 +446,7 @@ async function prepareOneAttachment(input: {
 }
 
 async function safeBlobStat(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   fileRef: FileRef,
   notes: string[],
   signal: AbortSignal
@@ -476,7 +476,7 @@ function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
 }
 
 async function readBlobBytes(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   blobId: string,
   maxBytes: number,
   signal: AbortSignal,

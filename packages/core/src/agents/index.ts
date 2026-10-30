@@ -174,6 +174,7 @@ export type {
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
   AgentRunCheckpoint,
+  AgentRunFileStore,
   AgentRunHeldCalls,
   AgentRunOutcome,
   AgentRunPeople,

@@ -711,6 +711,20 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     })
   })
 
+  describe("a run's files", () => {
+    test("stores a file and reads it back", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const body = new TextEncoder().encode("rows,1\n")
+
+      const file = await session.files.put({ body, fileName: "rows.csv", mediaType: "text/csv" })
+
+      expect(await session.files.stat(file.blobId)).toMatchObject({ sizeBytes: body.byteLength })
+      expect(await new Response(await session.files.open(file.blobId)).text()).toBe("rows,1\n")
+      session.close()
+    })
+  })
+
   describe("a turn's context", () => {
     // Guard proof: return every participant from readReaders; Cleo and Dan, who cannot read the
     // thread, are then named to the model as taking part.

@@ -1,12 +1,15 @@
 import type {
   AuthorizablePrincipal,
-  BlobStorage,
   OntologyDocsCatalog,
   Sixb,
   SixbDefinitions,
   ValueType,
 } from "@sixb/core"
-import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
+import type {
+  AgentRunFileStore,
+  PropertyClearance,
+  RunModelLoopInput,
+} from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -52,7 +55,7 @@ export interface AgentExecutionContext extends AgentRunSettings {
    * shared thread, where each user message names its author instead.
    */
   readonly requester?: AgentRequester
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
 }
 
 export interface AgentTurnContext {
@@ -62,7 +65,7 @@ export interface AgentTurnContext {
   readonly beforeFinalize?: (options?: BeforeFinalizeOptions) => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
@@ -86,7 +89,7 @@ export interface AgentTurnContext {
  */
 export interface AgentRunFiles {
   sandbox(): Promise<AgentSandboxHandle>
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   /**

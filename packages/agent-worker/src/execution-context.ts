@@ -2,6 +2,7 @@ import { agentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   type AgentExecutionAuthorization,
+  type AgentRunFileStore,
   resolveAgentPropertyClearance,
 } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
@@ -17,6 +18,8 @@ export async function createAgentExecutionContext(input: {
   /** Display names the run read as it started (`AgentTurnContext.names`), its requester's among them. */
   readonly names: Readonly<Record<string, string>>
   readonly authorization: AgentExecutionAuthorization
+  /** Where the run's files are stored: its session's. A workflow step stores through its SDK. */
+  readonly files?: AgentRunFileStore
   readonly authorPrincipal?: AgentRunnerContext["authorPrincipal"]
   /** Others take part in the run's thread, so each user message names its author instead. */
   readonly shared?: boolean
@@ -45,6 +48,6 @@ export async function createAgentExecutionContext(input: {
     ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     ...(requester === undefined ? {} : { requester }),
-    blobStorage: sixb.blobs,
+    blobStorage: input.files ?? sixb.blobs,
   }
 }

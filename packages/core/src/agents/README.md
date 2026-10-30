@@ -65,6 +65,8 @@ threads · children · mail              the conversation's messages, a turn's c
                                        between them; reads answer only for the run's conversation
 artifacts                              the conversation's artifacts, read as the requester, and
                                        what the run publishes into it (run-artifacts.ts)
+files                                  where the run's files are stored and read: its attachments,
+                                       its tools' and children's files, its artifacts' files
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the

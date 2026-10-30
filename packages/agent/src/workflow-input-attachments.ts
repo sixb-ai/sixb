@@ -1,6 +1,7 @@
 import { posix } from "node:path"
-import type { BlobStorage, FileRef } from "@sixb/core"
+import type { FileRef } from "@sixb/core"
 import { isFileRef } from "@sixb/core"
+import type { AgentRunFileStore } from "@sixb/core/internal/agents"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import { waitForAbort } from "./abort"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -11,7 +12,7 @@ const MAX_WORKFLOW_ATTACHMENTS_TOTAL_BYTES = 100 * 1024 * 1024
 /** Materialize nested FileRefs from a workflow input into the headless task sandbox. */
 export async function prepareWorkflowInputAttachments(input: {
   readonly input: WorkflowIOSnapshot
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** Where the run's files go: the input's files are materialized in it. */
   readonly contextDirectory: string
   readonly signal?: AbortSignal
