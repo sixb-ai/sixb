@@ -86,8 +86,16 @@ export interface AgentWorkerContext {
   readonly timeZone: string
 }
 
-/** Provider ports activated only after an Agent execution scope is bound. */
-export interface AgentExecutionContext extends AgentWorkerContext {
+/**
+ * Provider ports activated only after an Agent execution scope is bound. A run reaches shared
+ * state through its session; the worker's storage is not part of it.
+ */
+export interface AgentExecutionContext extends Omit<AgentWorkerContext, "storage"> {
+  /**
+   * Only for `publish_artifact`, which writes artifact versions itself until artifacts publish
+   * through the API. Nothing else on a run's path reads it.
+   */
+  readonly artifactPublishing: AgentWorkerStorage
   readonly sixb: Sixb
   /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
   readonly propertyClearance?: PropertyClearance
@@ -107,7 +115,6 @@ export interface AgentTurnContext {
   readonly beforeFinalize?: (options?: BeforeFinalizeOptions) => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
-  readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
   /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string

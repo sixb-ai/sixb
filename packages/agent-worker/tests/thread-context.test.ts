@@ -172,10 +172,10 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   }
 
   await runTurnInSession({
+    storage: requireWorkerStorage(seeded.storage),
     context: {
       id: projectId,
       authorPrincipal: { type: "serviceAccount", id: "service_agent" },
-      storage: requireWorkerStorage(seeded.storage),
       blobStorage: new InMemoryBlobStorage(),
       tools: [],
       systemPrompt: "Test system prompt.",
