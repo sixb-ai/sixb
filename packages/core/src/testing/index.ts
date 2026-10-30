@@ -178,6 +178,7 @@ export {
   runUniqueValuesContractSuite,
   type UniqueValuesContractProvider,
 } from "./unique-values-contract"
+export { seedTestUsers, type TestUser } from "./users"
 export { startTestWebhookRun } from "./webhook-execution"
 export {
   runWebhookRunStorageContractSuite,
