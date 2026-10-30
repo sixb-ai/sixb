@@ -63,27 +63,9 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
 
-const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace(
-  "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
-  "The CLI uses the selected local profile and its API credentials."
-)
-  .replace(
-    "  sixb status                         Check the sandbox and its API access\n  sixb context                        Print the current run context\n",
-    "  sixb status                         Check the current profile and its API access\n"
-  )
-  .replace(
-    "\nWhen you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use\n`sixb ontology get` for a type that has no file there.\n",
-    ""
-  )
-
-  // The agent reaches models with its run token once the model routes allow it.
-  .replace(
-    "Files:\n  sixb files upload|download ...\n",
-    "Files:\n  sixb files upload|download ...\n\nModels:\n  sixb models list [--kind <kind>]    Configured models of every kind, with prices\n  sixb models get <model>             One model's options and rate card\n  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help\n"
-  )
-
-export function renderInstanceHelp(mode: "local" | "sandbox"): string {
-  return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP
+/** The sandbox CLI's help, which the agent's prompt includes. People's comes from @sixb/cli. */
+export function renderInstanceHelp(): string {
+  return SANDBOX_MAIN_HELP
 }
 
 const SEARCH_DETAILS = `Without --type, search matches primary-id prefixes and full-text fields across visible types.

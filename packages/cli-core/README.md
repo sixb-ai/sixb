@@ -140,7 +140,7 @@ import {
 | `createInstanceApiClient` | Create the mode-aware HTTP client |
 | `INSTANCE_COMMANDS` | Frozen top-level command names |
 | `isInstanceCommand` | Narrow a string to an instance command |
-| `renderInstanceHelp` | Render local or sandbox help text |
+| `renderInstanceHelp` | The sandbox CLI's help text, which the agent's prompt includes |
 | `requestsHelp` | Detect help before resolving a local connection |
 | `CliError` | Structured CLI failure with an exit code |
 | `reportError` | Write the stable error envelope and return its exit code |
