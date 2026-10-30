@@ -265,7 +265,7 @@ describe("a cancel recorded on the run", () => {
   // Guard proof: drop readCancel(run) from openAgentRunSession; the reclaimed session runs on.
   test("cancels a session claimed after it", async () => {
     const { host, storage, run } = await setup()
-    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
     if (!first) throw new Error("Expected the run to be claimed.")
     first.close()
     const asked = await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: run.id })
