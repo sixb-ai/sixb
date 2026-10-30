@@ -61,6 +61,9 @@ export class CredentialForwarder {
     const target = new URL(`${base}${incoming.pathname}${incoming.search}`)
     const headers = new Headers(request.headers)
     headers.delete("host")
+    // The API trusts these from a proxy on its own network, which this forwarder is: a command
+    // must not say whom the request is from.
+    for (const name of FORWARDING_HEADERS) headers.delete(name)
     const credential = this.credentials.find((candidate) => matches(candidate, request, target))
     if (credential) headers.set("authorization", credential.headers.Authorization)
 
@@ -74,6 +77,14 @@ export class CredentialForwarder {
     })
   }
 }
+
+const FORWARDING_HEADERS = [
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+]
 
 function matches(credential: SandboxRequestCredential, request: Request, target: URL): boolean {
   if (target.origin !== credential.origin) return false
