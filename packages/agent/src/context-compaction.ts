@@ -101,10 +101,7 @@ export async function prepareAgentConversationContext(input: {
     : undefined
 
   const tools = contextEstimateTools([
-    ...agentModelToolSpecs({
-      definitions: plan.tools,
-      valueTypesById: context.valueTypesById,
-    }),
+    ...agentModelToolSpecs(plan.tools),
     ...(input.frameworkTools ?? []),
   ])
   const estimateShapeWith = (memory: ConversationMemory | undefined) => ({

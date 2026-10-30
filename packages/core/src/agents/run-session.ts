@@ -2,7 +2,13 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createSixbError } from "../errors/internal"
 import type { AuthorizationRef } from "../execution"
-import { type AgentExecutionHost, bindDurableAgentExecution } from "../execution/agent"
+import {
+  type AgentExecutionHost,
+  bindAgentModelExecution,
+  bindDurableAgentExecution,
+} from "../execution/agent"
+import type { RunLogSession } from "../logging/run-logger"
+import { type LoggingService, resolveLoggingService } from "../logging/service"
 import type { LanguageModelRef } from "../models/catalog"
 import {
   AiModelCallRecorder,
@@ -34,6 +40,7 @@ import {
   resolveInheritedAgentExecutionAuthorization,
   userCanRunAgent,
 } from "./authority"
+import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
 import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
@@ -61,6 +68,13 @@ import {
   agentRunThreads,
 } from "./run-session-children"
 import {
+  type AgentToolCall,
+  type AgentToolCallResult,
+  handedToolAttachments,
+  runAgentTool,
+  threadToolAttachments,
+} from "./run-tools"
+import {
   type AgentRunContext,
   type AgentTurnContext,
   type AgentTurnHistory,
@@ -68,6 +82,7 @@ import {
   readAgentTurnHistory,
 } from "./run-turn"
 import { subscribeAgentRunCancel } from "./streams/protocol"
+import type { AgentToolRunInfo } from "./types"
 
 /**
  * A run's session: the one way its runner reads and writes shared state for it. Claiming the run
@@ -94,14 +109,6 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * AiModelCallRecorder.wrapModel): the runner never reports what a call used.
    */
   readonly models: AgentRunModels
-  /**
-   * What admits and records the run's model calls, for a runner that runs the project's tools in
-   * its own process: their model calls bill to the run too.
-   *
-   * The first call reads what admission needs, so it belongs in the run's preparation, where a
-   * storage blip is retried: a failed read is read again on the next call.
-   */
-  modelCalls(): Promise<AiModelCallRecorder>
   /**
    * Live records for whoever watches the run: its start, chunks, compaction, finalized message and
    * end. Best effort: a record that cannot be delivered never fails the run, whose finish is the
@@ -159,6 +166,15 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly workspace: AgentRunWorkspace
   /** The messages of the run's conversation, its children's threads included. */
   readonly threads: AgentRunThreads
+  /**
+   * Run one call of a project tool the run offers, as the run (see runAgentTool): with the run's
+   * SDK, its attachments and its logger, its model calls billed to the run. The files it puts are
+   * stored and returned, for the runner to copy into its sandbox.
+   */
+  callTool(
+    call: AgentToolCall,
+    options: { readonly signal: AbortSignal }
+  ): Promise<AgentToolCallResult>
   /** Its conversation's artifacts: what it reads of them as its requester, and what it publishes. */
   readonly artifacts: AgentRunArtifacts
   /**
@@ -244,6 +260,8 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly events: StreamSink
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
+  /** Where a project tool's logs go; the project's logging service when absent. */
+  readonly logging?: LoggingService
   /**
    * Binds the run's SDK as its requester, as the API binds a request with the run's token: what
    * the run reads and publishes through its session goes through it.
@@ -325,6 +343,40 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   readCancel(run)
   const cancelled = AbortSignal.any([cancel.signal, recordedCancel.signal])
   const scope = agentRunScope(host, run)
+  const threads = agentRunThreads(host, run, scope)
+  const files: AgentRunFileStore = {
+    put: async (input) => (await runSdk()).blobs.put(input),
+    open: async (blobId) => (await runSdk()).blobs.open(blobId),
+    stat: async (blobId) => (await runSdk()).blobs.stat(blobId),
+  }
+  // Ends with the session: a tool call that outlived its run stops calling models.
+  const ended = new AbortController()
+  let toolsBound: Promise<Sixb> | undefined
+  // A project tool's own model calls bill to the run, admitted and recorded with its own.
+  const toolSdk = () => {
+    toolsBound ??= (async () => {
+      const sixb = await runSdk()
+      bindAgentModelExecution(sixb, {
+        signal: AbortSignal.any([cancelled, ended.signal]),
+        accounting: await openedModelCalls(),
+      })
+      return sixb
+    })().catch((error: unknown) => {
+      toolsBound = undefined
+      throw error
+    })
+    return toolsBound
+  }
+  let logs: RunLogSession | undefined
+  const toolLogger = () => {
+    logs ??= resolveLoggingService(host.projectId, host.logging).startExecution({
+      kind: "agent",
+      id: run.id,
+    })
+    return logs.logger.child(
+      run.kind === "subagent" ? { parentRunId: run.parentRunId } : { threadId: run.threadId }
+    )
+  }
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
 
@@ -343,7 +395,6 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
       pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
     },
-    modelCalls: openedModelCalls,
     models: {
       async language(ref) {
         const key = `${ref.provider}/${ref.modelId}`
@@ -395,12 +446,37 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return finished
     },
     assertOwned: () => assertAgentRunOwned(agents, fence),
-    threads: agentRunThreads(host, run, scope),
+    threads,
     artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
-    files: {
-      put: async (input) => (await runSdk()).blobs.put(input),
-      open: async (blobId) => (await runSdk()).blobs.open(blobId),
-      stat: async (blobId) => (await runSdk()).blobs.stat(blobId),
+    files,
+    async callTool(call, { signal }) {
+      // Only a tool the run offers: a child's are the ones its parent chose.
+      const offered = run.kind === "subagent" ? run.spec.toolNames : undefined
+      const definition =
+        offered === undefined || offered.includes(call.toolName)
+          ? host.definitions.tools.getByName(call.toolName)
+          : null
+      if (!definition) {
+        throw new AgentToolPublicError(`[Sixb] Tool '${call.toolName}' is not available.`)
+      }
+      return runAgentTool({
+        definition,
+        valueTypesById: host.definitions.ontology.getValueTypesById(),
+        call,
+        signal,
+        run: toolRunInfo(run),
+        sixb: await toolSdk(),
+        logger: toolLogger(),
+        attachments:
+          run.kind === "subagent"
+            ? handedToolAttachments({ files: run.spec.files ?? [], store: files })
+            : threadToolAttachments({
+                threadId: run.threadId,
+                message: (messageId) => threads.message(messageId),
+                files,
+              }),
+        files,
+      })
     },
     authorization: (ref) =>
       resolveInheritedAgentExecutionAuthorization({
@@ -460,8 +536,19 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           })
         ),
     },
-    close: cancel.stop,
+    close() {
+      cancel.stop()
+      ended.abort(new DOMException("The Agent run's session has closed.", "AbortError"))
+      void logs?.flush().catch(() => {})
+    },
   }
+}
+
+/** The run a project tool is told it runs in. */
+function toolRunInfo(run: AgentRunRecord): AgentToolRunInfo {
+  return run.kind === "subagent"
+    ? { kind: "subagent", id: run.id, parentRunId: run.parentRunId }
+    : { kind: "conversation", id: run.id, threadId: run.threadId }
 }
 
 interface BoundRun {

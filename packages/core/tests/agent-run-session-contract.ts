@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  AgentToolPublicError,
   ArtifactRequestError,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -18,6 +19,7 @@ import {
   NOOP_STREAM_SINK,
   publishAgentRunCancel,
 } from "../src/agents"
+import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
@@ -49,6 +51,19 @@ const answeringModel = new MockLanguageModel({
     ]),
 })
 
+/** A project tool that answers what run it ran in, and stores a file for the run's sandbox. */
+const chartTool = defineAgentTool("chart")
+  .description("Draw a chart.")
+  .input({ title: "string" })
+  .run(async ({ input, run, files }) => {
+    const file = await files.put({ body: new TextEncoder().encode("a,b\n"), fileName: "chart.csv" })
+    return { title: input.title, runId: run.id, kind: run.kind, sandboxPath: file.sandboxPath }
+  })
+const otherTool = defineAgentTool("other")
+  .description("Do something else.")
+  .input({})
+  .run(() => ({ ran: true }))
+
 /** The project a session binds its run's SDK in, over the storage the test seeds. */
 function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const blobs = new InMemoryBlobStorage()
@@ -56,6 +71,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
     id: PROJECT_ID,
     ontology: [],
     models: { language: [answeringModel] },
+    tools: [chartTool, otherTool],
     storage,
     blobStorage: blobs,
     broker,
@@ -798,6 +814,56 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(refused).toMatchObject({ code: "agent.execution_failed" })
       session.close()
+    })
+  })
+
+  describe("a run's project tools", () => {
+    test("run as the run, and return the files they stored for its sandbox", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const result = await session.callTool(
+        { toolName: "chart", toolCallId: "call-1", input: { title: "Sales" } },
+        { signal: new AbortController().signal }
+      )
+
+      expect(result.output).toMatchObject({
+        title: "Sales",
+        runId: "run-a",
+        kind: "conversation",
+        sandboxPath: expect.stringMatching(/^\.sixb\/agent\/tool-files\/.+-chart\.csv$/),
+      })
+      expect(result.files).toEqual([
+        {
+          fileRef: expect.objectContaining({ sizeBytes: 4 }),
+          path: expect.stringMatching(/^tool-files\//),
+        },
+      ])
+      const [file] = result.files
+      if (!file) throw new Error("Expected the tool's file.")
+      expect(await new Response(await session.files.open(file.fileRef.blobId)).text()).toBe("a,b\n")
+      session.close()
+    })
+
+    // Guard proof: drop the `offered` check from AgentRunSession.callTool; the child then runs a
+    // tool its parent did not give it.
+    test("refuse input the tool's schema refuses, and a tool a child was not given", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const signal = new AbortController().signal
+
+      const refused = await parent
+        .callTool({ toolName: "chart", toolCallId: "call-1", input: { title: 42 } }, { signal })
+        .catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(AgentToolPublicError)
+
+      const child = await open(await spawnChild(storage, parent))
+      const notGiven = await child
+        .callTool({ toolName: "other", toolCallId: "call-2", input: {} }, { signal })
+        .catch((error: unknown) => error)
+      expect(notGiven).toBeInstanceOf(AgentToolPublicError)
+      parent.close()
+      child.close()
     })
   })
 

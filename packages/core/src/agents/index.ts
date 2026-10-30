@@ -35,6 +35,14 @@ export {
   turnPausesOnHeldCalls,
   turnResumeReadiness,
 } from "./approvals"
+export type { MessageAttachmentFile } from "./attachment-keys"
+export {
+  attachmentKey,
+  attachmentKeyMessageId,
+  findMessageAttachment,
+  listMessageAttachments,
+  toolResultAttachmentKey,
+} from "./attachment-keys"
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,
@@ -226,6 +234,8 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
 } from "./run-token"
+export type { AgentToolCall, AgentToolCallResult, AgentToolSpec } from "./run-tools"
+export { agentToolSpec, runAgentTool, threadToolAttachments } from "./run-tools"
 export type {
   AgentChildContext,
   AgentRunContext,
@@ -280,6 +290,12 @@ export type {
 } from "./thread-context-projection"
 export { projectAgentThreadModelContext } from "./thread-context-projection"
 export type { AgentToolCatalog } from "./tool-catalog"
+export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
+export {
+  AGENT_FILE_MAX_BYTES,
+  SANDBOX_CONTEXT_DIRECTORY,
+  storeAgentToolFile,
+} from "./tool-files"
 export { isAgentToolResult } from "./tool-result"
 export type {
   AgentDescriptor,

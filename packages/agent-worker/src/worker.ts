@@ -16,7 +16,6 @@ import {
   toAgentRunFailure,
 } from "@sixb/agent"
 import { principalsEqual } from "@sixb/core"
-import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -280,18 +279,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         // Catch a renewal that completed between starting the run and attaching the observer.
         // Storage keeps this projection monotonic, so racing confirmations are safe.
         await session.renewLease(delivery.leaseExpiresAt)
-        const modelCalls = await session.modelCalls()
-        return { ...(await this.prepareConversationTurn(context, session)), modelCalls }
+        return this.prepareConversationTurn(context, session)
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
-      // Project tools run in this process: their model calls bill to the run too.
-      bindAgentModelExecution(prepared.executionContext.sixb, {
-        signal: runtime.signal,
-        accounting: prepared.modelCalls,
-      })
       delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
         this.requireChildren().start(child, { signal, delivery })
       )
@@ -424,9 +417,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const turn = await session.context()
     const { thread, execution, participants } = turn
     const runPlan = await session.plan()
-    const plan = resolveRunPlan(this.host.definitions, runPlan, {
-      model: await session.models.language(runPlan.model),
-    })
+    const plan = resolveRunPlan(runPlan, { model: await session.models.language(runPlan.model) })
     // A turn's plan always carries it; only a child's goes without.
     if (!runPlan.delegation) {
       throw createSixbError(
@@ -465,7 +456,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // and read back whatever memory the thread held meanwhile.
       shared: participants.length > 0,
       plan,
-      delegation: { models: runPlan.delegation, toolNames: runPlan.toolNames },
+      delegation: {
+        models: runPlan.delegation,
+        toolNames: runPlan.tools.map((tool) => tool.name),
+      },
       execution,
       executionContext,
       model,
@@ -751,6 +745,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       maxActiveChildren: context.subagentConcurrencyPerRun,
       sdk: this.host,
       definitions: this.host.definitions,
+      ...(this.host.logging === undefined ? {} : { logging: this.host.logging }),
       afterFinish: (run) => this.afterRunFinished(run),
     }
   }
@@ -823,8 +818,6 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     storage,
     sandboxes: host.sandboxes,
     keepsChildWorkspaces: keepsSubagentWorkspace(host.sandboxes),
-    logging: host.logging,
-    valueTypesById: host.definitions.ontology.getValueTypesById(),
     // Normalize the server base URL once here, at the boundary. Everything downstream (the sandbox's
     // API address and run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),

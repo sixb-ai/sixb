@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineAgentTool } from "@sixb/core"
+import { agentToolSpec } from "@sixb/core/internal/agents"
 import {
   PUBLISH_ARTIFACT_TOOL_SPEC,
   PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
@@ -16,10 +17,7 @@ describe("agent model tool specifications", () => {
       .input({ id: "string" })
       .run(async ({ input }) => ({ id: input.id }))
 
-    const specs = agentModelToolSpecs({
-      definitions: [lookup],
-      valueTypesById: new Map(),
-    })
+    const specs = agentModelToolSpecs([agentToolSpec(lookup, new Map())])
 
     expect(specs).toEqual([
       {

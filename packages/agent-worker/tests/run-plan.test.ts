@@ -11,7 +11,7 @@ import {
   type LanguageModelEntry,
   type SixbDefinitions,
 } from "@sixb/core"
-import type { AgentRunPlan } from "@sixb/core/internal/agents"
+import { type AgentRunPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
 import { BUILT_IN_SKILLS } from "../../agent/src/skills/built-in"
 import { WorkerTestModel } from "../../agent/tests/worker-model-fixture"
@@ -50,9 +50,10 @@ function definitionsOf(input: {
 }) {
   return {
     agent: { skills: input.skills ?? skillCatalog([]) },
+    ontology: { getValueTypesById: () => new Map() },
     ...(input.models === undefined ? {} : { models: { language: input.models } }),
     tools: input.tools,
-  } as unknown as Pick<SixbDefinitions, "agent" | "models" | "tools">
+  } as unknown as Pick<SixbDefinitions, "agent" | "models" | "ontology" | "tools">
 }
 
 /** A workflow step's plan, from definitions holding these catalogs. */
@@ -69,15 +70,6 @@ function stepPlan(input: {
 
 describe("resolveRunPlan", () => {
   const model = new WorkerTestModel({ modelId: "default" })
-  const entry: LanguageModelEntry = { provider: model.providerId, modelId: model.modelId, model }
-  const models: LanguageModelCatalog = {
-    default: entry,
-    list: () => [entry],
-    getByRef: (ref) =>
-      ref.provider === entry.provider && ref.modelId === entry.modelId ? entry : null,
-    tiers: [],
-    getByTier: () => entry,
-  }
   const lookup = defineAgentTool("lookup")
     .description("Look up a value.")
     .input({ query: "string" })
@@ -87,31 +79,23 @@ describe("resolveRunPlan", () => {
     reasoning: "high",
     instructions: "Answer in French.",
     skills: [skill("invoice-review")],
-    toolNames: ["lookup"],
+    tools: [agentToolSpec(lookup, new Map())],
     sandboxModels: [],
     ontologyDocs: { files: [], index: [] },
   }
 
-  test("resolves the plan's tools, takes the session's model, and adds the harness's skills", () => {
-    const resolved = resolveRunPlan(definitionsOf({ models, tools: toolCatalog([lookup]) }), plan, {
-      model,
-    })
+  test("takes the session's model and the plan's tool specs, and adds the harness's skills", () => {
+    const resolved = resolveRunPlan(plan, { model })
 
     expect(resolved).toEqual({
       model,
       ontologyDocs: { files: [], index: [] },
       reasoning: "high",
       instructions: "Answer in French.",
-      tools: [lookup],
+      tools: [agentToolSpec(lookup, new Map())],
       skills: [skill("invoice-review"), ...BUILT_IN_SKILLS],
     })
     expect(Object.isFrozen(resolved)).toBe(true)
-  })
-
-  test("fails clearly when a tool the plan names is gone", () => {
-    expect(() =>
-      resolveRunPlan(definitionsOf({ models, tools: toolCatalog([]) }), plan, { model })
-    ).toThrow("Project tool 'lookup' is not available.")
   })
 })
 
@@ -261,7 +245,7 @@ describe("resolveWorkflowAgentStepPlan", () => {
 
     expect(plan.model).toBe(model)
     expect(plan.reasoning).toBe("high")
-    expect(plan.tools).toEqual([selected])
+    expect(plan.tools).toEqual([agentToolSpec(selected, new Map())])
     expect(plan.skills).toEqual([skill("invoice-review")])
   })
 

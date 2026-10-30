@@ -15,6 +15,7 @@ import type { AgentRunRecord } from "../storage/agents"
 import { AgentMemoryError } from "./errors"
 import type { AgentMemoryRepoName } from "./memory"
 import type { AgentMemoryRepoView } from "./memory-execution"
+import { type AgentToolSpec, agentToolSpec } from "./run-tools"
 import type { AgentSkillDefinition } from "./skills"
 import type { AgentReasoning } from "./types"
 
@@ -32,8 +33,8 @@ export interface AgentRunPlan {
   readonly instructions?: string
   /** The project's Agent Skills; the harness adds its own. */
   readonly skills: readonly AgentSkillDefinition[]
-  /** The project tools the run offers, by name. */
-  readonly toolNames: readonly string[]
+  /** The project tools the run offers, as the model is offered them. */
+  readonly tools: readonly AgentToolSpec[]
   /** The models its `sixb` can call beside its own, as its prompt lists them. */
   readonly sandboxModels: readonly SandboxModel[]
   /** The requester's time zone and locale, when the run captured them. */
@@ -108,7 +109,7 @@ export function readAgentRunPlan(
   }
 
   if (run.kind === "subagent") {
-    const { model, reasoning, toolNames, timeZone, locale } = run.spec
+    const { model, reasoning, timeZone, locale } = run.spec
     if (!models?.language?.getByRef(model)) {
       throw createSixbError(
         "agent.execution_failed",
@@ -119,7 +120,7 @@ export function readAgentRunPlan(
     return Object.freeze({
       ...shared,
       model: { provider: model.provider, modelId: model.modelId },
-      toolNames,
+      tools: toolSpecs(definitions, run.spec.toolNames),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(timeZone === undefined ? {} : { timeZone }),
       ...(locale === undefined ? {} : { locale }),
@@ -143,7 +144,10 @@ export function readAgentRunPlan(
     ...shared,
     model: { provider: entry.provider, modelId: entry.modelId },
     ...(language ? { delegation: readAgentRunDelegation(language) } : {}),
-    toolNames: tools.list().map((tool) => tool.name),
+    tools: toolSpecs(
+      definitions,
+      tools.list().map((tool) => tool.name)
+    ),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(spec?.timeZone === undefined ? {} : { timeZone: spec.timeZone }),
     ...(spec?.locale === undefined ? {} : { locale: spec.locale }),
@@ -290,4 +294,23 @@ export function readAgentRunDelegation(language: LanguageModelCatalog): AgentRun
     defaultModel: { provider: language.default.provider, modelId: language.default.modelId },
     tiers: language.tiers,
   }
+}
+
+/** The specs of the project tools named, each as the model is offered it. */
+function toolSpecs(
+  definitions: AgentRunPlanDefinitions,
+  names: readonly string[]
+): readonly AgentToolSpec[] {
+  const valueTypesById = definitions.ontology.getValueTypesById()
+  return names.map((name) => {
+    const definition = definitions.tools.getByName(name)
+    if (!definition) {
+      throw createSixbError(
+        "agent.execution_failed",
+        `[Sixb] Project tool '${name}' is not available.`,
+        { details: { toolName: name } }
+      )
+    }
+    return agentToolSpec(definition, valueTypesById)
+  })
 }

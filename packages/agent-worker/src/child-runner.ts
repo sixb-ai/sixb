@@ -13,7 +13,6 @@ import {
   stoppedByWorker,
   toAgentRunFailure,
 } from "@sixb/agent"
-import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -246,11 +245,6 @@ export class ChildRunner {
         prepared
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
-      // Project tools run in this process: their model calls bill to the run too.
-      bindAgentModelExecution(executionContext.sixb, {
-        signal: runtime.signal,
-        accounting: prepared.modelCalls,
-      })
       // From the first message: one its parent sent while it was queued is read at its first step,
       // and a continuation's first step reads what the runs before it left unread.
       const inbox = new SubagentInbox(session.mail, run, history.messages)
@@ -335,7 +329,7 @@ export class ChildRunner {
       throw new DOMException("The parent Agent run is no longer active.", "AbortError")
     }
     const runPlan = await session.plan()
-    const configuredPlan = resolveRunPlan(host.definitions, runPlan, {
+    const configuredPlan = resolveRunPlan(runPlan, {
       model: await session.models.language(runPlan.model),
     })
     if (
@@ -376,15 +370,6 @@ export class ChildRunner {
     const prepared = prepareAgentModel(configuredPlan)
     const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
     const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
-    const modelCalls = await session.modelCalls()
-    return {
-      executionContext,
-      durableExecution,
-      childThread,
-      conversation,
-      plan,
-      history,
-      modelCalls,
-    }
+    return { executionContext, durableExecution, childThread, conversation, plan, history }
   }
 }

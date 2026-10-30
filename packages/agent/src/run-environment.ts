@@ -1,12 +1,11 @@
 import { posix } from "node:path"
-import type { AgentToolAttachments, AgentToolRunInfo, Principal } from "@sixb/core"
+import type { Principal } from "@sixb/core"
 import {
   type AgentRunArtifacts,
   type AgentRunSession,
   type AgentTurnHistory,
   conversationThreadId,
 } from "@sixb/core/internal/agents"
-import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
@@ -38,7 +37,7 @@ import { type ConversationMemory, loadConversationMemory } from "./conversation-
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
-import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
+import { type AgentErrorDetails, type AgentToolCaller, projectModelTools } from "./model-adapters"
 import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
@@ -51,15 +50,10 @@ import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
 import { type SubagentHistory, subagentSandboxFiles } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import {
-  handedToolAttachments,
-  threadToolAttachments,
-  workflowInputToolAttachments,
-} from "./tools/attachments"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
-import { AgentFileBudget, createAgentToolFiles } from "./tools/tool-files"
+import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -151,6 +145,8 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
   readonly stepId: string
   readonly nodeInput: WorkflowIOSnapshot
   readonly errorDetails: AgentErrorDetails
+  /** How the step calls a project tool: it runs in the cloud, so in the worker's process. */
+  readonly callTool: AgentToolCaller
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -228,7 +224,7 @@ export async function createConversationAgentEnvironment(
       plan,
       runId: run.id,
       threadId: run.threadId,
-      toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
+      callTool: (call, options) => input.session.callTool(call, options),
       ...(input.thread && run.execution
         ? {
             publishing: {
@@ -238,11 +234,6 @@ export async function createConversationAgentEnvironment(
             },
           }
         : {}),
-      toolAttachments: threadToolAttachments({
-        threads: input.session.threads,
-        threadId: run.threadId,
-        blobStorage: context.blobStorage,
-      }),
       apiBaseUrl,
       attachmentContext,
       ontologyDocs,
@@ -344,7 +335,7 @@ async function startSubagentEnvironment(
     runId: run.id,
     parentRunId: run.parentRunId,
     threadId: conversationThreadId(input.thread),
-    toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
+    callTool: (call, options) => input.session.callTool(call, options),
     ...(conversation
       ? {
           publishing: {
@@ -354,10 +345,6 @@ async function startSubagentEnvironment(
           },
         }
       : {}),
-    toolAttachments: handedToolAttachments({
-      files,
-      blobStorage: context.blobStorage,
-    }),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
     ontologyDocs: plan.ontologyDocs,
@@ -407,16 +394,7 @@ export async function createWorkflowAgentNodeEnvironment(
       actorId: run.actorId,
       plan,
       runId: run.nodeRunId,
-      toolRun: {
-        kind: "workflow",
-        id: run.nodeRunId,
-        workflowId: input.workflowId,
-        stepId: input.stepId,
-      },
-      toolAttachments: workflowInputToolAttachments({
-        input: input.nodeInput,
-        blobStorage: context.blobStorage,
-      }),
+      callTool: input.callTool,
       apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
       ontologyDocs: plan.ontologyDocs,
@@ -442,8 +420,8 @@ interface AgentEnvironmentSetup
   readonly sandboxSignal?: AbortSignal
   /** Environment-owned failure, such as lost source credentials. */
   readonly failureSignal?: AbortSignal
-  readonly toolRun: AgentToolRunInfo
-  readonly toolAttachments: AgentToolAttachments
+  /** How the run calls a project tool. */
+  readonly callTool: AgentToolCaller
   readonly actorId?: string
   readonly parentRunId?: string
   readonly mode: AgentExecutionMode
@@ -481,15 +459,6 @@ async function startAgentEnvironment(
   const { mode, sandbox, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext } =
     input
 
-  const logSession = resolveLoggingService(context.id, context.logging).startExecution({
-    kind: "agent",
-    id: runId,
-  })
-  const logger = logSession.logger.child({
-    ...(actorId === undefined ? {} : { actorId }),
-    ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
-    ...(threadId ? { threadId } : {}),
-  })
   let ready: Promise<ProvisionedRunSandbox>
   const fileRegistry = new AgentSandboxFileRegistry()
   const fileBudget = new AgentFileBudget()
@@ -510,16 +479,22 @@ async function startAgentEnvironment(
       onPublished: (file) => fileRegistry.register(file.sandboxPath, file.fileRef),
     })
   const tools = [
-    ...modelToolsFromAgentDefinitions({
-      definitions: plan.tools,
-      valueTypesById: context.valueTypesById,
-      run: input.toolRun,
-      sixb: context.sixb,
-      attachments: input.toolAttachments,
-      logger,
-      filesForToolCall,
+    ...projectModelTools({
+      specs: plan.tools,
+      runId,
+      callTool: input.callTool,
+      installFiles: ({ toolName, files, signal }) =>
+        installAgentToolFiles({
+          toolName,
+          files,
+          blobStorage: context.blobStorage,
+          resolveSandbox: () => ready,
+          budget: fileBudget,
+          signal,
+          onPublished: (file) => fileRegistry.register(file.sandboxPath, file.fileRef),
+        }),
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-      errorDetails: input.errorDetails,
+      ...(input.errorDetails === undefined ? {} : { errorDetails: input.errorDetails }),
     }),
   ]
 
@@ -588,12 +563,7 @@ async function startAgentEnvironment(
   }
   ready.then(markSettled, markSettled)
 
-  const dispose = async () => {
-    await Promise.all([
-      disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown),
-      logSession.flush(),
-    ])
-  }
+  const dispose = () => disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown)
 
   let systemPrompt: string
   try {

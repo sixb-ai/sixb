@@ -5,7 +5,7 @@ import type { AgentWorkspacePromptContext } from "./agent-prompt"
  * Where a provider's sandbox keeps a run's files: in its working directory, which a Git checkout
  * excludes (see `prepareWorkspaceRunFiles`).
  */
-export const SANDBOX_CONTEXT_DIRECTORY = ".sixb/agent"
+export { SANDBOX_CONTEXT_DIRECTORY } from "@sixb/core/internal/agents"
 
 /** The sandbox a run works in, with what the system prompt may say about it. */
 export interface AcquiredRunSandbox {

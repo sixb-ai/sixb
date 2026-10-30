@@ -48,12 +48,14 @@ Workflow agent nodes cannot start another workflow, which bounds recursive execu
 object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics,
 starting a sync or pipeline, and infrastructure or administration routes stay closed to run tokens.
 
-Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK,
-with the authority a run-token request resolves; its type shows only object reads, actions, models and
-connectors. The model supplies only ids, and the SDK checks every read and request against the
-run's authority: the user's access for a conversation, the task's groups for a workflow task. Tool
-authority is resolved once, at turn start, while a run-token request re-resolves it every time. Their
-model calls use the run's accounting recorder; a run-token request gets its own, on the run's attempt.
+Project tools run where the project is, never in the sandbox or the harness: a turn's and a child's
+through their session's `callTool`, a workflow task's in the worker (`runAgentTool` in core either
+way). Their `sixb` is the run's execution-bound SDK, with the authority a run-token request
+resolves; its type shows only object reads, actions, models and connectors. The model supplies only
+ids, and the SDK checks every read and request against the run's authority: the user's access for a
+conversation, the task's groups for a workflow task. Their model calls bill to the run, admitted and
+recorded with its own. The files a tool puts are stored where it runs and copied into the sandbox by
+the harness, at their path in its context directory, before the model reads the tool's output.
 Their `attachments` open a manifest key only in a message of the run's own thread, like the
 message file route, or among a workflow task's input files.
 

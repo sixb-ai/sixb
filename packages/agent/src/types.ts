@@ -1,6 +1,5 @@
-import type { AuthorizablePrincipal, Sixb, ValueType } from "@sixb/core"
+import type { AuthorizablePrincipal } from "@sixb/core"
 import type { AgentRunFileStore, RunModelLoopInput } from "@sixb/core/internal/agents"
-import type { LoggingService } from "@sixb/core/internal/logging"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
@@ -9,14 +8,12 @@ import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { AgentFileBudget } from "./tools/tool-files"
 
 /**
- * What every run of a project shares, whichever runner runs it: its settings and catalogs. A run
- * reaches shared state through its session, never through storage.
+ * What every run of a project shares, whichever runner runs it: its settings. A run reaches the
+ * project through its session, never through storage, the project's SDK or its definitions.
  */
 export interface AgentRunSettings {
   /** The project id. */
   readonly id: string
-  readonly logging?: LoggingService
-  readonly valueTypesById: ReadonlyMap<string, ValueType>
   /** The Sixb API origin the run's commands call, through their environment's credentialed address. */
   readonly apiBaseUrl: string
   /** How many children one conversation turn may have queued or running at once. */
@@ -28,9 +25,8 @@ export interface AgentRunSettings {
   readonly timeZone: string
 }
 
-/** Provider ports activated only after an Agent execution scope is bound. */
+/** A run's settings, with who it works for and where its files are stored. */
 export interface AgentExecutionContext extends AgentRunSettings {
-  readonly sixb: Sixb
   readonly authorPrincipal?: AuthorizablePrincipal
   /**
    * Who the run works for; absent when no principal started its chain of executions, or in a
