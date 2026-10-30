@@ -1,17 +1,6 @@
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import {
-  asRecord,
-  CliError,
-  createInstanceApiClient,
-  EXIT_API,
-  fail,
-  isFileError,
-  isHelp,
-  type SandboxInstanceCliMode,
-  writeJson,
-  writeText,
-} from "@sixb/cli-core"
+import { isHelp } from "../arguments"
 import {
   AGENT_MEMORY_ENTRY,
   AGENT_MEMORY_MANIFEST,
@@ -20,7 +9,10 @@ import {
   type AgentMemoryManifestRepo,
   type AgentMemoryRepo,
   agentMemoryFileHash,
-} from "../../agent-runtime/memory"
+} from "../memory"
+import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
+import { createInstanceApiClient, type SandboxInstanceCliMode } from "../run"
+import { asRecord, isFileError } from "./shared"
 
 const HELP = `Usage:
   sixb memory save <repo> -m <message>   Save local edits as one revision

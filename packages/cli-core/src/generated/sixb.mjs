@@ -1,15 +1,6 @@
 #!/usr/bin/env node
 
-// ../cli-core/src/api-client.ts
-import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { readFile, rename, rm } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
-import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-
-// ../cli-core/src/output.ts
+// src/output.ts
 var INSTANCE_CLI_VERSION = "1";
 var EXIT_USAGE = 2;
 var EXIT_API = 3;
@@ -64,185 +55,7 @@ function reportError(error) {
   return cliError.exitCode;
 }
 
-// ../cli-core/src/api-client.ts
-var UNIX_BASE_URL_PREFIX = "unix:";
-
-class ApiClient {
-  baseUrl;
-  socketPath;
-  authorization;
-  missingBaseUrlMessage;
-  unavailableMessage;
-  unavailableHint;
-  constructor(options) {
-    const baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.socketPath = baseUrl.startsWith(UNIX_BASE_URL_PREFIX) ? baseUrl.slice(UNIX_BASE_URL_PREFIX.length) : undefined;
-    this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
-    this.authorization = options.authorization;
-    this.missingBaseUrlMessage = options.missingBaseUrlMessage;
-    this.unavailableMessage = options.unavailableMessage;
-    this.unavailableHint = options.unavailableHint;
-  }
-  async get(path, query) {
-    const url = this.url(path, query);
-    return this.json(url, { method: "GET" });
-  }
-  async post(path, body, options = {}) {
-    return this.json(this.url(path), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      ...options.signal ? { signal: options.signal } : {}
-    });
-  }
-  async upload(path, source, logicalPath, mediaType) {
-    const form = new FormData;
-    const bytes = new Uint8Array(await readFile(source));
-    form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename(source));
-    if (logicalPath)
-      form.append("logicalPath", logicalPath);
-    return this.json(this.url(path), { method: "POST", body: form });
-  }
-  async download(path, output, query) {
-    const response = await this.fetch(this.url(path, query), { method: "GET" });
-    const temporary = join(dirname(output), `.${basename(output)}.sixb-${randomUUID()}.tmp`);
-    try {
-      const body = response.body ? Readable.fromWeb(response.body) : Readable.from([]);
-      await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
-      await rename(temporary, output);
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => {});
-      throw error;
-    }
-  }
-  url(path, query) {
-    if (!this.baseUrl)
-      fail(this.missingBaseUrlMessage, "runtime_unavailable");
-    validateApiPath(path);
-    const url = new URL(`${this.baseUrl}${path}`);
-    for (const [key, value] of Object.entries(query ?? {})) {
-      if (value !== undefined)
-        url.searchParams.set(key, value);
-    }
-    return url;
-  }
-  async json(url, init) {
-    const response = await this.fetch(url, init);
-    const text = await response.text();
-    if (!text)
-      return null;
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned invalid JSON." }, EXIT_API);
-    }
-  }
-  async fetch(url, init) {
-    let response;
-    try {
-      const headers = new Headers(init.headers);
-      if (this.authorization)
-        headers.set("authorization", this.authorization);
-      response = await send(url, { ...init, headers }, this.socketPath);
-    } catch (error) {
-      if (init.signal?.aborted)
-        throw error;
-      throw new CliError({
-        code: "api_unreachable",
-        message: this.unavailableMessage,
-        hint: this.unavailableHint
-      }, EXIT_API);
-    }
-    if (response.ok)
-      return response;
-    const body = await response.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      parsed = undefined;
-    }
-    const record = asRecord(parsed);
-    const error = record.error;
-    const nested = asRecord(error);
-    const code = stringField(record, "code") ?? stringField(nested, "code") ?? "http_error";
-    const message = stringField(record, "message") ?? stringField(nested, "message") ?? (typeof error === "string" ? error : `The Sixb API request failed with HTTP ${response.status}.`);
-    const hint = stringField(record, "hint") ?? stringField(nested, "hint");
-    const issues = Array.isArray(record.issues) ? record.issues : Array.isArray(nested.issues) ? nested.issues : undefined;
-    throw new CliError({
-      code,
-      status: response.status,
-      message,
-      ...hint ? { hint } : {},
-      ...issues ? { issues } : {}
-    }, EXIT_API);
-  }
-}
-function validateApiPath(path) {
-  const invalid = () => fail("API paths must be relative and start with /api/.");
-  if (path.includes("\\") || path.includes("#"))
-    invalid();
-  const normalized = (() => {
-    try {
-      return new URL(path, "http://sixb.invalid");
-    } catch {
-      return invalid();
-    }
-  })();
-  if (normalized.origin !== "http://sixb.invalid" || normalized.pathname !== "/api" && !normalized.pathname.startsWith("/api/")) {
-    invalid();
-  }
-}
-function asRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
-}
-function stringField(record, key) {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
-}
-function send(url, init, socketPath) {
-  if (socketPath === undefined)
-    return fetch(url, init);
-  if (typeof Bun !== "undefined")
-    return fetch(url, { ...init, unix: socketPath });
-  return sendOverNodeSocket(url, init, socketPath);
-}
-async function sendOverNodeSocket(url, init, socketPath) {
-  const outgoing = new Request(url, init);
-  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined;
-  const headers = Object.fromEntries(outgoing.headers);
-  if (body)
-    headers["content-length"] = String(body.byteLength);
-  return new Promise((resolve, reject) => {
-    const request = httpRequest({
-      socketPath,
-      method: outgoing.method,
-      path: `${url.pathname}${url.search}`,
-      headers: { ...headers, host: "localhost" },
-      ...init.signal ? { signal: init.signal } : {}
-    }, (response) => {
-      const responseHeaders = new Headers;
-      for (const [name, value] of Object.entries(response.headers)) {
-        for (const each of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
-          responseHeaders.append(name, each);
-        }
-      }
-      const status = response.statusCode ?? 502;
-      const empty = status === 204 || status === 304 || outgoing.method === "HEAD";
-      resolve(new Response(empty ? null : nodeBody(response), {
-        status,
-        statusText: response.statusMessage ?? "",
-        headers: responseHeaders
-      }));
-    });
-    request.on("error", reject);
-    request.end(body);
-  });
-}
-function nodeBody(response) {
-  return Readable.toWeb(response);
-}
-// ../cli-core/src/arguments.ts
+// src/arguments.ts
 function parseCommandArgs(args, kinds, command, positionalCount = 0) {
   const positionals = [];
   const options = {};
@@ -342,10 +155,11 @@ function formatAlternatives(values) {
     return `${values[0]} or ${values[1]}`;
   return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
 }
-// ../cli-core/src/commands/actions.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
 
-// ../cli-core/src/policies.ts
+// src/commands/actions.ts
+import { randomUUID } from "node:crypto";
+
+// src/policies.ts
 var CLI_LIMITS = {
   list: { default: 20, maximum: 1000 },
   search: { default: 20, maximum: 50 },
@@ -364,8 +178,8 @@ var DEFAULT_LIST_ORDER = "desc";
 var DEFAULT_OBJECT_ORDER_BY = "updatedAt";
 var DEFAULT_TELEMETRY_ORDER = "desc";
 
-// ../cli-core/src/commands/metadata.ts
-var SANDBOX_MAIN_HELP = `Sixb agent CLI
+// src/commands/metadata.ts
+var SANDBOX_MAIN_HELP = `Sixb CLI
 
 Usage:
   sixb <command> [options]
@@ -375,7 +189,7 @@ API commands emit JSON. Help, version, and examples emit text. Downloads write t
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and its API access
+  sixb status                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -422,9 +236,10 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
-var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and its API access
+var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb status                         Check the sandbox and its API access
   sixb context                        Print the current run context
-`, "").replace(`
+`, `  sixb status                         Check the current profile and its API access
+`).replace(`
 When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
 \`sixb ontology get\` for a type that has no file there.
 `, "").replace(`Files:
@@ -562,7 +377,7 @@ identities. Put limits and pages inside the query tree.
 Vector profile names are the keys of the type's search.vectors. Vector input is a start node,
 optionally under filters; k bounds the ranked matches and results carry a score.`;
 var GROUP_HELP = {
-  doctor: "Usage: sixb doctor",
+  status: "Usage: sixb status",
   context: "Usage: sixb context",
   project: "Usage: sixb project show",
   ontology: `Usage:
@@ -682,8 +497,8 @@ var QUERY_EXAMPLES = {
 };
 var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}';
 
-// ../cli-core/src/commands/shared.ts
-import { readFile as readFile2 } from "node:fs/promises";
+// src/commands/shared.ts
+import { readFile } from "node:fs/promises";
 function parseQueryOptions(args, names, command) {
   const kinds = Object.fromEntries(Object.keys(names).map((flag) => [flag, "string"]));
   const { options } = parseCommandArgs(args, kinds, command);
@@ -722,21 +537,21 @@ async function readJson(source) {
 }
 async function readText(source, noun) {
   try {
-    return source === "-" ? await readStdin() : await readFile2(source, "utf8");
+    return source === "-" ? await readStdin() : await readFile(source, "utf8");
   } catch (error) {
     if (isFileError(error, "ENOENT"))
       fail(`${noun} '${source}' does not exist.`);
     throw error;
   }
 }
-function asRecord2(value) {
+function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 }
 function asRecords(value) {
-  return Array.isArray(value) ? value.map(asRecord2) : [];
+  return Array.isArray(value) ? value.map(asRecord) : [];
 }
 function vectorProfileNames(objectType) {
-  return Object.keys(asRecord2(asRecord2(objectType.search).vectors));
+  return Object.keys(asRecord(asRecord(objectType.search).vectors));
 }
 function isFileError(error, code) {
   return error instanceof Error && "code" in error && error.code === code;
@@ -749,7 +564,7 @@ async function readStdin() {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-// ../cli-core/src/commands/actions.ts
+// src/commands/actions.ts
 var ACTION_REQUEST_WAIT_MS = 25000;
 async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
   const [sub, ...rest] = args;
@@ -766,7 +581,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
       return writeJson(response);
     if (!Array.isArray(response))
       fail("The actions API returned an invalid response.");
-    return writeJson(response.filter((value) => asRecord2(value).objectTypeId === options.objectTypeId));
+    return writeJson(response.filter((value) => asRecord(value).objectTypeId === options.objectTypeId));
   }
   if (sub === "request") {
     const { positionals, options } = parseCommandArgs(rest, {
@@ -787,7 +602,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     if (Array.isArray(params) || typeof params !== "object" || params === null) {
       fail("Action params must be a JSON object.");
     }
-    const requestedRunId = runId ?? `act_${randomUUID2()}`;
+    const requestedRunId = runId ?? `act_${randomUUID()}`;
     const waiting = AbortSignal.timeout(requestWaitMs);
     try {
       return writeRequestResult(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
@@ -808,7 +623,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
   fail(`Unknown actions command '${sub}'.`);
 }
 
-// ../cli-core/src/commands/files.ts
+// src/commands/files.ts
 import { access } from "node:fs/promises";
 async function files(api, args) {
   const [sub, ...rest] = args;
@@ -871,9 +686,9 @@ function parseContentUrl(value) {
   return url;
 }
 
-// ../cli-core/src/commands/models.ts
+// src/commands/models.ts
 import { access as access2, mkdir, stat } from "node:fs/promises";
-import { dirname as dirname2, extname, join as join2, parse } from "node:path";
+import { dirname, extname, join, parse } from "node:path";
 var MODEL_KINDS = ["language", "image", "speech", "transcription"];
 async function models(api, args) {
   const [sub, ...rest] = args;
@@ -1117,12 +932,12 @@ async function saveFiles(api, callId, files, output) {
     const number = files.length > 1 ? `-${index + 1}` : "";
     const extension = (file.mediaType && EXTENSIONS[file.mediaType]) ?? "";
     if (directory)
-      return join2(output, `${callId}${number}${extension || ".bin"}`);
+      return join(output, `${callId}${number}${extension || ".bin"}`);
     const { dir, name, ext } = parse(output);
-    return join2(dir, `${name}${number}${extension || ext}`);
+    return join(dir, `${name}${number}${extension || ext}`);
   });
   for (const [index, path] of paths.entries()) {
-    await mkdir(dirname2(path), { recursive: true });
+    await mkdir(dirname(path), { recursive: true });
     await api.download(`/api/ai/model-calls/${encodeURIComponent(callId)}/files/content`, path, {
       path: `/files/${index}`
     });
@@ -1205,7 +1020,7 @@ function dollars(amount) {
   return `$${amount}`;
 }
 
-// ../cli-core/src/graph.ts
+// src/graph.ts
 async function inspectGraph(api, objectTypeId, primaryId, options) {
   if (options.depth === 0)
     return inspectRoot(api, objectTypeId, primaryId, options);
@@ -1458,7 +1273,7 @@ function compareLinks(left, right) {
   return linkKey(left).localeCompare(linkKey(right));
 }
 
-// ../cli-core/src/commands/objects.ts
+// src/commands/objects.ts
 async function objects(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub))
@@ -1602,7 +1417,7 @@ async function objectsSearch(api, args) {
   if (!text.trim() || text.length > CLI_LIMITS.vectorSearchText.maximum) {
     fail(`Semantic search text must be nonempty and at most ${CLI_LIMITS.vectorSearchText.maximum} characters.`);
   }
-  const objectType = asRecord2(await api.get(`/api/object-types/${encodeURIComponent(objectTypeId)}`));
+  const objectType = asRecord(await api.get(`/api/object-types/${encodeURIComponent(objectTypeId)}`));
   const profile = selectVectorProfile(objectTypeId, objectType, options["--vector-profile"]);
   writeJson(await api.post("/api/objects/query", {
     query: {
@@ -1658,7 +1473,7 @@ async function objectsQuery(api, args) {
   if (!source)
     fail("objects query requires --file <path|->.");
   const input = await readJson(source);
-  const record = asRecord2(input);
+  const record = asRecord(input);
   const body = Object.hasOwn(record, "query") ? { ...record, ...Object.hasOwn(record, "includeTotal") ? {} : { includeTotal } } : { query: input, includeTotal };
   writeJson(await api.post("/api/objects/query", body));
 }
@@ -1667,7 +1482,7 @@ async function objectsScalar(api, operation, args) {
     return writeText(`Usage: sixb objects ${operation} --file <path|->`);
   const source = singleFileOption(args, `objects ${operation}`);
   const input = await readJson(source);
-  const record = asRecord2(input);
+  const record = asRecord(input);
   writeJson(await api.post(`/api/objects/query/${operation}`, {
     query: Object.hasOwn(record, "query") ? record.query : input
   }));
@@ -1686,7 +1501,7 @@ async function objectsFacets(api, args) {
   if (!options["--file"])
     fail("objects facets requires --file <path|->.");
   const body = await readJson(options["--file"]);
-  const record = asRecord2(body);
+  const record = asRecord(body);
   if (!Object.hasOwn(record, "query") || !Object.hasOwn(record, "facets")) {
     fail("objects facets input must contain query and facets.");
   }
@@ -1723,7 +1538,7 @@ async function objectsLinks(api, args) {
   }));
 }
 
-// ../cli-core/src/commands/ontology.ts
+// src/commands/ontology.ts
 async function ontology(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub))
@@ -1739,7 +1554,7 @@ async function ontology(api, args) {
     if (!Array.isArray(value))
       fail("The ontology API returned an invalid response.");
     return writeJson(value.map((entry) => {
-      const type = asRecord2(entry);
+      const type = asRecord(entry);
       const properties = asRecords(type.properties);
       const vectorProfiles = vectorProfileNames(type);
       return {
@@ -1772,7 +1587,7 @@ async function ontology(api, args) {
   fail(`Unknown ontology command '${sub}'.`);
 }
 
-// ../cli-core/src/commands/project.ts
+// src/commands/project.ts
 async function project(api, args) {
   if (!args[0] || isHelp(args[0]) || args[0] === "show" && requestsHelp(args.slice(1))) {
     return writeText(GROUP_HELP.project);
@@ -1783,7 +1598,7 @@ async function project(api, args) {
   writeJson(await api.get("/api/project"));
 }
 
-// ../cli-core/src/commands/runs.ts
+// src/commands/runs.ts
 var ACTION_RUN_STATUSES = ["succeeded", "failed"];
 var WORKFLOW_RUN_STATUSES = [
   "queued",
@@ -1840,7 +1655,7 @@ async function runs(api, kind, args) {
   fail(`Unknown ${group} command '${sub}'.`);
 }
 
-// ../cli-core/src/commands/telemetry.ts
+// src/commands/telemetry.ts
 async function telemetry(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -1908,7 +1723,7 @@ function normalizeTelemetryQueryInput(input) {
   return body;
 }
 
-// ../cli-core/src/commands/users.ts
+// src/commands/users.ts
 var USER_STATUSES = ["active", "suspended", "all"];
 var LIST_FLAGS = {
   "--status": "string",
@@ -1959,8 +1774,8 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// ../cli-core/src/commands/workflows.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+// src/commands/workflows.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
 async function workflows(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -1984,7 +1799,7 @@ async function workflows(api, args) {
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.");
     }
-    const runId = options["--run-id"] ?? `run_${randomUUID3()}`;
+    const runId = options["--run-id"] ?? `run_${randomUUID2()}`;
     return writeRequestResult(await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, {
       input,
       runId
@@ -1993,7 +1808,7 @@ async function workflows(api, args) {
   fail(`Unknown workflows command '${sub}'.`);
 }
 
-// ../cli-core/src/commands/index.ts
+// src/commands/index.ts
 var INSTANCE_COMMANDS = [
   "project",
   "ontology",
@@ -2038,25 +1853,12 @@ async function dispatch(api, command, args) {
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }
 }
-// ../cli-core/src/run.ts
-async function runInstanceCli(input) {
-  const [command, ...args] = input.args;
-  await dispatch(createInstanceApiClient(input.mode), command ?? "", args);
-}
-function createInstanceApiClient(mode) {
-  return new ApiClient({
-    baseUrl: mode.baseUrl,
-    ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
-    missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
-    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
-    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
-  });
-}
-// src/agent-cli/commands/memory.ts
+
+// src/commands/memory.ts
 import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
 import { dirname as dirname3, join as join3 } from "node:path";
 
-// src/agent-runtime/memory.ts
+// src/memory.ts
 import { createHash } from "node:crypto";
 var AGENT_MEMORY_MANIFEST = "context/memory.json";
 var AGENT_MEMORY_ENTRY = "MEMORY.md";
@@ -2067,7 +1869,208 @@ function agentMemoryFileHash(contents) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
-// src/agent-cli/commands/memory.ts
+// src/api-client.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { readFile as readFile2, rename, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { basename, dirname as dirname2, join as join2 } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+var UNIX_BASE_URL_PREFIX = "unix:";
+
+class ApiClient {
+  baseUrl;
+  socketPath;
+  authorization;
+  missingBaseUrlMessage;
+  unavailableMessage;
+  unavailableHint;
+  constructor(options) {
+    const baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.socketPath = baseUrl.startsWith(UNIX_BASE_URL_PREFIX) ? baseUrl.slice(UNIX_BASE_URL_PREFIX.length) : undefined;
+    this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
+    this.authorization = options.authorization;
+    this.missingBaseUrlMessage = options.missingBaseUrlMessage;
+    this.unavailableMessage = options.unavailableMessage;
+    this.unavailableHint = options.unavailableHint;
+  }
+  async get(path, query) {
+    const url = this.url(path, query);
+    return this.json(url, { method: "GET" });
+  }
+  async post(path, body, options = {}) {
+    return this.json(this.url(path), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      ...options.signal ? { signal: options.signal } : {}
+    });
+  }
+  async upload(path, source, logicalPath, mediaType) {
+    const form = new FormData;
+    const bytes = new Uint8Array(await readFile2(source));
+    form.append("file", new Blob([bytes], mediaType ? { type: mediaType } : undefined), basename(source));
+    if (logicalPath)
+      form.append("logicalPath", logicalPath);
+    return this.json(this.url(path), { method: "POST", body: form });
+  }
+  async download(path, output, query) {
+    const response = await this.fetch(this.url(path, query), { method: "GET" });
+    const temporary = join2(dirname2(output), `.${basename(output)}.sixb-${randomUUID3()}.tmp`);
+    try {
+      const body = response.body ? Readable.fromWeb(response.body) : Readable.from([]);
+      await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
+      await rename(temporary, output);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+  url(path, query) {
+    if (!this.baseUrl)
+      fail(this.missingBaseUrlMessage, "runtime_unavailable");
+    validateApiPath(path);
+    const url = new URL(`${this.baseUrl}${path}`);
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined)
+        url.searchParams.set(key, value);
+    }
+    return url;
+  }
+  async json(url, init) {
+    const response = await this.fetch(url, init);
+    const text = await response.text();
+    if (!text)
+      return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned invalid JSON." }, EXIT_API);
+    }
+  }
+  async fetch(url, init) {
+    let response;
+    try {
+      const headers = new Headers(init.headers);
+      if (this.authorization)
+        headers.set("authorization", this.authorization);
+      response = await send(url, { ...init, headers }, this.socketPath);
+    } catch (error) {
+      if (init.signal?.aborted)
+        throw error;
+      throw new CliError({
+        code: "api_unreachable",
+        message: this.unavailableMessage,
+        hint: this.unavailableHint
+      }, EXIT_API);
+    }
+    if (response.ok)
+      return response;
+    const body = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      parsed = undefined;
+    }
+    const record = asRecord2(parsed);
+    const error = record.error;
+    const nested = asRecord2(error);
+    const code = stringField(record, "code") ?? stringField(nested, "code") ?? "http_error";
+    const message = stringField(record, "message") ?? stringField(nested, "message") ?? (typeof error === "string" ? error : `The Sixb API request failed with HTTP ${response.status}.`);
+    const hint = stringField(record, "hint") ?? stringField(nested, "hint");
+    const issues = Array.isArray(record.issues) ? record.issues : Array.isArray(nested.issues) ? nested.issues : undefined;
+    throw new CliError({
+      code,
+      status: response.status,
+      message,
+      ...hint ? { hint } : {},
+      ...issues ? { issues } : {}
+    }, EXIT_API);
+  }
+}
+function validateApiPath(path) {
+  const invalid = () => fail("API paths must be relative and start with /api/.");
+  if (path.includes("\\") || path.includes("#"))
+    invalid();
+  const normalized = (() => {
+    try {
+      return new URL(path, "http://sixb.invalid");
+    } catch {
+      return invalid();
+    }
+  })();
+  if (normalized.origin !== "http://sixb.invalid" || normalized.pathname !== "/api" && !normalized.pathname.startsWith("/api/")) {
+    invalid();
+  }
+}
+function asRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+}
+function stringField(record, key) {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+function send(url, init, socketPath) {
+  if (socketPath === undefined)
+    return fetch(url, init);
+  if (typeof Bun !== "undefined")
+    return fetch(url, { ...init, unix: socketPath });
+  return sendOverNodeSocket(url, init, socketPath);
+}
+async function sendOverNodeSocket(url, init, socketPath) {
+  const outgoing = new Request(url, init);
+  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined;
+  const headers = Object.fromEntries(outgoing.headers);
+  if (body)
+    headers["content-length"] = String(body.byteLength);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      socketPath,
+      method: outgoing.method,
+      path: `${url.pathname}${url.search}`,
+      headers: { ...headers, host: "localhost" },
+      ...init.signal ? { signal: init.signal } : {}
+    }, (response) => {
+      const responseHeaders = new Headers;
+      for (const [name, value] of Object.entries(response.headers)) {
+        for (const each of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+          responseHeaders.append(name, each);
+        }
+      }
+      const status = response.statusCode ?? 502;
+      const empty = status === 204 || status === 304 || outgoing.method === "HEAD";
+      resolve(new Response(empty ? null : nodeBody(response), {
+        status,
+        statusText: response.statusMessage ?? "",
+        headers: responseHeaders
+      }));
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+function nodeBody(response) {
+  return Readable.toWeb(response);
+}
+
+// src/run.ts
+async function runInstanceCli(input) {
+  const [command, ...args] = input.args;
+  await dispatch(createInstanceApiClient(input.mode), command ?? "", args);
+}
+function createInstanceApiClient(mode) {
+  return new ApiClient({
+    baseUrl: mode.baseUrl,
+    ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
+    missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
+    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
+    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb status' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
+  });
+}
+
+// src/commands/memory.ts
 var HELP = `Usage:
   sixb memory save <repo> -m <message>   Save local edits as one revision
   sixb memory pull [repo]                Bring the local copy up to the latest revision
@@ -2117,7 +2120,7 @@ async function save(local, args, mode) {
   const api = createInstanceApiClient(mode);
   let saved;
   try {
-    saved = asRecord2(await api.post(`/api/agent-memory/${repo}/revisions`, {
+    saved = asRecord(await api.post(`/api/agent-memory/${repo}/revisions`, {
       baseRevision: loaded.revision,
       message,
       changes
@@ -2214,8 +2217,8 @@ async function update(local, repo, manifest, remote) {
   return { manifest: next, revision: remote.revision, updated, conflicts };
 }
 async function fetchRepo(api, repo) {
-  const body = asRecord2(await api.get(`/api/agent-memory/${repo}`));
-  const files = Array.isArray(body.files) ? body.files.map(asRecord2) : null;
+  const body = asRecord(await api.get(`/api/agent-memory/${repo}`));
+  const files = Array.isArray(body.files) ? body.files.map(asRecord) : null;
   if (typeof body.revision !== "number" || !files?.every((file) => typeof file.path === "string" && typeof file.contents === "string")) {
     throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid memory repo." }, EXIT_API);
   }
@@ -2322,13 +2325,13 @@ function installedRepos(manifest) {
   return ["user", "project"].filter((repo) => manifest.repos[repo] !== undefined);
 }
 function parseManifest(value) {
-  const repos = asRecord2(asRecord2(value).repos);
+  const repos = asRecord(asRecord(value).repos);
   const parsed = {};
   for (const repo of ["user", "project"]) {
     if (repos[repo] === undefined)
       continue;
-    const entry = asRecord2(repos[repo]);
-    const files = asRecord2(entry.files);
+    const entry = asRecord(repos[repo]);
+    const files = asRecord(entry.files);
     if (typeof entry.revision !== "number" || !Object.values(files).every((digest) => typeof digest === "string")) {
       throw new Error("invalid memory manifest");
     }
@@ -2340,19 +2343,15 @@ function parseManifest(value) {
   return { repos: parsed };
 }
 
-// src/agent-cli/commands/system.ts
+// src/commands/system.ts
 import { readFile as readFile4 } from "node:fs/promises";
-
-// src/agent-runtime/profile.ts
 var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
-
-// src/agent-cli/commands/system.ts
-async function doctor(args, mode) {
+async function status(args, mode) {
   if (isHelp(args[0]))
-    return writeText("Usage: sixb doctor");
+    return writeText("Usage: sixb status");
   if (args.length !== 0)
-    fail("doctor accepts no arguments.");
-  const project = asRecord2(await createInstanceApiClient(mode).get("/api/project"));
+    fail("status accepts no arguments.");
+  const project = asRecord(await createInstanceApiClient(mode).get("/api/project"));
   if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
   }
@@ -2394,16 +2393,16 @@ function javascriptRuntime() {
   return { name: "node", version: process.versions.node };
 }
 
-// src/agent-cli/index.ts
+// src/main.ts
 async function main(args) {
   const [command, ...rest] = args;
   if (!command || isHelp(command))
     return writeText(renderInstanceHelp("sandbox"));
   if (command === "--version" || command === "version") {
-    return writeText(`sixb agent CLI ${INSTANCE_CLI_VERSION}`);
+    return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`);
   }
-  if (command === "doctor")
-    return doctor(rest, sandboxMode());
+  if (command === "status")
+    return status(rest, sandboxMode());
   if (command === "context")
     return context(rest);
   if (command === "memory")

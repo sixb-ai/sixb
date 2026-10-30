@@ -1,25 +1,22 @@
 #!/usr/bin/env node
 
-import {
-  fail,
-  INSTANCE_CLI_VERSION,
-  isHelp,
-  isInstanceCommand,
-  renderInstanceHelp,
-  reportError,
-  runInstanceCli,
-  writeText,
-} from "@sixb/cli-core"
+// The `sixb` a sandbox runs: the API commands people run, plus the run's own (`status`,
+// `context`, `memory`). `bun run generate:sandbox-cli` bundles it into generated/sixb.mjs.
+import { isHelp } from "./arguments"
+import { isInstanceCommand } from "./commands"
 import { memory } from "./commands/memory"
-import { context, doctor } from "./commands/system"
+import { renderInstanceHelp } from "./commands/metadata"
+import { context, status } from "./commands/system"
+import { fail, INSTANCE_CLI_VERSION, reportError, writeText } from "./output"
+import { runInstanceCli } from "./run"
 
 async function main(args: readonly string[]): Promise<void> {
   const [command, ...rest] = args
   if (!command || isHelp(command)) return writeText(renderInstanceHelp("sandbox"))
   if (command === "--version" || command === "version") {
-    return writeText(`sixb agent CLI ${INSTANCE_CLI_VERSION}`)
+    return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`)
   }
-  if (command === "doctor") return doctor(rest, sandboxMode())
+  if (command === "status") return status(rest, sandboxMode())
   if (command === "context") return context(rest)
   if (command === "memory") return memory(rest, sandboxMode())
   if (!isInstanceCommand(command)) fail(`Unknown command '${command}'. Run 'sixb --help'.`)

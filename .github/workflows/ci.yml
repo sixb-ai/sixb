@@ -102,8 +102,8 @@ jobs:
       - name: Generate client
         run: bun run generate:client
 
-      - name: Generate agent CLI
-        run: bun run generate:agent-cli
+      - name: Generate sandbox CLI
+        run: bun run generate:sandbox-cli
 
       - name: Verify generated artifacts are committed
         run: git diff --exit-code

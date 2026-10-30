@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
+import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
   type AgentApprovalCall,
   agent,
@@ -32,7 +33,6 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { AgentWorker } from "../src"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { ChildQuestions } from "../src/child-questions"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
@@ -126,8 +126,8 @@ class TestSandbox implements Sandbox {
       // Exit code 4: the call waits.
       return { exitCode: 4, stdout: "", stderr: "", durationMs: 1 }
     }
-    if (script.includes("SIXB_BASH_ENV_READY")) return ok("node\t22.0.0\tsixb agent CLI 1\n")
-    if (script === "sixb doctor") {
+    if (script.includes("SIXB_BASH_ENV_READY")) return ok("node\t22.0.0\tsixb CLI 1\n")
+    if (script === "sixb status") {
       return ok(
         JSON.stringify({
           ok: true,
