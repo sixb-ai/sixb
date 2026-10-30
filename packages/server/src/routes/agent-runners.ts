@@ -1,10 +1,12 @@
 import { principalsEqual, type SixbHostView } from "@sixb/core"
 import {
   type AgentRunSessionHost,
+  afterAgentRunFinished,
   claimAgentRunForRunner,
   createBrokerStreamSink,
   encodeWireError,
   encodeWireValue,
+  endLapsedAgentRuns,
   isolateStreamSink,
   serveAgentRunSession,
   withAgentActivityStream,
@@ -21,7 +23,7 @@ import { requestActor, requireRequestSixb } from "../auth/scope"
 export function agentRunSessionHost(host: SixbHostView): AgentRunSessionHost | null {
   const { storage } = host
   if (!storage.agents || !storage.auth || !storage.aiUsage || !storage.aiCosts) return null
-  return {
+  const sessions: AgentRunSessionHost = {
     projectId: host.id,
     storage: storage as AgentRunSessionHost["storage"],
     broker: host.broker,
@@ -36,7 +38,33 @@ export function agentRunSessionHost(host: SixbHostView): AgentRunSessionHost | n
     sdk: host,
     definitions: host.definitions,
     logging: host.logging,
+    // A turn a runner finished here stops its children and resumes on calls already decided.
+    afterFinish: (run) => afterAgentRunFinished(sessions, run),
   }
+  return sessions
+}
+
+/** How often the API ends the runs no runner renews any more. */
+const SWEEP_INTERVAL_MS = 30_000
+/** How long the claim that ends a lapsed run holds it: as long as recording the end takes. */
+const SWEEP_CLAIM_MS = 60_000
+
+/**
+ * End the runs whose runner stopped renewing them, as the worker's repair pass does: a runner on
+ * a computer has no worker behind it. Several API servers may sweep at once: each run is ended
+ * once, by whichever takes it over. Returns the stop.
+ */
+export function startLapsedRunSweeper(host: SixbHostView): () => void {
+  const sessions = agentRunSessionHost(host)
+  if (!sessions) return () => {}
+  const sweep = () => {
+    void endLapsedAgentRuns(sessions, { leaseMs: SWEEP_CLAIM_MS }).catch((error: unknown) => {
+      console.error("[SixbServer] Could not end lapsed agent runs; retrying.", error)
+    })
+  }
+  sweep()
+  const timer = setInterval(sweep, SWEEP_INTERVAL_MS)
+  return () => clearInterval(timer)
 }
 
 /**

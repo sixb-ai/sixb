@@ -19,6 +19,7 @@ import {
   createHttpAgentRunSession,
 } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { startLapsedRunSweeper } from "../src/routes/agent-runners"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -110,12 +111,12 @@ async function setup() {
    * Claim as `headers`' person, with their session, as a runner they signed in would; its session's
    * requests then carry the run token.
    */
-  function claim(headers: Record<string, string>, runId: string) {
+  function claim(headers: Record<string, string>, runId: string, leaseExpiresAt = LEASE()) {
     return claimAgentRunOverHttp({
       apiUrl: API,
       runId,
       authorization: "",
-      leaseExpiresAt: LEASE(),
+      leaseExpiresAt,
       fetch: (request) => {
         if (new URL(request.url).pathname.endsWith("/claim")) {
           const signed = new Headers(request.headers)
@@ -130,7 +131,7 @@ async function setup() {
     })
   }
 
-  return { storage, send, person, ask, claim, runTokens }
+  return { storage, host, send, person, ask, claim, runTokens }
 }
 
 describe("a runner outside the worker", () => {
@@ -192,5 +193,54 @@ describe("a runner outside the worker", () => {
     )
     await first.close()
     await second.close()
+  })
+
+  // Removal proof: drop afterFinish from agentRunSessionHost; the child stays queued after its
+  // turn ended over HTTP, with nothing to run it.
+  test("stops the children of a turn it finished", async () => {
+    const { person, ask, claim, storage } = await setup()
+    const ava = await person("ava")
+    const turn = await claim(ava, await ask(ava, "Delegate."))
+    if (!turn) throw new Error("Expected the turn to be claimed.")
+    const child = await turn.children.spawn({
+      spawnKey: "west",
+      spec: {
+        model: { provider: "test", modelId: "test-model" },
+        task: "Look west.",
+        toolNames: [],
+      },
+      thread: { create: true },
+      trigger: { id: "west-task", parts: [{ type: "text", text: "Look west." }] },
+    })
+
+    await turn.finish({ status: "succeeded" })
+
+    expect(await storage.agents.runs.getById({ projectId, id: child.id })).toMatchObject({
+      status: "cancelled",
+    })
+    await turn.close()
+  })
+
+  // Removal proof: drop startLapsedRunSweeper from SixbServer.start, or its first sweep; the run
+  // whose runner stopped renewing stays running for good.
+  test("ends a run its runner stopped renewing", async () => {
+    const { person, ask, claim, storage, host } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Run until I stop.")
+    const session = await claim(ava, runId, new Date(Date.now() - 1_000).toISOString())
+    if (!session) throw new Error("Expected the turn to be claimed.")
+
+    const stop = startLapsedRunSweeper(host)
+    try {
+      let run = await storage.agents.runs.getById({ projectId, id: runId })
+      for (let turn = 0; turn < 100 && run?.status === "running"; turn += 1) {
+        await new Promise((resolve) => setImmediate(resolve))
+        run = await storage.agents.runs.getById({ projectId, id: runId })
+      }
+      expect(run).toMatchObject({ status: "cancelled", finishReason: "interrupted" })
+    } finally {
+      stop()
+      await session.close()
+    }
   })
 })

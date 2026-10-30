@@ -25,7 +25,12 @@ fresh execution token. `openAgentRunSession` opens the session of a run already 
 A run is held by whoever renews its lease. Once the lease recorded on it lapses, its run token
 fails closed, and `endLapsedAgentRuns` (`run-liveness.ts`) may end it: it reclaims the run, which
 rotates its token, then records it `cancelled` and `interrupted`. A worker's repair pass runs it,
-so a run ends without a queue job coming back for it.
+and so does the API server every 30 seconds, for runners with no worker behind them: a run ends
+without a queue job coming back for it.
+
+What follows a turn's end, its children still at work stopped and a turn paused on calls already
+decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
+the API's both run it.
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
 token stops working at once, and a runner that never hears the broker reads the cancel at its next
