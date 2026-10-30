@@ -1,4 +1,10 @@
 import type { Broker } from "../broker"
+import {
+  AiModelCallRecorder,
+  createAiModelCallLimitController,
+  type ModelCallAccountingStorage,
+  type RecoverAiModelCall,
+} from "../models/execution/index"
 import type { Storage } from "../storage"
 import {
   type AgentRunRecord,
@@ -25,6 +31,15 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly executionToken: string
   /** Aborts once the run, or any run named in `cancelWith`, is cancelled. */
   readonly cancelled: AbortSignal
+  /**
+   * The run's model calls. Wrap a model with it, and each call is admitted against the AI limits
+   * of whoever the run works for, and its usage and cost recorded before the next step; a record
+   * that cannot be written is recovered later. Project tools' own model calls bill here too.
+   *
+   * The first call reads what admission needs, so it belongs in the run's preparation, where a
+   * storage blip is retried: a failed read is read again on the next call.
+   */
+  modelCalls(): Promise<AiModelCallRecorder>
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
    * once the last lease recorded lapses, so the session renews it as the queue does.
@@ -53,8 +68,10 @@ export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
 /** What an in-process session works against. */
 export interface AgentRunSessionHost {
   readonly projectId: string
-  readonly storage: Storage & { readonly agents: AgentStorage }
+  readonly storage: Storage & { readonly agents: AgentStorage } & ModelCallAccountingStorage
   readonly broker: Broker
+  /** Queues a model call's record when storage cannot take it while the run goes on. */
+  readonly recoverAiModelCall: RecoverAiModelCall
 }
 
 export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
@@ -94,6 +111,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     throw new Error(`[Sixb] Agent run '${run.id}' has no execution token, so it was never claimed.`)
   }
 
+  let modelCalls: Promise<AiModelCallRecorder> | undefined
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   const fence = { projectId: host.projectId, id: run.id, executionToken }
 
@@ -101,6 +119,13 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     run,
     executionToken,
     cancelled: cancel.signal,
+    modelCalls() {
+      modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
+        modelCalls = undefined
+        throw error
+      })
+      return modelCalls
+    },
     async renewLease(leaseExpiresAt) {
       await host.storage.agents.runs.confirmExecutionOwnership({
         ...fence,
@@ -111,6 +136,35 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       finishWithRetries(host.storage, { ...outcome, ...fence }, messages ?? []),
     close: cancel.stop,
   }
+}
+
+async function openModelCalls(
+  host: AgentRunSessionHost,
+  run: AgentRunRecord
+): Promise<AiModelCallRecorder> {
+  const execution = await host.storage.executions.getById({
+    projectId: host.projectId,
+    id: run.executionId,
+  })
+  if (!execution) {
+    throw new Error(
+      `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+    )
+  }
+  return new AiModelCallRecorder({
+    storage: host.storage,
+    projectId: host.projectId,
+    executionId: run.executionId,
+    attempt: run.attempt,
+    requesterGroupIds: execution.requesterGroupIds,
+    limits: createAiModelCallLimitController({
+      storage: host.storage,
+      projectId: host.projectId,
+      requestedBy: execution.requestedBy,
+      requesterGroupIds: execution.requesterGroupIds,
+    }),
+    recoverAiModelCall: host.recoverAiModelCall,
+  })
 }
 
 /**

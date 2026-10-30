@@ -745,7 +745,6 @@ async function startAgentEnvironment(
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
       streamSink: context.streamSink,
-      recoverAiModelCall: context.recoverAiModelCall,
       turnTimeoutMs: context.turnTimeoutMs,
     },
     dispose,

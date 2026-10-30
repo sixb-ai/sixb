@@ -62,6 +62,7 @@ import {
   ensureManagedAgentExecutionIdentity,
   holdAgentApprovalCall,
   isAgentToolResult,
+  openAgentRunSession,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
@@ -10865,16 +10866,20 @@ describe("AgentWorker", () => {
       })
       const run = await reserveRequestedRun(host, await requestAgent(host, { text: "Work" }))
       const context = await buildAgentWorkerContext(host)
-      const execution = await context.storage.executions.getById({
-        projectId: PROJECT_ID,
-        id: run.executionId,
-      })
-      if (!execution) throw new Error("Expected the run's execution.")
+      const session = await openAgentRunSession(
+        {
+          projectId: PROJECT_ID,
+          storage: context.storage,
+          broker: host.broker,
+          recoverAiModelCall: context.recoverAiModelCall,
+        },
+        run
+      )
       const runtime = createAgentTurnRuntime({
         context,
         run,
         signal: new AbortController().signal,
-        execution,
+        modelCalls: await session.modelCalls(),
       })
       try {
         return await conversationPreparation.prepareAgentConversationContext({
@@ -10898,6 +10903,7 @@ describe("AgentWorker", () => {
           runtime,
         })
       } finally {
+        session.close()
         runtime.dispose()
       }
     }
@@ -11632,6 +11638,7 @@ describe("AgentWorker", () => {
     })
     const abort = new AbortController()
     const result = await runTurnInSession({
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -11641,7 +11648,6 @@ describe("AgentWorker", () => {
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
@@ -12191,6 +12197,7 @@ describe("AgentWorker", () => {
     })
 
     const promise = runTurnInSession({
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -12200,7 +12207,6 @@ describe("AgentWorker", () => {
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
@@ -12449,6 +12455,7 @@ describe("AgentWorker", () => {
     const start = Date.now()
     try {
       const turn = runTurnInSession({
+        recoverAiModelCall: recoverAiModelCall(sixb),
         context: {
           id: PROJECT_ID,
           authorPrincipal: AGENT_PRINCIPAL,
@@ -12461,7 +12468,6 @@ describe("AgentWorker", () => {
             broker: sixb.broker,
             projectId: PROJECT_ID,
           }),
-          recoverAiModelCall: recoverAiModelCall(sixb),
           turnTimeoutMs: 60_000,
         },
         plan: executionPlanFor(sixb),
@@ -12498,6 +12504,7 @@ describe("AgentWorker", () => {
       })
     )
     await runTurnInSession({
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -12510,7 +12517,6 @@ describe("AgentWorker", () => {
           broker: sixb.broker,
           projectId: PROJECT_ID,
         }),
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
