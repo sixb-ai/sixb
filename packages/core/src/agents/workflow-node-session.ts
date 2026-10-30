@@ -108,6 +108,26 @@ export class WorkflowResumeDispatchError extends Error {
   }
 }
 
+/** Short in-place retries that absorb a transient storage blip, as a run's finish has. */
+const FINISH_BACKOFF_MS = [50, 200, 600] as const
+
+async function retryFinish<T>(
+  finish: () => Promise<T>,
+  committed: () => Promise<T | null>
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await finish()
+    } catch (error) {
+      const delay = FINISH_BACKOFF_MS[attempt]
+      if (delay === undefined) throw error
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      const done = await committed().catch(() => null)
+      if (done) return done
+    }
+  }
+}
+
 /** Start a queued agent node, or reclaim a running one, and open its session. */
 export async function claimWorkflowAgentNode(
   host: WorkflowAgentNodeSessionHost,
@@ -189,21 +209,33 @@ export async function claimWorkflowAgentNode(
         security: host.security,
       }),
     async finishSucceeded(result) {
-      const finished = await transaction(async (runs) => {
-        await runs.agentNodes.finish({
-          ...fence,
-          status: "succeeded",
-          modelId: result.modelId,
-          finishReason: result.finishReason,
-          trace: result.trace,
-        })
-        return runs.nodes.finish({
-          projectId,
-          id: nodeRun.id,
-          status: "succeeded",
-          output: result.output,
-        })
-      })
+      // The agent already answered: a storage blip here must not fail its workflow.
+      const finished = await retryFinish(
+        () =>
+          transaction(async (runs) => {
+            await runs.agentNodes.finish({
+              ...fence,
+              status: "succeeded",
+              modelId: result.modelId,
+              finishReason: result.finishReason,
+              trace: result.trace,
+            })
+            return runs.nodes.finish({
+              projectId,
+              id: nodeRun.id,
+              status: "succeeded",
+              output: result.output,
+            })
+          }),
+        // A commit whose answer was lost: the node is already succeeded.
+        async () => {
+          const current = await host.storage.workflowRuns?.nodes.getById({
+            projectId,
+            id: nodeRun.id,
+          })
+          return current?.status === "succeeded" ? current : null
+        }
+      )
       await host.events.emit(
         { events: [nodeFinishedEvent(finished, result.totalNodes, "succeeded")] },
         { source: "SixbAgentWorker" }
