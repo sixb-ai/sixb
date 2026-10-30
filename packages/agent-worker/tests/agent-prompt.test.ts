@@ -471,7 +471,7 @@ describe("agent system prompt", () => {
 
     expect(prompt).toContain("inside a live Sixb project modeled as an ontology")
     expect(prompt).toContain("Use the `sixb` CLI only for the live project data")
-    expect(prompt).toContain(renderInstanceHelp("sandbox"))
+    expect(prompt).toContain(renderInstanceHelp())
     expect(prompt).toContain("Do not run `sixb --help`")
     expect(prompt).toContain("use the narrowest group or command help")
     expect(prompt).toContain("start with `sixb objects get <object-type> <primary-id>...`")

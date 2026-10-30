@@ -5,6 +5,9 @@ const packageRoot = resolve(import.meta.dir, "..")
 const entrypoint = resolve(packageRoot, "src", "main.ts")
 const outputPath = resolve(packageRoot, "src", "generated", "sixb.mjs")
 const check = process.argv.includes("--check")
+// The bundle's path comments are relative to the working directory: build from the package's, so
+// the bundle is the same wherever the script is run from.
+process.chdir(packageRoot)
 
 const result = await Bun.build({
   entrypoints: [entrypoint],

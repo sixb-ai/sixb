@@ -21,7 +21,8 @@ export interface SandboxStatusReport {
 
 export async function status(args: readonly string[], mode: SandboxInstanceCliMode): Promise<void> {
   if (isHelp(args[0])) return writeText("Usage: sixb status")
-  if (args.length !== 0) fail("status accepts no arguments.")
+  // Its output is JSON either way: --json, which people's `sixb status` takes, changes nothing.
+  if (args.some((arg) => arg !== "--json")) fail("status accepts no arguments but --json.")
   const project = asRecord(await createInstanceApiClient(mode).get("/api/project"))
   if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError(

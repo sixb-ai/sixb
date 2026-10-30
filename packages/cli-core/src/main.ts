@@ -12,7 +12,7 @@ import { runInstanceCli } from "./run"
 
 async function main(args: readonly string[]): Promise<void> {
   const [command, ...rest] = args
-  if (!command || isHelp(command)) return writeText(renderInstanceHelp("sandbox"))
+  if (!command || isHelp(command)) return writeText(renderInstanceHelp())
   if (command === "--version" || command === "version") {
     return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`)
   }

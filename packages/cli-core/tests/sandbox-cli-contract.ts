@@ -259,6 +259,13 @@ export function runSandboxCliContractSuite(implementation: SandboxCliContractImp
         })
         expect(report.project.name).toBeUndefined()
         expect(api.requests.map((request) => request.url.pathname)).toEqual(["/api/project"])
+
+        // --json, which people's `sixb status` takes, is accepted and changes nothing.
+        const json = await runCli(implementation, ["status", "--json"], apiEnv(api))
+        expect({ exitCode: json.exitCode, report: JSON.parse(json.stdout) }).toEqual({
+          exitCode: 0,
+          report,
+        })
       } finally {
         api.close()
       }

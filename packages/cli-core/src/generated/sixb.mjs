@@ -236,24 +236,8 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
-var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb status                         Check the sandbox and its API access
-  sixb context                        Print the current run context
-`, `  sixb status                         Check the current profile and its API access
-`).replace(`
-When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
-\`sixb ontology get\` for a type that has no file there.
-`, "").replace(`Files:
-  sixb files upload|download ...
-`, `Files:
-  sixb files upload|download ...
-
-Models:
-  sixb models list [--kind <kind>]    Configured models of every kind, with prices
-  sixb models get <model>             One model's options and rate card
-  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help
-`);
-function renderInstanceHelp(mode) {
-  return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
+function renderInstanceHelp() {
+  return SANDBOX_MAIN_HELP;
 }
 var SEARCH_DETAILS = `Without --type, search matches primary-id prefixes and full-text fields across visible types.
 With --type, the server embeds the text with the profile's model and ranks results by score,
@@ -2349,8 +2333,8 @@ var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
 async function status(args, mode) {
   if (isHelp(args[0]))
     return writeText("Usage: sixb status");
-  if (args.length !== 0)
-    fail("status accepts no arguments.");
+  if (args.some((arg) => arg !== "--json"))
+    fail("status accepts no arguments but --json.");
   const project = asRecord(await createInstanceApiClient(mode).get("/api/project"));
   if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
@@ -2397,7 +2381,7 @@ function javascriptRuntime() {
 async function main(args) {
   const [command, ...rest] = args;
   if (!command || isHelp(command))
-    return writeText(renderInstanceHelp("sandbox"));
+    return writeText(renderInstanceHelp());
   if (command === "--version" || command === "version") {
     return writeText(`sixb CLI ${INSTANCE_CLI_VERSION}`);
   }
