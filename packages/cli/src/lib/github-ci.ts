@@ -95,7 +95,9 @@ export function renderWorkflow(input: WorkflowInput): string {
       ? ["        with:", `          bun-version-file: ${input.bunVersionFile}`]
       : []),
     "      - name: Install dependencies",
-    "        run: bun install --frozen-lockfile",
+    // `sixb deploy` only loads `sixb.deploy.ts` and uploads the source; the server installs again
+    // with lifecycle scripts. Skipping them here skips downloads such as a Playwright browser.
+    "        run: bun install --frozen-lockfile --ignore-scripts",
     ...workingDirectory,
     "      - name: Install the deploy key",
     "        env:",

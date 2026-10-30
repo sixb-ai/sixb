@@ -17,7 +17,7 @@ It:
 
 Commit the workflow and push. Every push to the default branch then deploys; `--branch <name>` picks another branch. `sixb deploy status` shows each deploy as made by the GitHub user who pushed, through GitHub Actions.
 
-The workflow can read the repository and nothing else, runs one deploy at a time (a push during a deploy waits for it), and pins each action to an exact commit. To require an approval before each deploy, add required reviewers to the `production` environment in the repository's settings. An existing `production` environment keeps its rules.
+The workflow can read the repository and nothing else, runs one deploy at a time (a push during a deploy waits for it), and pins each action to an exact commit. It installs dependencies without their install scripts, since it only reads `sixb.deploy.ts` and sends the commit; the server runs them in its own install. To require an approval before each deploy, add required reviewers to the `production` environment in the repository's settings. An existing `production` environment keeps its rules.
 
 ## Rotate the key
 

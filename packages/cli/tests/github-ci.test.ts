@@ -48,6 +48,8 @@ describe("the deploy workflow", () => {
       expect(uses).toMatch(/@[0-9a-f]{40}$/)
     }
     expect(steps[0]?.with).toEqual({ "persist-credentials": false })
+    // The server runs lifecycle scripts; the runner only loads the deploy config.
+    expect(step("Install dependencies")?.run).toBe("bun install --frozen-lockfile --ignore-scripts")
     expect(step("Deploy")).toEqual({
       name: "Deploy",
       run: "bunx sixb deploy",
