@@ -43,6 +43,48 @@ test("applies residency to explicit rates, including the special cache price", (
   })
 })
 
+test("prices the 5.5 generation, including Opus 5.5 fast mode", () => {
+  expect(anthropicRateCard("claude-opus-5-5", undefined)).toEqual({
+    currency: "USD",
+    input: "4",
+    output: "20",
+    cacheReadInput: "0.2",
+    cacheWriteInput5m: "5",
+    cacheWriteInput1h: "8",
+  })
+  expect(anthropicRateCard("claude-sonnet-5-5", undefined)?.cacheReadInput).toBe("0.1")
+  expect(anthropicRateCard("claude-opus-5-5", { speed: "fast" })).toMatchObject({
+    input: "8",
+    output: "40",
+    cacheReadInput: "0.4",
+  })
+})
+
+test("bills every Haiku 5.5 meter higher once a prompt exceeds 100,000 tokens", () => {
+  const model = createAnthropic()("claude-haiku-5-5")
+  const cost = (inputTokens: number) =>
+    model.costEstimator?.estimate({
+      usage: {
+        inputTokens,
+        uncachedInputTokens: inputTokens - 50_000,
+        cacheReadInputTokens: 50_000,
+        cacheWriteInputTokens: 0,
+        cacheWrite5mInputTokens: 0,
+        cacheWrite1hInputTokens: 0,
+        outputTokens: 1_000,
+      },
+    })
+
+  // 50,000 × $0.10 + 50,000 × $0.01 + 1,000 × $0.50 per million tokens.
+  expect(cost(100_000)).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
+  // 50,001 × $0.50 + 50,000 × $0.05 + 1,000 × $2.50 per million tokens.
+  expect(cost(100_001)).toMatchObject({ status: "rated", money: { amountNanos: "30000500" } })
+  expect(anthropicRateCard("claude-haiku-5-5", { inference_geo: "us" })?.input).toEqual({
+    default: "0.11",
+    tiers: [{ minTokens: 100_001, price: "0.55" }],
+  })
+})
+
 test.each([
   "claude-opus-5-99",
   "claude-sonnet-4-6-20990101",
@@ -63,6 +105,7 @@ test.each(uncoveredRequests)("declines uncovered request dimensions (%j)", (requ
 
 test("does not extrapolate fast or residency pricing to unsupported versions", () => {
   expect(anthropicRateCard("claude-sonnet-5", { speed: "fast" })).toBeUndefined()
+  expect(anthropicRateCard("claude-opus-4-7", { speed: "fast" })).toBeUndefined()
   expect(anthropicRateCard("claude-opus-4-5", { inference_geo: "us" })).toBeUndefined()
 })
 

@@ -115,6 +115,8 @@ their additional charges would make a token-only total incomplete.
 
 Rates cover exact model IDs and supported request dimensions, with explicit cache prices:
 new versions, unlisted dated snapshots, and unknown pricing options are `unpriceable`, not guessed.
+Claude Haiku 5.5 bills every meter at its higher rates once a prompt, cache reads and writes
+included, exceeds 100,000 tokens; fast mode uses each Opus version's own rates.
 Unknown pricing does not block inference. The table records its verification date and
 [public pricing source](https://platform.claude.com/docs/en/about-claude/pricing);
 these rates do not account for negotiated discounts or replace an invoice.

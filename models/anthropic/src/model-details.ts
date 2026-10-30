@@ -1,11 +1,11 @@
-import type { JsonObject, ModelRateCard } from "@sixb/core/models"
+import type { JsonObject, ModelRateCard, ModelTokenPrice } from "@sixb/core/models"
 
 interface TokenRates {
-  readonly input: string
-  readonly output: string
-  readonly cacheReadInput: string
-  readonly cacheWriteInput5m: string
-  readonly cacheWriteInput1h: string
+  readonly input: ModelTokenPrice
+  readonly output: ModelTokenPrice
+  readonly cacheReadInput: ModelTokenPrice
+  readonly cacheWriteInput5m: ModelTokenPrice
+  readonly cacheWriteInput1h: ModelTokenPrice
 }
 
 interface PriceRule {
@@ -44,7 +44,7 @@ const OUTPUT_LIMITS: readonly OutputLimitRule[] = [
   },
 ]
 
-// Public USD/MTok prices verified on 2026-09-07:
+// Public USD/MTok prices verified on 2026-10-30:
 // https://platform.claude.com/docs/en/about-claude/pricing
 // Exact IDs only: neither new versions nor dated snapshots inherit a guessed family price.
 // Applied rates are retained by the accounting ledger; these are estimates, not negotiated bills.
@@ -68,6 +68,17 @@ const PRICES: readonly PriceRule[] = [
       cacheReadInput: "1",
       cacheWriteInput5m: "12.5",
       cacheWriteInput1h: "20",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-opus-5-5"],
+    rates: {
+      input: "4",
+      output: "20",
+      cacheReadInput: "0.2",
+      cacheWriteInput5m: "5",
+      cacheWriteInput1h: "8",
     },
     usInference: true,
   },
@@ -103,6 +114,17 @@ const PRICES: readonly PriceRule[] = [
     },
   },
   {
+    modelIds: ["claude-sonnet-5-5"],
+    rates: {
+      input: "2",
+      output: "10",
+      cacheReadInput: "0.1",
+      cacheWriteInput5m: "2.5",
+      cacheWriteInput1h: "4",
+    },
+    usInference: true,
+  },
+  {
     modelIds: ["claude-sonnet-5"],
     rates: {
       input: "2",
@@ -135,6 +157,18 @@ const PRICES: readonly PriceRule[] = [
     },
   },
   {
+    // A prompt over 100,000 tokens, cache reads and writes included, bills every meter higher.
+    modelIds: ["claude-haiku-5-5"],
+    rates: {
+      input: longPrompt("0.1", "0.5"),
+      output: longPrompt("0.5", "2.5"),
+      cacheReadInput: longPrompt("0.01", "0.05"),
+      cacheWriteInput5m: longPrompt("0.125", "0.625"),
+      cacheWriteInput1h: longPrompt("0.2", "1"),
+    },
+    usInference: true,
+  },
+  {
     modelIds: ["claude-haiku-4-5"],
     rates: {
       input: "1",
@@ -156,13 +190,28 @@ const PRICES: readonly PriceRule[] = [
   },
 ]
 
-const FAST_RATES: TokenRates = {
+const OPUS_5_FAST_RATES: TokenRates = {
   input: "10",
   output: "50",
   cacheReadInput: "1",
   cacheWriteInput5m: "12.5",
   cacheWriteInput1h: "20",
 }
+
+const FAST_RATES = new Map<string, TokenRates>([
+  [
+    "claude-opus-5-5",
+    {
+      input: "8",
+      output: "40",
+      cacheReadInput: "0.4",
+      cacheWriteInput5m: "10",
+      cacheWriteInput1h: "16",
+    },
+  ],
+  ["claude-opus-5", OPUS_5_FAST_RATES],
+  ["claude-opus-4-8", OPUS_5_FAST_RATES],
+])
 
 // Unknown request dimensions may change billing. Keep inference usable but decline the estimate.
 const PRICED_REQUEST_KEYS = new Set([
@@ -200,10 +249,17 @@ export function anthropicRateCard(
     return undefined
   if (request?.inference_geo !== undefined && !rule.usInference) return undefined
   const fast = request?.speed === "fast"
-  if (fast && modelId !== "claude-opus-5" && modelId !== "claude-opus-4-8") return undefined
-  const rates = fast ? FAST_RATES : rule.rates
+  const rates = fast ? FAST_RATES.get(modelId) : rule.rates
+  if (!rates) return undefined
   const residency = request?.inference_geo === "us"
-  const adjusted = (value: string) => (residency ? scale(value, 11n, 10n) : value)
+  const adjusted = (price: ModelTokenPrice): ModelTokenPrice => {
+    if (!residency) return price
+    if (typeof price === "string") return scale(price, 11n, 10n)
+    return {
+      default: scale(price.default, 11n, 10n),
+      tiers: price.tiers.map((tier) => ({ ...tier, price: scale(tier.price, 11n, 10n) })),
+    }
+  }
   return {
     currency: "USD",
     input: adjusted(rates.input),
@@ -212,6 +268,10 @@ export function anthropicRateCard(
     cacheWriteInput5m: adjusted(rates.cacheWriteInput5m),
     cacheWriteInput1h: adjusted(rates.cacheWriteInput1h),
   }
+}
+
+function longPrompt(standard: string, overThreshold: string): ModelTokenPrice {
+  return { default: standard, tiers: [{ minTokens: 100_001, price: overThreshold }] }
 }
 
 function scale(value: string, numerator: bigint, denominator: bigint): string {
