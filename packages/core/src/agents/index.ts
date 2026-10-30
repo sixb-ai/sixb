@@ -168,6 +168,8 @@ export type {
   AgentRunOutcome,
   AgentRunSession,
   AgentRunSessionHost,
+  AgentRunWorkspace,
+  AgentRunWorkspaceTransition,
   ClaimAgentRunInput,
 } from "./run-session"
 export {

@@ -315,6 +315,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
       const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({
+        session,
         frameworkTools,
         thread: prepared.thread,
         ...(prepared.execution.requestedBy === undefined
@@ -677,6 +678,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // and a continuation's first step reads what the runs before it left unread.
       const inbox = new SubagentInbox(session.mail, run, history.messages)
       environment = await createSubagentEnvironment({
+        session,
         context: executionContext,
         plan,
         run,

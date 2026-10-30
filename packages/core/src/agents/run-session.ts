@@ -10,8 +10,10 @@ import {
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
+  type AgentThreadSandboxState,
   type AppendAgentMessageInput,
   type FinishAgentRunInput,
+  type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
 import { turnPausesOnHeldCalls } from "./approvals"
 import { createAgentRunExecutionToken } from "./ids"
@@ -75,9 +77,30 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
     outcome: AgentRunOutcome,
     messages?: readonly AppendAgentMessageInput[]
   ): Promise<AgentRunRecord>
+  /**
+   * Throws {@link AgentExecutionLostError} unless the run still runs under this session, within
+   * its lease. Run it right before a side effect the run must not make once another delivery owns
+   * it.
+   */
+  assertOwned(): Promise<void>
+  /** A conversation's persistent workspace, as this run holds it. */
+  readonly workspace: AgentRunWorkspace
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
 }
+
+/** A thread's persistent workspace state, moved only by the run that holds the thread. */
+export interface AgentRunWorkspace {
+  /** Acquire, replace or settle the thread's workspace; refused once the run lost its execution. */
+  transition(input: AgentRunWorkspaceTransition): Promise<AgentThreadSandboxState>
+}
+
+/** A workspace transition a run makes; the session adds which run, and its token. */
+export type AgentRunWorkspaceTransition = TransitionAgentThreadSandboxInput extends infer T
+  ? T extends { readonly runId: string }
+    ? Omit<T, "projectId" | "runId" | "executionToken">
+    : never
+  : never
 
 export interface AgentRunHeldCalls {
   /** Whether a call of this run, or of one of its children, waits for an approval. */
@@ -175,6 +198,28 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     },
     finish: (outcome, messages) =>
       finishWithRetries(host.storage, { ...outcome, ...fence }, messages ?? []),
+    async assertOwned() {
+      const current = await host.storage.agents.runs.getById({
+        projectId: host.projectId,
+        id: run.id,
+      })
+      if (
+        current?.status !== "running" ||
+        current.execution?.token !== executionToken ||
+        current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
+      ) {
+        throw new AgentExecutionLostError(run.id)
+      }
+    },
+    workspace: {
+      transition: (input) =>
+        host.storage.agents.threads.transitionSandbox({
+          ...input,
+          projectId: host.projectId,
+          runId: run.id,
+          executionToken,
+        }),
+    },
     close: cancel.stop,
   }
 }

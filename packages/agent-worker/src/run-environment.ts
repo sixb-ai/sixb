@@ -7,7 +7,11 @@ import type {
   SandboxDefinition,
   SandboxFactory,
 } from "@sixb/core"
-import { conversationThreadId, staticSandboxRecipe } from "@sixb/core/internal/agents"
+import {
+  type AgentRunSession,
+  conversationThreadId,
+  staticSandboxRecipe,
+} from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -97,6 +101,8 @@ interface CreateAgentEnvironmentInput {
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The turn's session: its workspace, conversation and checkpoint go through it. */
+  readonly session: AgentRunSession
   readonly thread?: AgentThreadRecord | null
   /** Who asked for the turn: what it publishes is theirs, in an artifact the thread's owner owns. */
   readonly requestedBy?: Principal
@@ -115,6 +121,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 }
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The child's session: its workspace goes through it. */
+  readonly session: AgentRunSession
   readonly run: SubagentRunRecord
   /** The child's own thread: memory is read as of its creation. */
   readonly thread: AgentThreadRecord
@@ -157,6 +165,7 @@ export async function createConversationAgentEnvironment(
   const sandbox = input.thread?.sandboxParams
     ? await persistentRunSandbox({
         context,
+        session: input.session,
         definition: input.sandboxDefinition,
         thread: input.thread,
         run,
@@ -296,6 +305,7 @@ export async function createSubagentEnvironment(
   const workspace = keepsSubagentWorkspace(context.sandboxes)
     ? await persistentRunSandbox({
         context,
+        session: input.session,
         thread: input.thread,
         run,
         signal: input.signal ?? NEVER_ABORTED_SIGNAL,

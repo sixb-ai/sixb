@@ -1897,6 +1897,21 @@ function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   return storage
 }
 
+/** The session of a run the test started, as the worker opens it once it claims the run. */
+function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
+  return openAgentRunSession(
+    {
+      projectId: PROJECT_ID,
+      storage: workerStorageOf(sixb.storage),
+      broker: sixb.broker,
+      recoverAiModelCall: recoverAiModelCall(sixb),
+      events: NOOP_STREAM_SINK,
+      childQueue: sixb.queues.agentChildren,
+    },
+    run
+  )
+}
+
 /** A turn's coordinator as the worker builds it, in a session for its run, which the test started. */
 async function coordinatorFor(
   sixb: TestSixb,
@@ -1905,17 +1920,7 @@ async function coordinatorFor(
   deadline: Date
 ): Promise<SubagentCoordinator> {
   const context = await buildAgentWorkerContext(sixb)
-  const session = await openAgentRunSession(
-    {
-      projectId: PROJECT_ID,
-      storage: context.storage,
-      broker: sixb.broker,
-      recoverAiModelCall: context.recoverAiModelCall,
-      events: context.streamSink,
-      childQueue: sixb.queues.agentChildren,
-    },
-    parent
-  )
+  const session = await runSessionOf(sixb, parent)
   return new SubagentCoordinator(sixb, context, parent, session, execution, deadline)
 }
 
@@ -2634,6 +2639,7 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(host, requested)
     try {
       const error = await createConversationAgentEnvironment({
+        session: await runSessionOf(host, run),
         context: await buildAgentWorkerContext(host),
         plan: executionPlanFor(host),
         thread,
@@ -6713,11 +6719,13 @@ describe("AgentWorker", () => {
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
       createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, firstRun),
         context,
         plan: plan,
         run: firstRun,
       }),
       createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, secondRun),
         context,
         plan: plan,
         run: secondRun,
@@ -6803,6 +6811,7 @@ describe("AgentWorker", () => {
     })
 
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -6884,6 +6893,7 @@ describe("AgentWorker", () => {
     )
     const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context: await buildAgentWorkerContext(sixb),
       plan,
       run,
@@ -6972,6 +6982,7 @@ describe("AgentWorker", () => {
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -7008,7 +7019,12 @@ describe("AgentWorker", () => {
     })
 
     await expect(
-      createConversationAgentEnvironment({ context: failing, plan: executionPlanFor(sixb), run })
+      createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, run),
+        context: failing,
+        plan: executionPlanFor(sixb),
+        run,
+      })
     ).rejects.toThrow("locale unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
@@ -7038,6 +7054,7 @@ describe("AgentWorker", () => {
 
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -13216,6 +13233,7 @@ describe("agent tools act as the requester", () => {
       createdAt: new Date(),
     } as unknown as AgentThreadRecord
     const child = await createSubagentEnvironment({
+      session: await runSessionOf(sixb, childRun),
       context,
       plan,
       run: childRun,
