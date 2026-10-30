@@ -16,6 +16,13 @@ import {
 import { turnPausesOnHeldCalls } from "./approvals"
 import { createAgentRunExecutionToken } from "./ids"
 import type { StreamSink } from "./run-events"
+import {
+  type AgentRunChildren,
+  type AgentRunChildrenHost,
+  type AgentRunMail,
+  agentRunChildren,
+  agentRunMail,
+} from "./run-session-children"
 import { subscribeAgentRunCancel } from "./streams/protocol"
 
 /**
@@ -50,6 +57,10 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly events: StreamSink
   /** Approvals that hold the run: they are created by the API its commands call, never here. */
   readonly heldCalls: AgentRunHeldCalls
+  /** A conversation turn's children: spawning them, and reading them and their threads. */
+  readonly children: AgentRunChildren
+  /** Mail between a turn and its children. */
+  readonly mail: AgentRunMail
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
    * once the last lease recorded lapses, so the session renews it as the queue does.
@@ -86,7 +97,7 @@ export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
   : never
 
 /** What an in-process session works against. */
-export interface AgentRunSessionHost {
+export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage } & ModelCallAccountingStorage
   readonly broker: Broker
@@ -142,6 +153,8 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     executionToken,
     cancelled: cancel.signal,
     events: host.events,
+    children: agentRunChildren(host, run, executionToken),
+    mail: agentRunMail(host),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),

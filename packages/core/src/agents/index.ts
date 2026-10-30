@@ -178,6 +178,8 @@ export {
   openAgentRunSession,
   watchAgentRunCancel,
 } from "./run-session"
+export type { AgentRunChildren, AgentRunMail } from "./run-session-children"
+export { agentRunMail } from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
