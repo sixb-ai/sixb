@@ -1998,8 +1998,15 @@ async function runChildren(
   runIds: readonly string[],
   signal = new AbortController().signal
 ): Promise<void> {
+  const runner = childRunnerOf(sixb)
+  await startChildren(sixb, runner, runIds, signal)
+  await runner.drain()
+}
+
+/** The worker's child runner, for this project. */
+function childRunnerOf(sixb: TestSixb): ChildRunner {
   const context = workerContextOf(sixb)
-  const runner = new ChildRunner({
+  return new ChildRunner({
     host: sixb,
     context,
     sessions: {
@@ -2013,16 +2020,24 @@ async function runChildren(
     trackTeardown: () => {},
     reportFailure: () => {},
   })
+}
+
+/** Start children on a runner under a parent delivery the test holds, whose lease never renews. */
+async function startChildren(
+  sixb: TestSixb,
+  runner: ChildRunner,
+  runIds: readonly string[],
+  signal = new AbortController().signal
+): Promise<void> {
   const delivery = {
     leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     onLeaseRenewed: () => () => {},
   }
   for (const runId of runIds) {
-    const run = await context.storage.agents.runs.getById({ projectId: PROJECT_ID, id: runId })
+    const run = await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: runId })
     if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
     runner.start(run, { signal, delivery })
   }
-  await runner.drain()
 }
 
 function recoverAiModelCall(sixb: TestSixb) {
@@ -7752,7 +7767,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("delegates to an isolated child lane without consuming another primary slot", async () => {
+  test("runs a child beside its turn without consuming another primary slot", async () => {
     let childRunId = ""
     const parentCalls: LanguageModelRequest[] = []
     const childCalls: LanguageModelRequest[] = []
@@ -9303,6 +9318,81 @@ describe("AgentWorker", () => {
     ])
   })
 
+  test("a turn's end stops its children still running, without the broker", async () => {
+    // Removal proof: drop the abort in ChildRunner.stopChildrenOf; the child runs on, and the
+    // test times out waiting for it.
+    const model = new WorkerTestModel({
+      modelId: "blocking-child",
+      stream: async (options) => untilAborted(options),
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const {
+      parent,
+      children: [spawned],
+    } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+    if (!spawned) throw new Error("Expected the child.")
+    const modelCalls = spyOn(model, "stream")
+    const runner = childRunnerOf(sixb)
+    try {
+      await startChildren(sixb, runner, [spawned.runId])
+      await waitFor(() => modelCalls.mock.calls.length > 0, { label: "the child's model call" })
+
+      await runner.stopChildrenOf(parent.id)
+
+      expect(
+        await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
+      ).toMatchObject({ status: "cancelled" })
+    } finally {
+      modelCalls.mockRestore()
+    }
+  })
+
+  test("retries a child's claim that storage refused for a moment", async () => {
+    // Removal proof: claim without retryPreparationInPlace in ChildRunner.run; the child stays
+    // queued, and nothing would ever start it.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const {
+      children: [spawned],
+    } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
+    if (!spawned) throw new Error("Expected the child.")
+    let refused = false
+    const runs = storage.runs
+    const flaky = withStorage(
+      sixb,
+      new Proxy(sixb.storage, {
+        get: (target, property, receiver) =>
+          property === "agents"
+            ? new Proxy(storage, {
+                get: (agents, key, agentsReceiver) =>
+                  key === "runs"
+                    ? new Proxy(runs, {
+                        get: (runsTarget, method, runsReceiver) =>
+                          method === "start"
+                            ? async (...args: Parameters<typeof runs.start>) => {
+                                if (!refused) {
+                                  refused = true
+                                  throw new Error("connection reset")
+                                }
+                                return runs.start(...args)
+                              }
+                            : Reflect.get(runsTarget, method, runsReceiver),
+                      })
+                    : Reflect.get(agents, key, agentsReceiver),
+              })
+            : Reflect.get(target, property, receiver),
+      })
+    )
+
+    await runChildren(flaky, [spawned.runId])
+
+    expect(refused).toBe(true)
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })).toMatchObject({
+      status: "succeeded",
+    })
+  })
+
   test("ends a child as interrupted when its worker stops", async () => {
     // Removal proof: record the child's own abort in ChildRunner.run instead of interruptedError;
     // it ends cancelled with no finish reason, and its parent cannot tell it to spawn it again.
@@ -9340,10 +9430,14 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("ends a child its runner left running once its parent ended and its lease lapsed", async () => {
+  test.each([
+    true,
+    false,
+  ])("ends a child its runner left running once its lease lapsed (parent ended: %s)", async (parentEnded) => {
     // Removal proof: drop the lapsed-lease branch of requestSubagentCancellation, and the child is
     // only sent a cancel no runner hears: it never ends. End it without its lease check, and it ends
-    // while the runner that may still hold it could write.
+    // while the runner that may still hold it could write. Skip children of an active parent in the
+    // repair pass again, and the one whose parent still runs never ends.
     const model = answerModel()
     const sixb = buildSixb(model)
     const storage = agentStorageOf(sixb)
@@ -9357,19 +9451,21 @@ describe("AgentWorker", () => {
         children: [spawned],
       } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." })
       if (!spawned) throw new Error("Expected the child.")
-      // A runner started the child, then died with its parent's turn, whose end was recorded.
+      // A runner started the child, then died. Its parent's turn has ended, or still runs elsewhere.
       const leaseExpiresAt = new Date(Date.now() + 30_000)
       await storage.runs.start({
         projectId: PROJECT_ID,
         id: spawned.runId,
         execution: { token: createAgentRunExecutionToken(), queueLeaseExpiresAt: leaseExpiresAt },
       })
-      await storage.runs.finish({
-        projectId: PROJECT_ID,
-        id: parent.id,
-        executionToken: parent.execution?.token ?? "",
-        status: "succeeded",
-      })
+      if (parentEnded) {
+        await storage.runs.finish({
+          projectId: PROJECT_ID,
+          id: parent.id,
+          executionToken: parent.execution?.token ?? "",
+          status: "succeeded",
+        })
+      }
 
       await worker.start()
       const child = await underFakeTime(

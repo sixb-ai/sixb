@@ -126,6 +126,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly context: AgentWorkerContext | null
   /** Runs the children of this worker's turns, in this process. */
   private readonly children: ChildRunner | null
+  private readonly leaseMs: number
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -145,6 +146,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
 
     this.host = host
+    this.leaseMs = leaseMs
     const hasAgentWork =
       host.definitions.models?.language !== undefined ||
       host.definitions.workflows
@@ -388,6 +390,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         throw error
       }
     } finally {
+      // Its children end before its delivery does: that delivery renews their lease too.
+      await this.children?.stopChildrenOf(run.id)
       stopOwnershipProjection?.()
       session.close()
       delegation?.close()
@@ -681,9 +685,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (run.status === "running") {
       // A child runs in its parent's runner. Once its lease lapsed nothing runs it any more, and no
       // cancel reaches it: it ends here, as a turn left running by a dead delivery does.
-      if ((run.execution?.queueLeaseExpiresAt.getTime() ?? 0) <= Date.now()) {
+      if (leaseLapsed(run)) {
         await this.finishInterruptedTurn(context, run, {
-          leaseExpiresAt: new Date(Date.now() + DEFAULT_AGENT_QUEUE_LEASE_MS).toISOString(),
+          leaseExpiresAt: new Date(Date.now() + this.leaseMs).toISOString(),
         })
         return
       }
@@ -744,7 +748,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await Promise.all(
         children.map(async (run) => {
           const parent = parentsById.get(run.parentRunId)
-          if (parent?.kind === "conversation" && !isTerminalRun(parent)) return
+          const parentActive = parent?.kind === "conversation" && !isTerminalRun(parent)
+          // A child's runner renews its lease with its parent's, so one whose lease lapsed has no
+          // runner left, whatever its parent's state.
+          if (parentActive && !(run.status === "running" && leaseLapsed(run))) return
           try {
             await this.requestSubagentCancellation(run, "The parent Agent run is no longer active.")
           } catch (error) {
@@ -905,6 +912,10 @@ function assertAgentWorkerStorage(
 }
 
 /** Come back once the owning delivery's projected lease lapses, and never sooner than a moment. */
+function leaseLapsed(run: AgentRunRecord): boolean {
+  return (run.execution?.queueLeaseExpiresAt.getTime() ?? 0) <= Date.now()
+}
+
 function retryOnceReleased(error: AgentRunOwnedElsewhereError): QueueWorkerFailureDecision {
   const availableAt = Math.max(
     error.ownedUntil.getTime(),
