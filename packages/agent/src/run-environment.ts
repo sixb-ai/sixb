@@ -5,6 +5,7 @@ import {
   type AgentRunSession,
   type AgentTurnHistory,
   conversationThreadId,
+  subagentSandboxFiles,
 } from "@sixb/core/internal/agents"
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -48,7 +49,7 @@ import {
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
-import { type SubagentHistory, subagentSandboxFiles } from "./subagent-continuation"
+import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
@@ -483,6 +484,7 @@ async function startAgentEnvironment(
       specs: plan.tools,
       runId,
       callTool: input.callTool,
+      fileBytesLeft: () => fileBudget.maxBytes - fileBudget.reservedBytes,
       installFiles: ({ toolName, files, signal }) =>
         installAgentToolFiles({
           toolName,

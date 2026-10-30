@@ -1,4 +1,4 @@
-import type { AgentStorage, SubagentRunRecord } from "../storage/agents"
+import type { AgentStorage, SubagentRunFile, SubagentRunRecord } from "../storage/agents"
 
 const PAGE = 100
 
@@ -38,4 +38,22 @@ export async function listSubagentThreadRuns(
       (seqOf.get(a.id) ?? -1) - (seqOf.get(b.id) ?? -1) ||
       a.id.localeCompare(b.id)
   )
+}
+
+/**
+ * The files a child finds in its sandbox: those its parent handed over, and for a continuation
+ * what the paused run left in `out/`, given back there. An output wins over a handed file at its
+ * path, as the paused run's copy was the latest.
+ */
+export function subagentSandboxFiles(
+  run: SubagentRunRecord,
+  paused: SubagentRunRecord | undefined
+): readonly SubagentRunFile[] {
+  const outputs = (paused?.result?.files ?? []).map((file) => ({
+    ...file,
+    path: `out/${file.path}`,
+  }))
+  const restored = new Set(outputs.map((file) => file.path))
+
+  return [...(run.spec.files ?? []).filter((file) => !restored.has(file.path)), ...outputs]
 }

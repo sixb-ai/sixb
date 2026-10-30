@@ -149,7 +149,8 @@ export function createAgentToolFiles(input: CreateAgentToolFilesInput): AgentToo
 
 /**
  * Copy the files a project tool stored into the sandbox, at the paths it was told, each counted
- * against the run's budget as if the tool had put it here.
+ * against the run's budget as the harness's own tools' files are. The call stored no more than the
+ * budget had left when it started.
  */
 export async function installAgentToolFiles(input: {
   readonly toolName: string
@@ -164,7 +165,7 @@ export async function installAgentToolFiles(input: {
     input.signal.throwIfAborted()
     const reservation = input.budget.reserve(0, input.toolName)
     try {
-      reservation.addContent(file.fileRef.digest, file.fileRef.sizeBytes)
+      reservation.add(file.fileRef.sizeBytes)
       const bytes = new Uint8Array(
         await new Response(await input.blobStorage.open(file.fileRef.blobId)).arrayBuffer()
       )

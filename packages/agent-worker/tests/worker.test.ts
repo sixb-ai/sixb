@@ -13045,7 +13045,8 @@ describe("agent tools act as the requester", () => {
   // Regression proofs: give the session's callTool a child's thread attachments, or
   // workflowStepTools no input files; the child opens nothing its parent handed it, or the task
   // cannot open its input file.
-  test("gives a workflow task's tools its input files and a child's those its parent handed", async () => {
+  // A child's tools open what its parent handed through its session: the session suite proves it.
+  test("gives a workflow task's tools its input files, and lists a child's handed ones", async () => {
     const sixb = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
       projectTools: [readAttachment],
     })
@@ -13144,8 +13145,6 @@ describe("agent tools act as the requester", () => {
       })
       const quoted = { fileName: "quote.txt", text: "Quote 42" }
       await expect(openQuote(task, "input.quote")).resolves.toEqual(quoted)
-      await expect(openQuote(child, "inputs/quote.txt")).resolves.toEqual(quoted)
-      await expect(openQuote(child, "input.quote")).rejects.toThrow(AgentToolPublicError)
       await expect(openQuote(task, "inputs/quote.txt")).rejects.toThrow(AgentToolPublicError)
     } finally {
       await Promise.all([task.dispose(), child.dispose()])

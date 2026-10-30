@@ -59,6 +59,14 @@ const chartTool = defineAgentTool("chart")
     const file = await files.put({ body: new TextEncoder().encode("a,b\n"), fileName: "chart.csv" })
     return { title: input.title, runId: run.id, kind: run.kind, sandboxPath: file.sandboxPath }
   })
+/** A project tool that reads one of the run's attachments, by its key. */
+const readTool = defineAgentTool("read_attachment")
+  .description("Read an attachment.")
+  .input({ key: "string" })
+  .run(async ({ input, attachments }) => {
+    const opened = await attachments.open(input.key)
+    return { text: opened ? await new Response(opened.body).text() : null }
+  })
 const otherTool = defineAgentTool("other")
   .description("Do something else.")
   .input({})
@@ -71,7 +79,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
     id: PROJECT_ID,
     ontology: [],
     models: { language: [answeringModel] },
-    tools: [chartTool, otherTool],
+    tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
     broker,
@@ -864,6 +872,96 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(notGiven).toBeInstanceOf(AgentToolPublicError)
       parent.close()
       child.close()
+    })
+
+    // Removal proof: hand a child's tools run.spec.files alone in callTool; the continuation's
+    // tool cannot open out/report.txt, though its sandbox and $SIXB_ATTACHMENTS hold it.
+    test("open what a child was handed, and what the run it continues left in out/", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const put = (text: string) =>
+        parent.files.put({ body: new TextEncoder().encode(text), fileName: "file.txt" })
+      const handed = { path: "brief.txt", fileRef: await put("The brief.") }
+      const child = (id: string, thread: { readonly id: string; readonly create: boolean }) =>
+        createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: id,
+          sourceExecutionId: parent.run.executionId,
+        }).then((executionId) =>
+          storage.agents.runs.createSubagent({
+            id,
+            projectId: PROJECT_ID,
+            executionId,
+            parentRunId: parent.run.id,
+            parentExecutionToken: parent.executionToken,
+            spawnKey: "west",
+            spec: {
+              model: { provider: "test", modelId: "test-model" },
+              task: "Look west.",
+              toolNames: ["read_attachment"],
+              files: [handed],
+            },
+            thread,
+            trigger: { id: `${id}-task`, parts: [{ type: "text", text: "Look west." }] },
+            maxActiveChildren: 4,
+          })
+        )
+      // The first run pauses on a call it holds, with out/report.txt.
+      const first = await open(await child("child-1", { id: "child-thread", create: true }))
+      await storage.agents.approvals.request({
+        id: "apr-1",
+        projectId: PROJECT_ID,
+        runId: parent.run.id,
+        callerRunId: first.run.id,
+        executionToken: first.executionToken,
+        requestedBy: alice,
+        mode: "manual",
+        call: {
+          kind: "action",
+          actionId: "mark-paid",
+          subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-1" },
+          params: {},
+          actionRunId: "act-1",
+          effect: "ontology",
+        },
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      await first.finish({
+        status: "succeeded",
+        finishReason: "awaiting_approval",
+        result: { text: "", files: [{ path: "report.txt", fileRef: await put("The report.") }] },
+      })
+      first.close()
+      const continued = await open(await child("child-2", { id: "child-thread", create: false }))
+      const read = (key: string) =>
+        continued.callTool(
+          { toolName: "read_attachment", toolCallId: key, input: { key } },
+          { signal: new AbortController().signal }
+        )
+
+      expect((await read("brief.txt")).output).toEqual({ text: "The brief." })
+      expect((await read("out/report.txt")).output).toEqual({ text: "The report." })
+      parent.close()
+      continued.close()
+    })
+
+    // Removal proof: drop assertAgentRunOwned from callTool; the runner that lost the run still
+    // runs the tool, and acts on the project.
+    test("run nothing for a runner that lost the run", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const first = await open(await turn("run-a", "m1"), LAPSED)
+      const second = await open(first.run)
+
+      const refused = await first
+        .callTool(
+          { toolName: "other", toolCallId: "call-1", input: {} },
+          { signal: new AbortController().signal }
+        )
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(AgentExecutionLostError)
+      first.close()
+      second.close()
     })
   })
 

@@ -234,7 +234,12 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
 } from "./run-token"
-export type { AgentToolCall, AgentToolCallResult, AgentToolSpec } from "./run-tools"
+export type {
+  AgentToolCall,
+  AgentToolCallOptions,
+  AgentToolCallResult,
+  AgentToolSpec,
+} from "./run-tools"
 export { agentToolSpec, runAgentTool, threadToolAttachments } from "./run-tools"
 export type {
   AgentChildContext,
@@ -282,7 +287,7 @@ export {
   subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
-export { listSubagentThreadRuns } from "./subagent-runs"
+export { listSubagentThreadRuns, subagentSandboxFiles } from "./subagent-runs"
 export { assertConversationThread, conversationThreadId } from "./thread-access"
 export type {
   AgentThreadModelContextMessage,

@@ -179,6 +179,7 @@ export class ChildRunner {
           modelId: queuedRun.spec.model.modelId,
           leaseExpiresAt: parent.delivery.leaseExpiresAt,
           cancelWith: [queuedRun.parentRunId],
+          stop: stopped,
         })
       } catch (error) {
         if (stopped.aborted || isTerminalOrExecutionGone(error)) return null
@@ -311,7 +312,7 @@ export class ChildRunner {
       }
     } finally {
       stopOwnershipProjection?.()
-      session.close()
+      await session.close()
       runtime?.dispose()
       await environment?.dispose()
     }
