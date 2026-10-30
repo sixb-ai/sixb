@@ -53,7 +53,7 @@ import {
   type VercelGatewayImageOptions,
 } from "./image"
 import { gatewayImagePrice } from "./media-pricing"
-import { withAutomaticPromptCaching } from "./provider-caching"
+import { gatewayPromptCaching } from "./provider-caching"
 import { createGatewayReranking } from "./reranking"
 import {
   createGatewaySpeech,
@@ -1204,13 +1204,18 @@ class VercelGatewayLanguageModel implements LanguageModel {
         strict: isStrictGatewaySchema(tool.inputSchema),
       })),
     ]
-    const providerOptions = withAutomaticPromptCaching(
-      this.options.providerOptions,
-      request.caching
-    )
+    const { body: caching, providerOptions } = gatewayPromptCaching({
+      modelId: this.modelId,
+      providerOptions: this.options.providerOptions,
+      request: extra,
+      caching: request.caching,
+      messages: request.messages,
+      localTools: request.tools.length,
+    })
     return {
       body: {
         ...extra,
+        ...caching,
         model: this.modelId,
         input: responsesInput(request.messages, this.providerId),
         stream: true,
@@ -1306,12 +1311,17 @@ function normalizeUsage(raw: JsonObject | undefined): ModelUsage {
   const { inputTokens, outputTokens, reasoningOutputTokens: reasoning } = usage
   const cachedRaw = usage.cacheReadInputTokens
   const cached = cachedRaw ?? (inputTokens === undefined ? undefined : 0)
+  // Gateway reports cache writes for providers that bill them (Anthropic, OpenAI GPT-5.6+).
+  const writes = object(raw.input_tokens_details)?.cache_write_tokens
+  const written =
+    Number.isSafeInteger(writes) && (writes as number) >= 0 ? (writes as number) : undefined
   return {
     ...usage,
     ...(inputTokens === undefined || cached === undefined
       ? {}
-      : { uncachedInputTokens: Math.max(0, inputTokens - cached) }),
+      : { uncachedInputTokens: Math.max(0, inputTokens - cached - (written ?? 0)) }),
     ...(cached === undefined ? {} : { cacheReadInputTokens: cached }),
+    ...(written === undefined ? {} : { cacheWriteInputTokens: written }),
     ...(outputTokens === undefined
       ? {}
       : { textOutputTokens: Math.max(0, outputTokens - (reasoning ?? 0)) }),
