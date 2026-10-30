@@ -157,6 +157,24 @@ describe("a run's artifacts", () => {
     expect(refused).toMatchObject({ code: "artifact_not_found" })
   })
 
+  // Guard proof: drop assertTakesPart from the publish transaction; Bob's turn creates an artifact
+  // in Alice's conversation after she removed him from it.
+  test("creates nothing once the requester left the conversation", async () => {
+    const { storage, artifacts, document } = await setup()
+    await storage.agents.threads.removeParticipant({
+      projectId,
+      threadId: "thr_alice",
+      principal: bob,
+    })
+
+    const refused = await artifacts
+      .publish({ kind: "document", title: "Plan", files: await document("# Plan\n") })
+      .catch((error: unknown) => error)
+
+    expect(refused).toMatchObject({ code: "not_allowed" })
+    expect((await storage.artifacts.list({ projectId })).total).toBe(0)
+  })
+
   // Guard proof: drop assertAgentRunOwned from the publish transaction; the run that ended while
   // its version was checked publishes.
   test("publishes nothing when the run ends while its version is checked", async () => {

@@ -11,7 +11,7 @@ import {
   prepareArtifactVersion,
   storeArtifactVersion,
 } from "../artifacts/publish/publish"
-import type { Principal } from "../auth/types"
+import { type Principal, principalsEqual } from "../auth/types"
 import type { Sixb } from "../runtime/sixb"
 import type { Storage } from "../storage"
 import type { AgentStorage, ConversationAgentRunRecord, SubagentRunRecord } from "../storage/agents"
@@ -23,7 +23,10 @@ import { conversationThreadId } from "./thread-access"
 // lands in the conversation, owned by the conversation's owner. The worker reaches this through the
 // run's session; the API, for a request with the run's token. Both apply the same rules here.
 
-/** What a run reads and publishes of artifacts: its conversation's, as its requester. */
+/**
+ * What a run reads and publishes of artifacts, as its requester: it lists its conversation's, reads
+ * any its requester reads, and publishes into its conversation.
+ */
 export interface AgentRunArtifacts {
   /** The artifacts the conversation shares, most recently updated first. */
   list(input: { readonly limit: number }): Promise<readonly ArtifactRecord[]>
@@ -154,6 +157,13 @@ export function agentRunArtifacts(
       const stored = await storage.transaction(async (tx) => {
         await assertAgentRunOwned(requireAgents(tx), fence)
         if (run.kind === "subagent") await assertParentActive(requireAgents(tx), run)
+        if (execution.requestedBy) {
+          await assertTakesPart(
+            requireAgents(tx),
+            { projectId, threadId, owner },
+            execution.requestedBy
+          )
+        }
         // The owner may have deleted it since, or removed the requester from the conversation.
         return storeArtifactVersion(
           { ...context, storage: requireArtifacts(tx) },
@@ -193,12 +203,37 @@ async function readPublisher(
   return { threadId: conversation.id, owner: conversation.ownerPrincipal }
 }
 
+/** The requester may have been removed from the conversation while the run went on. */
+async function assertTakesPart(
+  agents: AgentStorage,
+  conversation: {
+    readonly projectId: string
+    readonly threadId: string
+    readonly owner: Principal
+  },
+  requester: Principal
+): Promise<void> {
+  if (principalsEqual(requester, conversation.owner)) return
+  const participants = await agents.threads.listParticipants({
+    projectId: conversation.projectId,
+    threadIds: [conversation.threadId],
+  })
+  if (participants.some((participant) => principalsEqual(participant.principal, requester))) return
+  throw new ArtifactRequestError(
+    "not_allowed",
+    "[Sixb] The requester no longer takes part in this conversation, so nothing was published."
+  )
+}
+
 async function assertParentActive(
   agents: AgentStorage,
   run: Extract<AgentRunArtifactsRun, { readonly kind: "subagent" }>
 ): Promise<void> {
   const parent = await agents.runs.getById({ projectId: run.projectId, id: run.parentRunId })
-  if (parent?.status === "queued" || parent?.status === "running") return
+  // A cancel recorded on the parent ends it, as the run token already reads it.
+  if ((parent?.status === "queued" || parent?.status === "running") && !parent.cancelRequestedAt) {
+    return
+  }
 
   throw new ArtifactRequestError(
     "not_allowed",

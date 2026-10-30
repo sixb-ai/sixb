@@ -15,7 +15,7 @@ import type {
 } from "../storage/agents"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
 import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
-import { AgentExecutionLostError, fenced } from "./run-fence"
+import { assertAgentRunOwned, fenced } from "./run-fence"
 import {
   type AgentInbox,
   type AgentMail,
@@ -317,10 +317,7 @@ export function agentRunMail(
   const agents = host.storage.agents
   return {
     async send(draft) {
-      const current = await agents.runs.getById({ projectId, id: run.id })
-      if (current?.status !== "running" || current.execution?.token !== executionToken) {
-        throw new AgentExecutionLostError(run.id)
-      }
+      await assertAgentRunOwned(agents, { projectId, id: run.id, executionToken })
       const sentAt = new Date().toISOString()
       if ("toRunId" in draft) {
         if (run.kind !== "subagent" || draft.toRunId !== run.parentRunId) {

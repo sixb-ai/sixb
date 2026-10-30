@@ -235,6 +235,8 @@ function toRunState(
   storedRun: AgentRunRecord | null,
   workflowRun: WorkflowAgentNodeRunRecord | null
 ): RunState | null {
+  // Admission checks the request's token against this one: it is the execution the request acts in.
+  const executionToken = storedRun?.execution?.token ?? ""
   if (storedRun?.kind === "subagent") {
     return {
       run: storedRun,
@@ -243,6 +245,7 @@ function toRunState(
         kind: "subagent",
         runId: storedRun.id,
         parentRunId: storedRun.parentRunId,
+        executionToken,
       },
       authority: "inherited",
     }
@@ -252,7 +255,7 @@ function toRunState(
     return {
       run: storedRun,
       runId: storedRun.id,
-      agentExecution: { kind: "conversation", runId: storedRun.id },
+      agentExecution: { kind: "conversation", runId: storedRun.id, executionToken },
       agentRun: storedRun,
       authority: "inherited",
     }
