@@ -68,20 +68,18 @@ describe("resolveAgentExecutionPlan", () => {
   const skills = skillCatalog([skill("invoice-review")])
 
   test("uses project capabilities, with instructions only from SIXB.md", () => {
-    const plan = resolveAgentExecutionPlan({ models, tools, skills, defaultMaxSteps: 25 })
+    const plan = resolveAgentExecutionPlan({ models, tools, skills })
     expect(plan).toEqual({
       model: defaultModel,
       tools: [lookup],
       skills: [skill("invoice-review"), ...BUILT_IN_SKILLS],
-      maxSteps: 25,
     })
     expect(Object.isFrozen(plan)).toBe(true)
     expect("agentId" in plan).toBe(false)
 
     const projectInstructions = "Answer in French."
     expect(
-      resolveAgentExecutionPlan({ models, tools, skills, projectInstructions, defaultMaxSteps: 25 })
-        .instructions
+      resolveAgentExecutionPlan({ models, tools, skills, projectInstructions }).instructions
     ).toBe(projectInstructions)
   })
 
@@ -90,10 +88,9 @@ describe("resolveAgentExecutionPlan", () => {
       model: { provider: selectedModel.providerId, modelId: selectedModel.modelId },
       reasoning: "high" as const,
     }
-    const plan = resolveAgentExecutionPlan({ spec, models, tools, skills, defaultMaxSteps: 7 })
+    const plan = resolveAgentExecutionPlan({ spec, models, tools, skills })
     expect(plan.model).toBe(selectedModel)
     expect(plan.reasoning).toBe("high")
-    expect(plan.maxSteps).toBe(7)
   })
 
   test("keeps the reasoning frozen at admission and defaults only runs without a spec", () => {
@@ -109,12 +106,9 @@ describe("resolveAgentExecutionPlan", () => {
     }
     const spec = { model: { provider: model.providerId, modelId: model.modelId } }
     expect(
-      resolveAgentExecutionPlan({ spec, models: withDefault, tools, skills, defaultMaxSteps: 7 })
+      resolveAgentExecutionPlan({ spec, models: withDefault, tools, skills })
     ).not.toHaveProperty("reasoning")
-    expect(
-      resolveAgentExecutionPlan({ models: withDefault, tools, skills, defaultMaxSteps: 7 })
-        .reasoning
-    ).toBe("low")
+    expect(resolveAgentExecutionPlan({ models: withDefault, tools, skills }).reasoning).toBe("low")
   })
 
   test("fails closed when a selected model disappears or no models are configured", () => {
@@ -123,11 +117,10 @@ describe("resolveAgentExecutionPlan", () => {
         models,
         tools,
         skills,
-        defaultMaxSteps: 25,
         spec: { model: { provider: selectedModel.providerId, modelId: "removed" } },
       })
     ).toThrow(/not available in models.language/)
-    expect(() => resolveAgentExecutionPlan({ tools, skills, defaultMaxSteps: 25 })).toThrow(
+    expect(() => resolveAgentExecutionPlan({ tools, skills })).toThrow(
       /not available in models.language/
     )
   })
@@ -155,14 +148,12 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       models,
       tools: toolCatalog([]),
       skills: skillCatalog([skill("invoice-review")]),
-      defaultMaxSteps: 25,
     })
 
     expect(plan.model).toBe(model)
     expect(plan.instructions).toBe("Review the request.")
     expect(plan.tools).toEqual([])
     expect(plan.skills).toEqual([])
-    expect(plan.maxSteps).toBe(25)
   })
 
   test("applies the project default model's default reasoning unless the step sets one", () => {
@@ -183,7 +174,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         models,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     expect(plan({ instructions: "Review." }).reasoning).toBe("medium")
@@ -213,7 +203,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         models,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     // Same identity as the catalog entry, other options: the step's binding and its default run.
@@ -241,7 +230,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         models: language,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     expect(plan("light")).toMatchObject({ model: light, reasoning: "low" })
@@ -254,7 +242,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         step: workflowStep({ instructions: "Review.", model: "light" }),
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
     ).toThrow("agent step 'review' cannot resolve the model of tier 'light'.")
   })
@@ -281,14 +268,12 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       }),
       tools: toolCatalog([selected, unselected]),
       skills: skillCatalog([skill("contract-review"), skill("invoice-review")]),
-      defaultMaxSteps: 9,
     })
 
     expect(plan.model).toBe(model)
     expect(plan.reasoning).toBe("high")
     expect(plan.tools).toEqual([selected])
     expect(plan.skills).toEqual([skill("invoice-review")])
-    expect(plan.maxSteps).toBe(9)
   })
 
   test("fails clearly when a selected skill is no longer registered", () => {
@@ -302,7 +287,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         }),
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 9,
       })
     ).toThrow("cannot resolve Agent Skill 'invoice-review'")
   })

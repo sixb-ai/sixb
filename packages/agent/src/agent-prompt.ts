@@ -12,13 +12,6 @@ import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
 
-/** Prompt appended to the final reserved model step after local tools are disabled. */
-export const DEFAULT_AGENT_FINAL_STEP_INSTRUCTION = [
-  "Provide the best possible final answer from the context available.",
-  "This is the final step, so do not call tools or defer the answer.",
-  "If the task cannot be completed from the available context, state the limitation clearly instead of inventing information.",
-].join(" ")
-
 const CHILD_FILE_LIMITS = `${SANDBOX_ATTACHMENT_LIMITS.maxFiles} files of ${formatBytes(SANDBOX_ATTACHMENT_LIMITS.fileMaxBytes)}, ${formatBytes(SANDBOX_ATTACHMENT_LIMITS.totalMaxBytes)} in all`
 
 const SIXB_RULE_PRECEDENCE =

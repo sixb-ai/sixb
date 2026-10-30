@@ -88,7 +88,7 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
  * closes over whatever it opens it from (a factory, the thread's recipe, the run's credentials).
  */
 export type OpenRunSandbox = (lifecycle: {
-  /** Stops provisioning: cancellation, lost ownership, shutdown, or the run's deadline. */
+  /** Stops provisioning: cancellation, lost ownership, or shutdown. */
   readonly signal: AbortSignal
   /** Ends the run when its environment can no longer serve it, such as lost source credentials. */
   readonly onFailure: (error: Error) => void
@@ -392,8 +392,8 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgent] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
-  // step's lost source credentials end the node through `failure`.
+  // Cancellation, lost ownership or worker shutdown stop provisioning. A step's lost source
+  // credentials end the node through `failure`.
   const failure = new AbortController()
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
@@ -691,7 +691,6 @@ async function startAgentEnvironment(
       systemPrompt,
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
-      turnTimeoutMs: context.turnTimeoutMs,
     },
     dispose,
   }

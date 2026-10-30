@@ -15,7 +15,7 @@ import {
   coerceAgentRunFinishReason,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
-import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
+import { renderCurrentTime } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
@@ -78,8 +78,6 @@ export async function runSubagent(input: {
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-    maxSteps: plan.maxSteps,
-    finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
     // A message from the parent comes after the step that was running when it arrived, and stays
     // in the history of every later step.
     prepareStep: async (step) => {

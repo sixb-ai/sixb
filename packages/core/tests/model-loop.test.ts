@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { runModelLoop } from "../src/agents/model-loop"
+import { afterEach, describe, expect, jest, test } from "bun:test"
+import { MODEL_CALL_IDLE_MS, runModelLoop } from "../src/agents/model-loop"
 import type {
   LanguageModelStreamEvent,
   ModelAssistantPart,
@@ -851,44 +851,6 @@ describe("runModelLoop", () => {
     expect(calls).toBe(0)
   })
 
-  test("records a final-step tool response without starting an unbounded continuation", async () => {
-    let offeredTools: readonly string[] = []
-    const model = new MockLanguageModel({
-      stream: async (request) => {
-        offeredTools = request.tools.map((tool) => tool.name)
-        return streamFromArray([
-          { type: "stream-start" },
-          {
-            type: "tool-call",
-            toolCallId: "too-late",
-            toolName: "echo",
-            input: '{"value":"late"}',
-          },
-          finish("tool-calls"),
-        ])
-      },
-    })
-
-    const result = await runModelLoop({
-      model,
-      messages: [],
-      tools: [echo],
-      maxSteps: 1,
-      finalStepInstruction: "Answer now without using tools.",
-      signal: new AbortController().signal,
-    })
-
-    expect(offeredTools).toEqual([])
-    expect(result).toMatchObject({
-      status: "completed",
-      output: "",
-      finishReason: "tool-calls",
-    })
-    expect(result.steps[0]?.content).toContainEqual(
-      expect.objectContaining({ type: "tool-call", toolCallId: "too-late" })
-    )
-  })
-
   test("executes parallel tools but preserves model call order", async () => {
     const releases = new Map<string, () => void>()
     const bothStarted = Promise.withResolvers<void>()
@@ -1332,5 +1294,124 @@ describe("runModelLoop", () => {
         signal: new AbortController().signal,
       })
     ).rejects.toThrow("different identity")
+  })
+})
+
+describe("a model call that goes quiet", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  /** Settles with `gate`, or rejects as a provider's stream does once its request is aborted. */
+  function until(gate: Promise<void>, signal: AbortSignal): Promise<void> {
+    return Promise.race([
+      gate,
+      new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+      }),
+    ])
+  }
+
+  // Removal proof: pass the loop's own signal to `model.stream`; the call then waits forever and
+  // the test times out.
+  test("fails once the model sends nothing for MODEL_CALL_IDLE_MS", async () => {
+    jest.useFakeTimers()
+    const quiet = Promise.withResolvers<void>()
+    const model = new MockLanguageModel({
+      stream: async ({ signal }) => ({
+        events: (async function* () {
+          yield { type: "stream-start" } as const
+          quiet.resolve()
+          await until(new Promise<void>(() => {}), signal)
+        })(),
+      }),
+    })
+
+    const result = runModelLoop({
+      model,
+      messages: [],
+      signal: new AbortController().signal,
+    }).catch((error: unknown) => error)
+    await quiet.promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS)
+
+    const error = await result
+    expect(error).toBeInstanceOf(ModelStreamError)
+    expect((error as Error).message).toBe("[SixbModels] The model sent nothing for 10 minutes.")
+  })
+
+  // Removal proof: drop the reset on each event; the two quiet stretches add up past the limit.
+  test("counts the quiet from the model's last event", async () => {
+    jest.useFakeTimers()
+    const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const
+    const reached = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const
+    const model = new MockLanguageModel({
+      stream: async ({ signal }) => ({
+        events: (async function* () {
+          yield { type: "stream-start" } as const
+          reached[0].resolve()
+          await until(gates[0].promise, signal)
+          yield { type: "text-start", id: "text" } as const
+          yield { type: "text-delta", id: "text", delta: "done" } as const
+          reached[1].resolve()
+          await until(gates[1].promise, signal)
+          yield { type: "text-end", id: "text" } as const
+          yield finish()
+        })(),
+      }),
+    })
+
+    const result = runModelLoop({
+      model,
+      messages: [],
+      signal: new AbortController().signal,
+    }).catch((error: unknown) => error)
+    await reached[0].promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS - 1)
+    gates[0].resolve()
+    await reached[1].promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS - 1)
+    gates[1].resolve()
+
+    expect(await result).toMatchObject({ status: "completed", output: "done" })
+  })
+
+  test("runs until the model answers when no step limit is given", async () => {
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return streamFromArray(
+          calls <= 150
+            ? [
+                { type: "stream-start" },
+                {
+                  type: "tool-call",
+                  toolCallId: `call-${calls}`,
+                  toolName: "echo",
+                  input: '{"value":"again"}',
+                },
+                finish("tool-calls"),
+              ]
+            : [
+                { type: "stream-start" },
+                { type: "text-start", id: "text" },
+                { type: "text-delta", id: "text", delta: "done" },
+                { type: "text-end", id: "text" },
+                finish(),
+              ]
+        )
+      },
+    })
+
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [echo],
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "done" })
+    expect(result.steps).toHaveLength(151)
   })
 })

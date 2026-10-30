@@ -1,4 +1,4 @@
-import { type AgentRunFailure, AgentTurnTimeoutError, toAgentExecutionFailure } from "@sixb/agent"
+import { type AgentRunFailure, toAgentExecutionFailure } from "@sixb/agent"
 import {
   AgentExecutionLostError,
   type AgentRunSession,
@@ -52,10 +52,7 @@ export async function recordFate(
   const failure = toAgentExecutionFailure(error, {
     status,
     at: completedAt,
-    details: {
-      ...agentRunFailureDetails(run),
-      ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
-    },
+    details: agentRunFailureDetails(run),
   })
   try {
     const finalized = await session.finish(
@@ -63,7 +60,6 @@ export async function recordFate(
         status,
         error: failure,
         completedAt,
-        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
         ...(error instanceof AgentTurnInterruptedError
           ? { finishReason: "interrupted" as const }
           : {}),

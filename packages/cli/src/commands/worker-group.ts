@@ -1,4 +1,3 @@
-import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
@@ -32,7 +31,6 @@ export interface WorkerGroupOptions {
   noMigrate?: boolean
   workerTypes?: readonly string[]
   apiPublicOrigin?: string
-  agentTurnTimeout?: string
   concurrency?: readonly string[]
   vectorConcurrency?: string
   subagentConcurrency?: string
@@ -45,7 +43,6 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   // Validate explicit worker types before loading the runtime so an unknown type
   // fails fast, just like `sixb worker`.
   const requestedTypes = (options.workerTypes ?? []).map(resolveWorkerTypeToStart)
-  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const subagents = resolveSubagentConcurrency({
@@ -98,7 +95,6 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     workers = workerTypes.map((workerType) =>
       createWorkerForType(host, workerType, {
         agentApiBaseUrl: options.apiPublicOrigin,
-        agentTurnTimeoutMs,
         workerConcurrency,
         vectorConcurrency,
         ...subagents,

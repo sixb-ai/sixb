@@ -127,17 +127,15 @@ import {
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
-import { AgentTurnTimeoutError } from "../../agent/src/errors"
 import { resolveAgentExecutionPlan } from "../../agent/src/execution-plan"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
-import * as agentEnvironment from "../../agent/src/run-environment"
 import {
   createConversationAgentEnvironment,
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "../../agent/src/run-environment"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
-import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../../agent/src/subagent-tools"
+import { SubagentCoordinator } from "../../agent/src/subagent-tools"
 import { AgentFileBudget } from "../../agent/src/tools/tool-files"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
 import type { AgentRunFiles } from "../../agent/src/types"
@@ -627,26 +625,6 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Wo
   })
 }
 
-function toolOnlyModel(): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async () => {
-      call += 1
-      return stream([
-        { type: "stream-start", warnings: [] },
-        {
-          type: "tool-call",
-          toolCallId: `tool-only-${call}`,
-          toolName: "echo",
-          input: JSON.stringify({ value: `step-${call}` }),
-        },
-        finish("tool-calls"),
-      ])
-    },
-  })
-}
-
 function structuredAnswerModel(): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
@@ -983,7 +961,6 @@ function workerOptions(
   return {
     ...options,
     apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
-    defaultMaxSteps: options.defaultMaxSteps ?? 4,
   }
 }
 
@@ -1983,12 +1960,11 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
  */
 async function coordinatorFor(
   sixb: TestSixb,
-  parent: ConversationAgentRunRecord,
-  deadline: Date
+  parent: ConversationAgentRunRecord
 ): Promise<SubagentCoordinator> {
   const context = await buildAgentWorkerContext(sixb)
   const session = await runSessionOf(sixb, parent)
-  return new SubagentCoordinator(sixb, context, parent, session, deadline, () => {})
+  return new SubagentCoordinator(sixb, context, parent, session, () => {})
 }
 
 /**
@@ -2097,12 +2073,11 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   return storage as AgentWorkerStorage
 }
 
-function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
+function executionPlanFor(sixb: TestSixb) {
   return resolveAgentExecutionPlan({
     models: sixb.definitions.models?.language,
     tools: sixb.definitions.tools,
     skills: sixb.definitions.agent.skills,
-    defaultMaxSteps,
   })
 }
 
@@ -2127,8 +2102,6 @@ function workerContextOf(
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
     recoverAiModelCall: recoverAiModelCall(sixb),
-    defaultMaxSteps: 4,
-    turnTimeoutMs: 60_000,
     subagentConcurrencyPerRun: 4,
     locale: sixb.locale,
     timeZone: sixb.timeZone,
@@ -2212,7 +2185,7 @@ async function requestAgentAs(
 async function spawnChildOfRunningTurn(
   sixb: TestSixb,
   request: Parameters<AgentRuntime["runs"]["request"]>[0],
-  input: { readonly deadline?: Date; readonly keys?: readonly string[] } = {}
+  input: { readonly keys?: readonly string[] } = {}
 ) {
   const storage = agentStorageOf(sixb)
   const requested = await requestAgent(sixb, request)
@@ -2231,11 +2204,7 @@ async function spawnChildOfRunningTurn(
     })
   )
 
-  const coordinator = await coordinatorFor(
-    sixb,
-    parent,
-    input.deadline ?? new Date(Date.now() + 60_000)
-  )
+  const coordinator = await coordinatorFor(sixb, parent)
   const children = []
   for (const key of input.keys ?? ["research"]) {
     children.push(
@@ -2594,23 +2563,6 @@ function hangingModel(onStart?: () => void): WorkerTestModel {
         },
       }),
     }),
-  })
-}
-
-/** A summary request that hangs until the shared turn deadline aborts it. */
-function hangingCompactionModel(onStart: () => void): WorkerTestModel {
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async (options) =>
-      new Promise((_, reject) => {
-        onStart()
-        const abort = () => reject(new DOMException("Aborted", "AbortError"))
-        if (options.signal.aborted) {
-          abort()
-        } else {
-          options.signal.addEventListener("abort", abort, { once: true })
-        }
-      }),
   })
 }
 
@@ -4055,26 +4007,6 @@ describe("AgentWorker", () => {
     )
   })
 
-  test("rejects invalid turn timeout values at the worker boundary", () => {
-    const sixb = new SixbHost({
-      id: PROJECT_ID,
-      ontology: [],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      sandboxes: new RecordingSandboxFactory(),
-    })
-    const invalidTimeouts = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]
-
-    for (const turnTimeoutMs of invalidTimeouts) {
-      expect(() => new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))).toThrow(
-        "Agent turn timeout must be a positive integer no greater than 2147483647ms."
-      )
-    }
-  })
-
   test("warns at execution time when the selected model has no context limit", async () => {
     // Regression proof: reject an undefined model window in resolveAgentContextBudget.
     const base = toolThenAnswerModel()
@@ -5139,115 +5071,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("bounds a workflow node's environment by the node deadline", async () => {
-    // Regression proof: start the deadline after createWorkflowAgentNodeEnvironment in
-    // workflow-node-execution.ts; the environment is never cancelled and waits out its fallback.
-    let environmentCancelled = false
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model: structuredAnswerModel(),
-      runId: "workflow-environment-deadline",
-    })
-    attachSixbErrorReporter(sixb, () => {})
-
-    // A slow environment, such as a long download: it waits for cancellation or a 3 s fallback.
-    const createEnvironment = agentEnvironment.createWorkflowAgentNodeEnvironment
-    const environments = spyOn(
-      agentEnvironment,
-      "createWorkflowAgentNodeEnvironment"
-    ).mockImplementation(async (input) => {
-      const { signal } = input
-      environmentCancelled = await new Promise<boolean>((resolve) => {
-        const fallback = setTimeout(() => resolve(false), 3_000)
-        signal?.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(fallback)
-            resolve(true)
-          },
-          { once: true }
-        )
-      })
-      signal?.throwIfAborted()
-      return createEnvironment(input)
-    })
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 200 }))
-    await worker.start()
-    try {
-      const node = await terminalWorkflowAgentNode(runs, nodeRunId)
-
-      expect(environmentCancelled).toBe(true)
-      expect(node.status).toBe("failed")
-      expect(node.error?.message).toBe(
-        "Agent execution failed. The task did not finish within the agent worker's turn budget (turnTimeoutMs: 200)."
-      )
-    } finally {
-      await worker.stop()
-      environments.mockRestore()
-    }
-  })
-
-  test("cancels a workflow node's sandbox creation when its deadline elapses", async () => {
-    // Regression proofs:
-    // - drop the signal from ephemeralRunSandbox in createWorkflowAgentNodeEnvironment; creation
-    //   is never cancelled, and the terminal write sees no abort reason.
-    // - call sandboxReadiness.throwIfFailed() unconditionally in runWorkflowAgentNode; the
-    //   provider's cancellation error replaces the deadline as the node's failure.
-    const reasonsAtTerminalWrite: unknown[] = []
-    let creation: AbortSignal | undefined
-    let releaseBoot!: () => void
-    const boot = new Promise<void>((resolve) => {
-      releaseBoot = resolve
-    })
-
-    // A provider that boots until the test releases it, and fails with its own error when its
-    // creation is cancelled first.
-    const recording = new RecordingSandboxFactory()
-    const sandboxes: SandboxFactory = {
-      supportsRequestCredentials: true,
-      create: async (options) => {
-        creation = options?.signal
-        await new Promise<void>((resolve, reject) => {
-          void boot.then(resolve)
-          creation?.addEventListener(
-            "abort",
-            () => reject(new Error("[TestSandbox] Creation was cancelled.")),
-            { once: true }
-          )
-        })
-        return recording.create(options)
-      },
-    }
-    const { model } = controlledBlockingAnswerModel()
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model,
-      sandboxes,
-      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
-        reasonsAtTerminalWrite.push(creation?.reason)
-      }),
-      runId: "workflow-sandbox-deadline",
-    })
-    attachSixbErrorReporter(sixb, () => {})
-
-    // Nothing else ends the blocking model: the deadline is the node's only way out.
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 300 }))
-    await worker.start()
-    try {
-      const node = await terminalWorkflowAgentNode(runs, nodeRunId)
-      expect(node.status).toBe("failed")
-
-      // The elapsed deadline cancelled creation before the node recorded its fate, not its
-      // teardown, and the deadline is the failure recorded.
-      expect(reasonsAtTerminalWrite).toHaveLength(1)
-      expect(reasonsAtTerminalWrite[0]).toBeInstanceOf(AgentTurnTimeoutError)
-      expect(node.error?.message).toBe(
-        "Agent execution failed. The task did not finish within the agent worker's turn budget (turnTimeoutMs: 300)."
-      )
-    } finally {
-      releaseBoot()
-      await worker.stop()
-    }
-  })
-
   test("lets a successful workflow node's sandbox finish booting, then destroys it", async () => {
     // Regression proof: pass the node signal, which ends with the node, to
     // createWorkflowAgentNodeEnvironment; finishing the node then aborts the boot.
@@ -5470,7 +5293,7 @@ describe("AgentWorker", () => {
     async () => {
       // Regression proof: drop failureSignal from the step environment in
       // createWorkflowAgentNodeEnvironment, or environmentFailureSignal from
-      // runWorkflowAgentNode's abort signal; the node deadline aborts the model instead.
+      // runWorkflowAgentNode's abort signal; the model then runs on, and the test times out.
       let modelAbortReason: unknown
       const events: string[] = []
       const { auth } = stepSourceAuth(events, { firstLifetimeMs: 61_000, failRenewal: true })
@@ -5498,7 +5321,7 @@ describe("AgentWorker", () => {
         runId: "workflow-step-renewal-failure",
       })
       attachSixbErrorReporter(sixb, () => {})
-      const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 4_000 }))
+      const worker = new AgentWorker(sixb, workerOptions())
       await worker.start()
       try {
         expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
@@ -5588,8 +5411,8 @@ describe("AgentWorker", () => {
     // only awaits that close. Regression proof: remove both (acquire's catch destroys without
     // discard()); the grant is not revoked before the node's terminal write. Each one alone is
     // proven where the other cannot help: removing acquire's close fails the takeover test, whose
-    // lost execution skips beforeFinalize; removing beforeFinalize fails the cancellation and
-    // clone deadline tests, which record the node while provisioning is still in flight.
+    // lost execution skips beforeFinalize; removing beforeFinalize fails the cancellation test,
+    // which records the node while provisioning is still in flight.
     let modelCalls = 0
     const events: string[] = []
     const atTerminalWrite: string[][] = []
@@ -5663,46 +5486,6 @@ describe("AgentWorker", () => {
       expect(events.indexOf("revoked")).toBeLessThan(events.indexOf("destroy"))
     } finally {
       // stop() drains the detached teardown, which waits for provisioning.
-      gate.release()
-      await worker.stop()
-    }
-  })
-
-  test("revokes a step's credentials before recording a deadline reached during the clone", async () => {
-    // Regression proof: drop beforeFinalize from createWorkflowAgentNodeEnvironment's catch; the
-    // node is recorded before its slow revocation completes.
-    let modelCalls = 0
-    const gate = provisioningGate()
-    const events: string[] = []
-    const atTerminalWrite: string[][] = []
-    const { auth } = stepSourceAuth(events, { revokeDelayMs: 100 })
-    const step = new StepSandboxFactory(
-      { source: { type: "git", url: STEP_REPOSITORY }, auth },
-      events,
-      { beforeClone: gate.wait }
-    )
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model: answerModel(() => {
-        modelCalls++
-      }),
-      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
-        atTerminalWrite.push([...events])
-      }),
-      stepSandbox: step,
-      runId: "workflow-step-clone-deadline",
-    })
-    attachSixbErrorReporter(sixb, () => {})
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 300 }))
-    await worker.start()
-    try {
-      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
-
-      gate.release()
-      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
-
-      expect(modelCalls).toBe(0)
-      expect(atTerminalWrite).toEqual([expect.arrayContaining(["revoked"])])
-    } finally {
       gate.release()
       await worker.stop()
     }
@@ -8137,7 +7920,7 @@ describe("AgentWorker", () => {
       })
     )
 
-    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent)
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -8656,10 +8439,7 @@ describe("AgentWorker", () => {
     })
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Review Acme." })
-    const worker = new AgentWorker(
-      sixb,
-      workerOptions({ subagentConcurrencyPerRun: 1, defaultMaxSteps: 6 })
-    )
+    const worker = new AgentWorker(sixb, workerOptions({ subagentConcurrencyPerRun: 1 }))
 
     jest.useFakeTimers()
     try {
@@ -9047,13 +8827,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  test.each([
-    "cancelled",
-    "timed out",
-  ] as const)("stops a running child when its parent is %s", async (ending) => {
-    // Removal proof: the turn records its own cancel or timeout, then cancels its children. Drop
-    // that cancelActiveSubagents call in AgentWorker.execute and either the child's watch on its
-    // parent's cancel (cancelled) or its inherited deadline (timed out): the child runs on.
+  test("stops a running child when its parent is cancelled", async () => {
+    // Removal proof: the turn records its own cancel, then cancels its children. Drop that
+    // cancelActiveSubagents call in AgentWorker.execute and the child's watch on its parent's
+    // cancel: the child runs on.
     let childStarted = false
     const childModel = new WorkerTestModel({
       providerId: "child-provider",
@@ -9065,18 +8842,12 @@ describe("AgentWorker", () => {
     })
     let childRunId = ""
     let parentCall = 0
-    // The parent works a while before it delegates, so the child's own budget would outlive it.
-    let delegate!: () => void
-    const delegating = new Promise<void>((resolve) => {
-      delegate = resolve
-    })
     const parentModel = new WorkerTestModel({
       providerId: "parent-provider",
       modelId: "waiting-parent",
       stream: async (options) => {
         parentCall += 1
         if (parentCall === 1) {
-          await delegating
           return toolCallStream("spawn", "spawn_agent", {
             key: "background-work",
             task: "Keep researching until stopped.",
@@ -9086,7 +8857,6 @@ describe("AgentWorker", () => {
         if (parentCall === 2) {
           return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
         }
-        // Told the child is still at work, the parent works on until its turn ends.
         return untilAborted(options)
       },
     })
@@ -9096,18 +8866,13 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, { text: "Research in the background." })
     childRunId = createSubagentRunId(requested.run.id, "background-work")
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 90_000 }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     jest.useFakeTimers()
     try {
       await worker.start()
-      await underFakeTime(() => parentCall === 1, "parent model started", 0)
-      jest.advanceTimersByTime(5_000)
-      delegate()
       await underFakeTime(() => childStarted, "child model started")
-      if (ending === "cancelled") {
-        await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: requested.run.id })
-      }
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: requested.run.id })
       const [parent, child] = await underFakeTime(
         async () => {
           const runs = await Promise.all([
@@ -9116,15 +8881,11 @@ describe("AgentWorker", () => {
           ])
           return runs.every(Boolean) ? runs : null
         },
-        `parent ${ending} and child stopped`,
+        "parent cancelled and child stopped",
         100
       )
 
-      expect(parent).toMatchObject(
-        ending === "cancelled"
-          ? { status: "cancelled" }
-          : { status: "failed", finishReason: "timeout" }
-      )
+      expect(parent).toMatchObject({ status: "cancelled" })
       expect(child?.status).not.toBe("succeeded")
       // It stops with its parent, not at the next repair pass.
       expect(
@@ -9132,113 +8893,6 @@ describe("AgentWorker", () => {
       ).toBeLessThan(1_000)
     } finally {
       await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
-  })
-
-  test("wait_agent returns before its turn's deadline, with the children still at work", async () => {
-    // Removal proof: drop the deadline from SubagentCoordinator.wait; it waits until the turn
-    // times out, and the parent never answers.
-    let childRunId = ""
-    const parentCalls: { readonly at: number; readonly request: LanguageModelRequest }[] = []
-    const childModel = new WorkerTestModel({
-      providerId: "child-provider",
-      modelId: "blocking-child",
-      stream: async (options) => untilAborted(options),
-    })
-    const parentModel = new WorkerTestModel({
-      providerId: "parent-provider",
-      modelId: "waiting-parent",
-      stream: async (options) => {
-        parentCalls.push({ at: Date.now(), request: options })
-        if (parentCalls.length === 1) {
-          return toolCallStream("spawn", "spawn_agent", {
-            key: "slow",
-            task: "Research slowly.",
-            model: { provider: childModel.providerId, modelId: childModel.modelId },
-          })
-        }
-        if (parentCalls.length === 2) {
-          return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
-        }
-        return answerStream("Here is what I have so far.")
-      },
-    })
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-    })
-    const storage = agentStorageOf(sixb)
-    const requested = await requestAgent(sixb, { text: "Research slowly." })
-    childRunId = createSubagentRunId(requested.run.id, "slow")
-    const turnTimeoutMs = 2 * WAIT_ANSWER_MARGIN_MS
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))
-
-    jest.useFakeTimers()
-    try {
-      await worker.start()
-      const parent = await underFakeTime(
-        () => terminalRun(storage, requested.run.id),
-        "parent answering without its child",
-        100
-      )
-
-      expect(parent.status).toBe("succeeded")
-      const answeredAt = parentCalls[2]?.at ?? Number.POSITIVE_INFINITY
-      const deadline = (parent.startedAt?.getTime() ?? 0) + turnTimeoutMs
-      expect(answeredAt).toBeGreaterThanOrEqual(deadline - WAIT_ANSWER_MARGIN_MS)
-      expect(answeredAt).toBeLessThan(deadline - WAIT_ANSWER_MARGIN_MS + 1_000)
-      expect(JSON.stringify(parentCalls[2]?.request.messages.at(-1))).toContain(
-        JSON.stringify(`"results":[{"runId":"${childRunId}","status":"running"}]`).slice(1, -1)
-      )
-    } finally {
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
-  })
-
-  test("a child that starts late still ends at its parent's deadline", async () => {
-    // Removal proof: create the child's runtime without `deadline` in ChildRunner.run; it gets the
-    // worker's ten minutes from its start and outlives its parent.
-    const model = new WorkerTestModel({
-      modelId: "blocking-child",
-      stream: async (options) => ({
-        stream: new ReadableStream<WorkerTestStreamEvent>({
-          start(controller) {
-            controller.enqueue({ type: "stream-start", warnings: [] })
-            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.signal?.aborted) abort()
-            else options.signal?.addEventListener("abort", abort, { once: true })
-          },
-        }),
-      }),
-    })
-    const sixb = buildSixb(model)
-    const storage = agentStorageOf(sixb)
-
-    jest.useFakeTimers()
-    try {
-      const deadline = new Date(Date.now() + 5_000)
-      const {
-        children: [spawned],
-      } = await spawnChildOfRunningTurn(sixb, { text: "Delegate." }, { deadline })
-      if (!spawned) throw new Error("Expected the child.")
-      expect(
-        await storage.runs.getById({ projectId: PROJECT_ID, id: spawned.runId })
-      ).toMatchObject({ spec: { deadline: deadline.toISOString() } })
-
-      // The child starts 3 of its parent's 5 seconds after it was spawned.
-      jest.advanceTimersByTime(3_000)
-      const ran = runChildren(sixb, [spawned.runId])
-      const child = await underFakeTime(
-        () => terminalRun(storage, spawned.runId),
-        "child at its parent's deadline"
-      )
-      await ran
-
-      expect(child).toMatchObject({ status: "failed", finishReason: "timeout" })
-      expect(child.completedAt?.getTime()).toBeGreaterThanOrEqual(deadline.getTime())
-      expect(child.completedAt?.getTime()).toBeLessThan(deadline.getTime() + 1_000)
-    } finally {
       jest.useRealTimers()
     }
   })
@@ -9655,7 +9309,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent)
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -9784,7 +9438,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent)
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -10516,43 +10170,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("reports a step limit reached before an answer as a diagnostic, not transcript text", async () => {
-    const sixb = buildSixbWithEchoTool(toolOnlyModel())
-    const storage = agentStorageOf(sixb)
-
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const {
-        run: { threadId, id: runId },
-      } = await requestAgent(sixb, {
-        text: "use tools forever",
-      })
-
-      const run = await waitForTerminalRun(storage, runId)
-
-      expect(run.status).toBe("succeeded")
-      expect(run.finishReason).toBe("tool-calls")
-      // Chats render the code in the reader's language; the message is for developers.
-      expect(run.diagnostics).toEqual([
-        {
-          code: "step_limit_reached",
-          severity: "warning",
-          scope: "run",
-          message: "The Agent reached its 4-step limit before producing a final answer.",
-        },
-      ])
-
-      const messages = await listMessages(storage, threadId)
-      const assistant = messages.find((message) => message.role === "assistant")
-      const parts = assistant?.parts ?? []
-      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
-      expect(parts.some((part) => part.type === "text")).toBe(false)
-    } finally {
-      await worker.stop()
-    }
-  })
-
   // Removal proof: drop `outputLimitDiagnostic` from runAgentTurn and the diagnostic is missing;
   // drop `withoutLocalToolCalls` from runModelLoop and the cut-short tool call fails the run; drop
   // `settleTruncatedParts` from the stream accumulator and spans left open fail it; drop the
@@ -11255,8 +10872,6 @@ describe("AgentWorker", () => {
         run
       )
       const runtime = createAgentTurnRuntime({
-        context,
-        run,
         signal: new AbortController().signal,
         modelCalls: await session.modelCalls(),
       })
@@ -12028,7 +11643,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
-        turnTimeoutMs: 60_000,
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
           abort.abort()
@@ -12636,7 +12250,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
       run: staleRun,
@@ -12897,7 +12510,6 @@ describe("AgentWorker", () => {
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
-          turnTimeoutMs: 60_000,
         },
         plan: executionPlanFor(sixb),
         run,
@@ -12946,7 +12558,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
       run: reclaimed,
@@ -12978,181 +12589,6 @@ describe("AgentWorker", () => {
       runId: request.run.id,
       attempt: 2,
     })
-  })
-
-  test("persists partial progress when a turn exceeds its wall-clock budget", async () => {
-    const partial = "I found the relevant deployment and started checking its logs"
-    const controlled = partialTextThenBlockingModel(partial)
-    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
-    const storage = agentStorageOf(sixb)
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
-
-    // The turn's budget elapses on fake time, once the partial answer has streamed.
-    jest.useFakeTimers()
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 100 }))
-    try {
-      await worker.start()
-      const request = await requestAgent(sixb, { text: "investigate" })
-      await underFakeTime(
-        async () => {
-          const records = await listRunStreamRecords(sixb.broker, request.run.id)
-          return JSON.stringify(records).includes(partial)
-        },
-        "partial text streamed before timeout",
-        0
-      )
-      jest.advanceTimersByTime(100)
-      const run = await underFakeTime(
-        () => terminalRun(storage, request.run.id),
-        "partial run timed out",
-        0
-      )
-
-      expect(run.status).toBe("failed")
-      // Regression proof: routing this timeout through generic finalization omits both the
-      // stable finish reason and duration that distinguish it from an ordinary failure.
-      expect(run.finishReason).toBe("timeout")
-      expect(run.error).toMatchObject({
-        code: "agent.execution_failed",
-        details: { timeoutMs: "100" },
-      })
-
-      const messages = await listMessages(storage, request.run.threadId)
-      const assistant = messages.find((message) => message.role === "assistant")
-      expect(assistant?.parts).toContainEqual({ type: "text", text: partial })
-
-      const streamNames = (await listRunStreamRecords(sixb.broker, request.run.id)).map(
-        (record) => record.name
-      )
-      expect(streamNames.indexOf("agent.message.finalized")).toBeGreaterThan(-1)
-      expect(streamNames.indexOf("agent.message.finalized")).toBeLessThan(
-        streamNames.indexOf("agent.run.finished")
-      )
-
-      const thread = await storage.threads.getById({
-        projectId: PROJECT_ID,
-        id: request.run.threadId,
-      })
-      expect(thread?.activeRunId).toBeNull()
-      await reporter.flush()
-      expect(reportCount).toBe(0)
-    } finally {
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
-  })
-
-  test("fails without an assistant message when a turn times out before producing content", async () => {
-    let modelStarted = false
-    const sixb = buildSixb(
-      hangingModel(() => {
-        modelStarted = true
-      })
-    )
-    const storage = agentStorageOf(sixb)
-
-    jest.useFakeTimers()
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
-    try {
-      await worker.start()
-      const {
-        run: { threadId, id: runId },
-      } = await requestAgent(sixb, { text: "hang" })
-      await underFakeTime(() => modelStarted, "model stream started", 0)
-      jest.advanceTimersByTime(50)
-      const run = await underFakeTime(() => terminalRun(storage, runId), "run timed out", 0)
-
-      expect(run.status).toBe("failed")
-      expect(run.error).toMatchObject({
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        details: { runId: run.id, threadId, timeoutMs: "50" },
-      })
-      expect(
-        (await listRunStreamRecords(sixb.broker, run.id)).find(
-          (record) => record.name === "agent.run.finished"
-        )?.payload
-      ).toMatchObject({
-        type: "agent.run.finished",
-        status: "failed",
-        runId: run.id,
-        attempt: 1,
-      })
-      // Thread released so a later message can run, and no assistant message was persisted.
-      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
-      expect(thread?.activeRunId).toBeNull()
-      const messages = await listMessages(storage, threadId)
-      expect(messages.every((m) => m.role !== "assistant")).toBe(true)
-    } finally {
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
-  })
-
-  test("records a timeout finish reason when preflight compaction exceeds the turn budget", async () => {
-    let summaryStarted = false
-    const sixb = buildSixb(
-      hangingCompactionModel(() => {
-        summaryStarted = true
-      })
-    )
-    const storage = agentStorageOf(sixb)
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
-    })
-    const threadId = "preflight_compaction_timeout_thread"
-    await storage.threads.create({
-      id: threadId,
-      projectId: PROJECT_ID,
-      ownerPrincipal: REQUESTER,
-    })
-    await seedCompletedConversationTurn({
-      sixb,
-      threadId,
-      index: 0,
-      text: "Summarize the historical investigation.",
-      assistantText: `historical-result ${"x".repeat(460_000)}`,
-    })
-
-    jest.useFakeTimers()
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
-    try {
-      await worker.start()
-      const request = await requestAgentAs(sixb, REQUESTER, {
-        threadId,
-        text: "Continue after compacting the thread.",
-      })
-      await underFakeTime(() => summaryStarted, "summary request started", 0)
-      jest.advanceTimersByTime(50)
-      const run = await underFakeTime(
-        () => terminalRun(storage, request.run.id),
-        "preflight compaction timeout",
-        0
-      )
-
-      expect(run.status).toBe("failed")
-      expect(run.finishReason).toBe("timeout")
-      expect(run.error).toMatchObject({
-        code: "agent.execution_failed",
-        details: { timeoutMs: "50" },
-      })
-      await expect(
-        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
-      ).resolves.toBeNull()
-      expect(
-        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
-      ).toContain("agent.compaction.started")
-      await reporter.flush()
-      expect(reportCount).toBe(0)
-    } finally {
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
-    }
   })
 
   test("terminalizes a queued run whose model is unavailable", async () => {
@@ -13756,51 +13192,6 @@ describe("agent tools act as the requester", () => {
       )
     } finally {
       await worker.stop()
-    }
-  })
-
-  // Regression proof: bind `turnSignal` instead of the node's deadline in
-  // workflow-node-execution.ts; the tool's call then outlives the deadline and the test times out.
-  test("cancels a tool's model call at the workflow node's deadline", async () => {
-    let toolCallStarted = false
-    let toolCallCancelled = false
-    const model = toolCallThenAnswerModel(
-      summarizeInvoice.name,
-      {},
-      {
-        onToolCall: ({ signal }) =>
-          new Promise((_, reject) => {
-            toolCallStarted = true
-            signal.addEventListener("abort", () => {
-              toolCallCancelled = true
-              reject(signal.reason)
-            })
-          }),
-      }
-    )
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model,
-      models: { language: [model] },
-      tools: [summarizeInvoice],
-      runId: "workflow-tool-deadline",
-    })
-    // The node's deadline passes on fake time, once the tool's call is in flight.
-    jest.useFakeTimers()
-    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 200 }))
-    try {
-      await worker.start()
-      await underFakeTime(() => toolCallStarted, "tool's model call started", 0)
-      jest.advanceTimersByTime(200)
-      const node = await underFakeTime(
-        () => terminalAgentNode(runs, nodeRunId),
-        "workflow tool deadline node terminal",
-        0
-      )
-      expect(node.status).not.toBe("succeeded")
-      expect(toolCallCancelled).toBe(true)
-    } finally {
-      await stopUnderFakeTime(worker)
-      jest.useRealTimers()
     }
   })
 

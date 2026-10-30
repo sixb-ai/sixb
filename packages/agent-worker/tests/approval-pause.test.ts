@@ -276,7 +276,6 @@ async function seedInvoice(host: SixbHost) {
 function startWorker(host: SixbHost) {
   return new AgentWorker(host, {
     apiBaseUrl: "http://localhost:3002/api/",
-    defaultMaxSteps: 4,
   })
 }
 

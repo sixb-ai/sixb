@@ -88,7 +88,7 @@ Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the enviro
 
 Projection workers also index [vector profiles](../ontology/properties.md#configure-vector-search), making up to 4 embedding calls at once independently of `--concurrency`. Raise or lower it with `--vector-concurrency 8` or `SIXB_VECTOR_CONCURRENCY=8` on `dev`, projection workers, or worker groups containing one. Your embedding provider's rate limit is the ceiling.
 
-Agent turns default to a 10-minute timeout. Override it with `--agent-turn-timeout 20m` or `SIXB_AGENT_TURN_TIMEOUT=20m` on `dev`, agent workers, or worker groups containing an agent worker.
+Agent turns have no time or step limit: a turn runs until the agent answers or someone stops it. Set [AI limits](../models/usage-and-limits.md) to cap what a turn can spend.
 
 When the agent [delegates](../models/overview.md#it-delegates), its sub-agents run in the same worker as its turn. Each agent worker runs up to 4 sub-agents at once, and one turn keeps up to 4 at work. Change them with `--subagent-concurrency` and `--subagent-concurrency-per-run`, or `SIXB_SUBAGENT_CONCURRENCY` and `SIXB_SUBAGENT_CONCURRENCY_PER_RUN`, on the same commands.
 

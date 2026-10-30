@@ -66,7 +66,7 @@ describe("sixb command line", () => {
     const worker = await runInProcess(() => renderHelp(helpFor(["worker"])))
     const workerOutput = worker.output.replace(/\s+/g, " ")
     expect(workerOutput).toContain("--concurrency <value>")
-    expect(workerOutput).toContain("--agent-turn-timeout <duration>")
+    expect(workerOutput).toContain("--subagent-concurrency-per-run <count>")
     expect(workerOutput).not.toContain("--type <type>")
     expect(workerOutput).not.toContain("--worker <type>")
   })

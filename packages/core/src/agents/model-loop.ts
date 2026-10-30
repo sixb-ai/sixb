@@ -39,6 +39,12 @@ import {
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
+/**
+ * How long a model call may go without sending anything before it fails. Nothing else bounds a
+ * call whose provider stopped answering: a turn has no time limit. Reasoning models can think for
+ * minutes before their first part, so this is well beyond that.
+ */
+export const MODEL_CALL_IDLE_MS = 10 * 60_000
 
 interface ModelLoopOptions {
   readonly model: LanguageModel
@@ -47,12 +53,11 @@ interface ModelLoopOptions {
   readonly reasoning?: ModelReasoning
   readonly maxOutputTokens?: number
   readonly caching?: "auto" | "off"
-  readonly maxSteps: number
+  /** At most this many provider calls. Without it, the loop runs until the model answers. */
+  readonly maxSteps?: number
   /** Direct generation cannot execute or synthesize local tool results. */
   readonly rejectLocalToolCalls?: boolean
   readonly signal: AbortSignal
-  /** Reserve the final provider call for a tool-free synthesis response. */
-  readonly finalStepInstruction?: string
   readonly prepareStep?: (
     input: PrepareModelStepInput
   ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
@@ -164,8 +169,9 @@ export async function runModelLoop(
   const steps: ModelStep[] = []
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
+  const maxSteps = input.maxSteps ?? Number.POSITIVE_INFINITY
 
-  for (let stepIndex = 0; stepIndex < input.maxSteps; stepIndex += 1) {
+  for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
     if (input.signal.aborted) {
       return { status: "aborted", steps, partialContent: [] }
     }
@@ -187,14 +193,6 @@ export async function runModelLoop(
     if (input.signal.aborted) {
       return { status: "aborted", steps, partialContent: [] }
     }
-    let requestTools: readonly ModelToolSpecification[] = toolSpecifications
-    if (input.finalStepInstruction !== undefined && stepIndex === input.maxSteps - 1) {
-      requestMessages = [
-        ...requestMessages,
-        { role: "user", content: [{ type: "text", text: input.finalStepInstruction }] },
-      ]
-      requestTools = []
-    }
 
     const callId = generateCallId()
     if (!callId || callIds.has(callId)) {
@@ -205,11 +203,12 @@ export async function runModelLoop(
     let accepted = false
     let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
     let terminalStreamError: { readonly error: unknown } | undefined
+    const idle = idleGuard(input.signal)
     try {
       const stream = await input.model.stream({
         callId,
         messages: requestMessages,
-        tools: requestTools,
+        tools: toolSpecifications,
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
         ...(input.caching === undefined ? {} : { caching: input.caching }),
@@ -225,13 +224,21 @@ export async function runModelLoop(
                 schema: input.output.schema,
               },
             }),
-        signal: input.signal,
+        signal: idle.signal,
       })
       accepted = true
+      idle.reset()
       for await (const event of stream.events) {
+        idle.reset()
         await accumulator.accept(event)
       }
     } catch (error) {
+      if (idle.fired() && !input.signal.aborted && !accumulator.isFinished()) {
+        throw new ModelStreamError(
+          `[SixbModels] The model sent nothing for ${MODEL_CALL_IDLE_MS / 60_000} minutes.`,
+          { cause: error }
+        )
+      }
       const aborted = input.signal.aborted || isAbortError(error)
       if (accumulator.isFinished()) {
         if (!aborted) terminalStreamError = { error }
@@ -245,6 +252,7 @@ export async function runModelLoop(
         }
       }
     } finally {
+      idle.dispose()
       // Once a stream is accepted, cancellation or protocol failure cannot erase the call.
       // Only a finish event establishes final meters; interrupted calls remain explicitly unknown.
       if (accepted) {
@@ -304,7 +312,7 @@ export async function runModelLoop(
       steps.push(step)
       await input.onStepEnd?.(step)
       messages = [...requestMessages, { role: "assistant", content: response.content }]
-      if (stepIndex + 1 === input.maxSteps) {
+      if (stepIndex + 1 === maxSteps) {
         throw new ModelStreamError(
           "[SixbModels] Model reached the step limit while a provider continuation was pending."
         )
@@ -317,7 +325,7 @@ export async function runModelLoop(
       await input.onStepEnd?.(step)
 
       // An answer cut short by the output limit ends the loop as it is.
-      const canContinue = response.finishReason !== "length" && stepIndex + 1 < input.maxSteps
+      const canContinue = response.finishReason !== "length" && stepIndex + 1 < maxSteps
       let followUp: readonly ModelMessage[] | undefined
       try {
         followUp = canContinue ? await input.beforeComplete?.(step, stepIndex) : undefined
@@ -396,7 +404,7 @@ export async function runModelLoop(
       { role: "tool", content: toolResults },
     ]
 
-    if (stepIndex + 1 === input.maxSteps) {
+    if (stepIndex + 1 === maxSteps) {
       if (input.output) {
         throw new StructuredOutputError(
           "[SixbModels] Model reached the step limit without structured output.",
@@ -418,7 +426,7 @@ function assertLoopInput(input: RunModelLoopInput<unknown>): void {
   ) {
     throw new TypeError("[SixbModels] maxOutputTokens must be a positive safe integer.")
   }
-  if (!Number.isInteger(input.maxSteps) || input.maxSteps <= 0) {
+  if (input.maxSteps !== undefined && (!Number.isInteger(input.maxSteps) || input.maxSteps <= 0)) {
     throw new TypeError("[SixbModels] maxSteps must be a positive integer.")
   }
   if (!input.model.providerId.trim() || !input.model.modelId.trim()) {
@@ -1170,4 +1178,24 @@ function isAbortError(error: unknown): boolean {
     (error instanceof DOMException && error.name === "AbortError") ||
     (error instanceof Error && error.name === "AbortError")
   )
+}
+
+/**
+ * The signal one model call runs under: the loop's, and aborted once the call goes
+ * {@link MODEL_CALL_IDLE_MS} without a response or a stream event.
+ */
+function idleGuard(signal: AbortSignal) {
+  const idle = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const reset = () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => idle.abort(), MODEL_CALL_IDLE_MS)
+  }
+  reset()
+  return {
+    signal: AbortSignal.any([signal, idle.signal]),
+    reset,
+    fired: () => idle.signal.aborted,
+    dispose: () => clearTimeout(timer),
+  }
 }

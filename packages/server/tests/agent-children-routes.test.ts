@@ -192,7 +192,6 @@ function createFixture() {
         model: { provider: "test", modelId: "test-model" },
         task,
         toolNames: [],
-        maxSteps: 5,
         ...spec,
       },
       thread: continuation

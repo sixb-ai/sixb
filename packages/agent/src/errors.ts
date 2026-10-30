@@ -91,22 +91,6 @@ export async function assertRunExecutionOwned(
   assertExecutionOwned({ current, executionToken: run.executionToken, runId: run.id })
 }
 
-/**
- * A turn exceeded its wall-clock budget. Unlike a shutdown abort, this is a run-level failure: the
- * run is recorded `failed` and the thread released (a slow-but-alive model must not hold a thread
- * forever). It is persisted as the run failure while coherent partial work is retained as the
- * assistant message.
- */
-export class AgentTurnTimeoutError extends Error {
-  readonly name = "AgentTurnTimeoutError"
-  constructor(
-    readonly runId: string,
-    readonly timeoutMs: number
-  ) {
-    super(`[SixbAgent] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
-  }
-}
-
 /** Keep an untrusted tool failure as the cause while exposing only a generic message to the model. */
 export class AgentToolExecutionError extends Error {
   readonly name = "AgentToolExecutionError"

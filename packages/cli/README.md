@@ -114,7 +114,6 @@ supervisor disappears, so a stuck startup cannot leave its process group running
 | `--api-port <port>` | `dev`, `api` | `port + 1` | API/auth/docs/WebSocket port |
 | `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
-| `--agent-turn-timeout <duration>` | `dev`, agent worker/group | `SIXB_AGENT_TURN_TIMEOUT` or `10m` | Agent turn wall-clock budget, e.g. `30s`, `10m`, or `1h` |
 | `--vector-concurrency <count>` | `dev`, projection worker/group | `SIXB_VECTOR_CONCURRENCY` or `4` | Concurrent embedding calls for vector indexing |
 | `--subagent-concurrency <count>` | `dev`, agent worker/group | `SIXB_SUBAGENT_CONCURRENCY` or `4` | Child agents an agent worker runs at once |
 | `--subagent-concurrency-per-run <count>` | `dev`, agent worker/group | `SIXB_SUBAGENT_CONCURRENCY_PER_RUN` or `4` | Child agents one Agent turn keeps at work at once |
@@ -413,8 +412,7 @@ sixb worker-group sync pipeline projection
 
 `sixb worker-group` with no positional types starts every registered queue worker type in one
 process, including the agent worker when agents and agent storage are configured. Agent workers
-require the API origin through `--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`. Set the per-turn
-wall-clock budget with `--agent-turn-timeout` or `SIXB_AGENT_TURN_TIMEOUT`; it defaults to 10 minutes.
+require the API origin through `--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`.
 
 `sixb dev` uses separated local ports by default:
 
@@ -437,6 +435,5 @@ enabled.
 worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue
 workers in a single process for constrained deployments; with no positional types it starts every
 registered worker type. Agent workers require `--api-public-origin` or
-`SIXB_API_PUBLIC_ORIGIN`. Their turn budget can be set with `--agent-turn-timeout` or
-`SIXB_AGENT_TURN_TIMEOUT`. Both commands reject the built-in `InMemoryQueues` — use `sixb dev`,
+`SIXB_API_PUBLIC_ORIGIN`. Both commands reject the built-in `InMemoryQueues` — use `sixb dev`,
 which co-hosts workers in-process.

@@ -2,12 +2,10 @@ import {
   AgentRequesterLeftThreadError,
   type AgentRunFailure,
   type AgentTurnRuntime,
-  AgentTurnTimeoutError,
   type ConversationAgentExecutionEnvironment,
   type ConversationReaders,
   createAgentTurnRuntime,
   createConversationAgentEnvironment,
-  DEFAULT_MAX_STEPS,
   isLostExecution,
   listSandboxModels,
   prepareAgentModel,
@@ -89,8 +87,6 @@ const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
 const DEFAULT_SUBAGENT_CONCURRENCY = 4
 const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
-const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
-const MAX_TIMER_DURATION_MS = 2_147_483_647
 /** Request paths publish their own jobs; this pass only repairs a publication or cancel they lost. */
 const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
@@ -139,7 +135,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
-    const turnTimeoutMs = normalizeTurnTimeoutMs(options.turnTimeoutMs)
     super({
       projectId: host.id,
       queue: host.queues.agents,
@@ -156,7 +151,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       host.definitions.workflows
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
-    this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
+    this.context = hasAgentWork ? buildAgentContext(host, options) : null
     this.children = this.context
       ? new ChildRunner({
           host,
@@ -289,23 +284,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
       await session.events.publishStarted(run)
-      runtime = createAgentTurnRuntime({
-        context: prepared.executionContext,
-        run,
-        signal: turnSignal,
-        modelCalls: prepared.modelCalls,
-      })
+      runtime = createAgentTurnRuntime({ signal: turnSignal, modelCalls: prepared.modelCalls })
       bindAgentModelExecution(prepared.executionContext.sixb, {
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
-      delegation = new SubagentCoordinator(
-        this.host,
-        context,
-        run,
-        session,
-        runtime.deadline,
-        (child) => this.requireChildren().start(child, { signal, delivery })
+      delegation = new SubagentCoordinator(this.host, context, run, session, (child) =>
+        this.requireChildren().start(child, { signal, delivery })
       )
       const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({
@@ -387,7 +372,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         interrupted ? new AgentTurnInterruptedError(run.id) : error
       )
       if (finalized) {
-        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
+        if (finalized.run.status === "failed") {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
         await session.events.publishRunFinished(finalized.run)
@@ -443,7 +428,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       ...(this.host.definitions.agent.instructions === undefined
         ? {}
         : { projectInstructions: this.host.definitions.agent.instructions }),
-      defaultMaxSteps: context.defaultMaxSteps,
       sandboxModels: listSandboxModels(this.host.definitions.models),
     })
     if (!execution) {
@@ -810,11 +794,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 }
 
-function buildAgentContext(
-  host: AgentWorkerHost,
-  options: AgentWorkerOptions,
-  turnTimeoutMs: number
-): AgentWorkerContext {
+function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
@@ -848,8 +828,6 @@ function buildAgentContext(
       )
     ),
     recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
-    defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
-    turnTimeoutMs,
     subagentConcurrencyPerRun: normalizeConcurrency(
       "subagentConcurrencyPerRun",
       options.subagentConcurrencyPerRun ?? DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN
@@ -933,15 +911,4 @@ function normalizeConcurrency(name: string, value: number): number {
     )
   }
   return value
-}
-
-function normalizeTurnTimeoutMs(value: number | undefined): number {
-  const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent turn timeout must be a positive integer no greater than ${MAX_TIMER_DURATION_MS}ms.`
-    )
-  }
-  return timeoutMs
 }

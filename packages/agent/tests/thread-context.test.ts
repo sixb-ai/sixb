@@ -168,7 +168,6 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
     }),
     tools: [],
     skills: [],
-    maxSteps: 4,
   }
 
   await runTurnInSession({
@@ -180,7 +179,6 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       tools: [],
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
-      turnTimeoutMs: 60_000,
     },
     plan,
     run: seeded.run,

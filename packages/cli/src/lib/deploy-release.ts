@@ -17,7 +17,6 @@ import {
   isDeployHttpService,
   isDeploySingletonService,
 } from "@sixb/core/internal/deploy"
-import { parseAgentTurnTimeoutMs } from "./agent-turn-timeout"
 import { SixbCliError } from "./errors"
 import { type ProductionRole, productionRoleFacts } from "./production-roles"
 
@@ -170,16 +169,6 @@ function workerGroupArgs(options: DeployWorkersConfig): string[] {
   const types = options.types === undefined || options.types === "all" ? [] : options.types
   const args = ["worker-group", ...types]
 
-  if (options.agentTurnTimeout !== undefined) {
-    if (parseAgentTurnTimeoutMs(options.agentTurnTimeout) === null) {
-      throw new SixbCliError(
-        `[SixbDeploy] services.workers.agentTurnTimeout '${options.agentTurnTimeout}' is not a ` +
-          "duration.",
-        { remediation: 'Use a positive duration such as "30s", "10m", or "1h".' }
-      )
-    }
-    args.push("--agent-turn-timeout", options.agentTurnTimeout)
-  }
   for (const [workerType, concurrency] of Object.entries(options.concurrency ?? {})) {
     args.push("--concurrency", `${workerType}=${concurrency}`)
   }

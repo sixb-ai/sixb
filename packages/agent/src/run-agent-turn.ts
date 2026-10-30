@@ -14,11 +14,9 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
-import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
-import { AgentTurnTimeoutError, throwIfExecutionLost } from "./errors"
+import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { type ConversationReaders, conversationAuthors } from "./message-authors"
 import { userMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
@@ -27,10 +25,8 @@ import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
-export const DEFAULT_MAX_STEPS = 100
-
 export interface RunAgentTurnInput {
-  /** The worker's stable execution context (storage, tools, stream sink, and turn limits). */
+  /** The worker's stable execution context (storage, tools and stream sink). */
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
@@ -65,20 +61,20 @@ export interface TurnChildren {
   unread(): Promise<string | undefined>
   /**
    * Before the turn records its end: each child still waiting on its question pauses on it, and
-   * the turn waits until it has, until `stopAt`. Only then can its end cancel the others.
+   * the turn waits until it has. Only then can its end cancel the others.
    */
-  defer(stopAt: number, signal: AbortSignal): Promise<void>
+  defer(signal: AbortSignal): Promise<void>
   /**
-   * Before a pausing turn records its end: wait until none of its children is at work, or until
-   * `stopAt`. Its end cancels those still at work; one that holds a call pauses by itself.
+   * Before a pausing turn records its end: wait until none of its children is at work. Its end
+   * cancels those still at work; one that holds a call pauses by itself.
    */
-  settle(stopAt: number, signal: AbortSignal): Promise<void>
+  settle(signal: AbortSignal): Promise<void>
 }
 
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
   const { context, plan, run, signal } = input
-  const { id: projectId, tools, turnTimeoutMs } = context
+  const { id: projectId, tools } = context
   const runId = run.id
 
   const { threadContext } = input
@@ -122,18 +118,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         : undefined,
   })
 
-  const maxSteps = plan.maxSteps
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
-  // Preflight and the answer share accounting and one deadline. Direct callers own their runtime.
+  // Preflight and the answer share accounting. Direct callers own their runtime.
   const ownsRuntime = input.runtime === undefined
   let runtime = input.runtime
   if (!runtime) {
-    runtime = createAgentTurnRuntime({
-      context,
-      run,
-      signal,
-      modelCalls: await input.session.modelCalls(),
-    })
+    runtime = createAgentTurnRuntime({ signal, modelCalls: await input.session.modelCalls() })
   }
   const usageRecorder = runtime.usageRecorder
   const abortSignal = AbortSignal.any([
@@ -150,35 +140,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     usageRecorder.assertHealthy()
     sandboxReadiness.throwIfFailed()
     context.environmentFailureSignal?.throwIfAborted()
-    if (runtime.timedOut()) {
-      const completedAt = new Date()
-      return finalizeInterruptedTurn({
-        session: input.session,
-        context,
-        run,
-        modelId: plan.model.modelId,
-        status: "failed",
-        finishReason: "timeout",
-        error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
-          status: "failed",
-          at: completedAt,
-          details: {
-            runId,
-            threadId: run.threadId,
-            timeoutMs: String(turnTimeoutMs),
-          },
-        }),
-        completedAt,
-        parts: interruptedParts,
-      })
-    }
     if (!abortSignal.aborted && (error === undefined || !isAbortError(error))) return null
     return finalizeInterruptedTurn({
       session: input.session,
       context,
       run,
       modelId: plan.model.modelId,
-      status: "cancelled",
       ...stopReason(),
       parts: interruptedParts,
     })
@@ -207,8 +174,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ],
         tools,
         ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-        maxSteps,
-        finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined
@@ -253,7 +218,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         context,
         run,
         modelId: plan.model.modelId,
-        status: "cancelled",
         ...stopReason(),
         parts: interruptedParts,
       })
@@ -261,14 +225,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     // A child waiting on its question pauses on it while the turn still runs: a waiting child
     // would hold the wait below forever, and the turn's end cancels the children still at work.
-    const stopWaitingAt = runtime.deadline.getTime() - PAUSE_WAIT_MARGIN_MS
-    await input.children?.defer(stopWaitingAt, abortSignal)
+    await input.children?.defer(abortSignal)
 
     // A call held after the last step that ran tools, by a command left running in the sandbox or
     // by a child, pauses the turn too. Its end cancels the children still at work, so it first
     // waits for them: one that holds a call pauses by itself instead of being stopped.
     if (result.status === "paused" || (await input.session.heldCalls.holdsRun())) {
-      await input.children?.settle(stopWaitingAt, abortSignal)
+      await input.children?.settle(abortSignal)
     }
     const interruptedWhileWaiting = await finalizeIfInterrupted()
     if (interruptedWhileWaiting) return interruptedWhileWaiting
@@ -278,10 +241,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ? "awaiting_approval"
         : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
-    const diagnostics = [
-      stepLimitDiagnostic(assistant, { finishReason, maxSteps }),
-      outputLimitDiagnostic(finishReason),
-    ].filter((diagnostic) => diagnostic !== undefined)
+    const diagnostics = [outputLimitDiagnostic(finishReason)].filter(
+      (diagnostic) => diagnostic !== undefined
+    )
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -324,12 +286,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  */
 
 /**
- * How long before its deadline a pausing turn stops waiting for its children: enough to record its
- * pause, which then cancels those still at work.
- */
-export const PAUSE_WAIT_MARGIN_MS = 10_000
-
-/**
  * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:
  * the combined turn signal carries the reason of the first source that aborted it.
  */
@@ -338,25 +294,9 @@ export function stoppedByWorker(turnSignal: AbortSignal, stopSignal?: AbortSigna
 }
 
 /**
- * A turn that ran out of steps before answering says so through a diagnostic, which chats render in
- * the reader's language, rather than through text written into the transcript.
- */
-function stepLimitDiagnostic(
-  message: AgentMessage,
-  input: { readonly finishReason: string | undefined; readonly maxSteps: number }
-): AgentRunDiagnostic | undefined {
-  if (hasVisibleText(message.parts) || input.finishReason !== "tool-calls") return undefined
-  return {
-    code: "step_limit_reached",
-    severity: "warning",
-    scope: "run",
-    message: `The Agent reached its ${input.maxSteps}-step limit before producing a final answer.`,
-  }
-}
-
-/**
  * An answer the output limit cut short keeps what the model produced, reasoning included, and says
- * so the same way. Its unfinished tool calls were dropped unexecuted.
+ * so through a diagnostic, which chats render in the reader's language. Its unfinished tool calls
+ * were dropped unexecuted.
  */
 function outputLimitDiagnostic(finishReason: AgentRunFinishReason): AgentRunDiagnostic | undefined {
   if (finishReason !== "length") return undefined
@@ -368,33 +308,24 @@ function outputLimitDiagnostic(finishReason: AgentRunFinishReason): AgentRunDiag
   }
 }
 
-function hasVisibleText(parts: AgentMessage["parts"]): boolean {
-  return parts.some((part) => part.type === "text" && part.text.trim().length > 0)
-}
-
-/** Persist an interrupted turn, retaining coherent partial content when any was produced. */
+/** Persist a cancelled turn, retaining coherent partial content when any was produced. */
 async function finalizeInterruptedTurn(input: {
   readonly session: AgentRunSession
   readonly context: AgentTurnContext
   readonly run: ConversationAgentRunRecord
   readonly modelId?: string
-  readonly status: "failed" | "cancelled"
-  readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval" | "awaiting_answer">
-  readonly error?: AgentRunFailure
-  readonly completedAt?: Date
+  readonly finishReason?: "interrupted"
   readonly parts?: readonly AgentMessagePart[]
 }): Promise<AgentRunRecord> {
-  const { session, context, run, modelId, status, finishReason, error, completedAt } = input
+  const { session, context, run, modelId, finishReason } = input
   const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
 
   await context.beforeFinalize?.()
 
   const outcome = {
-    status,
+    status: "cancelled" as const,
     ...(modelId === undefined ? {} : { modelId }),
     ...(finishReason === undefined ? {} : { finishReason }),
-    ...(error === undefined ? {} : { error }),
-    ...(completedAt === undefined ? {} : { completedAt }),
   }
   if (!parts) {
     const finalizedRun = await session.finish(outcome)

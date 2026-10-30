@@ -4,7 +4,6 @@ export { createAskParentTool } from "./ask-parent-tool"
 export { prepareAgentModel } from "./context-budget"
 export {
   AgentRequesterLeftThreadError,
-  AgentTurnTimeoutError,
   isLostExecution,
 } from "./errors"
 export type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -18,7 +17,7 @@ export type { AgentRunFailure } from "./failure"
 export { toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 export type { ConversationReaders } from "./message-authors"
 export { agentRequester } from "./requester"
-export { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
+export { runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 export type {
   AgentExecutionEnvironment,
   ConversationAgentExecutionEnvironment,

@@ -2,7 +2,6 @@ import {
   type AgentExecutionEnvironment,
   type AgentRunFailure,
   type AgentTurnRuntime,
-  AgentTurnTimeoutError,
   createAgentTurnRuntime,
   createAskParentTool,
   createSubagentEnvironment,
@@ -247,14 +246,7 @@ export class ChildRunner {
       const { executionContext, durableExecution, childThread, conversation, plan, history } =
         prepared
       await session.events.publishStarted(run)
-      // The parent's deadline, not one from now: a child that started late has less left.
-      runtime = createAgentTurnRuntime({
-        context: executionContext,
-        run,
-        signal: turnSignal,
-        modelCalls: prepared.modelCalls,
-        ...(run.spec.deadline === undefined ? {} : { deadline: new Date(run.spec.deadline) }),
-      })
+      runtime = createAgentTurnRuntime({ signal: turnSignal, modelCalls: prepared.modelCalls })
       bindAgentModelExecution(executionContext.sixb, {
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
@@ -318,7 +310,7 @@ export class ChildRunner {
         work.messages
       )
       if (finalized) {
-        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
+        if (finalized.run.status === "failed") {
           this.deps.reportFailure(error, finalized.run, finalized.failure)
         }
         await session.events.publishRunFinished(finalized.run)

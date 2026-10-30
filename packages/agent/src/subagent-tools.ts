@@ -79,13 +79,6 @@ export const CHILD_WAIT_RECHECK_MS = 5_000
  * are rare and short, so a short poll costs little.
  */
 export const OTHER_INBOX_RECHECK_MS = 250
-/**
- * How long before its turn's deadline `wait_agent` stops waiting, so the Agent still answers with
- * what its children found. A last step without tools takes seconds on a light model and up to about
- * a minute on a heavy one with high reasoning; a turn has ten minutes by default.
- */
-export const WAIT_ANSWER_MARGIN_MS = 60_000
-
 const OMIT_MODEL = "Omit model to use the project default."
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
@@ -221,8 +214,6 @@ export class SubagentCoordinator {
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
     private readonly session: AgentRunSession,
-    /** When the parent turn times out: no child outlives it. */
-    private readonly parentDeadline: Date,
     /**
      * Run a child this turn spawned or continues, in the turn's own runner: it claims the child's
      * run, opens its session and environment, and records its fate. Starting a run already
@@ -265,8 +256,8 @@ export class SubagentCoordinator {
         const unread = await this.unreadQuestions()
         return unread.length > 0 ? renderChildQuestions(unread) : undefined
       },
-      defer: (stopAt, signal) => this.deferOpenQuestions(stopAt, signal),
-      settle: (stopAt, signal) => this.settleChildren(stopAt, signal),
+      defer: (signal) => this.deferOpenQuestions(signal),
+      settle: (signal) => this.settleChildren(signal),
     }
   }
 
@@ -278,7 +269,7 @@ export class SubagentCoordinator {
   /**
    * When this turn resumes a paused one, continue each child that paused on its held calls: the
    * next run of its thread, under this turn and the same key, with the paused child's model, task
-   * and files, and this turn's mode and deadline. The outcomes of its calls start the run. Admitting
+   * and files, and this turn's mode. The outcomes of its calls start the run. Admitting
    * it again finds it, so a retry of this turn, under its own id, admits its own.
    */
   async continuePausedChildren(signal: AbortSignal): Promise<void> {
@@ -302,12 +293,11 @@ export class SubagentCoordinator {
   /**
    * Remove from a paused child's thread what the runs after its pause did under an earlier attempt
    * of this resume, which failed: this turn continues the paused child again, as a retried turn
-   * replays from its trigger. A run still stopping is waited for, until shortly before this turn's
-   * deadline.
+   * replays from its trigger. A run still stopping is waited for: its lease ends it if nothing else
+   * does.
    */
   private async clearDeadAttempts(paused: SubagentRunRecord, signal: AbortSignal): Promise<void> {
     const { children } = this.session
-    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
 
     for (;;) {
       const runs = await children.threadRuns(paused.threadId)
@@ -323,14 +313,8 @@ export class SubagentCoordinator {
         return
       }
 
-      const remainingMs = stopAt - Date.now()
-      if (remainingMs <= 0) {
-        throw new Error(
-          `[SixbAgent] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
-        )
-      }
       // Its finish goes to the inbox of the attempt it ran under, not this turn's: read it again.
-      await delay(Math.min(OTHER_INBOX_RECHECK_MS, remainingMs), signal)
+      await delay(OTHER_INBOX_RECHECK_MS, signal)
     }
   }
 
@@ -655,11 +639,10 @@ export class SubagentCoordinator {
 
   /**
    * Before the turn records its end, while it still runs: tell each child still waiting on its
-   * question that the turn ends without an answer, then wait, until `stopAt`, for each to pause on
-   * it. The turn's end cancels the children still at work, so a child it told and that has not
+   * question that the turn ends without an answer, then wait for each to pause on it. The turn's end cancels the children still at work, so a child it told and that has not
    * paused yet would be stopped; while the turn runs, the repair pass leaves its children alone.
    */
-  async deferOpenQuestions(stopAt: number, signal: AbortSignal): Promise<void> {
+  async deferOpenQuestions(signal: AbortSignal): Promise<void> {
     let asking: readonly WaitedQuestion[]
     let threads: ReadonlyMap<string, string>
     try {
@@ -699,11 +682,11 @@ export class SubagentCoordinator {
     }
 
     try {
-      while (deferred.length > 0 && Date.now() < stopAt) {
+      while (deferred.length > 0) {
         const paused = this.#questions.nextChange()
         const runs = await this.session.children.getMany(deferred)
         if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
-        await delay(Math.min(CHILD_WAIT_RECHECK_MS, stopAt - Date.now()), signal, paused)
+        await delay(CHILD_WAIT_RECHECK_MS, signal, paused)
       }
     } catch (error) {
       // The turn's interruption checks record why it stopped.
@@ -713,18 +696,16 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Wait until none of the turn's children is queued or running, or `stopAt`: a pausing turn's
-   * end cancels those still at work, and one that holds a call pauses by itself meanwhile.
+   * Wait until none of the turn's children is queued or running: a pausing turn's end cancels those
+   * still at work, and one that holds a call pauses by itself meanwhile.
    */
-  async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
+  async settleChildren(signal: AbortSignal): Promise<void> {
     for (;;) {
       const finished = this.#questions.nextChange()
       if ((await this.session.children.activeCount()) === 0) return
 
-      const remainingMs = stopAt - Date.now()
-      if (remainingMs <= 0) return
       try {
-        await delay(Math.min(CHILD_WAIT_RECHECK_MS, remainingMs), signal, finished)
+        await delay(CHILD_WAIT_RECHECK_MS, signal, finished)
       } catch (error) {
         // The turn's interruption checks record why it stopped, with what it wrote.
         if (signal.aborted) return
@@ -848,7 +829,7 @@ export class SubagentCoordinator {
 
   /**
    * The run of this turn that continues `paused` in its thread: its model, task and files, this
-   * turn's mode and deadline, and a trigger of what it goes on with (the outcomes of its calls, or
+   * turn's mode, and a trigger of what it goes on with (the outcomes of its calls, or
    * its parent's answer), what came back to its sandbox and when it continues.
    */
   private continuationOf(
@@ -897,8 +878,6 @@ export class SubagentCoordinator {
       model: { provider: model.provider, modelId: model.modelId },
       task,
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
-      maxSteps: this.context.defaultMaxSteps,
-      deadline: this.parentDeadline.toISOString(),
       ...(tier === undefined ? {} : { tier }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
@@ -963,8 +942,6 @@ export class SubagentCoordinator {
     // as it ended.
     const runIds = await Promise.all(passedIds.map((runId) => this.continuedChildId(runId)))
     const earlierTurns = await this.earlierTurnsOf(runIds)
-    // The Agent answers before its turn times out, with or without the children still at work.
-    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
     for (;;) {
       signal.throwIfAborted()
       // Taken before the reads, so a question or a finish that comes during them wakes the wait.
@@ -991,8 +968,7 @@ export class SubagentCoordinator {
       const asked = asking.some(
         (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
       )
-      const remainingMs = stopAt - Date.now()
-      if (children.every(isTerminalSubagent) || asked || remainingMs <= 0) {
+      if (children.every(isTerminalSubagent) || asked) {
         const awaiting = await this.session.children.awaitingApproval(runIds)
         const delivered = await this.deliverFiles(children, signal)
         const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
@@ -1029,7 +1005,7 @@ export class SubagentCoordinator {
         (run) => run.parentRunId !== this.parentRun.id && !isTerminalSubagent(run)
       )
       const recheckMs = unheard ? OTHER_INBOX_RECHECK_MS : CHILD_WAIT_RECHECK_MS
-      await delay(Math.min(recheckMs, remainingMs), signal, changed)
+      await delay(recheckMs, signal, changed)
     }
   }
 

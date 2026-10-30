@@ -91,7 +91,6 @@ async function seed() {
       model: { provider: "test", modelId: "small" },
       task: "Research",
       toolNames: [],
-      maxSteps: 25,
     },
     thread: { id: "thread_child", create: true },
     trigger: { id: "task_child", parts: [{ type: "text", text: "Research" }] },

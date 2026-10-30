@@ -511,16 +511,11 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
       `[${prefix}] Subagent spawn key must not exceed 128 characters.`
     )
   }
-  for (const [name, value] of [
-    ["maxActiveChildren", input.maxActiveChildren],
-    ["spec.maxSteps", input.spec.maxSteps],
-  ] as const) {
-    if (!Number.isSafeInteger(value) || value < 1) {
-      throw new AgentStorageError(
-        "invalid_input",
-        `[${prefix}] Subagent run '${name}' must be a positive safe integer.`
-      )
-    }
+  if (!Number.isSafeInteger(input.maxActiveChildren) || input.maxActiveChildren < 1) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run 'maxActiveChildren' must be a positive safe integer.`
+    )
   }
   if (new Set(input.spec.toolNames).size !== input.spec.toolNames.length) {
     throw new AgentStorageError(

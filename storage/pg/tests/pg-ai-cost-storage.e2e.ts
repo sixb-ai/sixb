@@ -98,7 +98,6 @@ test("PgAiCostStorage returns direct and child-agent attribution with each model
         model: { provider: "anthropic.messages", modelId: "claude-opus-4-8" },
         task: "Research the incident.",
         toolNames: [],
-        maxSteps: 25,
       },
       thread: { id: `thread_${childRunId}`, create: true },
       trigger: {

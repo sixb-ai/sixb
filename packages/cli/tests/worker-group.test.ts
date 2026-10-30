@@ -35,11 +35,6 @@ describe("sixb worker-group", () => {
       "'action' is no longer a worker type",
     ],
     [
-      "an invalid shared agent turn timeout",
-      { workerTypes: ["agent"], agentTurnTimeout: "eventually" },
-      "Invalid agent turn timeout 'eventually'",
-    ],
-    [
       "an invalid typed concurrency",
       { workerTypes: ["sync"], concurrency: ["sync=0"] },
       "Invalid worker concurrency '0'",

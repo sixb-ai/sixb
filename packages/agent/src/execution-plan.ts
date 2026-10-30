@@ -28,7 +28,6 @@ export interface ResolvedAgentExecutionPlan {
   readonly tools: readonly AgentToolDefinition[]
   /** Agent Skills installed in the sandbox and listed in the prompt. */
   readonly skills: readonly AgentSkillDefinition[]
-  readonly maxSteps: number
   /** The requester's time zone and locale, when the run captured them. */
   readonly timeZone?: string
   readonly locale?: string
@@ -102,7 +101,6 @@ export function resolveAgentExecutionPlan(input: {
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
   readonly projectInstructions?: string
-  readonly defaultMaxSteps: number
   readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
@@ -121,7 +119,6 @@ export function resolveAgentExecutionPlan(input: {
     ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: input.tools.list(),
     skills: withBuiltInSkills(input.skills.list()),
-    maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
     ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
@@ -136,7 +133,6 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
-  readonly defaultMaxSteps: number
   readonly sandboxModels?: readonly SandboxModel[]
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
@@ -184,7 +180,6 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     instructions: step.instructions,
     tools: Object.freeze(tools),
     skills: Object.freeze(skills),
-    maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(input.sandboxModels?.length ? { sandboxModels: input.sandboxModels } : {}),
   })
@@ -231,7 +226,6 @@ export function resolveSubagentExecutionPlan(input: {
     ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: Object.freeze(tools),
     skills: withBuiltInSkills(input.skills.list()),
-    maxSteps: run.spec.maxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(timeZone === undefined ? {} : { timeZone }),
     ...(locale === undefined ? {} : { locale }),

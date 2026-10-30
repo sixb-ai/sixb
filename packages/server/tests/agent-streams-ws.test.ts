@@ -561,7 +561,6 @@ async function spawnStartedChild(sixb: SixbHost): Promise<string> {
       model: { provider: "test", modelId: "test-model" },
       task: "Research the issue.",
       toolNames: [],
-      maxSteps: 5,
     },
     thread: { id: createSubagentThreadId(runId, "research"), create: true },
     trigger: { id: `task_${childId}`, parts: [{ type: "text", text: "Research the issue." }] },
