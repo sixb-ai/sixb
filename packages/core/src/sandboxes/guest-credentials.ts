@@ -173,7 +173,8 @@ export async function guestForwarder(paths: GuestCredentialPaths): Promise<void>
       ? target.pathname === credential.path
       : target.pathname.startsWith(credential.path.prefix)
   }
-  // Not forwarded either way: the connection's own, and what fetch has already decoded.
+  // Not forwarded either way: the connection's own, what fetch has already decoded, and whom the
+  // request is from, which the API trusts from a proxy on its network and a command must not say.
   const skipped = new Set([
     "connection",
     "keep-alive",
@@ -181,6 +182,11 @@ export async function guestForwarder(paths: GuestCredentialPaths): Promise<void>
     "content-length",
     "content-encoding",
     "host",
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
   ])
 
   const servers = new Map<string, ReturnType<typeof createServer>>()
@@ -191,7 +197,9 @@ export async function guestForwarder(paths: GuestCredentialPaths): Promise<void>
       rmSync(socket, { force: true })
       const server = createServer(async (request, response) => {
         try {
-          const target = new URL(request.url ?? "/", origin)
+          // Its path alone: a request in absolute form, or for `//host`, names another host.
+          const requested = new URL(request.url ?? "/", "http://guest.invalid")
+          const target = new URL(`${origin}${requested.pathname}${requested.search}`)
           const method = (request.method ?? "GET").toUpperCase()
           const headers = new Headers()
           for (const [name, value] of Object.entries(request.headers)) {
