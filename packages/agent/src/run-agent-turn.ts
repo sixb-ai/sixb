@@ -19,11 +19,11 @@ import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { AgentTurnTimeoutError, throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
-import { type ConversationReaders, loadConversationAuthors } from "./message-authors"
-import { loadUserMessageTimes } from "./message-times"
+import { type ConversationReaders, conversationAuthors } from "./message-authors"
+import { userMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
-import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
+import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
@@ -48,8 +48,8 @@ export interface RunAgentTurnInput {
   readonly runtime?: AgentTurnRuntime
   /** The thread and who can read it now; without it the model is told nothing of its people. */
   readonly conversation?: ConversationReaders
-  /** Preflight's retained projection, avoiding a second storage read in the worker path. */
-  readonly threadContext?: LoadedAgentThreadModelContext
+  /** The history the turn runs on: as it started, or as its compaction left it. */
+  readonly threadContext: LoadedAgentThreadModelContext
   /** What the turn's children ask it, and the work it waits for, when it can delegate. */
   readonly children?: TurnChildren
 }
@@ -81,28 +81,15 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const { id: projectId, tools, turnTimeoutMs } = context
   const runId = run.id
 
-  const threadContext =
-    input.threadContext ??
-    (await loadAgentThreadModelContext({
-      conversation: input.session.conversation,
-      threadId: run.threadId,
-    }))
+  const { threadContext } = input
   const { attachmentContext } = context
-  const [sentTimes, authors] = await Promise.all([
-    loadUserMessageTimes({
-      conversation: input.session.conversation,
-      threadId: run.threadId,
-      messages: threadContext.retainedMessages,
-      projectTimeZone: context.projectTimeZone,
-    }),
-    input.conversation
-      ? loadConversationAuthors({
-          people: input.session.people,
-          conversation: input.conversation,
-          messages: threadContext.retainedMessages,
-        })
-      : undefined,
-  ])
+  const sentTimes = userMessageTimes(threadContext.history, context.projectTimeZone)
+  const authors = input.conversation
+    ? conversationAuthors({
+        conversation: input.conversation,
+        messages: threadContext.retainedMessages,
+      })
+    : undefined
   const newestUserMessageId = threadContext.retainedMessages
     .filter((message) => message.role === "user")
     .at(-1)?.id

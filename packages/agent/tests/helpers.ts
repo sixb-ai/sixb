@@ -16,6 +16,7 @@ import {
 } from "@sixb/core/internal/agents"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
+import { agentThreadModelContext } from "../src/thread-context"
 
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
@@ -106,7 +107,9 @@ const EMPTY_SECURITY = { groups: [], roles: [] } as unknown as SecurityDefinitio
  * session's broker is its own: these tests cancel through their signal, not a published cancel.
  */
 export async function runTurnInSession(
-  input: Omit<RunAgentTurnInput, "session"> & {
+  input: Omit<RunAgentTurnInput, "session" | "threadContext"> & {
+    /** The history the turn runs on; read through its session, as the worker does, when omitted. */
+    readonly threadContext?: RunAgentTurnInput["threadContext"]
     /** Where a model call's record goes when storage cannot take it; dropped when omitted. */
     readonly recoverAiModelCall?: RecoverAiModelCall
     /** Where the turn's live records go; nowhere when omitted. */
@@ -128,7 +131,9 @@ export async function runTurnInSession(
     turn.run
   )
   try {
-    return await runAgentTurn({ ...turn, session })
+    const threadContext =
+      turn.threadContext ?? agentThreadModelContext((await session.context()).history)
+    return await runAgentTurn({ ...turn, session, threadContext })
   } finally {
     session.close()
   }

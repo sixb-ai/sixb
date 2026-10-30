@@ -9,6 +9,7 @@ run-session.ts             AgentRunSession: conversation turns and child agents
 run-session-children.ts    a turn's children and mail
 run-liveness.ts            ending a run whose lease lapsed
 run-fence.ts               AgentExecutionLostError, and the writes that report it
+run-turn.ts                what a turn or child starts from: AgentRunContext
 run-events.ts              the stream sink a session publishes live records through
 workflow-node-session.ts   WorkflowAgentNodeSession: workflow agent steps
 ```
@@ -48,7 +49,9 @@ renewLease · cancelled · assertOwned   ownership, and a cancel of the run or o
 modelCalls()                           admission, usage and recovery; opened on first use, inside
                                        the runner's preparation retry
 events · heldCalls                     live records (best effort) and the approvals that hold a run
-conversation · people · execution()    what a run reads to prepare; createCheckpoint is its write
+context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
+                                       compaction write, which answers the history that follows
+conversation · people · execution()    the reads behind them, still open to the runner
 children · mail                        a turn's children, their threads, and mail between them
 workspace                              a persistent workspace's acquire, replace and settle
 finish                                 messages and the run's end in one transaction, then the

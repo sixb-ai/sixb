@@ -1,6 +1,6 @@
 import {
-  type AgentRunConversation,
   type AgentThreadModelContextMessage,
+  type AgentTurnHistory,
   projectAgentThreadModelContext,
 } from "@sixb/core/internal/agents"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "@sixb/core/storage"
@@ -9,22 +9,17 @@ export interface LoadedAgentThreadModelContext {
   readonly checkpoint: AgentContextCheckpointRecord | null
   readonly retainedMessages: readonly AgentMessageRecord[]
   readonly modelMessages: readonly AgentThreadModelContextMessage[]
+  /** The history it was built from, as the session answered it. */
+  readonly history: AgentTurnHistory
 }
 
-/** Read only the retained tail and build the model-only checkpoint projection. */
-export async function loadAgentThreadModelContext(input: {
-  readonly conversation: Pick<AgentRunConversation, "latestCheckpoint" | "messages">
-  readonly threadId: string
-}): Promise<LoadedAgentThreadModelContext> {
-  const checkpoint = await input.conversation.latestCheckpoint(input.threadId)
-  const history = await input.conversation.messages({
-    threadId: input.threadId,
-    ...(checkpoint ? { afterSeq: checkpoint.summarizedThroughSeq } : {}),
-    order: "asc",
-  })
+/** The retained tail with its checkpoint, projected for the model. */
+export function agentThreadModelContext(history: AgentTurnHistory): LoadedAgentThreadModelContext {
+  const { checkpoint, messages } = history
   return {
     checkpoint,
-    retainedMessages: history.messages,
-    modelMessages: projectAgentThreadModelContext({ checkpoint, messages: history.messages }),
+    retainedMessages: messages,
+    modelMessages: projectAgentThreadModelContext({ checkpoint, messages }),
+    history,
   }
 }

@@ -5,7 +5,6 @@ import {
   AgentTurnTimeoutError,
   type ConversationAgentExecutionEnvironment,
   type ConversationReaders,
-  conversationReaders,
   createAgentTurnRuntime,
   createConversationAgentEnvironment,
   DEFAULT_MAX_STEPS,
@@ -26,6 +25,7 @@ import {
   AgentFinalizationError,
   type AgentRunSession,
   type AgentRunSessionHost,
+  type AgentTurnHistory,
   AgentTurnInterruptedError,
   claimAgentRun,
   createBrokerStreamSink,
@@ -111,6 +111,8 @@ interface PreparedConversationTurn {
   readonly execution: ExecutionRecord
   readonly executionContext: AgentRunnerContext
   readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
+  /** The conversation's history as the turn starts. */
+  readonly history: AgentTurnHistory
 }
 
 /**
@@ -329,6 +331,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: prepared.executionContext,
         plan,
         run,
+        history: prepared.history,
         signal: runtime.signal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
@@ -431,7 +434,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     session: AgentRunSession<ConversationAgentRunRecord>
   ): Promise<PreparedConversationTurn> {
     const { run } = session
-    const thread = await session.conversation.thread(run.threadId)
+    const turn = await session.context()
+    const { thread, execution, participants } = turn
     const plan = resolveAgentExecutionPlan({
       spec: run.spec,
       models: this.host.definitions.models?.language,
@@ -443,7 +447,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       defaultMaxSteps: context.defaultMaxSteps,
       sandboxModels: listSandboxModels(this.host.definitions.models),
     })
-    const execution = await session.execution()
     if (!execution) {
       throw createSixbError(
         "internal.unexpected",
@@ -451,15 +454,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
       )
     }
-    const participants = thread ? await session.conversation.participants([thread.id]) : []
     this.assertRequesterTakesPart(run, thread, participants, execution)
 
     const conversation = thread
-      ? await conversationReaders({
-          people: session.people,
-          thread,
-          participants,
-        })
+      ? { thread, participants: turn.readers, names: turn.names }
       : undefined
 
     const executionContext = await createAgentExecutionContext({
@@ -467,7 +465,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       host: this.host,
       execution,
       runId: run.id,
-      people: session.people,
+      names: turn.names,
       authorization: await session.people.authorization(execution.authorizationRef),
       shared: (conversation?.participants.length ?? 0) > 0,
     })
@@ -482,6 +480,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       execution,
       executionContext,
       model,
+      history: turn.history,
     }
   }
 

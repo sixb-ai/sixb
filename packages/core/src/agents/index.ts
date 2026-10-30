@@ -171,6 +171,7 @@ export type {
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
+  AgentRunCheckpoint,
   AgentRunConversation,
   AgentRunHeldCalls,
   AgentRunOutcome,
@@ -199,6 +200,12 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
 } from "./run-token"
+export type {
+  AgentChildContext,
+  AgentRunContext,
+  AgentTurnContext,
+  AgentTurnHistory,
+} from "./run-turn"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,

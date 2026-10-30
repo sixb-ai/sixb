@@ -1,10 +1,5 @@
 import { type Principal, principalsEqual, type UserPrincipal } from "@sixb/core"
-import type { AgentRunPeople } from "@sixb/core/internal/agents"
-import type {
-  AgentMessageRecord,
-  AgentThreadParticipantRecord,
-  AgentThreadRecord,
-} from "@sixb/core/storage"
+import type { AgentMessageRecord, AgentThreadRecord } from "@sixb/core/storage"
 import {
   type ConversationPerson,
   renderConversationPeople,
@@ -21,32 +16,14 @@ export interface ConversationAuthors {
 
 const ALONE: ConversationAuthors = { byMessageId: new Map() }
 
-/** A thread with the participants who can read it now: the people the model is told about. */
+/**
+ * A thread with the participants who can read it now: the people the model is told about, with
+ * their display names as the turn read them (`AgentTurnContext.readers` and `names`).
+ */
 export interface ConversationReaders {
   readonly thread: AgentThreadRecord
   readonly participants: readonly UserPrincipal[]
-}
-
-/**
- * The participants who can read the thread now: active users the project's roles let use the
- * Agent. Someone added before losing access is not named to the model as taking part.
- */
-export async function conversationReaders(input: {
-  readonly people: Pick<AgentRunPeople, "user" | "canRunAgent">
-  readonly thread: AgentThreadRecord
-  readonly participants: readonly AgentThreadParticipantRecord[]
-}): Promise<ConversationReaders> {
-  const { people, thread } = input
-  const readers = await Promise.all(
-    input.participants.map(async ({ principal }) => {
-      const user = await people.user(principal.id)
-      if (user?.status !== "active") return null
-
-      const allowed = await people.canRunAgent(principal.id)
-      return allowed ? principal : null
-    })
-  )
-  return { thread, participants: readers.filter((reader) => reader !== null) }
+  readonly names: Readonly<Record<string, string>>
 }
 
 /**
@@ -58,12 +35,11 @@ export async function conversationReaders(input: {
  * rides on the newest user message: on the next turn only that message, the history's tail, loses
  * it.
  */
-export async function loadConversationAuthors(input: {
-  readonly people: Pick<AgentRunPeople, "user">
+export function conversationAuthors(input: {
   readonly conversation: ConversationReaders
   readonly messages: readonly AgentMessageRecord[]
-}): Promise<ConversationAuthors> {
-  const { thread, participants } = input.conversation
+}): ConversationAuthors {
+  const { thread, participants, names } = input.conversation
 
   const authored = input.messages.filter(
     (message): message is AgentMessageRecord & { authorPrincipal: Principal } =>
@@ -75,12 +51,11 @@ export async function loadConversationAuthors(input: {
   )
   if (participants.length === 0 && !someoneElseWrote) return ALONE
 
-  const people = await namePeople(input.people, [
-    owner,
-    ...participants,
-    ...authored.map((message) => message.authorPrincipal),
-  ])
-  const personOf = (principal: Principal) => people.get(key(principal)) ?? { id: principal.id }
+  // Each user goes by their display name; anyone else, or a user without one, by their id.
+  const personOf = (principal: Principal): ConversationPerson => {
+    const name = principal.type === "user" ? names[`user:${principal.id}`] : undefined
+    return name ? { id: principal.id, name } : { id: principal.id }
+  }
 
   return {
     section: renderConversationPeople({
@@ -99,29 +74,4 @@ export async function loadConversationAuthors(input: {
 /** Everything the authors add to the model input, for its token estimate. */
 export function conversationAuthorsText(authors: ConversationAuthors): string {
   return [authors.section ?? "", ...authors.byMessageId.values()].join("\n")
-}
-
-/** Each user's display name; anyone else, or a user without one, goes by their id. */
-async function namePeople(
-  people: Pick<AgentRunPeople, "user">,
-  principals: readonly Principal[]
-): Promise<ReadonlyMap<string, ConversationPerson>> {
-  const unique = new Map(principals.map((principal) => [key(principal), principal]))
-
-  const named = await Promise.all(
-    [...unique.entries()].map(async ([principalKey, principal]) => {
-      const user = principal.type === "user" ? await people.user(principal.id) : null
-
-      const person: ConversationPerson = user?.displayName
-        ? { id: principal.id, name: user.displayName }
-        : { id: principal.id }
-      return [principalKey, person] as const
-    })
-  )
-
-  return new Map(named)
-}
-
-function key(principal: Principal): string {
-  return `${principal.type}:${principal.id}`
 }

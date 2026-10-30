@@ -8,7 +8,6 @@ import {
   createSubagentEnvironment,
   isLostExecution,
   listSandboxModels,
-  loadSubagentHistory,
   prepareAgentModel,
   resolveSubagentExecutionPlan,
   runSubagent,
@@ -24,7 +23,6 @@ import {
   type AgentRunSession,
   type AgentRunSessionHost,
   claimAgentRun,
-  conversationThreadId,
   interruptedError,
   isTerminalOrExecutionGone,
 } from "@sixb/core/internal/agents"
@@ -338,7 +336,9 @@ export class ChildRunner {
     const { host, context } = this.deps
     const { run } = session
     const runId = run.id
-    const currentParent = await session.conversation.run(run.parentRunId)
+    const child = await session.context()
+    if (child.kind !== "subagent") throw new Error(`[SixbAgentWorker] Run '${runId}' changed kind.`)
+    const { parent: currentParent, execution: durableExecution, thread: childThread } = child
     if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
       throw new DOMException("The parent Agent run is no longer active.", "AbortError")
     }
@@ -352,7 +352,6 @@ export class ChildRunner {
         : { projectInstructions: host.definitions.agent.instructions }),
       sandboxModels: listSandboxModels(host.definitions.models),
     })
-    const durableExecution = await session.execution()
     if (
       !durableExecution ||
       durableExecution.source.type !== "execution" ||
@@ -375,11 +374,10 @@ export class ChildRunner {
       host,
       execution: durableExecution,
       runId: queuedRun.id,
-      people: session.people,
+      names: child.names,
       authorization: await session.people.authorization(durableExecution.authorizationRef),
     })
     // The child works in its own thread, and publishes into its conversation's gallery.
-    const childThread = await session.conversation.thread(run.threadId)
     if (!childThread) {
       throw createSixbError(
         "internal.unexpected",
@@ -387,10 +385,10 @@ export class ChildRunner {
         { details: agentRunFailureDetails(run) }
       )
     }
-    const conversation = await session.conversation.thread(conversationThreadId(childThread))
+    const { conversation } = child
     const prepared = await prepareAgentModel(configuredPlan)
     const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
-    const history = await loadSubagentHistory(session, childThread)
+    const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
     const modelCalls = await session.modelCalls()
     return {
       executionContext,

@@ -1915,7 +1915,7 @@ function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
 }
 
 /** A conversation environment's input as the worker builds it: with the sandbox it opens. */
-function withConversationSandbox<
+async function withConversationSandbox<
   T extends {
     readonly context: AgentRunnerContext
     readonly session: AgentRunSession<ConversationAgentRunRecord>
@@ -1926,6 +1926,8 @@ function withConversationSandbox<
 >({ sandboxDefinition, ...input }: T) {
   return {
     ...input,
+    // The history the worker reads at the turn's start.
+    history: (await input.session.context()).history,
     openSandbox: conversationSandbox({
       context: input.context,
       session: input.session,
@@ -2807,7 +2809,7 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(host, requested)
     try {
       const error = await createConversationAgentEnvironment(
-        withConversationSandbox({
+        await withConversationSandbox({
           session: await runSessionOf(host, run),
           context: await buildAgentWorkerContext(host),
           plan: executionPlanFor(host),
@@ -6969,7 +6971,7 @@ describe("AgentWorker", () => {
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
       createConversationAgentEnvironment(
-        withConversationSandbox({
+        await withConversationSandbox({
           session: await runSessionOf(sixb, firstRun),
           context,
           plan: plan,
@@ -6977,7 +6979,7 @@ describe("AgentWorker", () => {
         })
       ),
       createConversationAgentEnvironment(
-        withConversationSandbox({
+        await withConversationSandbox({
           session: await runSessionOf(sixb, secondRun),
           context,
           plan: plan,
@@ -7065,7 +7067,7 @@ describe("AgentWorker", () => {
     })
 
     const environment = await createConversationAgentEnvironment(
-      withConversationSandbox({
+      await withConversationSandbox({
         session: await runSessionOf(sixb, run),
         context,
         plan: plan,
@@ -7149,7 +7151,7 @@ describe("AgentWorker", () => {
     )
     const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment(
-      withConversationSandbox({
+      await withConversationSandbox({
         session: await runSessionOf(sixb, run),
         context: await buildAgentWorkerContext(sixb),
         plan,
@@ -7241,7 +7243,7 @@ describe("AgentWorker", () => {
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment(
-      withConversationSandbox({
+      await withConversationSandbox({
         session: await runSessionOf(sixb, run),
         context,
         plan: plan,
@@ -7281,7 +7283,7 @@ describe("AgentWorker", () => {
 
     await expect(
       createConversationAgentEnvironment(
-        withConversationSandbox({
+        await withConversationSandbox({
           session: await runSessionOf(sixb, run),
           context: failing,
           plan: executionPlanFor(sixb),
@@ -7317,7 +7319,7 @@ describe("AgentWorker", () => {
 
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment(
-      withConversationSandbox({
+      await withConversationSandbox({
         session: await runSessionOf(sixb, run),
         context,
         plan: plan,
@@ -11323,6 +11325,7 @@ describe("AgentWorker", () => {
         return await conversationPreparation.prepareAgentConversationContext({
           context,
           session,
+          history: (await session.context()).history,
           plan: executionPlanFor(host),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           ontologyIndex: renderOntologyDocs({
