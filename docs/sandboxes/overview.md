@@ -40,9 +40,12 @@ Filesystem and network isolation depend on the provider. The local provider can 
 isolation when OS sandboxing is unavailable. Check the provider's requirements and isolation
 behavior before using it in production.
 
-Every provider here adds the agent's credentials outside the sandbox: the agent's commands reach
-the Sixb API as the run without ever holding its token. A custom provider must do the same, by
-setting `supportsRequestCredentials`; `createSixb` fails at startup otherwise.
+Every provider here adds the agent's credentials where its commands can't read them: they reach
+the Sixb API as the run without ever holding its token. Vercel and the local provider keep the token
+outside the sandbox. smolvm, Apple Container and Azure keep it inside the VM, in a file only root
+reads, while the agent's commands run as an unprivileged user. A custom provider must keep it out of
+the commands' reach too, by setting `supportsRequestCredentials`; `createSixb` fails at startup
+otherwise.
 
 ## Configure the environment
 

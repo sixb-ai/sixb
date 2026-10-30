@@ -58,7 +58,7 @@ renewal begins after acquisition. Normal teardown removes injection and revokes 
 cannot guarantee immediate revocation.
 
 Such a provider's sandboxes also give `credentialedUrl(url)`: the address guest commands use to
-reach `url` with the session's credentials added outside the guest. A provider whose firewall adds
+reach `url` with the session's credentials added out of its reach. A provider whose firewall adds
 them returns `url` itself; one that forwards on the host returns its own address, such as
 `unix:/tmp/…/0.sock`, which reaches only `url`. The worker adds every run's own token for the Sixb
 API this way, beside a source's credentials, so the run's commands never hold it.

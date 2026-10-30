@@ -82,8 +82,10 @@ export interface SandboxNetworkTarget {
 export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 /**
- * Host-only credentials injected outside the guest into matching requests. Guest commands never
- * hold them: not in env, files, process arguments or anything else they can read.
+ * Credentials injected into matching requests where guest commands can't reach them. Guest
+ * commands never hold them: not in env, files, process arguments or anything else they can read.
+ * A firewall or a host forwarder keeps them outside the guest; a VM guest may keep them in files
+ * only its root forwarder reads, while its commands run as an unprivileged user.
  *
  * A credential selects which requests receive its Authorization header. It does not decide what
  * the guest can reach, which is the network policy, nor which resources the token can act on:
@@ -143,7 +145,7 @@ export interface Sandbox {
   readonly workingDirectory: string
 
   /** Optional secure injection capability. Replaces all credentials on this session only.
-   * An empty list removes injection. Secrets must never enter guest files, env or snapshots.
+   * An empty list removes injection. Guest commands must never be able to read a secret.
    * Must not resume a stopped session or change defaults inherited by future sessions.
    * Renewal, ephemeral or persistent, targets the handle's session; after stop() it rejects.
    * A thrown error is reported to onError: it and its causes must never contain a credential.
@@ -154,7 +156,7 @@ export interface Sandbox {
 
   /**
    * The address guest commands use to reach `url` with this session's request credentials added
-   * outside the guest. It is `url` itself where a firewall adds them, or another address, such as
+   * out of their reach. It is `url` itself where a firewall adds them, or another address, such as
    * `unix:/path/to.sock`, that forwards only to `url`. Present on every sandbox of a factory that
    * advertises `supportsRequestCredentials`.
    */
@@ -199,7 +201,7 @@ export interface Sandbox {
  */
 export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
   /**
-   * Supports initial and renewable host-only credentials on ephemeral and named sessions. An
+   * Supports initial and renewable request credentials on ephemeral and named sessions. An
    * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
    */
   readonly supportsRequestCredentials?: boolean
