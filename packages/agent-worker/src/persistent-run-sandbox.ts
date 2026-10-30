@@ -229,9 +229,7 @@ class PersistentSandboxSession {
       const resumed = await this.wait(
         this.resume(this.name, {
           ...this.access.sessionOptions,
-          // An empty list confirms that this run's recipe needs no source auth.
-          requestCredentials:
-            this.access.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
+          requestCredentials: this.access.requestCredentials,
         })
       )
       this.resumed = true

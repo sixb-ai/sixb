@@ -127,34 +127,23 @@ describe("Agent sandbox binding", () => {
     }
   })
 
-  test("rejects auth on a provider without credential injection at startup", () => {
-    // Regression proof: remove the sandboxCredentialIssue check from SixbHost; the host is
-    // created and only a bound conversation's first run fails.
-    const unsupported: SandboxFactory = { create: forbidden, resume: forbidden }
-    const authenticated: SandboxConfig = {
+  // The run's token is a request credential, so every agent sandbox needs a provider that adds
+  // them, with or without a recipe.
+  test.each<SandboxConfig | undefined>([
+    undefined,
+    {
       source: { type: "git", url: "https://github.com/acme/app", access: "write" },
       auth: { authorize: forbidden },
-    }
-
-    expect(() => setup(authenticated, [], unsupported)).toThrow(
-      "[Sixb] Sandbox source auth needs a provider that injects request credentials outside the sandbox: use @sixb/sandboxes-vercel, or remove auth."
-    )
-    expect(() => setup(authenticated)).not.toThrow()
-  })
-
-  test("rejects auth on a provider without credential injection when only resolve has a source", () => {
-    // Regression proof: return early from sandboxCredentialIssue when the recipe has no source;
-    // the host is created and the provider is rejected only when a run resolves a source.
+    },
+  ])("rejects a provider without request credentials at startup: %j", (configuration) => {
+    // Regression proof: remove the sandboxCredentialIssue check from SixbHost; the host is
+    // created and only the first run fails.
     const unsupported: SandboxFactory = { create: forbidden, resume: forbidden }
-    const resolved: SandboxConfig = {
-      auth: { authorize: forbidden },
-      resolve: () => ({ source: { type: "git", url: "https://github.com/acme/app" } }),
-    }
 
-    expect(() => setup(resolved, [], unsupported)).toThrow(
-      "[Sixb] Sandbox source auth needs a provider that injects request credentials outside the sandbox"
+    expect(() => setup(configuration, [], unsupported)).toThrow(
+      "[Sixb] Agent sandboxes need a provider that adds request credentials outside the sandbox"
     )
-    expect(() => setup(resolved)).not.toThrow()
+    expect(() => setup(configuration)).not.toThrow()
   })
 
   test("rejects static write access without source auth at startup", () => {
@@ -258,7 +247,11 @@ describe("Agent sandbox binding", () => {
       ontology: [],
       ...createTestRuntimeDeps(),
       models: { language: [testLanguageModel()] },
-      sandboxes: { ...provider, configuration: recipe() } as unknown as SandboxFactory,
+      sandboxes: {
+        ...provider,
+        supportsRequestCredentials: true,
+        configuration: recipe(),
+      } as unknown as SandboxFactory,
     })
     await expect(
       createTestSixb(host).agent.threads.create({ sandbox: { clientId: "acme" } })

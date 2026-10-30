@@ -7,6 +7,7 @@ import {
   dispatchQueuedSubagentRuns,
   publishAgentRunCancel,
   resolveInheritedAgentExecutionAuthorization,
+  sandboxCredentialIssue,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
@@ -1336,6 +1337,13 @@ function buildAgentContext(
     throw createSixbError(
       "internal.unexpected",
       "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
+    )
+  }
+  // A worker host is structural and need not come from `SixbHost`, which checks this at startup.
+  if (!host.sandboxes.supportsRequestCredentials) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] ${sandboxCredentialIssue({ supportsRequestCredentials: false })}`
     )
   }
   return {

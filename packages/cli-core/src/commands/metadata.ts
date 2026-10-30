@@ -10,7 +10,7 @@ const SANDBOX_MAIN_HELP = `Sixb agent CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run's SIXB_API_BASE_URL and SIXB_TOKEN. Do not configure authentication or another origin.
+The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
@@ -65,7 +65,7 @@ For query IR, run \`sixb objects query --help\` and \`sixb objects query --examp
 
 const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI")
   .replace(
-    "The CLI uses the run's SIXB_API_BASE_URL and SIXB_TOKEN. Do not configure authentication or another origin.",
+    "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
     "The CLI uses the selected local profile and its API credentials."
   )
   .replace(

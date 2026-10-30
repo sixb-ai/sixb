@@ -3,9 +3,8 @@ import { dispatch } from "./commands"
 
 export interface SandboxInstanceCliMode {
   readonly kind: "sandbox"
+  /** The sandbox's credentialed address for the API: the run's token is added on the way out. */
   readonly baseUrl: string
-  /** The run's token, sent as a bearer token. */
-  readonly token?: string
   readonly runContextPath: string
 }
 
@@ -31,7 +30,7 @@ export async function runInstanceCli(input: RunInstanceCliInput): Promise<void> 
 export function createInstanceApiClient(mode: InstanceCliMode): ApiClient {
   return new ApiClient({
     baseUrl: mode.baseUrl,
-    ...(mode.token ? { authorization: `Bearer ${mode.token}` } : {}),
+    ...(mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {}),
     missingBaseUrlMessage:
       mode.kind === "sandbox"
         ? "SIXB_API_BASE_URL is not set."

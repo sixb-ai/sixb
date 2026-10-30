@@ -553,7 +553,7 @@ function assertWebhookRunStorage(
   }
 }
 
-/** Reject source access the factory cannot provide: a run checks what `resolve` returns. */
+/** Reject a factory an agent cannot run in: a run checks what `resolve` returns. */
 function assertSandboxCredentials<TParams extends ParamsConfig>(
   sandboxes: SandboxFactory<TParams> | undefined
 ): void {

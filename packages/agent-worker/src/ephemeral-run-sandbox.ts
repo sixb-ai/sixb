@@ -66,9 +66,6 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
   if (input.workspace) return new EphemeralWorkspace(input, apiOrigin)
 
   const { context, signal } = input
-  const credentials = context.sandboxes.supportsRequestCredentials
-    ? { requestCredentials: [input.apiCredential] }
-    : {}
 
   return {
     waitBeforeModel: false,
@@ -77,7 +74,7 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
       sandbox: await context.sandboxes.create({
         environment: {},
         network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
-        ...credentials,
+        requestCredentials: [input.apiCredential],
         ...(signal ? { signal } : {}),
       }),
     }),

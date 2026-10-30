@@ -94,6 +94,11 @@ class TestSandbox implements Sandbox {
   readonly status = "running"
   readonly workingDirectory: string
 
+  /** As a firewall adds credentials: the URL itself. */
+  credentialedUrl(url: string): string {
+    return url
+  }
+
   constructor(
     readonly id: string,
     private readonly host: SixbHost
@@ -245,7 +250,10 @@ function setup(scripts: {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    sandboxes: { create: async () => new TestSandbox(`sandbox-${++sandboxes}`, host) },
+    sandboxes: {
+      supportsRequestCredentials: true,
+      create: async () => new TestSandbox(`sandbox-${++sandboxes}`, host),
+    },
     models: { language: [parentModel, childModel] },
   })
   const worker = new AgentWorker(host, {

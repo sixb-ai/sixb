@@ -406,7 +406,6 @@ describe("agent runtime conformance", () => {
     const context = await prepareAgentSandboxApiContext({
       sandbox,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-      runToken,
       apiBaseUrl,
       projectId: PROJECT_ID,
       actorId: "assistant",
@@ -436,7 +435,6 @@ describe("agent runtime conformance", () => {
     const context = await prepareAgentSandboxApiContext({
       sandbox,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-      runToken: "sixb_run_v1_test",
       apiBaseUrl: "http://gateway.invalid",
       projectId: PROJECT_ID,
       actorId: "assistant",

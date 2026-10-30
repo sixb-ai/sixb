@@ -19,7 +19,7 @@ interface WorkspaceAccessInput {
   readonly auth?: SandboxSourceAuth
   readonly factory: Pick<SandboxFactory, "supportsRequestCredentials">
   readonly apiOrigin: string
-  /** The run's credential for the Sixb API, added when the provider adds credentials. */
+  /** The run's credential for the Sixb API, added outside the guest. */
   readonly apiCredential: SandboxRequestCredential
   readonly signal: AbortSignal
   readonly assertOwner: () => Promise<void>
@@ -54,15 +54,9 @@ export class WorkspaceAccess {
     return { env: this.env, network: this.network }
   }
 
-  /** The run's API credential and the first grant's requests; absent when there are none. */
-  get requestCredentials(): readonly SandboxRequestCredential[] | undefined {
-    const all = [...this.runCredentials, ...(this.credentials ?? [])]
-    return all.length > 0 ? all : undefined
-  }
-
-  /** The run's own credentials, on a provider that adds them outside the guest. */
-  private get runCredentials(): readonly SandboxRequestCredential[] {
-    return this.input.factory.supportsRequestCredentials ? [this.input.apiCredential] : []
+  /** The run's API credential and the first grant's requests. */
+  get requestCredentials(): readonly SandboxRequestCredential[] {
+    return [this.input.apiCredential, ...(this.credentials ?? [])]
   }
 
   /**
@@ -83,7 +77,7 @@ export class WorkspaceAccess {
     this.auth = new WorkspaceAuthSession({
       auth,
       source: recipe.source,
-      alongside: this.runCredentials,
+      alongside: [this.input.apiCredential],
       signal,
       assertOwner,
       onFailure: onAuthFailure,

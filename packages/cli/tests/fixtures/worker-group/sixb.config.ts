@@ -23,6 +23,7 @@ import {
 import { SharedBroker } from "../shared/sharedBroker"
 
 const sandboxes: SandboxFactory = {
+  supportsRequestCredentials: true,
   async create() {
     throw new Error("The worker-group fixture does not execute agent runs.")
   },

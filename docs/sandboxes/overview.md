@@ -40,6 +40,10 @@ Filesystem and network isolation depend on the provider. The local provider can 
 isolation when OS sandboxing is unavailable. Check the provider's requirements and isolation
 behavior before using it in production.
 
+Every provider here adds the agent's credentials outside the sandbox: the agent's commands reach
+the Sixb API as the run without ever holding its token. A custom provider must do the same, by
+setting `supportsRequestCredentials`; `createSixb` fails at startup otherwise.
+
 ## Configure the environment
 
 Use a persistence-capable provider such as Vercel for conversations that keep files between runs.
@@ -128,10 +132,9 @@ Public repositories can omit `auth`. Managed credentials are not written into gu
 `git` and GitHub API clients such as `gh` normally. Commits are attributed to the App's bot
 account. `GH_TOKEN` and `GITHUB_TOKEN` in the sandbox hold a placeholder, because these clients
 require a token; the real token never enters the sandbox.
-Write access needs `auth`, and `auth` needs a provider that injects credentials outside the
-sandbox, such as Vercel. `createSixb` fails at startup when a factory sets `auth` on another
-provider, or when its static `source` asks for write access without `auth`. A source returned by
-`resolve` is checked the same way when each run starts.
+Write access needs `auth`. `createSixb` fails at startup when a factory's static `source` asks
+for write access without it. A source returned by `resolve` is checked the same way when each run
+starts.
 Sixb refreshes access for each run and revokes it during normal cleanup. A worker crash cannot
 guarantee immediate revocation.
 
