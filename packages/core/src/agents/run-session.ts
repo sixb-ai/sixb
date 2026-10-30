@@ -185,23 +185,17 @@ async function startOrReclaim<TRun extends AgentRunRecord>(
     token: createAgentRunExecutionToken(),
     queueLeaseExpiresAt: new Date(input.leaseExpiresAt),
   }
-  if (run.status === "queued") {
-    const started = await agents.runs.start({
-      projectId,
-      id: run.id,
-      modelId: input.modelId,
-      execution,
-    })
-    return sameKind(run, started, "starting")
-  }
-  if (run.status !== "running") return null
-
+  if (run.status !== "queued" && run.status !== "running") return null
+  // The read the caller made is already old: a run that ended since, or that another worker
+  // started, is not this caller's.
   try {
-    return sameKind(
-      run,
-      await agents.runs.reclaim({ projectId, id: run.id, execution }),
-      "reclaiming"
-    )
+    return run.status === "queued"
+      ? sameKind(
+          run,
+          await agents.runs.start({ projectId, id: run.id, modelId: input.modelId, execution }),
+          "starting"
+        )
+      : sameKind(run, await agents.runs.reclaim({ projectId, id: run.id, execution }), "reclaiming")
   } catch (error) {
     if (error instanceof AgentStorageError && error.code === "invalid_state") return null
     throw error

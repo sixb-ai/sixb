@@ -57,6 +57,18 @@ describe("claimAgentRun", () => {
     expect(await claimAgentRun(host, { run: ended, leaseExpiresAt: LEASE })).toBeNull()
   })
 
+  // Guard proof: let `runs.start`'s invalid_state through in startOrReclaim; the claim throws.
+  test("returns nothing for a queued run that ended since it was read", async () => {
+    const { host, storage, run } = await setup()
+    await storage.agents.runs.finishQueued({
+      projectId: PROJECT_ID,
+      id: run.id,
+      status: "cancelled",
+    })
+
+    expect(await claimAgentRun(host, { run, leaseExpiresAt: LEASE })).toBeNull()
+  })
+
   // The fence the whole session rests on. Return the running run unchanged in startOrReclaim, in
   // place of `runs.reclaim`; the token never rotates and the earlier session keeps writing.
   test("a reclaim fences the earlier session out of every write", async () => {
