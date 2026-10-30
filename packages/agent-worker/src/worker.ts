@@ -14,7 +14,7 @@ import {
   isTerminalOrExecutionGone,
   publishAgentRunCancel,
   sandboxCredentialIssue,
-  watchAgentRunCancel,
+  WorkflowResumeDispatchError,
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
@@ -55,7 +55,6 @@ import {
   AgentTurnInterruptedError,
   AgentTurnTimeoutError,
   isLostExecution,
-  WorkflowResumeDispatchError,
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import {
@@ -225,8 +224,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         job,
         signal,
         delivery,
-        watchForCancel: (runId) =>
-          watchAgentRunCancel({ projectId: this.host.id, broker: this.host.broker }, [runId]),
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       return
