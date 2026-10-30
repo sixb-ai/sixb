@@ -286,8 +286,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
-      delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
-        this.requireChildren().start(child, { signal, delivery })
+      delegation = new SubagentCoordinator(
+        prepared.delegation,
+        context,
+        run,
+        session,
+        (child, family) => this.requireChildren().start(child, { signal, delivery, family })
       )
       const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({

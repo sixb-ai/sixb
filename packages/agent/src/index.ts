@@ -9,6 +9,7 @@ export {
 export type { ResolvedAgentExecutionPlan } from "./execution-plan"
 export type { AgentRunFailure } from "./failure"
 export { toAgentExecutionFailure, toAgentRunFailure } from "./failure"
+export type { FamilyMailbox } from "./family-mailbox"
 export type { ConversationReaders } from "./message-authors"
 export type { AgentToolCaller } from "./model-adapters"
 export { agentRequester } from "./requester"

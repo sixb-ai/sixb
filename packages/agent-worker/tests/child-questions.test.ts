@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
   type AgentApprovalCall,
@@ -20,22 +20,15 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
-  type AgentRunMail,
-  agentRunInboxStreamId,
-  agentThreadInboxStreamId,
   createSubagentRunId,
   createSubagentThreadId,
   holdAgentApprovalCall,
-  publishAgentMail,
-  readAgentMail,
-  subscribeAgentInbox,
-  subscribeAgentMail,
 } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
-import { ChildQuestions } from "../../agent/src/child-questions"
+import { SubagentInbox } from "../../agent/src/subagent-inbox"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 
@@ -87,8 +80,23 @@ const spawnWest = {
   model: { provider: "child-provider", modelId: "child-model" },
 }
 
+/** Settles once a child asked its parent, its question then in the turn's mailbox. */
+let asked = Promise.withResolvers<void>()
+
+beforeEach(() => {
+  asked = Promise.withResolvers<void>()
+  const ask = SubagentInbox.prototype.ask
+  // `ask` puts the question in the mailbox before its first await: it is there on return.
+  spyOn(SubagentInbox.prototype, "ask").mockImplementation(function (this: SubagentInbox, ...args) {
+    const reply = ask.apply(this, args)
+    asked.resolve()
+    return reply
+  })
+})
+
 afterEach(() => {
   jest.useRealTimers()
+  jest.restoreAllMocks()
 })
 
 /**
@@ -147,30 +155,6 @@ class TestSandbox implements Sandbox {
   async stop(): Promise<void> {}
 
   async destroy(): Promise<void> {}
-}
-
-class SlowAnswerBroker extends InMemoryBroker {
-  override async append(params: Parameters<InMemoryBroker["append"]>[0]) {
-    const answers = params.records.some(
-      (record) =>
-        typeof record.payload === "object" &&
-        record.payload !== null &&
-        "kind" in record.payload &&
-        record.payload.kind === "answer"
-    )
-    if (answers) await new Promise((resolve) => setTimeout(resolve, 100))
-    return super.append(params)
-  }
-}
-
-class DeafParentBroker extends InMemoryBroker {
-  override subscribe(...args: Parameters<InMemoryBroker["subscribe"]>) {
-    // A child's run id is `agt_run_child_…`; its parent's is not.
-    if (/^agents\.runs\.agt_run_(?!child_).+\.inbox$/.test(args[0].streamId)) {
-      return Promise.reject(new Error("[test] The broker cannot subscribe."))
-    }
-    return super.subscribe(...args)
-  }
 }
 
 function ok(stdout: string): CommandResult {
@@ -232,16 +216,8 @@ function setup(scripts: {
   readonly parent: Script
   readonly west: Script
   readonly onListOut?: () => Promise<void>
-  /** Hold each answer's write a moment, as a remote broker would: two answers then overlap. */
-  readonly slowAnswers?: boolean
-  /** The parent's inbox subscription fails: it reads its questions without the wake. */
-  readonly parentCannotListen?: boolean
 }) {
-  const broker = scripts.slowAnswers
-    ? new SlowAnswerBroker()
-    : scripts.parentCannotListen
-      ? new DeafParentBroker()
-      : new InMemoryBroker()
+  const broker = new InMemoryBroker()
   const parentRequests: LanguageModelRequest[] = []
   const westRequests: LanguageModelRequest[] = []
   const parentModel = new WorkerTestModel({
@@ -432,16 +408,6 @@ async function transcriptOf(harness: ReturnType<typeof setup>, runId: string) {
   )
 }
 
-/** Append again every record of an inbox, as a redelivery past the broker's dedupe would. */
-async function redeliverInbox(broker: InMemoryBroker, streamId: string): Promise<void> {
-  const { records } = await broker.read({ projectId, streamId })
-  await broker.append({
-    projectId,
-    streamId,
-    records: records.map((record) => ({ name: record.name, payload: record.payload })),
-  })
-}
-
 /** Request a turn as Alice, in `threadId` when given, and run it until it ends. */
 async function requestTurn(
   harness: ReturnType<typeof setup>,
@@ -461,22 +427,9 @@ async function requestTurn(
   return { run, alicesSixb, finished: await terminal(harness.agents, run.id) }
 }
 
-/** Resolves once West's question is in its parent's inbox, before the parent reads it. */
-async function westAsked(harness: ReturnType<typeof setup>, westId: string): Promise<void> {
-  const { parentRunId } = await child(harness.agents, westId)
-  let unsubscribe: (() => void) | undefined
-  await new Promise<void>((resolve) => {
-    void subscribeAgentMail(
-      harness.broker,
-      { projectId, inbox: { runId: parentRunId } },
-      (mail) => {
-        if (mail.some((item) => item.kind === "question")) resolve()
-      }
-    ).then((stop) => {
-      unsubscribe = stop
-    })
-  })
-  unsubscribe?.()
+/** Resolves once West asked, before the parent reads it. */
+function westAsked(): Promise<void> {
+  return asked.promise
 }
 
 /** A parent that spawns West, waits for its question and answers the user with it. */
@@ -537,39 +490,6 @@ describe("a child's question", () => {
     }
   })
 
-  // Removal proof: drop the refresh without a subscription from wait_agent; nothing tells it of
-  // the question, and it waits for the deadline margin.
-  test("still returns the parent's wait when its inbox cannot be subscribed to", async () => {
-    const harness = setup({
-      parentCannotListen: true,
-      parent: (request, call) => {
-        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
-        if (call === 3) {
-          return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
-        }
-        const westId = westRunId(harness.parentRequests[1])
-        if (call === 4) return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
-        return answer(RESULT)
-      },
-      west: (_request, call) =>
-        call === 1 ? toolCalls(["ask", "ask_parent", { question: QUESTION }]) : answer(RESULT),
-    })
-    jest.useFakeTimers()
-    await harness.worker.start()
-    try {
-      const { finished } = await requestTurn(harness, "How did the west do this year?")
-
-      expect(finished).toMatchObject({ status: "succeeded" })
-      expect(toolOutput(harness.parentRequests[2], "wait")).toMatchObject({
-        questions: [{ key: WEST.key, text: QUESTION }],
-      })
-      expect(toolOutput(harness.westRequests[1], "ask")).toEqual({ answer: ANSWER })
-    } finally {
-      await settle(harness.worker.stop(), "worker stop")
-    }
-  })
-
   // Removal proof: drop the `#asking` check from SubagentInbox.ask; both questions go out, the
   // parent answers the one it lists, and the other waits until the test gives up.
   test("is one at a time: a second one asked with it is refused", async () => {
@@ -612,52 +532,6 @@ describe("a child's question", () => {
         readonly questions: readonly unknown[]
       }
       expect(waited.questions).toHaveLength(1)
-    } finally {
-      await settle(harness.worker.stop(), "worker stop")
-    }
-  })
-
-  // Removal proof: drop the reply check from SubagentInbox's `unread`; the redelivered answer reaches
-  // West again, as a message at its next step. The parent's side is ChildQuestions' own test.
-  test("is answered once, however often the broker delivers the answer", async () => {
-    const harness = setup({
-      parent: async (request, call) => {
-        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
-        const westId = westRunId(harness.parentRequests[1])
-        if (call === 3) {
-          return toolCalls(["answer", "message_agent", { key: WEST.key, text: ANSWER }])
-        }
-        if (call === 4) {
-          // The answer, written again once West read it.
-          const { threadId } = await child(harness.agents, westId)
-          await redeliverInbox(harness.broker, agentThreadInboxStreamId(threadId))
-          return toolCalls(["wait-again", "wait_agent", { runIds: [westId] }])
-        }
-        return answer(RESULT)
-      },
-      west: (_request, call) => {
-        if (call === 1) return toolCalls(["ask", "ask_parent", { question: QUESTION }])
-        if (call === 2) return toolCalls(["look", "bash", { command: "ls revenue" }])
-        return answer(RESULT)
-      },
-    })
-    jest.useFakeTimers()
-    await harness.worker.start()
-    try {
-      const { run } = await requestTurn(harness, "How did the west do this year?")
-      const west = await child(harness.agents, createSubagentRunId(run.id, WEST.key))
-
-      expect(toolOutput(harness.parentRequests[4], "wait-again")).toEqual({
-        results: [{ runId: west.id, status: "succeeded", text: RESULT }],
-      })
-      expect(harness.westRequests).toHaveLength(3)
-      expect(modelText(harness.westRequests[2])).not.toContain("<sixb_parent_message id=")
-      expect(
-        (await transcriptOf(harness, west.id)).flatMap((message) =>
-          message.parts.filter((part) => part.type === "mail")
-        )
-      ).toEqual([])
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
@@ -809,61 +683,6 @@ describe("a question its parent's turn ends on", () => {
   })
 })
 
-describe("ChildQuestions", () => {
-  // Removal proof: drop the seen-id check from ChildQuestions; the question delivered again after
-  // its answer opens again.
-  test("counts a question once, and an answered one stays answered when delivered again", async () => {
-    const broker = new InMemoryBroker()
-    // ChildQuestions only reads the turn's inbox.
-    const inbox: AgentRunMail = {
-      send: () => Promise.reject(new Error("ChildQuestions sends nothing.")),
-      read: (from, afterCursor) =>
-        readAgentMail(broker, {
-          projectId,
-          inbox: from,
-          ...(afterCursor === undefined ? {} : { afterCursor }),
-        }),
-      subscribe: (from, on) => subscribeAgentInbox(broker, { projectId, inbox: from }, on),
-    }
-    const questions = new ChildQuestions(inbox, "run_parent")
-    const mail = {
-      id: "run_west:ask",
-      fromRunId: "run_west",
-      fromThreadId: "thread_west",
-      toRunId: "run_parent",
-      kind: "question",
-      text: QUESTION,
-      sentAt: "2026-10-24T09:00:00.000Z",
-    } as const
-    await questions.listen()
-    try {
-      const asked = questions.nextChange()
-      await publishAgentMail(broker, { projectId, mail })
-      await asked
-      await publishAgentMail(broker, {
-        projectId,
-        mail: { ...mail, id: "run_east:ask", fromRunId: "run_east" },
-      })
-      await questions.refresh()
-
-      expect(questions.open()).toEqual([
-        { id: "run_west:ask", runId: "run_west", text: QUESTION },
-        { id: "run_east:ask", runId: "run_east", text: QUESTION },
-      ])
-
-      const [west] = questions.open()
-      if (west) questions.answered(west)
-      // What a redelivery past the broker's dedupe window does: the same record, written again.
-      await redeliverInbox(broker, agentRunInboxStreamId("run_parent"))
-      await questions.refresh()
-
-      expect(questions.open().map((question) => question.id)).toEqual(["run_east:ask"])
-    } finally {
-      questions.close()
-    }
-  })
-})
-
 describe("a turn that ends while a child waits on its question", () => {
   // Removal proof: drop the `defer` call from runAgentTurn's finalize; the turn, paused on its own
   // call, waits for West, which waits for it, until the test gives up.
@@ -920,10 +739,10 @@ describe("a turn that ends while a child waits on its question", () => {
   // answer, and the user never reads West's question.
   test("shows the Agent a question it never waited for, before its answer ends the turn", async () => {
     const harness = setup({
-      parent: async (request, call) => {
+      parent: async (_request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
         if (call === 2) {
-          await westAsked(harness, westRunId(request))
+          await westAsked()
           return answer("West is comparing the regions.")
         }
         return answer(`West asks: ${QUESTION}`)
@@ -951,10 +770,10 @@ describe("a turn that ends while a child waits on its question", () => {
   test("is answered only by a message sent once the Agent read it", async () => {
     const STEER = "Leave out the Seattle office."
     const harness = setup({
-      parent: async (request, call) => {
+      parent: async (_request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
         if (call === 2) {
-          await westAsked(harness, westRunId(request))
+          await westAsked()
           return toolCalls(["steer", "message_agent", { key: WEST.key, text: STEER }])
         }
         const westId = westRunId(harness.parentRequests[1])
@@ -988,7 +807,6 @@ describe("a turn that ends while a child waits on its question", () => {
   // messages are told they answered it.
   test("is answered once when two answers are sent at once", async () => {
     const harness = setup({
-      slowAnswers: true,
       parent: (request, call) => {
         if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
         if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])

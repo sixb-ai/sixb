@@ -6,7 +6,7 @@ reach the same operations over HTTP, so none of them may assume they share a pro
 
 ```text
 run-session.ts             AgentRunSession: conversation turns and child agents
-run-session-children.ts    a turn's children and mail
+run-session-children.ts    a turn's children
 run-liveness.ts            ending a run whose lease lapsed
 run-fence.ts               AgentExecutionLostError, and the writes that report it
 run-turn.ts                what a turn or child starts from: AgentRunContext
@@ -29,18 +29,19 @@ so a run ends without a queue job coming back for it.
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
 token stops working at once, and a runner that never hears the broker reads the cancel at its next
-lease renewal, which aborts the session's `cancelled`.
+lease renewal, which aborts the session's `cancelled`. That is the only signal a run hears from
+outside its runner: a turn and its children share one, so their messages and questions, and a
+child's end, stay in it (`FamilyMailbox` in `@sixb/agent`).
 
 ## Fencing
 
 Every durable write carries the session's token, and storage refuses it once another delivery
 reclaimed the run: finishing, the context checkpoint, workspace transitions, spawning a child and
 clearing a child's dead attempt. `assertOwned` checks the same before a side effect storage cannot
-fence, such as a sandbox action, and mail checks it before it sends.
+fence, such as a sandbox action.
 
 Whichever write finds the run gone throws `AgentExecutionLostError` (`run-fence.ts`), never a
-storage error, so a runner checks for one error. Mail is sent as the session's run, which names
-its sender, and only to its own children's threads or to the turn that spawned it.
+storage error, so a runner checks for one error.
 
 ## Artifacts
 
@@ -70,8 +71,8 @@ plan() · memory                        what a run is set up with, as plain data
                                        docs and a turn's delegation models; and the memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
-threads · children · mail              the conversation's messages, a turn's children, and mail
-                                       between them; reads answer only for the run's conversation
+threads · children                     the conversation's messages and a turn's children; reads
+                                       answer only for the run's conversation
 artifacts                              the conversation's artifacts, read as the requester, and
                                        what the run publishes into it (run-artifacts.ts)
 files                                  where the run's files are stored and read: its attachments,

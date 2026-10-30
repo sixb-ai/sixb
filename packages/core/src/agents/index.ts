@@ -219,9 +219,7 @@ export {
 } from "./run-session"
 export type {
   AgentChildDraft,
-  AgentMailDraft,
   AgentRunChildren,
-  AgentRunMail,
   AgentRunThreads,
 } from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
@@ -256,13 +254,11 @@ export type {
 } from "./skills"
 export type {
   AgentCompactionFailureCode,
-  AgentMail,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
-  ReceivedAgentMail,
 } from "./streams/protocol"
 export {
   AGENT_COMPACTION_FAILURE_CODES,
@@ -271,20 +267,13 @@ export {
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
   agentRunFinishedEvent,
-  agentRunInboxStreamId,
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
-  agentThreadInboxStreamId,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   isAgentRunStreamEvent,
-  isKnownAgentMailKind,
-  publishAgentMail,
   publishAgentRunCancel,
   publishAgentRunFinished,
-  readAgentMail,
-  subscribeAgentInbox,
-  subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
 export { listSubagentThreadRuns, subagentSandboxFiles } from "./subagent-runs"

@@ -227,26 +227,19 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
 
 The parent steers a child still at work with `message_agent({ key, text })`. The key, not a run
 id, names the child, so it stays right across a continuation (`src/subagent-tools.ts`,
-`src/subagent-inbox.ts`):
+`src/subagent-inbox.ts`, `src/family-mailbox.ts`):
 
-- **Transport.** The parent appends an `agent.mail` record (`id`, `fromRunId`, `toThreadId`,
-  `kind`, `text`, `sentAt`) to the inbox stream of the child's thread,
-  `agents.threads.<childThreadId>.inbox`, which every run of the child reads. Its id,
-  `<parentRunId>:<modelCallId>:<toolCallId>`, is its idempotency key: a provider that reuses tool
-  call ids across steps still sends two messages. There is no table: both threads keep it, the
-  parent's tool call and the child's `mail` part. The stream keeps mail 8 days, past the 7 an
-  approval may wait, for the continuation below.
-- **Kinds.** Every mail carries `text` its reader's model can read. A reader delivers a kind it
-  does not know (a newer sender's) as a message, with a warning, so no cursor passes mail it never
-  delivered; a record with no mail envelope is reported and passed. `question`, `answer` and
-  `deferred` are a child's questions and their replies (see
-  [questions to the parent](#questions-to-the-parent)): never read as messages.
-- **Reading.** At each step boundary the child reads its inbox from its last cursor, from the
-  start for its first step, so a message sent while it was queued is read then. It keeps each id
-  once, whatever the broker delivers again, and skips the ids its thread already holds. The
-  messages become one user message of `mail` parts, projected as `<sixb_parent_message id="…">`,
-  the sender's text escaped, which stays in the history of every later step. A read that fails is
-  tried again at the next boundary.
+- **Transport.** A turn and the children it runs share a runner, so what they say to each other
+  never leaves it: the turn's mailbox (`FamilyMailbox`), one per turn, held in memory. Its id,
+  `<parentRunId>:<modelCallId>:<toolCallId>`, names the call: a replay sends nothing twice, and a
+  provider that reuses tool call ids across steps still sends two messages. There is no table:
+  both threads keep it, the parent's tool call and the child's `mail` part.
+- **Kinds.** A `message` steers the child; `answer` and `deferred` are replies to its question
+  (see [questions to the parent](#questions-to-the-parent)), never read as messages.
+- **Reading.** At each step boundary the child takes what came since its last read, so a message
+  sent while it was queued is read at its first step. The messages become one user message of
+  `mail` parts, projected as `<sixb_parent_message id="…">`, the sender's text escaped, which
+  stays in the history of every later step.
 - **As it answers.** When the model answers without tools and a step is left, `beforeComplete`
   reads the inbox once more. A message there adds a step after the answer, marked `afterAnswer`:
   the child is told its parent has not received that answer, and writes its result again. Its
@@ -257,9 +250,11 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
   steps it came between, written with the run's finish, so a continuation replays it in place,
   with the bytes the child read.
 - **Pausing.** A child whose call is filed (`holdsRun`) or that paused is refused: it reads nothing
-  until a later turn continues it, if the user decides. A message accepted just before it filed
-  its call is not lost: the continuation reads the same inbox from its first step, skipping what
-  the thread holds. Until then `wait_agent` lists it in `unread`.
+  until a later turn continues it. As it pauses, on a held call or on its question, it stops
+  reading, and what came that it never read is kept on its run (`result.unread`): the run that
+  continues it, under a later turn and perhaps another runner, reads it first, in its trigger.
+  Mail sent after it stopped reading is refused, saying it paused or ended. Until it continues,
+  `wait_agent` lists the unread in `unread`.
 - **Refusals.** A key that is no child of the turn, a child of one of the conversation's 20 latest
   earlier turns (spawn it again), a child that ended, and a paused one are refused, each with what
   to do.
@@ -267,17 +262,15 @@ id, names the child, so it stays right across a continuation (`src/subagent-tool
 ## Questions to the parent
 
 A child asks with `ask_parent({ question })` and waits for the answer within its step. The
-question and its replies travel through the same inboxes as messages (`src/subagent-inbox.ts`,
-`src/child-questions.ts`, `src/subagent-tools.ts`):
+question and its replies go through the turn's mailbox, as messages do (`src/subagent-inbox.ts`,
+`src/family-mailbox.ts`, `src/subagent-tools.ts`):
 
-- **Asking.** The child writes a `question` mail to its parent turn's inbox,
-  `agents.runs.<parentRunId>.inbox`, naming its thread (`fromThreadId`), its id
-  `<childRunId>:<modelCallId>:<toolCallId>`, and waits on its thread's inbox, subscribed, for the
-  parent's reply (`inReplyTo` the question), bounded by its signal: its cancel, or its parent's. One question at a time: a second `ask_parent` while one waits is refused. Replies never
-  reach the step-boundary reads as messages, a continuation's included, and the first reply counts.
-- **The parent's wait wakes.** A question wakes the parent's waits through its inbox (see
-  [the parent's waits](#the-parents-waits)); when the turn cannot subscribe, `wait_agent` reads the
-  inbox at each re-check instead. `wait_agent` returns as soon as a question comes, from any child
+- **Asking.** The child puts its question, id `<childRunId>:<modelCallId>:<toolCallId>`, in the
+  turn's mailbox and waits for the reply to it (`inReplyTo` the question), bounded by its signal:
+  its cancel, or its parent's. One question at a time: a second `ask_parent` while one waits is
+  refused. Replies never reach the step-boundary reads as messages, and the first reply counts.
+- **The parent's wait wakes.** A question wakes the parent's waits at once (see
+  [the parent's waits](#the-parents-waits)). `wait_agent` returns as soon as a question comes, from any child
   of the turn, not only those it waits for, since a child blocked on its question never finishes.
   A question it already returned no longer stops a wait for other children, only a wait for its
   own. `questions` (`key`, `runId`, `id`, `text`) lists the questions it returns first and those
@@ -318,21 +311,16 @@ question and its replies travel through the same inboxes as messages (`src/subag
 
 A turn waits for its children three ways: `wait_agent`; before its end, for each child it told
 that its question waits to pause; and, when it pauses, for those still at work. Each wakes on
-what it waits for (`src/subagent-tools.ts`, `src/child-questions.ts`):
+what it waits for (`src/subagent-tools.ts`, `src/family-mailbox.ts`):
 
-- **A finish is announced to the parent.** When a child's run finishes, ended or paused, the worker
-  appends an `agent.child.finished` record (`runId`, `parentRunId`, `status`) to its parent's
-  inbox, `agents.runs.<parentRunId>.inbox`, as does a queued child's cancellation. The worker's
-  platform-owned sink layer writes it, like the conversations' activity feed, so a replaced
-  transcript sink cannot silence it. The child's own run stream says it finished too, but hearing
-  it would take one subscription per child, each carrying every chunk the child streams.
-- **One subscription per turn hears it.** From its first child, the turn subscribes to its inbox,
-  for its children's questions and their finishes alike. Each wake has the wait read the runs
-  again, and only then: the record is a wake, never a result. A wait takes the wake before it
-  reads, so what comes during the read wakes it.
-- **A re-check bounds a lost wake.** A wait that nothing woke reads again after
-  `CHILD_WAIT_RECHECK_MS` (5 s): a record the broker dropped, or a subscription that failed, costs
-  at most that, and a minute of waiting reads storage 12 times.
+- **The runner tells the turn.** When a child's run ends here, ended or paused, or its claim gives
+  up, its runner tells the turn's mailbox, which wakes the turn's waits, as a question does. Each
+  wake has the wait read the runs again, and only then: it is a wake, never a result. A wait takes
+  the wake before it reads, so what comes during the read wakes it.
+- **A re-check bounds an end recorded elsewhere.** A wait that nothing woke reads again after
+  `CHILD_WAIT_RECHECK_MS` (5 s): a child still queued that the API cancels, or one a repair pass
+  ends when its own end could not be recorded, ends outside the runner. A minute of waiting reads
+  storage 12 times.
 
 ## Child runs
 

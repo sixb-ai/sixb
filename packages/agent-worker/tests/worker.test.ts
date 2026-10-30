@@ -130,6 +130,7 @@ import {
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
+import { FamilyMailbox } from "../../agent/src/family-mailbox"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import {
   createConversationAgentEnvironment,
@@ -2029,7 +2030,7 @@ async function startChildren(
   for (const runId of runIds) {
     const run = await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: runId })
     if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
-    runner.start(run, { signal, delivery })
+    runner.start(run, { signal, delivery, family: new FamilyMailbox() })
   }
 }
 
@@ -9086,6 +9087,7 @@ describe("AgentWorker", () => {
           leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
           onLeaseRenewed: () => () => {},
         },
+        family: new FamilyMailbox(),
       })
       const child = await underFakeTime(
         async () => {

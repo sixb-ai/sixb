@@ -119,8 +119,6 @@ async function settleSubagent(
   input: Omit<Parameters<typeof finishSubagent>[0], "finishReason" | "text"> & {
     readonly generation: PausableModelLoopResult
     readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
-    /** Whether the child paused on its question. */
-    readonly inbox: SubagentInbox
     /** After how many steps it read its parent's last message. */
     readonly lastMessageAt: number
   }
@@ -179,6 +177,7 @@ async function finishSubagent(input: {
   readonly abortSignal: AbortSignal
   readonly finishReason: AgentRunFinishReason
   readonly work: readonly AppendAgentMessageInput[]
+  readonly inbox: SubagentInbox
   /** None yet for a paused child. */
   readonly text?: string
 }): Promise<SubagentRunRecord> {
@@ -194,6 +193,9 @@ async function finishSubagent(input: {
   // the run that continues it, and one that answered goes.
   const paused =
     input.finishReason === "awaiting_approval" || input.finishReason === "awaiting_answer"
+  // A paused child stops reading here: what came and it never read goes on with the run that
+  // continues it, as that run's first message.
+  const unread = paused ? input.inbox.close() : []
   await context.beforeFinalize?.({ discard: !paused })
   input.runtime.assertCanContinue()
 
@@ -206,6 +208,7 @@ async function finishSubagent(input: {
         text: input.text ?? "",
         ...(outputs.files.length > 0 ? { files: outputs.files } : {}),
         ...(outputs.error === undefined ? {} : { filesError: outputs.error }),
+        ...(unread.length > 0 ? { unread } : {}),
       },
     },
     input.work
