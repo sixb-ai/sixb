@@ -58,6 +58,6 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@sixb/agent": "workspace:^"
+    "@sixb/agent": "workspace:*"
   }
 }

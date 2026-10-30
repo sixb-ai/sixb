@@ -88,6 +88,12 @@ export function expectedWorkspaceDependency(
     }
   }
 
+  // Each companion peers exactly on core: a range to another one could install a release built
+  // for another core.
+  if (coreInternalCompanions.has(name) && coreInternalCompanions.has(dependency)) {
+    return { field: "dependencies", protocol: exactWorkspaceProtocol }
+  }
+
   if (dependency === "@sixb/core") {
     if (coreInternalCompanions.has(name)) {
       return { field: "peerDependencies", protocol: exactWorkspaceProtocol }

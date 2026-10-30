@@ -673,7 +673,7 @@
       "name": "@sixb/agent-worker",
       "version": "0.1.25",
       "dependencies": {
-        "@sixb/agent": "workspace:^",
+        "@sixb/agent": "workspace:*",
       },
       "devDependencies": {
         "@sixb/cli-core": "workspace:*",

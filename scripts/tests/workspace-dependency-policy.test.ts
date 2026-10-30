@@ -54,6 +54,16 @@ describe("workspace dependency policy", () => {
     })
   })
 
+  // Guard proof: drop the companion-to-companion rule; agent-worker may take @sixb/agent with ^.
+  test("pins one core-internal companion to another", () => {
+    const worker = stub("packages/agent-worker", "@sixb/agent-worker")
+
+    expect(expectedWorkspaceDependency(worker, "@sixb/agent")).toEqual({
+      field: "dependencies",
+      protocol: exactWorkspaceProtocol,
+    })
+  })
+
   test("requires peer hosts to have an exact development dependency", () => {
     const connector = stub("connectors/example", "@sixb/connector-example", {
       peerDependencies: { "@sixb/core": compatibleWorkspaceProtocol },
