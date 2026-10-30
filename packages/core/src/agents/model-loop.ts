@@ -14,6 +14,7 @@ import type {
   ModelUiChunk,
   ModelUsage,
 } from "../models/events"
+import { ModelUsageRecordingError } from "../models/execution/errors"
 import { LanguageModelCallMeter } from "../models/language-call"
 import type {
   LanguageModel,
@@ -34,13 +35,6 @@ import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
-/**
- * How long a model call may go without sending anything before it fails. Nothing else bounds a
- * call whose provider stopped answering: a turn has no time limit. Reasoning models can think for
- * minutes before their first part, so this is well beyond that.
- */
-export const MODEL_CALL_IDLE_MS = 10 * 60_000
-
 interface ModelLoopOptions {
   readonly model: LanguageModel
   readonly messages: readonly ModelMessage[]
@@ -197,7 +191,6 @@ export async function runModelLoop(
     let accepted = false
     let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
     let terminalStreamError: { readonly error: unknown } | undefined
-    const idle = idleGuard(input.signal)
     try {
       const stream = await input.model.stream({
         callId,
@@ -218,21 +211,16 @@ export async function runModelLoop(
                 schema: input.output.schema,
               },
             }),
-        signal: idle.signal,
+        // A call the provider leaves silent fails where it is recorded (see reportModelCalls).
+        signal: input.signal,
       })
       accepted = true
-      idle.reset()
       for await (const event of stream.events) {
-        idle.reset()
         await accumulator.accept(event)
       }
     } catch (error) {
-      if (idle.fired() && !input.signal.aborted && !accumulator.isFinished()) {
-        throw new ModelStreamError(
-          `[SixbModels] The model sent nothing for ${MODEL_CALL_IDLE_MS / 60_000} minutes.`,
-          { cause: error }
-        )
-      }
+      // A call that could not be recorded fails the run, even one that was being cancelled.
+      if (error instanceof ModelUsageRecordingError) throw error
       const aborted = input.signal.aborted || isAbortError(error)
       if (accumulator.isFinished()) {
         if (!aborted) terminalStreamError = { error }
@@ -246,7 +234,6 @@ export async function runModelLoop(
         }
       }
     } finally {
-      idle.dispose()
       // The step's cost, as the model records the call: the model is what records it (see
       // AiModelCallRecorder.wrapModel), never the loop that reads it.
       if (accepted) cost = accumulator.meter.end({ model: input.model, callId }).cost
@@ -772,13 +759,9 @@ class StreamAccumulator {
       toolCalls: parsed.toolCalls,
       finishReason: this.finishReason,
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
-      ...this.accounting(),
+      ...this.meter.facts(),
       ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
     }
-  }
-
-  accounting() {
-    return this.meter.facts()
   }
 
   /**
@@ -1137,24 +1120,4 @@ function isAbortError(error: unknown): boolean {
     (error instanceof DOMException && error.name === "AbortError") ||
     (error instanceof Error && error.name === "AbortError")
   )
-}
-
-/**
- * The signal one model call runs under: the loop's, and aborted once the call goes
- * {@link MODEL_CALL_IDLE_MS} without a response or a stream event.
- */
-function idleGuard(signal: AbortSignal) {
-  const idle = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const reset = () => {
-    clearTimeout(timer)
-    timer = setTimeout(() => idle.abort(), MODEL_CALL_IDLE_MS)
-  }
-  reset()
-  return {
-    signal: AbortSignal.any([signal, idle.signal]),
-    reset,
-    fired: () => idle.signal.aborted,
-    dispose: () => clearTimeout(timer),
-  }
 }

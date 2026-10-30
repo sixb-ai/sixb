@@ -1,3 +1,4 @@
+import { ModelStreamError } from "./errors"
 import type {
   LanguageModelStreamEvent,
   ModelCallEndEvent,
@@ -98,9 +99,16 @@ export class LanguageModelCallMeter {
 }
 
 /**
+ * A call whose provider sends nothing for this long fails, its usage recorded unknown. A model
+ * thinking at length still streams: providers keep a reasoning stream alive with events.
+ */
+export const MODEL_CALL_IDLE_MS = 10 * 60_000
+
+/**
  * The model, with each call it makes reported once as it ends: when it finishes, before its
- * `finish` event reaches the reader, or however it ends instead, cancelled or failed, its usage then
- * unknown. A call is reported by the model that served it, never by whoever reads its stream.
+ * `finish` event reaches the reader, or however it ends instead, its usage then unknown: failed,
+ * silent past {@link MODEL_CALL_IDLE_MS}, or let go by its reader, even before its first event. A
+ * call is reported by the model that served it, never by whoever reads its stream.
  */
 export function reportModelCalls(
   model: LanguageModel,
@@ -108,7 +116,6 @@ export function reportModelCalls(
 ): LanguageModel {
   const { providerId, modelId, definition, costEstimator, rateCard } = model
   const { defaultReasoning, maxOutputTokens } = model
-  const resolve = model.resolve?.bind(model)
   // Read and bound once: a provider's model keeps its state in private fields.
   return {
     providerId,
@@ -118,45 +125,123 @@ export function reportModelCalls(
     ...(rateCard === undefined ? {} : { rateCard }),
     ...(defaultReasoning === undefined ? {} : { defaultReasoning }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-    ...(resolve === undefined
-      ? {}
-      : { resolve: async (options) => reportModelCalls(await resolve(options), onEnd) }),
     ...(model.validateResponseFormat === undefined
       ? {}
       : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
     stream: async (request) => {
-      const opened = await model.stream(request)
-      return { ...opened, events: reported(model, request, opened, onEnd) }
+      // Aborted once the provider goes silent, or the reader lets the call go.
+      const stop = new AbortController()
+      const opening = model.stream({
+        ...request,
+        signal: AbortSignal.any([request.signal, stop.signal]),
+      })
+      // A response that never comes is not a call: nothing was accepted, so nothing is reported.
+      const opened = await withinIdle(opening, stop, (late) => closeEvents(late.events))
+      return { ...opened, events: reportedEvents(model, request, opened, stop, onEnd) }
     },
   }
 }
 
-async function* reported(
+function reportedEvents(
   model: LanguageModel,
   request: LanguageModelRequest,
   stream: LanguageModelStream,
+  stop: AbortController,
   onEnd: (event: ModelCallEndEvent) => void | Promise<void>
-): AsyncGenerator<LanguageModelStreamEvent> {
+): AsyncIterable<LanguageModelStreamEvent> {
   const meter = new LanguageModelCallMeter()
-  let reported = false
+  let reported: Promise<void> | undefined
+  // Once accepted, a call is reported exactly once, however it ends.
   const report = () => {
-    reported = true
-    return onEnd(
-      meter.end({
-        model,
-        callId: request.callId,
-        ...(request.reasoning === undefined ? {} : { requestedReasoning: request.reasoning }),
-      })
-    )
+    reported ??= (async () =>
+      onEnd(
+        meter.end({
+          model,
+          callId: request.callId,
+          ...(request.reasoning === undefined ? {} : { requestedReasoning: request.reasoning }),
+        })
+      ))()
+    return reported
   }
+  let source: AsyncIterator<LanguageModelStreamEvent> | undefined
+  let done = false
+
+  // An iterator of its own, not a generator: a generator's `finally` never runs for a reader that
+  // lets go before its first `next()`, so that call would go unreported.
+  const events: AsyncIterator<LanguageModelStreamEvent> = {
+    async next() {
+      if (done) return { done: true, value: undefined }
+      source ??= stream.events[Symbol.asyncIterator]()
+      let result: IteratorResult<LanguageModelStreamEvent>
+      try {
+        result = await withinIdle(source.next(), stop)
+      } catch (error) {
+        done = true
+        if (stop.signal.aborted) closeEvents(source)
+        await report()
+        throw error
+      }
+      if (result.done) {
+        done = true
+        await report()
+        return result
+      }
+      meter.accept(result.value)
+      if (result.value.type === "finish") await report()
+      return result
+    },
+    async return(value) {
+      done = true
+      if (!reported) stop.abort(new DOMException("The reader let the model call go.", "AbortError"))
+      if (source) closeEvents(source)
+      else closeEvents(stream.events)
+      try {
+        await report()
+      } catch (error) {
+        // Thrown to a reader that broke off, but lost on one that threw: say it here too.
+        console.error(
+          `[SixbModels] Model call '${request.callId}' ended early, and recording it failed.`,
+          error
+        )
+        throw error
+      }
+      return { done: true, value }
+    },
+  }
+  return { [Symbol.asyncIterator]: () => events }
+}
+
+/** Settle with `pending`, or fail once the provider has been silent for {@link MODEL_CALL_IDLE_MS}. */
+async function withinIdle<T>(
+  pending: Promise<T>,
+  stop: AbortController,
+  onLate?: (value: T) => void
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const silence = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new ModelStreamError(
+        `[SixbModels] The model sent nothing for ${MODEL_CALL_IDLE_MS / 60_000} minutes.`
+      )
+      // A provider that honors its signal stops; one that does not is left behind.
+      stop.abort(error)
+      reject(error)
+    }, MODEL_CALL_IDLE_MS)
+  })
   try {
-    for await (const event of stream.events) {
-      meter.accept(event)
-      if (event.type === "finish") await report()
-      yield event
-    }
+    return await Promise.race([pending, silence])
   } finally {
-    // Once accepted, a call is never erased: cancelled, failed or unfinished, it is reported.
-    if (!reported) await report()
+    clearTimeout(timer)
+    if (stop.signal.aborted) pending.then(onLate, () => {})
   }
+}
+
+/** Close a provider's stream without waiting on it: one that ignores its signal may never settle. */
+function closeEvents(
+  events: AsyncIterable<LanguageModelStreamEvent> | AsyncIterator<LanguageModelStreamEvent>
+): void {
+  const iterator = Symbol.asyncIterator in events ? events[Symbol.asyncIterator]() : events
+  void Promise.resolve()
+    .then(() => iterator.return?.())
+    .catch(() => {})
 }
