@@ -59,7 +59,10 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   /** The run as the claim left it: `running`, with this session's execution. */
   readonly run: TRun
   readonly executionToken: string
-  /** Aborts once the run, or any run named in `cancelWith`, is cancelled. */
+  /**
+   * Aborts once the run, or any run named in `cancelWith`, is cancelled; and, with an
+   * {@link AgentExecutionLostError}, once a renewal finds the run ended or taken over.
+   */
   readonly cancelled: AbortSignal
   /**
    * The run's model calls. Wrap a model with it, and each call is admitted against the AI limits
@@ -261,10 +264,19 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return modelCalls
     },
     async renewLease(leaseExpiresAt) {
-      await host.storage.agents.runs.confirmExecutionOwnership({
-        ...fence,
-        queueLeaseExpiresAt: new Date(leaseExpiresAt),
-      })
+      try {
+        await host.storage.agents.runs.confirmExecutionOwnership({
+          ...fence,
+          queueLeaseExpiresAt: new Date(leaseExpiresAt),
+        })
+      } catch (error) {
+        if (!isTerminalOrExecutionGone(error)) throw error
+        // A repair pass ended the run, or another runner took it over: this one stops now rather
+        // than at its next write, as it does when its queue lease is lost.
+        const lost = new AgentExecutionLostError(run.id)
+        cancel.abort(lost)
+        throw lost
+      }
     },
     async finish(outcome, messages) {
       const finished = await finishWithRetries(
@@ -387,7 +399,11 @@ export function agentRunPeople(
 export async function watchAgentRunCancel(
   host: Pick<AgentRunSessionHost, "projectId" | "broker">,
   runIds: readonly string[]
-): Promise<{ readonly signal: AbortSignal; readonly stop: () => void }> {
+): Promise<{
+  readonly signal: AbortSignal
+  abort(reason: unknown): void
+  readonly stop: () => void
+}> {
   const controller = new AbortController()
   const unsubscribes = await Promise.all(
     runIds.map((runId) =>
@@ -401,6 +417,7 @@ export async function watchAgentRunCancel(
   )
   return {
     signal: controller.signal,
+    abort: (reason) => controller.abort(reason),
     stop: () => {
       for (const unsubscribe of unsubscribes) unsubscribe?.()
     },
@@ -462,7 +479,11 @@ async function startOrReclaim<TRun extends AgentRunRecord>(
           await agents.runs.start({ projectId, id: run.id, modelId: input.modelId, execution }),
           "starting"
         )
-      : sameKind(run, await agents.runs.reclaim({ projectId, id: run.id, execution }), "reclaiming")
+      : sameKind(
+          run,
+          await agents.runs.reclaim({ projectId, id: run.id, execution, ifLapsedBy: new Date() }),
+          "reclaiming"
+        )
   } catch (error) {
     if (error instanceof AgentStorageError && error.code === "invalid_state") return null
     throw error

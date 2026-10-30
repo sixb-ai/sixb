@@ -283,7 +283,17 @@ export class PgAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      await this.lockRunning(tx, input.projectId, input.id)
+      const run = await this.lockRunning(tx, input.projectId, input.id)
+      if (
+        input.ifLapsedBy &&
+        run.execution_queue_lease_expires_at !== null &&
+        new Date(run.execution_queue_lease_expires_at).getTime() > input.ifLapsedBy.getTime()
+      ) {
+        throw new AgentStorageError(
+          "invalid_state",
+          `[SixbPg] Agent run '${input.id}' is still held by its runner, whose lease has not lapsed.`
+        )
+      }
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
         SET

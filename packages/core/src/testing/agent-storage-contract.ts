@@ -1767,10 +1767,21 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(older.execution?.queueLeaseExpiresAt.toISOString()).toBe("2026-06-23T10:03:00.000Z")
 
+        // A takeover conditioned on a lapse that a renewal moved past leaves the run to its runner.
+        await expectAgentError(
+          storage.runs.reclaim({
+            projectId,
+            id: "run_1",
+            execution: execution("exec_2", at("2026-06-23T10:04:00.000Z")),
+            ifLapsedBy: at("2026-06-23T10:02:59.000Z"),
+          }),
+          "invalid_state"
+        )
         const reclaimed = await storage.runs.reclaim({
           projectId,
           id: "run_1",
           execution: execution("exec_2", at("2026-06-23T10:04:00.000Z")),
+          ifLapsedBy: at("2026-06-23T10:03:00.000Z"),
         })
         expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
         expect(reclaimed.execution?.token).toBe("exec_2")
