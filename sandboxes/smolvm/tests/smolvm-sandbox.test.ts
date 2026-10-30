@@ -129,6 +129,24 @@ describe("SmolvmSandbox lifecycle", () => {
     await sandbox.destroy()
   })
 
+  // Guard proof: run writeFiles' script as root again; its exec is not under setpriv. As root, a
+  // link a command planted in the working directory would lead the write anywhere.
+  test("writes files as the command user, like the commands", async () => {
+    const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
+    try {
+      await sandbox.writeFiles([{ path: "notes.txt", contents: "x" }])
+
+      const calls = await readCalls()
+      const write = calls.find((call) => call.endsWith("sh -c set -e")) ?? ""
+      expect(write).toStartWith(
+        "machine exec --name run-1 --workdir / -- setpriv --reuid=65534 --regid=65534"
+      )
+      expect(calls.some((call) => call.includes("chown") && call.includes("notes.txt"))).toBe(false)
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("destroy stops and removes the machine; later stop/destroy are no-ops and commands reject", async () => {
     const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
 
