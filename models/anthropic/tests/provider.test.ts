@@ -436,6 +436,33 @@ describe("Anthropic provider", () => {
     expect(bodies[0]?.thinking).toEqual(thinking)
   })
 
+  test("selects the workspace for keys that can act on several", async () => {
+    const headers: Headers[] = []
+    const fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers))
+      return sseResponse([])
+    }
+    const previous = process.env.ANTHROPIC_WORKSPACE_ID
+    process.env.ANTHROPIC_WORKSPACE_ID = "wrkspc_env"
+    try {
+      await createAnthropic({ fetch })("claude-opus-5-5").stream(request())
+      await createAnthropic({ fetch, workspaceId: "wrkspc_option" })("claude-opus-5-5").stream(
+        request()
+      )
+      delete process.env.ANTHROPIC_WORKSPACE_ID
+      await createAnthropic({ fetch })("claude-opus-5-5").stream(request())
+    } finally {
+      if (previous === undefined) delete process.env.ANTHROPIC_WORKSPACE_ID
+      else process.env.ANTHROPIC_WORKSPACE_ID = previous
+    }
+
+    expect(headers.map((header) => header.get("anthropic-workspace-id"))).toEqual([
+      "wrkspc_env",
+      "wrkspc_option",
+      null,
+    ])
+  })
+
   test("uses configured credentials, metadata, and snapshotted request options", async () => {
     // Removal proof: omit configuredModels or the model-options snapshot.
     const options = { maxOutputTokens: 512, request: { temperature: 0.2 } }

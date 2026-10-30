@@ -22,7 +22,8 @@ import { anthropic } from "@sixb/anthropic"
 const model = anthropic("claude-sonnet-5")
 ```
 
-`anthropic` reads `ANTHROPIC_API_KEY` lazily. Create an isolated provider when you need custom
+`anthropic` reads `ANTHROPIC_API_KEY` lazily, and `ANTHROPIC_WORKSPACE_ID` for keys that are not
+scoped to a single workspace, which Anthropic otherwise rejects. Create an isolated provider when you need custom
 credentials, headers, beta features, transport, or inline definitions:
 
 ```ts

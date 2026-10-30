@@ -47,6 +47,8 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "im
 export interface AnthropicOptions {
   readonly baseUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
+  /** Workspace for keys that can act on several. Defaults to `ANTHROPIC_WORKSPACE_ID`. */
+  readonly workspaceId?: ValueSource<string | undefined>
   readonly apiVersion?: string
   readonly betas?: ValueSource<readonly string[]>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
@@ -95,6 +97,7 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
   const transport: AnthropicTransport = {
     ...options,
     apiKey: options.apiKey ?? (() => process.env.ANTHROPIC_API_KEY),
+    workspaceId: options.workspaceId ?? (() => process.env.ANTHROPIC_WORKSPACE_ID),
     baseUrl,
     apiVersion,
   }
@@ -738,6 +741,7 @@ function anthropicHeaders(
 ): Record<string, string> {
   const headers = resolve(transport.headers) ?? {}
   const apiKey = resolve(transport.apiKey)
+  const workspaceId = resolve(transport.workspaceId)?.trim()
   const betas = resolve(transport.betas)?.filter((value) => value.trim()) ?? []
   return {
     accept,
@@ -746,6 +750,7 @@ function anthropicHeaders(
     ...(contentType ? { "content-type": "application/json" } : {}),
     ...(betas.length === 0 ? {} : { "anthropic-beta": betas.join(",") }),
     ...(apiKey ? { "x-api-key": apiKey } : {}),
+    ...(workspaceId ? { "anthropic-workspace-id": workspaceId } : {}),
   }
 }
 
