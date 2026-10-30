@@ -48,6 +48,25 @@ describe.skipIf(backend === "none")(`denyReadPaths (${backend})`, () => {
     }
   })
 
+  // Guard proof: drop the ancestors' rule from buildSeatbeltProfile; the moved secret is read.
+  test("a denied path can't be read by moving the directory above it", async () => {
+    const directory = project()
+    const sandbox = await new LocalSandboxFactory({
+      denyReadPaths: [join(directory, ".env")],
+    }).create()
+    try {
+      const moved = `${directory}-moved`
+      directories.push(moved)
+      const read = await sandbox.runCommand("/bin/sh", [
+        "-c",
+        `mv ${directory} ${moved}; cat ${join(moved, ".env")}`,
+      ])
+      expect(read.stdout).not.toContain("do-not-read")
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("a denied file inside the working directory hides only that file", async () => {
     const directory = project()
     const sandbox = await new LocalSandboxFactory({
