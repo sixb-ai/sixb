@@ -63,10 +63,8 @@ import {
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
-  type AgentRunMail,
   type AgentRunThreads,
   agentRunChildren,
-  agentRunMail,
   agentRunScope,
   agentRunThreads,
 } from "./run-session-children"
@@ -125,8 +123,6 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly heldCalls: AgentRunHeldCalls
   /** A conversation turn's children: spawning them, and reading them and their threads. */
   readonly children: AgentRunChildren
-  /** Mail between a turn and its children. */
-  readonly mail: AgentRunMail
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
    * once the last lease recorded lapses, so the session renews it as the queue does. A renewal that
@@ -430,7 +426,6 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       tools: host.definitions.tools.list().map((tool) => tool.name),
       models: host.definitions.models?.language?.list() ?? [],
     })),
-    mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),

@@ -20,11 +20,7 @@ import {
   type Sandbox,
   SixbHost,
 } from "@sixb/core"
-import {
-  agentThreadInboxStreamId,
-  createSubagentRunId,
-  holdAgentApprovalCall,
-} from "@sixb/core/internal/agents"
+import { createSubagentRunId, holdAgentApprovalCall } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
@@ -668,83 +664,6 @@ describe("a message to a child at work", () => {
     }
   })
 
-  // Removal proof: drop the read-id check from SubagentInbox.take; the child reads the message
-  // twice, in one block each.
-  test("is read once, however often the broker delivers it", async () => {
-    const harness = steeredMidWork({
-      firstStep: () => toolCalls(["look", "bash", { command: "ls offers" }]),
-      // What a redelivery past the broker's dedupe window does: the same record, written again.
-      afterSent: async ({ agents, broker }, childRunId) => {
-        const streamId = agentThreadInboxStreamId((await child(agents, childRunId)).threadId)
-        const { records } = await broker.read({ projectId, streamId })
-        await broker.append({
-          projectId,
-          streamId,
-          records: records.map((record) => ({ name: record.name, payload: record.payload })),
-        })
-      },
-    })
-    jest.useFakeTimers()
-    await harness.worker.start()
-    try {
-      const { run } = await requestTurn(harness)
-      const compare = await child(harness.agents, createSubagentRunId(run.id, COMPARE.key))
-
-      expect(
-        modelText(harness.childRequests(COMPARE.key)[1]).split("<sixb_parent_message id=").length -
-          1
-      ).toBe(1)
-      expect(mailParts(await transcriptOf(harness, compare.id))).toHaveLength(1)
-    } finally {
-      await settle(harness.worker.stop(), "worker stop")
-    }
-  })
-
-  // Removal proof: accept only the kinds this version knows in readAgentMail's envelope check; the
-  // newer kind is skipped for good, as the cursor passes it.
-  test("reads a newer sender's kind as a message, rather than skipping it", async () => {
-    const harness = steeredMidWork({
-      firstStep: () => toolCalls(["look", "bash", { command: "ls offers" }]),
-      afterSent: async ({ broker }, childRunId) => {
-        const parentRunId = (await child(harness.agents, childRunId)).parentRunId
-        await broker.append({
-          projectId,
-          streamId: agentThreadInboxStreamId((await child(harness.agents, childRunId)).threadId),
-          records: [
-            {
-              name: "agent.mail",
-              payload: {
-                id: `${parentRunId}:future`,
-                fromRunId: parentRunId,
-                toThreadId: (await child(harness.agents, childRunId)).threadId,
-                kind: "handoff",
-                text: "Use the fiscal year.",
-                sentAt: new Date().toISOString(),
-              },
-            },
-          ],
-        })
-      },
-    })
-    jest.useFakeTimers()
-    await harness.worker.start()
-    try {
-      const { run } = await requestTurn(harness)
-      const compare = createSubagentRunId(run.id, COMPARE.key)
-
-      expect(mailParts(await transcriptOf(harness, compare))).toEqual([
-        expect.objectContaining({ id: mailId(run.id), kind: "message", text: STEER }),
-        expect.objectContaining({
-          id: `${run.id}:future`,
-          kind: "message",
-          text: "Use the fiscal year.",
-        }),
-      ])
-    } finally {
-      await settle(harness.worker.stop(), "worker stop")
-    }
-  })
-
   // Removal proof: build the mail id from the provider's tool call id alone; the second message,
   // whose call reuses that id in a later step, is dropped as a duplicate.
   test("is one message per call, even when a provider reuses a tool call id", async () => {
@@ -975,9 +894,9 @@ describe("message_agent", () => {
 })
 
 describe("a message a child paused before reading", () => {
-  // Removal proof: read a run's mail in SubagentInbox.take only from the run's own start, past
-  // what was sent before it was admitted; the child that continues after the approval never reads
-  // the message its parent was told it would.
+  // Removal proof: drop `unread` from what finishSubagent records, or from continuationTrigger;
+  // the child that continues after the approval never reads the message its parent was told it
+  // would.
   test("reaches the child that continues it once the user decides", async () => {
     const childAtWork = moment()
     const sent = moment()
@@ -1030,7 +949,10 @@ describe("a message a child paused before reading", () => {
       const continuation = createSubagentRunId(decided.run.id, COMPARE.key)
 
       expect(readsMessage(harness.childRequests(`${COMPARE.key}'`)[0], run.id)).toBe(true)
-      expect(mailParts(await transcriptOf(harness, continuation))).toEqual([
+      // It is the first thing the continuation reads: its trigger holds it.
+      const { triggerMessageId } = await child(harness.agents, continuation)
+      const trigger = await harness.agents.messages.getById({ projectId, id: triggerMessageId })
+      expect(mailParts(trigger ? [trigger] : null)).toEqual([
         expect.objectContaining({ id: mailId(run.id), text: STEER }),
       ])
       expect(toolOutput(harness.parentRequests[4], "wait-again")).toMatchObject({

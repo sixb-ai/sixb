@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { join } from "node:path"
 import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
@@ -35,7 +35,8 @@ import { SandboxStateUnavailableError } from "@sixb/core/sandboxes"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { renderCurrentTime } from "../../agent/src/agent-prompt"
-import { CHILD_WAIT_RECHECK_MS, OTHER_INBOX_RECHECK_MS } from "../../agent/src/subagent-tools"
+import { FamilyMailbox } from "../../agent/src/family-mailbox"
+import { CHILD_WAIT_RECHECK_MS, OTHER_TURN_RECHECK_MS } from "../../agent/src/subagent-tools"
 import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 
@@ -101,6 +102,7 @@ afterEach(() => {
   editsRun = 0
   blocking = undefined
   jest.useRealTimers()
+  jest.restoreAllMocks()
 })
 
 /**
@@ -329,7 +331,6 @@ function setup(scripts: {
   readonly parent: Script
   readonly children: Readonly<Record<string, Script>>
   readonly afterHold?: (runId: string) => Promise<void>
-  readonly broker?: InMemoryBroker
   /**
    * A provider that keeps named sandboxes and resumes them, as Vercel's does. `lost` names those
    * whose saved files are gone, as an expired snapshot's.
@@ -405,7 +406,7 @@ function setup(scripts: {
     actions: [markPaid],
     groups: [agentUsers],
     roles: [agentRunner],
-    broker: scripts.broker ?? new InMemoryBroker(),
+    broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
@@ -1560,13 +1561,6 @@ describe("a paused child, on a provider that keeps sandboxes", () => {
 })
 
 /** Drops what tells a parent that its child finished, as a lost record would. */
-class LosesChildFinishes extends InMemoryBroker {
-  override async append(params: Parameters<InMemoryBroker["append"]>[0]) {
-    const records = params.records.filter((record) => record.name !== "agent.child.finished")
-    return records.length === 0 ? [] : super.append({ ...params, records })
-  }
-}
-
 /** How much fake time passes until `check` holds. */
 async function elapsedUntil(check: () => boolean | Promise<boolean>, label: string) {
   const startedAt = Date.now()
@@ -1631,7 +1625,7 @@ const WAITS: ChildWait[] = [
  * Collect works a minute while its parent waits, then finishes just after one of the wait's
  * re-checks: only the wake of its finish ends the wait before the next.
  */
-async function waitOnCollect(wait: ChildWait, broker?: InMemoryBroker) {
+async function waitOnCollect(wait: ChildWait, options: { readonly unheard?: boolean } = {}) {
   let releaseCollect!: () => void
   const collectReleased = new Promise<void>((resolve) => {
     releaseCollect = resolve
@@ -1644,8 +1638,9 @@ async function waitOnCollect(wait: ChildWait, broker?: InMemoryBroker) {
         return answer("Three invoices are open.")
       },
     },
-    ...(broker === undefined ? {} : { broker }),
   })
+  // Its end recorded where the turn's mailbox does not hear it: by the API, or a repair pass.
+  if (options.unheard) spyOn(FamilyMailbox.prototype, "finished").mockImplementation(() => {})
   jest.useFakeTimers()
   await harness.worker.start()
   try {
@@ -1686,10 +1681,9 @@ describe.each(WAITS)("a wait for a child at work: $name", (wait) => {
   })
 
   // Removal proof: wait for the wake alone, without CHILD_WAIT_RECHECK_MS bounding the delay; the
-  // finish whose record was lost holds the wait until its deadline margin, past what fake time
-  // drives here.
-  test("still ends at its next re-check when the finish's record is lost", async () => {
-    const { waitedAfterFinish } = await waitOnCollect(wait, new LosesChildFinishes())
+  // end nothing wakes it for holds the wait for good, past what fake time drives here.
+  test("still ends at its next re-check when nothing wakes it for the child's end", async () => {
+    const { waitedAfterFinish } = await waitOnCollect(wait, { unheard: true })
 
     expect(waitedAfterFinish).toBeGreaterThanOrEqual(CHILD_WAIT_RECHECK_MS - 100)
     expect(waitedAfterFinish).toBeLessThan(CHILD_WAIT_RECHECK_MS + 1_000)
@@ -1754,7 +1748,7 @@ describe("a retried resume whose earlier attempt's continuation is still stoppin
         async () => (await harness.agents.runs.getById({ projectId, id: again })) !== null,
         "the retry continues the child"
       )
-      expect(continuedAfter).toBeLessThan(OTHER_INBOX_RECHECK_MS + 500)
+      expect(continuedAfter).toBeLessThan(OTHER_TURN_RECHECK_MS + 500)
       expect(await terminal(harness.agents, retried.id)).toMatchObject({ status: "succeeded" })
     } finally {
       release()
@@ -1819,7 +1813,7 @@ describe("a wait for a child of an earlier turn still stopping", () => {
         () => harness.parentRequests.length === 4,
         "the wait is over"
       )
-      expect(waitedAfterStop).toBeLessThan(OTHER_INBOX_RECHECK_MS + 500)
+      expect(waitedAfterStop).toBeLessThan(OTHER_TURN_RECHECK_MS + 500)
       expect(await terminal(harness.agents, next.id)).toMatchObject({ status: "succeeded" })
     } finally {
       release()

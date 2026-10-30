@@ -702,6 +702,17 @@ export function assertSubagentRunResult(
       `[${prefix}] Subagent run '${runId}' result.filesError must say why it returned no files.`
     )
   }
+  if (
+    result.unread !== undefined &&
+    (!paused ||
+      !Array.isArray(result.unread) ||
+      !result.unread.every((mail) => typeof mail?.id === "string" && typeof mail.text === "string"))
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Only a paused subagent run keeps unread mail, each with its id and text: '${runId}'.`
+    )
+  }
 }
 
 /** Each file a parent and its child exchange: a safe relative path, once, and a valid FileRef. */

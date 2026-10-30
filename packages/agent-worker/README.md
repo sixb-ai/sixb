@@ -37,7 +37,7 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
 - The worker transitions the durable run from `queued` to `running` when it claims the job, through
   core's run session (`claimAgentRun` in `@sixb/core/internal/agents`; see its
   [README](../core/src/agents/README.md)). A turn, a child and a workflow step reach shared state
-  only through their session: preparation reads, model calls, live records, children and mail,
+  only through their session: preparation reads, model calls, live records, children,
   the checkpoint, the workspace and the finish. A runner outside the worker will reach the same
   operations over HTTP.
 - Before each conversation turn, the worker estimates the next model request and checkpoints older
@@ -87,7 +87,8 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   installed in the parent's `$SIXB_ARTIFACTS` (see
   [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns once they have all
   ended, or one asks a question.
-  `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
+  `message_agent` sends a queued or running child a message, by its key, through the turn's
+  mailbox in the runner; the child reads it
   before its next step, or answers again when it came as it answered, and `wait_agent` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
   [messages to a child](../agent/docs/runtime-design.md#messages-to-a-child)). Children get

@@ -1,6 +1,7 @@
 import type { AgentMessagePart } from "@sixb/core"
 import type { AgentMessageRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { renderCurrentTime } from "./agent-prompt"
+import { mailPart } from "./subagent-inbox"
 
 // A child that paused continues as the next run of its thread under a later turn: once its held
 // calls are decided, in the turn that resumes, or once its parent answers the question it paused
@@ -16,7 +17,8 @@ export interface SubagentHistory {
 
 /**
  * The message a continuation starts with: how each of its calls ended, as its own, or its parent's
- * answer to its question, what came back to its new sandbox, and when it continues. It stays in
+ * answer to its question; the messages its parent sent that the paused run never read; what came
+ * back to its new sandbox, and when it continues. It stays in
  * the thread, so a later continuation replays the same bytes.
  *
  * A child whose workspace is kept finds it as it left it, and is told nothing about it here. If
@@ -33,6 +35,7 @@ export function continuationTrigger(input: {
 }): readonly AgentMessagePart[] {
   return [
     ...input.goesOnWith,
+    ...(input.paused.result?.unread ?? []).map((mail) => mailPart(mail)),
     ...(input.keepsWorkspace
       ? []
       : [{ type: "text" as const, text: sandboxRestarted(input.paused) }]),

@@ -381,6 +381,11 @@ export interface SubagentRunResult {
   readonly files?: readonly SubagentRunFile[]
   /** Why none of what it wrote under `out/` came back, and what to do about it. */
   readonly filesError?: string
+  /**
+   * What its parent sent a paused child that it had not read: the run that continues it reads it
+   * first.
+   */
+  readonly unread?: readonly { readonly id: string; readonly text: string }[]
 }
 
 export interface SubagentRunRecord extends AgentRunRecordBase {
