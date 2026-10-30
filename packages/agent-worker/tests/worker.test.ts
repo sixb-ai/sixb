@@ -59,9 +59,11 @@ import {
   type AgentRunSession,
   agentRunQueueJobId,
   agentRunTokenRunId,
+  claimAgentRunOverHttp,
   claimWorkflowAgentNode,
   createAgentRunExecutionToken,
   createAgentRunId,
+  createAgentRunToken,
   createBrokerStreamSink,
   createSubagentRunId,
   createSubagentThreadId,
@@ -131,8 +133,10 @@ import {
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
+import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
+import { runConversationTurn } from "../../agent/src/run-conversation-turn"
 import {
   createConversationAgentEnvironment,
   createSubagentEnvironment,
@@ -149,13 +153,15 @@ import {
   WorkerTestModel,
   type WorkerTestStreamEvent,
 } from "../../agent/tests/worker-model-fixture"
+import { createSixbApi, SixbServer } from "../../server/src/server"
+import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { normalizeApiBaseUrl } from "../src/api-url"
+import { normalizeApiBaseUrl, runApiCredential } from "../src/api-url"
 import { ChildRunner } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
+import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
 import { isTerminalRun } from "../src/run-fate"
-import { resolveRunPlan } from "../src/run-plan"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -13215,6 +13221,93 @@ describe("agent tools act as the requester", () => {
 
   // Regression proof: remove the bindAgentModelExecution call from the session's toolSdk in
   // run-session.ts; the tool's generate() then fails without a bound execution attempt.
+  // The runner here holds no project, storage or broker: only the API's address and what it claims.
+  // Removal proof: serve "callTool" or "models.stream" from the HTTP session no more; the turn
+  // fails, and nothing is recorded.
+  test("a runner over HTTP finishes a turn: its plan, model calls, a project tool and its end", async () => {
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(summarizeInvoice.name, {}),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [summarizeInvoice] }
+    )
+    const request = await requestAgent(sixb, { text: "Summarize inv-1." })
+    const { workerHost, recorded } = recordUsage(sixb)
+    const api = createSixbApi(
+      new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const apiUrl = "http://api.localhost"
+    const send = async (outgoing: Request) => api.fetch(outgoing)
+
+    const session = await claimAgentRunOverHttp({
+      apiUrl,
+      runId: request.run.id,
+      authorization: "",
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      fetch: send,
+    })
+    if (!session) throw new Error("Expected the turn to be claimed.")
+    const sandboxes = new RecordingSandboxFactory()
+    try {
+      await runConversationTurn({
+        session,
+        signal: new AbortController().signal,
+        runner: {
+          settings: {
+            id: PROJECT_ID,
+            apiBaseUrl: apiUrl,
+            subagentConcurrencyPerRun: 4,
+            keepsChildWorkspaces: false,
+            locale: "en-US",
+            timeZone: "UTC",
+          },
+          openSandbox: () => async () => ({
+            sandbox: ephemeralRunSandbox({
+              context: { sandboxes, apiBaseUrl: apiUrl },
+              apiCredential: runApiCredential(
+                apiUrl,
+                createAgentRunToken({
+                  projectId: PROJECT_ID,
+                  runId: session.run.id,
+                  executionToken: session.executionToken,
+                })
+              ),
+            }),
+          }),
+          startChild: () => {
+            throw new Error("This turn spawns no child.")
+          },
+          onDetachedTeardown: () => {},
+        },
+      })
+    } finally {
+      await session.close()
+    }
+
+    const run = await agentStorageOf(sixb).runs.getById({
+      projectId: PROJECT_ID,
+      id: request.run.id,
+    })
+    expect(run).toMatchObject({ status: "succeeded" })
+    const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
+    expect(
+      toolOutput(
+        messages.flatMap((message) => message.parts),
+        summarizeInvoice.name
+      )
+    ).toEqual({ summary: "Paid in full." })
+    // Its end reached whoever watches the run, though its token no longer did by then.
+    const live = await sixb.broker.read({
+      projectId: PROJECT_ID,
+      streamId: agentRunStreamId(request.run.id),
+    })
+    expect(live.records.map((record) => record.name)).toContain("agent.run.finished")
+    // Recorded on the server: the Agent's tool call, the tool's own call, then its answer.
+    expect(recorded).toEqual(
+      Array.from({ length: 3 }, () => ({ executionId: run?.executionId ?? "", attempt: 1 }))
+    )
+  })
+
   test("accounts a tool's model call to the chat run like the Agent's own", async () => {
     const sixb = buildSixb(
       toolCallThenAnswerModel(summarizeInvoice.name, {}),

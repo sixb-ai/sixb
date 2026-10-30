@@ -133,7 +133,13 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
         throw error
       }
     },
-    finish: (outcome, messages) => call("finish", [outcome, messages]),
+    async finish(outcome, messages) {
+      // What it streamed goes first; the server announces the end it records.
+      await sink.flush()
+      const finished = await call<AgentRunRecord>("finish", [outcome, messages])
+      sink.end()
+      return finished
+    },
     assertOwned: () => call("assertOwned"),
     plan: () => call("plan"),
     memory: (memory) => call("memory", [memory]),
@@ -323,8 +329,10 @@ async function* modelEvents(
  */
 function batchedEvents(
   deliver: (batch: readonly { readonly method: string; readonly input: unknown }[]) => Promise<void>
-): { readonly sink: StreamSink; flush(): Promise<void> } {
+): { readonly sink: StreamSink; flush(): Promise<void>; end(): void } {
   let queued: { readonly method: string; readonly input: unknown }[] = []
+  // Once the run ended, its token reaches nothing: the server announced the end.
+  let ended = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let sending = Promise.resolve()
   const flush = () => {
@@ -336,6 +344,7 @@ function batchedEvents(
     return sending
   }
   const enqueue = (method: string) => async (record: unknown) => {
+    if (ended) return
     queued.push({ method, input: record })
     timer ??= setTimeout(() => void flush(), EVENT_BATCH_MS)
   }
@@ -353,5 +362,10 @@ function batchedEvents(
       },
     },
     flush,
+    end() {
+      ended = true
+      clearTimeout(timer)
+      queued = []
+    },
   }
 }

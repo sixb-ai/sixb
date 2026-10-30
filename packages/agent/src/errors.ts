@@ -74,3 +74,12 @@ export class AgentToolOutputError extends AgentToolPublicError {
     super(`[SixbAgent] Agent tool '${toolName}' returned an invalid result; ${reason}.`, options)
   }
 }
+
+/** Failed preservation is a failure even when the run was also cancelled. */
+export class AgentEnvironmentSaveError extends Error {
+  readonly name = "AgentEnvironmentSaveError"
+
+  constructor() {
+    super("[SixbAgent] Sandbox save or cleanup could not be confirmed. Recovery is required.")
+  }
+}

@@ -2,12 +2,15 @@ import {
   type AgentExecutionEnvironment,
   type AgentRunFailure,
   type AgentTurnRuntime,
+  agentRunFailureDetails,
   createAgentTurnRuntime,
   createAskParentTool,
   createSubagentEnvironment,
   type FamilyMailbox,
   isLostExecution,
   prepareAgentModel,
+  recordFate,
+  resolveRunPlan,
   runSubagent,
   SubagentInbox,
   type SubagentWork,
@@ -32,16 +35,13 @@ import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { isPermanentAgentPreparationError } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
 import {
-  agentRunFailureDetails,
   isTerminalRun,
   PREPARATION_RETRY_BACKOFF_MS,
   PRESTART_RETRY_BACKOFF_MS,
   projectLease,
-  recordFate,
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
-import { resolveRunPlan } from "./run-plan"
 import { childSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 

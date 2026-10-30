@@ -109,6 +109,9 @@ renewLease       answers whether the run, or the turn a child stops with, was ca
                  signal a runner over HTTP hears, at most two minutes apart
 ```
 
+Once a run ended, its token reaches nothing, so `finish` over HTTP also announces the end live: its
+answer, then the run's end, from the server that recorded them.
+
 The server pins a runner's messages to its run's thread and drops any author they name, and caps
 the lease a runner asks for. `authorization()` is not offered: such a runner never binds the
 project.

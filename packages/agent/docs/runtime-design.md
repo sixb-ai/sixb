@@ -3,6 +3,21 @@
 For contributors working on Sixb internals. Application setup and usage are documented in the
 [public documentation](../../../docs/README.md).
 
+## Runners
+
+A turn runs the same way whichever runner runs it: `runConversationTurn`
+(`src/run-conversation-turn.ts`) prepares it from its session, runs it, and records how it ended.
+The runner keeps what is its own, as a `ConversationTurnRunner`:
+
+```text
+the worker               a queue delivery holds the run; preparation retries a blip in place; a
+                         thread's workspace comes from the project's sandbox factory and recipe
+a runner over HTTP       its own lease renewals hold the run; its sandbox is its own; its session
+                         is createHttpAgentRunSession
+```
+
+Children run in their turn's runner, on the turn's mailbox (see [child runs](#child-runs)).
+
 ## System prompts
 
 The agent worker owns one system-prompt renderer for conversations, child agents, and workflow
