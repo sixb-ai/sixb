@@ -83,13 +83,19 @@ export async function repairAgentApprovals(input: {
  * found it still running. The repair pass tries again if this fails.
  */
 export async function resumeIfDecided(
-  sixb: Parameters<typeof resumeDecidedAgentTurn>[0],
+  host: AgentWorkerHost,
   run: ConversationAgentRunRecord
 ): Promise<void> {
   if (!isAwaitingApprovalRun(run)) return
 
   try {
-    await resumeDecidedAgentTurn(sixb, run.id)
+    // As its requester, with the grants they have now: what a decision would have done.
+    const scope = await resolveAgentRunExecutionScope(host, {
+      runId: run.id,
+      executionId: run.executionId,
+      authority: { type: "inherited" },
+    })
+    await resumeDecidedAgentTurn(bindDurableAgentExecution(host, scope), run.id)
   } catch (error) {
     console.error(
       `[SixbAgentWorker] Could not resume Agent run '${run.id}'; retrying later.`,

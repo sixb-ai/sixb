@@ -334,7 +334,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // A resumed turn's paused children go on first, as the model reads that they do.
       await delegation.continuePausedChildren(runtime.signal)
       runtime.assertCanContinue()
-      const completed = await runAgentTurn({
+      await runAgentTurn({
         context: environment.turnContext,
         plan,
         run,
@@ -346,10 +346,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         threadContext: environment.threadContext,
         children: await delegation.turnChildren(),
       })
-      await this.cancelActiveSubagents(completed.id, "The parent Agent run has finished.")
-      if (completed.kind === "conversation") {
-        await resumeIfDecided(prepared.executionContext.sixb, completed)
-      }
     } catch (caughtError) {
       let error = caughtError
       let environmentSaveFailed = error instanceof AgentEnvironmentSaveError
@@ -391,10 +387,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
         await session.events.publishRunFinished(finalized.run)
-        await this.cancelActiveSubagents(
-          finalized.run.id,
-          `The parent Agent run was ${finalized.run.status}.`
-        )
       }
       // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
       // or a recorded model/tool failure keeps its fate on the record, so we ack by returning.
@@ -517,9 +509,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     )
     if (!finalized) return
     await session.events.publishRunFinished(finalized.run)
-    if (finalized.run.kind === "conversation") {
-      await this.cancelActiveSubagents(finalized.run.id, "The parent Agent run was interrupted.")
-    }
   }
 
   async executeSubagent(
@@ -1061,7 +1050,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       events: context.streamSink,
       childQueue: this.host.queues.agentChildren,
       security: this.host.definitions.security,
+      afterFinish: (run) => this.afterRunFinished(run),
     }
+  }
+
+  /** A turn's end stops its children still at work, and resumes it if its calls were decided. */
+  private async afterRunFinished(run: AgentRunRecord): Promise<void> {
+    if (run.kind !== "conversation") return
+    const ended =
+      run.finishReason === "interrupted"
+        ? "was interrupted"
+        : run.status === "succeeded"
+          ? "has finished"
+          : `was ${run.status}`
+    await this.cancelActiveSubagents(run.id, `The parent Agent run ${ended}.`)
+    await resumeIfDecided(this.host, run)
   }
 
   private reportFailure(
