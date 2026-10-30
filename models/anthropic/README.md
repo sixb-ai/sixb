@@ -107,21 +107,33 @@ catalog-resolved bindings, including compaction summaries.
 
 The model definition is built synchronously from provider defaults and configured definitions.
 Pricing lives separately in `model.costEstimator.estimate({ usage })`. Its exact token calculation
-uses provider-owned rates and produces an **estimate**, with the applied rates retained as evidence.
-Constructing a model and ordinary inference never fetch the cached, paginated
-catalog. A structured-output call consults it only when native support is otherwise unknown; a
-catalog failure rejects structured output before inference. Server tools disable token-only estimates when
-their additional charges would make a token-only total incomplete.
+produces an **estimate**, with the applied rates retained as evidence. Constructing a model and
+ordinary inference never fetch the cached, paginated catalog. A structured-output call consults it
+only when native support is otherwise unknown; a catalog failure rejects structured output before
+inference. Server tools disable token-only estimates when their additional charges would make a
+token-only total incomplete.
 
-Rates cover exact model IDs and supported request dimensions, with explicit cache prices:
-new versions, unlisted dated snapshots, and unknown pricing options are `unpriceable`, not guessed.
-Claude Haiku 5.5 bills every meter at its higher rates once a prompt, cache reads and writes
-included, exceeds 100,000 tokens; fast mode uses each Opus version's own rates.
-Unknown pricing does not block inference. The table records its verification date and
-[public pricing source](https://platform.claude.com/docs/en/about-claude/pricing);
-these rates do not account for negotiated discounts or replace an invoice.
+Anthropic publishes no machine-readable prices, so base prices come from
+[models.dev](https://models.dev). `await model.resolve?.()` downloads them once per provider and
+keeps them in memory for `catalogTtlMs` (one hour by default); an offline resolution uses the prices
+already in memory. An unresolved binding has no prices. Sixb resolves models before running them.
+The rest follows Anthropic's [published multipliers](https://platform.claude.com/docs/en/about-claude/pricing):
+one-hour cache writes cost twice the input price, US-only inference (`inference_geo: "us"`, Claude 4.6
+and later) costs 1.1x, and fast mode doubles every meter on Claude Opus 5.5, Opus 5 and Opus 4.8.
+Context tiers such as Claude Haiku 5.5's prompts over 100,000 tokens are priced per call.
 
-Cost estimates use local rates and the completed call's usage. Native provider request and response
+Models models.dev does not list, and unknown pricing options, are `unpriceable`, not guessed.
+Unknown pricing does not block inference. If models.dev is unavailable, resolution keeps the last
+prices, or none, warns, and retries after a minute. Set `rateCard` on a binding for negotiated or
+otherwise known prices; it replaces models.dev for that binding:
+
+```ts
+const model = anthropic("claude-sonnet-5-5", {
+  rateCard: { currency: "USD", input: "1.6", output: "8", cacheReadInput: "0.08" },
+})
+```
+
+Cost estimates use these rates and the completed call's usage. Native provider request and response
 IDs are retained with usage for troubleshooting.
 
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,

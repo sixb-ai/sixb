@@ -33,6 +33,12 @@
       "bun": "./src/responses.ts",
       "import": "./dist/responses.js",
       "default": "./dist/responses.js"
+    },
+    "./models-dev": {
+      "types": "./dist/models-dev.d.ts",
+      "bun": "./src/models-dev.ts",
+      "import": "./dist/models-dev.js",
+      "default": "./dist/models-dev.js"
     }
   },
   "scripts": {

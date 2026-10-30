@@ -1,50 +1,31 @@
 import { expect, test } from "bun:test"
-import type { JsonObject } from "@sixb/core/models"
+import { type JsonObject, rateModelCall } from "@sixb/core/models"
+import { modelsDevRateCard } from "@sixb/model-protocols/models-dev"
 import { createAnthropic } from "../src"
 import { anthropicRateCard } from "../src/model-details"
 
-// Regression proof: restore the family regexes and derived cache multipliers in model-details.
-test("prices cache reads explicitly for each covered version", () => {
-  expect(anthropicRateCard("claude-fable-5-1", undefined)?.cacheReadInput).toBe("0.25")
-  expect(anthropicRateCard("claude-mythos-5-1", undefined)?.cacheReadInput).toBe("0.25")
-  expect(anthropicRateCard("claude-fable-5", undefined)?.cacheReadInput).toBe("1")
-  const model = createAnthropic()("claude-fable-5-1")
-  expect(
-    model.costEstimator?.estimate({
-      usage: {
-        inputTokens: 1_000_000,
-        uncachedInputTokens: 0,
-        cacheReadInputTokens: 1_000_000,
-        cacheWriteInputTokens: 0,
-        cacheWrite5mInputTokens: 0,
-        cacheWrite1hInputTokens: 0,
-        outputTokens: 0,
-      },
-    })
-  ).toMatchObject({ status: "rated", money: { amountNanos: "250000000" } })
+// models.dev cost objects, at Anthropic's published prices.
+const opus5 = modelsDevRateCard({ input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 })
+const opus55 = modelsDevRateCard({ input: 4, output: 20, cache_read: 0.2, cache_write: 5 })
+const fable51 = modelsDevRateCard({ input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 })
+const haiku55 = modelsDevRateCard({
+  input: 0.1,
+  output: 0.5,
+  cache_read: 0.01,
+  cache_write: 0.125,
+  tiers: [
+    {
+      input: 0.5,
+      output: 2.5,
+      cache_read: 0.05,
+      cache_write: 0.625,
+      tier: { type: "context", size: 100_000 },
+    },
+  ],
 })
 
-test("applies residency to explicit rates, including the special cache price", () => {
-  expect(anthropicRateCard("claude-fable-5-1", { inference_geo: "us" })).toEqual({
-    currency: "USD",
-    input: "11",
-    output: "55",
-    cacheReadInput: "0.275",
-    cacheWriteInput5m: "13.75",
-    cacheWriteInput1h: "22",
-  })
-  expect(anthropicRateCard("claude-opus-5", { speed: "fast", inference_geo: "us" })).toEqual({
-    currency: "USD",
-    input: "11",
-    output: "55",
-    cacheReadInput: "1.1",
-    cacheWriteInput5m: "13.75",
-    cacheWriteInput1h: "22",
-  })
-})
-
-test("prices the 5.5 generation, including Opus 5.5 fast mode", () => {
-  expect(anthropicRateCard("claude-opus-5-5", undefined)).toEqual({
+test("keeps models.dev prices and derives one-hour cache writes from input", () => {
+  expect(anthropicRateCard("claude-opus-5-5", undefined, opus55)).toEqual({
     currency: "USD",
     input: "4",
     output: "20",
@@ -52,18 +33,45 @@ test("prices the 5.5 generation, including Opus 5.5 fast mode", () => {
     cacheWriteInput5m: "5",
     cacheWriteInput1h: "8",
   })
-  expect(anthropicRateCard("claude-sonnet-5-5", undefined)?.cacheReadInput).toBe("0.1")
-  expect(anthropicRateCard("claude-opus-5-5", { speed: "fast" })).toMatchObject({
+})
+
+test("applies residency to every meter, including the special cache price", () => {
+  expect(anthropicRateCard("claude-fable-5-1", { inference_geo: "us" }, fable51)).toEqual({
+    currency: "USD",
+    input: "11",
+    output: "55",
+    cacheReadInput: "0.275",
+    cacheWriteInput5m: "13.75",
+    cacheWriteInput1h: "22",
+  })
+  expect(anthropicRateCard("claude-opus-5", { speed: "fast", inference_geo: "us" }, opus5)).toEqual(
+    {
+      currency: "USD",
+      input: "11",
+      output: "55",
+      cacheReadInput: "1.1",
+      cacheWriteInput5m: "13.75",
+      cacheWriteInput1h: "22",
+    }
+  )
+})
+
+test("doubles every meter in fast mode", () => {
+  expect(anthropicRateCard("claude-opus-5-5", { speed: "fast" }, opus55)).toEqual({
+    currency: "USD",
     input: "8",
     output: "40",
     cacheReadInput: "0.4",
+    cacheWriteInput5m: "10",
+    cacheWriteInput1h: "16",
   })
 })
 
 test("bills every Haiku 5.5 meter higher once a prompt exceeds 100,000 tokens", () => {
-  const model = createAnthropic()("claude-haiku-5-5")
+  const rateCard = anthropicRateCard("claude-haiku-5-5", undefined, haiku55)
   const cost = (inputTokens: number) =>
-    model.costEstimator?.estimate({
+    rateModelCall({
+      rateCard,
       usage: {
         inputTokens,
         uncachedInputTokens: inputTokens - 50_000,
@@ -79,19 +87,18 @@ test("bills every Haiku 5.5 meter higher once a prompt exceeds 100,000 tokens", 
   expect(cost(100_000)).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
   // 50,001 × $0.50 + 50,000 × $0.05 + 1,000 × $2.50 per million tokens.
   expect(cost(100_001)).toMatchObject({ status: "rated", money: { amountNanos: "30000500" } })
-  expect(anthropicRateCard("claude-haiku-5-5", { inference_geo: "us" })?.input).toEqual({
+  expect(rateCard?.cacheWriteInput1h).toEqual({
+    default: "0.2",
+    tiers: [{ minTokens: 100_001, price: "1" }],
+  })
+  expect(anthropicRateCard("claude-haiku-5-5", { inference_geo: "us" }, haiku55)?.input).toEqual({
     default: "0.11",
     tiers: [{ minTokens: 100_001, price: "0.55" }],
   })
 })
 
-test.each([
-  "claude-opus-5-99",
-  "claude-sonnet-4-6-20990101",
-  "custom/claude-opus-5",
-  "toString",
-])("does not guess a tariff for %s", (modelId) => {
-  expect(anthropicRateCard(modelId, undefined)).toBeUndefined()
+test("does not guess a tariff without models.dev prices", () => {
+  expect(anthropicRateCard("claude-opus-5-99", undefined, undefined)).toBeUndefined()
 })
 
 const uncoveredRequests: JsonObject[] = [
@@ -100,13 +107,16 @@ const uncoveredRequests: JsonObject[] = [
   { inference_geo: "eu" },
 ]
 test.each(uncoveredRequests)("declines uncovered request dimensions (%j)", (request) => {
-  expect(anthropicRateCard("claude-opus-5", request)).toBeUndefined()
+  expect(anthropicRateCard("claude-opus-5", request, opus5)).toBeUndefined()
 })
 
 test("does not extrapolate fast or residency pricing to unsupported versions", () => {
-  expect(anthropicRateCard("claude-sonnet-5", { speed: "fast" })).toBeUndefined()
-  expect(anthropicRateCard("claude-opus-4-7", { speed: "fast" })).toBeUndefined()
-  expect(anthropicRateCard("claude-opus-4-5", { inference_geo: "us" })).toBeUndefined()
+  expect(anthropicRateCard("claude-sonnet-5", { speed: "fast" }, opus5)).toBeUndefined()
+  expect(anthropicRateCard("claude-opus-4-7", { speed: "fast" }, opus5)).toBeUndefined()
+  for (const modelId of ["claude-opus-4-5", "claude-haiku-4-5-20251001", "claude-3-5-haiku"]) {
+    expect(anthropicRateCard(modelId, { inference_geo: "us" }, opus5)).toBeUndefined()
+  }
+  expect(anthropicRateCard("claude-opus-4-6", { inference_geo: "us" }, opus5)).toBeDefined()
 })
 
 test("keeps inference usable without pricing or a catalog request", async () => {

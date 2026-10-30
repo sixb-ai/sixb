@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   defineLanguageModel,
   defineLanguageModelLabel,
+  defineModelRateCard,
   estimateModelReservation,
   isJsonObject,
   isModelReasoning,
@@ -27,6 +28,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
+import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
 import { anthropicOutputSchema } from "./structured-output"
 
@@ -37,6 +39,7 @@ const DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 const DEFAULT_API_VERSION = "2023-06-01"
 const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
+const PRICES_RETRY_MS = 60_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
 const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
@@ -48,6 +51,7 @@ export interface AnthropicOptions {
   readonly betas?: ValueSource<readonly string[]>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+  /** How long the model catalog and models.dev prices stay in memory. Defaults to one hour. */
   readonly catalogTtlMs?: number
   readonly maxRetries?: number
   readonly maxRetryDelayMs?: number
@@ -64,6 +68,8 @@ export interface AnthropicModelOptions extends LanguageModelLabel {
   /** Anthropic server tools such as web search. Local Sixb tools are appended as client tools. */
   readonly providerTools?: readonly JsonObject[]
   readonly capabilities?: ModelCapabilities
+  /** Prices for this binding, such as negotiated rates. Replaces the models.dev prices. */
+  readonly rateCard?: ModelRateCard
 }
 
 export interface AnthropicCatalog extends LanguageModelDefinitionCatalog {
@@ -94,11 +100,13 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
   }
   const configuredModels = configuredModelDefinitions(options.models ?? [])
   const catalog = new RemoteAnthropicCatalog(transport, configuredModels)
+  const prices = new ModelsDevPrices(transport)
   const model = (modelId: string, modelOptions: AnthropicModelOptions = {}) => {
     if (!modelId.trim()) throw new TypeError("[SixbAnthropic] Model id must not be empty.")
     return new AnthropicLanguageModel(
       transport,
       catalog,
+      prices,
       modelId,
       structuredClone(modelOptions),
       configuredModels.get(modelId)
@@ -235,7 +243,59 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
   }
 }
 
-// Created after the catalog class it constructs: bundlers keep class declarations in their temporal
+/**
+ * models.dev prices for Anthropic models, held in memory for the catalog TTL. Anthropic publishes
+ * no machine-readable prices. A failed download keeps the last prices, or leaves models unpriced,
+ * and is retried after a minute; it never fails inference.
+ */
+class ModelsDevPrices {
+  private prices: ReadonlyMap<string, ModelRateCard> | undefined
+  private loadPromise: Promise<void> | undefined
+  private loadedAt = 0
+  private retryAt = 0
+
+  constructor(private readonly transport: AnthropicTransport) {}
+
+  /** Prices in memory, after any download already under way. Never starts I/O. */
+  async cached(modelId: string): Promise<ModelRateCard | undefined> {
+    await this.loadPromise
+    return this.prices?.get(modelId)
+  }
+
+  async get(modelId: string): Promise<ModelRateCard | undefined> {
+    const ttl = this.transport.catalogTtlMs ?? DEFAULT_CATALOG_TTL_MS
+    const stale = this.prices === undefined || Date.now() - this.loadedAt >= ttl
+    if (stale && Date.now() >= this.retryAt) {
+      this.loadPromise ??= this.load().finally(() => {
+        this.loadPromise = undefined
+      })
+    }
+    return this.cached(modelId)
+  }
+
+  private async load(): Promise<void> {
+    try {
+      const text = await downloadModelsDev({ fetch: this.transport.fetch })
+      const models = object(object(object(JSON.parse(text))?.anthropic)?.models)
+      if (!models) throw new Error("The response has no anthropic.models.")
+
+      const prices = new Map<string, ModelRateCard>()
+      for (const [modelId, value] of Object.entries(models)) {
+        const card = modelsDevRateCard(object(object(value)?.cost))
+        if (card) prices.set(modelId, card)
+      }
+      this.prices = prices
+      this.loadedAt = Date.now()
+    } catch (error) {
+      this.retryAt = Date.now() + PRICES_RETRY_MS
+      console.warn(
+        `[SixbAnthropic] models.dev prices unavailable: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }
+}
+
+// Created after the classes it constructs: bundlers keep class declarations in their temporal
 // dead zone until evaluated, so a browser bundle threw while importing the package.
 /** Shared zero-configuration Anthropic provider. */
 export const anthropic = createAnthropic({
@@ -309,10 +369,12 @@ class AnthropicLanguageModel implements LanguageModel {
   constructor(
     private readonly transport: AnthropicTransport,
     private readonly catalog: AnthropicCatalog,
+    private readonly prices: ModelsDevPrices,
     modelId: string,
     private readonly options: AnthropicModelOptions,
     configuredDefinition: LanguageModelDefinition | undefined,
-    private readonly metadataResolved = false
+    private readonly metadataResolved = false,
+    basePrices?: ModelRateCard
   ) {
     this.modelId = modelId
     const base = configuredDefinition ?? fallbackDefinition(modelId)
@@ -347,9 +409,11 @@ class AnthropicLanguageModel implements LanguageModel {
     }
     // Server tools may add request- or duration-based charges that token rates cannot represent.
     const rateCard =
-      (options.providerTools?.length ?? 0) > 0
-        ? undefined
-        : anthropicRateCard(modelId, options.request)
+      options.rateCard !== undefined
+        ? defineModelRateCard(options.rateCard)
+        : (options.providerTools?.length ?? 0) > 0
+          ? undefined
+          : anthropicRateCard(modelId, options.request, basePrices)
     this.definition = defineLanguageModel({
       ...base,
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
@@ -364,14 +428,22 @@ class AnthropicLanguageModel implements LanguageModel {
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {
     if (this.metadataResolved) return this
-    const definition = options?.offline ? this.definition : await this.catalog.get(this.modelId)
+    const offline = options?.offline === true
+    const [definition, basePrices] = await Promise.all([
+      offline ? this.definition : this.catalog.get(this.modelId),
+      this.options.rateCard !== undefined || offline
+        ? this.prices.cached(this.modelId)
+        : this.prices.get(this.modelId),
+    ])
     return new AnthropicLanguageModel(
       this.transport,
       this.catalog,
+      this.prices,
       this.modelId,
       this.options,
       definition ?? this.definition,
-      true
+      true,
+      basePrices
     )
   }
 
