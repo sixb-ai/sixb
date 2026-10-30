@@ -21,6 +21,15 @@ function requireWorkerStorage(storage: Storage): AgentWorkerStorage {
   return storage as AgentWorkerStorage
 }
 
+/** The two reads compaction's estimate makes of a conversation, as a run's session answers them. */
+function anchorReads(storage: InMemoryStorage) {
+  return {
+    run: (runId: string) => storage.agents.runs.getById({ projectId, id: runId }),
+    latestModelCall: (executionId: string) =>
+      storage.aiUsage.getLatestForExecution({ projectId, executionId }),
+  }
+}
+
 describe("agent conversation context estimation", () => {
   test("anchors to the latest provider call with usage and estimates only trailing messages", async () => {
     const storage = new InMemoryStorage()
@@ -105,7 +114,7 @@ describe("agent conversation context estimation", () => {
 
     const messages: readonly AgentMessageRecord[] = [user, assistant, trailing]
     const estimate = await estimateAgentConversationInputTokens({
-      context: { id: projectId, storage: requireWorkerStorage(storage) },
+      conversation: anchorReads(storage),
       plan,
       threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
       systemPrompt: "This full fallback prompt should not be counted.",
@@ -125,7 +134,7 @@ describe("agent conversation context estimation", () => {
     expect(expandedFullEstimate).toBeGreaterThan(estimate)
     await expect(
       estimateAgentConversationInputTokens({
-        context: { id: projectId, storage: requireWorkerStorage(storage) },
+        conversation: anchorReads(storage),
         plan,
         threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
         systemPrompt: expandedSystemPrompt,
@@ -164,7 +173,7 @@ describe("agent conversation context estimation", () => {
     }).tokens
     await expect(
       estimateAgentConversationInputTokens({
-        context: { id: projectId, storage: requireWorkerStorage(storage) },
+        conversation: anchorReads(storage),
         plan,
         threadContext: {
           checkpoint,
@@ -199,7 +208,7 @@ describe("agent conversation context estimation", () => {
       })
       await expect(
         estimateAgentConversationInputTokens({
-          context: { id: projectId, storage: requireWorkerStorage(storage) },
+          conversation: anchorReads(storage),
           plan,
           threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
           systemPrompt: "System",

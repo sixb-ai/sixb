@@ -1,6 +1,8 @@
 import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
+  type AgentRunConversation,
+  type AgentRunSession,
   agentContextCheckpointId,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -16,7 +18,6 @@ import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
   AgentMessageRecord,
-  AgentThreadRecord,
   ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
@@ -68,6 +69,8 @@ export type LoadConversationMemory = (
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
 export async function prepareAgentConversationContext(input: {
   readonly context: AgentExecutionContext
+  /** The turn's session: its history, the checkpoint it writes, and the records it publishes. */
+  readonly session: AgentRunSession
   readonly plan: ResolvedAgentExecutionPlan
   /** The ontology files listed in the conversation's prompt. */
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
@@ -81,10 +84,9 @@ export async function prepareAgentConversationContext(input: {
   readonly frameworkTools?: readonly ModelTool[]
   readonly loadMemory?: LoadConversationMemory
 }): Promise<PreparedAgentConversationContext> {
-  const { context, plan, budget, run, runtime } = input
+  const { context, session, plan, budget, run, runtime } = input
   const initialContext = await loadAgentThreadModelContext({
-    storage: context.storage.agents,
-    projectId: context.id,
+    conversation: session.conversation,
     threadId: run.threadId,
   })
   runtime.assertCanContinue()
@@ -129,7 +131,7 @@ export async function prepareAgentConversationContext(input: {
   })
   const estimateShape = estimateShapeWith(memory)
   const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
-    context,
+    conversation: session.conversation,
     plan,
     threadContext: initialContext,
     ...estimateShape,
@@ -146,7 +148,7 @@ export async function prepareAgentConversationContext(input: {
   }
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
-  await context.streamSink.publishCompactionStarted({
+  await session.events.publishCompactionStarted({
     run,
     reason,
     estimatedInputTokensBefore,
@@ -236,17 +238,15 @@ export async function prepareAgentConversationContext(input: {
     }
 
     const checkpoint = await createCheckpoint({
-      context,
+      session,
       runtime,
       run,
       candidate,
       estimatedInputTokensAfter,
       expectedPreviousCheckpointId: initialContext.checkpoint?.id ?? null,
-      executionToken: requiredExecutionToken(run),
     })
     const threadContext = await loadAgentThreadModelContext({
-      storage: context.storage.agents,
-      projectId: context.id,
+      conversation: session.conversation,
       threadId: run.threadId,
     })
     runtime.assertCanContinue()
@@ -258,7 +258,7 @@ export async function prepareAgentConversationContext(input: {
       )
     }
 
-    await context.streamSink.publishCompactionCompleted({
+    await session.events.publishCompactionCompleted({
       run,
       reason,
       checkpointId: checkpoint.id,
@@ -271,7 +271,7 @@ export async function prepareAgentConversationContext(input: {
     // run-level outcome instead of relabeling them as a compaction implementation failure.
     runtime.assertCanContinue()
     const compactionError = normalizeCompactionError(error, run.id)
-    await context.streamSink.publishCompactionFailed({
+    await session.events.publishCompactionFailed({
       run,
       reason,
       errorCode: compactionError.code,
@@ -282,13 +282,13 @@ export async function prepareAgentConversationContext(input: {
 
 /** Conservatively combine matching provider usage with the current deterministic request shape. */
 export async function estimateAgentConversationInputTokens(input: {
-  readonly context: Pick<AgentExecutionContext, "id" | "storage">
+  readonly conversation: Pick<AgentRunConversation, "run" | "latestModelCall">
   readonly plan: ResolvedAgentExecutionPlan
   readonly threadContext: LoadedAgentThreadModelContext
   readonly systemPrompt: string
   readonly tools: readonly AgentContextEstimateTool[]
 }): Promise<number> {
-  const { context, plan, threadContext } = input
+  const { conversation, plan, threadContext } = input
   const fullEstimate = estimateAgentContextRequestTokens({
     systemPrompt: input.systemPrompt,
     tools: input.tools,
@@ -298,15 +298,9 @@ export async function estimateAgentConversationInputTokens(input: {
   const anchorIndex = findLatestUsageAnchor(threadContext.retainedMessages, checkpointHead)
   const anchor = threadContext.retainedMessages[anchorIndex]
   if (anchor?.runId) {
-    const anchorRun = await context.storage.agents.runs.getById({
-      projectId: context.id,
-      id: anchor.runId,
-    })
+    const anchorRun = await conversation.run(anchor.runId)
     if (anchorRun) {
-      const usage = await context.storage.aiUsage.getLatestForExecution({
-        projectId: context.id,
-        executionId: anchorRun.executionId,
-      })
+      const usage = await conversation.latestModelCall(anchorRun.executionId)
       const inputTokens = usage?.usage.inputTokens
       const outputTokens = usage?.usage.outputTokens
       if (
@@ -448,25 +442,21 @@ function summaryPrompt(
 }
 
 async function createCheckpoint(input: {
-  readonly context: AgentExecutionContext
+  readonly session: AgentRunSession
   readonly runtime: AgentTurnRuntime
   readonly run: ConversationAgentRunRecord
   readonly candidate: AgentContextCheckpointRecord
   readonly estimatedInputTokensAfter: number
   readonly expectedPreviousCheckpointId: string | null
-  readonly executionToken: string
 }): Promise<AgentContextCheckpointRecord> {
   for (let attempt = 0; ; attempt += 1) {
     input.runtime.assertCanContinue()
     try {
-      return await input.context.storage.agents.checkpoints.create({
+      return await input.session.conversation.createCheckpoint({
         id: input.candidate.id,
-        projectId: input.candidate.projectId,
         threadId: input.candidate.threadId,
-        createdByRunId: input.candidate.createdByRunId,
         expectedPreviousCheckpointId: input.expectedPreviousCheckpointId,
         expectedHeadSeq: input.candidate.observedHeadSeq,
-        executionToken: input.executionToken,
         reason: input.candidate.reason,
         summary: input.candidate.summary,
         summaryFormatVersion: input.candidate.summaryFormatVersion,
@@ -519,18 +509,6 @@ function requiredHeadSeq(
     )
   }
   return head
-}
-
-function requiredExecutionToken(run: ConversationAgentRunRecord): string {
-  const token = run.execution?.token
-  if (!token) {
-    throw new AgentContextCompactionError(
-      "checkpoint_failed",
-      run.id,
-      "Cannot compact a run without an execution token."
-    )
-  }
-  return token
 }
 
 function normalizeCompactionError(error: unknown, runId: string): AgentContextCompactionError {
