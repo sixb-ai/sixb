@@ -5,13 +5,16 @@ import type {
   OntologyDocsCatalog,
   Principal,
 } from "@sixb/core"
-import { type AgentRunSession, conversationThreadId } from "@sixb/core/internal/agents"
+import {
+  type AgentRunSession,
+  type AgentTurnHistory,
+  conversationThreadId,
+} from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
-  AgentMessageRecord,
   AgentThreadRecord,
   ConversationAgentRunRecord,
   SubagentRunRecord,
@@ -51,7 +54,7 @@ import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
 import { type SubagentHistory, subagentSandboxFiles } from "./subagent-continuation"
-import type { LoadedAgentThreadModelContext } from "./thread-context"
+import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import {
   handedToolAttachments,
   threadToolAttachments,
@@ -76,7 +79,8 @@ export interface AgentExecutionEnvironment {
 }
 
 export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnvironment {
-  readonly threadContext?: LoadedAgentThreadModelContext
+  /** The history the turn runs on: as it started, or as its compaction left it. */
+  readonly threadContext: LoadedAgentThreadModelContext
 }
 
 /**
@@ -123,8 +127,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   /** Run preflight only after current sandbox access has been resolved. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
   readonly run: ConversationAgentRunRecord
-  /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
-  readonly messages?: readonly AgentMessageRecord[]
+  /** The conversation's history as the turn started (`AgentTurnContext.history`). */
+  readonly history: AgentTurnHistory
   /** Framework-owned tools of the conversational Agent: delegation. */
   readonly frameworkTools?: readonly ModelTool[]
 }
@@ -189,6 +193,7 @@ export async function createConversationAgentEnvironment(
           ontologyIndex: ontologyDocs.index,
           contextDirectory: sandbox.contextDirectory,
           run,
+          history: input.history,
           ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
           budget: preflight.budget,
           runtime: {
@@ -203,16 +208,11 @@ export async function createConversationAgentEnvironment(
           loadMemory,
         })
       : undefined
-    const [messages, inlineImages, memory] = await Promise.all([
-      prepared?.threadContext.retainedMessages ??
-        input.messages ??
-        input.session.conversation
-          .messages({ threadId: run.threadId, order: "asc" })
-          .then((history) => history.messages),
+    const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
+    const messages = threadContext.retainedMessages
+    const [inlineImages, memory] = await Promise.all([
       modelSupportsInlineImages(plan.model),
-      prepared
-        ? prepared.memory
-        : input.session.conversation.latestCheckpoint(run.threadId).then(loadMemory),
+      prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
     ])
     const attachmentContext = await prepareAgentAttachments({
       projectId: context.id,
@@ -256,7 +256,7 @@ export async function createConversationAgentEnvironment(
       ...(memory ? { memory } : {}),
       onDetachedTeardown: input.onDetachedTeardown,
     })
-    return { ...environment, threadContext: prepared?.threadContext }
+    return { ...environment, threadContext }
   } catch (error) {
     // Preparation can fail before the worker receives this environment. Preserve here, before
     // the worker records the run's terminal outcome; a lost execution must touch nothing.

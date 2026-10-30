@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type SecurityDefinitionCatalog } from "@sixb/core"
-import { agentRunPeople } from "@sixb/core/internal/agents"
-import { emptyGrantIndex } from "@sixb/core/internal/authorization"
-import { conversationReaders, loadConversationAuthors } from "../src/message-authors"
+import { InMemoryStorage } from "@sixb/core"
+import { conversationAuthors } from "../src/message-authors"
 
 const projectId = "message-authors"
-/** Naming authors reads only members; no grant is checked. */
-const NO_SECURITY = { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
+
+/** Display names by `type:id`, as a turn's context carries them. */
+async function namesOf(storage: InMemoryStorage): Promise<Record<string, string>> {
+  const names: Record<string, string> = {}
+  for (const id of [alice.id, bob.id]) {
+    const name = (await storage.auth.users.getById({ projectId, id }))?.displayName
+    if (name) names[`user:${id}`] = name
+  }
+  return names
+}
 
 async function conversation(options: { readonly bobWrites?: boolean; readonly shared?: boolean }) {
   const storage = new InMemoryStorage()
@@ -39,9 +45,12 @@ async function conversation(options: { readonly bobWrites?: boolean; readonly sh
   if (options.bobWrites) await say("msg_bob", bob)
 
   const { messages } = await storage.agents.messages.list({ projectId, threadId: "thr_1" })
-  return loadConversationAuthors({
-    people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
-    conversation: { thread, participants: options.shared ? [bob] : [] },
+  return conversationAuthors({
+    conversation: {
+      thread,
+      participants: options.shared ? [bob] : [],
+      names: await namesOf(storage),
+    },
     messages,
   })
 }
@@ -118,9 +127,8 @@ describe("who writes in a conversation, as the model reads it", () => {
       ownerPrincipal: bob,
     })
     const { messages } = await storage.agents.messages.list({ projectId, threadId: fork.id })
-    const authors = await loadConversationAuthors({
-      people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
-      conversation: { thread: fork, participants: [] },
+    const authors = conversationAuthors({
+      conversation: { thread: fork, participants: [], names: await namesOf(storage) },
       messages,
     })
 
@@ -158,71 +166,12 @@ describe("who writes in a conversation, as the model reads it", () => {
       parts: [{ type: "text", text: "hi" }],
     })
 
-    const authors = await loadConversationAuthors({
-      people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
-      conversation: { thread, participants: [] },
+    const authors = conversationAuthors({
+      conversation: { thread, participants: [], names: await namesOf(storage) },
       messages: [message],
     })
     expect(authors.byMessageId.get("msg_alice")).toBe(
       `<sixb_author id="usr_alice">${"A".repeat(80)}</sixb_author>`
     )
-  })
-
-  // Guard proof: return every participant from conversationReaders; Cleo and Dan, who cannot read
-  // the thread, are then named to the model as taking part.
-  test("names only the participants who can read the thread now", async () => {
-    const storage = new InMemoryStorage()
-    const runners = { id: "agent-users" }
-    // The project's roles, as the worker's host resolves them: one lets its group use the Agent.
-    const security = {
-      listResolvedRoles: () => [
-        {
-          id: "agent.runner",
-          grantedToGroupIds: [runners.id],
-          grants: { ...emptyGrantIndex(), "run:agent": true },
-        },
-      ],
-    } as unknown as SecurityDefinitionCatalog
-    const thread = await storage.agents.threads.create({
-      projectId,
-      id: "thr_1",
-      ownerPrincipal: alice,
-    })
-
-    const people = [
-      { id: "usr_bob", status: "active", member: true },
-      { id: "usr_cleo", status: "active", member: false },
-      { id: "usr_dan", status: "suspended", member: true },
-    ] as const
-    for (const person of people) {
-      await storage.auth.users.create({
-        projectId,
-        id: person.id,
-        email: `${person.id}@example.com`,
-        status: person.status,
-      })
-      if (person.member) {
-        await storage.auth.groupMemberships.upsert({
-          projectId,
-          userId: person.id,
-          groupId: runners.id,
-          source: "manual",
-        })
-      }
-    }
-    const participants = await storage.agents.threads.addParticipants({
-      projectId,
-      threadId: thread.id,
-      principals: people.map((person) => ({ type: "user", id: person.id })),
-      addedBy: alice,
-      maxParticipants: 50,
-    })
-
-    const readers = await conversationReaders({
-      people: agentRunPeople({ projectId, storage, security }),
-      thread,
-      participants,
-    })
-    expect(readers.participants).toEqual([bob])
   })
 })

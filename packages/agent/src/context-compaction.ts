@@ -1,8 +1,8 @@
 import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
-  type AgentRunConversation,
   type AgentRunSession,
+  type AgentTurnHistory,
   agentContextCheckpointId,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -28,10 +28,10 @@ import { AgentContextCompactionError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import {
   type ConversationReaders,
+  conversationAuthors,
   conversationAuthorsText,
-  loadConversationAuthors,
 } from "./message-authors"
-import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
+import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext } from "./types"
@@ -78,6 +78,8 @@ export async function prepareAgentConversationContext(input: {
   readonly contextDirectory: string
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
+  /** The conversation's history as the turn started. */
+  readonly history: AgentTurnHistory
   /** Who can read the run's thread: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
   readonly runtime: AgentTurnRuntime
@@ -85,18 +87,13 @@ export async function prepareAgentConversationContext(input: {
   readonly loadMemory?: LoadConversationMemory
 }): Promise<PreparedAgentConversationContext> {
   const { context, session, plan, budget, run, runtime } = input
-  const initialContext = await loadAgentThreadModelContext({
-    conversation: session.conversation,
-    threadId: run.threadId,
-  })
-  runtime.assertCanContinue()
+  const initialContext = agentThreadModelContext(input.history)
   const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
 
   // The authors ride on user messages, not the system prompt; an estimate only needs their size.
   const authors = input.conversation
-    ? await loadConversationAuthors({
-        people: session.people,
+    ? conversationAuthors({
         conversation: input.conversation,
         messages: initialContext.retainedMessages,
       })
@@ -130,8 +127,7 @@ export async function prepareAgentConversationContext(input: {
     tools,
   })
   const estimateShape = estimateShapeWith(memory)
-  const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
-    conversation: session.conversation,
+  const estimatedInputTokensBefore = estimateAgentConversationInputTokens({
     plan,
     threadContext: initialContext,
     ...estimateShape,
@@ -237,19 +233,18 @@ export async function prepareAgentConversationContext(input: {
       )
     }
 
-    const checkpoint = await createCheckpoint({
-      session,
-      runtime,
-      run,
-      candidate,
-      estimatedInputTokensAfter,
-      expectedPreviousCheckpointId: initialContext.checkpoint?.id ?? null,
-    })
-    const threadContext = await loadAgentThreadModelContext({
-      conversation: session.conversation,
-      threadId: run.threadId,
-    })
+    const threadContext = agentThreadModelContext(
+      await createCheckpoint({
+        session,
+        runtime,
+        run,
+        candidate,
+        estimatedInputTokensAfter,
+        expectedPreviousCheckpointId: initialContext.checkpoint?.id ?? null,
+      })
+    )
     runtime.assertCanContinue()
+    const checkpoint = candidate
     if (threadContext.checkpoint?.id !== checkpoint.id) {
       throw new AgentContextCompactionError(
         "checkpoint_failed",
@@ -281,44 +276,41 @@ export async function prepareAgentConversationContext(input: {
 }
 
 /** Conservatively combine matching provider usage with the current deterministic request shape. */
-export async function estimateAgentConversationInputTokens(input: {
-  readonly conversation: Pick<AgentRunConversation, "run" | "latestModelCall">
+export function estimateAgentConversationInputTokens(input: {
   readonly plan: ResolvedAgentExecutionPlan
   readonly threadContext: LoadedAgentThreadModelContext
   readonly systemPrompt: string
   readonly tools: readonly AgentContextEstimateTool[]
-}): Promise<number> {
-  const { conversation, plan, threadContext } = input
+}): number {
+  const { plan, threadContext } = input
   const fullEstimate = estimateAgentContextRequestTokens({
     systemPrompt: input.systemPrompt,
     tools: input.tools,
     messages: threadContext.modelMessages,
   }).tokens
-  const checkpointHead = threadContext.checkpoint?.observedHeadSeq ?? 0
-  const anchorIndex = findLatestUsageAnchor(threadContext.retainedMessages, checkpointHead)
-  const anchor = threadContext.retainedMessages[anchorIndex]
-  if (anchor?.runId) {
-    const anchorRun = await conversation.run(anchor.runId)
-    if (anchorRun) {
-      const usage = await conversation.latestModelCall(anchorRun.executionId)
-      const inputTokens = usage?.usage.inputTokens
-      const outputTokens = usage?.usage.outputTokens
-      if (
-        usage?.providerId === plan.model.providerId &&
-        usage.requestedModelId === plan.model.modelId &&
-        inputTokens !== undefined &&
-        inputTokens > 0 &&
-        outputTokens !== undefined &&
-        outputTokens > 0
-      ) {
-        const anchoredEstimate =
-          inputTokens +
-          outputTokens +
-          estimateAgentContextMessagesTokens(threadContext.retainedMessages.slice(anchorIndex + 1))
-            .tokens
-        return Math.max(anchoredEstimate, fullEstimate)
-      }
-    }
+  // The session found the model call that ended the latest assistant message after the checkpoint.
+  const anchor = threadContext.history.usageAnchor
+  const anchorIndex = anchor
+    ? threadContext.retainedMessages.findIndex((message) => message.id === anchor.messageId)
+    : -1
+  const usage = anchor?.modelCall
+  const inputTokens = usage?.usage.inputTokens
+  const outputTokens = usage?.usage.outputTokens
+  if (
+    anchorIndex >= 0 &&
+    usage?.providerId === plan.model.providerId &&
+    usage.requestedModelId === plan.model.modelId &&
+    inputTokens !== undefined &&
+    inputTokens > 0 &&
+    outputTokens !== undefined &&
+    outputTokens > 0
+  ) {
+    const anchoredEstimate =
+      inputTokens +
+      outputTokens +
+      estimateAgentContextMessagesTokens(threadContext.retainedMessages.slice(anchorIndex + 1))
+        .tokens
+    return Math.max(anchoredEstimate, fullEstimate)
   }
 
   return fullEstimate
@@ -332,14 +324,6 @@ function contextEstimateTools(
     description: spec.description,
     inputSchema: stableJsonStringify(spec.inputSchema),
   }))
-}
-
-function findLatestUsageAnchor(messages: readonly AgentMessageRecord[], afterSeq: number): number {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message?.role === "assistant" && message.seq > afterSeq && message.runId) return index
-  }
-  return -1
 }
 
 async function generateCheckpointSummary(input: {
@@ -448,11 +432,11 @@ async function createCheckpoint(input: {
   readonly candidate: AgentContextCheckpointRecord
   readonly estimatedInputTokensAfter: number
   readonly expectedPreviousCheckpointId: string | null
-}): Promise<AgentContextCheckpointRecord> {
+}): Promise<AgentTurnHistory> {
   for (let attempt = 0; ; attempt += 1) {
     input.runtime.assertCanContinue()
     try {
-      return await input.session.conversation.createCheckpoint({
+      return await input.session.checkpoint({
         id: input.candidate.id,
         threadId: input.candidate.threadId,
         expectedPreviousCheckpointId: input.expectedPreviousCheckpointId,

@@ -1,5 +1,4 @@
-import type { AgentRunConversation } from "@sixb/core/internal/agents"
-import type { AgentMessageRecord } from "@sixb/core/storage"
+import type { AgentTurnHistory } from "@sixb/core/internal/agents"
 import { renderCurrentTime } from "./agent-prompt"
 
 /**
@@ -7,35 +6,16 @@ import { renderCurrentTime } from "./agent-prompt"
  * of the run that answered it (the project's when that run captured none). Stored data only, so
  * every later run replays the same bytes and the history stays a cacheable prefix.
  */
-export async function loadUserMessageTimes(input: {
-  readonly conversation: Pick<AgentRunConversation, "runs">
-  readonly threadId: string
-  readonly messages: readonly AgentMessageRecord[]
-  readonly projectTimeZone: string
-}): Promise<ReadonlyMap<string, string>> {
-  const userMessages = input.messages.filter((message) => message.role === "user")
-  const oldest = userMessages[0]
-  if (!oldest) return new Map()
-
-  // A run starts after its trigger message, so this window holds every run that answered one.
-  const { runs } = await input.conversation.runs({
-    threadId: input.threadId,
-    kinds: ["conversation"],
-    startedAfter: new Date(oldest.createdAt.getTime() - 1),
-  })
-  const timeZoneByTrigger = new Map<string, string>()
-  for (const run of runs) {
-    if (run.kind === "conversation" && run.spec?.timeZone) {
-      timeZoneByTrigger.set(run.triggerMessageId, run.spec.timeZone)
-    }
-  }
+export function userMessageTimes(
+  history: AgentTurnHistory,
+  projectTimeZone: string
+): ReadonlyMap<string, string> {
   return new Map(
-    userMessages.map((message) => [
-      message.id,
-      renderCurrentTime(
-        message.createdAt,
-        timeZoneByTrigger.get(message.id) ?? input.projectTimeZone
-      ),
-    ])
+    history.messages
+      .filter((message) => message.role === "user")
+      .map((message) => [
+        message.id,
+        renderCurrentTime(message.createdAt, history.sentTimeZones[message.id] ?? projectTimeZone),
+      ])
   )
 }

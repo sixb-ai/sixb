@@ -18,6 +18,7 @@ import {
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AppendAgentMessageInput,
+  type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
   type ListAgentMessagesInput,
@@ -45,6 +46,13 @@ import {
   agentRunChildren,
   agentRunMail,
 } from "./run-session-children"
+import {
+  type AgentRunContext,
+  type AgentTurnContext,
+  type AgentTurnHistory,
+  readAgentRunContext,
+  readAgentTurnHistory,
+} from "./run-turn"
 import { subscribeAgentRunCancel } from "./streams/protocol"
 
 /**
@@ -108,6 +116,16 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * it.
    */
   assertOwned(): Promise<void>
+  /**
+   * What the run starts from, in one read: a turn's thread, the people it names and its history,
+   * or a child's parent, threads and messages.
+   */
+  context(): Promise<TRun extends ConversationAgentRunRecord ? AgentTurnContext : AgentRunContext>
+  /**
+   * Summarize the conversation up to a point, and answer its history from the new checkpoint on.
+   * Refused with {@link AgentExecutionLostError} once the run is no longer this session's.
+   */
+  checkpoint(input: AgentRunCheckpoint): Promise<AgentTurnHistory>
   /** A conversation's persistent workspace, as this run holds it. */
   readonly workspace: AgentRunWorkspace
   /** The run's conversation: its threads, history and context checkpoints. */
@@ -142,6 +160,12 @@ export interface AgentRunConversation {
     >
   ): Promise<AgentContextCheckpointRecord>
 }
+
+/** A context checkpoint a turn writes; the session adds which run, and its token. */
+export type AgentRunCheckpoint = Omit<
+  CreateAgentContextCheckpointInput,
+  "projectId" | "createdByRunId" | "executionToken"
+>
 
 /** The project's members as a run needs them, and the authority its execution carries. */
 export interface AgentRunPeople {
@@ -343,6 +367,24 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     people: agentRunPeople(host),
     execution: () =>
       host.storage.executions.getById({ projectId: host.projectId, id: run.executionId }),
+    context: async () => {
+      const context = await readAgentRunContext(host, run)
+      if (run.kind === "conversation" && context.kind !== "conversation") {
+        throw new Error(`[Sixb] Agent run '${run.id}' changed kind.`)
+      }
+      return context as Awaited<ReturnType<AgentRunSession<TRun>["context"]>>
+    },
+    async checkpoint(input) {
+      await fenced(run.id, () =>
+        agents.checkpoints.create({
+          ...input,
+          projectId: host.projectId,
+          createdByRunId: run.id,
+          executionToken,
+        })
+      )
+      return readAgentTurnHistory(host, input.threadId)
+    },
     workspace: {
       transition: (input) =>
         fenced(run.id, () =>
