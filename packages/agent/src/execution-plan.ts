@@ -1,5 +1,5 @@
-import type { AgentReasoning, AgentSkillDefinition, AgentToolDefinition } from "@sixb/core"
-import type { SandboxModel } from "@sixb/core/internal/agents"
+import type { AgentReasoning, AgentSkillDefinition } from "@sixb/core"
+import type { AgentToolSpec, SandboxModel } from "@sixb/core/internal/agents"
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { LanguageModel } from "@sixb/core/models"
 
@@ -13,7 +13,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly model: LanguageModel
   readonly reasoning?: AgentReasoning
   readonly instructions?: string
-  readonly tools: readonly AgentToolDefinition[]
+  /** The project tools it offers, as the model is offered them; they run where the project is. */
+  readonly tools: readonly AgentToolSpec[]
   /** Agent Skills installed in the sandbox and listed in the prompt. */
   readonly skills: readonly AgentSkillDefinition[]
   /** The requester's time zone and locale, when the run captured them. */

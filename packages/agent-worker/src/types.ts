@@ -5,6 +5,7 @@ import type {
   Queues,
   SandboxDefinition,
   SandboxFactory,
+  Sixb,
   SixbDefinitions,
   Storage,
 } from "@sixb/core"
@@ -94,4 +95,10 @@ export interface AgentWorkerOptions {
 }
 
 /** A run's execution context as the cloud runner holds it: with the factory its sandboxes come from. */
-export type AgentRunnerContext = AgentExecutionContext & Pick<AgentWorkerContext, "sandboxes">
+/**
+ * A run's execution context as the cloud runner holds it: with the factory its sandboxes come from,
+ * and the run's SDK, which a workspace's recipe resolves its parameters with. The harness reaches
+ * neither.
+ */
+export type AgentRunnerContext = AgentExecutionContext &
+  Pick<AgentWorkerContext, "sandboxes"> & { readonly sixb: Sixb }

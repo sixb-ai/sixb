@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { type AgentRunPlanDefinitions, type AgentRunView, readAgentRunPlan } from "../src/agents"
+import { defineAgentTool } from "../src/agents/builders"
 import type { AgentSkillDefinition } from "../src/agents/skills"
+import type { AgentToolDefinition } from "../src/agents/types"
 import type { LanguageModel } from "../src/models"
 import { createModelCatalog } from "../src/models"
 import { createOntologyDocsCatalog } from "../src/ontology/docs"
@@ -30,6 +32,19 @@ const invoiceReview: AgentSkillDefinition = {
   files: [],
 }
 
+const lookup = defineAgentTool("lookup")
+  .description("Look up.")
+  .input({ id: "string" })
+  .run(({ input }) => input)
+const exporter = defineAgentTool("export")
+  .description("Export.")
+  .input({})
+  .run(() => ({}))
+const tools = new Map<string, AgentToolDefinition>([
+  ["lookup", lookup],
+  ["export", exporter],
+])
+
 function definitions(input: { readonly instructions?: string } = {}): AgentRunPlanDefinitions {
   const models = createModelCatalog({
     language: [model("default", "low"), model("selected")],
@@ -41,10 +56,8 @@ function definitions(input: { readonly instructions?: string } = {}): AgentRunPl
       ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     },
     models,
-    tools: {
-      list: () => [{ name: "lookup" }, { name: "export" }],
-      getByName: () => null,
-    },
+    tools: { list: () => [lookup, exporter], getByName: (name: string) => tools.get(name) ?? null },
+    ontology: { getValueTypesById: () => new Map() },
   } as unknown as AgentRunPlanDefinitions
 }
 
@@ -68,7 +81,10 @@ describe("a turn's plan", () => {
       model: { provider: "test", modelId: "default" },
       reasoning: "low",
       skills: [invoiceReview],
-      toolNames: ["lookup", "export"],
+      tools: [
+        { name: "lookup", description: "Look up.", inputSchema: expect.any(Object) },
+        { name: "export", description: "Export.", inputSchema: expect.any(Object) },
+      ],
       sandboxModels: [
         { kind: "language", provider: "test", modelId: "default" },
         { kind: "language", provider: "test", modelId: "selected" },
@@ -131,7 +147,7 @@ describe("a child's plan", () => {
     expect(plan).not.toHaveProperty("delegation")
     expect(plan).toMatchObject({
       model: { provider: "test", modelId: "selected" },
-      toolNames: ["lookup"],
+      tools: [{ name: "lookup" }],
       timeZone: "Europe/Paris",
     })
   })

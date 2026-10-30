@@ -34,6 +34,7 @@ import {
   InMemoryStorage,
   type JsonValue,
   type ModelCatalogInput,
+  noopLogger,
   type ObjectTypeWithPropertyTokens,
   type OntologyDocsInput,
   prop,
@@ -160,6 +161,7 @@ import type {
   AgentWorkerHost,
   AgentWorkerStorage,
 } from "../src/types"
+import { workflowStepTools } from "../src/workflow-node-execution"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
 
@@ -2092,7 +2094,7 @@ function executionPlanFor(sixb: TestSixb) {
   })
   const model = sixb.definitions.models?.language?.default.model
   if (!model) throw new Error("Expected a default language model.")
-  return resolveRunPlan(sixb.definitions, { ...plan, sandboxModels: [] }, { model })
+  return resolveRunPlan({ ...plan, sandboxModels: [] }, { model })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -2109,8 +2111,6 @@ function workerContextOf(
     storage: workerStorageOf(sixb.storage),
     sandboxes: sixb.sandboxes,
     keepsChildWorkspaces: typeof sixb.sandboxes.resume === "function",
-    logging: sixb.logging,
-    valueTypesById: sixb.definitions.ontology.getValueTypesById(),
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
@@ -13042,9 +13042,9 @@ describe("agent tools act as the requester", () => {
     }
   })
 
-  // Regression proofs: swap the subagent's and the workflow task's `toolAttachments` in
-  // run-environment.ts; the child opens the input file and the task cannot. Give the child
-  // nothing to open, and it cannot open the quote its parent handed it.
+  // Regression proofs: give the session's callTool a child's thread attachments, or
+  // workflowStepTools no input files; the child opens nothing its parent handed it, or the task
+  // cannot open its input file.
   test("gives a workflow task's tools its input files and a child's those its parent handed", async () => {
     const sixb = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
       projectTools: [readAttachment],
@@ -13074,19 +13074,37 @@ describe("agent tools act as the requester", () => {
         stepId: "read-quote",
         nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
         errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
+        callTool: workflowStepTools({
+          host: sixb,
+          context,
+          plan,
+          logger: noopLogger,
+          run: {
+            kind: "workflow",
+            id: "task-run:node:0",
+            workflowId: "quotes",
+            stepId: "read-quote",
+          },
+          nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
+        }),
       })
     )
-    // The environment reads only the run's identity, execution and handed files, and its
-    // thread's: its session reads memory through the run's SDK.
+    // The environment reads only the run's kind, identity, attempt, execution and handed files,
+    // and its thread's: its session reads memory and runs its tools through the run's SDK.
     const childRun = {
       id: "child-run",
+      kind: "subagent",
       parentRunId: "parent-run",
+      attempt: 1,
       executionId: await createTestAgentExecution(sixb.storage, {
         projectId: PROJECT_ID,
         runId: "child-run",
       }),
       execution,
-      spec: { files: [{ path: "inputs/quote.txt", fileRef: quote }] },
+      spec: {
+        toolNames: [readAttachment.name],
+        files: [{ path: "inputs/quote.txt", fileRef: quote }],
+      },
     } as unknown as SubagentRunRecord
     const childThread = {
       id: "child-thread",
@@ -13146,8 +13164,8 @@ describe("agent tools act as the requester", () => {
     return { workerHost, recorded }
   }
 
-  // Regression proof: remove the bindAgentModelExecution call after the turn runtime in
-  // worker.ts; the tool's generate() then fails without a bound execution attempt.
+  // Regression proof: remove the bindAgentModelExecution call from the session's toolSdk in
+  // run-session.ts; the tool's generate() then fails without a bound execution attempt.
   test("accounts a tool's model call to the chat run like the Agent's own", async () => {
     const sixb = buildSixb(
       toolCallThenAnswerModel(summarizeInvoice.name, {}),

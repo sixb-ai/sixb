@@ -59,9 +59,10 @@ renewLease · cancelled · assertOwned   ownership, and a cancel of the run or o
 models.language(ref)                   the run's model, pinned once: each call is admitted against
                                        the requester's AI limits and records itself, so the runner
                                        never reports what a call used
-modelCalls()                           the recorder behind them, for a runner that runs project tools
-                                       in its own process; opened on first use, inside its
-                                       preparation retry
+callTool(call)                         one call of a project tool the run offers, run as the run
+                                       (run-tools.ts): its input checked against the tool's schema,
+                                       its model calls billed to the run, the files it puts stored
+                                       and returned for the runner to copy into its sandbox
 events · heldCalls                     live records (best effort) and the approvals that hold a run
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
@@ -86,5 +87,5 @@ and a session over HTTP runs the same suite.
 ## Outside the session
 
 The worker's loops stay its own: dispatching queued runs, repairing approvals, recovering model-call
-records and finishing runs that never started. Project tools run with the run's execution-bound
-`sixb`, which reaches storage only through the run's authority.
+records and finishing runs that never started. A workflow agent step runs only in the cloud, so the
+worker runs its project tools itself, through the same `runAgentTool`.

@@ -8,9 +8,10 @@ import {
   type JsonValue,
   type OpenedFileRef,
 } from "@sixb/core"
+import { threadToolAttachments } from "@sixb/core/internal/agents"
 import type { AgentStorage } from "@sixb/core/storage"
 import { attachmentKey, toolResultAttachmentKey } from "../src/attachments"
-import { threadToolAttachments, workflowInputToolAttachments } from "../src/tools/attachments"
+import { workflowInputToolAttachments } from "../src/tools/attachments"
 
 const PROJECT_ID = "tool-attachments"
 const OWNER = { type: "user", id: "usr_owner" } as const
@@ -87,9 +88,9 @@ async function seedThreads() {
     ],
   })
   const attachments = threadToolAttachments({
-    threads: { message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }) },
     threadId: "thread-1",
-    blobStorage,
+    message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }),
+    files: blobStorage,
   })
   return { attachments, blobStorage }
 }
@@ -112,7 +113,7 @@ describe("tool attachments", () => {
     })
   })
 
-  // Regression proof: drop the thread check in tools/attachments.ts, or the `isAgentToolResult`
+  // Regression proof: drop the thread check in core's run-tools.ts, or the `isAgentToolResult`
   // check in attachments.ts; the other thread's file, or the plain JSON one, then opens.
   test("rejects keys the manifest cannot list", async () => {
     const { attachments } = await seedThreads()
@@ -147,9 +148,9 @@ describe("tool attachments", () => {
       ],
     })
     const attachments = threadToolAttachments({
-      threads: { message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }) },
       threadId: "thread-1",
-      blobStorage: new InMemoryBlobStorage(),
+      message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }),
+      files: new InMemoryBlobStorage(),
     })
 
     await expect(attachments.open(attachmentKey("msg-1", 0))).resolves.toBeNull()

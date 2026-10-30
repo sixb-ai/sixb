@@ -1,20 +1,32 @@
 import {
   type AgentExecutionEnvironment,
+  type AgentToolCaller,
   createWorkflowAgentNodeEnvironment,
   isLostExecution,
   prepareAgentModel,
+  type ResolvedAgentExecutionPlan,
   runWorkflowAgentNode,
   toAgentExecutionFailure,
   type WorkflowAgentFailurePhase,
   WorkflowAgentNodeExecutionError,
+  workflowInputToolAttachments,
 } from "@sixb/agent"
-import type { AgentMessagePart, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
+import {
+  type AgentMessagePart,
+  AgentToolPublicError,
+  type AgentToolRunInfo,
+  type Logger,
+  type SixbFailure,
+  type ValueType,
+  type WorkflowDefinition,
+} from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
   renderAgentRunOntologyDocs,
   resolveAgentPropertyClearance,
+  runAgentTool,
   type WorkflowAgentNodeSession,
   WorkflowResumeDispatchError,
 } from "@sixb/core/internal/agents"
@@ -25,13 +37,14 @@ import {
   summarizeErrorMessage,
   toSixbFailure,
 } from "@sixb/core/internal/errors"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import {
   type AiModelCallRecorder,
   ModelUsageRecordingError,
   resolveLanguageModel,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
-import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
+import type { WorkflowAgentNodeDefinition, WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import { createWorkflowNodeFailure, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
   AgentQueueJob,
@@ -53,7 +66,7 @@ import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveWorkflowAgentStepPlan } from "./run-plan"
 import { workflowStepSandbox } from "./run-sandboxes"
-import type { AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
   readonly context: AgentWorkerContext
@@ -109,6 +122,11 @@ export async function executeWorkflowAgentNode(
   let totalNodes: number | undefined
   let preparationComplete = false
   const turnSignal = AbortSignal.any([signal, session.cancelled])
+  // The step's project tools log here, as the step.
+  const logs = resolveLoggingService(context.id, input.host.logging).startExecution({
+    kind: "agent",
+    id: nodeRun.id,
+  })
   // Fires when the node ends, however it ends: its tools' model calls must not outlive it.
   const ended = new AbortController()
   const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
@@ -179,6 +197,19 @@ export async function executeWorkflowAgentNode(
       stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
+      callTool: workflowStepTools({
+        host: input.host,
+        context: executionContext,
+        plan,
+        logger: logs.logger.child({ actorId }),
+        run: {
+          kind: "workflow",
+          id: nodeRun.id,
+          workflowId: workflow.id,
+          stepId: node.agentStep.id,
+        },
+        nodeInput: nodeRun.input,
+      }),
       signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -282,6 +313,7 @@ export async function executeWorkflowAgentNode(
     }
   } finally {
     ended.abort()
+    await logs.flush().catch(() => {})
     stopOwnershipProjection()
     session.close()
     await environment?.dispose()
@@ -546,5 +578,43 @@ function workflowAgentErrorDetails(
     workflowRunId: nodeRun.workflowRunId,
     nodeId: nodeRun.nodeId,
     nodeRunId: nodeRun.id,
+  }
+}
+
+/**
+ * How a workflow step calls a project tool: in this process, as the step, with its execution's
+ * SDK, its input's files as attachments and its logger. Only a tool the step selects runs.
+ */
+export function workflowStepTools(input: {
+  readonly host: AgentWorkerHost
+  readonly context: AgentRunnerContext
+  readonly plan: Pick<ResolvedAgentExecutionPlan, "tools">
+  readonly logger: Logger
+  readonly run: AgentToolRunInfo
+  readonly nodeInput: WorkflowIOSnapshot
+}): AgentToolCaller {
+  const selected = new Set(input.plan.tools.map((tool) => tool.name))
+  const attachments = workflowInputToolAttachments({
+    input: input.nodeInput,
+    blobStorage: input.context.blobStorage,
+  })
+  return (call, { signal }) => {
+    const definition = selected.has(call.toolName)
+      ? input.host.definitions.tools.getByName(call.toolName)
+      : null
+    if (!definition) {
+      throw new AgentToolPublicError(`[SixbAgentWorker] Tool '${call.toolName}' is not available.`)
+    }
+    return runAgentTool({
+      definition,
+      valueTypesById: input.host.definitions.ontology.getValueTypesById(),
+      call,
+      signal,
+      run: input.run,
+      sixb: input.context.sixb,
+      logger: input.logger,
+      attachments,
+      files: input.context.blobStorage,
+    })
   }
 }

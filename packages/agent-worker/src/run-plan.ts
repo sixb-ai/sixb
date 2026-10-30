@@ -1,39 +1,27 @@
 import { type ResolvedAgentExecutionPlan, withBuiltInSkills } from "@sixb/agent"
-import type { AgentStepDefinition, AgentToolDefinition, SixbDefinitions } from "@sixb/core"
-import { type AgentRunPlan, listSandboxModels } from "@sixb/core/internal/agents"
+import type { AgentStepDefinition, SixbDefinitions } from "@sixb/core"
+import { type AgentRunPlan, agentToolSpec, listSandboxModels } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
 import type { LanguageModel } from "@sixb/core/models"
 
-// The cloud runner holds the project, so it resolves the project tools a plan names to their
-// handlers. A turn's model comes from its session; a workflow step's, from the worker.
+// A turn's or a child's plan comes from its session, its model too. A workflow step runs only in the
+// cloud, so the worker resolves its plan from the project's definitions.
 
 /**
- * A turn's or a child's plan, with its tools resolved and the harness's skills added. Its model is
- * the session's, which records each call itself.
+ * A turn's or a child's plan, with the session's model, which records each call itself, and the
+ * harness's skills added. Its project tools run through the session.
  */
 export function resolveRunPlan(
-  definitions: Pick<SixbDefinitions, "tools">,
   plan: AgentRunPlan,
   resolved: { readonly model: LanguageModel }
 ): ResolvedAgentExecutionPlan {
-  const tools = plan.toolNames.map((name): AgentToolDefinition => {
-    const tool = definitions.tools.getByName(name)
-    if (!tool) {
-      throw createSixbError(
-        "agent.execution_failed",
-        `[SixbAgentWorker] Project tool '${name}' is not available.`,
-        { details: { toolName: name } }
-      )
-    }
-    return tool
-  })
-  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs } = plan
+  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs, tools } = plan
   return Object.freeze({
     model: resolved.model,
     ontologyDocs,
     ...(instructions === undefined ? {} : { instructions }),
-    tools: Object.freeze(tools),
+    tools,
     skills: withBuiltInSkills(plan.skills),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(timeZone === undefined ? {} : { timeZone }),
@@ -47,7 +35,7 @@ export function resolveRunPlan(
  * ontology docs, which its execution's view renders.
  */
 export function resolveWorkflowAgentStepPlan(
-  definitions: Pick<SixbDefinitions, "agent" | "models" | "tools">,
+  definitions: Pick<SixbDefinitions, "agent" | "models" | "ontology" | "tools">,
   input: { readonly workflowId: string; readonly step: AgentStepDefinition }
 ): Omit<ResolvedAgentExecutionPlan, "ontologyDocs"> {
   const { workflowId, step } = input
@@ -66,6 +54,7 @@ export function resolveWorkflowAgentStepPlan(
     )
   }
 
+  const valueTypesById = definitions.ontology.getValueTypesById()
   const tools = step.toolNames.map((name) => {
     const tool = definitions.tools.getByName(name)
     if (tool === null) {
@@ -75,7 +64,7 @@ export function resolveWorkflowAgentStepPlan(
         { details: { workflowId, agentStepId: step.id, toolName: name } }
       )
     }
-    return tool
+    return agentToolSpec(tool, valueTypesById)
   })
 
   const skills = step.skillNames.map((name) => {

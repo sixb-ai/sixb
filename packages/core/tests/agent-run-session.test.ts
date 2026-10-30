@@ -62,8 +62,8 @@ describe("an in-process run session", () => {
     stuck.close()
   })
 
-  // The worker loads the recorder inside its preparation, which retries a blip in place. Cache the
-  // rejected read in AgentRunSession.modelCalls; the second call fails too.
+  // The worker asks for its model inside its preparation, which retries a blip in place. Cache the
+  // rejected read of the run's model-call accounting in the session; the second ask fails too.
   test("reads the run's model-call accounting on first use, again after a failed read", async () => {
     const { host, storage, run } = await seedAgentRun()
     const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
@@ -75,10 +75,11 @@ describe("an in-process run session", () => {
       return getById(input)
     }
 
-    expect(await session.modelCalls().catch((error: unknown) => error)).toBeInstanceOf(Error)
-    const modelCalls = await session.modelCalls()
-    expect(modelCalls.executionId).toBe(run.executionId)
-    expect(await session.modelCalls()).toBe(modelCalls)
+    const ref = { provider: "test", modelId: "test-model" }
+    expect(await session.models.language(ref).catch((error: unknown) => error)).toBeInstanceOf(
+      Error
+    )
+    expect((await session.models.language(ref)).modelId).toBe("test-model")
     session.close()
   })
 })
