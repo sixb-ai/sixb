@@ -1,6 +1,7 @@
 import type { SixbHostView, SyncDefinition } from "@sixb/core"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -105,6 +106,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered syncs",
           tags: [OPENAPI_TAGS.syncs.name],
           operationId: "listSyncs",
+          security: accessTokenSecurityRequirement("listSyncs"),
         },
       }
     )
@@ -128,6 +130,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get sync metadata",
           tags: [OPENAPI_TAGS.syncs.name],
           operationId: "getSync",
+          security: accessTokenSecurityRequirement("getSync"),
         },
       }
     )
@@ -174,6 +177,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           summary: "List sync run history",
           tags: [OPENAPI_TAGS.syncRuns.name],
           operationId: "listSyncRuns",
+          security: accessTokenSecurityRequirement("listSyncRuns"),
         },
       }
     )

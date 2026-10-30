@@ -34,6 +34,9 @@ sixb action-runs get run-123
 sixb workflows list
 sixb workflows start onboarding --file input.json
 sixb workflow-runs get run-456
+sixb datasets rows orders --columns id,total --limit 10
+sixb sync-runs list --sync crm --status failed
+sixb pipeline-runs get run-789
 sixb files upload ./report.pdf
 ```
 

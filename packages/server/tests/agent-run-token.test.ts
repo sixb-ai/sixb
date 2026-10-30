@@ -6,7 +6,10 @@ import {
   type AuthorizablePrincipal,
   type AuthorizationContext,
   can,
+  change,
+  col,
   defineAction,
+  defineDataset,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -171,12 +174,23 @@ const routeLanguageModel = {
   },
 } satisfies LanguageModel
 
+const deviceReadings = defineDataset("device_readings", {
+  schema: [col("id", "string"), col("celsius", "float64")],
+  primaryKey: "id",
+})
+// The run's requester may not view this one, so the run may not either.
+const payroll = defineDataset("payroll", {
+  schema: [col("id", "string"), col("salary", "float64")],
+  primaryKey: "id",
+})
+
 const agentRuntime = defineGroup("agent-runtime")
 const agentRole = defineRole("agent.runtime", {
   grantedTo: [agentRuntime],
   grants: [
     can.view(Device),
     can.view(Contract),
+    can.view(deviceReadings),
     can.apply(labelDevice),
     can.apply(syncDevice),
     can.apply(notifyDevice),
@@ -846,6 +860,45 @@ describe("run tokens", () => {
     } finally {
       listener.stop(true)
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  // Remove the dataset, sync or pipeline reads from SIXB_API_ROUTES; that command gets a 403.
+  test("reads datasets, syncs and pipelines with the run's grants", async () => {
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
+    const listener = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => app.fetch(request),
+    })
+    const baseUrl = new URL(apiBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+
+    try {
+      const cli = (...args: string[]) => runSandboxCli(baseUrl.href, args)
+      const [datasets, rows, hidden, syncs, syncRuns, pipelines, pipelineRuns] = await Promise.all([
+        cli("datasets", "list"),
+        cli("datasets", "rows", "device_readings"),
+        cli("datasets", "get", "payroll"),
+        cli("syncs", "list"),
+        cli("sync-runs", "list"),
+        cli("pipelines", "list"),
+        cli("pipeline-runs", "list"),
+      ])
+
+      expect(datasets.exitCode).toBe(0)
+      expect(JSON.parse(datasets.stdout).map((dataset: { id: string }) => dataset.id)).toEqual([
+        "device_readings",
+      ])
+      expect(JSON.parse(rows.stdout)).toMatchObject({ rows: [{ id: "fan-1", celsius: 21.5 }] })
+      expect(hidden.exitCode).toBe(3)
+      expect(JSON.parse(hidden.stderr).error.status).toBe(404)
+      for (const result of [syncs, syncRuns, pipelines, pipelineRuns]) {
+        expect(result).toMatchObject({ exitCode: 0, stderr: "" })
+      }
+    } finally {
+      listener.stop(true)
     }
   })
 
@@ -1932,6 +1985,7 @@ async function createRunTokenRuntime(
     ontology: [Contract, Device, PrivateNote],
     actions: [labelDevice, syncDevice, notifyDevice],
     workflows: [inspectDevices, pingDevices, relabelDevices],
+    datasets: [deviceReadings, payroll],
     groups: [agentRuntime, noteReaders],
     roles: [agentRole, noteReaderRole],
     models: {
@@ -1948,6 +2002,9 @@ async function createRunTokenRuntime(
 
   const setup = createTestSixb(sixb)
   await setup.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
+  await setup.datasets.ingest(deviceReadings, {
+    changes: [change.upsert({ id: "fan-1", celsius: 21.5 })],
+  })
   await setup.objects.upsert("contract", { id: "contract-1" })
   await setup.objects.upsertLink("device", "fan-1", "contract", {
     targetTypeId: "contract",

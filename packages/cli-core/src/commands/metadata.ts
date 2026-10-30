@@ -50,6 +50,13 @@ Actions and workflows:
   sixb workflows list|get|start ...
   sixb workflow-runs list|get ...
 
+Data:
+  sixb datasets list|get|versions|rows ...
+  sixb syncs list|get ...             Syncs you may run, each with its latest run
+  sixb sync-runs list ...
+  sixb pipelines list|get ...         Pipelines you may run, each with its latest run
+  sixb pipeline-runs list|get ...
+
 Files:
   sixb files upload|download ...
 
@@ -296,6 +303,56 @@ List options:
   --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
   --offset <n>                  Non-negative; defaults to 0
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  datasets: `Usage:
+  sixb datasets list
+  sixb datasets get <dataset-id>
+  sixb datasets versions <dataset-id> [--limit <1-${CLI_LIMITS.datasetVersions.maximum}>]
+  sixb datasets rows <dataset-id> [options]
+
+Rows options:
+  --version <version-id>        Defaults to the latest version
+  --columns <a,b,...>           Defaults to every column
+  --limit <1-${CLI_LIMITS.datasetRows.maximum}>              Defaults to ${CLI_LIMITS.datasetRows.default}
+  --offset <n>                  Non-negative; defaults to 0
+
+\`list\` and \`get\` show a dataset's schema, latest version and the syncs, pipelines and
+projections that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
+columns your clearances do not cover and names them under redactions.`,
+  syncs: `Usage:
+  sixb syncs list
+  sixb syncs get <sync-id>
+
+Lists the syncs you may run, each with its latest run. \`sixb sync-runs list\` shows the history.`,
+  "sync-runs": `Usage:
+  sixb sync-runs list [options]
+
+List options:
+  --sync <sync-id>
+  --dataset <dataset-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  pipelines: `Usage:
+  sixb pipelines list
+  sixb pipelines get <pipeline-id>
+
+Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
+history and each run's steps.`,
+  "pipeline-runs": `Usage:
+  sixb pipeline-runs list [options]
+  sixb pipeline-runs get <run-id>
+
+List options:
+  --pipeline <pipeline-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}
+
+\`get\` includes the run's steps.`,
 } as const
 
 export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
