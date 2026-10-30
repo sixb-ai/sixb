@@ -1,5 +1,11 @@
 import { createSixbError } from "../errors/internal"
-import type { LanguageModelRef, LanguageModelTier, ModelCatalog } from "../models/catalog"
+import type {
+  LanguageModelCatalog,
+  LanguageModelRef,
+  LanguageModelTier,
+  ModelCatalog,
+} from "../models/catalog"
+import type { LanguageModelDefinition } from "../models/definitions"
 import type { PropertyClearance } from "../objects/property-clearance"
 import type { OntologyDocsCatalog } from "../ontology/docs"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "../ontology/docs-markdown"
@@ -35,6 +41,25 @@ export interface AgentRunPlan {
   readonly locale?: string
   /** Reference docs for the object types its requester can see, from their own view. */
   readonly ontologyDocs: RenderedOntologyDocs
+  /** The models a turn can hand a child; a child spawns none. */
+  readonly delegation?: AgentRunDelegation
+}
+
+/** The project's language models, as a turn chooses one for a child it spawns. */
+export interface AgentRunDelegation {
+  /** In catalog order: with tiers, light, standard then heavy. */
+  readonly models: readonly AgentRunDelegationModel[]
+  /** The project default, for a child spawned without a model. */
+  readonly defaultModel: LanguageModelRef
+  /** The tiers the project configures; empty when `models.language` is a list. */
+  readonly tiers: readonly LanguageModelTier[]
+}
+
+export interface AgentRunDelegationModel extends LanguageModelRef {
+  readonly tier?: LanguageModelTier
+  /** As the model's binding configures it, never its provider's catalog. */
+  readonly definition: LanguageModelDefinition
+  readonly defaultReasoning?: AgentReasoning
 }
 
 export type SandboxModelKind = "language" | "image" | "speech" | "transcription"
@@ -113,9 +138,11 @@ export function readAgentRunPlan(
   // Admission freezes the model's default reasoning into the spec; only runs admitted before
   // specs existed take today's default.
   const reasoning = spec ? spec.reasoning : entry.model.defaultReasoning
+  const language = models?.language
   return Object.freeze({
     ...shared,
     model: { provider: entry.provider, modelId: entry.modelId },
+    ...(language ? { delegation: readAgentRunDelegation(language) } : {}),
     toolNames: tools.list().map((tool) => tool.name),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(spec?.timeZone === undefined ? {} : { timeZone: spec.timeZone }),
@@ -244,4 +271,23 @@ export function renderAgentRunOntologyDocs(input: {
   const oldest = views.keys().next().value
   if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
   return rendered
+}
+
+/** The project's language models, as a turn offers them to the children it spawns. */
+export function readAgentRunDelegation(language: LanguageModelCatalog): AgentRunDelegation {
+  return {
+    models: language.list().map(
+      ({ provider, modelId, tier, model }): AgentRunDelegationModel => ({
+        provider,
+        modelId,
+        ...(tier === undefined ? {} : { tier }),
+        definition: model.definition,
+        ...(model.defaultReasoning === undefined
+          ? {}
+          : { defaultReasoning: model.defaultReasoning }),
+      })
+    ),
+    defaultModel: { provider: language.default.provider, modelId: language.default.modelId },
+    tiers: language.tiers,
+  }
 }

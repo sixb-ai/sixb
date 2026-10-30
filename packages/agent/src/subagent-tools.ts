@@ -9,7 +9,6 @@ import {
   type AgentReasoning,
   AgentToolPublicError,
   type AgentToolResult,
-  type LanguageModelCatalog,
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
@@ -17,6 +16,8 @@ import {
   type AgentChildApprovalAwaiting,
   type AgentChildDraft,
   AgentExecutionLostError,
+  type AgentRunDelegation,
+  type AgentRunDelegationModel,
   type AgentRunSession,
   createAgentMessageId,
   createSubagentRunId,
@@ -64,7 +65,7 @@ import { renderModelLine } from "./model-lines"
 import type { TurnChildren } from "./run-agent-turn"
 import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { continuationTrigger } from "./subagent-continuation"
-import type { AgentProjectCatalogs, AgentRunFiles, AgentRunSettings } from "./types"
+import type { AgentRunFiles, AgentRunSettings } from "./types"
 
 /**
  * How long a wait for children goes without reading their runs when nothing woke it. A child's
@@ -192,9 +193,17 @@ export interface WaitForSubagentsOutput {
   readonly artifactsError?: string
 }
 
+/** What a turn offers the children it spawns. */
+export interface TurnDelegation {
+  /** The project's language models, from the turn's plan. */
+  readonly models: AgentRunDelegation
+  /** The project tools each child gets. */
+  readonly toolNames: readonly string[]
+}
+
 /** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
 export class SubagentCoordinator {
-  private readonly models: LanguageModelCatalog
+  private readonly models: AgentRunDelegation
   #runFiles: AgentRunFiles | undefined
   /** Children whose files are in the parent's sandbox, and in the result that first listed them. */
   readonly #installed = new Map<string, readonly InstalledChildFile[]>()
@@ -209,7 +218,8 @@ export class SubagentCoordinator {
   readonly #answers = new Map<string, MessageSubagentOutput>()
 
   constructor(
-    private readonly host: AgentProjectCatalogs,
+    /** What the turn offers its children: the project's language models, and its tools. */
+    private readonly delegation: TurnDelegation,
     private readonly context: AgentRunSettings,
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
@@ -221,11 +231,7 @@ export class SubagentCoordinator {
      */
     private readonly startChild: (run: SubagentRunRecord) => void
   ) {
-    const models = host.definitions.models?.language
-    if (!models) {
-      throw new Error("[SixbAgent] Subagent delegation requires a language model catalog.")
-    }
-    this.models = models
+    this.models = delegation.models
     this.#questions = new ChildQuestions(session.mail, parentRun.id)
   }
 
@@ -735,7 +741,7 @@ export class SubagentCoordinator {
     const key = requireNonEmpty("spawn_agent", input.key, "key", 128)
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
-    const reasoning = input.reasoning ?? model.model.defaultReasoning
+    const reasoning = input.reasoning ?? model.defaultReasoning
     const sources = input.files?.length
       ? await listHandedSources({ files: this.runFiles(), paths: input.files, signal })
       : undefined
@@ -877,7 +883,7 @@ export class SubagentCoordinator {
     return {
       model: { provider: model.provider, modelId: model.modelId },
       task,
-      toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
+      toolNames: this.delegation.toolNames,
       ...(tier === undefined ? {} : { tier }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
@@ -1165,12 +1171,24 @@ export class SubagentCoordinator {
     return this.#runFiles
   }
 
-  private resolveModel(ref: LanguageModelRef | LanguageModelTier | undefined) {
-    if (ref === undefined) return this.models.default
-    if (typeof ref === "string") return this.models.getByTier(ref)
-    const model = this.models.getByRef(ref)
+  private resolveModel(
+    ref: LanguageModelRef | LanguageModelTier | undefined
+  ): AgentRunDelegationModel {
+    const { models, defaultModel } = this.models
+    const byRef = (wanted: LanguageModelRef) => models.find((model) => sameModel(model, wanted))
+    const projectDefault = () => {
+      const model = byRef(defaultModel)
+      if (!model)
+        throw new Error("[SixbAgent] The project's default model is not among its models.")
+      return model
+    }
+    if (ref === undefined) return projectDefault()
+    // A tier's first model; a tier left out, or any tier of a list, gives the default.
+    if (typeof ref === "string")
+      return models.find((model) => model.tier === ref) ?? projectDefault()
+    const model = byRef(ref)
     if (model) return model
-    const available = this.models.list().map(formatModelRef).join(", ")
+    const available = models.map(formatModelRef).join(", ")
     throw new AgentToolPublicError(
       `[SixbAgent] Language model ${formatModelRef(ref)} is not configured for this project. ` +
         `Use one of: ${available}. Omit model to use the project default.`
@@ -1182,16 +1200,16 @@ export class SubagentCoordinator {
  * Built from each model's configured definition, never from its provider catalog: the guide is in
  * every turn's tools, so it stays the same for the process and catalog I/O cannot fail a turn.
  */
-export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
-  const entries = models.list().map((entry) => {
-    const metadata = defineLanguageModel(entry.model.definition)
+export function renderSubagentModelGuide(models: AgentRunDelegation): string {
+  const entries = models.models.map((entry) => {
+    const metadata = defineLanguageModel(entry.definition)
     if (metadata.providerId !== entry.provider || metadata.modelId !== entry.modelId) {
       throw new Error(
         "[SixbAgent] Delegation model definition identity does not match its catalog entry."
       )
     }
     const details: string[] = []
-    if (sameModel(entry, models.default)) details.push("default")
+    if (sameModel(entry, models.defaultModel)) details.push("default")
     if (metadata.contextWindow !== undefined)
       details.push(`context ${formatTokenCount(metadata.contextWindow)} tokens`)
     if (metadata.maxInputTokens !== undefined)
@@ -1226,7 +1244,7 @@ export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
   ].join("\n")
 }
 
-function modelChoice(models: LanguageModelCatalog): typeof LISTED_MODEL_CHOICE {
+function modelChoice(models: AgentRunDelegation): typeof LISTED_MODEL_CHOICE {
   return models.tiers.length > 0 ? TIERED_MODEL_CHOICE : LISTED_MODEL_CHOICE
 }
 
@@ -1251,7 +1269,7 @@ function formatScaled(value: number, scale: number): string {
   return (Math.round((value / scale) * 100) / 100).toString()
 }
 
-function spawnInputSchema(models: LanguageModelCatalog): JsonObject {
+function spawnInputSchema(models: AgentRunDelegation): JsonObject {
   return {
     type: "object",
     properties: {
@@ -1297,8 +1315,8 @@ function tierChoice(tiers: readonly LanguageModelTier[]): readonly JsonObject[] 
 }
 
 // Keep each pair together: independent enums would also admit unconfigured bindings.
-function modelRefChoices(models: LanguageModelCatalog): readonly JsonObject[] {
-  return models.list().map(({ provider, modelId }) => ({
+function modelRefChoices(models: AgentRunDelegation): readonly JsonObject[] {
+  return models.models.map(({ provider, modelId }) => ({
     type: "object",
     properties: {
       provider: { type: "string", enum: [provider] },

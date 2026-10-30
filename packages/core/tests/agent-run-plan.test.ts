@@ -63,7 +63,8 @@ function turn(spec?: object): AgentRunRecord {
 
 describe("a turn's plan", () => {
   test("offers every project tool and skill, with instructions only from SIXB.md", () => {
-    expect(readAgentRunPlan(definitions(), turn(), VIEW)).toEqual({
+    const { delegation, ...plan } = readAgentRunPlan(definitions(), turn(), VIEW)
+    expect(plan).toEqual({
       model: { provider: "test", modelId: "default" },
       reasoning: "low",
       skills: [invoiceReview],
@@ -73,6 +74,15 @@ describe("a turn's plan", () => {
         { kind: "language", provider: "test", modelId: "selected" },
       ],
       ontologyDocs: { files: [], index: [] },
+    })
+    // What a child may run on: the project's models, each as its binding configures it.
+    expect(delegation).toMatchObject({
+      defaultModel: { provider: "test", modelId: "default" },
+      tiers: [],
+      models: [
+        { provider: "test", modelId: "default", defaultReasoning: "low" },
+        { provider: "test", modelId: "selected", definition: { modelId: "selected" } },
+      ],
     })
     expect(
       readAgentRunPlan(definitions({ instructions: "Answer in French." }), turn(), VIEW)
@@ -116,7 +126,10 @@ describe("a child's plan", () => {
       },
     } as unknown as AgentRunRecord
 
-    expect(readAgentRunPlan(definitions(), child, VIEW)).toMatchObject({
+    const plan = readAgentRunPlan(definitions(), child, VIEW)
+    // A child spawns no children of its own.
+    expect(plan).not.toHaveProperty("delegation")
+    expect(plan).toMatchObject({
       model: { provider: "test", modelId: "selected" },
       toolNames: ["lookup"],
       timeZone: "Europe/Paris",

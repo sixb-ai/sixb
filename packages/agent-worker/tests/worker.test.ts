@@ -69,6 +69,7 @@ import {
   NOOP_STREAM_SINK,
   openAgentRunSession,
   publishAgentRunCancel,
+  readAgentRunDelegation,
   readAgentRunPlan,
   type WorkflowAgentNodeSession,
 } from "@sixb/core/internal/agents"
@@ -1967,7 +1968,13 @@ async function coordinatorFor(
 ): Promise<SubagentCoordinator> {
   const context = await buildAgentWorkerContext(sixb)
   const session = await runSessionOf(sixb, parent)
-  return new SubagentCoordinator(sixb, context, parent, session, () => {})
+  const language = sixb.definitions.models?.language
+  if (!language) throw new Error("Expected a language model catalog.")
+  const delegation = {
+    models: readAgentRunDelegation(language),
+    toolNames: sixb.definitions.tools.list().map((tool) => tool.name),
+  }
+  return new SubagentCoordinator(delegation, context, parent, session, () => {})
 }
 
 /**

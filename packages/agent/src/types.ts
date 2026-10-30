@@ -1,4 +1,4 @@
-import type { AuthorizablePrincipal, Sixb, SixbDefinitions, ValueType } from "@sixb/core"
+import type { AuthorizablePrincipal, Sixb, ValueType } from "@sixb/core"
 import type { AgentRunFileStore, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { ModelTool } from "@sixb/core/models"
@@ -26,11 +26,6 @@ export interface AgentRunSettings {
   /** Project locale and time zone, for runs that do not carry the requester's own. */
   readonly locale: string
   readonly timeZone: string
-}
-
-/** The project's catalogs a turn offers its children: their models and tools. */
-export interface AgentProjectCatalogs {
-  readonly definitions: Pick<SixbDefinitions, "models" | "tools">
 }
 
 /** Provider ports activated only after an Agent execution scope is bound. */

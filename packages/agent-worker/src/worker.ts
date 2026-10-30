@@ -12,6 +12,7 @@ import {
   runAgentTurn,
   SubagentCoordinator,
   stoppedByWorker,
+  type TurnDelegation,
   toAgentRunFailure,
 } from "@sixb/agent"
 import { principalsEqual } from "@sixb/core"
@@ -103,6 +104,8 @@ interface PreparedConversationTurn {
   /** Others were added to the thread, even ones who cannot read it now. */
   readonly shared: boolean
   readonly plan: ResolvedAgentExecutionPlan
+  /** What the turn offers the children it spawns. */
+  readonly delegation: TurnDelegation
   readonly execution: ExecutionRecord
   readonly executionContext: AgentRunnerContext
   readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
@@ -288,7 +291,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: runtime.signal,
         accounting: runtime.usageRecorder,
       })
-      delegation = new SubagentCoordinator(this.host, context, run, session, (child) =>
+      delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
         this.requireChildren().start(child, { signal, delivery })
       )
       const frameworkTools = await delegation.createTools()
@@ -419,7 +422,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const { run } = session
     const turn = await session.context()
     const { thread, execution, participants } = turn
-    const plan = resolveRunPlan(this.host.definitions, await session.plan())
+    const runPlan = await session.plan()
+    const plan = resolveRunPlan(this.host.definitions, runPlan)
+    if (!runPlan.delegation) {
+      throw new Error(`[SixbAgentWorker] Agent run '${run.id}' has no models to delegate to.`)
+    }
     if (!execution) {
       throw createSixbError(
         "internal.unexpected",
@@ -451,6 +458,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // and read back whatever memory the thread held meanwhile.
       shared: participants.length > 0,
       plan,
+      delegation: { models: runPlan.delegation, toolNames: runPlan.toolNames },
       execution,
       executionContext,
       model,

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
+import { readAgentRunDelegation } from "@sixb/core/internal/agents"
+import type { LanguageModelCatalog } from "@sixb/core/models"
 import { createModelCatalog } from "@sixb/core/models"
 import { renderSubagentModelGuide } from "../src/subagent-tools"
 import { WorkerTestModel } from "./worker-model-fixture"
+
+/** The models a turn's plan offers its children, from the project's catalog. */
+function delegationOf(language: LanguageModelCatalog | undefined) {
+  if (!language) throw new Error("Expected a language model catalog.")
+  return readAgentRunDelegation(language)
+}
 
 describe("subagent model guidance", () => {
   test("reads each model's configured definition and never its provider catalog", () => {
@@ -30,7 +38,7 @@ describe("subagent model guidance", () => {
       ],
     })
 
-    expect(renderSubagentModelGuide(catalog.language)).toBe(
+    expect(renderSubagentModelGuide(delegationOf(catalog.language))).toBe(
       [
         "Available models (provider-declared metadata when available):",
         '- {"provider":"gateway","modelId":"openai/gpt-5.5"} GPT (default; tools)',
@@ -62,7 +70,7 @@ describe("subagent model guidance", () => {
         }),
       ],
     })
-    expect(renderSubagentModelGuide(catalog.language)).toBe(
+    expect(renderSubagentModelGuide(delegationOf(catalog.language))).toBe(
       [
         "Available models (provider-declared metadata when available):",
         '- {"provider":"gateway/private","modelId":"specialist"} (default; metadata unavailable)',
@@ -88,7 +96,7 @@ describe("subagent model guidance", () => {
       ],
     })
 
-    expect(renderSubagentModelGuide(catalog.language)).toBe(
+    expect(renderSubagentModelGuide(delegationOf(catalog.language))).toBe(
       [
         "Available models (provider-declared metadata when available):",
         '- {"provider":"gateway","modelId":"openai/gpt-5.5"} GPT (default; tools): A second opinion, useful to compare an analysis.',
@@ -120,7 +128,7 @@ describe("subagent model guidance", () => {
       },
     })
 
-    expect(renderSubagentModelGuide(catalog.language)).toBe(
+    expect(renderSubagentModelGuide(delegationOf(catalog.language))).toBe(
       [
         "Models you can delegate to:",
         'light     {"provider":"gateway","modelId":"deepseek/deepseek-v4.1-flash"} DeepSeek V4.1 Flash (reasoning)',
