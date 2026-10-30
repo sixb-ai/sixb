@@ -309,7 +309,10 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     executionToken,
     cancelled,
     events: host.events,
-    children: agentRunChildren(host, run, executionToken, scope),
+    children: agentRunChildren(host, run, executionToken, scope, () => ({
+      tools: host.definitions.tools.list().map((tool) => tool.name),
+      models: host.definitions.models?.language?.list() ?? [],
+    })),
     mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>

@@ -44,8 +44,10 @@ export function resolveRunPlan(
   })
 }
 
-/** Resolve a directly configured workflow task into the shared Agent execution contract. */
-/** A workflow step's plan, but for its ontology docs, which its execution's view renders. */
+/**
+ * Resolve a directly configured workflow task into the shared Agent execution contract: all but its
+ * ontology docs, which its execution's view renders.
+ */
 export function resolveWorkflowAgentStepPlan(
   definitions: Pick<SixbDefinitions, "agent" | "models" | "tools">,
   input: { readonly workflowId: string; readonly step: AgentStepDefinition }

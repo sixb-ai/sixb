@@ -424,8 +424,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const { thread, execution, participants } = turn
     const runPlan = await session.plan()
     const plan = resolveRunPlan(this.host.definitions, runPlan)
+    // A turn's plan always carries it; only a child's goes without.
     if (!runPlan.delegation) {
-      throw new Error(`[SixbAgentWorker] Agent run '${run.id}' has no models to delegate to.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${run.id}' has no models to delegate to.`
+      )
     }
     if (!execution) {
       throw createSixbError(

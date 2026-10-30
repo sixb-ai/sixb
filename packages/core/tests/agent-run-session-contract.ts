@@ -19,6 +19,7 @@ import {
   publishAgentRunCancel,
 } from "../src/agents"
 import { emptyGrantIndex } from "../src/authorization/types"
+import type { LanguageModel } from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 
@@ -34,6 +35,15 @@ const LEASE = "2099-01-01T00:00:00.000Z"
 /** A lease already run out: what lets another runner take a run over. */
 const LAPSED = "2000-01-01T00:00:00.000Z"
 
+const TEST_MODEL: LanguageModel = {
+  providerId: "test",
+  modelId: "test-model",
+  definition: { kind: "language", providerId: "test", modelId: "test-model", capabilities: {} },
+  async stream() {
+    throw new Error("The session suite calls no model.")
+  },
+}
+
 /** The project a session binds its run's SDK in, over the storage the test seeds. */
 function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const blobs = new InMemoryBlobStorage()
@@ -45,6 +55,8 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
     broker,
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
+    // The model the suite's turns run on, which they may hand their children.
+    models: { language: [TEST_MODEL] },
   })
   return { session: { sdk, definitions: sdk.definitions }, blobs }
 }
@@ -558,6 +570,16 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(await turn.children.spawn(draft("east")).catch((error) => error)).toMatchObject({
         code: "active_child_limit",
       })
+      // Only the project's tools and models: a runner names no others for its child.
+      for (const spec of [
+        { model: { provider: "test", modelId: "test-model" }, toolNames: ["drop_tables"] },
+        { model: { provider: "other", modelId: "any-model" }, toolNames: [] },
+      ]) {
+        const forged = { ...draft("south"), spec: { ...draft("south").spec, ...spec } }
+        expect(await turn.children.spawn(forged).catch((error: Error) => error.message)).toMatch(
+          /cannot (hand a child tool|delegate to model)/
+        )
+      }
       turn.close()
     })
 
