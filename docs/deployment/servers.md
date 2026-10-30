@@ -160,7 +160,7 @@ A deploy:
 3. Installs the pinned Bun and the dependencies, and runs `sixb build`.
 4. Updates the routes. Caddy must accept them first; otherwise the deploy stops and the previous routes keep working.
 5. Stops the services, runs `sixb db migrate`, `sixb check`, and `sixb lake check`, and starts the services again.
-6. Waits for the API's `/ready`, and fails if a process exits in the seconds after.
+6. Waits for the API's `/ready`, and fails if a process exits in its first seconds.
 
 The services are down during step 5. Meanwhile, browsers opening your app get an "Updates in progress" page.
 

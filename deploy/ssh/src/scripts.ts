@@ -275,14 +275,18 @@ function renderUpdateRoutes(release: DeployRelease, layout: DeploymentLayout): s
 }
 
 function renderStartServices(): string {
-  return ['systemctl --user restart "$UNIT"', 'systemctl --user is-active --quiet "$UNIT"'].join(
-    "\n"
-  )
+  return [
+    'systemctl --user restart "$UNIT"',
+    'systemctl --user is-active --quiet "$UNIT"',
+    // Where "Check services" counts its quiet window from.
+    "started=$SECONDS",
+  ].join("\n")
 }
 
 /**
  * Done means healthy, not just started: the API answers its readiness route, and no process has
- * exited in the seconds after it did.
+ * exited in its first seconds. Those seconds count from "Start services", so the time the API
+ * takes to boot is part of them rather than added to them.
  */
 export function renderCheckServices(readinessUrl: string | null): string {
   const waitForApi = readinessUrl
@@ -303,5 +307,10 @@ export function renderCheckServices(readinessUrl: string | null): string {
         "fi",
       ]
     : []
-  return [...waitForApi, "sleep 5", '"$CTL" status --check'].join("\n")
+  return [
+    ...waitForApi,
+    "quiet=$((5 - (SECONDS - started)))",
+    'if [ "$quiet" -gt 0 ]; then sleep "$quiet"; fi',
+    '"$CTL" status --check',
+  ].join("\n")
 }
