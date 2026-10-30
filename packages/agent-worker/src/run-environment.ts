@@ -250,7 +250,6 @@ export async function createConversationAgentEnvironment(
         blobStorage: context.blobStorage,
       }),
       apiBaseUrl,
-      runToken,
       attachmentContext,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -312,7 +311,6 @@ export async function createSubagentEnvironment(
       ...input,
       execution,
       sandbox,
-      runToken,
       resumed: workspace?.resumed ?? false,
     })
   } catch (error) {
@@ -328,12 +326,11 @@ async function startSubagentEnvironment(
   input: CreateSubagentEnvironmentInput & {
     readonly execution: NonNullable<SubagentRunRecord["execution"]>
     readonly sandbox: RunSandbox
-    readonly runToken: string
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
   }
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation, execution, sandbox, runToken, resumed } = input
+  const { context, plan, run, conversation, execution, sandbox, resumed } = input
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
@@ -394,7 +391,6 @@ async function startSubagentEnvironment(
       blobStorage: context.blobStorage,
     }),
     apiBaseUrl: context.apiBaseUrl,
-    runToken,
     attachmentContext,
     ontologyDocs: renderRunOntologyDocs(context),
     ...(memory ? { memory } : {}),
@@ -474,7 +470,6 @@ export async function createWorkflowAgentNodeEnvironment(
         blobStorage: context.blobStorage,
       }),
       apiBaseUrl: context.apiBaseUrl,
-      runToken,
       attachmentContext,
       ontologyDocs: renderRunOntologyDocs(context),
       errorDetails: input.errorDetails,
@@ -520,8 +515,6 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
   readonly runId: string
   readonly threadId?: string
   readonly apiBaseUrl: string
-  /** What the run's commands call the API with, as `$SIXB_TOKEN`. */
-  readonly runToken: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
   readonly ontologyDocs?: RenderedOntologyDocs
@@ -653,7 +646,6 @@ async function startAgentEnvironment(
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
-    runToken: input.runToken,
     attachmentContext,
     // A conversation's memory section names the memory skill; other runs never see it.
     skills: input.memory && mode === "conversation" ? [...plan.skills, MEMORY_SKILL] : plan.skills,
@@ -848,7 +840,6 @@ interface ProvisionSandboxInput {
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
-  readonly runToken: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
@@ -870,7 +861,6 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       sandbox,
       contextDirectory,
       apiBaseUrl,
-      runToken: input.runToken,
       projectId: context.id,
       ...(actorId === undefined ? {} : { actorId }),
       ...(run.threadId ? { threadId: run.threadId } : {}),

@@ -198,7 +198,10 @@ export interface Sandbox {
  * Credentials and current authority must be supplied again, never inferred from saved files.
  */
 export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
-  /** Supports initial and renewable host-only credentials on ephemeral and named sessions. */
+  /**
+   * Supports initial and renewable host-only credentials on ephemeral and named sessions. An
+   * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
+   */
   readonly supportsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>

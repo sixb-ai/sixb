@@ -34,6 +34,11 @@ export class LocalBashSandbox implements Sandbox {
 
   constructor(readonly workingDirectory: string) {}
 
+  /** As a firewall adds credentials: the URL itself. */
+  credentialedUrl(url: string): string {
+    return url
+  }
+
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     for (const file of files) {
       const path = isAbsolute(file.path) ? file.path : join(this.workingDirectory, file.path)

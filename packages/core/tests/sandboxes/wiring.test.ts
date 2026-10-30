@@ -12,6 +12,7 @@ const Room = defineObjectType({
 
 test("SixbHost exposes the configured sandbox factory, or none", () => {
   const factory: SandboxFactory = {
+    supportsRequestCredentials: true,
     create: async () => {
       throw new Error("unused")
     },

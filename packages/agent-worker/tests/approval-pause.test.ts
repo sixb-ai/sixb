@@ -87,6 +87,11 @@ class GatewaySandbox implements Sandbox {
   readonly status = "running"
   readonly workingDirectory = "/tmp/sixb-gateway-sandbox"
 
+  /** As a firewall adds credentials: the URL itself. */
+  credentialedUrl(url: string): string {
+    return url
+  }
+
   constructor(
     private readonly onHeldCommand: (runId: string, signal?: AbortSignal) => Promise<void>
   ) {}
@@ -195,6 +200,7 @@ function setup(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     sandboxes: {
+      supportsRequestCredentials: true,
       create: async () =>
         new GatewaySandbox((runId, signal) => onHeldCommand({ runId, host, signal })),
     },

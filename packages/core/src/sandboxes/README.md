@@ -6,10 +6,10 @@ Factories define environments; threads retain immutable parameters; runs provide
   Dynamic recipes require an execution-resolved environment; providers never invoke resolvers.
 - Selection and validation happen before provisioning. Initial source access must be allowed by
   the session network policy. Creation runs setup once; resume never replays it.
-- One rule decides whether source access can work (`sandboxCredentialIssue` in
-  [configuration](./configuration.ts)): write access needs `auth`, and `auth` a provider with
-  `supportsRequestCredentials`, even for a recipe without a source. `SixbHost` applies it to the
-  factory's static recipe at construction. The worker applies it again to each recipe a run
+- One rule decides whether an agent can run in a factory's sandboxes (`sandboxCredentialIssue` in
+  [configuration](./configuration.ts)): the provider must have `supportsRequestCredentials`, since
+  the run's token is one of the credentials, and write access needs `auth`. `SixbHost` applies it
+  to the factory and its static recipe at construction. The worker applies it again to each recipe a run
   resolves: `resolve` results are unknown at startup, and a worker host is structural.
 - Runs without a thread binding explicitly select `{}`; shared env/network defaults remain session
   settings, not an implicit project binding. Unsupported provider capabilities fail explicitly.
@@ -49,8 +49,8 @@ Vercel requests can outlive their worker: storage fencing cannot cancel provider
 Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
 Saved files remain subject to provider retention.
 
-Source `auth` stays host-side. Providers advertising `supportsRequestCredentials` must apply
-execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
+Source `auth` stays host-side. Providers advertising `supportsRequestCredentials`, as every
+agent's provider must, apply execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
 initial credentials before setup and expose session-scoped renewal, for ephemeral and named
 sandboxes alike. Unsupported providers reject credentials before provisioning. During initial
 provisioning/setup, the worker aborts before token expiry if no session handle is available yet;

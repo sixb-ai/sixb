@@ -749,12 +749,12 @@ describe("run tokens", () => {
   })
 
   test("saves and pulls memory from two sandboxes, merging a conflicting save", async () => {
-    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime()
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
     const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-memory-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (request) => api.fetch(request),
+      fetch: (request) => app.fetch(request),
     })
     const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
@@ -768,7 +768,7 @@ describe("run tokens", () => {
       const file = (path: string) => join(env.SIXB_MEMORY_DIR, "user", path)
       return {
         run: async (...args: string[]) => {
-          const result = await runAgentCli(baseUrl.href, runToken, ["memory", ...args], env)
+          const result = await runAgentCli(baseUrl.href, ["memory", ...args], env)
           return { ...result, json: result.stdout ? JSON.parse(result.stdout) : null }
         },
         read: (path: string) => readFile(file(path), "utf8"),
@@ -853,19 +853,19 @@ describe("run tokens", () => {
   })
 
   test("keeps the generated agent CLI compatible with the real API", async () => {
-    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime()
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
     const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-api-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (request) => api.fetch(request),
+      fetch: (request) => app.fetch(request),
     })
     const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, runToken, args)
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
       const invalidQueryPath = join(directory, "invalid-query.json")
       const actionParamsPath = join(directory, "action-params.json")
       const uploadPath = join(directory, "upload.txt")
@@ -1605,16 +1605,16 @@ describe("agent approval gate", () => {
   })
 
   test("the generated agent CLI prints a held call and exits with code 4", async () => {
-    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime({
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
       approvalMode: "manual",
     })
-    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => api.fetch(r) })
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
     const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const held = await runAgentCli(baseUrl.href, runToken, [
+      const held = await runAgentCli(baseUrl.href, [
         "actions",
         "request",
         "label-device",
@@ -1812,17 +1812,17 @@ describe("agent CLI models", () => {
       definition: { kind: "image", providerId: "test", modelId: "painter" },
       generate: async () => ({ output: { images: [{ data: png, mediaType: "image/png" }] } }),
     }
-    const { api, apiBaseUrl, runToken } = await createRunTokenRuntime({
+    const { app, apiBaseUrl } = await createRunTokenRuntime({
       models: { image: [painter] },
     })
     const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-models-"))
-    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => api.fetch(r) })
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
     const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, runToken, args)
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
       const listed = await cli(["models", "list", "--kind", "image"])
       expect(listed.exitCode).toBe(0)
       expect(JSON.parse(listed.stdout)).toEqual([
@@ -1851,16 +1851,16 @@ interface AgentApi {
   fetch(request: Request): Promise<Response>
 }
 
+/** The agent CLI against `baseUrl`, a forwarder that adds the run token, as in a sandbox. */
 async function runAgentCli(
   baseUrl: string,
-  runToken: string,
   args: readonly string[],
   env: Readonly<Record<string, string>> = {}
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
   // This path-level dependency is intentional: it verifies the exact artifact copied into agent
   // sandboxes without making @sixb/agent-worker a runtime dependency of @sixb/server.
   const child = Bun.spawn([process.execPath, AGENT_CLI_ARTIFACT, ...args], {
-    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl, SIXB_TOKEN: runToken },
+    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -1894,7 +1894,7 @@ async function createRunTokenRuntime(
 ): Promise<{
   /** The API as the run's commands call it: with the run token, unless a request names its own. */
   readonly app: AgentApi
-  /** The API with no credential added, as the agent CLI reaches it with `SIXB_TOKEN`. */
+  /** The API with no credential added. */
   readonly api: ReturnType<typeof createSixbApi>
   readonly apiBaseUrl: string
   readonly runToken: string

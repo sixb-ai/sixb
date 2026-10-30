@@ -41,7 +41,6 @@ test("git add . stages only project files across creation and resume", async () 
     await prepareAgentSandboxApiContext({
       sandbox,
       contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-      runToken: "sixb_run_v1_test",
       projectId: "test",
       runId,
       apiBaseUrl: "https://gateway.invalid/synthetic-capability",
