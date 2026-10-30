@@ -11,7 +11,7 @@ import {
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS, DEFAULT_TELEMETRY_ORDER } from "../policies"
 import { GROUP_HELP } from "./metadata"
-import { normalizeWindowOptions, readJson, singleFileOption } from "./shared"
+import { idSegment, normalizeWindowOptions, readJson, singleFileOption } from "./shared"
 
 export async function telemetry(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -62,7 +62,7 @@ export async function telemetry(api: ApiClient, args: readonly string[]): Promis
 }
 
 function telemetryPath(args: readonly string[], terminal: "latest" | "history"): string {
-  return `/api/objects/${encodeURIComponent(args[0] ?? "")}/${encodeURIComponent(args[1] ?? "")}/telemetry/${encodeURIComponent(args[2] ?? "")}/${terminal}`
+  return `/api/objects/${idSegment(args[0])}/${idSegment(args[1])}/telemetry/${idSegment(args[2])}/${terminal}`
 }
 
 function normalizeTelemetryQueryInput(input: unknown): Record<string, unknown> {

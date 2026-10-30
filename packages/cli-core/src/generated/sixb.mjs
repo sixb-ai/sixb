@@ -482,8 +482,8 @@ Rows options:
   --limit <1-${CLI_LIMITS.datasetRows.maximum}>              Defaults to ${CLI_LIMITS.datasetRows.default}
   --offset <n>                  Non-negative; defaults to 0
 
-\`list\` and \`get\` show a dataset's schema, latest version and the syncs, pipelines and
-projections that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
+\`list\` and \`get\` show a dataset's schema, its latest version, and the syncs and pipelines you
+may run that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
 columns your clearances do not cover and names them under redactions.`,
   syncs: `Usage:
   sixb syncs list
@@ -541,6 +541,11 @@ var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"face
 
 // src/commands/shared.ts
 import { readFile } from "node:fs/promises";
+function idSegment(value) {
+  if (!value || value === "." || value === "..")
+    fail(`'${value ?? ""}' is not an id.`);
+  return encodeURIComponent(value);
+}
 function parseQueryOptions(args, names, command) {
   const kinds = Object.fromEntries(Object.keys(names).map((flag) => [flag, "string"]));
   const { options } = parseCommandArgs(args, kinds, command);
@@ -614,7 +619,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     return writeText(GROUP_HELP.actions);
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "actions get", 1);
-    return writeJson(await api.get(`/api/actions/${encodeURIComponent(positionals[0] ?? "")}`));
+    return writeJson(await api.get(`/api/actions/${idSegment(positionals[0])}`));
   }
   if (sub === "list") {
     const options = parseQueryOptions(rest, { "--type": "objectTypeId" }, "actions list");
@@ -647,7 +652,7 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     const requestedRunId = runId ?? `act_${randomUUID()}`;
     const waiting = AbortSignal.timeout(requestWaitMs);
     try {
-      return writeRequestResult(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+      return writeRequestResult(await api.post(`/api/actions/${idSegment(actionId)}`, {
         params,
         ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
         runId: requestedRunId
@@ -666,7 +671,6 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
 }
 
 // src/commands/data.ts
-var segment = (value) => encodeURIComponent(value ?? "");
 async function datasets(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
@@ -677,13 +681,13 @@ async function datasets(api, args) {
   }
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "datasets get", 1);
-    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}`));
+    return writeJson(await api.get(`/api/datasets/${idSegment(positionals[0])}`));
   }
   if (sub === "versions") {
     const { positionals, options } = parseCommandArgs(rest, { "--limit": "string" }, "datasets versions", 1);
     const { default: fallback, maximum } = CLI_LIMITS.datasetVersions;
     const limit = integerInRange("--limit", options["--limit"] ?? String(fallback), 1, maximum);
-    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}/versions`, { limit: String(limit) }));
+    return writeJson(await api.get(`/api/datasets/${idSegment(positionals[0])}/versions`, { limit: String(limit) }));
   }
   if (sub === "rows") {
     const { positionals, options } = parseCommandArgs(rest, { "--version": "string", "--columns": "string", "--limit": "string", "--offset": "string" }, "datasets rows", 1);
@@ -694,7 +698,7 @@ async function datasets(api, args) {
       ...options["--columns"] === undefined ? {} : { columns: columnList(options["--columns"]) },
       ...options["--offset"] === undefined ? {} : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }
     };
-    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}/rows`, query));
+    return writeJson(await api.get(`/api/datasets/${idSegment(positionals[0])}/rows`, query));
   }
   fail(`Unknown datasets command '${sub}'.`);
 }
@@ -708,7 +712,7 @@ async function runnables(api, group, args) {
   }
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
-    return writeJson(await api.get(`/api/${group}/${segment(positionals[0])}`));
+    return writeJson(await api.get(`/api/${group}/${idSegment(positionals[0])}`));
   }
   fail(`Unknown ${group} command '${sub}'.`);
 }
@@ -752,11 +756,11 @@ async function files(api, args) {
       requireExact(positionals, 3, "files download object requires object type and primary id.");
       const type = positionals[1] ?? "";
       const id = positionals[2] ?? "";
-      route = `/api/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}/files/content`;
+      route = `/api/objects/${idSegment(type)}/${idSegment(id)}/files/content`;
     } else if (context === "action-run" || context === "workflow-run") {
       requireExact(positionals, 2, `files download ${context} requires exactly one run id.`);
       const id = positionals[1] ?? "";
-      route = `/api/${context}s/${encodeURIComponent(id)}/files/content`;
+      route = `/api/${context}s/${idSegment(id)}/files/content`;
     } else
       fail(`Unknown file download context '${context}'.`);
     const path = options["--path"];
@@ -961,7 +965,7 @@ async function calls(api, args) {
     fail(`Unknown models calls command '${sub ?? ""}'. Use 'models calls files'.`);
   const { positionals, options } = parseCommandArgs(rest, { "--output": "string" }, "models calls files", 1);
   const callId = positionals[0] ?? "";
-  const call = await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}/files`);
+  const call = await api.get(`/api/ai/model-calls/${idSegment(callId)}/files`);
   const output = options["--output"];
   if (output === undefined)
     return writeJson(call);
@@ -1034,7 +1038,7 @@ async function saveFiles(api, callId, files, output) {
   });
   for (const [index, path] of paths.entries()) {
     await mkdir(dirname(path), { recursive: true });
-    await api.download(`/api/ai/model-calls/${encodeURIComponent(callId)}/files/content`, path, {
+    await api.download(`/api/ai/model-calls/${idSegment(callId)}/files/content`, path, {
       path: `/files/${index}`
     });
   }
@@ -1678,7 +1682,7 @@ async function ontology(api, args) {
     if (requestsHelp(rest))
       return writeText("Usage: sixb ontology get <object-type>");
     const { positionals } = parseCommandArgs(rest, {}, "ontology get", 1);
-    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(positionals[0] ?? "")}`));
+    return writeJson(await api.get(`/api/object-types/${idSegment(positionals[0])}`));
   }
   fail(`Unknown ontology command '${sub}'.`);
 }
@@ -1796,7 +1800,7 @@ async function telemetry(api, args) {
   fail(`Unknown telemetry command '${sub}'.`);
 }
 function telemetryPath(args, terminal) {
-  return `/api/objects/${encodeURIComponent(args[0] ?? "")}/${encodeURIComponent(args[1] ?? "")}/telemetry/${encodeURIComponent(args[2] ?? "")}/${terminal}`;
+  return `/api/objects/${idSegment(args[0])}/${idSegment(args[1])}/telemetry/${idSegment(args[2])}/${terminal}`;
 }
 function normalizeTelemetryQueryInput(input) {
   if (Array.isArray(input) || typeof input !== "object" || input === null) {
@@ -1838,7 +1842,7 @@ async function users(api, args) {
     return writeText(GROUP_HELP.users);
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "users get", 1);
-    return writeJson(await api.get(`/api/users/${encodeURIComponent(positionals[0] ?? "")}`));
+    return writeJson(await api.get(`/api/users/${idSegment(positionals[0])}`));
   }
   if (sub === "list") {
     const { options } = parseCommandArgs(rest, LIST_FLAGS, "users list");
@@ -1876,7 +1880,7 @@ async function workflows(api, args) {
     const {
       positionals: [workflowId]
     } = parseCommandArgs(rest, {}, "workflows get", 1);
-    return writeJson(await api.get(`/api/workflows/${encodeURIComponent(workflowId ?? "")}`));
+    return writeJson(await api.get(`/api/workflows/${idSegment(workflowId)}`));
   }
   if (sub === "start") {
     const {
@@ -1888,7 +1892,7 @@ async function workflows(api, args) {
       fail("Workflow input must be a JSON object.");
     }
     const runId = options["--run-id"] ?? `run_${randomUUID2()}`;
-    return writeRequestResult(await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, {
+    return writeRequestResult(await api.post(`/api/workflows/${idSegment(workflowId)}/runs`, {
       input,
       runId
     }));

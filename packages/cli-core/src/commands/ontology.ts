@@ -2,7 +2,7 @@ import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { asRecord, asRecords, vectorProfileNames } from "./shared"
+import { asRecord, asRecords, idSegment, vectorProfileNames } from "./shared"
 
 export async function ontology(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -46,7 +46,7 @@ export async function ontology(api: ApiClient, args: readonly string[]): Promise
   if (sub === "get") {
     if (requestsHelp(rest)) return writeText("Usage: sixb ontology get <object-type>")
     const { positionals } = parseCommandArgs(rest, {}, "ontology get", 1)
-    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(positionals[0] ?? "")}`))
+    return writeJson(await api.get(`/api/object-types/${idSegment(positionals[0])}`))
   }
   fail(`Unknown ontology command '${sub}'.`)
 }

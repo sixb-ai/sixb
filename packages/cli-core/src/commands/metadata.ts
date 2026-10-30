@@ -314,8 +314,8 @@ Rows options:
   --limit <1-${CLI_LIMITS.datasetRows.maximum}>              Defaults to ${CLI_LIMITS.datasetRows.default}
   --offset <n>                  Non-negative; defaults to 0
 
-\`list\` and \`get\` show a dataset's schema, latest version and the syncs, pipelines and
-projections that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
+\`list\` and \`get\` show a dataset's schema, its latest version, and the syncs and pipelines you
+may run that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
 columns your clearances do not cover and names them under redactions.`,
   syncs: `Usage:
   sixb syncs list

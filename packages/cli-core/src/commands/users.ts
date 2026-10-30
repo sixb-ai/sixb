@@ -11,6 +11,7 @@ import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS } from "../policies"
 import { GROUP_HELP } from "./metadata"
 import type { QueryOptions } from "./shared"
+import { idSegment } from "./shared"
 
 const USER_STATUSES = ["active", "suspended", "all"] as const
 
@@ -26,7 +27,7 @@ export async function users(api: ApiClient, args: readonly string[]): Promise<vo
 
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "users get", 1)
-    return writeJson(await api.get(`/api/users/${encodeURIComponent(positionals[0] ?? "")}`))
+    return writeJson(await api.get(`/api/users/${idSegment(positionals[0])}`))
   }
 
   if (sub === "list") {

@@ -4,6 +4,12 @@ import { fail } from "../output"
 
 export type QueryOptions = Record<string, string | undefined>
 
+/** An id as one segment of an API path: `.` or `..` would name another route. */
+export function idSegment(value: string | undefined): string {
+  if (!value || value === "." || value === "..") fail(`'${value ?? ""}' is not an id.`)
+  return encodeURIComponent(value)
+}
+
 /** Parse flag/value pairs into API query parameters. */
 
 export function parseQueryOptions(

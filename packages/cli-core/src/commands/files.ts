@@ -3,6 +3,7 @@ import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp, requireExact } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
+import { idSegment } from "./shared"
 
 export async function files(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -45,11 +46,11 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
       requireExact(positionals, 3, "files download object requires object type and primary id.")
       const type = positionals[1] ?? ""
       const id = positionals[2] ?? ""
-      route = `/api/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}/files/content`
+      route = `/api/objects/${idSegment(type)}/${idSegment(id)}/files/content`
     } else if (context === "action-run" || context === "workflow-run") {
       requireExact(positionals, 2, `files download ${context} requires exactly one run id.`)
       const id = positionals[1] ?? ""
-      route = `/api/${context}s/${encodeURIComponent(id)}/files/content`
+      route = `/api/${context}s/${idSegment(id)}/files/content`
     } else fail(`Unknown file download context '${context}'.`)
     const path = options["--path"]
     if (!path) fail("files download requires --path <json-pointer>.")

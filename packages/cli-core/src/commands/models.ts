@@ -4,7 +4,7 @@ import type { ApiClient } from "../api-client"
 import { enumValue, integerInRange, isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { readText } from "./shared"
+import { idSegment, readText } from "./shared"
 
 export const MODEL_KINDS = ["language", "image", "speech", "transcription"] as const
 export type ModelKind = (typeof MODEL_KINDS)[number]
@@ -277,7 +277,7 @@ async function calls(api: ApiClient, args: readonly string[]): Promise<void> {
     1
   )
   const callId = positionals[0] ?? ""
-  const call = (await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}/files`)) as {
+  const call = (await api.get(`/api/ai/model-calls/${idSegment(callId)}/files`)) as {
     readonly callId: string
     readonly files: readonly FileRef[]
   }
@@ -390,7 +390,7 @@ async function saveFiles(
   })
   for (const [index, path] of paths.entries()) {
     await mkdir(dirname(path), { recursive: true })
-    await api.download(`/api/ai/model-calls/${encodeURIComponent(callId)}/files/content`, path, {
+    await api.download(`/api/ai/model-calls/${idSegment(callId)}/files/content`, path, {
       path: `/files/${index}`,
     })
   }

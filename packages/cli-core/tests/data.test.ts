@@ -13,6 +13,7 @@ afterEach(() => {
 /** Runs one command against a server that records each request and answers `{}`. */
 async function run(args: readonly string[]) {
   const requests: string[] = []
+  server?.stop(true)
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -69,6 +70,21 @@ describe("sixb datasets", () => {
     expect(requests).toEqual([
       "/api/datasets/orders/rows?limit=50&versionId=v_2&columns=id,total&offset=100",
     ])
+  })
+
+  // Guard proof: encode ids with encodeURIComponent alone again; `..` requests /api/rows.
+  test("refuses an id that would name another route, before any request", async () => {
+    for (const args of [
+      ["datasets", "rows", ".."],
+      ["syncs", "get", "."],
+    ]) {
+      const { requests, error } = await run(args)
+      expect({ args, requests, code: error instanceof CliError && error.body.code }).toEqual({
+        args,
+        requests: [],
+        code: "invalid_arguments",
+      })
+    }
   })
 
   test("refuses bounds the server would reject, before any request", async () => {
