@@ -79,8 +79,8 @@ export async function prepareAgentSandboxApiContext(
   }
   const apiBaseUrl = input.sandbox.credentialedUrl(input.apiBaseUrl)
 
-  // apiBaseUrl arrives already normalized (see worker.ts), so it is used verbatim. The run token
-  // stays out of run.json: only the commands' environment holds it.
+  // apiBaseUrl arrives already normalized (see worker.ts), so it is used verbatim. No file or env
+  // var of the run holds the token: the sandbox adds it to requests to apiBaseUrl.
   const runContext = JSON.stringify(
     {
       projectId: input.projectId,
