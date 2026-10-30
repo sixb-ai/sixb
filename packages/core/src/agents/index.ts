@@ -167,6 +167,7 @@ export type {
   AgentRunConversation,
   AgentRunHeldCalls,
   AgentRunOutcome,
+  AgentRunPeople,
   AgentRunSession,
   AgentRunSessionHost,
   AgentRunWorkspace,
@@ -176,6 +177,7 @@ export type {
 export {
   AgentExecutionLostError,
   AgentFinalizationError,
+  agentRunPeople,
   claimAgentRun,
   isTerminalOrExecutionGone,
   openAgentRunSession,

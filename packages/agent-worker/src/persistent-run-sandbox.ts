@@ -118,7 +118,7 @@ class PersistentSandboxSession {
     private readonly recipe: SandboxEnvironment,
     private readonly resume: NonNullable<SandboxFactory["resume"]>
   ) {
-    const { context, definition, thread, run, signal, onAuthFailure } = input
+    const { context, definition, thread, signal, onAuthFailure } = input
     this.access = new WorkspaceAccess({
       recipe,
       auth: definition?.auth,

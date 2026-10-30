@@ -13,7 +13,6 @@ import {
   isolateStreamSink,
   isTerminalOrExecutionGone,
   publishAgentRunCancel,
-  resolveInheritedAgentExecutionAuthorization,
   sandboxCredentialIssue,
   watchAgentRunCancel,
   withAgentActivityStream,
@@ -290,7 +289,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         // Storage keeps this projection monotonic, so racing confirmations are safe.
         await session.renewLease(delivery.leaseExpiresAt)
         const modelCalls = await session.modelCalls()
-        return { ...(await this.prepareConversationTurn(context, run)), modelCalls }
+        return { ...(await this.prepareConversationTurn(context, session)), modelCalls }
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
@@ -433,12 +432,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   /** Resolve everything a turn needs before its first model call. */
   private async prepareConversationTurn(
     context: AgentWorkerContext,
-    run: ConversationAgentRunRecord
+    session: AgentRunSession<ConversationAgentRunRecord>
   ): Promise<PreparedConversationTurn> {
-    const thread = await context.storage.agents.threads.getById({
-      projectId: context.id,
-      id: run.threadId,
-    })
+    const { run } = session
+    const thread = await session.conversation.thread(run.threadId)
     const plan = resolveAgentExecutionPlan({
       spec: run.spec,
       models: this.host.definitions.models?.language,
@@ -450,10 +447,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       defaultMaxSteps: context.defaultMaxSteps,
       sandboxModels: listSandboxModels(this.host.definitions.models),
     })
-    const execution = await context.storage.executions.getById({
-      projectId: context.id,
-      id: run.executionId,
-    })
+    const execution = await session.execution()
     if (!execution) {
       throw createSixbError(
         "internal.unexpected",
@@ -461,18 +455,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
       )
     }
-    const participants = thread
-      ? await context.storage.agents.threads.listParticipants({
-          projectId: context.id,
-          threadIds: [thread.id],
-        })
-      : []
+    const participants = thread ? await session.conversation.participants([thread.id]) : []
     this.assertRequesterTakesPart(run, thread, participants, execution)
 
     const conversation = thread
       ? await conversationReaders({
-          auth: context.storage.auth,
-          security: this.host.definitions.security,
+          people: session.people,
           thread,
           participants,
         })
@@ -483,12 +471,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       host: this.host,
       execution,
       runId: run.id,
-      authorization: await resolveInheritedAgentExecutionAuthorization({
-        auth: context.storage.auth,
-        projectId: context.id,
-        authorizationRef: execution.authorizationRef,
-        security: this.host.definitions.security,
-      }),
+      people: session.people,
+      authorization: await session.people.authorization(execution.authorizationRef),
       shared: (conversation?.participants.length ?? 0) > 0,
     })
     const model = await prepareAgentModel(plan)
@@ -586,10 +570,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const work: SubagentWork = {}
 
     try {
-      const currentParent = await context.storage.agents.runs.getById({
-        projectId: context.id,
-        id: run.parentRunId,
-      })
+      const currentParent = await session.conversation.run(run.parentRunId)
       if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
         throw new DOMException("The parent Agent run is no longer active.", "AbortError")
       }
@@ -606,10 +587,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           : { projectInstructions: this.host.definitions.agent.instructions }),
         sandboxModels: listSandboxModels(this.host.definitions.models),
       })
-      const durableExecution = await context.storage.executions.getById({
-        projectId: context.id,
-        id: queuedRun.executionId,
-      })
+      const durableExecution = await session.execution()
       if (
         !durableExecution ||
         durableExecution.source.type !== "execution" ||
@@ -627,24 +605,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           }
         )
       }
-      const authorization = await resolveInheritedAgentExecutionAuthorization({
-        auth: context.storage.auth,
-        projectId: context.id,
-        authorizationRef: durableExecution.authorizationRef,
-        security: this.host.definitions.security,
-      })
       const executionContext = await createAgentExecutionContext({
         context,
         host: this.host,
         execution: durableExecution,
         runId: queuedRun.id,
-        authorization,
+        people: session.people,
+        authorization: await session.people.authorization(durableExecution.authorizationRef),
       })
       // The child works in its own thread, and publishes into its conversation's gallery.
-      const childThread = await context.storage.agents.threads.getById({
-        projectId: context.id,
-        id: run.threadId,
-      })
+      const childThread = await session.conversation.thread(run.threadId)
       if (!childThread) {
         throw createSixbError(
           "internal.unexpected",
@@ -652,13 +622,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           { details: agentRunFailureDetails(run) }
         )
       }
-      const conversation = await context.storage.agents.threads.getById({
-        projectId: context.id,
-        id: conversationThreadId(childThread),
-      })
+      const conversation = await session.conversation.thread(conversationThreadId(childThread))
       const prepared = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
-      const history = await loadSubagentHistory(context.storage.agents, run, childThread)
+      const history = await loadSubagentHistory(session, childThread)
       const modelCalls = await session.modelCalls()
       preparationComplete = true
       await session.events.publishStarted(run)
@@ -1093,6 +1060,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
       childQueue: this.host.queues.agentChildren,
+      security: this.host.definitions.security,
     }
   }
 

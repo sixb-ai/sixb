@@ -1907,6 +1907,7 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
       recoverAiModelCall: recoverAiModelCall(sixb),
       events: NOOP_STREAM_SINK,
       childQueue: sixb.queues.agentChildren,
+      security: sixb.definitions.security,
     },
     run
   )
@@ -10895,6 +10896,7 @@ describe("AgentWorker", () => {
           broker: host.broker,
           recoverAiModelCall: context.recoverAiModelCall,
           events: context.streamSink,
+          security: host.definitions.security,
         },
         run
       )

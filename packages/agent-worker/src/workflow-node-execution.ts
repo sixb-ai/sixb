@@ -1,6 +1,7 @@
 import type { AgentMessagePart, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
+  agentRunPeople,
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
@@ -176,6 +177,11 @@ export async function executeWorkflowAgentNode(
       execution: durableExecution,
       actorId,
       runId: nodeRun.id,
+      people: agentRunPeople({
+        projectId: context.id,
+        storage: context.storage,
+        security: input.host.definitions.security,
+      }),
       authorization: { type: "principal", context: resolved.context },
       authorPrincipal: resolved.identity.principal,
     })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import { InMemoryBroker, InMemoryStorage } from "../src"
+import { InMemoryBroker, InMemoryStorage, type SecurityDefinitionCatalog } from "../src"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -40,6 +40,7 @@ async function setup(id = "run-1") {
     broker,
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
+    security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
   }
   return { storage, broker, run, host }
 }

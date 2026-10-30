@@ -96,7 +96,7 @@ export async function prepareAgentConversationContext(input: {
   // The authors ride on user messages, not the system prompt; an estimate only needs their size.
   const authors = input.conversation
     ? await loadConversationAuthors({
-        auth: context.storage.auth,
+        people: session.people,
         conversation: input.conversation,
         messages: initialContext.retainedMessages,
       })

@@ -87,8 +87,7 @@ async function seedThreads() {
     ],
   })
   const attachments = threadToolAttachments({
-    storage: agents,
-    projectId: PROJECT_ID,
+    conversation: { message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }) },
     threadId: "thread-1",
     blobStorage,
   })
@@ -148,8 +147,7 @@ describe("tool attachments", () => {
       ],
     })
     const attachments = threadToolAttachments({
-      storage: agents,
-      projectId: PROJECT_ID,
+      conversation: { message: (id) => agents.messages.getById({ projectId: PROJECT_ID, id }) },
       threadId: "thread-1",
       blobStorage: new InMemoryBlobStorage(),
     })
