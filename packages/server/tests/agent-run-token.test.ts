@@ -1357,6 +1357,31 @@ describe("agent approval gate", () => {
     expect(await storage.actionRuns.getById({ projectId: PROJECT_ID, id: "act_notify" })).toBeNull()
   })
 
+  // Guard proof: drop the media type check from the gate's readBody; evil_1 runs on run_ping's
+  // approval, because the route reads the form field the gate never saw.
+  test("an approved call can't be replayed as another through a body the route reads differently", async () => {
+    const { app, apiBaseUrl, sixb, storage } = await createRunTokenRuntime({
+      approvalMode: "manual",
+    })
+    await requestGatedCall(app, apiBaseUrl, "workflow", "run_ping")
+    const { approvals } = await storage.agents.approvals.list({ projectId: PROJECT_ID })
+    const [approval] = approvals
+    if (!approval) throw new Error("Expected the held call.")
+    expect((await decideAs(sixb, approval, "approve")).status).toBe(200)
+
+    // JSON to the gate, the approved call; a form to the route, another run.
+    const response = await app.fetch(
+      new Request(`${apiBaseUrl}/api/workflows/ping-devices/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: JSON.stringify({ input: {}, runId: "run_ping", x: "&runId=evil_1&" }),
+      })
+    )
+
+    expect(response.status).toBe(415)
+    expect(await gatedCallRan(storage, "workflow", "evil_1")).toBe(false)
+  })
+
   test("a turn from before approval modes runs what it asks, as it always did", async () => {
     const { app, apiBaseUrl, storage } = await createRunTokenRuntime()
 
