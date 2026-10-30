@@ -95,13 +95,7 @@ export class AiModelCallRecorder {
   wrapModel(model: LanguageModel): LanguageModel {
     const recorded = reportModelCalls(model, this.onModelCallEnd)
     return {
-      providerId: model.providerId,
-      modelId: model.modelId,
-      definition: model.definition,
-      costEstimator: model.costEstimator,
-      ...(model.validateResponseFormat === undefined
-        ? {}
-        : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
+      ...recorded,
       stream: async (request) => {
         this.assertHealthy()
         const inputTokens = estimateAiModelCallInputTokens({
