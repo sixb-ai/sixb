@@ -12,8 +12,8 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createTestSixb } from "@sixb/core/testing"
+import { WorkerTestModel } from "../../../packages/agent/tests/worker-model-fixture"
 import { AgentWorker } from "../../../packages/agent-worker/src"
-import { WorkerTestModel } from "../../../packages/agent-worker/tests/worker-model-fixture"
 import { createSixbApi, SixbServer } from "../../../packages/server/src/server"
 import { AzureSandboxFactory } from "../src"
 import { buildGuestArtifact } from "./guest-build"

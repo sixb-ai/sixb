@@ -29,10 +29,10 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
+import { waitFor as pollFor } from "../../agent/tests/helpers"
+import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
 import { repairAgentApprovals } from "../src/approval-repair"
-import { waitFor as pollFor } from "./helpers"
-import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "agent-approval-pause"
 const alice = { type: "user", id: "usr_alice" } as const

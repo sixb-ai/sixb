@@ -1,3 +1,16 @@
+import {
+  type AgentExecutionEnvironment,
+  AgentTurnTimeoutError,
+  createWorkflowAgentNodeEnvironment,
+  isLostExecution,
+  listSandboxModels,
+  prepareAgentModel,
+  resolveWorkflowAgentStepExecutionPlan,
+  runWorkflowAgentNode,
+  toAgentExecutionFailure,
+  type WorkflowAgentFailurePhase,
+  WorkflowAgentNodeExecutionError,
+} from "@sixb/agent"
 import type { AgentMessagePart, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
@@ -37,21 +50,9 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
-import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
-import { AgentTurnTimeoutError, isLostExecution } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import { listSandboxModels, resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
-import { toAgentExecutionFailure } from "./failure"
-import {
-  type AgentExecutionEnvironment,
-  createWorkflowAgentNodeEnvironment,
-} from "./run-environment"
-import {
-  runWorkflowAgentNode,
-  type WorkflowAgentFailurePhase,
-  WorkflowAgentNodeExecutionError,
-} from "./run-workflow-agent-node"
+import { workflowStepSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
@@ -161,7 +162,12 @@ export async function executeWorkflowAgentNode(
     const provisioningSignal = AbortSignal.any([turnSignal, deadline.signal])
     const nodeSignal = AbortSignal.any([provisioningSignal, ended.signal])
     environment = await createWorkflowAgentNodeEnvironment({
-      session,
+      openSandbox: workflowStepSandbox({
+        context,
+        session,
+        run: reserved,
+        ...(node.agentStep.sandbox === undefined ? {} : { stepSandbox: node.agentStep.sandbox }),
+      }),
       context: executionContext,
       plan,
       run: reserved,
@@ -169,7 +175,6 @@ export async function executeWorkflowAgentNode(
       stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
-      ...(node.agentStep.sandbox === undefined ? {} : { stepSandbox: node.agentStep.sandbox }),
       signal: provisioningSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })

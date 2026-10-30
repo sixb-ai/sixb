@@ -1,6 +1,8 @@
 # @sixb/agent-worker
 
 Runs conversation, headless workflow-agent, and model-accounting recovery jobs for a Sixb project.
+It is the cloud runner of the agent harness, [@sixb/agent](../agent/README.md): it claims runs from
+the queues, opens their sessions and sandboxes, and hands them to the harness.
 
 The worker claims durable conversation runs created by `sixb.agent.runs.request(...)` and agent workflow
 nodes parked by the workflow worker. It starts or reclaims the execution, renews queue ownership,
@@ -78,23 +80,23 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   (else its last text). A child whose call waits for approval pauses, its work in its thread, and comes
   back `awaiting_approval`; the turn pauses once no other child is at work, and the turn that
   resumes it continues the child first (see
-  [paused children](./docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
+  [paused children](../agent/docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
   paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
   back as files of `wait_agent`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is
   installed in the parent's `$SIXB_ARTIFACTS` (see
-  [runtime design](./docs/runtime-design.md#child-runs)). It returns a minute before
+  [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
   `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
   before its next step, or answers again when it came as it answered, and `wait_agent` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
-  [messages to a child](./docs/runtime-design.md#messages-to-a-child)). Children get
+  [messages to a child](../agent/docs/runtime-design.md#messages-to-a-child)). Children get
   `ask_parent`, which waits for the parent's answer: `wait_agent` returns as soon as a child of
   the turn asks, with its question in `questions`, and `message_agent` to that child is the
   answer. Before a turn records its end, each child still waiting pauses `awaiting_answer`, the
   next turn reads which children wait, and its `message_agent` to the key continues it with the
   answer (see
-  [questions to the parent](./docs/runtime-design.md#questions-to-the-parent)).
+  [questions to the parent](../agent/docs/runtime-design.md#questions-to-the-parent)).
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
   instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only

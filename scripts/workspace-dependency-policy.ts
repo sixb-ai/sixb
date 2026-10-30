@@ -27,6 +27,7 @@ export interface WorkspaceDependencyEntry {
  * server, or storage provider. The CLI is the host and therefore keeps core in `dependencies`.
  */
 export const coreInternalCompanions: ReadonlySet<string> = new Set([
+  "@sixb/agent",
   "@sixb/agent-worker",
   "@sixb/orchestrator",
   "@sixb/pg",

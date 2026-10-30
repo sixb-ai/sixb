@@ -13,7 +13,7 @@ import { LocalBashSandbox } from "./helpers"
 //
 //   SIXB_PLAYWRIGHT=<dir>/node_modules/playwright-core \
 //   SIXB_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-//   bun test ./packages/agent-worker/tests/layout-check.e2e.ts
+//   bun test ./packages/agent/tests/layout-check.e2e.ts
 const IMAGE_PLAYWRIGHT = "/opt/sixb/js/node_modules/playwright"
 const playwright =
   process.env.SIXB_PLAYWRIGHT ?? (existsSync(IMAGE_PLAYWRIGHT) ? IMAGE_PLAYWRIGHT : "")

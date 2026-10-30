@@ -78,11 +78,11 @@ recording are outside its guarantee.
 You rarely call `runCommand` yourself. The agent worker does it, and every run kind goes through
 one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one of two behaviors:
 
-- **Ephemeral** ([ephemeral-run-sandbox.ts](../src/ephemeral-run-sandbox.ts)): created for one
+- **Ephemeral** ([ephemeral-run-sandbox.ts](../../agent-worker/src/ephemeral-run-sandbox.ts)): created for one
   run and destroyed when the run releases it. It is blank for an unbound conversation, a subagent
   on a provider without `resume`, or a workflow node; a workflow step's own `sandbox` factory makes
   it a workspace from its static recipe, destroyed after its credentials are revoked.
-- **Persistent** ([persistent-run-sandbox.ts](../src/persistent-run-sandbox.ts)): a thread's
+- **Persistent** ([persistent-run-sandbox.ts](../../agent-worker/src/persistent-run-sandbox.ts)): a thread's
   workspace, resumed by each run and saved by `beforeFinalize` before the run's terminal write: a
   bound conversation's, and on a provider with `resume` a subagent's, blank (see
   [paused children](#paused-children)). Run teardown never destroys it; only a subagent that ended

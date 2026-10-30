@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto"
+import {
+  type AcquiredRunSandbox,
+  AgentEnvironmentSaveError,
+  type BeforeFinalizeOptions,
+  bounded,
+  type RunSandbox,
+  SANDBOX_CONTEXT_DIRECTORY,
+  sandboxError,
+  waitForAbort,
+} from "@sixb/agent"
 import type {
   Sandbox,
   SandboxDefinition,
@@ -17,21 +27,12 @@ import type {
   ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import { waitForAbort } from "./abort"
-import { AgentEnvironmentSaveError } from "./errors"
-import {
-  type AcquiredRunSandbox,
-  type BeforeFinalizeOptions,
-  type RunSandbox,
-  SANDBOX_CONTEXT_DIRECTORY,
-} from "./run-sandbox"
-import { bounded, sandboxError } from "./sandbox-operation"
-import type { AgentExecutionContext } from "./types"
+import type { AgentRunnerContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles, WorkspaceRunFilesConflictError } from "./workspace-files"
 
 interface PersistentRunSandboxInput {
-  readonly context: AgentExecutionContext
+  readonly context: AgentRunnerContext
   /** The run's session: the thread's workspace state moves only through it. */
   readonly session: AgentRunSession
   /** A conversation's recipe. A sub-agent's thread has none: its workspace is blank. */

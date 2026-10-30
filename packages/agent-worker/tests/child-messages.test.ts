@@ -30,8 +30,8 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
+import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
-import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // The parent steers a child at work with message_agent: the child reads the message before its
 // next step, or in one more step when it arrives as the child answers, and both keep it.

@@ -1,3 +1,4 @@
+import type { AgentWorkspacePromptContext } from "@sixb/agent"
 import type {
   Sandbox,
   SandboxEnvironment,
@@ -9,7 +10,6 @@ import type {
 import { sandboxCredentialIssue } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
-import type { AgentWorkspacePromptContext } from "./agent-prompt"
 import { WorkspaceAuthSession, type WorkspaceGrant } from "./workspace-auth"
 import { workspaceNetwork } from "./workspace-network"
 

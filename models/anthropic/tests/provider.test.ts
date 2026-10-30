@@ -6,9 +6,9 @@ import {
   ModelProviderError,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
-import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
+import { READ_TOOL_SPEC } from "../../../packages/agent/src/tools/read"
+import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent/src/tools/view-file"
 import { anthropic, createAnthropic } from "../src"
 import { anthropicOutputSchema } from "../src/structured-output"
 

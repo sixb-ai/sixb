@@ -7,8 +7,8 @@ import type {
   LanguageModelStreamEvent,
   ModelMessage,
 } from "@sixb/core/models"
-import { prepareAgentModel } from "../../../packages/agent-worker/src/context-budget"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { prepareAgentModel } from "../../../packages/agent/src/context-budget"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { type AzureAIFoundryOptions, createAzureAIFoundry } from "../src"
 
 // Opt-in: these tests make billable calls. Run sequentially; each call has an output limit,

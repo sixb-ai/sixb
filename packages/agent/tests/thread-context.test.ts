@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
 import { InMemoryBlobStorage, InMemoryStorage, type Storage } from "@sixb/core"
+import type { AgentRunSessionHost } from "@sixb/core/internal/agents"
 import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { renderCurrentTime } from "../src/agent-prompt"
-import type { AgentWorkerStorage } from "../src/types"
 import { runTurnInSession } from "./helpers"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
@@ -44,11 +44,11 @@ function captureModel(capture: (prompt: readonly ModelMessage[]) => void): Worke
   })
 }
 
-function requireWorkerStorage(storage: Storage): AgentWorkerStorage {
+function requireWorkerStorage(storage: Storage): AgentRunSessionHost["storage"] {
   if (!storage.agents || !storage.auth || !storage.aiUsage) {
     throw new Error("Expected complete agent worker storage.")
   }
-  return storage as AgentWorkerStorage
+  return storage as AgentRunSessionHost["storage"]
 }
 
 async function seedThread(withCheckpoint: boolean) {
