@@ -185,7 +185,9 @@ async function readBody(input: AgentApiGateInput): Promise<Uint8Array | undefine
     if (error instanceof RequestBodyTooLargeError) throw refusal(413, error.message)
     throw error
   }
-  const mediaType = input.contentType?.split(";")[0]?.trim().toLowerCase()
+  // Exactly as the route reads it: Elysia cuts the type at ";" and matches it case-sensitively,
+  // so `Application/JSON` reaches the route without a body.
+  const mediaType = input.contentType?.split(";")[0]
   if (body && body.byteLength > 0 && mediaType !== "application/json") {
     throw refusal(415, "A call that may need approval sends its body as application/json.")
   }
