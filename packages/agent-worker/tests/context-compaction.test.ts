@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type Storage } from "@sixb/core"
+import { InMemoryStorage } from "@sixb/core"
 import {
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -8,18 +8,10 @@ import {
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { estimateAgentConversationInputTokens } from "../src/context-compaction"
-import type { AgentWorkerStorage } from "../src/types"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "context-compaction-tests"
 const threadId = "thread"
-
-function requireWorkerStorage(storage: Storage): AgentWorkerStorage {
-  if (!storage.agents || !storage.auth || !storage.aiUsage) {
-    throw new Error("Expected complete Agent worker storage.")
-  }
-  return storage as AgentWorkerStorage
-}
 
 /** The two reads compaction's estimate makes of a conversation, as a run's session answers them. */
 function anchorReads(storage: InMemoryStorage) {

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage } from "@sixb/core"
+import { InMemoryStorage, type SecurityDefinitionCatalog } from "@sixb/core"
+import { agentRunPeople } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { conversationReaders, loadConversationAuthors } from "../src/message-authors"
 
 const projectId = "message-authors"
+/** Naming authors reads only members; no grant is checked. */
+const NO_SECURITY = { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
 
@@ -37,7 +40,7 @@ async function conversation(options: { readonly bobWrites?: boolean; readonly sh
 
   const { messages } = await storage.agents.messages.list({ projectId, threadId: "thr_1" })
   return loadConversationAuthors({
-    auth: storage.auth,
+    people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
     conversation: { thread, participants: options.shared ? [bob] : [] },
     messages,
   })
@@ -116,7 +119,7 @@ describe("who writes in a conversation, as the model reads it", () => {
     })
     const { messages } = await storage.agents.messages.list({ projectId, threadId: fork.id })
     const authors = await loadConversationAuthors({
-      auth: storage.auth,
+      people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
       conversation: { thread: fork, participants: [] },
       messages,
     })
@@ -156,7 +159,7 @@ describe("who writes in a conversation, as the model reads it", () => {
     })
 
     const authors = await loadConversationAuthors({
-      auth: storage.auth,
+      people: agentRunPeople({ projectId, storage, security: NO_SECURITY }),
       conversation: { thread, participants: [] },
       messages: [message],
     })
@@ -179,7 +182,7 @@ describe("who writes in a conversation, as the model reads it", () => {
           grants: { ...emptyGrantIndex(), "run:agent": true },
         },
       ],
-    } as unknown as Parameters<typeof conversationReaders>[0]["security"]
+    } as unknown as SecurityDefinitionCatalog
     const thread = await storage.agents.threads.create({
       projectId,
       id: "thr_1",
@@ -216,8 +219,7 @@ describe("who writes in a conversation, as the model reads it", () => {
     })
 
     const readers = await conversationReaders({
-      auth: storage.auth,
-      security,
+      people: agentRunPeople({ projectId, storage, security }),
       thread,
       participants,
     })

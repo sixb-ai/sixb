@@ -78,9 +78,8 @@ export interface TurnChildren {
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
   const { context, plan, run, signal } = input
-  const { id: projectId, storage, tools, turnTimeoutMs } = context
+  const { id: projectId, tools, turnTimeoutMs } = context
   const runId = run.id
-  const agents = storage.agents
 
   const threadContext =
     input.threadContext ??
@@ -98,7 +97,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }),
     input.conversation
       ? loadConversationAuthors({
-          auth: storage.auth,
+          people: input.session.people,
           conversation: input.conversation,
           messages: threadContext.retainedMessages,
         })

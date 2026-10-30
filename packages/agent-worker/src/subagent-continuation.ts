@@ -1,8 +1,7 @@
 import type { AgentMessagePart } from "@sixb/core"
-import { isPausedSubagentRun, listSubagentThreadRuns } from "@sixb/core/internal/agents"
+import { type AgentRunSession, isPausedSubagentRun } from "@sixb/core/internal/agents"
 import type {
   AgentMessageRecord,
-  AgentStorage,
   AgentThreadRecord,
   SubagentRunFile,
   SubagentRunRecord,
@@ -23,13 +22,12 @@ export interface SubagentHistory {
 
 /** The child's thread as its run starts: its messages, and the paused run before it, if any. */
 export async function loadSubagentHistory(
-  agents: AgentStorage,
-  run: SubagentRunRecord,
+  session: Pick<AgentRunSession<SubagentRunRecord>, "run" | "conversation" | "children">,
   thread: AgentThreadRecord
 ): Promise<SubagentHistory> {
   const [{ messages }, paused] = await Promise.all([
-    agents.messages.list({ projectId: run.projectId, threadId: thread.id, order: "asc" }),
-    latestPausedRun(agents, run),
+    session.conversation.messages({ threadId: thread.id, order: "asc" }),
+    latestPausedRun(session),
   ])
 
   return { messages, ...(paused ? { paused } : {}) }
@@ -40,13 +38,10 @@ export async function loadSubagentHistory(
  * paused on its calls succeeds without ending its thread.
  */
 async function latestPausedRun(
-  agents: AgentStorage,
-  run: SubagentRunRecord
+  session: Pick<AgentRunSession<SubagentRunRecord>, "run" | "children">
 ): Promise<SubagentRunRecord | undefined> {
-  const runs = await listSubagentThreadRuns(agents, {
-    projectId: run.projectId,
-    threadId: run.threadId,
-  })
+  const { run } = session
+  const runs = await session.children.threadRuns(run.threadId)
   const previous = runs.filter((each) => each.status === "succeeded").at(-1)
   return previous && isPausedSubagentRun(previous) ? previous : undefined
 }

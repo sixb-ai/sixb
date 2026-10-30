@@ -1,6 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
-import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type {
+  CommandResult,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SecurityDefinitionCatalog,
+} from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
 import { NOOP_STREAM_SINK, openAgentRunSession, type StreamSink } from "@sixb/core/internal/agents"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
@@ -87,6 +93,9 @@ export class LocalBashSandbox implements Sandbox {
   async destroy(): Promise<void> {}
 }
 
+/** No groups or roles: a direct turn's tests read members, never grants. */
+const EMPTY_SECURITY = { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog
+
 /**
  * Run a turn as the worker does, in the session of its run, which the test started already. The
  * session's broker is its own: these tests cancel through their signal, not a published cancel.
@@ -107,6 +116,7 @@ export async function runTurnInSession(
       broker: new InMemoryBroker(),
       recoverAiModelCall,
       events,
+      security: EMPTY_SECURITY,
     },
     turn.run
   )

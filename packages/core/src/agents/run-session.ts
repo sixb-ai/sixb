@@ -1,10 +1,12 @@
 import type { Broker } from "../broker"
+import type { AuthorizationRef } from "../execution"
 import {
   AiModelCallRecorder,
   createAiModelCallLimitController,
   type ModelCallAccountingStorage,
   type RecoverAiModelCall,
 } from "../models/execution/index"
+import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
   type AgentContextCheckpointRecord,
@@ -25,7 +27,14 @@ import {
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
 import type { AiModelCallUsageRecord } from "../storage/ai-usage"
+import type { AuthStorage, UserRecord } from "../storage/auth"
+import type { ExecutionRecord } from "../storage/executions/types"
 import { turnPausesOnHeldCalls } from "./approvals"
+import {
+  type AgentExecutionAuthorization,
+  resolveInheritedAgentExecutionAuthorization,
+  userCanRunAgent,
+} from "./authority"
 import { createAgentRunExecutionToken } from "./ids"
 import type { StreamSink } from "./run-events"
 import {
@@ -97,6 +106,10 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly workspace: AgentRunWorkspace
   /** The run's conversation: its threads, history and context checkpoints. */
   readonly conversation: AgentRunConversation
+  /** Who the run works for and with: members, and the authority the run carries. */
+  readonly people: AgentRunPeople
+  /** The run's execution: who asked for it, with which groups, and the authority it refers to. */
+  execution(): Promise<ExecutionRecord | null>
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
 }
@@ -122,6 +135,16 @@ export interface AgentRunConversation {
       "projectId" | "createdByRunId" | "executionToken"
     >
   ): Promise<AgentContextCheckpointRecord>
+}
+
+/** The project's members as a run needs them, and the authority its execution carries. */
+export interface AgentRunPeople {
+  /** A member: a message's author, or whoever the run works for. */
+  user(userId: string): Promise<UserRecord | null>
+  /** Whether a member may run the Agent now: a shared conversation's readers are those who may. */
+  canRunAgent(userId: string): Promise<boolean>
+  /** The authority a run's execution carries now: its requester's groups, as they are today. */
+  authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
 }
 
 /** A thread's persistent workspace state, moved only by the run that holds the thread. */
@@ -157,12 +180,17 @@ export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
 /** What an in-process session works against. */
 export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly projectId: string
-  readonly storage: Storage & { readonly agents: AgentStorage } & ModelCallAccountingStorage
+  readonly storage: Storage & {
+    readonly agents: AgentStorage
+    readonly auth: AuthStorage
+  } & ModelCallAccountingStorage
   readonly broker: Broker
   /** Queues a model call's record when storage cannot take it while the run goes on. */
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Where live records go; the host keeps them best effort (see isolateStreamSink). */
   readonly events: StreamSink
+  /** The project's security definitions, which decide a run's authority. */
+  readonly security: SecurityDefinitionCatalog
 }
 
 export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
@@ -267,6 +295,9 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           executionToken,
         }),
     },
+    people: agentRunPeople(host),
+    execution: () =>
+      host.storage.executions.getById({ projectId: host.projectId, id: run.executionId }),
     workspace: {
       transition: (input) =>
         host.storage.agents.threads.transitionSandbox({
@@ -307,6 +338,31 @@ async function openModelCalls(
     }),
     recoverAiModelCall: host.recoverAiModelCall,
   })
+}
+
+/** A project's members and a run's authority, as the in-process session reads them. */
+export function agentRunPeople(
+  host: Pick<AgentRunSessionHost, "projectId" | "security"> & {
+    readonly storage: { readonly auth: AuthStorage }
+  }
+): AgentRunPeople {
+  return {
+    user: (userId) => host.storage.auth.users.getById({ projectId: host.projectId, id: userId }),
+    canRunAgent: (userId) =>
+      userCanRunAgent({
+        auth: host.storage.auth,
+        projectId: host.projectId,
+        userId,
+        security: host.security,
+      }),
+    authorization: (ref) =>
+      resolveInheritedAgentExecutionAuthorization({
+        auth: host.storage.auth,
+        projectId: host.projectId,
+        authorizationRef: ref,
+        security: host.security,
+      }),
+  }
 }
 
 /**
