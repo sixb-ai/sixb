@@ -10,6 +10,7 @@ import type {
   ProviderData,
 } from "../src/models"
 import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
+import { reportModelCalls } from "../src/models/language-call"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const USAGE = {
@@ -95,7 +96,9 @@ describe("runModelLoop", () => {
     ])
     await expect(
       runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          accounting.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
@@ -108,9 +111,6 @@ describe("runModelLoop", () => {
             },
           },
         ],
-        onModelCallEnd: (event) => {
-          accounting.push(event)
-        },
       })
     ).rejects.toThrow("Cannot execute local tools")
     expect(executed).toBe(0)
@@ -378,13 +378,12 @@ describe("runModelLoop", () => {
           }),
         })
         const result = runModelLoop({
-          model,
+          model: reportModelCalls(model, (call) => {
+            calls.push(call)
+          }),
           messages: [],
           maxSteps: 1,
           signal: abort.signal,
-          onModelCallEnd: (call) => {
-            calls.push(call)
-          },
         })
         if (interrupted) {
           const partial = await result
@@ -470,15 +469,20 @@ describe("runModelLoop", () => {
     let validations = 0
     await expect(
       runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "text-start", id: "text-1" },
-            { type: "text-delta", id: "text-1", delta: '{"answer":"yes"}' },
-            { type: "text-end", id: "text-1" },
-            { type: "finish", finishReason, usage: USAGE },
-          ],
-        ]),
+        model: reportModelCalls(
+          modelFromCalls([
+            [
+              { type: "stream-start" },
+              { type: "text-start", id: "text-1" },
+              { type: "text-delta", id: "text-1", delta: '{"answer":"yes"}' },
+              { type: "text-end", id: "text-1" },
+              { type: "finish", finishReason, usage: USAGE },
+            ],
+          ]),
+          (event) => {
+            calls.push(event)
+          }
+        ),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
@@ -489,9 +493,6 @@ describe("runModelLoop", () => {
             validations += 1
             return value
           },
-        },
-        onModelCallEnd(event) {
-          calls.push(event)
         },
       })
     ).rejects.toBeInstanceOf(StructuredOutputError)
@@ -537,19 +538,21 @@ describe("runModelLoop", () => {
     const calls: ModelCallEndEvent[] = []
     for (const providerIds of [undefined, { generationId: "gen_1", requestId: "req_1" }]) {
       await runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "response-metadata", ...(providerIds ? { providerIds } : {}) },
-            finish(),
-          ],
-        ]),
+        model: reportModelCalls(
+          modelFromCalls([
+            [
+              { type: "stream-start" },
+              { type: "response-metadata", ...(providerIds ? { providerIds } : {}) },
+              finish(),
+            ],
+          ]),
+          async (event) => {
+            calls.push(event)
+          }
+        ),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
-        onModelCallEnd: async (event) => {
-          calls.push(event)
-        },
       })
     }
     expect(calls[0]?.responseId).toContain(":response")
@@ -600,13 +603,12 @@ describe("runModelLoop", () => {
       { costEstimator: { estimate } }
     )
     await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       maxSteps: 1,
       signal: new AbortController().signal,
-      onModelCallEnd: (event) => {
-        calls.push(event)
-      },
     })
     expect(calls[0]).toMatchObject({
       usage: USAGE,
@@ -636,25 +638,27 @@ describe("runModelLoop", () => {
     const events: ModelUiChunk[] = []
     const calls: ModelCallEndEvent[] = []
     const result = await runModelLoop({
-      model: modelFromCalls([
-        [
-          { type: "stream-start" },
-          { type: "response-metadata", id: "response-1", modelId: "resolved-model" },
-          { type: "text-start", id: "answer" },
-          { type: "text-delta", id: "answer", delta: "Hello" },
-          { type: "text-end", id: "answer" },
-          finish(),
-        ],
-      ]),
+      model: reportModelCalls(
+        modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "response-metadata", id: "response-1", modelId: "resolved-model" },
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "Hello" },
+            { type: "text-end", id: "answer" },
+            finish(),
+          ],
+        ]),
+        (event) => {
+          calls.push(event)
+        }
+      ),
       messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
       reasoning: "high",
       maxSteps: 4,
       signal: new AbortController().signal,
       onEvent(event) {
         events.push(event)
-      },
-      onModelCallEnd(event) {
-        calls.push(event)
       },
       generateCallId: () => "call-1",
     })
@@ -802,7 +806,9 @@ describe("runModelLoop", () => {
       },
     })
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       tools: [echo],
       maxSteps: 3,
@@ -811,9 +817,6 @@ describe("runModelLoop", () => {
         if (stepIndex !== 1) return
         abort.abort(new Error("cancelled during projection"))
         if (outcome === "throw") signal.throwIfAborted()
-      },
-      onModelCallEnd: (event) => {
-        calls.push(event)
       },
     })
 
@@ -1089,13 +1092,12 @@ describe("runModelLoop", () => {
         }),
       })
       const result = runModelLoop({
-        model,
+        model: reportModelCalls(model, async (event) => {
+          calls.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: abort.signal,
-        onModelCallEnd: async (event) => {
-          calls.push(event)
-        },
       })
       if (end === "abort") expect((await result).status).toBe("aborted")
       else
@@ -1128,13 +1130,12 @@ describe("runModelLoop", () => {
     })
 
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       maxSteps: 1,
       signal: abort.signal,
-      onModelCallEnd(event) {
-        calls.push(event)
-      },
       generateCallId: () => "call-raced-abort",
     })
 
@@ -1161,13 +1162,12 @@ describe("runModelLoop", () => {
 
     await expect(
       runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          calls.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
-        onModelCallEnd(event) {
-          calls.push(event)
-        },
         generateCallId: () => "call-post-finish-error",
       })
     ).rejects.toThrow("after stream finish")

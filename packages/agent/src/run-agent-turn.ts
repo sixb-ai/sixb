@@ -187,7 +187,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
               },
             }),
         signal: abortSignal,
-        onModelCallEnd: usageRecorder.onModelCallEnd,
         onEvent: async (chunk) => {
           await input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
         },

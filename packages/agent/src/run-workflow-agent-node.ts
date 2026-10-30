@@ -140,7 +140,6 @@ export async function runWorkflowAgentNode(
         ? {}
         : { prepareStep: input.context.prepareStep }),
       signal: abortSignal,
-      onModelCallEnd: input.usageRecorder.onModelCallEnd,
       onStepEnd: (step) => {
         completedSteps.push(step)
       },
@@ -208,7 +207,6 @@ export async function runWorkflowAgentNode(
           },
           maxSteps: 1,
           signal: abortSignal,
-          onModelCallEnd: input.usageRecorder.onModelCallEnd,
         })
         input.usageRecorder.assertHealthy()
         if (finalization.status === "aborted") {

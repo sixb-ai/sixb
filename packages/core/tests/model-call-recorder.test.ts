@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { type ModelCallEndEvent, rateModelCall } from "@sixb/core/models"
+import {
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelStreamEvent,
+  type ModelCallEndEvent,
+  rateModelCall,
+} from "@sixb/core/models"
 import { AiUsageStorageError, InMemoryStorage } from "@sixb/core/storage"
 import { ModelUsageRecordingError } from "../src/models/execution/errors"
 import { recordAiModelCallAccounting } from "../src/models/execution/model-call-accounting"
@@ -439,5 +445,118 @@ describe("AiModelCallRecorder", () => {
     )
     expect(records).toBe(0)
     expect(() => usage.assertHealthy()).toThrow(ModelUsageRecordingError)
+  })
+})
+
+describe("a model the recorder wraps", () => {
+  const model = (events: () => AsyncIterable<LanguageModelStreamEvent>): LanguageModel => ({
+    providerId: "gateway",
+    modelId: "openai/gpt-5",
+    definition: defineLanguageModel({
+      kind: "language",
+      providerId: "gateway",
+      modelId: "openai/gpt-5",
+      capabilities: {},
+    }),
+    async stream() {
+      return { events: events() }
+    },
+  })
+  const request = {
+    callId: "call_1",
+    messages: [],
+    tools: [],
+    signal: new AbortController().signal,
+  }
+  const finished: LanguageModelStreamEvent = {
+    type: "finish",
+    finishReason: "stop",
+    usage: { inputTokens: 12, outputTokens: 8 },
+  }
+  const recordedCalls = async (storage: InMemoryStorage) =>
+    (await storage.aiUsage.summarizeExecution({ projectId: "project_1", executionId }))
+      .modelCallCount
+
+  // Removal proof: return the provider's stream from wrapModel unread, as before the call recorded
+  // itself; a reader that never reports the call leaves it unrecorded.
+  test("records its call before the finish reaches the reader, whoever reads it", async () => {
+    const storage = await seededStorage()
+    const wrapped = recorder(storage).wrapModel(
+      model(async function* () {
+        yield { type: "stream-start" }
+        yield finished
+      })
+    )
+
+    const recordedAtFinish: number[] = []
+    for await (const event of (await wrapped.stream(request)).events) {
+      if (event.type === "finish") recordedAtFinish.push(await recordedCalls(storage))
+    }
+
+    expect(recordedAtFinish).toEqual([1])
+    expect(
+      await storage.aiUsage.summarizeExecution({ projectId: "project_1", executionId })
+    ).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 12, outputTokens: 8 } })
+  })
+
+  // Removal proof: drop the `finally` in reportModelCalls; the abandoned call is never recorded.
+  test("records a call its reader abandons, or its provider fails, with its usage unknown", async () => {
+    for (const end of ["abandoned", "failed"] as const) {
+      const storage = await seededStorage()
+      const wrapped = recorder(storage).wrapModel(
+        model(async function* () {
+          yield { type: "stream-start" }
+          if (end === "failed") throw new Error("connection lost")
+          yield finished
+        })
+      )
+
+      const read = (async () => {
+        for await (const event of (await wrapped.stream(request)).events) {
+          if (event.type === "stream-start" && end === "abandoned") break
+        }
+      })()
+      await read.catch(() => {})
+
+      const summary = await storage.aiUsage.summarizeExecution({
+        projectId: "project_1",
+        executionId,
+      })
+      expect(summary.modelCallCount).toBe(1)
+      expect(summary.usage.inputTokens).toBeUndefined()
+    }
+  })
+
+  // Removal proof: record the call after yielding its finish; the reader finishes the call while
+  // its record failed, and the failure surfaces only at the next call's admission.
+  test("fails its call when the record cannot be written, and hands it to recovery", async () => {
+    const storage = await seededStorage()
+    const recovered: RecoverAiModelCallInput[] = []
+    const wrapped = recorder(
+      storage,
+      {
+        retryDelaysMs: [],
+        recordAccounting: async () => {
+          throw new Error("storage unavailable")
+        },
+      },
+      async (input) => {
+        recovered.push(input)
+      }
+    ).wrapModel(
+      model(async function* () {
+        yield { type: "stream-start" }
+        yield finished
+      })
+    )
+
+    const seen: string[] = []
+    const failure = await (async () => {
+      for await (const event of (await wrapped.stream(request)).events) seen.push(event.type)
+    })().catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
+    expect(seen).toEqual(["stream-start"])
+    expect(recovered).toHaveLength(1)
   })
 })

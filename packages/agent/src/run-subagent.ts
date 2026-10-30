@@ -93,7 +93,6 @@ export async function runSubagent(input: {
       return mail ? toModelMessages([mail]) : undefined
     },
     signal: abortSignal,
-    onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) =>
       input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
     // The approval records decide, never the prompt or the tool output: a held call stops the

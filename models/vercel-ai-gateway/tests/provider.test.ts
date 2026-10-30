@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import { reportModelCalls } from "@sixb/core/internal/model-execution"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -350,15 +351,14 @@ describe("Vercel AI Gateway provider", () => {
     const chunks: string[] = []
     const calls: ModelCallEndEvent[] = []
     const result = await runModelLoop({
-      model: provider("openai/test"),
+      model: reportModelCalls(provider("openai/test"), (event) => {
+        calls.push(event)
+      }),
       messages: request().messages,
       maxSteps: 1,
       signal: new AbortController().signal,
       onEvent: (event) => {
         if (event.type === "text-delta") chunks.push(event.delta)
-      },
-      onModelCallEnd: (event) => {
-        calls.push(event)
       },
     })
     expect(result).toMatchObject({

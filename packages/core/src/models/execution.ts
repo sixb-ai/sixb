@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { runModelLoop } from "../agents/model-loop"
 import { assertModelAccess, canAccessModels } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
@@ -8,7 +9,6 @@ import { createModelCallsRuntime, type ModelCallRunVisibility } from "./calls"
 import { type ModelCatalog, selectLanguageModel } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
-import type { ModelCallEndEvent } from "./events"
 import { registerModelExecutionBinding } from "./execution/binding"
 import { aiModelCallOutputTokenAllowance } from "./execution/model-call-admission"
 import type { ModelExecutionSession } from "./execution/session"
@@ -85,9 +85,11 @@ export function createModelsRuntime(
     const accounting = await session.accounting()
     accounting.assertHealthy()
     signal.throwIfAborted()
-    let event: ModelCallEndEvent | undefined
+    // The wrapped model records the call; its one step says what the call used and cost.
+    const callId = `model_call_${randomUUID()}`
     const options = {
       model: accounting.wrapModel(model),
+      generateCallId: () => callId,
       messages,
       maxSteps: 1,
       rejectLocalToolCalls: true,
@@ -95,10 +97,6 @@ export function createModelsRuntime(
       reasoning,
       caching: input.caching,
       signal,
-      onModelCallEnd: async (completed: ModelCallEndEvent) => {
-        await accounting.onModelCallEnd(completed)
-        event = completed
-      },
     }
     const result = output ? await runModelLoop({ ...options, output }) : await runModelLoop(options)
     if (result.status === "aborted") {
@@ -112,13 +110,13 @@ export function createModelsRuntime(
         model.modelId
       )
     }
-    if (!event)
-      throw new ModelStreamError("[SixbModels] Generation completed without accounting metadata.")
+    const [step] = result.steps
+    if (!step) throw new ModelStreamError("[SixbModels] Generation completed without a model call.")
     return {
       output: result.output,
-      usage: event.usage,
-      cost: event.cost,
-      callId: event.callId,
+      usage: step.usage,
+      cost: step.cost,
+      callId,
       finishReason: result.finishReason,
     }
   }
