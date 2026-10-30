@@ -5663,6 +5663,49 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Guard proof: finish the node without retryFinish in WorkflowAgentNodeSession.finishSucceeded;
+  // the lost answer fails the step, and the workflow with it.
+  test("a workflow step whose finish storage answered with an error still succeeds", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-finish-blip",
+    })
+    const storage = sixb.storage
+    const transaction = storage.transaction.bind(storage)
+    let blipped = false
+    storage.transaction = (async (write: Parameters<typeof transaction>[0]) => {
+      const result = await transaction(write)
+      const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      if (!blipped && node?.status === "succeeded") {
+        blipped = true
+        throw new Error("connection reset")
+      }
+      return result
+    }) as typeof storage.transaction
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const [resume] = await waitFor(
+        async () => {
+          const claimed = await sixb.queues.workflows.claim({
+            projectId: PROJECT_ID,
+            workerId: "workflow-test-worker",
+          })
+          return claimed.length > 0 ? claimed : null
+        },
+        { label: "resume queued" }
+      )
+      expect(blipped).toBe(true)
+      expect(resume?.job.type).toBe("workflow.run.resume.requested")
+      expect(
+        await runs.getById({ projectId: PROJECT_ID, id: "workflow-finish-blip" })
+      ).not.toMatchObject({ status: "failed" })
+    } finally {
+      storage.transaction = transaction
+      await worker.stop()
+    }
+  })
+
   test("a redelivery after the node succeeded only queues the resume", async () => {
     let modelCalls = 0
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
@@ -6272,7 +6315,9 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("keeps workflow usage outside a failed node-finalization transaction", async () => {
+  // The usage is recorded outside the finalization transaction, so the attempt that failed keeps it;
+  // the retry then finishes the step.
+  test("keeps workflow usage when a node finalization fails once, and finishes the step", async () => {
     const storage = withOneFailingWorkflowAgentFinalization(new InMemoryStorage())
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: structuredAnswerModel(),
@@ -6284,22 +6329,10 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
-        label: "workflow node finalization failure",
+        label: "workflow node finalization",
       })
 
-      expect(execution.status).toBe("failed")
-      expect(execution.error).toMatchObject({
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        details: {
-          agentStepId: "workflow-usage-step",
-          workflowId: "workflow-usage-test",
-          workflowRunId: "workflow-finalization-failure",
-          nodeId: "workflow-usage-step",
-          nodeRunId,
-        },
-      })
+      expect(execution.status).toBe("succeeded")
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
