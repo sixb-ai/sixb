@@ -1,4 +1,5 @@
 import type { Broker } from "../broker"
+import { createInheritedAgentExecutionRecord } from "../execution/agent"
 import { ensureExecutionRecord } from "../execution/durable"
 import type { Storage } from "../storage"
 import type {
@@ -12,8 +13,8 @@ import type {
   ListThreadSubagentsInput,
   SubagentRunRecord,
 } from "../storage/agents"
-import type { CreateExecutionInput } from "../storage/executions/types"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
+import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
 import { AgentExecutionLostError, fenced } from "./run-fence"
 import {
   type AgentInbox,
@@ -53,18 +54,28 @@ export interface AgentRunChildren {
   activeCount(): Promise<number>
   /**
    * Create a child run of this turn, with its execution, in one transaction that refuses once the
-   * turn no longer owns its run.
+   * turn no longer owns its run. The session decides what the runner may not: the child's id and
+   * thread from its key, its authority from the turn's, and how many children may be at work.
    */
-  spawn(input: {
-    readonly execution: CreateExecutionInput
-    readonly run: Omit<CreateSubagentRunInput, "projectId" | "parentRunId" | "parentExecutionToken">
-  }): Promise<SubagentRunRecord>
+  spawn(child: AgentChildDraft): Promise<SubagentRunRecord>
   /**
    * Remove what a run left in a child thread under an earlier attempt of this turn, which failed,
    * so the turn can continue the child again. Refused once the turn no longer owns its run.
    */
   clearAttempt(input: { readonly threadId: string; readonly runId: string }): Promise<void>
 }
+
+/**
+ * A child as the turn asks for it: under its key, with its task, either in a thread of its own or
+ * continuing one of the conversation's child threads.
+ */
+export type AgentChildDraft = Pick<CreateSubagentRunInput, "spawnKey" | "spec" | "trigger"> & {
+  readonly thread: { readonly create: true } | { readonly id: string; readonly create: false }
+  readonly createdAt?: Date
+}
+
+/** How many children one turn may have queued or running at once, unless its host says. */
+export const DEFAULT_MAX_ACTIVE_CHILDREN = 4
 
 /** The messages of the run's conversation: its threads, and its children's. */
 export interface AgentRunThreads {
@@ -162,6 +173,8 @@ export interface AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage }
   readonly broker: Broker
+  /** How many children one turn may have queued or running at once. */
+  readonly maxActiveChildren?: number
 }
 
 export function agentRunChildren(
@@ -209,21 +222,57 @@ export function agentRunChildren(
       })
       return active.total
     },
-    spawn: (input) =>
-      fenced(run.id, () =>
+    async spawn(child) {
+      const id = createSubagentRunId(run.id, child.spawnKey)
+      const executionId = createSubagentExecutionId(id)
+      const [parentExecution, maxActiveChildren] = await Promise.all([
+        host.storage.executions.getById({ projectId, id: run.executionId }),
+        childLimit(host, run, child),
+      ])
+      if (!parentExecution) {
+        throw new Error(`[Sixb] Agent run '${run.id}' has no execution to hand its children.`)
+      }
+      const execution = createInheritedAgentExecutionRecord({
+        id: executionId,
+        parent: parentExecution,
+        runId: id,
+      })
+      return fenced(run.id, () =>
         host.storage.transaction(async (tx) => {
           if (!tx.agents)
             throw new Error("[Sixb] Agent storage disappeared during child admission.")
-          await ensureExecutionRecord(tx.executions, input.execution)
+          await ensureExecutionRecord(tx.executions, execution)
           return tx.agents.runs.createSubagent({
-            ...input.run,
+            id,
             projectId,
+            executionId,
             parentRunId: run.id,
             parentExecutionToken: executionToken,
+            spawnKey: child.spawnKey,
+            spec: child.spec,
+            thread: child.thread.create
+              ? { id: createSubagentThreadId(run.id, child.spawnKey), create: true }
+              : child.thread,
+            trigger: child.trigger,
+            maxActiveChildren,
+            ...(child.createdAt === undefined ? {} : { createdAt: child.createdAt }),
           })
         })
-      ),
+      )
+    },
     async clearAttempt({ threadId, runId }) {
+      // Only an attempt that ended, of a child of this conversation, in that child's thread.
+      const attempt = await get(runId)
+      if (
+        attempt?.kind !== "subagent" ||
+        attempt.threadId !== threadId ||
+        attempt.status === "queued" ||
+        attempt.status === "running"
+      ) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' clears only an ended attempt of its conversation's children, not '${runId}'.`
+        )
+      }
       await fenced(run.id, () =>
         agents.messages.deleteByRunId({
           projectId,
@@ -234,6 +283,29 @@ export function agentRunChildren(
       )
     },
   }
+}
+
+/**
+ * A turn keeps at most the host's limit of children at work. One that resumes children paused on
+ * calls its trigger decided starts with all of them at once: each was admitted within the limit.
+ */
+async function childLimit(
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  child: AgentChildDraft
+): Promise<number> {
+  const limit = host.maxActiveChildren ?? DEFAULT_MAX_ACTIVE_CHILDREN
+  if (child.thread.create) return limit
+  const trigger = await host.storage.agents.messages.getById({
+    projectId: host.projectId,
+    id: run.triggerMessageId,
+  })
+  const continuing = new Set(
+    (trigger?.parts ?? []).flatMap((part) =>
+      part.type === "approval-outcome" && part.caller?.continues ? [part.caller.runId] : []
+    )
+  )
+  return Math.max(limit, continuing.size)
 }
 
 export function agentRunMail(
@@ -271,9 +343,16 @@ export function agentRunMail(
     read: (inbox, afterCursor) =>
       readAgentMail(broker, {
         projectId,
-        inbox,
+        inbox: ownInbox(run, inbox),
         ...(afterCursor === undefined ? {} : { afterCursor }),
       }),
-    subscribe: (inbox, on) => subscribeAgentInbox(broker, { projectId, inbox }, on),
+    subscribe: (inbox, on) =>
+      subscribeAgentInbox(broker, { projectId, inbox: ownInbox(run, inbox) }, on),
   }
+}
+
+/** A run hears only its own inbox: a turn's run, a child's thread. */
+function ownInbox(run: AgentRunRecord, inbox: AgentInbox): AgentInbox {
+  if ("runId" in inbox ? inbox.runId === run.id : inbox.threadId === run.threadId) return inbox
+  throw new Error(`[Sixb] Agent run '${run.id}' reads only its own inbox.`)
 }

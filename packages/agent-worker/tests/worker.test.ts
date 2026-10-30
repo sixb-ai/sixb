@@ -108,7 +108,6 @@ import {
   type ArtifactStorage,
   type ArtifactVersionRecord,
   type ConversationAgentRunRecord,
-  type ExecutionRecord,
   type RecordAiModelCallInput,
   type SubagentRunRecord,
   type WorkflowAgentNodeRunRecord,
@@ -1985,12 +1984,11 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
 async function coordinatorFor(
   sixb: TestSixb,
   parent: ConversationAgentRunRecord,
-  execution: ExecutionRecord,
   deadline: Date
 ): Promise<SubagentCoordinator> {
   const context = await buildAgentWorkerContext(sixb)
   const session = await runSessionOf(sixb, parent)
-  return new SubagentCoordinator(sixb, context, parent, session, execution, deadline, () => {})
+  return new SubagentCoordinator(sixb, context, parent, session, deadline, () => {})
 }
 
 /**
@@ -2232,16 +2230,10 @@ async function spawnChildOfRunningTurn(
       execution: freshTestExecution(),
     })
   )
-  const execution = await sixb.storage.executions.getById({
-    projectId: PROJECT_ID,
-    id: parent.executionId,
-  })
-  if (!execution) throw new Error("Expected the turn's execution.")
 
   const coordinator = await coordinatorFor(
     sixb,
     parent,
-    execution,
     input.deadline ?? new Date(Date.now() + 60_000)
   )
   const children = []
@@ -8144,13 +8136,8 @@ describe("AgentWorker", () => {
         execution: freshTestExecution(),
       })
     )
-    const execution = await sixb.storage.executions.getById({
-      projectId: PROJECT_ID,
-      id: parent.executionId,
-    })
-    if (!execution) throw new Error("Expected the turn's execution.")
 
-    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -9668,7 +9655,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -9797,7 +9784,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
+    const coordinator = await coordinatorFor(sixb, parent, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal

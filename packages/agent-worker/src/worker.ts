@@ -304,7 +304,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context,
         run,
         session,
-        prepared.execution,
         runtime.deadline,
         (child) => this.requireChildren().start(child, { signal, delivery })
       )
@@ -759,6 +758,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
       security: this.host.definitions.security,
+      maxActiveChildren: context.subagentConcurrencyPerRun,
       afterFinish: (run) => this.afterRunFinished(run),
     }
   }

@@ -189,6 +189,7 @@ export {
   watchAgentRunCancel,
 } from "./run-session"
 export type {
+  AgentChildDraft,
   AgentMailDraft,
   AgentRunChildren,
   AgentRunMail,
