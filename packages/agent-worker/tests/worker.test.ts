@@ -9568,10 +9568,8 @@ describe("AgentWorker", () => {
     true,
     false,
   ])("ends a child its runner left running once its lease lapsed (parent ended: %s)", async (parentEnded) => {
-    // Removal proof: drop the lapsed-lease branch of requestSubagentCancellation, and the child is
-    // only sent a cancel no runner hears: it never ends. End it without its lease check, and it ends
-    // while the runner that may still hold it could write. Skip children of an active parent in the
-    // repair pass again, and the one whose parent still runs never ends.
+    // Removal proof: drop endLapsedAgentRuns from the repair pass, and the child is only sent a
+    // cancel no runner hears: it never ends.
     const model = answerModel()
     const sixb = buildSixb(model)
     const storage = agentStorageOf(sixb)
@@ -12326,6 +12324,14 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       execution: crashedExecution,
     })
+    // The repair pass would end it too; this test is about the redelivery, so it sees no turn.
+    const runStore: AgentStorage["runs"] = Object.getPrototypeOf(storage.runs)
+    const list = runStore.list
+    const listed = spyOn(runStore, "list").mockImplementation(function (this: unknown, input) {
+      return input.statuses?.join() === "running" && input.kinds?.includes("conversation")
+        ? Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        : list.call(this, input)
+    })
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -12368,6 +12374,7 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
       modelCalls.mockRestore()
+      listed.mockRestore()
     }
   })
 
@@ -12418,6 +12425,47 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
       retried.mockRestore()
+    }
+  })
+
+  test("ends a turn no delivery will come back for once its lease lapses", async () => {
+    // Removal proof: drop endLapsedAgentRuns from the repair pass; with its job gone, the turn
+    // stays running and its thread locked.
+    const model = answerModel()
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const modelCalls = spyOn(model, "stream")
+    const request = await requestAgent(sixb, { text: "hello" })
+    // Its runner took the job and stopped renewing the turn: a queue that gave up on the job, or a
+    // runner with no queue at all.
+    const [delivered] = await sixb.queues.agents.claim({ projectId: PROJECT_ID, workerId: "gone" })
+    if (!delivered) throw new Error("Expected the request's job.")
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: delivered.job.id,
+      leaseId: delivered.leaseId,
+    })
+    await storage.runs.start({
+      id: request.run.id,
+      projectId: PROJECT_ID,
+      execution: { ...freshTestExecution(), queueLeaseExpiresAt: new Date(Date.now() - 1) },
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect(await waitForTerminalRun(storage, request.run.id)).toMatchObject({
+        status: "cancelled",
+        finishReason: "interrupted",
+        attempt: 2,
+      })
+      expect(
+        await storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+      ).toMatchObject({ activeRunId: null })
+      expect(modelCalls).not.toHaveBeenCalled()
+    } finally {
+      await worker.stop()
+      modelCalls.mockRestore()
     }
   })
 

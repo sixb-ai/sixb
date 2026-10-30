@@ -7,6 +7,7 @@ reach the same operations over HTTP, so none of them may assume they share a pro
 ```text
 run-session.ts             AgentRunSession: conversation turns and child agents
 run-session-children.ts    a turn's children and mail
+run-liveness.ts            ending a run whose lease lapsed
 run-events.ts              the stream sink a session publishes live records through
 workflow-node-session.ts   WorkflowAgentNodeSession: workflow agent steps
 ```
@@ -16,6 +17,13 @@ workflow-node-session.ts   WorkflowAgentNodeSession: workflow agent steps
 `claimAgentRun` starts a queued run, or reclaims one whose last delivery's lease lapsed, with a
 fresh execution token. `openAgentRunSession` opens the session of a run already claimed. A step's
 `claimWorkflowAgentNode` does both for its agent node.
+
+## Liveness
+
+A run is held by whoever renews its lease. Once the lease recorded on it lapses, its run token
+fails closed, and `endLapsedAgentRuns` (`run-liveness.ts`) may end it: it reclaims the run, which
+rotates its token, then records it `cancelled` and `interrupted`. A worker's repair pass runs it,
+so a run ends without a queue job coming back for it.
 
 ## Fencing
 

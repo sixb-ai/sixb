@@ -1,7 +1,6 @@
 import {
   AgentRequesterLeftThreadError,
   type AgentRunFailure,
-  AgentTurnInterruptedError,
   type AgentTurnRuntime,
   AgentTurnTimeoutError,
   type ConversationAgentExecutionEnvironment,
@@ -27,9 +26,13 @@ import {
   AgentFinalizationError,
   type AgentRunSession,
   type AgentRunSessionHost,
+  AgentTurnInterruptedError,
+  agentRunLeaseLapsed,
   claimAgentRun,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
+  endInterruptedAgentRun,
+  endLapsedAgentRuns,
   isolateStreamSink,
   publishAgentRunCancel,
   sandboxCredentialIssue,
@@ -66,7 +69,6 @@ import { createAgentExecutionContext } from "./execution-context"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import {
   agentRunFailureDetails,
-  interruptedError,
   isTerminalRun,
   PRESTART_RETRY_BACKOFF_MS,
   projectLease,
@@ -254,7 +256,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       if (ownedUntil && ownedUntil.getTime() > Date.now()) {
         throw new AgentRunOwnedElsewhereError(queuedRun.id, ownedUntil)
       }
-      await this.finishInterruptedTurn(context, queuedRun, delivery)
+      await endInterruptedAgentRun(this.sessionHost(context), queuedRun, this.leaseMs)
       return
     }
     // Own this attempt before preparation: even a revoked authority needs a fenced terminal outcome.
@@ -484,27 +486,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 
-  /**
-   * End a turn whose delivery died, without calling the model. Reclaiming first rotates the
-   * execution token, so a delivery that is only slow, not dead, can no longer write to the run.
-   */
-  private async finishInterruptedTurn(
-    context: AgentWorkerContext,
-    queuedRun: AgentRunRecord,
-    delivery: { readonly leaseExpiresAt: string }
-  ): Promise<void> {
-    const session = await claimAgentRun(this.sessionHost(context), {
-      run: queuedRun,
-      leaseExpiresAt: delivery.leaseExpiresAt,
-    })
-    if (!session) return
-    session.close()
-
-    const finalized = await recordFate(session, "cancelled", interruptedError(queuedRun))
-    if (!finalized) return
-    await session.events.publishRunFinished(finalized.run)
-  }
-
   protected override async onExecutionError(
     claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
@@ -597,6 +578,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       try {
+        // Runs whose runner stopped renewing them first: their children's parents end with them.
+        await endLapsedAgentRuns(this.sessionHost(context), { leaseMs: this.leaseMs })
         await this.reconcileInactiveParentSubagents(context)
         const results = [
           await dispatchQueuedAgentRuns({
@@ -690,10 +673,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (run.status === "running") {
       // A child runs in its parent's runner. Once its lease lapsed nothing runs it any more, and no
       // cancel reaches it: it ends here, as a turn left running by a dead delivery does.
-      if (leaseLapsed(run)) {
-        await this.finishInterruptedTurn(context, run, {
-          leaseExpiresAt: new Date(Date.now() + this.leaseMs).toISOString(),
-        })
+      if (agentRunLeaseLapsed(run)) {
+        await endInterruptedAgentRun(this.sessionHost(context), run, this.leaseMs)
         return
       }
       await publishAgentRunCancel(this.host.broker, { projectId: context.id, runId: run.id })
@@ -753,10 +734,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await Promise.all(
         children.map(async (run) => {
           const parent = parentsById.get(run.parentRunId)
-          const parentActive = parent?.kind === "conversation" && !isTerminalRun(parent)
-          // A child's runner renews its lease with its parent's, so one whose lease lapsed has no
-          // runner left, whatever its parent's state.
-          if (parentActive && !(run.status === "running" && leaseLapsed(run))) return
+          if (parent?.kind === "conversation" && !isTerminalRun(parent)) return
           try {
             await this.requestSubagentCancellation(run, "The parent Agent run is no longer active.")
           } catch (error) {
@@ -914,11 +892,6 @@ function assertAgentWorkerStorage(
       "[SixbAgentWorker] Agent workers require storage.aiLimits support."
     )
   }
-}
-
-/** Come back once the owning delivery's projected lease lapses, and never sooner than a moment. */
-function leaseLapsed(run: AgentRunRecord): boolean {
-  return (run.execution?.queueLeaseExpiresAt.getTime() ?? 0) <= Date.now()
 }
 
 function retryOnceReleased(error: AgentRunOwnedElsewhereError): QueueWorkerFailureDecision {

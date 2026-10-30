@@ -154,6 +154,13 @@ export {
   NOOP_STREAM_SINK,
   withAgentActivityStream,
 } from "./run-events"
+export {
+  AgentTurnInterruptedError,
+  agentRunLeaseLapsed,
+  endInterruptedAgentRun,
+  endLapsedAgentRuns,
+  interruptedError,
+} from "./run-liveness"
 export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,

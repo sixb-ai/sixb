@@ -239,9 +239,10 @@ The terminal run state is stored on the run record:
 - Conversation turn found `running` on redelivery (its worker crashed or lost the queue lease):
   `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. It already
   billed its model calls and may have run actions or published, so it is retried only on request
-  (`POST .../runs/:runId/retry`). A child runs in its parent's worker, under the parent's lease:
-  once its parent ended and its own lease lapsed, the repair pass ends it the same way, and the
-  parent spawns it again if it still needs it.
+  (`POST .../runs/:runId/retry`). A turn or child left running with its lease lapsed and no job
+  coming back for it (a child runs under its parent's lease, a job may have given up) is ended the
+  same way by the repair pass, through core's `endLapsedAgentRuns`; a parent spawns its child
+  again if it still needs it.
   Workflow agent nodes are replayed instead. A run whose projected queue lease has not lapsed is
   still owned by a live delivery: a duplicate job leaves it alone and is retried once that lease
   runs out

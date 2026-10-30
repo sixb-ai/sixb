@@ -25,6 +25,7 @@ import {
   type AgentRunSessionHost,
   claimAgentRun,
   conversationThreadId,
+  interruptedError,
   isTerminalOrExecutionGone,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -37,7 +38,6 @@ import { isPermanentAgentPreparationError } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
 import {
   agentRunFailureDetails,
-  interruptedError,
   isTerminalRun,
   PREPARATION_RETRY_BACKOFF_MS,
   PRESTART_RETRY_BACKOFF_MS,
