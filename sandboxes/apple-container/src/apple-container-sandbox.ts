@@ -62,7 +62,7 @@ const HOST_ENV_ALLOWLIST = [
 ] as const
 // Written as root, then owned by the user commands run as: the file and each directory it created
 // inside the working directory, the remaining arguments.
-const WRITE_FILE_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" && cat > "$1" && if [ -n "$2" ]; then chmod "$2" "$1"; fi && shift 2 && chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} -- "$@"`
+const WRITE_FILE_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" && cat > "$1" && if [ -n "$2" ]; then chmod "$2" "$1"; fi`
 
 export class AppleContainerSandbox implements Sandbox {
   readonly id: string
@@ -269,20 +269,21 @@ export class AppleContainerSandbox implements Sandbox {
     for (const file of files) {
       const target = this.resolveWithinWorkingDirectory(file.path)
       const mode = file.mode === undefined ? "" : file.mode.toString(8)
-      const owned: string[] = []
-      for (
-        let path = target;
-        path.startsWith(`${this.workingDirectory}/`);
-        path = posix.dirname(path)
-      ) {
-        owned.push(path)
-      }
+      // As the command user, like the commands: a link a command planted can't lead a write, with
+      // root's rights, anywhere the command couldn't write itself.
+      const [command = "/bin/sh", ...args] = unprivilegedGuestArgv("/bin/sh", [
+        "-c",
+        WRITE_FILE_SCRIPT,
+        "sh",
+        target,
+        mode,
+      ])
       const result = await runAppleContainerCli({
         argv: buildExecArgv(this.cli, {
           id: this.id,
           cwd: "/",
-          command: "/bin/sh",
-          args: ["-c", WRITE_FILE_SCRIPT, "sh", target, mode, ...owned],
+          command,
+          args,
           env: {},
           interactive: true,
         }),

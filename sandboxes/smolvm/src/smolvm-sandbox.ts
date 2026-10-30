@@ -251,23 +251,16 @@ export class SmolvmSandbox implements Sandbox {
     // script that base64-decodes each payload into place. Run from "/" (always present) because a
     // target directory may not exist yet; the script mkdir -p's each one. That is why relative paths
     // are resolved against workingDirectory here rather than by the guest shell.
+    // As the command user, like the commands: a link a command planted can't lead a write, with
+    // root's rights, anywhere the command couldn't write itself.
+    const [command = "sh", ...args] = unprivilegedGuestArgv("sh", [
+      "-c",
+      buildWriteFilesScript(
+        files.map((file) => ({ ...file, path: posix.resolve(this.workingDirectory, file.path) }))
+      ),
+    ])
     const result = await exec({
-      argv: buildExecArgv(this.cli, {
-        id: this.id,
-        cwd: "/",
-        command: "sh",
-        args: [
-          "-c",
-          buildWriteFilesScript(
-            files.map((file) => ({
-              ...file,
-              path: posix.resolve(this.workingDirectory, file.path),
-            })),
-            this.workingDirectory
-          ),
-        ],
-        env: {},
-      }),
+      argv: buildExecArgv(this.cli, { id: this.id, cwd: "/", command, args, env: {} }),
       cwd: process.cwd(),
       env: hostEnv(),
     })
@@ -336,14 +329,8 @@ function isLoopbackOrigin(origin: string): boolean {
  * base64-decode the payload into place (base64 keeps binary/quoting safe), honoring an optional
  * mode. `set -e` aborts on the first failure so a partial write surfaces a non-zero exit.
  */
-export function buildWriteFilesScript(
-  files: readonly SandboxFileRecord[],
-  workingDirectory: string
-): string {
+export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
   const lines = ["set -e"]
-  // Written as root, owned by the command user: each file, and each directory it creates inside
-  // the working directory.
-  const owned = new Set<string>()
   for (const file of files) {
     const encoded = Buffer.from(file.contents).toString("base64")
     const quotedPath = shellQuote(file.path)
@@ -352,18 +339,6 @@ export function buildWriteFilesScript(
     if (file.mode !== undefined) {
       lines.push(`chmod ${file.mode.toString(8)} ${quotedPath}`)
     }
-    for (
-      let path = file.path;
-      path.startsWith(`${workingDirectory}/`);
-      path = posix.dirname(path)
-    ) {
-      owned.add(path)
-    }
-  }
-  if (owned.size > 0) {
-    lines.push(
-      `chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} ${[...owned].map(shellQuote).join(" ")}`
-    )
   }
   return lines.join("\n")
 }
