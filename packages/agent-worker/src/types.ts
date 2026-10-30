@@ -13,7 +13,7 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
-import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
+import type { PropertyClearance, RunModelLoopInput, StreamSink } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import type { ModelTool } from "@sixb/core/models"
@@ -28,7 +28,6 @@ import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
 import type { BeforeFinalizeOptions } from "./run-sandbox"
 import type { AgentSandboxHandle } from "./sandbox-handle"
-import type { StreamSink } from "./stream-sink"
 import type { AgentFileBudget } from "./tools/tool-files"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
@@ -125,7 +124,6 @@ export interface AgentTurnContext {
    * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
-  readonly streamSink: StreamSink
   readonly turnTimeoutMs: number
 }
 

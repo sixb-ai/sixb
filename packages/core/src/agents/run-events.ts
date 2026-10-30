@@ -1,9 +1,12 @@
-import type { Broker, JsonValue } from "@sixb/core"
+import type { Broker } from "../broker"
+import { createSixbError } from "../errors/internal"
+import type { JsonValue } from "../json"
 import type {
-  AgentCompactionFailureCode,
-  AgentRunStreamEvent,
-  ModelUiChunk,
-} from "@sixb/core/agents/streams"
+  AgentContextCheckpointReason,
+  AgentRunRecord,
+  ConversationAgentRunRecord,
+} from "../storage/agents"
+import type { AgentCompactionFailureCode, AgentRunStreamEvent, ModelUiChunk } from "./streams"
 import {
   agentRunFinishedEvent,
   agentRunStreamDefinition,
@@ -12,13 +15,7 @@ import {
   agentRunStreamIdempotencyKey,
   publishAgentChildFinished,
   publishAgentRunActivity,
-} from "@sixb/core/internal/agents/streams"
-import { createSixbError } from "@sixb/core/internal/errors"
-import type {
-  AgentContextCheckpointReason,
-  AgentRunRecord,
-  ConversationAgentRunRecord,
-} from "@sixb/core/storage"
+} from "./streams/protocol"
 
 export interface CompactionStartedInput {
   readonly run: ConversationAgentRunRecord
@@ -193,7 +190,7 @@ class BrokerStreamSink implements StreamSink {
         runId: input.run.id,
       }) as ModelUiChunk
     } catch (error) {
-      console.error("[SixbAgentWorker] Agent run stream chunk encoding failed:", error)
+      console.error("[Sixb] Agent run stream chunk encoding failed:", error)
       return
     }
 
@@ -280,7 +277,7 @@ async function isolateStreamSinkCall(
   try {
     await publish()
   } catch (error) {
-    console.error(`[SixbAgentWorker] Agent run '${runId}' ${label} stream publish failed:`, error)
+    console.error(`[Sixb] Agent run '${runId}' ${label} stream publish failed:`, error)
   }
 }
 
@@ -292,21 +289,18 @@ function toBrokerJson(
   try {
     const serialized = JSON.stringify(value)
     if (serialized === undefined) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] ${label} serialized to undefined.`,
-        { details }
-      )
+      throw createSixbError("internal.unexpected", `[Sixb] ${label} serialized to undefined.`, {
+        details,
+      })
     }
     // The stringify/parse round-trip already yields a pure JSON value (functions/symbols/undefined
     // are dropped or throw above, NaN/Infinity become null), so no further validation is needed —
     // the broker append boundary re-checks the payload anyway.
     return JSON.parse(serialized) as JsonValue
   } catch (error) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] ${label} could not be JSON encoded.`,
-      { cause: error, details }
-    )
+    throw createSixbError("internal.unexpected", `[Sixb] ${label} could not be JSON encoded.`, {
+      cause: error,
+      details,
+    })
   }
 }

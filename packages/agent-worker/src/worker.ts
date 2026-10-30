@@ -7,13 +7,16 @@ import {
   type AgentRunSessionHost,
   claimAgentRun,
   conversationThreadId,
+  createBrokerStreamSink,
   dispatchQueuedAgentRuns,
   dispatchQueuedSubagentRuns,
+  isolateStreamSink,
   isTerminalOrExecutionGone,
   publishAgentRunCancel,
   resolveInheritedAgentExecutionAuthorization,
   sandboxCredentialIssue,
   watchAgentRunCancel,
+  withAgentActivityStream,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
@@ -72,7 +75,6 @@ import {
   createSubagentEnvironment,
 } from "./run-environment"
 import { runSubagent, type SubagentWork } from "./run-subagent"
-import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
 import { loadSubagentHistory } from "./subagent-continuation"
 import { SubagentInbox } from "./subagent-inbox"
 import { SubagentCoordinator } from "./subagent-tools"
@@ -292,7 +294,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
-      await context.streamSink.publishStarted(run)
+      await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({
         context: prepared.executionContext,
         run,
@@ -387,7 +389,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
-        await context.streamSink.publishRunFinished(finalized.run)
+        await session.events.publishRunFinished(finalized.run)
         await this.cancelActiveSubagents(
           finalized.run.id,
           `The parent Agent run was ${finalized.run.status}.`
@@ -528,7 +530,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         : new AgentTurnInterruptedError(queuedRun.id)
     )
     if (!finalized) return
-    await context.streamSink.publishRunFinished(finalized.run)
+    await session.events.publishRunFinished(finalized.run)
     if (finalized.run.kind === "conversation") {
       await this.cancelActiveSubagents(finalized.run.id, "The parent Agent run was interrupted.")
     }
@@ -657,7 +659,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const history = await loadSubagentHistory(context.storage.agents, run, childThread)
       const modelCalls = await session.modelCalls()
       preparationComplete = true
-      await context.streamSink.publishStarted(run)
+      await session.events.publishStarted(run)
       // The parent's deadline, not one from now: a child that waited in the queue has less left.
       runtime = createAgentTurnRuntime({
         context: executionContext,
@@ -732,7 +734,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
           this.reportFailure(error, finalized.run, claimed.job.attempt, finalized.failure)
         }
-        await context.streamSink.publishRunFinished(finalized.run)
+        await session.events.publishRunFinished(finalized.run)
       }
       if (signal.aborted) throw error
     } finally {
@@ -1086,6 +1088,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       storage: context.storage,
       broker: this.host.broker,
       recoverAiModelCall: context.recoverAiModelCall,
+      events: context.streamSink,
     }
   }
 

@@ -5,7 +5,6 @@ import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { renderCurrentTime } from "../src/agent-prompt"
-import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
 import { runTurnInSession } from "./helpers"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
@@ -181,7 +180,6 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       tools: [],
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
-      streamSink: NOOP_STREAM_SINK,
       turnTimeoutMs: 60_000,
     },
     plan,

@@ -4,6 +4,7 @@ import {
   AgentExecutionLostError,
   AgentFinalizationError,
   claimAgentRun,
+  NOOP_STREAM_SINK,
   publishAgentRunCancel,
 } from "../src/agents"
 import { createTestAgentExecution } from "../src/testing"
@@ -32,7 +33,13 @@ async function setup(id = "run-1") {
     triggerMessageId: `message-${id}`,
     spec: { model: { provider: "test", modelId: "test-model" } },
   })
-  const host = { projectId: PROJECT_ID, storage, broker, recoverAiModelCall: async () => {} }
+  const host = {
+    projectId: PROJECT_ID,
+    storage,
+    broker,
+    recoverAiModelCall: async () => {},
+    events: NOOP_STREAM_SINK,
+  }
   return { storage, broker, run, host }
 }
 

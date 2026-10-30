@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
-import { openAgentRunSession } from "@sixb/core/internal/agents"
+import { NOOP_STREAM_SINK, openAgentRunSession, type StreamSink } from "@sixb/core/internal/agents"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 
@@ -95,15 +95,18 @@ export async function runTurnInSession(
   input: Omit<RunAgentTurnInput, "session"> & {
     /** Where a model call's record goes when storage cannot take it; dropped when omitted. */
     readonly recoverAiModelCall?: RecoverAiModelCall
+    /** Where the turn's live records go; nowhere when omitted. */
+    readonly events?: StreamSink
   }
 ) {
-  const { recoverAiModelCall = async () => {}, ...turn } = input
+  const { recoverAiModelCall = async () => {}, events = NOOP_STREAM_SINK, ...turn } = input
   const session = await openAgentRunSession(
     {
       projectId: turn.context.id,
       storage: turn.context.storage,
       broker: new InMemoryBroker(),
       recoverAiModelCall,
+      events,
     },
     turn.run
   )
