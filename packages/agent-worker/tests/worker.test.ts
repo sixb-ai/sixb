@@ -55,6 +55,7 @@ import {
   AgentFinalizationError,
   agentRunQueueJobId,
   agentRunTokenRunId,
+  claimWorkflowAgentNode,
   createAgentRunExecutionToken,
   createAgentRunId,
   createBrokerStreamSink,
@@ -5704,6 +5705,53 @@ describe("AgentWorker", () => {
       storage.transaction = transaction
       await worker.stop()
     }
+  })
+
+  // Guard proof: drop the attempt check from finishSucceeded's committed read; the stale session
+  // takes the other runner's success as its own and emits node.finished a second time.
+  test("a workflow step that lost its node never reports another runner's success", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-stale-finish",
+    })
+    const emitted: string[] = []
+    const emit = sixb.events.emit.bind(sixb.events)
+    sixb.events.emit = async (input, options) => {
+      emitted.push(...input.events.map((event) => event.type))
+      return emit(input, options)
+    }
+    const host = {
+      projectId: PROJECT_ID,
+      storage: workerStorageOf(sixb.storage),
+      broker: sixb.broker,
+      recoverAiModelCall: async () => {},
+      events: sixb.events,
+      workflowQueue: sixb.queues.workflows,
+      security: sixb.definitions.security,
+    }
+    const claim = async (leaseExpiresAt: string) => {
+      const node = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      const nodeRun = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      if (!node || !nodeRun) throw new Error("Expected the agent node.")
+      return claimWorkflowAgentNode(host, { node, nodeRun, leaseExpiresAt })
+    }
+    const result = {
+      modelId: "test-model",
+      finishReason: "stop" as const,
+      trace: [],
+      output: { answer: "alpha", confidence: 1 },
+      totalNodes: 1,
+    }
+
+    // A's lease lapses; B reclaims the node and finishes it.
+    const stale = await claim(new Date(Date.now() - 1_000).toISOString())
+    const current = await claim(new Date(Date.now() + 60_000).toISOString())
+    await current.finishSucceeded(result)
+
+    const error = await stale.finishSucceeded(result).catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(AgentExecutionLostError)
+    expect(emitted.filter((type) => type === "workflow.run.node.finished")).toHaveLength(1)
   })
 
   test("a redelivery after the node succeeded only queues the resume", async () => {

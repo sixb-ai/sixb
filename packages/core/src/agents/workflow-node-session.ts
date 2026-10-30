@@ -122,7 +122,10 @@ async function retryFinish<T>(
       const delay = FINISH_BACKOFF_MS[attempt]
       if (delay === undefined) throw error
       await new Promise((resolve) => setTimeout(resolve, delay))
-      const done = await committed().catch(() => null)
+      const done = await committed().catch((reason: unknown) => {
+        if (reason instanceof AgentExecutionLostError) throw reason
+        return null
+      })
       if (done) return done
     }
   }
@@ -227,8 +230,14 @@ export async function claimWorkflowAgentNode(
               output: result.output,
             })
           }),
-        // A commit whose answer was lost: the node is already succeeded.
+        // A commit whose answer was lost: the node is already succeeded. Another runner that
+        // reclaimed the node bumped its attempt, and what it finished is not this session's.
         async () => {
+          const agentNode = await agentNodes.getByNodeRunId({ projectId, nodeRunId: nodeRun.id })
+          if (agentNode && agentNode.attempt !== node.attempt) {
+            throw new AgentExecutionLostError(nodeRun.id)
+          }
+
           const current = await host.storage.workflowRuns?.nodes.getById({
             projectId,
             id: nodeRun.id,
