@@ -521,7 +521,7 @@ async function listSources(
 ): Promise<PublishSource[]> {
   let absolutePath: string
   try {
-    absolutePath = resolveSandboxPath(handle.sandbox.workingDirectory, path)
+    absolutePath = resolveSandboxPath(handle, path)
   } catch (error) {
     throw toPublishError(error, tool)
   }

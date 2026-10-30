@@ -3,7 +3,7 @@ import { AgentToolPublicError, type CommandResult } from "@sixb/core"
 import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { AgentToolExecutionError } from "../errors"
 import { agentToolErrorText } from "../model-adapters"
-import type { AgentSandboxHandle } from "../sandbox-handle"
+import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
 
 const DEFAULT_LIMIT = 2_000
 const MAX_BYTES = 50 * 1024
@@ -17,7 +17,11 @@ export const READ_TOOL_SPEC = {
   inputSchema: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Path relative to the sandbox working directory." },
+      path: {
+        type: "string",
+        description:
+          "Path relative to the working directory, or an absolute path in the run's context directory.",
+      },
       offset: { type: "integer", minimum: 1, description: "One-based start line. Default: 1." },
       limit: {
         type: "integer",
@@ -59,7 +63,8 @@ export function createReadTool(
 
       let result: CommandResult
       try {
-        const { sandbox, env } = await resolveSandbox()
+        const handle = await resolveSandbox()
+        const { sandbox, env } = handle
         result = await sandbox.runCommand(
           "bash",
           [
@@ -70,6 +75,7 @@ export function createReadTool(
             String(offset),
             String(limit),
             String(PROBE_BYTES),
+            contextPath(handle),
           ],
           {
             cwd: sandbox.workingDirectory,
@@ -121,15 +127,12 @@ function parseReadToolInput(value: unknown): ReadToolInput {
   }
 }
 
+/** The sandbox checks where a path really leads: here only its form. */
 function normalizePath(value: unknown): string {
-  if (typeof value !== "string" || !value || value.includes("\0") || posix.isAbsolute(value)) {
-    throw publicError("path must be a non-empty relative path.")
+  if (typeof value !== "string" || !value || value.includes("\0")) {
+    throw publicError("path must be a non-empty path.")
   }
-  const normalized = posix.normalize(value)
-  if (normalized === ".." || normalized.startsWith("../")) {
-    throw publicError("path must stay within the sandbox working directory.")
-  }
-  return normalized
+  return posix.normalize(value)
 }
 
 function positiveInteger(value: unknown, fallback: number, field: string): number {
@@ -211,7 +214,9 @@ function paginate(
 function throwReadError(path: string, exitCode: number, stderr: string): never {
   if (exitCode === 10) throw publicError(`'${path}' does not exist or cannot be resolved.`)
   if (exitCode === 11)
-    throw publicError(`'${path}' resolves outside the sandbox working directory.`)
+    throw publicError(
+      `'${path}' resolves outside the working directory and the run's context directory.`
+    )
   if (exitCode === 12) throw publicError(`'${path}' is a directory, not a file.`)
   if (exitCode === 13) throw publicError(`'${path}' is not a regular file.`)
   if (exitCode === 14) throw publicError(`'${path}' is not readable.`)
@@ -234,8 +239,11 @@ tail_bin="$(command -v tail)" || exit 16
 head_bin="$(command -v head)" || exit 17
 base64_bin="$(command -v base64)" || exit 18
 root="$(pwd -P)"
-target="$("$realpath_bin" "$root/$1")" || exit 10
-case "$target" in "$root"|"$root"/*) ;; *) exit 11 ;; esac
+context="$root"
+if [ -d "$5" ]; then context="$(cd -P -- "$5" && pwd)"; fi
+case "$1" in /*) requested="$1" ;; *) requested="$root/$1" ;; esac
+target="$("$realpath_bin" "$requested")" || exit 10
+case "$target" in "$root"|"$root"/*|"$context"/*) ;; *) exit 11 ;; esac
 [ -e "$target" ] || exit 10
 [ ! -d "$target" ] || exit 12
 [ -f "$target" ] || exit 13

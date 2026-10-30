@@ -20,6 +20,7 @@ import {
   type SandboxFileEntry,
   SandboxFileError,
   type SandboxFileListing,
+  sandboxRoots,
 } from "./sandbox-files"
 import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 import { AgentFileBudget } from "./tools/tool-files"
@@ -79,18 +80,21 @@ export async function listHandedSources(input: {
   const handle = await input.files.sandbox()
   input.signal.throwIfAborted()
 
-  // The working directory may itself be reached through a link: compare real paths with its own.
-  const root = posix.resolve(handle.sandbox.workingDirectory)
-  const rootEntry = await resolveSandboxEntry(handle, {
-    path: root,
-    signal: input.signal,
-    timeoutMs: SANDBOX_TIMEOUT_MS,
-  })
-  const realRoot = rootEntry.kind === "directory" ? rootEntry.realPath : root
+  // The working directory may itself be reached through a link: compare real paths with its own,
+  // and with the context directory's when that lies elsewhere.
+  const realRoots: string[] = []
+  for (const root of sandboxRoots(handle)) {
+    const entry = await resolveSandboxEntry(handle, {
+      path: root,
+      signal: input.signal,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+    })
+    realRoots.push(entry.kind === "directory" ? entry.realPath : root)
+  }
 
   const sources = new Map<string, HandedSource>()
   for (const path of input.paths) {
-    for (const source of await handedSourcesAt(handle, realRoot, path, input.signal)) {
+    for (const source of await handedSourcesAt(handle, realRoots, path, input.signal)) {
       sources.set(source.path, source)
     }
   }
@@ -352,18 +356,22 @@ function childDirectoryName(key: string): string {
 
 async function handedSourcesAt(
   handle: AgentSandboxHandle,
-  realRoot: string,
+  realRoots: readonly string[],
   path: string,
   signal: AbortSignal
 ): Promise<readonly HandedSource[]> {
-  const root = posix.resolve(handle.sandbox.workingDirectory)
+  const [root = "/", context] = sandboxRoots(handle)
   let requested: string
   try {
-    requested = resolveSandboxPath(root, path)
+    requested = resolveSandboxPath(handle, path)
   } catch (error) {
     throw toHandOffError(error, path)
   }
-  const childPath = posix.relative(root, requested)
+  // A run file in a context directory outside the working directory reaches the child at its path
+  // in that directory, such as `attachments/report.pdf`.
+  const fromContext = context !== undefined && requested.startsWith(`${context}/`)
+  const childPath = posix.relative(fromContext ? context : root, requested)
+  const realRoot = (fromContext ? realRoots[1] : realRoots[0]) ?? root
 
   // What the path really is decides what it may hand over: a link must not reach the run context.
   const entry = await resolveSandboxEntry(handle, {
@@ -377,9 +385,14 @@ async function handedSourcesAt(
   if (entry.kind === "link") throw handOffError(`'${path}': it is a symbolic link`)
   const realPath = posix.relative(realRoot, entry.realPath)
   if (realPath === "" || realPath.startsWith("../") || realPath === "..") {
-    throw handOffError(`'${path}': it leads outside the sandbox working directory`)
+    throw handOffError(
+      fromContext
+        ? `'${path}': it leads outside the run's context directory`
+        : `'${path}': it leads outside the sandbox working directory`
+    )
   }
-  assertHandable(handle, realPath, path)
+  if (fromContext) assertHandableRunFile(handle, realPath, path)
+  else assertHandable(handle, realPath, path)
 
   if (entry.kind === "file") {
     return [{ path: childPath, absolutePath: entry.realPath }]
@@ -420,11 +433,17 @@ function assertHandable(handle: AgentSandboxHandle, relativePath: string, reques
     posix.resolve(handle.sandbox.workingDirectory),
     contextPath(handle)
   )
-  const runFile = isRunFile(relativePath, contextDirectory)
-  const handed = HANDED_RUN_DIRECTORIES.some((directory) =>
-    `${relativePath}/`.startsWith(`${contextDirectory}/${directory}/`)
-  )
-  if (!runFile || handed) {
+  if (!isRunFile(relativePath, contextDirectory)) return
+  assertHandableRunFile(handle, posix.relative(contextDirectory, relativePath), requested)
+}
+
+/** A path in the context directory, relative to it: only the files the run was given or made. */
+function assertHandableRunFile(
+  handle: AgentSandboxHandle,
+  relativePath: string,
+  requested: string
+): void {
+  if (HANDED_RUN_DIRECTORIES.some((directory) => `${relativePath}/`.startsWith(`${directory}/`))) {
     return
   }
 
