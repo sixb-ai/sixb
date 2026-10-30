@@ -46,7 +46,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
   })
-  return { sdk, blobs }
+  return { session: { sdk, definitions: sdk.definitions }, blobs }
 }
 
 /** A queued turn in a fresh storage, with the host a session works against. */
@@ -74,7 +74,7 @@ export async function seedAgentRun(id = "run-1") {
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
-    sdk: projectOver(storage, broker).sdk,
+    ...projectOver(storage, broker).session,
   }
   return { storage, broker, run, host }
 }
@@ -123,7 +123,7 @@ const SECURITY = {
 async function seedConversation(claim: ClaimAgentRunSession) {
   const storage = new InMemoryStorage()
   const broker = new InMemoryBroker()
-  const { sdk, blobs } = projectOver(storage, broker)
+  const { session, blobs } = projectOver(storage, broker)
   const host = {
     projectId: PROJECT_ID,
     storage,
@@ -131,7 +131,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: SECURITY,
-    sdk,
+    ...session,
   }
   await storage.auth.users.create({
     projectId: PROJECT_ID,

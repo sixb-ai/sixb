@@ -2,9 +2,7 @@ import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
-  resolveWorkflowAgentStepExecutionPlan,
   runWorkflowAgentNode,
   toAgentExecutionFailure,
   type WorkflowAgentFailurePhase,
@@ -50,6 +48,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
+import { resolveWorkflowAgentStepPlan } from "./run-plan"
 import { workflowStepSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -119,13 +118,9 @@ export async function executeWorkflowAgentNode(
       await resolveWorkflowAgentNodeExecution(input, loaded, session)
     usageRecorder = await session.modelCalls()
     totalNodes = workflow.nodes.length
-    const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
+    const configuredPlan = resolveWorkflowAgentStepPlan(input.host.definitions, {
       workflowId: workflow.id,
       step: node.agentStep,
-      models: input.host.definitions.models?.language,
-      tools: input.host.definitions.tools,
-      skills: input.host.definitions.agent.skills,
-      sandboxModels: listSandboxModels(input.host.definitions.models),
     })
     modelId = configuredPlan.model.modelId
     const resolved = await session.authorizeActor(actorId, durableExecution.authorizationRef)

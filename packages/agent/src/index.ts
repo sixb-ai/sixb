@@ -7,12 +7,6 @@ export {
   isLostExecution,
 } from "./errors"
 export type { ResolvedAgentExecutionPlan } from "./execution-plan"
-export {
-  listSandboxModels,
-  resolveAgentExecutionPlan,
-  resolveSubagentExecutionPlan,
-  resolveWorkflowAgentStepExecutionPlan,
-} from "./execution-plan"
 export type { AgentRunFailure } from "./failure"
 export { toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 export type { ConversationReaders } from "./message-authors"
@@ -35,6 +29,7 @@ export type { SubagentWork } from "./run-subagent"
 export { runSubagent } from "./run-subagent"
 export type { WorkflowAgentFailurePhase } from "./run-workflow-agent-node"
 export { runWorkflowAgentNode, WorkflowAgentNodeExecutionError } from "./run-workflow-agent-node"
+export { withBuiltInSkills } from "./skills/built-in"
 export { SubagentInbox } from "./subagent-inbox"
 export { SubagentCoordinator } from "./subagent-tools"
 export type { AgentTurnRuntime } from "./turn-runtime"

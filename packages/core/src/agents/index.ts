@@ -166,6 +166,13 @@ export {
   interruptedError,
 } from "./run-liveness"
 export type {
+  AgentRunPlan,
+  AgentRunPlanDefinitions,
+  SandboxModel,
+  SandboxModelKind,
+} from "./run-plan"
+export { listSandboxModels, readAgentRunPlan } from "./run-plan"
+export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,
   AgentRunScopeErrorCode,

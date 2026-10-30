@@ -69,6 +69,7 @@ import {
   NOOP_STREAM_SINK,
   openAgentRunSession,
   publishAgentRunCancel,
+  readAgentRunPlan,
   type WorkflowAgentNodeSession,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
@@ -127,7 +128,6 @@ import {
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
-import { resolveAgentExecutionPlan } from "../../agent/src/execution-plan"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import {
   createConversationAgentEnvironment,
@@ -151,6 +151,7 @@ import { ChildRunner } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
 import { isTerminalRun } from "../src/run-fate"
+import { resolveRunPlan } from "../src/run-plan"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -1950,6 +1951,7 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
       events: NOOP_STREAM_SINK,
       security: sixb.definitions.security,
       sdk: sixb,
+      definitions: sixb.definitions,
     },
     run
   )
@@ -1997,6 +1999,7 @@ function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
       events: context.streamSink,
       security: sixb.definitions.security,
       sdk: sixb,
+      definitions: sixb.definitions,
     },
     trackTeardown: () => {},
     reportFailure: () => {},
@@ -2075,12 +2078,10 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   return storage as AgentWorkerStorage
 }
 
+/** A turn's plan on the project's default model, without the models its `sixb` can call. */
 function executionPlanFor(sixb: TestSixb) {
-  return resolveAgentExecutionPlan({
-    models: sixb.definitions.models?.language,
-    tools: sixb.definitions.tools,
-    skills: sixb.definitions.agent.skills,
-  })
+  const plan = readAgentRunPlan(sixb.definitions, { id: "plan", kind: "conversation" } as never)
+  return resolveRunPlan(sixb.definitions, { ...plan, sandboxModels: [] })
 }
 
 /** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
@@ -10869,6 +10870,7 @@ describe("AgentWorker", () => {
           events: context.streamSink,
           security: host.definitions.security,
           sdk: host,
+          definitions: host.definitions,
         },
         run
       )
@@ -12667,7 +12669,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         retryable: false,
         message:
-          "[SixbAgent] The conversation's language model is not available in models.language.",
+          "[Sixb] The conversation's language model is not available in models.language.",
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,

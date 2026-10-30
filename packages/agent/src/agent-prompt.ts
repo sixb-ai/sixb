@@ -1,12 +1,12 @@
 import { posix } from "node:path"
 import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition } from "@sixb/core"
+import type { SandboxModel } from "@sixb/core/internal/agents"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import { CHILD_FILES_DIRECTORY } from "./child-files"
-import type { SandboxModel } from "./execution-plan"
 import { renderModelLine } from "./model-lines"
 import type { AgentRequester } from "./requester"
 

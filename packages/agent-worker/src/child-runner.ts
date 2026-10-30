@@ -6,9 +6,7 @@ import {
   createAskParentTool,
   createSubagentEnvironment,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
-  resolveSubagentExecutionPlan,
   runSubagent,
   SubagentInbox,
   type SubagentWork,
@@ -43,6 +41,7 @@ import {
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
+import { resolveRunPlan } from "./run-plan"
 import { childSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -334,16 +333,7 @@ export class ChildRunner {
     if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
       throw new DOMException("The parent Agent run is no longer active.", "AbortError")
     }
-    const configuredPlan = resolveSubagentExecutionPlan({
-      run: queuedRun,
-      models: host.definitions.models?.language,
-      tools: host.definitions.tools,
-      skills: host.definitions.agent.skills,
-      ...(host.definitions.agent.instructions === undefined
-        ? {}
-        : { projectInstructions: host.definitions.agent.instructions }),
-      sandboxModels: listSandboxModels(host.definitions.models),
-    })
+    const configuredPlan = resolveRunPlan(host.definitions, await session.plan())
     if (
       !durableExecution ||
       durableExecution.source.type !== "execution" ||

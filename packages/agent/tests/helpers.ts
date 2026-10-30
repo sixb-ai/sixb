@@ -9,6 +9,7 @@ import type {
 } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
 import {
+  type AgentRunPlanDefinitions,
   type AgentRunSessionHost,
   NOOP_STREAM_SINK,
   openAgentRunSession,
@@ -134,6 +135,8 @@ export async function runTurnInSession(
           throw new Error("A turn run directly reaches no project SDK.")
         },
       },
+      // Its plan is the test's own.
+      definitions: {} as AgentRunPlanDefinitions,
     },
     turn.run
   )
