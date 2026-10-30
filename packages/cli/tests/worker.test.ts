@@ -39,11 +39,6 @@ describe("sixb worker", () => {
         "requests them (API, workflows, syncs). Remove it from the command.",
     ],
     [
-      "an invalid agent turn timeout",
-      { workerType: "agent", agentTurnTimeout: "eventually" },
-      "Invalid agent turn timeout 'eventually'",
-    ],
-    [
       "an invalid concurrency",
       { workerType: "sync", concurrency: "0" },
       "Invalid worker concurrency '0'",

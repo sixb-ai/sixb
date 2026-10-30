@@ -415,7 +415,6 @@ function setup(scripts: {
   })
   const worker = new AgentWorker(host, {
     apiBaseUrl: "http://localhost:3002/api/",
-    defaultMaxSteps: 6,
   })
   return {
     host,

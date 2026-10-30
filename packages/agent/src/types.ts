@@ -35,8 +35,6 @@ export interface AgentRunSettings {
   readonly ontologyDocs: OntologyDocsCatalog
   /** The Sixb API origin the run's commands call, through their environment's credentialed address. */
   readonly apiBaseUrl: string
-  readonly defaultMaxSteps: number
-  readonly turnTimeoutMs: number
   /** How many children one conversation turn may have queued or running at once. */
   readonly subagentConcurrencyPerRun: number
   /** Whether a child keeps its workspace between runs: its environment can be resumed. */
@@ -93,7 +91,6 @@ export interface AgentTurnContext {
    * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
-  readonly turnTimeoutMs: number
 }
 
 /**

@@ -448,7 +448,6 @@ async function seed(storage: AiModelCallGroupsContractStorage) {
           model: { provider: "child-provider", modelId: "small" },
           task: "Research",
           toolNames: [],
-          maxSteps: 25,
         },
         thread: { id: "child_thread", create: true },
         trigger: { id: "child_task", parts: [{ type: "text", text: "Research" }] },

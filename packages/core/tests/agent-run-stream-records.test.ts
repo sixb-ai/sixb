@@ -57,7 +57,6 @@ function subagentRunRecord(overrides: Partial<SubagentRunRecord> = {}): Subagent
       model: { provider: "gateway", modelId: "openai/gpt-5" },
       task: "Research the delegated question.",
       toolNames: [],
-      maxSteps: 25,
     },
     status: "cancelled",
     attempt: 1,

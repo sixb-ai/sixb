@@ -2232,7 +2232,6 @@ async function createRunTokenRuntime(
         model: { provider: "test", modelId: "child" },
         task: "Inspect devices.",
         toolNames: [],
-        maxSteps: 25,
         ...approvalModeOf(options),
       },
       thread: { id: `thread_${runId}`, create: true },

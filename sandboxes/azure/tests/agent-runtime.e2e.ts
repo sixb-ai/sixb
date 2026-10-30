@@ -130,8 +130,6 @@ test.skipIf(!enabled)(
       console.log("[AzureE2E] Temporary HTTPS tunnel ready")
       worker = new AgentWorker(host, {
         apiBaseUrl: origin,
-        defaultMaxSteps: 3,
-        turnTimeoutMs: 120_000,
       })
       const requested = await api.agent.runs.request({
         text: "Read Device fan-1 using the Sixb CLI and report its label.",

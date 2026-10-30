@@ -105,9 +105,8 @@ For a blank sandbox:
    `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
-A workflow node's deadline also covers provisioning: it starts before the environment is created,
-and it, a cancellation or a worker shutdown cancels `create()`. Finishing the node never does: a
-sandbox still booting then is destroyed once it is ready.
+A cancellation or a worker shutdown cancels a workflow node's `create()`. Finishing the node never
+does: a sandbox still booting then is destroyed once it is ready.
 
 A workspace, a thread's or a step's, is ready before the first model call instead, so the system
 prompt can describe the checkout, and its network follows its recipe, which always includes the
@@ -144,9 +143,8 @@ Each child:
   sandbox, listed in its task and in `$SIXB_ATTACHMENTS`, and returns what it writes to `out/`;
 - works in a thread of its own, its run's `threadId`, beside a durable run, usage records and
   stream (see [Child threads](#child-threads));
-- stops with its parent: when the parent finishes, is cancelled or times out, or its runner stops.
-  Its wall clock ends at the parent's deadline, which its spec carries, however late it starts. Once
-  its parent has ended, the API and the publish transaction refuse it. A child waiting on its
+- stops with its parent: when the parent finishes or is cancelled, or its runner stops. Once its
+  parent has ended, the API and the publish transaction refuse it. A child waiting on its
   question when its parent finishes pauses instead: see [questions to the parent](#questions-to-the-parent);
 - is never replayed: one its runner stopped with, or left running, ends `interrupted`, since it may
   already have run actions or published. Its parent decides whether to spawn it again;
@@ -176,9 +174,8 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
 - **The turn never stops a child for a held call.** Its own call pauses it after the step that
   made it. A child's pauses it only once none of its children is queued or running
   (`turnPausesOnHeldCalls`), so it goes on waiting for the others. A turn that pauses, after a
-  step or because it ended holding a call, first waits for its children still at work, until
-  `PAUSE_WAIT_MARGIN_MS` before its deadline: its end cancels them, and one that holds a call
-  pauses by itself meanwhile. The wait wakes on their finishes: see
+  step or because it ended holding a call, first waits for its children still at work: its end
+  cancels them, and one that holds a call pauses by itself meanwhile. The wait wakes on their finishes: see
   [the parent's waits](#the-parents-waits).
 - **The resumed turn continues it.** The report that resumes a turn marks each outcome whose caller
   paused on its calls `caller.continues`, and the model reads that from the part. Before the
@@ -187,10 +184,10 @@ approval records decide, never the prompt or the tool output (`src/run-subagent.
   with `thread.create: false`). Its trigger holds the outcomes, copied without their caller so the
   child reads them as its own, what came back to its new sandbox (its `out/`, or why none could be
   kept) unless its workspace is kept, and when it continues. The model, task and handed files are the paused child's; the mode
-  and deadline are this turn's. A new message continues none.
+  is this turn's. A new message continues none.
 - **A retried resume continues it again.** The retry keeps its trigger, so it continues the child
   again under its own id. The runs of the thread after the pause that ran under the failed
-  attempt are waited for until they stop (`clearDeadAttempts`, bounded by the turn's deadline),
+  attempt are waited for until they stop (`clearDeadAttempts`; a lapsed lease ends one at the latest),
   then their messages leave the thread (`deleteByRunId`), as a retried turn's leave its own.
 - **Its history is its thread.** A continuation reads its thread's messages: the task and handed
   files, dated by the thread's creation, each run's work and each trigger, in order, so its request
@@ -274,8 +271,7 @@ question and its replies travel through the same inboxes as messages (`src/subag
 - **Asking.** The child writes a `question` mail to its parent turn's inbox,
   `agents.runs.<parentRunId>.inbox`, naming its thread (`fromThreadId`), its id
   `<childRunId>:<modelCallId>:<toolCallId>`, and waits on its thread's inbox, subscribed, for the
-  parent's reply (`inReplyTo` the question), bounded by its signal: its cancel, its parent's, its
-  deadline. One question at a time: a second `ask_parent` while one waits is refused. Replies never
+  parent's reply (`inReplyTo` the question), bounded by its signal: its cancel, or its parent's. One question at a time: a second `ask_parent` while one waits is refused. Replies never
   reach the step-boundary reads as messages, a continuation's included, and the first reply counts.
 - **The parent's wait wakes.** A question wakes the parent's waits through its inbox (see
   [the parent's waits](#the-parents-waits)); when the turn cannot subscribe, `wait_agent` reads the
@@ -293,8 +289,7 @@ question and its replies travel through the same inboxes as messages (`src/subag
   not read comes as one more step, a `<sixb_child_questions>` block: the turn does not end on an
   answer that ignores it.
 - **The turn's end.** Before the turn records its end, while it still runs, it writes a `deferred`
-  reply to each child still waiting on its question, and waits, until 10 s before its deadline,
-  for each to pause: `succeeded`, `finishReason: "awaiting_answer"`, its work in its thread, the
+  reply to each child still waiting on its question, and waits for each to pause: `succeeded`, `finishReason: "awaiting_answer"`, its work in its thread, the
   `ask_parent` call and its `deferred` output, which names the question's id, included, and its
   `out/` in its result. Only then does it wait for its other children when it pauses, and record its end, which
   cancels those still at work. The repair pass leaves a running turn's children alone, so a child
@@ -335,8 +330,7 @@ what it waits for (`src/subagent-tools.ts`, `src/child-questions.ts`):
   reads, so what comes during the read wakes it.
 - **A re-check bounds a lost wake.** A wait that nothing woke reads again after
   `CHILD_WAIT_RECHECK_MS` (5 s): a record the broker dropped, or a subscription that failed, costs
-  at most that, and a minute of waiting reads storage 12 times. A wait never sleeps past its own
-  deadline.
+  at most that, and a minute of waiting reads storage 12 times.
 
 ## Child runs
 
@@ -351,9 +345,8 @@ Child events are recorded in the broker, and reach whoever reads the conversatio
 its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by
 `threads.listChildren`), and `/ws/agents` streams a child's run as a turn's. The parent
 receives their durable results through `wait_agent`: each child's final answer, the text it wrote
-after its last local tool call, else its last text. `wait_agent` returns `WAIT_ANSWER_MARGIN_MS` (a
-minute) before the parent's deadline, children still at work reported `queued` or `running`, so the
-parent answers before it times out.
+after its last local tool call, else its last text. `wait_agent` returns once every child it waits
+for has ended, or one asks a question.
 
 Files travel through blob storage, never through the model (`src/child-files.ts`):
 

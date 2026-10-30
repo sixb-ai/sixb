@@ -1639,7 +1639,6 @@ describe("a sub-agent's thread over HTTP", () => {
         model: { provider: "test", modelId: "test-model" },
         task: "Find the late invoices.",
         toolNames: [],
-        maxSteps: 5,
         approvalMode: "manual",
       },
       thread: { id: "child-thread", create: true },

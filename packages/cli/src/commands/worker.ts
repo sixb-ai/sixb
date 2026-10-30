@@ -1,4 +1,3 @@
-import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { SixbCliError } from "../lib/errors"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
@@ -25,7 +24,6 @@ export interface WorkerOptions {
   noMigrate?: boolean
   workerType?: string
   apiPublicOrigin?: string
-  agentTurnTimeout?: string
   concurrency?: string
   vectorConcurrency?: string
   subagentConcurrency?: string
@@ -36,7 +34,6 @@ export async function runWorker(options: WorkerOptions = {}) {
   process.env.NODE_ENV = "production"
 
   const workerType = resolveWorkerTypeToStart(options.workerType)
-  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveSingleWorkerConcurrency(workerType, options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const subagents = resolveSubagentConcurrency({
@@ -79,7 +76,6 @@ export async function runWorker(options: WorkerOptions = {}) {
 
     worker = createWorkerForType(sixb, workerType, {
       agentApiBaseUrl: options.apiPublicOrigin,
-      agentTurnTimeoutMs,
       workerConcurrency,
       vectorConcurrency,
       ...subagents,

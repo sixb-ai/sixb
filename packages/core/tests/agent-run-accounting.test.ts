@@ -80,7 +80,6 @@ async function spawnChild(
       model: { provider: "test", modelId: "test-model" },
       task: `Look into ${key}.`,
       toolNames: [],
-      maxSteps: 5,
     },
     thread: { id: `${turn.id}_${key}_thread`, create: true },
     trigger: { id: `${turn.id}_${key}_task`, parts: [{ type: "text", text: `Look into ${key}.` }] },

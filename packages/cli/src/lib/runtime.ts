@@ -60,7 +60,6 @@ export interface StartSixbRuntimeOptions {
    */
   readonly api?: RuntimeApiServer
   readonly agentApiBaseUrl?: string
-  readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
   readonly vectorConcurrency?: number
   readonly subagentConcurrency?: number
@@ -292,7 +291,6 @@ export async function startSixbRuntime(
             ? requireAgentApiBaseUrl(options.agentApiBaseUrl)
             : undefined,
           concurrency: options.workerConcurrency?.agent,
-          turnTimeoutMs: options.agentTurnTimeoutMs,
           subagentConcurrency: options.subagentConcurrency,
           subagentConcurrencyPerRun: options.subagentConcurrencyPerRun,
         })

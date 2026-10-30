@@ -17,7 +17,6 @@ export type QueueWorkerProcess = Worker & { readonly concurrency: number }
 
 export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string
-  readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
   readonly vectorConcurrency?: number
   readonly subagentConcurrency?: number
@@ -54,7 +53,6 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
           ? resolveAgentApiBaseUrl(options.agentApiBaseUrl)
           : undefined,
         concurrency: options.workerConcurrency?.agent,
-        turnTimeoutMs: options.agentTurnTimeoutMs,
         subagentConcurrency: options.subagentConcurrency,
         subagentConcurrencyPerRun: options.subagentConcurrencyPerRun,
       }),

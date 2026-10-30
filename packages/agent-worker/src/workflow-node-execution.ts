@@ -1,6 +1,5 @@
 import {
   type AgentExecutionEnvironment,
-  AgentTurnTimeoutError,
   createWorkflowAgentNodeEnvironment,
   isLostExecution,
   listSandboxModels,
@@ -25,7 +24,6 @@ import {
   isSixbError,
   summarizeErrorMessage,
   toSixbFailure,
-  withFailureMessage,
 } from "@sixb/core/internal/errors"
 import {
   type AiModelCallRecorder,
@@ -109,11 +107,8 @@ export async function executeWorkflowAgentNode(
   let totalNodes: number | undefined
   let preparationComplete = false
   const turnSignal = AbortSignal.any([signal, session.cancelled])
-  // Fires only when the node's time budget elapses: its environment, model loop and tools stop.
-  const deadline = new AbortController()
   // Fires when the node ends, however it ends: its tools' model calls must not outlive it.
   const ended = new AbortController()
-  let deadlineTimer: ReturnType<typeof setTimeout> | undefined
   const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
     void session.renewLease(renewed.leaseExpiresAt).catch(() => {})
   })
@@ -130,7 +125,6 @@ export async function executeWorkflowAgentNode(
       models: input.host.definitions.models?.language,
       tools: input.host.definitions.tools,
       skills: input.host.definitions.agent.skills,
-      defaultMaxSteps: context.defaultMaxSteps,
       sandboxModels: listSandboxModels(input.host.definitions.models),
     })
     modelId = configuredPlan.model.modelId
@@ -152,18 +146,10 @@ export async function executeWorkflowAgentNode(
     const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
     preparationComplete = true
 
-    // The deadline starts before the environment: preparing it shares the node's time budget.
-    // Its reason is the node's failure, also when the abort makes provisioning fail.
-    deadlineTimer = setTimeout(
-      () => deadline.abort(nodeDeadlineExceeded(nodeRun.id, context.turnTimeoutMs)),
-      context.turnTimeoutMs
-    )
-
-    // Provisioning stops on cancellation, lost ownership, worker shutdown (the delivery `signal`)
-    // or the deadline, never because the node finished: a sandbox still booting then reaches the
-    // normal destroy once it is ready.
-    const provisioningSignal = AbortSignal.any([turnSignal, deadline.signal])
-    const nodeSignal = AbortSignal.any([provisioningSignal, ended.signal])
+    // Provisioning stops on `turnSignal` (cancellation, lost ownership or worker shutdown), never
+    // because the node finished: a sandbox still booting then reaches the normal destroy once it
+    // is ready.
+    const nodeSignal = AbortSignal.any([turnSignal, ended.signal])
     environment = await createWorkflowAgentNodeEnvironment({
       openSandbox: workflowStepSandbox({
         context,
@@ -178,7 +164,7 @@ export async function executeWorkflowAgentNode(
       stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
-      signal: provisioningSignal,
+      signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
     bindAgentModelExecution(executionContext.sixb, {
@@ -281,7 +267,6 @@ export async function executeWorkflowAgentNode(
       })
     }
   } finally {
-    clearTimeout(deadlineTimer)
     ended.abort()
     stopOwnershipProjection()
     session.close()
@@ -527,14 +512,6 @@ function isAiUsageLimitFailure(error: unknown): error is ReturnType<typeof creat
   return (
     isSixbError(error) &&
     (error.code === "ai.usage_limit_exceeded" || error.code === "ai.usage_limit_unavailable")
-  )
-}
-
-/** The node's time budget elapsed. The recorded failure names the worker setting that sets it. */
-function nodeDeadlineExceeded(nodeRunId: string, timeoutMs: number): AgentTurnTimeoutError {
-  return withFailureMessage(
-    new AgentTurnTimeoutError(nodeRunId, timeoutMs),
-    `The task did not finish within the agent worker's turn budget (turnTimeoutMs: ${timeoutMs}).`
   )
 }
 

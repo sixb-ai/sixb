@@ -12,11 +12,7 @@ import {
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
 import { StructuredOutputError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
-import {
-  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
-  renderWorkflowOutputFinalizerPrompt,
-  withCurrentTime,
-} from "./agent-prompt"
+import { renderWorkflowOutputFinalizerPrompt, withCurrentTime } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -37,7 +33,7 @@ export interface RunWorkflowAgentNodeInput {
   readonly createdAt: Date
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly usageRecorder: AiModelCallRecorder
-  /** Includes the node's deadline, which the caller also applies to its tools' model calls. */
+  /** The node's signal, which the caller also applies to its tools' model calls. */
   readonly signal: AbortSignal
 }
 
@@ -73,7 +69,6 @@ export class WorkflowAgentNodeExecutionError extends Error {
 export async function runWorkflowAgentNode(
   input: RunWorkflowAgentNodeInput
 ): Promise<WorkflowAgentNodeResult> {
-  const maxSteps = input.plan.maxSteps
   const validateOutput = (value: unknown): Record<string, unknown> => ({
     ...validateWorkflowAgentStepOutput({
       workflowId: input.workflowId,
@@ -91,8 +86,8 @@ export async function runWorkflowAgentNode(
     ...(environmentFailureSignal ? [environmentFailureSignal] : []),
   ])
   // A provisioning or environment failure (for example lost source credentials) is the concrete
-  // cause of the abort it triggers in any phase. Once the node itself is aborted (cancellation,
-  // deadline or shutdown), provisioning fails because of it, and the abort's reason is the one
+  // cause of the abort it triggers in any phase. Once the node itself is aborted (cancellation or
+  // shutdown), provisioning fails because of it, and the abort's reason is the one
   // to report.
   const throwIfEnvironmentFailed = () => {
     if (input.signal.aborted) return
@@ -141,8 +136,6 @@ export async function runWorkflowAgentNode(
       ],
       tools: input.context.tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
-      maxSteps,
-      finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
       ...(input.context.prepareStep === undefined
         ? {}
         : { prepareStep: input.context.prepareStep }),

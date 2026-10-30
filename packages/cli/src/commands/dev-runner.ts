@@ -6,7 +6,6 @@ import {
   createCustomApp,
 } from "@sixb/app/server"
 import { createSixbServer } from "@sixb/server"
-import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import {
   apiDocsUrl,
   apiEventsUrl,
@@ -40,7 +39,6 @@ export interface DevOptions {
   apiHost?: string
   apiPublicOrigin?: string
   appPublicOrigin?: string
-  agentTurnTimeout?: string
   concurrency?: readonly string[]
   vectorConcurrency?: string
   subagentConcurrency?: string
@@ -52,7 +50,6 @@ export interface DevOptions {
 export async function runDevRuntime(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
-  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const subagents = resolveSubagentConcurrency({
@@ -134,7 +131,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
         stop: () => server.stop(),
       },
       agentApiBaseUrl: topology.apiPublicOrigin,
-      agentTurnTimeoutMs,
       workerConcurrency,
       vectorConcurrency,
       ...subagents,
