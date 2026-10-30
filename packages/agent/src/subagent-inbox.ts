@@ -68,7 +68,7 @@ export class SubagentInbox {
   async ask(question: string, callId: string, signal: AbortSignal): Promise<ParentReply> {
     if (this.#asking !== undefined) {
       throw new AgentToolPublicError(
-        "[SixbAgentWorker] Ask one question at a time: your parent has not answered the last one yet."
+        "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
       )
     }
     signal.throwIfAborted()
@@ -132,7 +132,7 @@ export class SubagentInbox {
       page = await this.mail.read({ threadId }, this.#cursor)
     } catch (error) {
       console.error(
-        `[SixbAgentWorker] Subagent run '${runId}' could not read its inbox; it reads it again at its next step.`,
+        `[SixbAgent] Subagent run '${runId}' could not read its inbox; it reads it again at its next step.`,
         error
       )
       return undefined
@@ -147,7 +147,7 @@ export class SubagentInbox {
       if (!isKnownAgentMailKind(mail.kind)) {
         // A newer sender's kind: its text still reaches the model, as a message.
         console.warn(
-          `[SixbAgentWorker] Subagent run '${runId}' read mail '${mail.id}' of unknown kind '${mail.kind}'; its text reads as a message.`
+          `[SixbAgent] Subagent run '${runId}' read mail '${mail.id}' of unknown kind '${mail.kind}'; its text reads as a message.`
         )
       }
       parts.push({

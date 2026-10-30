@@ -206,7 +206,7 @@ function tryParseJsonDocument(text: string): unknown {
 /** Keep the head and tail, dropping the middle — so trailing errors and exit lines survive. */
 function truncateText(text: string, maxChars: number): TruncateResult {
   if (text.length <= maxChars) return { text, truncated: false }
-  const marker = `\n…[SixbAgentWorker] output truncated to ${maxChars} characters]…\n`
+  const marker = `\n…[SixbAgent] output truncated to ${maxChars} characters]…\n`
   const budget = Math.max(0, maxChars - marker.length)
   const head = Math.ceil(budget / 2)
   const tail = budget - head

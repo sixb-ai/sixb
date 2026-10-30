@@ -110,7 +110,7 @@ export function resolveAgentExecutionPlan(input: {
   if (!entry) {
     throw createSixbError(
       "agent.execution_failed",
-      "[SixbAgentWorker] The conversation's language model is not available in models.language."
+      "[SixbAgent] The conversation's language model is not available in models.language."
     )
   }
   // Admission freezes the model's default reasoning into the spec; only runs admitted before
@@ -149,7 +149,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
         : "the project default language model"
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve ${reference}.`,
+      `[SixbAgent] Workflow '${workflowId}' agent step '${step.id}' cannot resolve ${reference}.`,
       { details: { workflowId, agentStepId: step.id } }
     )
   }
@@ -159,7 +159,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     if (tool === null) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve project tool '${name}'.`,
+        `[SixbAgent] Workflow '${workflowId}' agent step '${step.id}' cannot resolve project tool '${name}'.`,
         { details: { workflowId, agentStepId: step.id, toolName: name } }
       )
     }
@@ -171,7 +171,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     if (skill === null) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve Agent Skill '${name}'.`,
+        `[SixbAgent] Workflow '${workflowId}' agent step '${step.id}' cannot resolve Agent Skill '${name}'.`,
         { details: { workflowId, agentStepId: step.id, skillName: name } }
       )
     }
@@ -208,7 +208,7 @@ export function resolveSubagentExecutionPlan(input: {
   if (model === null) {
     throw createSixbError(
       "agent.execution_failed",
-      `[SixbAgentWorker] Subagent run '${run.id}' cannot resolve language model '${run.spec.model.provider}/${run.spec.model.modelId}'.`,
+      `[SixbAgent] Subagent run '${run.id}' cannot resolve language model '${run.spec.model.provider}/${run.spec.model.modelId}'.`,
       { details: { parentRunId: run.parentRunId, runId: run.id } }
     )
   }
@@ -218,7 +218,7 @@ export function resolveSubagentExecutionPlan(input: {
     if (definition === null) {
       throw createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Subagent run '${run.id}' cannot resolve project tool '${name}'.`,
+        `[SixbAgent] Subagent run '${run.id}' cannot resolve project tool '${name}'.`,
         { details: { parentRunId: run.parentRunId, runId: run.id, toolName: name } }
       )
     }

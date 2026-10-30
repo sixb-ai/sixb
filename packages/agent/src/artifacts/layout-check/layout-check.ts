@@ -203,7 +203,7 @@ export async function checkLayout(
       return { status: "skipped", reason: `it took longer than ${timeoutMs / 1000} seconds` }
     }
     const detail = report?.failed ?? result.stderr.trim()
-    console.warn(`[SixbAgentWorker] The layout check failed: ${detail.slice(0, 500)}`)
+    console.warn(`[SixbAgent] The layout check failed: ${detail.slice(0, 500)}`)
     return { status: "skipped", reason: "the check failed in the sandbox" }
   }
   const noun = { deck: "deck", page: "page", canvas: "canvas" }[input.layout]
@@ -272,7 +272,7 @@ function deckThemes(theme: ArtifactTheme | undefined) {
 
 function asset(path: string): string {
   const file = FRAME_ASSETS[path]
-  if (!file) throw new Error(`[SixbAgentWorker] The frame has no '${path}'.`)
+  if (!file) throw new Error(`[SixbAgent] The frame has no '${path}'.`)
   return file.body
 }
 

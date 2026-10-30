@@ -146,7 +146,7 @@ Earlier files in the retained conversation are discoverable through the sandbox'
 attachments and file-producing tool results retain their model-input projections.
 
 `publish_artifact` creates an artifact and `publish_artifact_version` publishes the next version of
-one (`src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
+one (`../agent/src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
 a mode carried by an optional or null argument is where models differ, and with every property
 required each model adapter sends both schemas strict. Offered only to conversations whose storage
 holds artifacts, each reads a file or directory from the sandbox, stores its bytes against the run's
@@ -160,20 +160,20 @@ execution token and asks core's access rule again, so a run reclaimed by another
 requester removed meanwhile, publishes nothing. The version exists when the tool returns: the
 conversation shows it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the
 run's messages. After a deck publishes, the
-layout check (`src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
+layout check (`../agent/src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
 the files the version holds; it bounds every wait on the page and exits before its command's
 timeout, so a deck that hangs costs a partial report rather than a browser left running.
 
-Before each conversation run, `src/artifacts/materialize.ts` installs the latest version of each
+Before each conversation run, `../agent/src/artifacts/materialize.ts` installs the latest version of each
 artifact the thread published under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
 newest first within a byte budget; an artifact whose files cannot be read is listed without them.
 Each publish replaces its artifact's copy and entry, so both stay the latest version during the run.
-The built-in `sixb-artifacts` skill (`src/skills/`) describes the formats the publisher accepts; its
+The built-in `sixb-artifacts` skill (`../agent/src/skills/`) describes the formats the publisher accepts; its
 examples are published in the tests.
 
 ## Memory
 
-Before each conversation run, `src/conversation-memory.ts` reads the requester's `user` repo and
+Before each conversation run, `../agent/src/conversation-memory.ts` reads the requester's `user` repo and
 the `project` repo, which every conversation builds up, through `sixb.agent.memory`, so the
 requester's own access decides what is installed, and installs their latest files under
 `$SIXB_MEMORY_DIR/<repo>/`, with a starter `MEMORY.md` while a repo has none.
@@ -188,7 +188,7 @@ The `<sixb_memory>` section closes the system prompt with when and how to save, 
 mid-thread leaves the prompt, and the prompt cache, unchanged; the installed files are always the
 latest. Its examples are each one command that edits `MEMORY.md` and saves it: given the edit and
 the save as two steps, small models stop after the edit or save without one. Organizing topic files
-and merging a conflict is the `sixb-memory` skill (`src/skills/sixb-memory/`): it is installed with
+and merging a conflict is the `sixb-memory` skill (`../agent/src/skills/sixb-memory/`): it is installed with
 the memory and named by the section rather than listed in the skill catalog, so runs without memory
 keep their prompt as it was. Compaction estimates the section like the rest of the prompt, and the
 continuation after a checkpoint shows the memory as of that checkpoint.

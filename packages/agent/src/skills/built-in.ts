@@ -154,7 +154,7 @@ export function withBuiltInSkills(
  */
 function text(value: unknown): string {
   if (typeof value !== "string") {
-    throw new Error("[SixbAgentWorker] A built-in skill's file must be imported as text.")
+    throw new Error("[SixbAgent] A built-in skill's file must be imported as text.")
   }
   return value
 }
@@ -170,7 +170,7 @@ function builtInSkill(skill: string, files: Record<string, string>): AgentSkillD
     !("description" in metadata) ||
     typeof metadata.description !== "string"
   ) {
-    throw new Error("[SixbAgentWorker] A built-in skill's SKILL.md needs a name and a description.")
+    throw new Error("[SixbAgent] A built-in skill's SKILL.md needs a name and a description.")
   }
   return Object.freeze({
     name: metadata.name,

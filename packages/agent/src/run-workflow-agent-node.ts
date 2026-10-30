@@ -116,7 +116,7 @@ export async function runWorkflowAgentNode(
     })
     if (input.plan.model.definition.capabilities.nativeStructuredOutput === false) {
       throw new UnsupportedModelFeatureError(
-        "[SixbAgentWorker] Workflow output requires a model supporting structured output.",
+        "[SixbAgent] Workflow output requires a model supporting structured output.",
         { reason: "unsupported-model" }
       )
     }
@@ -167,7 +167,7 @@ export async function runWorkflowAgentNode(
       throw withFailureMessage(
         createSixbError(
           "agent.execution_failed",
-          `[SixbAgentWorker] Workflow agent step '${input.agentStepId}' reached the model's output limit before finishing its answer. ${remedy}`,
+          `[SixbAgent] Workflow agent step '${input.agentStepId}' reached the model's output limit before finishing its answer. ${remedy}`,
           { details: traceDetails }
         ),
         `The model reached its output limit before finishing its answer. ${remedy}`
@@ -176,7 +176,7 @@ export async function runWorkflowAgentNode(
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Workflow agent step '${input.agentStepId}' produced no final answer to structure.`,
+        `[SixbAgent] Workflow agent step '${input.agentStepId}' produced no final answer to structure.`,
         { details: traceDetails }
       )
     }
@@ -255,7 +255,7 @@ export async function runWorkflowAgentNode(
     if (structuredValue === undefined) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Workflow output finalization for agent step '${input.agentStepId}' ended without a value.`,
+        `[SixbAgent] Workflow output finalization for agent step '${input.agentStepId}' ended without a value.`,
         { details: traceDetails }
       )
     }

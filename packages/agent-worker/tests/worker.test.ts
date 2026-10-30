@@ -127,7 +127,7 @@ import {
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
-import { AgentRunOwnedElsewhereError, AgentTurnTimeoutError } from "../../agent/src/errors"
+import { AgentTurnTimeoutError } from "../../agent/src/errors"
 import { resolveAgentExecutionPlan } from "../../agent/src/execution-plan"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import * as agentEnvironment from "../../agent/src/run-environment"
@@ -150,6 +150,7 @@ import {
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
+import { AgentRunOwnedElsewhereError } from "../src/errors"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -4752,7 +4753,7 @@ describe("AgentWorker", () => {
     await expect(
       worker.decideExecutionError(
         claimed,
-        createSixbError("internal.unexpected", "[SixbAgentWorker] Deterministic worker failure.", {
+        createSixbError("internal.unexpected", "[SixbAgent] Deterministic worker failure.", {
           details: { runId: "run-1", threadId: "thread-1" },
         })
       )
@@ -7564,7 +7565,7 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         state: "output-error",
         errorText:
-          "[SixbAgentWorker] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
+          "[SixbAgent] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
       })
 
       const second = await requestAgent(sixb, {
@@ -8496,7 +8497,7 @@ describe("AgentWorker", () => {
       expect(parent.status).toBe("succeeded")
       expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toBeNull()
       expect(JSON.stringify(parentCalls[2]?.messages.at(-1))).toContain(
-        `[SixbAgentWorker] spawn_agent cannot hand over ${reason}`
+        `[SixbAgent] spawn_agent cannot hand over ${reason}`
       )
     } finally {
       await stopUnderFakeTime(worker)
@@ -8693,7 +8694,7 @@ describe("AgentWorker", () => {
     const [a, b, c, d] = runIds as [string, string, string, string]
     const { runFiles } = recordingRunFiles(sixb, {
       installArtifactsFrom: async () => {
-        throw new Error("[SixbAgentWorker] Could not install artifacts art_q3.")
+        throw new Error("[SixbAgent] Could not install artifacts art_q3.")
       },
     })
     coordinator.attach(runFiles)
@@ -9741,7 +9742,7 @@ describe("AgentWorker", () => {
             type: "tool-call",
             toolCallId: `invalid-model-${index}`,
             state: "output-error",
-            errorText: `[SixbAgentWorker] Language model ${JSON.stringify(model)} is not configured for this project. Use one of: {"provider":"parent-provider","modelId":"parent-model"}, {"provider":"gateway","modelId":"deepseek/deepseek-v4-flash-vision-exp"}. Omit model to use the project default.`,
+            errorText: `[SixbAgent] Language model ${JSON.stringify(model)} is not configured for this project. Use one of: {"provider":"parent-provider","modelId":"parent-model"}, {"provider":"gateway","modelId":"deepseek/deepseek-v4-flash-vision-exp"}. Omit model to use the project default.`,
           })
         )
         await expect(
@@ -12940,7 +12941,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         retryable: false,
         message:
-          "[SixbAgentWorker] The conversation's language model is not available in models.language.",
+          "[SixbAgent] The conversation's language model is not available in models.language.",
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,

@@ -131,7 +131,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     })
     if (removed.exitCode !== 0 || removed.timedOut) {
       throw new Error(
-        `[SixbAgentWorker] Could not remove ${directory}: ${removed.stderr.trim() || `exit ${removed.exitCode}`}`
+        `[SixbAgent] Could not remove ${directory}: ${removed.stderr.trim() || `exit ${removed.exitCode}`}`
       )
     }
     if (install) this.#installed.set(artifact.id, sizeBytes)
@@ -208,7 +208,7 @@ export async function materializeThreadArtifacts(input: {
         signal.throwIfAborted()
         // One unreadable blob must not cost every later run of the thread its sandbox.
         console.warn(
-          `[SixbAgentWorker] Could not install version ${version.version} of artifact '${artifact.id}':`,
+          `[SixbAgent] Could not install version ${version.version} of artifact '${artifact.id}':`,
           error
         )
         install = false
@@ -270,12 +270,12 @@ export async function installArtifactsPublishedBy(input: {
       await input.installed.replace(input.sandbox, { artifact, version }, files, input.signal)
     } catch (error) {
       input.signal.throwIfAborted()
-      console.warn(`[SixbAgentWorker] Could not install artifact '${artifact.id}':`, error)
+      console.warn(`[SixbAgent] Could not install artifact '${artifact.id}':`, error)
       failed.push(artifact.id)
     }
   }
   if (failed.length > 0) {
-    throw new Error(`[SixbAgentWorker] Could not install artifacts ${failed.join(", ")}.`)
+    throw new Error(`[SixbAgent] Could not install artifacts ${failed.join(", ")}.`)
   }
 }
 

@@ -3,9 +3,7 @@ export type { AgentWorkspacePromptContext } from "./agent-prompt"
 export { createAskParentTool } from "./ask-parent-tool"
 export { prepareAgentModel } from "./context-budget"
 export {
-  AgentEnvironmentSaveError,
   AgentRequesterLeftThreadError,
-  AgentRunOwnedElsewhereError,
   AgentTurnInterruptedError,
   AgentTurnTimeoutError,
   isLostExecution,
@@ -40,7 +38,6 @@ export type { SubagentWork } from "./run-subagent"
 export { runSubagent } from "./run-subagent"
 export type { WorkflowAgentFailurePhase } from "./run-workflow-agent-node"
 export { runWorkflowAgentNode, WorkflowAgentNodeExecutionError } from "./run-workflow-agent-node"
-export { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
 export { loadSubagentHistory } from "./subagent-continuation"
 export { SubagentInbox } from "./subagent-inbox"
 export { SubagentCoordinator } from "./subagent-tools"

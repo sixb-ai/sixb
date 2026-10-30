@@ -33,7 +33,7 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
   const budget = resolveAgentContextBudget(selection, definition)
   if (budget.source === "fallback") {
     console.warn(
-      `[SixbAgentWorker] No context limit is available for '${model.providerId}/${model.modelId}'; using the ${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token fallback.`
+      `[SixbAgent] No context limit is available for '${model.providerId}/${model.modelId}'; using the ${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token fallback.`
     )
   }
   const maxOutputTokens = outputCapTokens(selection.model, definition) ?? budget.reserveTokens
@@ -149,7 +149,7 @@ export function resolveAgentContextBudget(
 }
 
 function invalidBudget(message: string): AgentDefinitionError {
-  return new AgentDefinitionError(`[SixbAgentWorker] Agent context ${message}`)
+  return new AgentDefinitionError(`[SixbAgent] Agent context ${message}`)
 }
 
 function assertPositiveSafeInteger(value: number, field: string): void {

@@ -153,7 +153,7 @@ async function settleSubagent(
     throw withFailureMessage(
       createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Subagent run '${run.id}' reached the model's output limit before finishing its answer. ${remedy}`,
+        `[SixbAgent] Subagent run '${run.id}' reached the model's output limit before finishing its answer. ${remedy}`,
         { details: { parentRunId: run.parentRunId, runId: run.id } }
       ),
       `The subagent's model reached its output limit before finishing its answer. ${remedy}`
@@ -214,7 +214,7 @@ async function finishSubagent(input: {
     input.work
   )
   if (finalized.kind !== "subagent") {
-    throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' changed kind during finalization.`)
+    throw new Error(`[SixbAgent] Subagent run '${run.id}' changed kind during finalization.`)
   }
   await input.session.events.publishRunFinished(finalized)
   return finalized
@@ -314,7 +314,7 @@ function subagentResult(
     throw withFailureMessage(
       createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Subagent run '${run.id}' finished without an answer. ${remedy}`,
+        `[SixbAgent] Subagent run '${run.id}' finished without an answer. ${remedy}`,
         { details: { parentRunId: run.parentRunId, runId: run.id } }
       ),
       `The subagent finished without an answer. ${remedy}`

@@ -59,7 +59,7 @@ export class ChildQuestions {
         (error: unknown) => {
           this.#listening = undefined
           console.error(
-            `[SixbAgentWorker] Agent run '${this.turnRunId}' could not listen for its children's questions; it tries again with its next child.`,
+            `[SixbAgent] Agent run '${this.turnRunId}' could not listen for its children's questions; it tries again with its next child.`,
             error
           )
         }

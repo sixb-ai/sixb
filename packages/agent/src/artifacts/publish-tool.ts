@@ -299,7 +299,7 @@ async function publish(
       if (parentRunId !== undefined)
         await assertParentRunActive(tx, input.projectId, parentRunId, tool)
       const stored = tx.artifacts
-      if (!stored) throw new Error("[SixbAgentWorker] Storage transactions hold no artifacts.")
+      if (!stored) throw new Error("[SixbAgent] Storage transactions hold no artifacts.")
       // Checks again what the requester may do: the owner may have deleted it since the check
       // above, or removed the requester from the conversation.
       return storeArtifactVersion(
@@ -351,7 +351,7 @@ async function publish(
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
-      `[SixbAgentWorker] Could not install version ${published.version.version} of artifact '${published.artifact.id}':`,
+      `[SixbAgent] Could not install version ${published.version.version} of artifact '${published.artifact.id}':`,
       error
     )
   }
@@ -397,7 +397,7 @@ async function publish(
       })
     } catch (error) {
       if (signal.aborted) throw error
-      console.warn("[SixbAgentWorker] The layout check failed:", error)
+      console.warn("[SixbAgent] The layout check failed:", error)
       check = { status: "skipped", reason: "the check failed in the sandbox" }
     }
   }
@@ -451,7 +451,7 @@ async function checkedQueries(
     names.map(async (name): Promise<readonly [string, CheckedQuery]> => {
       try {
         const result = await reader.query(artifact.id, name, { version: version.version })
-        if (!result) throw new Error(`[SixbAgentWorker] Version ${version.version} is missing.`)
+        if (!result) throw new Error(`[SixbAgent] Version ${version.version} is missing.`)
 
         return [name, { result: serializeArtifactQueryResult(result) }]
       } catch (error) {
@@ -485,7 +485,7 @@ function queryErrorText(error: unknown): string {
     return /[.!?]$/.test(error.message) ? error.message : `${error.message}.`
   }
 
-  console.warn("[SixbAgentWorker] A query of the published version did not run:", error)
+  console.warn("[SixbAgent] A query of the published version did not run:", error)
   return "[Sixb] The query could not be read."
 }
 
@@ -540,9 +540,7 @@ async function artifactMoved(
   const artifact = await updatableArtifact(input, artifactId, VERSION_TOOL)
   const latest = await input.reader.getVersion(artifactId, artifact.latestVersion)
   if (!latest) {
-    throw new Error(
-      `[SixbAgentWorker] Version ${artifact.latestVersion} of '${artifactId}' is missing.`
-    )
+    throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
   }
 
   const author = principalsEqual(latest.author, input.owner)
@@ -564,7 +562,7 @@ async function artifactMoved(
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
-      `[SixbAgentWorker] Could not install version ${latest.version} of artifact '${artifactId}':`,
+      `[SixbAgent] Could not install version ${latest.version} of artifact '${artifactId}':`,
       error
     )
     return publishError(
@@ -777,5 +775,5 @@ function toPublishError(error: unknown, tool: PublishToolName, path?: string): u
 
 function publishError(tool: PublishToolName, message: string): AgentToolPublicError {
   const sentence = /[.!?]$/.test(message) ? message : `${message}.`
-  return new AgentToolPublicError(`[SixbAgentWorker] ${tool} refused: ${sentence}`)
+  return new AgentToolPublicError(`[SixbAgent] ${tool} refused: ${sentence}`)
 }

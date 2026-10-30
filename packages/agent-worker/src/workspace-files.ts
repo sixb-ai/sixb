@@ -1,10 +1,6 @@
-import {
-  bounded,
-  SANDBOX_CONTEXT_DIRECTORY,
-  SANDBOX_OPERATION_TIMEOUT_MS,
-  sandboxError,
-} from "@sixb/agent"
+import { SANDBOX_CONTEXT_DIRECTORY } from "@sixb/agent"
 import type { Sandbox } from "@sixb/core"
+import { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
 
 /** The script's exit status when the repository claims the directory reserved for run files. */
 const RESERVED_DIRECTORY_CLAIMED = 3

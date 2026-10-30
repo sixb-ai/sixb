@@ -56,7 +56,8 @@ export function PublishArtifactToolView({ tool }: { tool: NormalizedTool }) {
   )
 }
 
-/** The refusal the Agent received, without the worker's prefix. */
+/** The refusal the Agent received, without the harness's prefix. */
 function refusal(errorText: string): string {
-  return errorText.replace(/^\[SixbAgentWorker\] publish_artifact(_version)? refused: /, "")
+  // [SixbAgentWorker] on refusals recorded before the harness had a package of its own.
+  return errorText.replace(/^\[SixbAgent(?:Worker)?\] publish_artifact(_version)? refused: /, "")
 }

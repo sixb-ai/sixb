@@ -456,7 +456,7 @@ describe("publish_artifact", () => {
   test("refuses ids that are not an artifact of the owner's, and says how to create one", async () => {
     write("work/review/document.md", "# Q3 review\n\nDraft.\n")
     const shape =
-      "[SixbAgentWorker] publish_artifact_version refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
+      "[SixbAgent] publish_artifact_version refused: id must be an artifact id such as art_k3m9q2x7tp. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
     // What a model sends when it means "no artifact yet".
     for (const id of [" ", "", "new", "null", "0", ".sixb-new"]) {
       expect(await refusal({ id, path: "work/review", title: "Q3" }, "version")).toBe(shape)
@@ -464,7 +464,7 @@ describe("publish_artifact", () => {
     expect(
       await refusal({ id: "art_0000000000", path: "work/review", title: "Q3" }, "version")
     ).toBe(
-      "[SixbAgentWorker] publish_artifact_version refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
+      "[SixbAgent] publish_artifact_version refused: there is no artifact 'art_0000000000'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact."
     )
   })
 
@@ -493,7 +493,7 @@ describe("publish_artifact", () => {
       { author: bob, run: bobsThread }
     ).catch((error: unknown) => error)
     expect(tools().version.errorText(elsewhere)).toBe(
-      `[SixbAgentWorker] publish_artifact_version refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
+      `[SixbAgent] publish_artifact_version refused: there is no artifact '${artifactId}'. $SIXB_ARTIFACTS lists this conversation's artifacts; to create a new one, call publish_artifact.`
     )
     expect(await storage.artifacts.listThreadIds({ projectId, id: artifactId })).toEqual([
       run.threadId,
@@ -590,16 +590,16 @@ describe("publish_artifact", () => {
     mkdirSync(join(root, "blank"))
 
     expect(await refusal({ path: "work/review", kind: "document", title: "Q3" })).toBe(
-      "[SixbAgentWorker] publish_artifact refused: document.md shows the image 'figures/missing.svg', which is not one of the artifact's files."
+      "[SixbAgent] publish_artifact refused: document.md shows the image 'figures/missing.svg', which is not one of the artifact's files."
     )
     expect(await refusal({ path: "missing", kind: "document", title: "Q3" })).toBe(
-      "[SixbAgentWorker] publish_artifact refused: there is no file or directory at 'missing'."
+      "[SixbAgent] publish_artifact refused: there is no file or directory at 'missing'."
     )
     expect(await refusal({ path: "empty", kind: "document", title: "Q3" })).toBe(
-      "[SixbAgentWorker] publish_artifact refused: 'empty' holds no files to publish."
+      "[SixbAgent] publish_artifact refused: 'empty' holds no files to publish."
     )
     expect(await refusal({ path: "blank", kind: "document", title: "Q3" })).toBe(
-      "[SixbAgentWorker] publish_artifact refused: 'blank' is an empty directory."
+      "[SixbAgent] publish_artifact refused: 'blank' is an empty directory."
     )
     expect(await refusal({ path: "../outside", kind: "document", title: "Q3" })).toContain(
       "path must stay inside the sandbox working directory"
@@ -664,7 +664,7 @@ describe("publish_artifact", () => {
     expect(stale).toBeInstanceOf(AgentExecutionLostError)
     // The trace says why, not "An error occurred."
     expect(tools().create.errorText(stale)).toBe(
-      "[SixbAgentWorker] publish_artifact refused: this run no longer holds its conversation, so nothing was published."
+      "[SixbAgent] publish_artifact refused: this run no longer holds its conversation, so nothing was published."
     )
 
     // The run ends while its files are read: the commit is fenced too. Reproduce by removing
@@ -759,7 +759,7 @@ describe("publish_artifact", () => {
 
     expect(error).toBeInstanceOf(AgentToolPublicError)
     expect(version.errorText(error)).toBe(
-      `[SixbAgentWorker] publish_artifact_version refused: artifact '${artifactId}' moved on from version 1, which you started from: version 2 was published by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists version 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish.`
+      `[SixbAgent] publish_artifact_version refused: artifact '${artifactId}' moved on from version 1, which you started from: version 2 was published by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists version 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish.`
     )
     expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
 
@@ -1150,7 +1150,7 @@ describe("materializeThreadArtifacts", () => {
         `.sixb/agent/artifacts/${second.artifactId}/document.md`,
       ])
       expect(String(warn.mock.calls[0]?.[0])).toStartWith(
-        `[SixbAgentWorker] Could not install version 1 of artifact '${first.artifactId}'`
+        `[SixbAgent] Could not install version 1 of artifact '${first.artifactId}'`
       )
     } finally {
       warn.mockRestore()

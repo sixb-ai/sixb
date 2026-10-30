@@ -151,5 +151,5 @@ function toViewFileError(error: unknown): unknown {
 }
 
 function viewFileError(message: string): AgentToolPublicError {
-  return new AgentToolPublicError(`[SixbAgentWorker] view_file ${message}.`)
+  return new AgentToolPublicError(`[SixbAgent] view_file ${message}.`)
 }

@@ -457,7 +457,7 @@ async function safeBlobStat(
     stat = await waitForAbort(blobStorage.stat(fileRef.blobId), signal)
   } catch (error) {
     signal.throwIfAborted()
-    console.error("[SixbAgentWorker] Failed to inspect an attachment blob.", error)
+    console.error("[SixbAgent] Failed to inspect an attachment blob.", error)
     notes.push("[File omitted: blob storage metadata is unavailable.]")
     return null
   }
@@ -491,7 +491,7 @@ async function readBlobBytes(
     stream = await waitForAbort(blobStorage.open(blobId), signal)
   } catch (error) {
     signal.throwIfAborted()
-    console.error("[SixbAgentWorker] Failed to open an attachment blob.", error)
+    console.error("[SixbAgent] Failed to open an attachment blob.", error)
     return { ok: false, reason: "blob content is unavailable" }
   }
 
