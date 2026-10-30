@@ -52,6 +52,9 @@ describe("classifyCommand", () => {
       "sixb workflows start renewCustomer": "workflows.start",
       "sixb workflow-runs list": "workflow-runs.list",
       "sixb workflow-runs get run-2": "workflow-runs.get",
+      "sixb datasets rows orders --limit 50": "datasets.rows",
+      "sixb sync-runs list --sync crm": "sync-runs.list",
+      "sixb pipeline-runs get run-3": "pipeline-runs.get",
       "sixb models list --kind image": "models.list",
       "sixb models get bfl/flux-3-image-klein": "models.get",
       'sixb models text "Status?"': "models.text",
@@ -242,6 +245,16 @@ describe("describeBash", () => {
     ["(bun test || true)", "Running a command"],
   ])("describes `%s` as %s", (command, runningTitle) => {
     expect(describeBash(classifyCommand(command), null).runningTitle).toBe(runningTitle)
+  })
+
+  // Guard proof: drop the data groups from CLI_COMMANDS; these read "Ran a Sixb command".
+  test("names what the agent read from datasets, syncs and pipelines", () => {
+    const title = (command: string) => describeBash(classifyCommand(command), null).title
+    expect(title("sixb datasets rows customer_orders --limit 50")).toBe(
+      "Read rows of the customer orders dataset"
+    )
+    expect(title("sixb syncs get crm")).toBe("Inspected the crm sync")
+    expect(title("sixb pipeline-runs list --pipeline daily")).toBe("Listed pipeline runs")
   })
 
   test("says what a memory save remembered, and when it saved nothing", () => {

@@ -586,6 +586,57 @@ export const fr: Translation<AgentMessages> = {
       title: "Exécution de workflow vérifiée",
       running: "Vérification d’une exécution de workflow",
     },
+    listDatasets: {
+      title: "Jeux de données listés",
+      running: "Récupération des jeux de données",
+    },
+    inspectDataset: {
+      title: (dataset) =>
+        dataset ? `Jeu de données ${quoted(dataset)} examiné` : "Jeu de données examiné",
+      running: (dataset) =>
+        dataset ? `Examen du jeu de données ${quoted(dataset)}` : "Examen d’un jeu de données",
+    },
+    datasetVersions: {
+      title: (dataset) =>
+        dataset ? `Versions de ${quoted(dataset)} listées` : "Versions d’un jeu de données listées",
+      running: (dataset) =>
+        dataset
+          ? `Récupération des versions de ${quoted(dataset)}`
+          : "Récupération des versions d’un jeu de données",
+    },
+    datasetRows: {
+      title: (dataset) =>
+        dataset ? `Lignes de ${quoted(dataset)} lues` : "Lignes d’un jeu de données lues",
+      running: (dataset) =>
+        dataset
+          ? `Lecture des lignes de ${quoted(dataset)}`
+          : "Lecture des lignes d’un jeu de données",
+    },
+    listSyncs: { title: "Synchronisations listées", running: "Récupération des synchronisations" },
+    inspectSync: {
+      title: (sync) =>
+        sync ? `Synchronisation ${quoted(sync)} examinée` : "Synchronisation examinée",
+      running: (sync) =>
+        sync ? `Examen de la synchronisation ${quoted(sync)}` : "Examen d’une synchronisation",
+    },
+    listSyncRuns: {
+      title: "Exécutions de synchronisations listées",
+      running: "Récupération des exécutions de synchronisations",
+    },
+    listPipelines: { title: "Pipelines listés", running: "Récupération des pipelines" },
+    inspectPipeline: {
+      title: (pipeline) => (pipeline ? `Pipeline ${quoted(pipeline)} examiné` : "Pipeline examiné"),
+      running: (pipeline) =>
+        pipeline ? `Examen du pipeline ${quoted(pipeline)}` : "Examen d’un pipeline",
+    },
+    listPipelineRuns: {
+      title: "Exécutions de pipelines listées",
+      running: "Récupération des exécutions de pipelines",
+    },
+    pipelineRun: {
+      title: "Exécution de pipeline vérifiée",
+      running: "Vérification d’une exécution de pipeline",
+    },
     upload: { title: "Fichier téléversé", running: "Téléversement d’un fichier" },
     download: { title: "Fichier téléchargé", running: "Téléchargement d’un fichier" },
     models: {
