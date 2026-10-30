@@ -388,15 +388,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               },
             ],
           })
-          await queues.agentChildren.enqueue({
-            projectId: "project-a",
-            jobs: [
-              {
-                type: "agent.subagent-run.requested",
-                payload: { runId: "child-run-1" },
-              },
-            ],
-          })
 
           const crossLane = await queues.pipelines.claim({
             projectId: "project-a",
@@ -418,11 +409,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             workerId: "agent-worker-1",
             limit: 10,
           })
-          const childLane = await queues.agentChildren.claim({
-            projectId: "project-a",
-            workerId: "child-agent-worker-1",
-            limit: 10,
-          })
           const sameLane = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "sync-worker-1",
@@ -440,8 +426,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             type: "agent.run.requested",
             payload: { runId: "agent-run-1" },
           })
-          expect(childLane).toHaveLength(1)
-          expect(childLane[0]?.job.payload.runId).toBe("child-run-1")
           expect(sameLane).toHaveLength(1)
         })
       })

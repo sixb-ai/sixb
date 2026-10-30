@@ -90,7 +90,7 @@ Projection workers also index [vector profiles](../ontology/properties.md#config
 
 Agent turns default to a 10-minute timeout. Override it with `--agent-turn-timeout 20m` or `SIXB_AGENT_TURN_TIMEOUT=20m` on `dev`, agent workers, or worker groups containing an agent worker.
 
-When the agent [delegates](../models/overview.md#it-delegates), each agent worker runs up to 4 sub-agents at once, and one turn keeps up to 4 at work. Change them with `--subagent-concurrency` and `--subagent-concurrency-per-run`, or `SIXB_SUBAGENT_CONCURRENCY` and `SIXB_SUBAGENT_CONCURRENCY_PER_RUN`, on the same commands.
+When the agent [delegates](../models/overview.md#it-delegates), its sub-agents run in the same worker as its turn, and one turn keeps up to 4 at work. Change it with `--subagent-concurrency-per-run` or `SIXB_SUBAGENT_CONCURRENCY_PER_RUN`, on the same commands.
 
 ## Deploy commands
 

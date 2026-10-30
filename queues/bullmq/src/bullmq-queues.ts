@@ -6,7 +6,6 @@ import type {
   PipelineRunRequestedQueueJob,
   ProjectionQueueJobFailureCode,
   ProjectionRunRequestedQueueJob,
-  SubagentQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   VectorIndexingQueueJob,
@@ -84,7 +83,6 @@ export class BullMqQueues implements Queues {
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
   readonly workflows: BullMqQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
   readonly agents: BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>
-  readonly agentChildren: BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>
 
   private readonly connections: BullMqConnections
 
@@ -119,10 +117,6 @@ export class BullMqQueues implements Queues {
       "workflow.runs"
     )
     this.agents = new BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>(shared, "agent.runs")
-    this.agentChildren = new BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>(
-      shared,
-      "agent.children"
-    )
   }
 
   /** The non-blocking handle: a probe has no business queueing behind BullMQ's fetch loop. */
@@ -137,7 +131,6 @@ export class BullMqQueues implements Queues {
       this.projections.close(),
       this.workflows.close(),
       this.agents.close(),
-      this.agentChildren.close(),
       this.vectorIndexing.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)

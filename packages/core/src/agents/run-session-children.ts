@@ -1,6 +1,5 @@
 import type { Broker } from "../broker"
 import { ensureExecutionRecord } from "../execution/durable"
-import type { Queue, SubagentQueueJob } from "../queues"
 import type { Storage } from "../storage"
 import {
   type AgentApprovalRecord,
@@ -20,7 +19,6 @@ import {
   hasActiveChildren,
   listChildApprovalsAwaiting,
 } from "./approvals"
-import { dispatchQueuedSubagentRuns } from "./dispatch"
 import {
   type AgentInbox,
   type AgentMail,
@@ -65,8 +63,6 @@ export interface AgentRunChildren {
     readonly execution: CreateExecutionInput
     readonly run: Omit<CreateSubagentRunInput, "projectId" | "parentRunId" | "parentExecutionToken">
   }): Promise<SubagentRunRecord>
-  /** Queue a spawned child for a worker; a failure is retried by the worker's reconciliation. */
-  dispatch(runId: string): Promise<{ readonly failed?: unknown }>
   /**
    * Remove what a run left in a child thread under an earlier attempt of this turn, which failed,
    * so the turn can continue the child again. Refused once the turn no longer owns its run.
@@ -96,8 +92,6 @@ export interface AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage }
   readonly broker: Broker
-  /** Where spawned children wait for a worker. */
-  readonly childQueue?: Queue<SubagentQueueJob>
 }
 
 export function agentRunChildren(
@@ -155,17 +149,6 @@ export function agentRunChildren(
           parentExecutionToken: executionToken,
         })
       }),
-    async dispatch(runId) {
-      if (!host.childQueue) return { failed: new Error("[Sixb] No queue takes child runs.") }
-      const dispatched = await dispatchQueuedSubagentRuns({
-        projectId,
-        storage: agents,
-        queue: host.childQueue,
-        runIds: [runId],
-      })
-      const failure = dispatched.failures[0]
-      return failure === undefined ? {} : { failed: failure.error }
-    },
     async clearAttempt({ threadId, runId }) {
       await assertOwned()
       await agents.messages.deleteByRunId({ projectId, threadId, runId })

@@ -13,7 +13,6 @@ const environmentVariables = [
   "SIXB_PROJECTION_WORKER_CONCURRENCY",
   "SIXB_WORKFLOW_WORKER_CONCURRENCY",
   "SIXB_VECTOR_CONCURRENCY",
-  "SIXB_SUBAGENT_CONCURRENCY",
   "SIXB_SUBAGENT_CONCURRENCY_PER_RUN",
 ] as const
 
@@ -93,23 +92,15 @@ describe("worker concurrency configuration", () => {
     expect(() => resolveVectorConcurrency("0")).toThrow("--vector-concurrency")
   })
 
-  test("resolves the agent worker's child agents per worker and per turn", () => {
-    expect(resolveSubagentConcurrency({ perWorker: undefined, perRun: undefined })).toEqual({})
+  test("resolves how many child agents one turn keeps at work", () => {
+    expect(resolveSubagentConcurrency({ perRun: undefined })).toEqual({})
 
-    process.env.SIXB_SUBAGENT_CONCURRENCY = "6"
     process.env.SIXB_SUBAGENT_CONCURRENCY_PER_RUN = "3"
-    expect(resolveSubagentConcurrency({ perWorker: undefined, perRun: undefined })).toEqual({
-      subagentConcurrency: 6,
+    expect(resolveSubagentConcurrency({ perRun: undefined })).toEqual({
       subagentConcurrencyPerRun: 3,
     })
-    expect(resolveSubagentConcurrency({ perWorker: "8", perRun: "2" })).toEqual({
-      subagentConcurrency: 8,
-      subagentConcurrencyPerRun: 2,
-    })
-    expect(() => resolveSubagentConcurrency({ perWorker: "0", perRun: undefined })).toThrow(
-      "--subagent-concurrency"
-    )
-    expect(() => resolveSubagentConcurrency({ perWorker: undefined, perRun: "x" })).toThrow(
+    expect(resolveSubagentConcurrency({ perRun: "2" })).toEqual({ subagentConcurrencyPerRun: 2 })
+    expect(() => resolveSubagentConcurrency({ perRun: "x" })).toThrow(
       "--subagent-concurrency-per-run"
     )
   })

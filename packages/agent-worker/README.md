@@ -224,8 +224,8 @@ The terminal run state is stored on the run record:
   model never invokes a sandbox tool; in-flight inference is aborted with the original failure reported
 - Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
   assistant message before the thread is released. This controlled limit is not emitted as an
-  unhandled runtime failure. A child times out at its parent's deadline, its wait in the queue
-  included
+  unhandled runtime failure. A child times out at its parent's deadline, however late it
+  started
 - User cancel during a turn: `cancelled`
 - Step limit reached before an answer: `succeeded` with `finishReason: "tool-calls"` and a
   `step_limit_reached` diagnostic
@@ -236,10 +236,12 @@ The terminal run state is stored on the run record:
 - Worker shutdown during a conversation turn: `cancelled` with `finishReason: "interrupted"`,
   coherent partial work kept as the assistant message so the user can continue from it
 - Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced
-- Conversation turn or child found `running` on redelivery (its worker crashed or lost the queue
-  lease): `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. It
-  already billed its model calls and may have run actions or published, so a turn is retried only
-  on request (`POST .../runs/:runId/retry`) and a child only if its parent spawns it again.
+- Conversation turn found `running` on redelivery (its worker crashed or lost the queue lease):
+  `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. It already
+  billed its model calls and may have run actions or published, so it is retried only on request
+  (`POST .../runs/:runId/retry`). A child runs in its parent's worker, under the parent's lease:
+  once its parent ended and its own lease lapsed, the repair pass ends it the same way, and the
+  parent spawns it again if it still needs it.
   Workflow agent nodes are replayed instead. A run whose projected queue lease has not lapsed is
   still owned by a live delivery: a duplicate job leaves it alone and is retried once that lease
   runs out
@@ -260,10 +262,9 @@ The terminal run state is stored on the run record:
   `agentApi`, as the run, while the run holds its execution; it carries no other credential.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `8`.
-- `subagentConcurrency`: maximum number of child agents this worker executes at once, on a lane of
-  their own so waiting parents cannot consume their capacity; defaults to `4`.
 - `subagentConcurrencyPerRun`: maximum number of child agents one conversation turn keeps queued or
-  running at once, across workers; defaults to `4`.
+  running at once; defaults to `4`. Children run in their parent's worker, under the parent's
+  queue lease, so a worker runs up to `concurrency` turns and their children.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.

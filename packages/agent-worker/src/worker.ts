@@ -1,5 +1,4 @@
 import {
-  type AgentExecutionEnvironment,
   AgentRequesterLeftThreadError,
   type AgentRunFailure,
   AgentTurnInterruptedError,
@@ -9,24 +8,16 @@ import {
   type ConversationReaders,
   conversationReaders,
   createAgentTurnRuntime,
-  createAskParentTool,
   createConversationAgentEnvironment,
-  createSubagentEnvironment,
   DEFAULT_MAX_STEPS,
   isLostExecution,
   listSandboxModels,
-  loadSubagentHistory,
   prepareAgentModel,
   type ResolvedAgentExecutionPlan,
   resolveAgentExecutionPlan,
-  resolveSubagentExecutionPlan,
   runAgentTurn,
-  runSubagent,
   SubagentCoordinator,
-  SubagentInbox,
-  type SubagentWork,
   stoppedByWorker,
-  toAgentExecutionFailure,
   toAgentRunFailure,
 } from "@sixb/agent"
 import { principalsEqual } from "@sixb/core"
@@ -37,12 +28,9 @@ import {
   type AgentRunSession,
   type AgentRunSessionHost,
   claimAgentRun,
-  conversationThreadId,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
-  dispatchQueuedSubagentRuns,
   isolateStreamSink,
-  isTerminalOrExecutionGone,
   publishAgentRunCancel,
   sandboxCredentialIssue,
   WorkflowResumeDispatchError,
@@ -50,7 +38,7 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
+import { createSixbError } from "@sixb/core/internal/errors"
 import {
   enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
@@ -59,12 +47,11 @@ import {
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueWorker } from "@sixb/core/internal/workers"
-import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
+import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
-  AppendAgentMessageInput,
   ConversationAgentRunRecord,
   ExecutionRecord,
   SubagentRunRecord,
@@ -72,15 +59,22 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals, resumeIfDecided } from "./approval-repair"
-import {
-  isPermanentAgentPreparationError,
-  MAX_AGENT_DELIVERY_ATTEMPTS,
-  shouldRetryAgentPreparation,
-} from "./delivery-policy"
+import { ChildRunner } from "./child-runner"
+import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
 import { AgentEnvironmentSaveError, AgentRunOwnedElsewhereError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
-import { childSandbox, conversationSandbox } from "./run-sandboxes"
+import {
+  agentRunFailureDetails,
+  interruptedError,
+  isTerminalRun,
+  PRESTART_RETRY_BACKOFF_MS,
+  projectLease,
+  recordFate,
+  retryPreparationInPlace,
+  waitForAbort,
+} from "./run-fate"
+import { conversationSandbox } from "./run-sandboxes"
 import type {
   AgentRunnerContext,
   AgentWorkerContext,
@@ -92,7 +86,6 @@ import { executeWorkflowAgentNode } from "./workflow-node-execution"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
-const DEFAULT_SUBAGENT_CONCURRENCY = 4
 const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const MAX_TIMER_DURATION_MS = 2_147_483_647
@@ -100,9 +93,6 @@ const MAX_TIMER_DURATION_MS = 2_147_483_647
 const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
-const PRESTART_RETRY_BACKOFF_MS = 5_000
-/** A turn's own preparation retries quickly first, so a storage blip does not delay the answer. */
-const PREPARATION_RETRY_BACKOFF_MS = [250, 1_000, PRESTART_RETRY_BACKOFF_MS] as const
 /** Floor for a duplicate's deferral, so a skewed lease clock cannot make it redeliver at once. */
 const OWNED_ELSEWHERE_MIN_DEFER_MS = 1_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
@@ -134,7 +124,8 @@ interface PreparedConversationTurn {
 export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
   private readonly context: AgentWorkerContext | null
-  private readonly subagentWorker: SubagentQueueWorker
+  /** Runs the children of this worker's turns, in this process. */
+  private readonly children: ChildRunner | null
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -160,19 +151,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
-    this.subagentWorker = new SubagentQueueWorker(
-      this,
-      host,
-      leaseMs,
-      options.subagentConcurrency ?? DEFAULT_SUBAGENT_CONCURRENCY
-    )
-  }
-
-  override async start(): Promise<void> {
-    await Promise.all([
-      super.start(),
-      ...(this.context === null ? [] : [this.subagentWorker.start()]),
-    ])
+    this.children = this.context
+      ? new ChildRunner({
+          host,
+          context: this.context,
+          sessions: this.sessionHost(this.context),
+          trackTeardown: (teardown) => this.trackTeardown(teardown),
+          reportFailure: (error, run, failure) => this.reportFailure(error, run, 1, failure),
+        })
+      : null
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
@@ -196,12 +183,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     // super.stop() awaits every in-flight execute() (and thus its dispose()); draining afterwards
     // catches the detached teardowns dispose() left running so we never report stopped while a
     // sandbox machine is still being reaped.
-    await Promise.all([super.stop(), this.subagentWorker.stop()])
+    await super.stop()
+    await this.children?.drain()
     await Promise.allSettled([...this.pendingTeardowns])
-  }
-
-  override wait(): Promise<void> {
-    return Promise.all([super.wait(), this.subagentWorker.wait()]).then(() => undefined)
   }
 
   /** Register a detached sandbox teardown so stop() can drain it; self-removes when it settles. */
@@ -311,7 +295,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         run,
         session,
         prepared.execution,
-        runtime.deadline
+        runtime.deadline,
+        (child) => this.requireChildren().start(child, { signal, delivery })
       )
       const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({
@@ -506,212 +491,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (!session) return
     session.close()
 
-    const finalized = await recordFate(
-      session,
-      "cancelled",
-      queuedRun.kind === "subagent"
-        ? withFailureMessage(
-            new AgentTurnInterruptedError(queuedRun.id),
-            "The subagent stopped when the worker running it did. Spawn it again with a new key if its answer is still needed: what it already changed stays changed."
-          )
-        : new AgentTurnInterruptedError(queuedRun.id)
-    )
+    const finalized = await recordFate(session, "cancelled", interruptedError(queuedRun))
     if (!finalized) return
     await session.events.publishRunFinished(finalized.run)
-  }
-
-  async executeSubagent(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    signal: AbortSignal,
-    delivery: QueueDelivery<SubagentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
-  ): Promise<void> {
-    const context = this.requireContext()
-    const { runId } = claimed.job.payload
-    const queuedRun = await context.storage.agents.runs.getById({
-      projectId: context.id,
-      id: runId,
-    })
-    if (!queuedRun || queuedRun.kind !== "subagent") {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Queued subagent run '${runId}' was not found.`,
-        { details: { runId } }
-      )
-    }
-    if (queuedRun.status !== "queued" && queuedRun.status !== "running") return
-    // Like a conversation turn, a child left running by a dead delivery already ran its tools:
-    // actions, artifact versions, billed model calls. A replay would repeat them, so it ends
-    // interrupted and its parent decides whether to spawn it again.
-    if (queuedRun.status === "running") {
-      const ownedUntil = queuedRun.execution?.queueLeaseExpiresAt
-      if (ownedUntil && ownedUntil.getTime() > Date.now()) {
-        throw new AgentRunOwnedElsewhereError(queuedRun.id, ownedUntil)
-      }
-      await this.finishInterruptedTurn(context, queuedRun, delivery)
-      return
-    }
-
-    // A child stops with its parent: cancelling the parent cancels it.
-    const session = await claimAgentRun(this.sessionHost(context), {
-      run: queuedRun,
-      modelId: queuedRun.spec.model.modelId,
-      leaseExpiresAt: delivery.leaseExpiresAt,
-      cancelWith: [queuedRun.parentRunId],
-    })
-    if (!session) return
-    const run = session.run
-    const turnSignal = AbortSignal.any([signal, session.cancelled])
-    let preparationComplete = false
-    let environment: AgentExecutionEnvironment | null = null
-    let runtime: AgentTurnRuntime | null = null
-    let stopOwnershipProjection: (() => void) | undefined
-    const work: SubagentWork = {}
-
-    try {
-      const currentParent = await session.conversation.run(run.parentRunId)
-      if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
-        throw new DOMException("The parent Agent run is no longer active.", "AbortError")
-      }
-
-      stopOwnershipProjection = projectLease(delivery, session, "subagent")
-      await session.renewLease(delivery.leaseExpiresAt)
-      const configuredPlan = resolveSubagentExecutionPlan({
-        run: queuedRun,
-        models: this.host.definitions.models?.language,
-        tools: this.host.definitions.tools,
-        skills: this.host.definitions.agent.skills,
-        ...(this.host.definitions.agent.instructions === undefined
-          ? {}
-          : { projectInstructions: this.host.definitions.agent.instructions }),
-        sandboxModels: listSandboxModels(this.host.definitions.models),
-      })
-      const durableExecution = await session.execution()
-      if (
-        !durableExecution ||
-        durableExecution.source.type !== "execution" ||
-        durableExecution.source.executionId !== currentParent.executionId
-      ) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbAgentWorker] Subagent run '${runId}' has invalid execution lineage.`,
-          {
-            details: {
-              parentRunId: queuedRun.parentRunId,
-              runId,
-              executionId: queuedRun.executionId,
-            },
-          }
-        )
-      }
-      const executionContext = await createAgentExecutionContext({
-        context,
-        host: this.host,
-        execution: durableExecution,
-        runId: queuedRun.id,
-        people: session.people,
-        authorization: await session.people.authorization(durableExecution.authorizationRef),
-      })
-      // The child works in its own thread, and publishes into its conversation's gallery.
-      const childThread = await session.conversation.thread(run.threadId)
-      if (!childThread) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbAgentWorker] Subagent run '${run.id}' references missing thread '${run.threadId}'.`,
-          { details: agentRunFailureDetails(run) }
-        )
-      }
-      const conversation = await session.conversation.thread(conversationThreadId(childThread))
-      const prepared = await prepareAgentModel(configuredPlan)
-      const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
-      const history = await loadSubagentHistory(session, childThread)
-      const modelCalls = await session.modelCalls()
-      preparationComplete = true
-      await session.events.publishStarted(run)
-      // The parent's deadline, not one from now: a child that waited in the queue has less left.
-      runtime = createAgentTurnRuntime({
-        context: executionContext,
-        run,
-        signal: turnSignal,
-        modelCalls,
-        ...(run.spec.deadline === undefined ? {} : { deadline: new Date(run.spec.deadline) }),
-      })
-      bindAgentModelExecution(executionContext.sixb, {
-        signal: runtime.signal,
-        accounting: runtime.usageRecorder,
-      })
-      // From the first message: one its parent sent while it was queued is read at its first step,
-      // and a continuation's first step reads what the runs before it left unread.
-      const inbox = new SubagentInbox(session.mail, run, history.messages)
-      environment = await createSubagentEnvironment({
-        session,
-        openSandbox: childSandbox({ context: executionContext, session, run, thread: childThread }),
-        context: executionContext,
-        plan,
-        run,
-        thread: childThread,
-        conversation,
-        frameworkTools: [createAskParentTool(inbox)],
-        ...(durableExecution.requestedBy === undefined
-          ? {}
-          : { requestedBy: durableExecution.requestedBy }),
-        history,
-        signal: runtime.signal,
-        onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
-      })
-      await runSubagent({
-        history,
-        inbox,
-        context: environment.turnContext,
-        plan,
-        run,
-        session,
-        thread: childThread,
-        runtime,
-        work,
-        runFiles: environment.runFiles,
-      })
-    } catch (error) {
-      if (isLostExecution(error, signal)) return
-      if (error instanceof AgentFinalizationError) throw error
-      // A child run that fails or is stopped leaves its workspace mid-work: it goes, and a later
-      // continuation of the thread starts again from the handed files and out/. The run's own
-      // error is the one recorded, a save that failed included.
-      try {
-        await environment?.beforeFinalize({ discard: true })
-      } catch (saveError) {
-        if (saveError instanceof AgentExecutionLostError) return
-      }
-      if (
-        !preparationComplete &&
-        !turnSignal.aborted &&
-        !isAbortError(error) &&
-        shouldRetryAgentPreparation(error, claimed.job.attempt)
-      ) {
-        throw error
-      }
-
-      const aborted =
-        !(error instanceof ModelUsageRecordingError) &&
-        (signal.aborted || session.cancelled.aborted || isAbortError(error))
-      const finalized = await recordFate(
-        session,
-        aborted ? "cancelled" : "failed",
-        error,
-        work.messages
-      )
-      if (finalized) {
-        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
-          this.reportFailure(error, finalized.run, claimed.job.attempt, finalized.failure)
-        }
-        await session.events.publishRunFinished(finalized.run)
-      }
-      if (signal.aborted) throw error
-    } finally {
-      stopOwnershipProjection?.()
-      session.close()
-      runtime?.dispose()
-      await environment?.dispose()
-    }
   }
 
   protected override async onExecutionError(
@@ -798,36 +580,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     return { kind: "fail" }
   }
 
-  async onSubagentExecutionError(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    error: unknown
-  ): Promise<QueueWorkerFailureDecision<(typeof AGENT_RUN_FAILURE_CODES)[number]>> {
-    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
-    if (
-      error instanceof AgentFinalizationError &&
-      claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS
-    ) {
-      return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
-    }
-
-    const retryable = !isPermanentAgentPreparationError(error)
-    if (retryable && claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
-      return { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
-    }
-
-    const terminalized = await this.terminalizeSubagentDeliveryFailure(claimed, error)
-    return terminalized ? { kind: "fail", failure: terminalized } : { kind: "fail" }
-  }
-
-  onSubagentAbortError(
-    _claimed: ClaimedQueueJob<SubagentQueueJob>,
-    error: unknown
-  ): QueueWorkerFailureDecision {
-    // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
-    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
-    return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
-  }
-
   /**
    * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
    * Each read covers only active rows, and the deterministic job ids make republication idempotent.
@@ -842,11 +594,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             projectId: context.id,
             storage: context.storage.agents,
             queue: this.host.queues.agents,
-          }),
-          await dispatchQueuedSubagentRuns({
-            projectId: context.id,
-            storage: context.storage.agents,
-            queue: this.host.queues.agentChildren,
           }),
         ]
         const failures = results.flatMap((result) => result.failures)
@@ -932,6 +679,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   ): Promise<void> {
     const context = this.requireContext()
     if (run.status === "running") {
+      // A child runs in its parent's runner. Once its lease lapsed nothing runs it any more, and no
+      // cancel reaches it: it ends here, as a turn left running by a dead delivery does.
+      if ((run.execution?.queueLeaseExpiresAt.getTime() ?? 0) <= Date.now()) {
+        await this.finishInterruptedTurn(context, run, {
+          leaseExpiresAt: new Date(Date.now() + DEFAULT_AGENT_QUEUE_LEASE_MS).toISOString(),
+        })
+        return
+      }
       await publishAgentRunCancel(this.host.broker, { projectId: context.id, runId: run.id })
       return
     }
@@ -1006,39 +761,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 
-  private async terminalizeSubagentDeliveryFailure(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    error: unknown
-  ): Promise<AgentRunFailure | undefined> {
-    const context = this.requireContext()
-    const loaded = await context.storage.agents.runs.getById({
+  private sessionHost(context: AgentWorkerContext): AgentRunSessionHost {
+    return {
       projectId: context.id,
-      id: claimed.job.payload.runId,
-    })
-    if (!loaded || loaded.kind !== "subagent" || isTerminalRun(loaded)) return loaded?.error
-
-    const completedAt = new Date()
-    const failure = toAgentRunFailure(error, {
-      status: "failed",
-      at: completedAt,
-      details: agentRunFailureDetails(loaded),
-    })
-    if (loaded.status === "queued") {
-      const failed = await context.storage.agents.runs.finishQueued({
-        projectId: context.id,
-        id: loaded.id,
-        status: "failed",
-        error: failure,
-        completedAt,
-      })
-      this.reportFailure(error, failed, claimed.job.attempt, failure)
-      await context.streamSink.publishRunFinished(failed)
-      return failure
+      storage: context.storage,
+      broker: this.host.broker,
+      recoverAiModelCall: context.recoverAiModelCall,
+      events: context.streamSink,
+      security: this.host.definitions.security,
+      afterFinish: (run) => this.afterRunFinished(run),
     }
+  }
 
-    // A preparation failure must only finish the token acquired by that delivery in executeSubagent.
-    // Never reclaim a running child from an error handler: another delivery may already own it.
-    return undefined
+  private requireChildren(): ChildRunner {
+    if (!this.children) throw new Error("[SixbAgentWorker] Agent worker has no child runner.")
+    return this.children
   }
 
   private requireContext(): AgentWorkerContext {
@@ -1049,19 +786,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
     }
     return this.context
-  }
-
-  private sessionHost(context: AgentWorkerContext): AgentRunSessionHost {
-    return {
-      projectId: context.id,
-      storage: context.storage,
-      broker: this.host.broker,
-      recoverAiModelCall: context.recoverAiModelCall,
-      events: context.streamSink,
-      childQueue: this.host.queues.agentChildren,
-      security: this.host.definitions.security,
-      afterFinish: (run) => this.afterRunFinished(run),
-    }
   }
 
   /** A turn's end stops its children still at work, and resumes it if its calls were decided. */
@@ -1093,46 +817,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           : { runId: run.id, parentRunId: run.parentRunId },
       failure,
     })
-  }
-}
-
-class SubagentQueueWorker extends QueueWorker<SubagentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
-  constructor(
-    private readonly owner: AgentWorker,
-    host: AgentWorkerHost,
-    leaseMs: number,
-    concurrency: number
-  ) {
-    super({
-      projectId: host.id,
-      queue: host.queues.agentChildren,
-      failureCodes: AGENT_RUN_FAILURE_CODES,
-      workerId: `subagent-worker-${host.id}`,
-      claimLimit: concurrency,
-      leaseMs,
-    })
-  }
-
-  protected execute(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    signal: AbortSignal,
-    delivery: QueueDelivery<SubagentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
-  ): Promise<void> {
-    return this.owner.executeSubagent(claimed, signal, delivery)
-  }
-
-  protected override onExecutionError(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    error: unknown
-  ): Promise<QueueWorkerFailureDecision<(typeof AGENT_RUN_FAILURE_CODES)[number]>> {
-    return this.owner.onSubagentExecutionError(claimed, error)
-  }
-
-  protected override onAbortError(
-    claimed: ClaimedQueueJob<SubagentQueueJob>,
-    error: unknown
-  ): QueueWorkerFailureDecision {
-    return this.owner.onSubagentAbortError(claimed, error)
   }
 }
 
@@ -1220,68 +904,6 @@ function assertAgentWorkerStorage(
   }
 }
 
-/**
- * Record the queue's renewals on the run: a run token fails closed once the lease last recorded
- * lapses, so it needs no heartbeat of its own. Returns the stop.
- */
-function projectLease(
-  delivery: { onLeaseRenewed(listener: (renewed: { leaseExpiresAt: string }) => void): () => void },
-  session: AgentRunSession,
-  kind: "agent" | "subagent"
-): () => void {
-  return delivery.onLeaseRenewed((renewed) => {
-    void session.renewLease(renewed.leaseExpiresAt).catch((error: unknown) => {
-      if (!isTerminalOrExecutionGone(error)) {
-        console.error(
-          `[SixbAgentWorker] Could not project queue ownership for ${kind} run '${session.run.id}'.`,
-          error
-        )
-      }
-    })
-  })
-}
-
-/**
- * End a run that failed or stopped, with what it did kept in the same transaction. Returns
- * nothing when the run is no longer this session's; throws {@link AgentFinalizationError} when
- * storage stays unavailable, so the job is redelivered rather than acknowledged.
- */
-async function recordFate(
-  session: AgentRunSession,
-  status: "failed" | "cancelled",
-  error: unknown,
-  messages?: readonly AppendAgentMessageInput[]
-): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
-  const { run } = session
-  const completedAt = new Date()
-  const failure = toAgentExecutionFailure(error, {
-    status,
-    at: completedAt,
-    details: {
-      ...agentRunFailureDetails(run),
-      ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
-    },
-  })
-  try {
-    const finalized = await session.finish(
-      {
-        status,
-        error: failure,
-        completedAt,
-        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
-        ...(error instanceof AgentTurnInterruptedError
-          ? { finishReason: "interrupted" as const }
-          : {}),
-      },
-      messages
-    )
-    return { run: finalized, failure }
-  } catch (finishError) {
-    if (finishError instanceof AgentExecutionLostError) return undefined
-    throw finishError
-  }
-}
-
 /** Come back once the owning delivery's projected lease lapses, and never sooner than a moment. */
 function retryOnceReleased(error: AgentRunOwnedElsewhereError): QueueWorkerFailureDecision {
   const availableAt = Math.max(
@@ -1303,16 +925,6 @@ function aiUsageRecoveryBackoffMs(attempt: number): number {
   )
 }
 
-function agentRunFailureDetails(run: AgentRunRecord): Readonly<Record<string, string>> {
-  return run.kind === "conversation"
-    ? { runId: run.id, threadId: run.threadId }
-    : { parentRunId: run.parentRunId, runId: run.id }
-}
-
-function isTerminalRun(run: AgentRunRecord): boolean {
-  return run.status !== "queued" && run.status !== "running"
-}
-
 function normalizeRequiredString(value: string | undefined): string {
   const trimmed = value?.trim()
   if (!trimmed) {
@@ -1322,46 +934,6 @@ function normalizeRequiredString(value: string | undefined): string {
     )
   }
   return trimmed
-}
-
-async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(finish, ms)
-    function finish(): void {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
-      resolve()
-    }
-    signal.addEventListener("abort", finish, { once: true })
-  })
-}
-
-/**
- * Preparation calls no model and no tool, so a dependency failure is retried here, within the
- * delivery that owns the run. A redelivery would find the run running and end it as interrupted.
- */
-async function retryPreparationInPlace<T>(
-  attempt: number,
-  signal: AbortSignal,
-  prepare: () => Promise<T>
-): Promise<T> {
-  for (let retry = 0; ; retry += 1) {
-    try {
-      return await prepare()
-    } catch (error) {
-      if (
-        signal.aborted ||
-        isTerminalOrExecutionGone(error) ||
-        !shouldRetryAgentPreparation(error, attempt + retry)
-      ) {
-        throw error
-      }
-    }
-    const backoffMs = PREPARATION_RETRY_BACKOFF_MS[retry] ?? PRESTART_RETRY_BACKOFF_MS
-    await waitForAbort(backoffMs, signal)
-    signal.throwIfAborted()
-  }
 }
 
 function normalizeConcurrency(name: string, value: number): number {
