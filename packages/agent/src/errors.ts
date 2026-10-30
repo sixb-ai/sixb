@@ -99,18 +99,6 @@ export class AgentTurnTimeoutError extends Error {
   }
 }
 
-/**
- * The worker running a conversation turn stopped, or died, before finishing it. The turn is
- * recorded `cancelled` with `finishReason: "interrupted"` rather than replayed: the user already saw
- * it stream and its model calls were billed, so resuming it is their call.
- */
-export class AgentTurnInterruptedError extends Error {
-  readonly name = "AgentTurnInterruptedError"
-  constructor(readonly runId: string) {
-    super(`[SixbAgent] Agent run '${runId}' was interrupted when the worker running it stopped.`)
-  }
-}
-
 /** Keep an untrusted tool failure as the cause while exposing only a generic message to the model. */
 export class AgentToolExecutionError extends Error {
   readonly name = "AgentToolExecutionError"

@@ -343,10 +343,9 @@ what it waits for (`src/subagent-tools.ts`, `src/child-questions.ts`):
 A child runs in its parent's runner: `spawn_agent` creates its queued run, and the coordinator
 hands it to the runner's `startChild`, which claims it under the parent's delivery, its lease
 renewed with the parent's, and runs it beside the turn. Nothing queues it, so a runner that stops
-takes its children with it; its repair pass ends a child left running once its parent has ended and
-its lease has lapsed. Nothing redelivers a child either, so its runner retries a claim that storage
-refuses for as long as the parent runs, and ends failed one it refuses for good: its parent's wait
-always returns.
+takes its children with it; a repair pass ends any run left running once its lease has lapsed. Nothing
+redelivers a child either, so its runner retries a claim that storage refuses for as long as the
+parent runs, and ends failed one it refuses for good: its parent's wait always returns.
 
 Child events are recorded in the broker, and reach whoever reads the conversation: the API lists
 its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by

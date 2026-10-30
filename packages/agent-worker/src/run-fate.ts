@@ -1,15 +1,10 @@
-import {
-  type AgentRunFailure,
-  AgentTurnInterruptedError,
-  AgentTurnTimeoutError,
-  toAgentExecutionFailure,
-} from "@sixb/agent"
+import { type AgentRunFailure, AgentTurnTimeoutError, toAgentExecutionFailure } from "@sixb/agent"
 import {
   AgentExecutionLostError,
   type AgentRunSession,
+  AgentTurnInterruptedError,
   isTerminalOrExecutionGone,
 } from "@sixb/core/internal/agents"
-import { withFailureMessage } from "@sixb/core/internal/errors"
 import type { AgentRunRecord, AppendAgentMessageInput } from "@sixb/core/storage"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
 
@@ -20,19 +15,6 @@ import { shouldRetryAgentPreparation } from "./delivery-policy"
 export const PRESTART_RETRY_BACKOFF_MS = 5_000
 /** A run's own preparation retries quickly first, so a storage blip does not delay the answer. */
 export const PREPARATION_RETRY_BACKOFF_MS = [250, 1_000, PRESTART_RETRY_BACKOFF_MS] as const
-
-/**
- * What a run that stopped with its runner records. A child's tells its parent what to do about it:
- * nothing replays it.
- */
-export function interruptedError(run: AgentRunRecord): AgentTurnInterruptedError {
-  return run.kind === "subagent"
-    ? withFailureMessage(
-        new AgentTurnInterruptedError(run.id),
-        "The subagent stopped when the worker running it did. Spawn it again with a new key if its answer is still needed: what it already changed stays changed."
-      )
-    : new AgentTurnInterruptedError(run.id)
-}
 
 /**
  * Record the queue's renewals on the run: a run token fails closed once the lease last recorded

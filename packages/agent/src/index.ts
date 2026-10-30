@@ -4,7 +4,6 @@ export { createAskParentTool } from "./ask-parent-tool"
 export { prepareAgentModel } from "./context-budget"
 export {
   AgentRequesterLeftThreadError,
-  AgentTurnInterruptedError,
   AgentTurnTimeoutError,
   isLostExecution,
 } from "./errors"
