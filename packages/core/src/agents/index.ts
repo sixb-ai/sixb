@@ -155,7 +155,7 @@ export {
   NOOP_STREAM_SINK,
   withAgentActivityStream,
 } from "./run-events"
-export { AgentExecutionLostError } from "./run-fence"
+export { AgentExecutionLostError, isTerminalOrExecutionGone } from "./run-fence"
 export {
   AgentTurnInterruptedError,
   agentRunLeaseLapsed,
