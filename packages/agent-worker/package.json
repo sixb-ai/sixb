@@ -30,24 +30,10 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
-    "generate:agent-cli": "bun ./scripts/generate-agent-cli.ts",
-    "check:agent-cli": "bun ./scripts/generate-agent-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 300 bun test ./tests/layout-check.e2e.ts",
     "prepack": "bun run build"
-  },
-  "sixbBuild": {
-    "assets": [
-      {
-        "from": "./src/agent-cli/bin",
-        "to": "./dist/agent-cli/bin"
-      },
-      {
-        "from": "./src/agent-cli/generated",
-        "to": "./dist/agent-cli/generated"
-      }
-    ]
   },
   "peerDependencies": {
     "@sixb/core": "workspace:*"

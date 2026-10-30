@@ -10,8 +10,11 @@ afterEach(() => {
 
 describe("instance CLI modes", () => {
   test("renders mode-specific help", () => {
-    expect(renderInstanceHelp("sandbox")).toContain("sixb doctor")
-    expect(renderInstanceHelp("local")).not.toContain("sixb doctor")
+    expect(renderInstanceHelp("sandbox")).toContain("sixb context")
+    expect(renderInstanceHelp("local")).not.toContain("sixb context")
+    // One status command; what it checks depends on where it runs.
+    expect(renderInstanceHelp("sandbox")).toContain("Check the sandbox and its API access")
+    expect(renderInstanceHelp("local")).toContain("Check the current profile and its API access")
     expect(renderInstanceHelp("local")).toContain("selected local profile")
   })
 

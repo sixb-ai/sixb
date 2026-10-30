@@ -85,8 +85,8 @@ command can run. The profile requires behavior, not an `agentReady` provider fla
 
 `curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
 runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
-after materializing its files, then runs `sixb doctor` to verify the installed CLI contract and
-project identity through the API. While the API restarts, `sixb doctor` is retried for at
+after materializing its files, then runs `sixb status` to verify the installed CLI contract and
+project identity through the API. While the API restarts, `sixb status` is retried for at
 most eight seconds on a refused connection or a 5xx. An incompatible environment cannot execute a
 sandbox command. Its failure records the provider, profile, failed check, and safe failure
 classification without recording raw command output or the run token. Bake shared

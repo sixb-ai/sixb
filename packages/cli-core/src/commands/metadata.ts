@@ -5,7 +5,7 @@ import {
   DEFAULT_TELEMETRY_ORDER,
 } from "../policies"
 
-const SANDBOX_MAIN_HELP = `Sixb agent CLI
+const SANDBOX_MAIN_HELP = `Sixb CLI
 
 Usage:
   sixb <command> [options]
@@ -15,7 +15,7 @@ API commands emit JSON. Help, version, and examples emit text. Downloads write t
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and its API access
+  sixb status                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -63,14 +63,13 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
 
-const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI")
+const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace(
+  "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
+  "The CLI uses the selected local profile and its API credentials."
+)
   .replace(
-    "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
-    "The CLI uses the selected local profile and its API credentials."
-  )
-  .replace(
-    "  sixb doctor                         Check the sandbox and its API access\n  sixb context                        Print the current run context\n",
-    ""
+    "  sixb status                         Check the sandbox and its API access\n  sixb context                        Print the current run context\n",
+    "  sixb status                         Check the current profile and its API access\n"
   )
   .replace(
     "\nWhen you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use\n`sixb ontology get` for a type that has no file there.\n",
@@ -214,7 +213,7 @@ Vector profile names are the keys of the type's search.vectors. Vector input is 
 optionally under filters; k bounds the ranked matches and results carry a score.`
 
 export const GROUP_HELP = {
-  doctor: "Usage: sixb doctor",
+  status: "Usage: sixb status",
   context: "Usage: sixb context",
   project: "Usage: sixb project show",
   ontology: `Usage:

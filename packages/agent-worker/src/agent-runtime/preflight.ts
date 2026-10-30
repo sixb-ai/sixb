@@ -1,10 +1,13 @@
-import { EXIT_API, INSTANCE_CLI_VERSION } from "@sixb/cli-core"
+import {
+  AGENT_RUNTIME_PROFILE,
+  EXIT_API,
+  INSTANCE_CLI_VERSION,
+  type SandboxStatusReport,
+} from "@sixb/cli-core"
 import type { CommandResult, Sandbox } from "@sixb/core"
 import { AgentRuntimeProfileError } from "./errors"
 import {
   AGENT_RUNTIME_MINIMUM_VERSIONS,
-  AGENT_RUNTIME_PROFILE,
-  type AgentDoctorReport,
   type AgentJavascriptRuntime,
   type AgentRuntimeFailureReason,
   type AgentRuntimeProfileCheck,
@@ -69,7 +72,7 @@ export async function assertAgentRuntimeProfile(
   if (gateway.exitCode !== 0) {
     throw profileError(input.sandbox, "gateway-connectivity", "nonzero-exit", gateway.exitCode)
   }
-  assertDoctorReport(input.sandbox, gateway.stdout, input.projectId, runtime)
+  assertStatusReport(input.sandbox, gateway.stdout, input.projectId, runtime)
 }
 
 async function runProbe(
@@ -106,7 +109,7 @@ async function probeGateway(input: AssertAgentRuntimeProfileInput): Promise<Comm
     const timeoutMs = retry === 0 ? PREFLIGHT_TIMEOUT_MS : deadline - Date.now()
     const outcome = await runProbe(
       input.sandbox,
-      "sixb doctor",
+      "sixb status",
       input.env,
       "gateway-connectivity",
       timeoutMs
@@ -158,7 +161,7 @@ function parseLocalProbe(
   if ((name !== "bun" && name !== "node") || !version || !cliOutput) {
     throw profileError(sandbox, "cli-execution", "invalid-output")
   }
-  const prefix = "sixb agent CLI "
+  const prefix = "sixb CLI "
   if (!cliOutput.startsWith(prefix)) {
     throw profileError(sandbox, "cli-execution", "invalid-output")
   }
@@ -187,16 +190,16 @@ function parseVersion(version: string): { readonly major: number; readonly minor
   return { major: Number(match[1]), minor: Number(match[2]) }
 }
 
-function assertDoctorReport(
+function assertStatusReport(
   sandbox: Sandbox,
   stdout: string,
   projectId: string,
   localRuntime: { readonly name: AgentJavascriptRuntime; readonly version: string }
 ): void {
-  let report: AgentDoctorReport
+  let report: SandboxStatusReport
   try {
     const value: unknown = JSON.parse(stdout)
-    report = parseDoctorReport(value)
+    report = parseStatusReport(value)
   } catch {
     throw profileError(sandbox, "cli-execution", "invalid-output")
   }
@@ -212,7 +215,7 @@ function assertDoctorReport(
   }
 }
 
-function parseDoctorReport(value: unknown): AgentDoctorReport {
+function parseStatusReport(value: unknown): SandboxStatusReport {
   const report = record(value)
   const cli = record(report.cli)
   const javascript = record(report.javascript)
@@ -228,7 +231,7 @@ function parseDoctorReport(value: unknown): AgentDoctorReport {
     typeof project.id !== "string" ||
     project.id.length === 0
   ) {
-    throw new Error("invalid doctor report")
+    throw new Error("invalid status report")
   }
   return {
     ok: true,

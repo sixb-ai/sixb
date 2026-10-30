@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
 import { assertAgentRuntimeProfile } from "../src/agent-runtime/preflight"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { runApiCredential } from "../src/api-url"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
@@ -18,7 +18,7 @@ const ENV = {
 
 const SUCCESSFUL_LOCAL_PROBE: CommandResult = {
   exitCode: 0,
-  stdout: "node\t22.1.0\tsixb agent CLI 1\n",
+  stdout: "node\t22.1.0\tsixb CLI 1\n",
   stderr: "",
   durationMs: 1,
 }
@@ -98,7 +98,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
     expect(sandbox.commands[0]?.args[1]).not.toContain(ENV.SIXB_API_BASE_URL)
     expect(sandbox.commands[1]).toMatchObject({
       command: "bash",
-      args: ["-lc", "sixb doctor"],
+      args: ["-lc", "sixb status"],
       options: { env: ENV, timeout: 15_000 },
     })
   })
@@ -169,7 +169,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
   })
 
   test("rejects runtimes below the supported floor even when the CLI starts", async () => {
-    for (const stdout of ["bun\t1.2.9\tsixb agent CLI 1\n", "node\tv21.9.0\tsixb agent CLI 1\n"]) {
+    for (const stdout of ["bun\t1.2.9\tsixb CLI 1\n", "node\tv21.9.0\tsixb CLI 1\n"]) {
       const sandbox = new StubSandbox([{ ...SUCCESSFUL_LOCAL_PROBE, stdout }])
       await expect(
         assertAgentRuntimeProfile({ sandbox, env: ENV, projectId: PROJECT_ID })
@@ -179,7 +179,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
 
   test("rejects a stale CLI artifact before performing a gateway request", async () => {
     const sandbox = new StubSandbox([
-      { ...SUCCESSFUL_LOCAL_PROBE, stdout: "node\t22.1.0\tsixb agent CLI stale\n" },
+      { ...SUCCESSFUL_LOCAL_PROBE, stdout: "node\t22.1.0\tsixb CLI stale\n" },
     ])
 
     await expect(
@@ -200,7 +200,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
       ])
       try {
         await assertAgentRuntimeProfile({ sandbox, env: ENV, projectId: PROJECT_ID })
-        throw new Error("Expected doctor validation to fail.")
+        throw new Error("Expected status validation to fail.")
       } catch (error) {
         expect(error).toMatchObject({
           check: stdout === "not-json" ? "cli-execution" : "gateway-connectivity",

@@ -22,7 +22,8 @@ function output(stdout: string, exitCode = 0) {
 describe("classifyCommand", () => {
   test("classifies every supported CLI operation from its fixed command path", () => {
     const cases = {
-      "sixb doctor": "doctor",
+      "sixb status": "status",
+      "sixb doctor": "status",
       "sixb context": "context",
       "sixb project show": "project.show",
       "sixb ontology list": "ontology.list",

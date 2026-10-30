@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
+import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
   type AgentApprovalCall,
   agent,
@@ -29,7 +30,6 @@ import type { LanguageModelRequest } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { AgentWorker } from "../src"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { repairAgentApprovals } from "../src/approval-repair"
 import { waitFor as pollFor } from "./helpers"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
@@ -105,9 +105,9 @@ class GatewaySandbox implements Sandbox {
   ): Promise<CommandResult> {
     const script = args.at(-1) ?? ""
     if (command === "bash" && script.includes("SIXB_BASH_ENV_READY")) {
-      return ok("node\t22.0.0\tsixb agent CLI 1\n")
+      return ok("node\t22.0.0\tsixb CLI 1\n")
     }
-    if (command === "bash" && script === "sixb doctor") {
+    if (command === "bash" && script === "sixb status") {
       return ok(
         JSON.stringify({
           ok: true,

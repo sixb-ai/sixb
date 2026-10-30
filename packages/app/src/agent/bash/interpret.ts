@@ -37,7 +37,7 @@ type CliCommandName = {
 type SixbCommandName =
   | "help"
   | "version"
-  | "doctor"
+  | "status"
   | "context"
   | "objects.query-example"
   | CliCommandName
@@ -211,8 +211,12 @@ function classifySixbCommand(
   if (cliArgs[0] === "version" || cliArgs[0] === "--version") {
     return { kind: "sixb", command: "version", args: cliArgs.slice(1) }
   }
-  if (cliArgs[0] === "doctor" || cliArgs[0] === "context") {
-    return { kind: "sixb", command: cliArgs[0], args: cliArgs.slice(1) }
+  // `doctor` is what `status` was called before; older threads still show it.
+  if (cliArgs[0] === "status" || cliArgs[0] === "doctor") {
+    return { kind: "sixb", command: "status", args: cliArgs.slice(1) }
+  }
+  if (cliArgs[0] === "context") {
+    return { kind: "sixb", command: "context", args: cliArgs.slice(1) }
   }
 
   const [group, operation, ...args] = cliArgs
@@ -497,7 +501,7 @@ function describeSixb(
       return icon("skill", m.help, m.helpSubjects[helpSubject(intent.args)])
     case "version":
       return icon("terminal", m.version)
-    case "doctor":
+    case "status":
       return icon("terminal", m.doctor)
     case "context":
       return icon("project", m.runContext)

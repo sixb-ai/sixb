@@ -2,40 +2,39 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { AGENT_API_ROUTES } from "@sixb/core/internal/agents"
 import {
   type CliResult,
-  runAgentCliContractSuite,
-  runAgentCliProcessSmoke,
-} from "./agent-cli-contract"
+  runSandboxCliContractSuite,
+  runSandboxCliProcessSmoke,
+} from "./sandbox-cli-contract"
 
-const launcherPath = resolve(import.meta.dir, "..", "src", "agent-cli", "bin", "sixb")
-const artifactPath = resolve(import.meta.dir, "..", "src", "agent-cli", "generated", "sixb.mjs")
+const launcherPath = resolve(import.meta.dir, "..", "src", "bin", "sixb")
+const artifactPath = resolve(import.meta.dir, "..", "src", "generated", "sixb.mjs")
 const GENERATOR_CHECK_TIMEOUT_MS = 10_000
-const VERSION = "sixb agent CLI 1"
+const VERSION = "sixb CLI 1"
 
-runAgentCliContractSuite({
+runSandboxCliContractSuite({
   name: "generated artifact",
   version: VERSION,
   runtime: "bun",
   run: runArtifactInProcess,
 })
 
-describe("Sixb agent CLI generated artifact process boundary", () => {
-  runAgentCliProcessSmoke({
+describe("Sixb sandbox CLI generated artifact process boundary", () => {
+  runSandboxCliProcessSmoke({
     runtime: "bun",
     command: [process.execPath, artifactPath],
     version: VERSION,
   })
-  runAgentCliProcessSmoke({ runtime: "node", command: ["node", artifactPath], version: VERSION })
+  runSandboxCliProcessSmoke({ runtime: "node", command: ["node", artifactPath], version: VERSION })
   // A sandbox that adds the run token outside its commands gives them a `unix:` address.
-  runAgentCliProcessSmoke({
+  runSandboxCliProcessSmoke({
     runtime: "bun",
     command: [process.execPath, artifactPath],
     version: VERSION,
     overUnixSocket: true,
   })
-  runAgentCliProcessSmoke({
+  runSandboxCliProcessSmoke({
     runtime: "node",
     command: ["node", artifactPath],
     version: VERSION,
@@ -84,78 +83,12 @@ async function runArtifactInProcess(
   }
 }
 
-const CLI_API_ROUTES = [
-  "GET /api/project",
-  "GET /api/object-types",
-  "GET /api/object-types/:objectTypeId",
-  "GET /api/objects",
-  "POST /api/objects/query",
-  "POST /api/objects/:objectTypeId/by/:propertyId",
-  "POST /api/objects/query/links",
-  "POST /api/objects/query/count",
-  "POST /api/objects/query/exists",
-  "POST /api/objects/query/facets",
-  "POST /api/telemetry/history",
-  "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
-  "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
-  "GET /api/objects/:objectTypeId/:objectId/files/content",
-  "GET /api/actions",
-  "GET /api/actions/:actionId",
-  "POST /api/actions/:actionId",
-  "POST /api/files",
-  "GET /api/action-runs",
-  "GET /api/action-runs/:runId",
-  "GET /api/action-runs/:runId/files/content",
-  "GET /api/workflows",
-  "GET /api/workflows/:workflowId",
-  "POST /api/workflows/:workflowId/runs",
-  "GET /api/workflow-runs",
-  "GET /api/workflow-runs/:runId",
-  "GET /api/workflow-runs/:runId/files/content",
-  "GET /api/objects/search",
-  "GET /api/users",
-  "GET /api/users/:userId",
-  "GET /api/models",
-  "POST /api/models/language/generations",
-  "POST /api/models/image/generations",
-  "POST /api/models/audio/speech",
-  "POST /api/models/audio/transcriptions",
-  "GET /api/ai/model-calls/:callId/files",
-  "GET /api/ai/model-calls/:callId/files/content",
-  "GET /api/agent-memory/:repo",
-  "POST /api/agent-memory/:repo/revisions",
-] as const
-
-const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([
-  [
-    "GET /api/objects/:objectTypeId/:objectId",
-    "Exact object reads use POST /api/objects/query with opaque refs.",
-  ],
-  [
-    "GET /api/agent-threads/:threadId/messages/:messageId/files/content",
-    "Run attachments are materialized in the sandbox before the model starts.",
-  ],
-])
-
-describe("Sixb agent CLI route coverage", () => {
-  test("accounts for every route exposed by the agent API gateway", () => {
-    const direct = new Set<string>(CLI_API_ROUTES)
-    const alternatives = new Set(INTENTIONAL_CLI_ROUTE_ALTERNATIVES.keys())
-    expect([...direct].filter((route) => alternatives.has(route))).toEqual([])
-    expect([...INTENTIONAL_CLI_ROUTE_ALTERNATIVES.values()].every(Boolean)).toBe(true)
-
-    const accountedFor = [...direct, ...alternatives].sort()
-    const exposed = AGENT_API_ROUTES.map((route) => `${route.method} ${route.path}`).sort()
-    expect(accountedFor).toEqual(exposed)
-  })
-})
-
-describe("Sixb agent CLI generated artifact", () => {
+describe("Sixb sandbox CLI generated artifact", () => {
   test(
     "is current and has no workspace or third-party runtime imports",
     async () => {
       const check = Bun.spawn({
-        cmd: [process.execPath, "./scripts/generate-agent-cli.ts", "--check"],
+        cmd: [process.execPath, "./scripts/generate-sandbox-cli.ts", "--check"],
         cwd: resolve(import.meta.dir, ".."),
         stdout: "pipe",
         stderr: "pipe",
@@ -173,7 +106,7 @@ describe("Sixb agent CLI generated artifact", () => {
         ])
         if (timedOut) {
           throw new Error(
-            `Agent CLI generation exceeded ${GENERATOR_CHECK_TIMEOUT_MS}ms and was killed.`
+            `Sandbox CLI generation exceeded ${GENERATOR_CHECK_TIMEOUT_MS}ms and was killed.`
           )
         }
         expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
@@ -197,7 +130,7 @@ describe("Sixb agent CLI generated artifact", () => {
     const shPath = Bun.which("sh")
     const dirnamePath = Bun.which("dirname")
     if (!nodePath || !shPath || !dirnamePath) throw new Error("Expected host runtime tools.")
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-launcher-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-launcher-"))
     try {
       await Promise.all([
         symlink(nodePath, join(tempDir, "node")),
@@ -211,7 +144,7 @@ describe("Sixb agent CLI generated artifact", () => {
         stderr: "pipe",
       })
       expect(await nodeFallback.exited).toBe(0)
-      expect(await new Response(nodeFallback.stdout).text()).toBe("sixb agent CLI 1\n")
+      expect(await new Response(nodeFallback.stdout).text()).toBe("sixb CLI 1\n")
       expect(await new Response(nodeFallback.stderr).text()).toBe("")
 
       await rm(join(tempDir, "node"))

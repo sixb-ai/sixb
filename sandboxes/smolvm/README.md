@@ -77,7 +77,7 @@ forwarder needs Bun or Node in the image.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `image` | required | A local `.tar` path (offline), a registry ref (pulled at boot), or `null` for a bare busybox machine that cannot run the agent CLI. |
+| `image` | required | A local `.tar` path (offline), a registry ref (pulled at boot), or `null` for a bare busybox machine that cannot run the sandbox's `sixb`. |
 | `timeout` | — | Per-command timeout, in ms. |
 | `overlayGiB` | smolvm default (2) | Writable-layer disk size; raise to avoid "no space left". |
 | `env` | `{}` | Env merged into every run. |

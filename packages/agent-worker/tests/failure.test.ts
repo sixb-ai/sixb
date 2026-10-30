@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import { aiUsageLimitExceededError } from "@sixb/core/internal/ai-limit-enforcement"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { type AgentRunFailure, toAgentExecutionFailure } from "../src/failure"
 
 const at = new Date("2026-08-14T12:00:00.000Z")

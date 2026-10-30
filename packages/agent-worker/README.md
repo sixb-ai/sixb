@@ -171,9 +171,9 @@ the `project` repo, which every conversation builds up, through `sixb.agent.memo
 requester's own access decides what is installed, and installs their latest files under
 `$SIXB_MEMORY_DIR/<repo>/`, with a starter `MEMORY.md` while a repo has none.
 `context/memory.json` records the revision and each file's SHA-256 as installed; `sixb memory
-save` (`src/agent-cli/commands/memory.ts`) sends the files that differ from it with the run token,
-which records the run's thread as the save's source. `src/agent-runtime/memory.ts` holds that
-layout for both sides. A requester with no repo of its own, such as a service account, gets the
+save` (`@sixb/cli-core`'s `src/commands/memory.ts`) sends the files that differ from it with the
+run token, which records the run's thread as the save's source. `@sixb/cli-core`'s
+`src/memory.ts` holds that layout for both sides. A requester with no repo of its own, such as a service account, gets the
 project's alone.
 
 The `<sixb_memory>` section closes the system prompt with when and how to save, then each repo's

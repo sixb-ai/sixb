@@ -164,7 +164,7 @@ async function request(
   return JSON.parse(result.stdout)
 }
 
-// curl where the guest has it, else Bun or Node: a guest that runs the agent CLI has one of them.
+// curl where the guest has it, else Bun or Node: a guest that runs `sixb` has one.
 const REQUEST_SCRIPT = `set -eu
 if command -v curl >/dev/null 2>&1; then
   set -- -sS -m 10 -X "$SUITE_METHOD"

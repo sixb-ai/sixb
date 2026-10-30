@@ -163,7 +163,7 @@ bun sixb worker agent \
 ```
 
 The worker automatically requests restricted access to the API origin, installs the
-Sixb CLI and run context, runs `sixb doctor`, and destroys the sandbox after the run.
+Sixb CLI and run context, runs `sixb status`, and destroys the sandbox after the run.
 Model-provider credentials stay with your existing worker configuration.
 
 ## Production auth
@@ -260,7 +260,7 @@ image: { type: "disk", id: "<disk-image-id>" }
 
 | Image requirement | Purpose |
 | --- | --- |
-| Node 22+ and Bash | Supervisor and Sixb agent CLI |
+| Node 22+ and Bash | Supervisor and the sandbox's `sixb` |
 | Coreutils, `env`, `unshare`, `setpriv` | File tools and unprivileged command execution |
 | System CA bundle | TLS verification through Azure's inspection proxy |
 | Root setup and writable cgroup v2 with `cgroup.kill` / `cgroup.freeze` | Cancellation and safe file publication |
@@ -397,7 +397,7 @@ The setup example chooses a 30-second command timeout instead of the five-minute
 | Authentication failed | Run `az login` locally; verify the attached identity and client ID in Azure |
 | HTTP 403 | Check the group-scoped Data Owner role; allow time for RBAC propagation |
 | Provisioning failed | Check region, group capacity, resource sizing and image readiness |
-| `sixb doctor` / gateway preflight failed | Check the public HTTPS Sixb API origin and image tools/CA bundle |
+| `sixb status` preflight failed | Check the public HTTPS Sixb API origin and image tools/CA bundle |
 | Node TLS error | Preserve the injected system CA bundle and check `NODE_EXTRA_CA_CERTS` overrides |
 | Guest artifact unavailable in a source checkout | Run `bun --filter @sixb/sandboxes-azure build:guest` |
 | Create response was uncertain | Inspect the reported `sixb-provisioning-id` label before retrying |
