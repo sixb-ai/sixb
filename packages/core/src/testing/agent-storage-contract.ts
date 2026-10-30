@@ -2521,7 +2521,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           executionToken: "exec_2",
           status: "failed",
         })
-        await expectAgentError(storage.checkpoints.create(checkpointInput()), "invalid_state")
+        await expectAgentError(storage.checkpoints.create(checkpointInput()), "execution_lost")
         expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toBeNull()
       })
     })
