@@ -9,27 +9,17 @@ import {
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
-  type AgentContextCheckpointRecord,
-  type AgentMessageRecord,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
-  type AgentThreadParticipantRecord,
-  type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AppendAgentMessageInput,
   type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
-  type ListAgentMessagesInput,
-  type ListAgentMessagesResult,
-  type ListAgentRunsInput,
-  type ListAgentRunsResult,
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
-import type { AiModelCallUsageRecord } from "../storage/ai-usage"
 import type { AuthStorage, UserRecord } from "../storage/auth"
-import type { ExecutionRecord } from "../storage/executions/types"
 import { turnPausesOnHeldCalls } from "./approvals"
 import {
   type AgentExecutionAuthorization,
@@ -43,8 +33,11 @@ import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
   type AgentRunMail,
+  type AgentRunThreads,
   agentRunChildren,
   agentRunMail,
+  agentRunScope,
+  agentRunThreads,
 } from "./run-session-children"
 import {
   type AgentRunContext,
@@ -128,37 +121,15 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   checkpoint(input: AgentRunCheckpoint): Promise<AgentTurnHistory>
   /** A conversation's persistent workspace, as this run holds it. */
   readonly workspace: AgentRunWorkspace
-  /** The run's conversation: its threads, history and context checkpoints. */
-  readonly conversation: AgentRunConversation
-  /** Who the run works for and with: members, and the authority the run carries. */
-  readonly people: AgentRunPeople
-  /** The run's execution: who asked for it, with which groups, and the authority it refers to. */
-  execution(): Promise<ExecutionRecord | null>
+  /** The messages of the run's conversation, its children's threads included. */
+  readonly threads: AgentRunThreads
+  /**
+   * The authority the run's execution carries now: its requester's groups, as they are today. A
+   * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
+   */
+  authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
-}
-
-/**
- * What a run reads of its conversation, and the one write it makes there besides finishing: a
- * context checkpoint, fenced by the run's token.
- */
-export interface AgentRunConversation {
-  thread(threadId: string): Promise<AgentThreadRecord | null>
-  participants(threadIds: readonly string[]): Promise<readonly AgentThreadParticipantRecord[]>
-  latestCheckpoint(threadId: string): Promise<AgentContextCheckpointRecord | null>
-  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
-  message(messageId: string): Promise<AgentMessageRecord | null>
-  run(runId: string): Promise<AgentRunRecord | null>
-  runs(input: Omit<ListAgentRunsInput, "projectId">): Promise<ListAgentRunsResult>
-  /** The latest completed model call of an execution: what compaction's estimate anchors on. */
-  latestModelCall(executionId: string): Promise<AiModelCallUsageRecord | null>
-  /** Summarize the thread up to a point; refused once the run lost its execution. */
-  createCheckpoint(
-    input: Omit<
-      CreateAgentContextCheckpointInput,
-      "projectId" | "createdByRunId" | "executionToken"
-    >
-  ): Promise<AgentContextCheckpointRecord>
 }
 
 /** A context checkpoint a turn writes; the session adds which run, and its token. */
@@ -167,7 +138,7 @@ export type AgentRunCheckpoint = Omit<
   "projectId" | "createdByRunId" | "executionToken"
 >
 
-/** The project's members as a run needs them, and the authority its execution carries. */
+/** The project's members as a workflow step needs them, and the authority its execution carries. */
 export interface AgentRunPeople {
   /** A member: a message's author, or whoever the run works for. */
   user(userId: string): Promise<UserRecord | null>
@@ -276,6 +247,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
   readCancel(run)
   const cancelled = AbortSignal.any([cancel.signal, recordedCancel.signal])
+  const scope = agentRunScope(host, run)
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
 
@@ -284,7 +256,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     executionToken,
     cancelled,
     events: host.events,
-    children: agentRunChildren(host, run, executionToken),
+    children: agentRunChildren(host, run, executionToken, scope),
     mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
@@ -342,31 +314,14 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         throw new AgentExecutionLostError(run.id)
       }
     },
-    conversation: {
-      thread: (threadId) => agents.threads.getById({ projectId: host.projectId, id: threadId }),
-      participants: (threadIds) =>
-        agents.threads.listParticipants({ projectId: host.projectId, threadIds }),
-      latestCheckpoint: (threadId) =>
-        agents.checkpoints.getLatest({ projectId: host.projectId, threadId }),
-      messages: (input) => agents.messages.list({ ...input, projectId: host.projectId }),
-      message: (messageId) => agents.messages.getById({ projectId: host.projectId, id: messageId }),
-      run: (runId) => agents.runs.getById({ projectId: host.projectId, id: runId }),
-      runs: (input) => agents.runs.list({ ...input, projectId: host.projectId }),
-      latestModelCall: (executionId) =>
-        host.storage.aiUsage.getLatestForExecution({ projectId: host.projectId, executionId }),
-      createCheckpoint: (input) =>
-        fenced(run.id, () =>
-          agents.checkpoints.create({
-            ...input,
-            projectId: host.projectId,
-            createdByRunId: run.id,
-            executionToken,
-          })
-        ),
-    },
-    people: agentRunPeople(host),
-    execution: () =>
-      host.storage.executions.getById({ projectId: host.projectId, id: run.executionId }),
+    threads: agentRunThreads(host, run, scope),
+    authorization: (ref) =>
+      resolveInheritedAgentExecutionAuthorization({
+        auth: host.storage.auth,
+        projectId: host.projectId,
+        authorizationRef: ref,
+        security: host.security,
+      }),
     context: async () => {
       const context = await readAgentRunContext(host, run)
       if (run.kind === "conversation" && context.kind !== "conversation") {

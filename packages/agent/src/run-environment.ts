@@ -245,7 +245,7 @@ export async function createConversationAgentEnvironment(
           }
         : {}),
       toolAttachments: threadToolAttachments({
-        conversation: input.session.conversation,
+        threads: input.session.threads,
         threadId: run.threadId,
         blobStorage: context.blobStorage,
       }),

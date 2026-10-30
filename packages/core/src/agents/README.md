@@ -51,12 +51,16 @@ modelCalls()                           admission, usage and recovery; opened on 
 events · heldCalls                     live records (best effort) and the approvals that hold a run
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
-conversation · people · execution()    the reads behind them, still open to the runner
-children · mail                        a turn's children, their threads, and mail between them
-workspace                              a persistent workspace's acquire, replace and settle
+threads · children · mail              the conversation's messages, a turn's children, and mail
+                                       between them; reads answer only for the run's conversation
+authorization · workspace              for a runner that binds the project in its own process: the
+                                       execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
                                        host's afterFinish: stopping children, resuming a decided turn
 ```
+
+`tests/agent-run-session-contract.ts` is what every session does: the in-process one runs it now,
+and a session over HTTP runs the same suite.
 
 ## Outside the session
 

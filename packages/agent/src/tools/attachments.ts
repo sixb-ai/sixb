@@ -1,5 +1,5 @@
 import { type AgentToolAttachments, AgentToolPublicError, type BlobStorage } from "@sixb/core"
-import type { AgentRunConversation } from "@sixb/core/internal/agents"
+import type { AgentRunThreads } from "@sixb/core/internal/agents"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { SubagentRunFile } from "@sixb/core/storage"
@@ -13,14 +13,14 @@ type AttachmentBlobStorage = Pick<BlobStorage, "stat" | "open">
  * the gateway's message file route, a key resolves only in a message of the run's own thread.
  */
 export function threadToolAttachments(input: {
-  readonly conversation: Pick<AgentRunConversation, "message">
+  readonly threads: Pick<AgentRunThreads, "message">
   readonly threadId: string
   readonly blobStorage: AttachmentBlobStorage
 }): AgentToolAttachments {
   return {
     async open(key) {
       const messageId = attachmentKeyMessageId(key)
-      const message = messageId && (await input.conversation.message(messageId))
+      const message = messageId && (await input.threads.message(messageId))
       const fileRef =
         message && message.threadId === input.threadId ? findMessageAttachment(message, key) : null
       if (!fileRef) throw unknownAttachment(key)

@@ -375,7 +375,7 @@ export class ChildRunner {
       execution: durableExecution,
       runId: queuedRun.id,
       names: child.names,
-      authorization: await session.people.authorization(durableExecution.authorizationRef),
+      authorization: await session.authorization(durableExecution.authorizationRef),
     })
     // The child works in its own thread, and publishes into its conversation's gallery.
     if (!childThread) {
