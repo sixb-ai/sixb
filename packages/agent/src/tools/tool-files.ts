@@ -5,11 +5,11 @@ import type {
   AgentToolFilePutInput,
   AgentToolFiles,
   BlobBody,
-  BlobStorage,
   FileRef,
 } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
 import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
+import type { AgentRunFileStore } from "@sixb/core/internal/agents"
 import { sniffFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
@@ -25,7 +25,7 @@ interface CreateAgentToolFilesInput {
   readonly toolName: string
   readonly toolCallId: string
   readonly signal: AbortSignal
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   readonly onPublished?: (file: AgentToolFile) => void
   /** Shared across every tool call in one run so parallel publishers cannot oversubscribe it. */

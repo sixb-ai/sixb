@@ -5,14 +5,17 @@ import {
   type ArtifactKind,
   ArtifactRequestError,
   AuthorizationError,
-  type BlobStorage,
   type JsonValue,
   ObjectQueryExecutionError,
   type Principal,
   principalsEqual,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { AgentExecutionLostError, type AgentRunArtifacts } from "@sixb/core/internal/agents"
+import {
+  AgentExecutionLostError,
+  type AgentRunArtifacts,
+  type AgentRunFileStore,
+} from "@sixb/core/internal/agents"
 import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
@@ -116,7 +119,7 @@ interface PublishToolsInput {
   readonly threadId: string
   readonly owner: Principal
   /** Where the version's files are stored before it is published. */
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>

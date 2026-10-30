@@ -1,5 +1,5 @@
-import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
-import { isAgentToolResult } from "@sixb/core/internal/agents"
+import type { FileRef, JsonValue } from "@sixb/core"
+import { type AgentRunFileStore, isAgentToolResult } from "@sixb/core/internal/agents"
 import { prepareAgentToolFileProjection } from "../attachments"
 
 export type AgentToolModelOutput =
@@ -9,7 +9,7 @@ export type AgentToolModelOutput =
 /** Convert a durable Sixb tool result into bounded, provider-safe model-facing output. */
 export async function agentToolResultToModelOutput(input: {
   readonly output: JsonValue
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly signal?: AbortSignal
   readonly sandboxPathForFileRef?: (fileRef: FileRef) => string | undefined
   readonly imageOmissionNote?: string

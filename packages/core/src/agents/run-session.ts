@@ -1,3 +1,4 @@
+import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { AuthorizationRef } from "../execution"
 import { type AgentExecutionHost, bindDurableAgentExecution } from "../execution/agent"
@@ -134,6 +135,11 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   /** Its conversation's artifacts: what it reads of them as its requester, and what it publishes. */
   readonly artifacts: AgentRunArtifacts
   /**
+   * The files it stores and reads: its attachments, what its tools and children write, its
+   * artifacts' files. Through the run's SDK, as an API request with the run's token stores them.
+   */
+  readonly files: AgentRunFileStore
+  /**
    * The authority the run's execution carries now: its requester's groups, as they are today. A
    * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
    */
@@ -141,6 +147,9 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
 }
+
+/** Where a run's files are stored: put one, open or stat one by its blob id. */
+export type AgentRunFileStore = Pick<BlobStorage, "put" | "open" | "stat">
 
 /** A context checkpoint a turn writes; the session adds which run, and its token. */
 export type AgentRunCheckpoint = Omit<
@@ -327,6 +336,11 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     assertOwned: () => assertAgentRunOwned(agents, fence),
     threads: agentRunThreads(host, run, scope),
     artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
+    files: {
+      put: async (input) => (await runSdk()).blobs.put(input),
+      open: async (blobId) => (await runSdk()).blobs.open(blobId),
+      stat: async (blobId) => (await runSdk()).blobs.stat(blobId),
+    },
     authorization: (ref) =>
       resolveInheritedAgentExecutionAuthorization({
         auth: host.storage.auth,

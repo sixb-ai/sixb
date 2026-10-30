@@ -1,12 +1,12 @@
-import { type AgentToolAttachments, AgentToolPublicError, type BlobStorage } from "@sixb/core"
-import type { AgentRunThreads } from "@sixb/core/internal/agents"
+import { type AgentToolAttachments, AgentToolPublicError } from "@sixb/core"
+import type { AgentRunFileStore, AgentRunThreads } from "@sixb/core/internal/agents"
 import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { attachmentKeyMessageId, findMessageAttachment } from "../attachments"
 import { workflowInputFileRefs } from "../workflow-input-attachments"
 
-type AttachmentBlobStorage = Pick<BlobStorage, "stat" | "open">
+type AttachmentBlobStorage = Pick<AgentRunFileStore, "stat" | "open">
 
 /**
  * A chat's attachments: files of its thread's messages, by the key `$SIXB_ATTACHMENTS` lists. Like

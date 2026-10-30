@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
 import { posix } from "node:path"
-import type { BlobStorage, FileRef } from "@sixb/core"
+import type { FileRef } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
+import type { AgentRunFileStore } from "@sixb/core/internal/agents"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
@@ -185,7 +186,7 @@ export async function prepareHandedFiles(input: {
   readonly inSandbox?: boolean
   /** The child's context directory, relative to its working directory or absolute. */
   readonly contextDirectory: string
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const signal = input.signal ?? NEVER_ABORTED_SIGNAL

@@ -368,6 +368,7 @@ export class ChildRunner {
       runId: queuedRun.id,
       names: child.names,
       authorization: await session.authorization(durableExecution.authorizationRef),
+      files: session.files,
     })
     // The child works in its own thread, and publishes into its conversation's gallery.
     if (!childThread) {
