@@ -7,10 +7,8 @@ import {
   createAgentTurnRuntime,
   createConversationAgentEnvironment,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
   type ResolvedAgentExecutionPlan,
-  resolveAgentExecutionPlan,
   runAgentTurn,
   SubagentCoordinator,
   stoppedByWorker,
@@ -73,6 +71,7 @@ import {
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
+import { resolveRunPlan } from "./run-plan"
 import { conversationSandbox } from "./run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -420,16 +419,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const { run } = session
     const turn = await session.context()
     const { thread, execution, participants } = turn
-    const plan = resolveAgentExecutionPlan({
-      spec: run.spec,
-      models: this.host.definitions.models?.language,
-      tools: this.host.definitions.tools,
-      skills: this.host.definitions.agent.skills,
-      ...(this.host.definitions.agent.instructions === undefined
-        ? {}
-        : { projectInstructions: this.host.definitions.agent.instructions }),
-      sandboxModels: listSandboxModels(this.host.definitions.models),
-    })
+    const plan = resolveRunPlan(this.host.definitions, await session.plan())
     if (!execution) {
       throw createSixbError(
         "internal.unexpected",
@@ -745,6 +735,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       security: this.host.definitions.security,
       maxActiveChildren: context.subagentConcurrencyPerRun,
       sdk: this.host,
+      definitions: this.host.definitions,
       afterFinish: (run) => this.afterRunFinished(run),
     }
   }

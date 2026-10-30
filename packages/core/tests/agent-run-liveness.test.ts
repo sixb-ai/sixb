@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage, type SecurityDefinitionCatalog } from "../src"
-import { createAgentRunExecutionToken, endLapsedAgentRuns, NOOP_STREAM_SINK } from "../src/agents"
+import {
+  type AgentRunPlanDefinitions,
+  createAgentRunExecutionToken,
+  endLapsedAgentRuns,
+  NOOP_STREAM_SINK,
+} from "../src/agents"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 
@@ -22,13 +27,14 @@ function setup() {
       },
     },
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
-    // Ending a run binds no SDK.
+    // Ending a run binds no SDK and reads no plan.
     sdk: {
       id: PROJECT_ID,
       withScope: () => {
         throw new Error("Ending a lapsed run reaches no project SDK.")
       },
     },
+    definitions: {} as AgentRunPlanDefinitions,
   }
 
   /** A turn some runner started, holding it until `leaseExpiresAt`; or still queued. */

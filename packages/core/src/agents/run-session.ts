@@ -38,6 +38,7 @@ import {
   fenced,
   isTerminalOrExecutionGone,
 } from "./run-fence"
+import { type AgentRunPlan, type AgentRunPlanDefinitions, readAgentRunPlan } from "./run-plan"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
@@ -118,6 +119,8 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * it.
    */
   assertOwned(): Promise<void>
+  /** What the run is set up with: its model, the project's instructions, skills and tools. */
+  plan(): Promise<AgentRunPlan>
   /**
    * What the run starts from, in one read: a turn's thread, the people it names and its history,
    * or a child's parent, threads and messages.
@@ -216,6 +219,8 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
    * the run reads and publishes through its session goes through it.
    */
   readonly sdk: AgentExecutionHost
+  /** The definitions a run's plan is read from. */
+  readonly definitions: AgentRunPlanDefinitions
   /**
    * What follows a run's end, once `finish` recorded it: a turn's children still at work are
    * stopped, and a turn paused on calls already decided goes on. Best effort: a failure is logged,
@@ -348,6 +353,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         authorizationRef: ref,
         security: host.security,
       }),
+    plan: async () => readAgentRunPlan(host.definitions, run),
     context: async () => {
       const context = await readAgentRunContext(host, run)
       if (run.kind === "conversation" && context.kind !== "conversation") {
