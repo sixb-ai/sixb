@@ -151,6 +151,7 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
 export type { AgentRunArtifactPublish, AgentRunArtifacts } from "./run-artifacts"
 export { agentRunArtifacts } from "./run-artifacts"
 export type {
