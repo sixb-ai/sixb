@@ -446,7 +446,7 @@ export type {
 // ── Member directory ──────────────────────────────────────
 
 export type { UserStatus } from "./storage"
-export type { ListUsersInput, UserProfile, UsersPage, UsersRuntime } from "./users"
+export type { ListUsersInput, UserLookup, UserProfile, UsersPage, UsersRuntime } from "./users"
 
 // ── Security Definitions ───────────────────────────────────
 

@@ -6,6 +6,7 @@ import type { UserRecord, UserStatus } from "../storage"
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
 const MAX_SEARCH_LENGTH = 200
+const MAX_EMAIL_LENGTH = 320
 
 /** A member as the directory shows them. Read from auth storage, never from what a writer stored. */
 export interface UserProfile {
@@ -29,6 +30,9 @@ export interface ListUsersInput {
   readonly offset?: number
 }
 
+/** The member `users.get` reads: by user reference, or by email, matched exactly but ignoring case. */
+export type UserLookup = UserRef | { readonly email: string }
+
 /** One page of members, oldest first. */
 export interface UsersPage {
   readonly users: readonly UserProfile[]
@@ -39,8 +43,8 @@ export interface UsersPage {
 
 /** The project's member directory. Reading it requires `can.view(project.users)`. */
 export interface UsersRuntime {
-  /** The member's profile, suspended or not, or `null` when no member has this id. */
-  get(user: UserRef): Promise<UserProfile | null>
+  /** The member's profile, suspended or not, or `null` when no member has this id or email. */
+  get(user: UserLookup): Promise<UserProfile | null>
   list(input?: ListUsersInput): Promise<UsersPage>
 }
 
@@ -50,15 +54,15 @@ export function createUsersRuntime(runtime: SixbRuntimeContext): UsersRuntime {
   return {
     get: async (user) => {
       assertReadable()
-
-      if (!isUserRef(user)) {
-        throw new Error("[Sixb] users.get expects a user reference, such as userRef(id).")
-      }
+      const lookup = userLookup(user)
 
       const users = runtime.storage.auth?.users
       if (!users) return null
 
-      const record = await users.getById({ projectId: runtime.projectId, id: user.id })
+      const record =
+        "email" in lookup
+          ? await users.getByEmail({ projectId: runtime.projectId, email: lookup.email })
+          : await users.getById({ projectId: runtime.projectId, id: lookup.id })
       return record ? toUserProfile(record) : null
     },
 
@@ -99,6 +103,28 @@ export function toUserProfile(record: UserRecord): UserProfile {
     ...(record.avatarUrl === undefined ? {} : { avatarUrl: record.avatarUrl }),
     status: record.status,
   }
+}
+
+function userLookup(user: UserLookup): UserLookup {
+  if (isUserRef(user)) return user
+  if (isEmailLookup(user)) {
+    const email = user.email.trim()
+    if (email && email.length <= MAX_EMAIL_LENGTH) return { email }
+
+    throw new Error(
+      `[Sixb] users.get email must be nonblank and at most ${MAX_EMAIL_LENGTH} characters.`
+    )
+  }
+
+  throw new Error(
+    '[Sixb] users.get expects a user reference, such as userRef(id), or { email: "ava@acme.com" }.'
+  )
+}
+
+function isEmailLookup(value: unknown): value is { readonly email: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  return keys.length === 1 && keys[0] === "email" && typeof Reflect.get(value, "email") === "string"
 }
 
 function statusFilter(status: ListUsersInput["status"] = "active") {

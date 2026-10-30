@@ -10,6 +10,8 @@ afterEach(() => {
   server = undefined
 })
 
+const AVA = { id: "usr_ava", email: "ava@acme.com", status: "active" }
+
 function startDirectory() {
   const requests: string[] = []
   server = Bun.serve({
@@ -18,7 +20,9 @@ function startDirectory() {
     fetch(request) {
       const url = new URL(request.url)
       requests.push(`${url.pathname}${url.search}`)
-      return Response.json({ users: [], hasMore: false, total: 0 })
+      const email = url.searchParams.get("email")
+      const users = email === "ava@acme.com" ? [AVA] : []
+      return Response.json({ users, hasMore: false, total: users.length })
     },
   })
 
@@ -63,6 +67,23 @@ describe("sixb users", () => {
     expect(requests).toEqual(["/api/users/usr%2F1"])
   })
 
+  test("gets one member by email, keeping it out of the path", async () => {
+    const { requests, output } = await run(["get", "ava@acme.com"])
+
+    expect(requests).toEqual(["/api/users?email=ava%40acme.com"])
+    expect(JSON.parse(output)).toEqual(AVA)
+  })
+
+  test("fails when no member has the email", async () => {
+    const error = await run(["get", "dan@acme.com"]).catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).body).toEqual({
+      code: "not_found",
+      message: "No member has the email 'dan@acme.com'.",
+    })
+  })
+
   test("rejects bad options before any request", async () => {
     const cases: readonly (readonly string[])[] = [
       ["list", "--status", "invited"],
@@ -72,6 +93,7 @@ describe("sixb users", () => {
       ["search", "   "],
       ["search"],
       ["get"],
+      ["get", "  "],
       ["remove", "usr_1"],
     ]
 

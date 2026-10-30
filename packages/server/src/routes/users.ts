@@ -17,8 +17,21 @@ export function registerUserRoutes(app: Elysia, _host: SixbHostView) {
         const sixb = requireRequestSixb(context)
 
         try {
-          const page = await sixb.users.list(ListUsersQuerySchema.parse(query))
-          return { users: [...page.users], hasMore: page.hasMore, total: page.total }
+          const { email, ...input } = ListUsersQuerySchema.parse(query)
+          if (email === undefined) {
+            const page = await sixb.users.list(input)
+            return { users: [...page.users], hasMore: page.hasMore, total: page.total }
+          }
+
+          // `users.get({ email })` over HTTP: a query parameter, so an email never goes in a path.
+          if (Object.values(input).some((value) => value !== undefined)) {
+            set.status = 400
+            return {
+              error: "[SixbServer] email finds one member and takes no other option.",
+            }
+          }
+          const profile = await sixb.users.get({ email })
+          return { users: profile ? [profile] : [], hasMore: false, total: profile ? 1 : 0 }
         } catch (error) {
           return handleRouteError(error, set)
         }

@@ -20955,6 +20955,7 @@ export type ListUsersData = {
     search?: string
     limit?: number
     offset?: number
+    email?: string
   }
   url: "/api/users"
 }

@@ -37,6 +37,7 @@ export {
   useAgentRunStream,
 } from "./useAgentRunStream"
 export {
+  type UserLookupInput,
   type UseUserOptions,
   type UseUsersOptions,
   userQueryOptions,

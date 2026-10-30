@@ -7,7 +7,7 @@ import {
   parseCommandArgs,
   requestsHelp,
 } from "../arguments"
-import { fail, writeJson, writeText } from "../output"
+import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS } from "../policies"
 import { GROUP_HELP } from "./metadata"
 import type { QueryOptions } from "./shared"
@@ -26,7 +26,22 @@ export async function users(api: ApiClient, args: readonly string[]): Promise<vo
 
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "users get", 1)
-    return writeJson(await api.get(`/api/users/${encodeURIComponent(positionals[0] ?? "")}`))
+    const user = positionals[0]?.trim()
+    if (!user) fail("users get requires a user id or email.")
+    // Sign-in mints ids as `usr_<uuid>`, so an `@` marks an email.
+    if (!user.includes("@")) {
+      return writeJson(await api.get(`/api/users/${encodeURIComponent(user)}`))
+    }
+
+    const page = await api.get("/api/users", { email: user })
+    const [member] = isRecord(page) && Array.isArray(page.users) ? page.users : []
+    if (member === undefined) {
+      throw new CliError(
+        { code: "not_found", message: `No member has the email '${user}'.` },
+        EXIT_API
+      )
+    }
+    return writeJson(member)
   }
 
   if (sub === "list") {
@@ -64,4 +79,8 @@ function listQuery(options: {
       ? {}
       : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }),
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
