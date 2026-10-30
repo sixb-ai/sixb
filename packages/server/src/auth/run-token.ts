@@ -3,6 +3,7 @@ import {
   type AgentRunExecutionScope,
   AgentRunScopeError,
   agentRunTokenRunId,
+  findAgentApiRoute,
   isAgentRunToken,
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
@@ -95,6 +96,7 @@ export async function resolveRunTokenRequest(input: {
  * What a run of each kind may not do, whatever its requester's grants allow:
  * - a workflow step or a child starts no workflow;
  * - a workflow step has no memory: a conversation's notes must not change a fixed assignment;
+ * - a workflow step publishes no artifact: it has no conversation to publish into;
  * - a child reads its conversation's memory but saves none, and changes nothing once its parent's
  *   turn has ended;
  * - a shared conversation reaches only the project's memory, whoever sends the turn.
@@ -121,6 +123,9 @@ async function runPolicyRefusal(
   }
   if (kind === "workflow" && matchesAgentMemory(path)) {
     return deny(403, "Workflow agent nodes have no Agent memory.")
+  }
+  if (kind === "workflow" && findAgentApiRoute(method, path)?.effect === "artifact") {
+    return deny(403, "Workflow agent nodes publish no artifacts: they have no conversation.")
   }
   if ("kind" in run && run.kind === "subagent" && !(await parentRunActive(host, run))) {
     return deny(409, "The child agent's parent run has ended or been stopped.")

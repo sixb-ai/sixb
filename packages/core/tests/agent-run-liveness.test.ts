@@ -22,6 +22,13 @@ function setup() {
       },
     },
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
+    // Ending a run binds no SDK.
+    sdk: {
+      id: PROJECT_ID,
+      withScope: () => {
+        throw new Error("Ending a lapsed run reaches no project SDK.")
+      },
+    },
   }
 
   /** A turn some runner started, holding it until `leaseExpiresAt`; or still queued. */

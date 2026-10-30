@@ -493,6 +493,46 @@ describe("run tokens", () => {
     ).toBe(1)
   })
 
+  // Guard proof: drop the run-token branch from POST /api/artifacts; the artifact is then the
+  // requester's own, published in no conversation, and the conversation lists nothing.
+  test("publishes an artifact into the run's conversation, and reads it back", async () => {
+    const { app, apiBaseUrl, sixb, runId } = await createRunTokenRuntime()
+    const file = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("# Plan\n"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+
+    const created = await app.fetch(
+      jsonRequest("POST", "/api/artifacts", {
+        kind: "document",
+        title: "Plan",
+        files: [{ path: "document.md", file: fileRefJson(file) }],
+      })
+    )
+    expect(created.status).toBe(201)
+    const published = (await created.json()) as {
+      artifact: { id: string; owner: unknown }
+      version: { origin: unknown }
+    }
+    expect(published.artifact.owner).toEqual({ type: "user", id: "usr_requester" })
+    expect(published.version.origin).toEqual({ threadId: "thread-1", runId })
+
+    const listed = await app.fetch(new Request(`${apiBaseUrl}/api/artifacts?thread=thread-1`))
+    await expect(listed.json()).resolves.toMatchObject({
+      artifacts: [{ id: published.artifact.id }],
+    })
+    const next = await app.fetch(
+      jsonRequest("POST", `/api/artifacts/${published.artifact.id}/versions`, {
+        kind: "document",
+        title: "Plan",
+        files: [{ path: "document.md", file: fileRefJson(file) }],
+        baseVersion: 1,
+      })
+    )
+    expect(next.status).toBe(201)
+  })
+
   test("gives a shared conversation the project's memory alone", async () => {
     // Reproduce by dropping the shared-conversation check in resolveRunTokenRequest: the
     // run then reads and saves its requester's own memory.
@@ -604,6 +644,25 @@ describe("run tokens", () => {
     expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual({
       error: "Workflow agent nodes have no Agent memory.",
+    })
+  })
+
+  test("lets workflow agent nodes publish no artifact", async () => {
+    // Reproduce by dropping the artifact check in runPolicyRefusal: the node's service account
+    // then creates an artifact in no conversation.
+    const { app } = await createRunTokenRuntime({ executionKind: "workflow" })
+
+    const response = await app.fetch(
+      jsonRequest("POST", "/api/artifacts", {
+        kind: "document",
+        title: "Plan",
+        files: [],
+      })
+    )
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({
+      error: "Workflow agent nodes publish no artifacts: they have no conversation.",
     })
   })
 

@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryBroker, InMemoryStorage, type SecurityDefinitionCatalog } from "../src"
+import {
+  ArtifactRequestError,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  type SecurityDefinitionCatalog,
+  SixbHost,
+} from "../src"
 import {
   AgentExecutionLostError,
   type AgentRunSession,
@@ -10,6 +19,7 @@ import {
   publishAgentRunCancel,
 } from "../src/agents"
 import { emptyGrantIndex } from "../src/authorization/types"
+import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 
 // What every run session does, however its runner reaches it: in process, as the worker's does,
@@ -23,6 +33,21 @@ const PROJECT_ID = "agent-run-session-contract"
 const LEASE = "2099-01-01T00:00:00.000Z"
 /** A lease already run out: what lets another runner take a run over. */
 const LAPSED = "2000-01-01T00:00:00.000Z"
+
+/** The project a session binds its run's SDK in, over the storage the test seeds. */
+function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
+  const blobs = new InMemoryBlobStorage()
+  const sdk = new SixbHost({
+    id: PROJECT_ID,
+    ontology: [],
+    storage,
+    blobStorage: blobs,
+    broker,
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+  })
+  return { sdk, blobs }
+}
 
 /** A queued turn in a fresh storage, with the host a session works against. */
 export async function seedAgentRun(id = "run-1") {
@@ -49,6 +74,7 @@ export async function seedAgentRun(id = "run-1") {
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
+    sdk: projectOver(storage, broker).sdk,
   }
   return { storage, broker, run, host }
 }
@@ -96,13 +122,16 @@ const SECURITY = {
 /** A conversation owned by Alice, with turns to claim. */
 async function seedConversation(claim: ClaimAgentRunSession) {
   const storage = new InMemoryStorage()
+  const broker = new InMemoryBroker()
+  const { sdk, blobs } = projectOver(storage, broker)
   const host = {
     projectId: PROJECT_ID,
     storage,
-    broker: new InMemoryBroker(),
+    broker,
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: SECURITY,
+    sdk,
   }
   await storage.auth.users.create({
     projectId: PROJECT_ID,
@@ -143,12 +172,23 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       },
     })
   }
-  const open = async (run: Awaited<ReturnType<typeof turn>>) => {
+  const open = async <TRun extends AgentRunRecord>(run: TRun) => {
     const session = await claim(host, { run, leaseExpiresAt: LEASE })
     if (!session) throw new Error("Expected the run to be claimed.")
     return session
   }
-  return { storage, thread, say, turn, open }
+  /** A document's bytes, stored as a version's file is before it is published. */
+  const documentFile = async (markdown: string) => [
+    {
+      path: "document.md",
+      file: await blobs.put({
+        body: new TextEncoder().encode(markdown),
+        fileName: "document.md",
+        mediaType: "text/markdown",
+      }),
+    },
+  ]
+  return { storage, thread, say, turn, open, documentFile }
 }
 
 export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): void {
@@ -584,6 +624,77 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       turn.close()
       child.close()
       reclaimed?.close()
+    })
+  })
+
+  describe("a run's artifacts", () => {
+    // Guard proof: drop `origin` from what AgentRunArtifacts.publish prepares; the version names
+    // no conversation, and the conversation lists nothing.
+    test("publishes into its conversation, owned by its owner, and reads it back", async () => {
+      const { turn, open, documentFile } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const published = await session.artifacts.publish({
+        kind: "document",
+        title: "Plan",
+        files: await documentFile("# Plan\n"),
+      })
+
+      expect(published.artifact.owner).toEqual(alice)
+      expect(published.version.origin).toEqual({ threadId: "thr_1", runId: "run-a" })
+      expect((await session.artifacts.list({ limit: 10 })).map((each) => each.id)).toEqual([
+        published.artifact.id,
+      ])
+      expect(await session.artifacts.updatable(published.artifact.id)).toMatchObject({
+        id: published.artifact.id,
+      })
+      session.close()
+    })
+
+    // Guard proof: drop the ownership check from the publish transaction and the one before it;
+    // the fenced-out session's version lands.
+    test("publishes nothing once another session holds the run", async () => {
+      const { storage, turn, open, documentFile } = await seedConversation(claim)
+      const first = await open(await turn("run-a", "m1"))
+      const second = await open(first.run)
+
+      const refused = await first.artifacts
+        .publish({ kind: "document", title: "Late", files: await documentFile("# Late\n") })
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(AgentExecutionLostError)
+      expect((await storage.artifacts.list({ projectId: PROJECT_ID })).total).toBe(0)
+      first.close()
+      second.close()
+    })
+
+    // Guard proof: drop assertParentActive from the publish transaction; the child's version
+    // lands after its turn ended.
+    test("a child publishes into its parent's conversation, and nothing once its parent ended", async () => {
+      const { storage, turn, open, documentFile } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const child = await open(await spawnChild(storage, parent))
+
+      const published = await child.artifacts.publish({
+        kind: "document",
+        title: "West",
+        files: await documentFile("# West\n"),
+      })
+      expect(published.version.origin).toEqual({ threadId: "thr_1", runId: child.run.id })
+
+      await parent.finish({ status: "succeeded" })
+      const refused = await child.artifacts
+        .publish({
+          artifactId: published.artifact.id,
+          title: "West again",
+          files: await documentFile("# West again\n"),
+        })
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(ArtifactRequestError)
+      expect(refused).toMatchObject({ code: "not_allowed" })
+      parent.close()
+      child.close()
     })
   })
 

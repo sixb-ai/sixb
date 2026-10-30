@@ -4,24 +4,16 @@ import type {
   OntologyDocsCatalog,
   Sixb,
   SixbDefinitions,
-  Storage,
   ValueType,
 } from "@sixb/core"
 import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { ModelTool } from "@sixb/core/models"
-import type { AgentStorage, ArtifactStorage } from "@sixb/core/storage"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
 import type { BeforeFinalizeOptions } from "./run-sandbox"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { AgentFileBudget } from "./tools/tool-files"
-
-/** What `publish_artifact` writes through, until artifacts publish through the API. */
-export type ArtifactPublishingStorage = Storage & {
-  readonly agents: AgentStorage
-  readonly artifacts?: ArtifactStorage
-}
 
 /**
  * What every run of a project shares, whichever runner runs it: its settings and catalogs. A run
@@ -51,11 +43,6 @@ export interface AgentProjectCatalogs {
 
 /** Provider ports activated only after an Agent execution scope is bound. */
 export interface AgentExecutionContext extends AgentRunSettings {
-  /**
-   * Only for `publish_artifact`, which writes artifact versions itself until artifacts publish
-   * through the API. Nothing else on a run's path reads it.
-   */
-  readonly artifactPublishing: ArtifactPublishingStorage
   readonly sixb: Sixb
   /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
   readonly propertyClearance?: PropertyClearance

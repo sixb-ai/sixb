@@ -143,6 +143,8 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export type { AgentRunArtifactPublish, AgentRunArtifacts } from "./run-artifacts"
+export { agentRunArtifacts } from "./run-artifacts"
 export type {
   CompactionCompletedInput,
   CompactionFailedInput,

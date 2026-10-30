@@ -43,5 +43,4 @@ export type {
   AgentExecutionContext,
   AgentProjectCatalogs,
   AgentRunSettings,
-  ArtifactPublishingStorage,
 } from "./types"

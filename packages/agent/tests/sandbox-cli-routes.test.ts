@@ -55,6 +55,9 @@ const CLI_API_ROUTES = [
   "POST /api/agent-memory/:repo/revisions",
 ] as const
 
+const ARTIFACTS_THROUGH_THE_RUNNER =
+  "The run's session reaches artifacts for publish_artifact and $SIXB_ARTIFACTS."
+
 const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([
   [
     "GET /api/objects/:objectTypeId/:objectId",
@@ -64,6 +67,15 @@ const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([
     "GET /api/agent-threads/:threadId/messages/:messageId/files/content",
     "Run attachments are materialized in the sandbox before the model starts.",
   ],
+  // A runner's session publishes and reads the conversation's artifacts through these; the Agent
+  // publishes with publish_artifact and finds each latest version in $SIXB_ARTIFACTS.
+  ["GET /api/artifacts", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["GET /api/artifacts/:artifactId", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["GET /api/artifacts/:artifactId/versions/:version", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["GET /api/artifacts/:artifactId/versions/:version/content", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["GET /api/artifacts/:artifactId/versions/:version/queries/:name", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["POST /api/artifacts", ARTIFACTS_THROUGH_THE_RUNNER],
+  ["POST /api/artifacts/:artifactId/versions", ARTIFACTS_THROUGH_THE_RUNNER],
 ])
 
 describe("the sandbox CLI's route coverage", () => {

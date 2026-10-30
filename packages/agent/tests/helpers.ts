@@ -127,6 +127,13 @@ export async function runTurnInSession(
       recoverAiModelCall,
       events,
       security: EMPTY_SECURITY,
+      // A turn run directly has no environment, so nothing it does binds the run's SDK.
+      sdk: {
+        id: turn.context.id,
+        withScope: () => {
+          throw new Error("A turn run directly reaches no project SDK.")
+        },
+      },
     },
     turn.run
   )
