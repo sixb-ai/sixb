@@ -1,0 +1,196 @@
+import { describe, expect, test } from "bun:test"
+import type { LanguageModel } from "@sixb/core"
+import {
+  agent,
+  can,
+  defineGroup,
+  defineRole,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  SixbHost,
+} from "@sixb/core"
+import {
+  AgentExecutionLostError,
+  AgentRunRefusedError,
+  claimAgentRunOverHttp,
+  createHttpAgentRunSession,
+} from "@sixb/core/internal/agents"
+import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createSixbApi, SixbServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
+
+// A runner outside the worker claims a turn as the person who asked for it, then reaches the
+// turn's session with the run token its claim returned. The session suite in core proves each
+// operation over HTTP; this proves who reaches it.
+
+const model = {
+  providerId: "test",
+  modelId: "test-model",
+  definition: { kind: "language", providerId: "test", modelId: "test-model", capabilities: {} },
+  stream: async () => {
+    throw new Error("No model call here.")
+  },
+} satisfies LanguageModel
+const runners = defineGroup("runners")
+const projectId = "agent-runners"
+const API = "http://api.localhost"
+const LEASE = () => new Date(Date.now() + 60_000).toISOString()
+
+async function setup() {
+  const storage = new InMemoryStorage()
+  const host = new SixbHost({
+    id: projectId,
+    ontology: [],
+    models: { language: [model] },
+    storage,
+    broker: new InMemoryBroker(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+    groups: [runners],
+    roles: [defineRole("runner", { grantedTo: [runners], grants: [can.run(agent)] })],
+    auth: { id: "test", kind: "dev" },
+  })
+  const app = createSixbApi(
+    new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
+  )
+  const send = (request: Request) => app.fetch(request)
+
+  /** A signed-in person who may use the Agent: their session cookie and CSRF pair. */
+  async function person(userId: string) {
+    await storage.auth.users.create({ projectId, id: userId, email: `${userId}@example.test` })
+    await storage.auth.groupMemberships.upsert({
+      projectId,
+      userId,
+      groupId: runners.id,
+      source: "manual",
+    })
+    const credential = createSessionCredential(`ses_${userId}`)
+    await storage.auth.sessions.create({
+      projectId,
+      id: credential.sessionId,
+      userId,
+      strategyId: "test",
+      tokenHash: credential.tokenHash,
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 86_400_000),
+    })
+    return {
+      cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf-token`,
+      origin: "http://app.localhost",
+      "x-sixb-csrf": "csrf-token",
+    }
+  }
+
+  /** Ask the Agent, as `headers`' person: the turn waits queued, as no worker runs here. */
+  async function ask(headers: Record<string, string>, text: string) {
+    const post = (path: string, body: unknown) =>
+      send(
+        new Request(`${API}${path}`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      ).then((response) => response.json())
+    const { thread } = (await post("/api/agent-threads", {})) as { readonly thread: { id: string } }
+    const body = (await post(`/api/agent-threads/${thread.id}/messages`, { text })) as {
+      readonly run?: { readonly id: string }
+    }
+    if (!body.run) throw new Error(`Expected a queued turn, got ${JSON.stringify(body)}.`)
+    return body.run.id
+  }
+
+  /** The run token each run's session sent, by run. */
+  const runTokens = new Map<string, string>()
+
+  /**
+   * Claim as `headers`' person, with their session, as a runner they signed in would; its session's
+   * requests then carry the run token.
+   */
+  function claim(headers: Record<string, string>, runId: string) {
+    return claimAgentRunOverHttp({
+      apiUrl: API,
+      runId,
+      authorization: "",
+      leaseExpiresAt: LEASE(),
+      fetch: (request) => {
+        if (new URL(request.url).pathname.endsWith("/claim")) {
+          const signed = new Headers(request.headers)
+          signed.delete("authorization")
+          for (const [name, value] of Object.entries(headers)) signed.set(name, value)
+          return send(new Request(request, { headers: signed }))
+        }
+        const token = request.headers.get("authorization")?.replace(/^Bearer /, "")
+        if (token) runTokens.set(runId, token)
+        return send(request)
+      },
+    })
+  }
+
+  return { storage, send, person, ask, claim, runTokens }
+}
+
+describe("a runner outside the worker", () => {
+  // Removal proof: drop the requester check from the claim route; Bob runs Ava's turn, with her
+  // authority.
+  test("claims a turn only as the person who asked for it", async () => {
+    const { person, ask, claim, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Summarize the open invoices.")
+    // Bob takes part in Ava's conversation, so he reads the turn: he still did not ask for it.
+    const run = await storage.agents.runs.getById({ projectId, id: runId })
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: run?.threadId ?? "",
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+
+    expect(await claim(bob, runId).catch((error: unknown) => error)).toBeInstanceOf(
+      AgentRunRefusedError
+    )
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+
+    const session = await claim(ava, runId)
+    expect(session?.run).toMatchObject({ id: runId, status: "running" })
+    expect((await session?.plan())?.model).toMatchObject({
+      provider: "test",
+      modelId: "test-model",
+    })
+    await session?.close()
+  })
+
+  // Removal proof: compare the path's run with the token's in admitRunner no more; a run token
+  // reaches another run's session.
+  test("reaches with its run token only its own run's session, and nothing once it ended", async () => {
+    const { person, ask, claim, send, runTokens } = await setup()
+    const ava = await person("ava")
+    const first = await claim(ava, await ask(ava, "First."))
+    const second = await claim(ava, await ask(ava, "Second."))
+    if (!first || !second) throw new Error("Expected both turns to be claimed.")
+    await first.assertOwned()
+
+    // The first run's token, pointed at the second run's session.
+    const crossed = createHttpAgentRunSession({
+      apiUrl: API,
+      runToken: runTokens.get(first.run.id) ?? "",
+      run: second.run,
+      fetch: send,
+    })
+    expect(await crossed.plan().catch((error: unknown) => error)).toMatchObject({
+      message: "[Sixb] A run's session takes that run's token.",
+    })
+
+    await first.finish({ status: "succeeded" })
+    expect(await first.plan().catch((error: unknown) => error)).toBeInstanceOf(
+      AgentExecutionLostError
+    )
+    await first.close()
+    await second.close()
+  })
+})

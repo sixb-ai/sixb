@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
-import { AgentFinalizationError, claimAgentRun } from "../src/agents"
+import { AgentFinalizationError, claimAgentRun, publishAgentRunCancel } from "../src/agents"
 import { describeAgentRunSessionContract, seedAgentRun } from "./agent-run-session-contract"
 
 const LEASE = "2099-01-01T00:00:00.000Z"
@@ -12,6 +12,26 @@ describeAgentRunSessionContract(claimAgentRun)
 
 // How the in-process session uses storage itself: a session over HTTP retries on its own terms.
 describe("an in-process run session", () => {
+  // In process the broker carries a cancel at once; a runner over HTTP hears it at its renewal.
+  test("is cancelled through the broker with its own run, and with a run named in cancelWith", async () => {
+    const { host, broker, run } = await seedAgentRun()
+    const session = await claimAgentRun(host, {
+      run,
+      leaseExpiresAt: LEASE,
+      cancelWith: ["parent-run"],
+    })
+    if (!session) throw new Error("Expected the run to be claimed.")
+    const cancelled = new Promise<void>((resolve) =>
+      session.cancelled.addEventListener("abort", () => resolve(), { once: true })
+    )
+
+    await publishAgentRunCancel(broker, { projectId: run.projectId, runId: "parent-run" })
+
+    await cancelled
+    expect(session.cancelled.aborted).toBe(true)
+    session.close()
+  })
+
   test("retries a transient storage failure, and gives up after 850ms", async () => {
     const { host, storage, run } = await seedAgentRun()
     const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })

@@ -463,6 +463,11 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
             { ended: true }
           )
         )
+        // A child stops with its parent: a cancel recorded on it too.
+        if (cancelWith.length > 0) {
+          const others = await agents.runs.getByIds({ projectId: host.projectId, ids: cancelWith })
+          for (const other of others) readCancel(other)
+        }
       } catch (error) {
         // A repair pass ended the run, or another runner took it over: this one stops now rather
         // than at its next write, as it does when its queue lease is lost.
