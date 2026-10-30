@@ -32,7 +32,8 @@ async function setup(id = "run-1") {
     triggerMessageId: `message-${id}`,
     spec: { model: { provider: "test", modelId: "test-model" } },
   })
-  return { storage, broker, run, host: { projectId: PROJECT_ID, storage, broker } }
+  const host = { projectId: PROJECT_ID, storage, broker, recoverAiModelCall: async () => {} }
+  return { storage, broker, run, host }
 }
 
 describe("claimAgentRun", () => {
@@ -163,6 +164,26 @@ describe("an agent run session", () => {
     expect(Date.now() - start).toBeLessThan(1_000)
     session.close()
     stuck.close()
+  })
+
+  // The worker loads the recorder inside its preparation, which retries a blip in place. Cache the
+  // rejected read in AgentRunSession.modelCalls; the second call fails too.
+  test("reads the run's model-call accounting on first use, again after a failed read", async () => {
+    const { host, storage, run } = await setup()
+    const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!session) throw new Error("Expected the run to be claimed.")
+    const getById = storage.executions.getById.bind(storage.executions)
+    let failures = 1
+    storage.executions.getById = async (input) => {
+      if (failures-- > 0) throw new Error("storage blip")
+      return getById(input)
+    }
+
+    expect(await session.modelCalls().catch((error: unknown) => error)).toBeInstanceOf(Error)
+    const modelCalls = await session.modelCalls()
+    expect(modelCalls.executionId).toBe(run.executionId)
+    expect(await session.modelCalls()).toBe(modelCalls)
+    session.close()
   })
 
   test("is cancelled with its own run, and with a run named in cancelWith", async () => {

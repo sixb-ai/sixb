@@ -126,7 +126,6 @@ export interface AgentTurnContext {
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
   readonly streamSink: StreamSink
-  readonly recoverAiModelCall: RecoverAiModelCall
   readonly turnTimeoutMs: number
 }
 

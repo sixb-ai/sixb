@@ -287,7 +287,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         // Catch a renewal that completed between starting the run and attaching the observer.
         // Storage keeps this projection monotonic, so racing confirmations are safe.
         await session.renewLease(delivery.leaseExpiresAt)
-        return this.prepareConversationTurn(context, run)
+        const modelCalls = await session.modelCalls()
+        return { ...(await this.prepareConversationTurn(context, run)), modelCalls }
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
@@ -296,7 +297,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: prepared.executionContext,
         run,
         signal: turnSignal,
-        execution: prepared.execution,
+        modelCalls: prepared.modelCalls,
       })
       bindAgentModelExecution(prepared.executionContext.sixb, {
         signal: runtime.signal,
@@ -654,6 +655,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const prepared = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
       const history = await loadSubagentHistory(context.storage.agents, run, childThread)
+      const modelCalls = await session.modelCalls()
       preparationComplete = true
       await context.streamSink.publishStarted(run)
       // The parent's deadline, not one from now: a child that waited in the queue has less left.
@@ -661,7 +663,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         run,
         signal: turnSignal,
-        execution: durableExecution,
+        modelCalls,
         ...(run.spec.deadline === undefined ? {} : { deadline: new Date(run.spec.deadline) }),
       })
       bindAgentModelExecution(executionContext.sixb, {
@@ -1079,7 +1081,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   private sessionHost(context: AgentWorkerContext): AgentRunSessionHost {
-    return { projectId: context.id, storage: context.storage, broker: this.host.broker }
+    return {
+      projectId: context.id,
+      storage: context.storage,
+      broker: this.host.broker,
+      recoverAiModelCall: context.recoverAiModelCall,
+    }
   }
 
   private reportFailure(

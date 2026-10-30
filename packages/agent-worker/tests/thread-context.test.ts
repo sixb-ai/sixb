@@ -182,7 +182,6 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
       streamSink: NOOP_STREAM_SINK,
-      recoverAiModelCall: async () => {},
       turnTimeoutMs: 60_000,
     },
     plan,

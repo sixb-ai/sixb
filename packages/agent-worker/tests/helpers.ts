@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
 import { openAgentRunSession } from "@sixb/core/internal/agents"
+import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
@@ -90,13 +91,24 @@ export class LocalBashSandbox implements Sandbox {
  * Run a turn as the worker does, in the session of its run, which the test started already. The
  * session's broker is its own: these tests cancel through their signal, not a published cancel.
  */
-export async function runTurnInSession(input: Omit<RunAgentTurnInput, "session">) {
+export async function runTurnInSession(
+  input: Omit<RunAgentTurnInput, "session"> & {
+    /** Where a model call's record goes when storage cannot take it; dropped when omitted. */
+    readonly recoverAiModelCall?: RecoverAiModelCall
+  }
+) {
+  const { recoverAiModelCall = async () => {}, ...turn } = input
   const session = await openAgentRunSession(
-    { projectId: input.context.id, storage: input.context.storage, broker: new InMemoryBroker() },
-    input.run
+    {
+      projectId: turn.context.id,
+      storage: turn.context.storage,
+      broker: new InMemoryBroker(),
+      recoverAiModelCall,
+    },
+    turn.run
   )
   try {
-    return await runAgentTurn({ ...input, session })
+    return await runAgentTurn({ ...turn, session })
   } finally {
     session.close()
   }

@@ -7,7 +7,6 @@ import {
   toModelMessages,
   turnPausesOnHeldCalls,
 } from "@sixb/core/internal/agents"
-import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
   type AgentRunDiagnostic,
@@ -147,22 +146,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const ownsRuntime = input.runtime === undefined
   let runtime = input.runtime
   if (!runtime) {
-    const durableExecution = await storage.executions.getById({
-      projectId,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${run.executionId}'.`,
-        { details: { runId, executionId: run.executionId } }
-      )
-    }
     runtime = createAgentTurnRuntime({
       context,
       run,
       signal,
-      execution: durableExecution,
+      modelCalls: await input.session.modelCalls(),
     })
   }
   const usageRecorder = runtime.usageRecorder
