@@ -315,7 +315,7 @@ export async function executeWorkflowAgentNode(
     ended.abort()
     await logs.flush().catch(() => {})
     stopOwnershipProjection()
-    session.close()
+    await session.close()
     await environment?.dispose()
   }
 }
@@ -598,7 +598,7 @@ export function workflowStepTools(input: {
     input: input.nodeInput,
     blobStorage: input.context.blobStorage,
   })
-  return (call, { signal }) => {
+  return (call, { signal, maxFileBytes }) => {
     const definition = selected.has(call.toolName)
       ? input.host.definitions.tools.getByName(call.toolName)
       : null
@@ -615,6 +615,7 @@ export function workflowStepTools(input: {
       logger: input.logger,
       attachments,
       files: input.context.blobStorage,
+      ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
     })
   }
 }

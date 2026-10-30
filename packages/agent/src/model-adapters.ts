@@ -3,6 +3,7 @@ import { AgentToolPublicError } from "@sixb/core"
 import {
   type AgentToolCall,
   type AgentToolCallFile,
+  type AgentToolCallOptions,
   type AgentToolCallResult,
   AgentToolResultValidationError,
   type AgentToolSpec,
@@ -31,13 +32,15 @@ export type AgentErrorDetails =
 /** How a run calls a project tool: through its session, or for a workflow step in the worker. */
 export type AgentToolCaller = (
   call: AgentToolCall,
-  options: { readonly signal: AbortSignal }
+  options: AgentToolCallOptions
 ) => Promise<AgentToolCallResult>
 
 interface ProjectModelToolsInput {
   readonly specs: readonly AgentToolSpec[]
   readonly runId: string
   readonly callTool: AgentToolCaller
+  /** The bytes the run's file budget has left, which a call's files may take. */
+  readonly fileBytesLeft: () => number
   /** Copy the files a call stored into the sandbox, before the model reads its output. */
   readonly installFiles: (input: {
     readonly toolName: string
@@ -90,7 +93,7 @@ function projectModelTool(
       try {
         result = await context.callTool(
           { toolName: spec.name, toolCallId, input: toolInput },
-          { signal }
+          { signal, maxFileBytes: context.fileBytesLeft() }
         )
       } catch (error) {
         if (error instanceof AgentToolResultValidationError) {

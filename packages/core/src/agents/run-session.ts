@@ -9,6 +9,7 @@ import {
 } from "../execution/agent"
 import type { RunLogSession } from "../logging/run-logger"
 import { type LoggingService, resolveLoggingService } from "../logging/service"
+import type { LogFields } from "../logging/types"
 import type { LanguageModelRef } from "../models/catalog"
 import {
   AiModelCallRecorder,
@@ -30,6 +31,8 @@ import {
   type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
+  type SubagentRunFile,
+  type SubagentRunRecord,
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
 import type { AuthStorage, UserRecord } from "../storage/auth"
@@ -69,6 +72,7 @@ import {
 } from "./run-session-children"
 import {
   type AgentToolCall,
+  type AgentToolCallOptions,
   type AgentToolCallResult,
   handedToolAttachments,
   runAgentTool,
@@ -82,6 +86,8 @@ import {
   readAgentTurnHistory,
 } from "./run-turn"
 import { subscribeAgentRunCancel } from "./streams/protocol"
+import { subagentSandboxFiles } from "./subagent-runs"
+import { conversationThreadId } from "./thread-access"
 import type { AgentToolRunInfo } from "./types"
 
 /**
@@ -171,10 +177,7 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * SDK, its attachments and its logger, its model calls billed to the run. The files it puts are
    * stored and returned, for the runner to copy into its sandbox.
    */
-  callTool(
-    call: AgentToolCall,
-    options: { readonly signal: AbortSignal }
-  ): Promise<AgentToolCallResult>
+  callTool(call: AgentToolCall, options: AgentToolCallOptions): Promise<AgentToolCallResult>
   /** Its conversation's artifacts: what it reads of them as its requester, and what it publishes. */
   readonly artifacts: AgentRunArtifacts
   /**
@@ -187,8 +190,11 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
    */
   authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
-  /** Stop watching for cancellation. The run itself is unaffected. */
-  close(): void
+  /**
+   * Stop watching for cancellation, stop its tools' model calls, and flush their logs. The run
+   * itself is unaffected.
+   */
+  close(): Promise<void>
 }
 
 /** The models a run calls, by the ref its plan names. */
@@ -285,6 +291,11 @@ export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
   readonly leaseExpiresAt: string
   /** Other runs whose cancellation cancels this one: a child's parent. */
   readonly cancelWith?: readonly string[]
+  /**
+   * The runner's own stop: its process shutting down, or its delivery lost. The calls its project
+   * tools make stop with it, as the run's own do.
+   */
+  readonly stop?: AbortSignal
 }
 
 /**
@@ -297,7 +308,7 @@ export async function claimAgentRun<TRun extends AgentRunRecord>(
 ): Promise<AgentRunSession<TRun> | null> {
   const run = await startOrReclaim(host.storage.agents, host.projectId, input)
   if (!run) return null
-  return openAgentRunSession(host, run, input.cancelWith)
+  return openAgentRunSession(host, run, input.cancelWith, input.stop)
 }
 
 /**
@@ -307,7 +318,8 @@ export async function claimAgentRun<TRun extends AgentRunRecord>(
 export async function openAgentRunSession<TRun extends AgentRunRecord>(
   host: AgentRunSessionHost,
   run: TRun,
-  cancelWith: readonly string[] = []
+  cancelWith: readonly string[] = [],
+  stop?: AbortSignal
 ): Promise<AgentRunSession<TRun>> {
   const executionToken = run.execution?.token
   if (!executionToken) {
@@ -357,7 +369,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     toolsBound ??= (async () => {
       const sixb = await runSdk()
       bindAgentModelExecution(sixb, {
-        signal: AbortSignal.any([cancelled, ended.signal]),
+        signal: AbortSignal.any([cancelled, ended.signal, ...(stop ? [stop] : [])]),
         accounting: await openedModelCalls(),
       })
       return sixb
@@ -368,17 +380,46 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     return toolsBound
   }
   let logs: RunLogSession | undefined
-  const toolLogger = () => {
+  // Labeled with the conversation its run works in: a child's is its parent's.
+  let toolLabels: Promise<LogFields> | undefined
+  const toolLogger = async () => {
+    toolLabels ??= (async (): Promise<LogFields> => {
+      if (run.kind !== "subagent") return { threadId: run.threadId }
+      const thread = await host.storage.agents.threads.getById({
+        projectId: host.projectId,
+        id: run.threadId,
+      })
+      return {
+        parentRunId: run.parentRunId,
+        threadId: thread ? conversationThreadId(thread) : run.threadId,
+      }
+    })().catch((error: unknown) => {
+      toolLabels = undefined
+      throw error
+    })
+    const labels = await toolLabels
     logs ??= resolveLoggingService(host.projectId, host.logging).startExecution({
       kind: "agent",
       id: run.id,
     })
-    return logs.logger.child(
-      run.kind === "subagent" ? { parentRunId: run.parentRunId } : { threadId: run.threadId }
-    )
+    return logs.logger.child(labels)
   }
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
+  // What a child's sandbox holds: what it was handed, and what a paused run it continues left in
+  // out/. Its tools open those, by the paths $SIXB_ATTACHMENTS lists.
+  let handed: Promise<readonly SubagentRunFile[]> | undefined
+  const childFiles = (child: SubagentRunRecord) => {
+    handed ??= readAgentRunContext(host, child)
+      .then((context) =>
+        subagentSandboxFiles(child, context.kind === "subagent" ? context.paused : undefined)
+      )
+      .catch((error: unknown) => {
+        handed = undefined
+        throw error
+      })
+    return handed
+  }
 
   return {
     run,
@@ -449,7 +490,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     threads,
     artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
     files,
-    async callTool(call, { signal }) {
+    async callTool(call, { signal, maxFileBytes }) {
       // Only a tool the run offers: a child's are the ones its parent chose.
       const offered = run.kind === "subagent" ? run.spec.toolNames : undefined
       const definition =
@@ -459,6 +500,8 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       if (!definition) {
         throw new AgentToolPublicError(`[Sixb] Tool '${call.toolName}' is not available.`)
       }
+      // A tool acts on the project: only for the runner that still holds the run.
+      await assertAgentRunOwned(agents, fence)
       return runAgentTool({
         definition,
         valueTypesById: host.definitions.ontology.getValueTypesById(),
@@ -466,16 +509,17 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         signal,
         run: toolRunInfo(run),
         sixb: await toolSdk(),
-        logger: toolLogger(),
+        logger: await toolLogger(),
         attachments:
           run.kind === "subagent"
-            ? handedToolAttachments({ files: run.spec.files ?? [], store: files })
+            ? handedToolAttachments({ files: await childFiles(run), store: files })
             : threadToolAttachments({
                 threadId: run.threadId,
                 message: (messageId) => threads.message(messageId),
                 files,
               }),
         files,
+        ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
       })
     },
     authorization: (ref) =>
@@ -536,10 +580,12 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           })
         ),
     },
-    close() {
+    async close() {
       cancel.stop()
       ended.abort(new DOMException("The Agent run's session has closed.", "AbortError"))
-      void logs?.flush().catch(() => {})
+      await logs?.flush().catch((error: unknown) => {
+        console.error(`[Sixb] Agent run '${run.id}' could not flush its tools' logs.`, error)
+      })
     },
   }
 }

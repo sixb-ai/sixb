@@ -36,6 +36,13 @@ export interface AgentToolCall {
   readonly input: unknown
 }
 
+/** How a call runs: until `signal` aborts, its files within what the run's file budget has left. */
+export interface AgentToolCallOptions {
+  readonly signal: AbortSignal
+  /** The bytes the run may still store; the put that would pass it is refused. */
+  readonly maxFileBytes?: number
+}
+
 /** What a project tool returned, and the files it stored for the run's sandbox. */
 export interface AgentToolCallResult {
   readonly output: JsonValue
@@ -72,6 +79,8 @@ export async function runAgentTool(input: {
   readonly attachments: AgentToolAttachments
   /** Where the files it puts are stored. */
   readonly files: Pick<AgentRunFileStore, "put">
+  /** The bytes its files may take in all: the run's budget left. */
+  readonly maxFileBytes?: number
 }): Promise<AgentToolCallResult> {
   const { definition, call, signal } = input
   let toolInput: Readonly<Record<string, JsonValue>>
@@ -91,6 +100,7 @@ export async function runAgentTool(input: {
   }
 
   const stored: AgentToolCallFile[] = []
+  let storedBytes = 0
   const output = await definition.handler({
     input: toolInput,
     toolCallId: call.toolCallId,
@@ -106,6 +116,15 @@ export async function runAgentTool(input: {
           file,
           store: input.files,
           signal,
+          // Counted as it is read: the put that would pass the run's budget stores nothing.
+          onBytes: (sizeBytes) => {
+            storedBytes += sizeBytes
+            if (input.maxFileBytes !== undefined && storedBytes > input.maxFileBytes) {
+              throw new AgentToolPublicError(
+                `[SixbAgent] Agent tool '${definition.name}' files exceed the run's file limit, ${input.maxFileBytes} bytes left.`
+              )
+            }
+          },
         })
         stored.push({ fileRef, path })
         // Where the runner copies it, in a sandbox that keeps its run files in the usual place.
@@ -114,6 +133,7 @@ export async function runAgentTool(input: {
     },
     attachments: input.attachments,
   })
+  // The tool's definition checked it is JSON.
   return { output: output as JsonValue, files: stored }
 }
 

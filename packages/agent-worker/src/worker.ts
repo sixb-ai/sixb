@@ -261,6 +261,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       run: queuedRun,
       modelId: queuedRun.spec?.model.modelId,
       leaseExpiresAt: delivery.leaseExpiresAt,
+      stop: signal,
     })
     if (!session) return
     const run = session.run
@@ -382,7 +383,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // Its children end before its delivery does: that delivery renews their lease too.
       await this.children?.stopChildrenOf(run.id)
       stopOwnershipProjection?.()
-      session.close()
+      await session.close()
       delegation?.close()
       runtime?.dispose()
       await environment?.dispose()

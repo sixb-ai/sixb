@@ -59,10 +59,11 @@ renewLease · cancelled · assertOwned   ownership, and a cancel of the run or o
 models.language(ref)                   the run's model, pinned once: each call is admitted against
                                        the requester's AI limits and records itself, so the runner
                                        never reports what a call used
-callTool(call)                         one call of a project tool the run offers, run as the run
-                                       (run-tools.ts): its input checked against the tool's schema,
-                                       its model calls billed to the run, the files it puts stored
-                                       and returned for the runner to copy into its sandbox
+callTool(call)                         one call of a project tool the run offers, for the runner
+                                       that holds the run, run as the run (run-tools.ts): its input
+                                       checked against the tool's schema, its model calls billed to
+                                       the run and stopped with it, the files it puts stored within
+                                       the run's budget and returned for the runner to copy in
 events · heldCalls                     live records (best effort) and the approvals that hold a run
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
@@ -78,7 +79,7 @@ files                                  where the run's files are stored and read
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
-                                       host's afterFinish: stopping children, resuming a decided turn
+                                       host's afterFinish: children stopped, a decided turn resumed
 ```
 
 `tests/agent-run-session-contract.ts` is what every session does: the in-process one runs it now,

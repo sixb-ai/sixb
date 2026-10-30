@@ -2,6 +2,7 @@ import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
   estimateAgentContextMessagesTokens,
@@ -33,7 +34,7 @@ import {
   conversationAuthorsText,
 } from "./message-authors"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
+import { agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext } from "./types"
 
@@ -315,7 +316,7 @@ export function estimateAgentConversationInputTokens(input: {
 }
 
 function contextEstimateTools(
-  specs: readonly AgentModelToolSpec[]
+  specs: readonly AgentToolSpec[]
 ): readonly AgentContextEstimateTool[] {
   return specs.map((spec) => ({
     name: spec.name,
