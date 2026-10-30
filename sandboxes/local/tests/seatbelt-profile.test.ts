@@ -17,6 +17,7 @@ describe("buildSeatbeltProfile", () => {
         "(allow default)",
         "(deny network-outbound)",
         "(deny file-write*)",
+        '(allow file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (regex #"^/dev/fd/"))',
         '(allow file-write* (subpath "/private/tmp/wd"))',
         '(allow file-write* (subpath "/private/tmp"))',
         '(allow file-write* (subpath "/private/var/folders"))',
@@ -67,8 +68,10 @@ describe("buildSeatbeltProfile", () => {
       network: { mode: "none" },
     })
 
-    expect(profile.trimEnd().split("\n").slice(-2)).toEqual([
+    expect(profile.trimEnd().split("\n").slice(-4)).toEqual([
+      '(deny file-write* (literal "/Users/ada") (literal "/Users"))',
       '(deny file-read* file-write* (subpath "/Users/ada/acme"))',
+      '(deny file-write* (literal "/private/tmp/wd") (literal "/private/tmp") (literal "/private"))',
       '(deny file-read* file-write* (subpath "/private/tmp/wd/.env"))',
     ])
   })
