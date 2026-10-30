@@ -13204,6 +13204,8 @@ describe("agent tools act as the requester", () => {
     const plan = executionPlanFor(sixb)
     const execution = freshTestExecution()
     const task = await createWorkflowAgentNodeEnvironment({
+      // The test's node is not stored, and nothing here acts on its sandbox.
+      session: { assertOwned: async () => {} },
       context,
       plan,
       run: {

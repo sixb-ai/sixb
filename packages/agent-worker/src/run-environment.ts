@@ -11,6 +11,7 @@ import {
   type AgentRunSession,
   conversationThreadId,
   staticSandboxRecipe,
+  type WorkflowAgentNodeSession,
 } from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
@@ -44,7 +45,7 @@ import type { AgentContextBudget } from "./context-budget"
 import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
-import { assertExecutionOwned, isLostExecution } from "./errors"
+import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
@@ -137,6 +138,8 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The step's session: its sandbox checks the node is still the session's before each action. */
+  readonly session: Pick<WorkflowAgentNodeSession, "assertOwned">
   readonly run: WorkflowAgentNodeRunRecord
   readonly workflowId: string
   readonly stepId: string
@@ -445,7 +448,7 @@ export async function createWorkflowAgentNodeEnvironment(
           factory: stepSandbox,
           recipe: staticSandboxRecipe(stepSandbox.configuration ?? {}),
           auth: stepSandbox.configuration?.auth,
-          assertOwner: () => assertNodeRunOwned(context, run.nodeRunId, execution.token),
+          assertOwner: () => input.session.assertOwned(),
           onAuthFailure: (error) => failure.abort(error),
         },
       })
@@ -490,20 +493,6 @@ export async function createWorkflowAgentNodeEnvironment(
     if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
     throw error
   }
-}
-
-/** Throw unless this execution still owns the node run; read before each provider action. */
-async function assertNodeRunOwned(
-  context: AgentExecutionContext,
-  nodeRunId: string,
-  executionToken: string
-): Promise<void> {
-  const current = await context.storage.workflowRuns?.agentNodes.getByNodeRunId({
-    projectId: context.id,
-    nodeRunId,
-  })
-
-  assertExecutionOwned({ current, executionToken, runId: nodeRunId })
 }
 
 interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signal"> {

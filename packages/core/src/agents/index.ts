@@ -279,3 +279,12 @@ export {
   isAgentToolDefinition,
   validateAndNormalizeAgentToolInput,
 } from "./validation"
+export type {
+  WorkflowAgentNodeSession,
+  WorkflowAgentNodeSessionHost,
+} from "./workflow-node-session"
+export {
+  claimWorkflowAgentNode,
+  enqueueWorkflowAgentNodeResume,
+  WorkflowResumeDispatchError,
+} from "./workflow-node-session"
