@@ -24,6 +24,11 @@ const CLI_COMMANDS = {
   files: ["upload", "download"],
   workflows: ["list", "get", "start"],
   "workflow-runs": ["list", "get"],
+  datasets: ["list", "get", "versions", "rows"],
+  syncs: ["list", "get"],
+  "sync-runs": ["list"],
+  pipelines: ["list", "get"],
+  "pipeline-runs": ["list", "get"],
   models: ["list", "get", "text", "image", "speech", "transcribe", "calls"],
   api: ["get", "post"],
   memory: ["save", "pull"],
@@ -617,6 +622,28 @@ function describeSixb(
       )
     case "workflow-runs.get":
       return withDetail(icon("actions", m.workflowRun), runStatus(parsed?.json, m))
+    case "datasets.list":
+      return icon("objects", m.listDatasets)
+    case "datasets.get":
+      return icon("objects", m.inspectDataset, humanize(intent.args[0]))
+    case "datasets.versions":
+      return icon("objects", m.datasetVersions, humanize(intent.args[0]))
+    case "datasets.rows":
+      return icon("objects", m.datasetRows, humanize(intent.args[0]))
+    case "syncs.list":
+      return icon("actions", m.listSyncs)
+    case "syncs.get":
+      return icon("actions", m.inspectSync, humanize(intent.args[0]))
+    case "sync-runs.list":
+      return icon("actions", m.listSyncRuns)
+    case "pipelines.list":
+      return icon("actions", m.listPipelines)
+    case "pipelines.get":
+      return icon("actions", m.inspectPipeline, humanize(intent.args[0]))
+    case "pipeline-runs.list":
+      return icon("actions", m.listPipelineRuns)
+    case "pipeline-runs.get":
+      return withDetail(icon("actions", m.pipelineRun), runStatus(parsed?.json, m))
     case "files.upload":
       return withDetail(icon("object", m.upload), filePath(parsed?.json))
     case "files.download":

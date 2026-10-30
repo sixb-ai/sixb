@@ -563,6 +563,32 @@ export const en = {
     },
     listWorkflowRuns: { title: "Listed workflow runs", running: "Listing workflow runs" },
     workflowRun: { title: "Checked a workflow run", running: "Checking a workflow run" },
+    listDatasets: { title: "Listed datasets", running: "Listing datasets" },
+    inspectDataset: {
+      title: (dataset: string) => `Inspected the ${dataset || "requested"} dataset`,
+      running: (dataset: string) => `Inspecting the ${dataset || "requested"} dataset`,
+    },
+    datasetVersions: {
+      title: (dataset: string) => `Listed versions of the ${dataset || "requested"} dataset`,
+      running: (dataset: string) => `Listing versions of the ${dataset || "requested"} dataset`,
+    },
+    datasetRows: {
+      title: (dataset: string) => `Read rows of the ${dataset || "requested"} dataset`,
+      running: (dataset: string) => `Reading rows of the ${dataset || "requested"} dataset`,
+    },
+    listSyncs: { title: "Listed syncs", running: "Listing syncs" },
+    inspectSync: {
+      title: (sync: string) => `Inspected the ${sync || "requested"} sync`,
+      running: (sync: string) => `Inspecting the ${sync || "requested"} sync`,
+    },
+    listSyncRuns: { title: "Listed sync runs", running: "Listing sync runs" },
+    listPipelines: { title: "Listed pipelines", running: "Listing pipelines" },
+    inspectPipeline: {
+      title: (pipeline: string) => `Inspected the ${pipeline || "requested"} pipeline`,
+      running: (pipeline: string) => `Inspecting the ${pipeline || "requested"} pipeline`,
+    },
+    listPipelineRuns: { title: "Listed pipeline runs", running: "Listing pipeline runs" },
+    pipelineRun: { title: "Checked a pipeline run", running: "Checking a pipeline run" },
     upload: { title: "Uploaded a file", running: "Uploading a file" },
     download: { title: "Downloaded a file", running: "Downloading a file" },
     models: { title: "Checked the available models", running: "Checking the available models" },
