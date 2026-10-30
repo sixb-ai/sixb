@@ -164,6 +164,7 @@ export type {
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
+  AgentRunConversation,
   AgentRunHeldCalls,
   AgentRunOutcome,
   AgentRunSession,

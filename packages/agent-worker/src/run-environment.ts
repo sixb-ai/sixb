@@ -191,6 +191,7 @@ export async function createConversationAgentEnvironment(
     const prepared = preflight
       ? await prepareAgentConversationContext({
           context,
+          session: input.session,
           plan,
           ontologyIndex: ontologyDocs.index,
           contextDirectory: sandbox.contextDirectory,
@@ -212,15 +213,13 @@ export async function createConversationAgentEnvironment(
     const [messages, inlineImages, memory] = await Promise.all([
       prepared?.threadContext.retainedMessages ??
         input.messages ??
-        context.storage.agents.messages
-          .list({ projectId: context.id, threadId: run.threadId, order: "asc" })
+        input.session.conversation
+          .messages({ threadId: run.threadId, order: "asc" })
           .then((history) => history.messages),
       modelSupportsInlineImages(plan.model),
       prepared
         ? prepared.memory
-        : context.storage.agents.checkpoints
-            .getLatest({ projectId: context.id, threadId: run.threadId })
-            .then(loadMemory),
+        : input.session.conversation.latestCheckpoint(run.threadId).then(loadMemory),
     ])
     const attachmentContext = await prepareAgentAttachments({
       projectId: context.id,

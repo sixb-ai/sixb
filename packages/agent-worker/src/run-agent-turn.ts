@@ -85,15 +85,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const threadContext =
     input.threadContext ??
     (await loadAgentThreadModelContext({
-      storage: agents,
-      projectId,
+      conversation: input.session.conversation,
       threadId: run.threadId,
     }))
   const { attachmentContext } = context
   const [sentTimes, authors] = await Promise.all([
     loadUserMessageTimes({
-      storage: agents,
-      projectId,
+      conversation: input.session.conversation,
       threadId: run.threadId,
       messages: threadContext.retainedMessages,
       projectTimeZone: context.projectTimeZone,

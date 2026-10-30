@@ -248,6 +248,53 @@ describe("an agent run session's children and mail", () => {
     second.close()
   })
 
+  // Compaction's checkpoint is the one write a run makes to its conversation besides finishing.
+  // Write it with the token storage holds now in place of the session's; the stale write lands.
+  test("writes a context checkpoint only while the turn owns its run", async () => {
+    const { host, run } = await setup()
+    const first = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    if (!first) throw new Error("Expected the run to be claimed.")
+    const checkpoint = (id: string) => ({
+      id,
+      threadId: run.threadId,
+      expectedPreviousCheckpointId: null,
+      expectedHeadSeq: 2,
+      reason: "threshold" as const,
+      summary: "Earlier turns.",
+      summaryFormatVersion: 1 as const,
+      summarizedThroughSeq: 1,
+      observedHeadSeq: 2,
+      estimatedInputTokensBefore: 10,
+      estimatedInputTokensAfter: 5,
+      summaryModelId: "test-model",
+    })
+    await host.storage.agents.messages.append({
+      id: "message-earlier",
+      projectId: PROJECT_ID,
+      threadId: run.threadId,
+      runId: run.id,
+      role: "assistant",
+      parts: [{ type: "text", text: "An earlier answer." }],
+    })
+    await host.storage.agents.messages.append({
+      id: "message-head",
+      projectId: PROJECT_ID,
+      threadId: run.threadId,
+      runId: run.id,
+      role: "user",
+      parts: [{ type: "text", text: "The latest question." }],
+    })
+    const second = await claimAgentRun(host, { run: first.run, leaseExpiresAt: LEASE })
+    if (!second) throw new Error("Expected the run to be reclaimed.")
+
+    expect(
+      await first.conversation.createCheckpoint(checkpoint("ckpt-stale")).catch((error) => error)
+    ).toBeInstanceOf(AgentStorageError)
+    expect((await second.conversation.createCheckpoint(checkpoint("ckpt-1"))).id).toBe("ckpt-1")
+    first.close()
+    second.close()
+  })
+
   test("sends mail to a child's thread inbox and reads it back from a cursor", async () => {
     const { host, run } = await setup()
     const session = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })

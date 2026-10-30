@@ -10907,6 +10907,7 @@ describe("AgentWorker", () => {
       try {
         return await conversationPreparation.prepareAgentConversationContext({
           context,
+          session,
           plan: executionPlanFor(host),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           ontologyIndex: renderOntologyDocs({

@@ -7,14 +7,24 @@ import {
 } from "../models/execution/index"
 import type { Storage } from "../storage"
 import {
+  type AgentContextCheckpointRecord,
+  type AgentMessageRecord,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
+  type AgentThreadParticipantRecord,
+  type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AppendAgentMessageInput,
+  type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
+  type ListAgentMessagesInput,
+  type ListAgentMessagesResult,
+  type ListAgentRunsInput,
+  type ListAgentRunsResult,
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
+import type { AiModelCallUsageRecord } from "../storage/ai-usage"
 import { turnPausesOnHeldCalls } from "./approvals"
 import { createAgentRunExecutionToken } from "./ids"
 import type { StreamSink } from "./run-events"
@@ -85,8 +95,33 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   assertOwned(): Promise<void>
   /** A conversation's persistent workspace, as this run holds it. */
   readonly workspace: AgentRunWorkspace
+  /** The run's conversation: its threads, history and context checkpoints. */
+  readonly conversation: AgentRunConversation
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
+}
+
+/**
+ * What a run reads of its conversation, and the one write it makes there besides finishing: a
+ * context checkpoint, fenced by the run's token.
+ */
+export interface AgentRunConversation {
+  thread(threadId: string): Promise<AgentThreadRecord | null>
+  participants(threadIds: readonly string[]): Promise<readonly AgentThreadParticipantRecord[]>
+  latestCheckpoint(threadId: string): Promise<AgentContextCheckpointRecord | null>
+  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
+  message(messageId: string): Promise<AgentMessageRecord | null>
+  run(runId: string): Promise<AgentRunRecord | null>
+  runs(input: Omit<ListAgentRunsInput, "projectId">): Promise<ListAgentRunsResult>
+  /** The latest completed model call of an execution: what compaction's estimate anchors on. */
+  latestModelCall(executionId: string): Promise<AiModelCallUsageRecord | null>
+  /** Summarize the thread up to a point; refused once the run lost its execution. */
+  createCheckpoint(
+    input: Omit<
+      CreateAgentContextCheckpointInput,
+      "projectId" | "createdByRunId" | "executionToken"
+    >
+  ): Promise<AgentContextCheckpointRecord>
 }
 
 /** A thread's persistent workspace state, moved only by the run that holds the thread. */
@@ -170,6 +205,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   let modelCalls: Promise<AiModelCallRecorder> | undefined
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   const fence = { projectId: host.projectId, id: run.id, executionToken }
+  const agents = host.storage.agents
 
   return {
     run,
@@ -210,6 +246,26 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       ) {
         throw new AgentExecutionLostError(run.id)
       }
+    },
+    conversation: {
+      thread: (threadId) => agents.threads.getById({ projectId: host.projectId, id: threadId }),
+      participants: (threadIds) =>
+        agents.threads.listParticipants({ projectId: host.projectId, threadIds }),
+      latestCheckpoint: (threadId) =>
+        agents.checkpoints.getLatest({ projectId: host.projectId, threadId }),
+      messages: (input) => agents.messages.list({ ...input, projectId: host.projectId }),
+      message: (messageId) => agents.messages.getById({ projectId: host.projectId, id: messageId }),
+      run: (runId) => agents.runs.getById({ projectId: host.projectId, id: runId }),
+      runs: (input) => agents.runs.list({ ...input, projectId: host.projectId }),
+      latestModelCall: (executionId) =>
+        host.storage.aiUsage.getLatestForExecution({ projectId: host.projectId, executionId }),
+      createCheckpoint: (input) =>
+        agents.checkpoints.create({
+          ...input,
+          projectId: host.projectId,
+          createdByRunId: run.id,
+          executionToken,
+        }),
     },
     workspace: {
       transition: (input) =>
