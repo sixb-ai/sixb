@@ -51,6 +51,8 @@ import {
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
   agentRunQueueJobId,
   agentRunTokenRunId,
   createAgentRunExecutionToken,
@@ -117,15 +119,9 @@ import { prepareAgentAttachments } from "../src/attachments"
 import { storeChildOutputs } from "../src/child-files"
 import * as conversationPreparation from "../src/context-compaction"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentRunOwnedElsewhereError,
-  AgentTurnTimeoutError,
-} from "../src/errors"
+import { AgentRunOwnedElsewhereError, AgentTurnTimeoutError } from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
-import { finishRunOrThrow } from "../src/finalize"
-import { runAgentTurn, stoppedByWorker } from "../src/run-agent-turn"
+import { stoppedByWorker } from "../src/run-agent-turn"
 import * as agentEnvironment from "../src/run-environment"
 import {
   createConversationAgentEnvironment,
@@ -146,7 +142,7 @@ import type {
 } from "../src/types"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
-import { waitFor as pollFor } from "./helpers"
+import { waitFor as pollFor, runTurnInSession } from "./helpers"
 import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -6869,7 +6865,7 @@ describe("AgentWorker", () => {
       run,
     })
     try {
-      await runAgentTurn({
+      await runTurnInSession({
         context: environment.turnContext,
         plan,
         run,
@@ -7721,7 +7717,7 @@ describe("AgentWorker", () => {
   })
 
   test("keeps a child's task and its work in a thread of its own, under the conversation", async () => {
-    // Removal proof: finish the child with `finishRunOrThrow` again, without its work message;
+    // Removal proof: finish the child with `session.finish` without its work message;
     // its thread then holds the task alone.
     let childRunId = ""
     const childCalls: LanguageModelRequest[] = []
@@ -11635,7 +11631,7 @@ describe("AgentWorker", () => {
       execution: freshTestExecution(),
     })
     const abort = new AbortController()
-    const result = await runAgentTurn({
+    const result = await runTurnInSession({
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -12194,7 +12190,7 @@ describe("AgentWorker", () => {
       execution: freshTestExecution(),
     })
 
-    const promise = runAgentTurn({
+    const promise = runTurnInSession({
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -12452,7 +12448,7 @@ describe("AgentWorker", () => {
     jest.useFakeTimers()
     const start = Date.now()
     try {
-      const turn = runAgentTurn({
+      const turn = runTurnInSession({
         context: {
           id: PROJECT_ID,
           authorPrincipal: AGENT_PRINCIPAL,
@@ -12501,7 +12497,7 @@ describe("AgentWorker", () => {
         execution: freshTestExecution(),
       })
     )
-    await runAgentTurn({
+    await runTurnInSession({
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
@@ -13423,50 +13419,5 @@ describe("agent tools act as the requester", () => {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
     }
-  })
-})
-
-describe("finishRunOrThrow", () => {
-  function finishingStorage(finish: AgentStorage["runs"]["finish"]): AgentStorage {
-    return { runs: { finish } } as unknown as AgentStorage
-  }
-
-  const succeededInput = {
-    projectId: PROJECT_ID,
-    id: "agt_run_x",
-    executionToken: "agt_exec_x",
-    status: "succeeded",
-  } as const
-
-  test("raises AgentFinalizationError when an infra error persists across retries", async () => {
-    let attempts = 0
-    const storage = finishingStorage(() => {
-      attempts += 1
-      return Promise.reject(new Error("db down"))
-    })
-    // Fake timers stand in for the in-place backoff between attempts.
-    jest.useFakeTimers()
-    const start = Date.now()
-    try {
-      const error = await settleUnderFakeTime(
-        finishRunOrThrow(storage, succeededInput),
-        "finalization retries"
-      ).catch((caught: unknown) => caught)
-      expect(error).toBeInstanceOf(AgentFinalizationError)
-      // Every finalization retry: 50 + 200 + 600ms.
-      expectBackoffSpent(start, 850)
-    } finally {
-      jest.useRealTimers()
-    }
-    expect(attempts).toBe(4)
-  })
-
-  test("raises AgentExecutionLostError when the run is no longer ours", async () => {
-    const storage = finishingStorage(() =>
-      Promise.reject(new AgentStorageError("execution_lost", "gone"))
-    )
-    expect(
-      await finishRunOrThrow(storage, succeededInput).catch((error: unknown) => error)
-    ).toBeInstanceOf(AgentExecutionLostError)
   })
 })

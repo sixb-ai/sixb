@@ -1,5 +1,6 @@
 import {
   type AgentContextEstimateTool,
+  AgentExecutionLostError,
   agentContextCheckpointId,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -22,7 +23,7 @@ import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentContextBudget } from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
-import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
+import { AgentContextCompactionError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import {
   type ConversationReaders,

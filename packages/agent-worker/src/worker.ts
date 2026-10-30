@@ -1,14 +1,19 @@
 import { principalsEqual } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  type AgentRunSession,
+  type AgentRunSessionHost,
+  claimAgentRun,
   conversationThreadId,
-  createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
   dispatchQueuedSubagentRuns,
+  isTerminalOrExecutionGone,
   publishAgentRunCancel,
   resolveInheritedAgentExecutionAuthorization,
   sandboxCredentialIssue,
-  subscribeAgentRunCancel,
+  watchAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
@@ -23,14 +28,12 @@ import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/inter
 import { isAbortError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
 import type {
-  AgentRunExecution,
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
   AppendAgentMessageInput,
   ConversationAgentRunRecord,
   ExecutionRecord,
-  FinishAgentRunInput,
   SubagentRunRecord,
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
@@ -45,8 +48,6 @@ import {
 } from "./delivery-policy"
 import {
   AgentEnvironmentSaveError,
-  AgentExecutionLostError,
-  AgentFinalizationError,
   AgentRequesterLeftThreadError,
   AgentRunOwnedElsewhereError,
   AgentTurnInterruptedError,
@@ -62,7 +63,6 @@ import {
   resolveSubagentExecutionPlan,
 } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
-import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { type ConversationReaders, conversationReaders } from "./message-authors"
 import { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 import {
@@ -116,11 +116,6 @@ interface PreparedConversationTurn {
   readonly executionContext: AgentExecutionContext
   readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
 }
-
-/** Outcome of trying to own a run for a claimed job. */
-type Reservation<TRun extends AgentRunRecord = AgentRunRecord> =
-  | { readonly kind: "run"; readonly run: TRun }
-  | { readonly kind: "skip" }
 
 /**
  * Cohosted worker that turns durable queued agent runs into executing turns.
@@ -229,7 +224,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         job,
         signal,
         delivery,
-        watchForCancel: (runId) => this.watchForCancel(runId),
+        watchForCancel: (runId) =>
+          watchAgentRunCancel({ projectId: this.host.id, broker: this.host.broker }, [runId]),
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       return
@@ -269,59 +265,28 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       return
     }
     // Own this attempt before preparation: even a revoked authority needs a fenced terminal outcome.
-    const reservation = await this.startOrReclaim(context, {
+    const session = await claimAgentRun(this.sessionHost(context), {
       run: queuedRun,
       modelId: queuedRun.spec?.model.modelId,
-      execution: freshExecution(delivery.leaseExpiresAt),
+      leaseExpiresAt: delivery.leaseExpiresAt,
     })
-    if (reservation.kind === "skip") {
-      return
-    }
-    const run = reservation.run
-    const executionToken = run.execution?.token
-    if (!executionToken) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${run.id}' has no execution token.`,
-        { details: { runId: run.id, threadId: run.threadId } }
-      )
-    }
+    if (!session) return
+    const run = session.run
     let environment: ConversationAgentExecutionEnvironment | null = null
     let runtime: AgentTurnRuntime | null = null
     let delegation: SubagentCoordinator | undefined
     let stopOwnershipProjection: (() => void) | undefined
-    // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
-    // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
-    const cancel = await this.watchForCancel(run.id)
-    const turnSignal = AbortSignal.any([signal, cancel.signal])
+    // A user cancel joins the turn's abort sources, so it stops the model stream as a shutdown does.
+    const turnSignal = AbortSignal.any([signal, session.cancelled])
 
     try {
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
       // expiration so a run token can fail closed without maintaining another heartbeat.
-      stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
-        void this.confirmExecutionOwnership(
-          context,
-          run.id,
-          executionToken,
-          renewed.leaseExpiresAt
-        ).catch((error) => {
-          if (!isExecutionGone(error)) {
-            console.error(
-              `[SixbAgentWorker] Could not project queue ownership for agent run '${run.id}'.`,
-              error
-            )
-          }
-        })
-      })
+      stopOwnershipProjection = projectLease(delivery, session, "agent")
       const prepared = await retryPreparationInPlace(job.attempt, turnSignal, async () => {
         // Catch a renewal that completed between starting the run and attaching the observer.
         // Storage keeps this projection monotonic, so racing confirmations are safe.
-        await this.confirmExecutionOwnership(
-          context,
-          run.id,
-          executionToken,
-          delivery.leaseExpiresAt
-        )
+        await session.renewLease(delivery.leaseExpiresAt)
         return this.prepareConversationTurn(context, run)
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
@@ -369,6 +334,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: environment.turnContext,
         plan,
         run,
+        session,
         ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
         signal: turnSignal,
         stopSignal: signal,
@@ -408,13 +374,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         error instanceof AgentRequesterLeftThreadError ||
         (!environmentSaveFailed &&
           !(error instanceof ModelUsageRecordingError) &&
-          (signal.aborted || cancel.signal.aborted || isAbortError(error)))
+          (signal.aborted || session.cancelled.aborted || isAbortError(error)))
       // A worker stop, unlike a user cancel, leaves the user something to resume.
       const interrupted = aborted && stoppedByWorker(turnSignal, signal)
-      const finalized = await this.recordFate(
-        context,
-        run,
-        executionToken,
+      const finalized = await recordFate(
+        session,
         aborted ? "cancelled" : "failed",
         interrupted ? new AgentTurnInterruptedError(run.id) : error
       )
@@ -435,7 +399,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       }
     } finally {
       stopOwnershipProjection?.()
-      cancel.stop()
+      session.close()
       delegation?.close()
       runtime?.dispose()
       await environment?.dispose()
@@ -545,16 +509,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     queuedRun: AgentRunRecord,
     delivery: { readonly leaseExpiresAt: string }
   ): Promise<void> {
-    const reservation = await this.startOrReclaim(context, {
+    const session = await claimAgentRun(this.sessionHost(context), {
       run: queuedRun,
-      execution: freshExecution(delivery.leaseExpiresAt),
+      leaseExpiresAt: delivery.leaseExpiresAt,
     })
-    if (reservation.kind === "skip" || !reservation.run.execution) return
+    if (!session) return
+    session.close()
 
-    const finalized = await this.recordFate(
-      context,
-      reservation.run,
-      reservation.run.execution.token,
+    const finalized = await recordFate(
+      session,
       "cancelled",
       queuedRun.kind === "subagent"
         ? withFailureMessage(
@@ -601,25 +564,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       return
     }
 
-    const reservation = await this.startOrReclaim(context, {
+    // A child stops with its parent: cancelling the parent cancels it.
+    const session = await claimAgentRun(this.sessionHost(context), {
       run: queuedRun,
       modelId: queuedRun.spec.model.modelId,
-      execution: freshExecution(delivery.leaseExpiresAt),
+      leaseExpiresAt: delivery.leaseExpiresAt,
+      cancelWith: [queuedRun.parentRunId],
     })
-    if (reservation.kind === "skip" || reservation.run.kind !== "subagent") return
-    const run = reservation.run
-    const executionToken = run.execution?.token
-    if (!executionToken) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Subagent run '${run.id}' has no execution token.`,
-        { details: agentRunFailureDetails(run) }
-      )
-    }
-
-    const cancel = await this.watchForCancel(run.id)
-    const parentCancel = await this.watchForCancel(run.parentRunId)
-    const turnSignal = AbortSignal.any([signal, cancel.signal, parentCancel.signal])
+    if (!session) return
+    const run = session.run
+    const turnSignal = AbortSignal.any([signal, session.cancelled])
     let preparationComplete = false
     let environment: AgentExecutionEnvironment | null = null
     let runtime: AgentTurnRuntime | null = null
@@ -635,22 +589,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         throw new DOMException("The parent Agent run is no longer active.", "AbortError")
       }
 
-      stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
-        void this.confirmExecutionOwnership(
-          context,
-          run.id,
-          executionToken,
-          renewed.leaseExpiresAt
-        ).catch((error) => {
-          if (!isExecutionGone(error)) {
-            console.error(
-              `[SixbAgentWorker] Could not project queue ownership for subagent run '${run.id}'.`,
-              error
-            )
-          }
-        })
-      })
-      await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
+      stopOwnershipProjection = projectLease(delivery, session, "subagent")
+      await session.renewLease(delivery.leaseExpiresAt)
       const configuredPlan = resolveSubagentExecutionPlan({
         run: queuedRun,
         models: this.host.definitions.models?.language,
@@ -751,6 +691,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: environment.turnContext,
         plan,
         run,
+        session,
         thread: childThread,
         runtime,
         work,
@@ -778,14 +719,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
       const aborted =
         !(error instanceof ModelUsageRecordingError) &&
-        (signal.aborted ||
-          cancel.signal.aborted ||
-          parentCancel.signal.aborted ||
-          isAbortError(error))
-      const finalized = await this.recordFate(
-        context,
-        run,
-        executionToken,
+        (signal.aborted || session.cancelled.aborted || isAbortError(error))
+      const finalized = await recordFate(
+        session,
         aborted ? "cancelled" : "failed",
         error,
         work.messages
@@ -799,8 +735,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       if (signal.aborted) throw error
     } finally {
       stopOwnershipProjection?.()
-      cancel.stop()
-      parentCancel.stop()
+      session.close()
       runtime?.dispose()
       await environment?.dispose()
     }
@@ -1143,83 +1078,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     return this.context
   }
 
-  private async startOrReclaim<TRun extends AgentRunRecord>(
-    context: AgentWorkerContext,
-    input: {
-      readonly run: TRun
-      readonly modelId?: string
-      readonly execution: AgentRunExecution
-    }
-  ): Promise<Reservation<TRun>> {
-    const { run } = input
-    if (run.status === "queued") {
-      const started = await context.storage.agents.runs.start({
-        projectId: context.id,
-        id: run.id,
-        modelId: input.modelId,
-        execution: input.execution,
-      })
-      if (started.kind !== run.kind) {
-        throw new Error(`[SixbAgentWorker] Agent run '${run.id}' changed kind while starting.`)
-      }
-      return { kind: "run", run: started as TRun }
-    }
-    if (run.status !== "running") {
-      return { kind: "skip" }
-    }
-    try {
-      const reclaimed = await context.storage.agents.runs.reclaim({
-        projectId: context.id,
-        id: run.id,
-        execution: input.execution,
-      })
-      if (reclaimed.kind !== run.kind) {
-        throw new Error(`[SixbAgentWorker] Agent run '${run.id}' changed kind while reclaiming.`)
-      }
-      return { kind: "run", run: reclaimed as TRun }
-    } catch (error) {
-      if (error instanceof AgentStorageError && error.code === "invalid_state") {
-        return { kind: "skip" }
-      }
-      throw error
-    }
-  }
-
-  /**
-   * Subscribe to a run's cancel signal for the duration of its turn. Failing to attach the watch
-   * only costs cancellability for this run (it still runs to completion), so it is best-effort and
-   * never fails the turn. The returned `stop` unsubscribes.
-   */
-  private async watchForCancel(runId: string): Promise<{
-    readonly signal: AbortSignal
-    readonly stop: () => void
-  }> {
-    const controller = new AbortController()
-    let unsubscribe: (() => void) | undefined
-    try {
-      unsubscribe = await subscribeAgentRunCancel(
-        this.host.broker,
-        { projectId: this.host.id, runId },
-        () => controller.abort()
-      )
-    } catch (error) {
-      console.error(`[SixbAgentWorker] Agent run '${runId}' cancel watch failed to start:`, error)
-    }
-    return { signal: controller.signal, stop: () => unsubscribe?.() }
-  }
-
-  private confirmExecutionOwnership(
-    context: AgentWorkerContext,
-    runId: string,
-    executionToken: string,
-    queueLeaseExpiresAt: string
-  ): Promise<AgentRunRecord> {
-    return context.storage.agents.runs.confirmExecutionOwnership({
-      projectId: context.id,
-      id: runId,
-      executionToken,
-      queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
-    })
+  private sessionHost(context: AgentWorkerContext): AgentRunSessionHost {
+    return { projectId: context.id, storage: context.storage, broker: this.host.broker }
   }
 
   private reportFailure(
@@ -1238,51 +1098,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           : { runId: run.id, parentRunId: run.parentRunId },
       failure,
     })
-  }
-
-  private async recordFate(
-    context: AgentWorkerContext,
-    run: AgentRunRecord,
-    executionToken: string,
-    status: "failed" | "cancelled",
-    error: unknown,
-    /** What the run did, kept with its fate in one transaction. */
-    messages?: readonly AppendAgentMessageInput[]
-  ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
-    try {
-      const completedAt = new Date()
-      const failure = toAgentExecutionFailure(error, {
-        status,
-        at: completedAt,
-        details: {
-          ...agentRunFailureDetails(run),
-          ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
-        },
-      })
-      const finish: FinishAgentRunInput = {
-        projectId: context.id,
-        id: run.id,
-        executionToken,
-        status,
-        error: failure,
-        completedAt,
-        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
-        ...(error instanceof AgentTurnInterruptedError
-          ? { finishReason: "interrupted" as const }
-          : {}),
-      }
-      const finalized = messages?.length
-        ? await appendMessageAndFinishRunOrThrow(context.storage, { messages, finish })
-        : await finishRunOrThrow(context.storage.agents, finish)
-      return { run: finalized, failure }
-    } catch (finalizeError) {
-      // Execution already lost / run already terminal — nothing more to record.
-      if (finalizeError instanceof AgentExecutionLostError) {
-        return undefined
-      }
-      // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
-      throw finalizeError
-    }
   }
 }
 
@@ -1409,20 +1224,66 @@ function assertAgentWorkerStorage(
   }
 }
 
-function freshExecution(queueLeaseExpiresAt: string): AgentRunExecution {
-  return {
-    token: createAgentRunExecutionToken(),
-    queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
-  }
+/**
+ * Record the queue's renewals on the run: a run token fails closed once the lease last recorded
+ * lapses, so it needs no heartbeat of its own. Returns the stop.
+ */
+function projectLease(
+  delivery: { onLeaseRenewed(listener: (renewed: { leaseExpiresAt: string }) => void): () => void },
+  session: AgentRunSession,
+  kind: "agent" | "subagent"
+): () => void {
+  return delivery.onLeaseRenewed((renewed) => {
+    void session.renewLease(renewed.leaseExpiresAt).catch((error: unknown) => {
+      if (!isTerminalOrExecutionGone(error)) {
+        console.error(
+          `[SixbAgentWorker] Could not project queue ownership for ${kind} run '${session.run.id}'.`,
+          error
+        )
+      }
+    })
+  })
 }
 
-function isExecutionGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.code === "execution_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
-  )
+/**
+ * End a run that failed or stopped, with what it did kept in the same transaction. Returns
+ * nothing when the run is no longer this session's; throws {@link AgentFinalizationError} when
+ * storage stays unavailable, so the job is redelivered rather than acknowledged.
+ */
+async function recordFate(
+  session: AgentRunSession,
+  status: "failed" | "cancelled",
+  error: unknown,
+  messages?: readonly AppendAgentMessageInput[]
+): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
+  const { run } = session
+  const completedAt = new Date()
+  const failure = toAgentExecutionFailure(error, {
+    status,
+    at: completedAt,
+    details: {
+      ...agentRunFailureDetails(run),
+      ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
+    },
+  })
+  try {
+    const finalized = await session.finish(
+      {
+        status,
+        error: failure,
+        completedAt,
+        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
+        ...(error instanceof AgentTurnInterruptedError
+          ? { finishReason: "interrupted" as const }
+          : {}),
+      },
+      messages
+    )
+    return { run: finalized, failure }
+  } catch (finishError) {
+    if (finishError instanceof AgentExecutionLostError) return undefined
+    throw finishError
+  }
 }
 
 /** Come back once the owning delivery's projected lease lapses, and never sooner than a moment. */
@@ -1495,7 +1356,7 @@ async function retryPreparationInPlace<T>(
     } catch (error) {
       if (
         signal.aborted ||
-        isExecutionGone(error) ||
+        isTerminalOrExecutionGone(error) ||
         !shouldRetryAgentPreparation(error, attempt + retry)
       ) {
         throw error

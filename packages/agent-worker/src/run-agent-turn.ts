@@ -1,5 +1,6 @@
-import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
+import type { AgentMessage, AgentMessagePart } from "@sixb/core"
 import {
+  type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
@@ -13,7 +14,6 @@ import {
   type AgentRunFinishReason,
   type AgentRunRecord,
   type AgentStorage,
-  type AgentThreadRecord,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -22,7 +22,6 @@ import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
-import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { type ConversationReaders, loadConversationAuthors } from "./message-authors"
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
@@ -39,6 +38,8 @@ export interface RunAgentTurnInput {
   readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
   readonly run: ConversationAgentRunRecord
+  /** The run's session: its finish, and every other write, are fenced by its execution token. */
+  readonly session: AgentRunSession
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
   /**
@@ -82,14 +83,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const { context, plan, run, signal } = input
   const { id: projectId, storage, tools, turnTimeoutMs } = context
   const runId = run.id
-  const executionToken = run.execution?.token
-  if (!executionToken) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent run '${runId}' has no execution token.`,
-      { details: { runId, threadId: run.threadId } }
-    )
-  }
   const agents = storage.agents
 
   const threadContext =
@@ -192,12 +185,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (runtime.timedOut()) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({
-        storage,
-        agents,
+        session: input.session,
         context,
         run,
-        executionToken,
-        projectId,
         modelId: plan.model.modelId,
         status: "failed",
         finishReason: "timeout",
@@ -216,12 +206,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
     if (!abortSignal.aborted && (error === undefined || !isAbortError(error))) return null
     return finalizeInterruptedTurn({
-      storage,
-      agents,
+      session: input.session,
       context,
       run,
-      executionToken,
-      projectId,
       modelId: plan.model.modelId,
       status: "cancelled",
       ...stopReason(),
@@ -294,12 +281,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (interruptedAfterModel) return interruptedAfterModel
     if (result.status === "aborted") {
       return finalizeInterruptedTurn({
-        storage,
-        agents,
+        session: input.session,
         context,
         run,
-        executionToken,
-        projectId,
         modelId: plan.model.modelId,
         status: "cancelled",
         ...stopReason(),
@@ -336,8 +320,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (interruptedBeforeCommit) return interruptedBeforeCommit
 
     await context.beforeFinalize?.()
-    const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-      messages: [
+    const finalizedRun = await input.session.finish(
+      {
+        status: "succeeded",
+        modelId: plan.model.modelId,
+        finishReason,
+        ...(diagnostics.length === 0 ? {} : { diagnostics }),
+      },
+      [
         {
           id: assistantMessageId,
           projectId,
@@ -349,17 +339,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
             ? {}
             : { authorPrincipal: context.authorPrincipal }),
         },
-      ],
-      finish: {
-        projectId,
-        id: runId,
-        executionToken,
-        status: "succeeded",
-        modelId: plan.model.modelId,
-        finishReason,
-        ...(diagnostics.length === 0 ? {} : { diagnostics }),
-      },
-    })
+      ]
+    )
 
     await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
     await context.streamSink.publishRunFinished(finalizedRun)
@@ -428,12 +409,9 @@ function hasVisibleText(parts: AgentMessage["parts"]): boolean {
 
 /** Persist an interrupted turn, retaining coherent partial content when any was produced. */
 async function finalizeInterruptedTurn(input: {
-  readonly storage: Storage
-  readonly agents: AgentStorage
+  readonly session: AgentRunSession
   readonly context: AgentTurnContext
   readonly run: ConversationAgentRunRecord
-  readonly executionToken: string
-  readonly projectId: string
   readonly modelId?: string
   readonly status: "failed" | "cancelled"
   readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval" | "awaiting_answer">
@@ -441,64 +419,38 @@ async function finalizeInterruptedTurn(input: {
   readonly completedAt?: Date
   readonly parts?: readonly AgentMessagePart[]
 }): Promise<AgentRunRecord> {
-  const {
-    storage,
-    agents,
-    context,
-    run,
-    executionToken,
-    projectId,
-    modelId,
-    status,
-    finishReason,
-    error,
-    completedAt,
-  } = input
+  const { session, context, run, modelId, status, finishReason, error, completedAt } = input
   const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
 
   await context.beforeFinalize?.()
 
+  const outcome = {
+    status,
+    ...(modelId === undefined ? {} : { modelId }),
+    ...(finishReason === undefined ? {} : { finishReason }),
+    ...(error === undefined ? {} : { error }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+  }
   if (!parts) {
-    const finalizedRun = await finishRunOrThrow(agents, {
-      projectId,
-      id: run.id,
-      executionToken,
-      status,
-      ...(modelId === undefined ? {} : { modelId }),
-      ...(finishReason === undefined ? {} : { finishReason }),
-      ...(error === undefined ? {} : { error }),
-      ...(completedAt === undefined ? {} : { completedAt }),
-    })
+    const finalizedRun = await session.finish(outcome)
     await context.streamSink.publishRunFinished(finalizedRun)
     return finalizedRun
   }
 
   const assistantMessageId = createAgentMessageId()
-  const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-    messages: [
-      {
-        id: assistantMessageId,
-        projectId,
-        threadId: run.threadId,
-        runId: run.id,
-        role: "assistant",
-        parts,
-        ...(context.authorPrincipal === undefined
-          ? {}
-          : { authorPrincipal: context.authorPrincipal }),
-      },
-    ],
-    finish: {
-      projectId,
-      id: run.id,
-      executionToken,
-      status,
-      ...(modelId === undefined ? {} : { modelId }),
-      ...(finishReason === undefined ? {} : { finishReason }),
-      ...(error === undefined ? {} : { error }),
-      ...(completedAt === undefined ? {} : { completedAt }),
+  const finalizedRun = await session.finish(outcome, [
+    {
+      id: assistantMessageId,
+      projectId: run.projectId,
+      threadId: run.threadId,
+      runId: run.id,
+      role: "assistant",
+      parts,
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
     },
-  })
+  ])
   await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
   await context.streamSink.publishRunFinished(finalizedRun)
   return finalizedRun

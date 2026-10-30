@@ -1,6 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
+import { InMemoryBroker } from "@sixb/core"
+import { openAgentRunSession } from "@sixb/core/internal/agents"
+import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
@@ -81,4 +84,20 @@ export class LocalBashSandbox implements Sandbox {
   async stop(): Promise<void> {}
 
   async destroy(): Promise<void> {}
+}
+
+/**
+ * Run a turn as the worker does, in the session of its run, which the test started already. The
+ * session's broker is its own: these tests cancel through their signal, not a published cancel.
+ */
+export async function runTurnInSession(input: Omit<RunAgentTurnInput, "session">) {
+  const session = await openAgentRunSession(
+    { projectId: input.context.id, storage: input.context.storage, broker: new InMemoryBroker() },
+    input.run
+  )
+  try {
+    return await runAgentTurn({ ...input, session })
+  } finally {
+    session.close()
+  }
 }

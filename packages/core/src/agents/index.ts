@@ -151,6 +151,20 @@ export type {
   AgentRunScopeHost,
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
+export type {
+  AgentRunOutcome,
+  AgentRunSession,
+  AgentRunSessionHost,
+  ClaimAgentRunInput,
+} from "./run-session"
+export {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  claimAgentRun,
+  isTerminalOrExecutionGone,
+  openAgentRunSession,
+  watchAgentRunCancel,
+} from "./run-session"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,

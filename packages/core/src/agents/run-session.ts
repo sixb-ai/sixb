@@ -1,0 +1,246 @@
+import type { Broker } from "../broker"
+import type { Storage } from "../storage"
+import {
+  type AgentRunRecord,
+  type AgentStorage,
+  AgentStorageError,
+  type AppendAgentMessageInput,
+  type FinishAgentRunInput,
+} from "../storage/agents"
+import { createAgentRunExecutionToken } from "./ids"
+import { subscribeAgentRunCancel } from "./streams/protocol"
+
+/**
+ * A run's session: the one way its runner reads and writes shared state for it. Claiming the run
+ * creates it, with a fresh execution token, and every write it makes is fenced by that token: once
+ * another delivery reclaims the run, this session's writes fail with
+ * {@link AgentExecutionLostError} and the runner stops touching the run.
+ *
+ * The worker uses an in-process session. A runner elsewhere will reach the same operations over
+ * HTTP, so nothing here may assume it shares a process with storage.
+ */
+export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
+  /** The run as the claim left it: `running`, with this session's execution. */
+  readonly run: TRun
+  readonly executionToken: string
+  /** Aborts once the run, or any run named in `cancelWith`, is cancelled. */
+  readonly cancelled: AbortSignal
+  /**
+   * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
+   * once the last lease recorded lapses, so the session renews it as the queue does.
+   */
+  renewLease(leaseExpiresAt: string): Promise<void>
+  /**
+   * End the run, with what it did appended first in the same transaction. Absorbs a transient
+   * storage failure with a few short retries; see {@link AgentExecutionLostError} and
+   * {@link AgentFinalizationError} for what it throws.
+   */
+  finish(
+    outcome: AgentRunOutcome,
+    messages?: readonly AppendAgentMessageInput[]
+  ): Promise<AgentRunRecord>
+  /** Stop watching for cancellation. The run itself is unaffected. */
+  close(): void
+}
+
+/** How a run ended; the session supplies which run, and its token. */
+export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
+  ? Finish extends FinishAgentRunInput
+    ? Omit<Finish, "projectId" | "id" | "executionToken">
+    : never
+  : never
+
+/** What an in-process session works against. */
+export interface AgentRunSessionHost {
+  readonly projectId: string
+  readonly storage: Storage & { readonly agents: AgentStorage }
+  readonly broker: Broker
+}
+
+export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
+  /** A queued run, or a running one whose last delivery's lease lapsed. */
+  readonly run: TRun
+  readonly modelId?: string
+  /** When the queue delivery that claims the run expires unless renewed. */
+  readonly leaseExpiresAt: string
+  /** Other runs whose cancellation cancels this one: a child's parent. */
+  readonly cancelWith?: readonly string[]
+}
+
+/**
+ * Start a queued run, or reclaim a running one, and open its session. Returns null when the run
+ * ended meanwhile, so there is nothing to claim.
+ */
+export async function claimAgentRun<TRun extends AgentRunRecord>(
+  host: AgentRunSessionHost,
+  input: ClaimAgentRunInput<TRun>
+): Promise<AgentRunSession<TRun> | null> {
+  const run = await startOrReclaim(host.storage.agents, host.projectId, input)
+  if (!run) return null
+  return openAgentRunSession(host, run, input.cancelWith)
+}
+
+/**
+ * The session of a run already claimed: the one its execution token names. A server answering a
+ * remote runner opens it per request; the worker opens it once, when it claims the run.
+ */
+export async function openAgentRunSession<TRun extends AgentRunRecord>(
+  host: AgentRunSessionHost,
+  run: TRun,
+  cancelWith: readonly string[] = []
+): Promise<AgentRunSession<TRun>> {
+  const executionToken = run.execution?.token
+  if (!executionToken) {
+    throw new Error(`[Sixb] Agent run '${run.id}' has no execution token, so it was never claimed.`)
+  }
+
+  const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
+  const fence = { projectId: host.projectId, id: run.id, executionToken }
+
+  return {
+    run,
+    executionToken,
+    cancelled: cancel.signal,
+    async renewLease(leaseExpiresAt) {
+      await host.storage.agents.runs.confirmExecutionOwnership({
+        ...fence,
+        queueLeaseExpiresAt: new Date(leaseExpiresAt),
+      })
+    },
+    finish: (outcome, messages) =>
+      finishWithRetries(host.storage, { ...outcome, ...fence }, messages ?? []),
+    close: cancel.stop,
+  }
+}
+
+/**
+ * Watch runs for a cancel, best effort: failing to attach a watch costs that run its
+ * cancellability, never the run itself. `stop` unsubscribes.
+ */
+export async function watchAgentRunCancel(
+  host: Pick<AgentRunSessionHost, "projectId" | "broker">,
+  runIds: readonly string[]
+): Promise<{ readonly signal: AbortSignal; readonly stop: () => void }> {
+  const controller = new AbortController()
+  const unsubscribes = await Promise.all(
+    runIds.map((runId) =>
+      subscribeAgentRunCancel(host.broker, { projectId: host.projectId, runId }, () =>
+        controller.abort()
+      ).catch((error: unknown) => {
+        console.error(`[Sixb] Agent run '${runId}' cancel watch failed to start:`, error)
+        return undefined
+      })
+    )
+  )
+  return {
+    signal: controller.signal,
+    stop: () => {
+      for (const unsubscribe of unsubscribes) unsubscribe?.()
+    },
+  }
+}
+
+/** This session's execution token is stale, so it must make no further durable writes. */
+export class AgentExecutionLostError extends Error {
+  readonly name = "AgentExecutionLostError"
+  constructor(readonly runId: string) {
+    super(`[Sixb] Lost execution ownership of agent run '${runId}'.`)
+  }
+}
+
+/**
+ * The run's end could not be recorded: storage stayed unavailable across the retries. The runner
+ * leaves the delivery for another attempt rather than acknowledging a run that never ended.
+ */
+export class AgentFinalizationError extends Error {
+  readonly name = "AgentFinalizationError"
+  constructor(
+    readonly runId: string,
+    options?: ErrorOptions
+  ) {
+    super(`[Sixb] Could not finalize agent execution '${runId}'; storage is unavailable.`, options)
+  }
+}
+
+/**
+ * Storage outcomes that mean the run is no longer this session's: another delivery owns it, or it
+ * already ended. There is nothing more to record either way.
+ */
+export function isTerminalOrExecutionGone(error: unknown): boolean {
+  return (
+    error instanceof AgentStorageError &&
+    (error.code === "execution_lost" ||
+      error.code === "invalid_state" ||
+      error.code === "run_not_found")
+  )
+}
+
+async function startOrReclaim<TRun extends AgentRunRecord>(
+  agents: AgentStorage,
+  projectId: string,
+  input: ClaimAgentRunInput<TRun>
+): Promise<TRun | null> {
+  const { run } = input
+  const execution = {
+    token: createAgentRunExecutionToken(),
+    queueLeaseExpiresAt: new Date(input.leaseExpiresAt),
+  }
+  if (run.status === "queued") {
+    const started = await agents.runs.start({
+      projectId,
+      id: run.id,
+      modelId: input.modelId,
+      execution,
+    })
+    return sameKind(run, started, "starting")
+  }
+  if (run.status !== "running") return null
+
+  try {
+    return sameKind(
+      run,
+      await agents.runs.reclaim({ projectId, id: run.id, execution }),
+      "reclaiming"
+    )
+  } catch (error) {
+    if (error instanceof AgentStorageError && error.code === "invalid_state") return null
+    throw error
+  }
+}
+
+function sameKind<TRun extends AgentRunRecord>(
+  run: TRun,
+  claimed: AgentRunRecord,
+  while_: string
+): TRun {
+  if (claimed.kind !== run.kind) {
+    throw new Error(`[Sixb] Agent run '${run.id}' changed kind while ${while_}.`)
+  }
+  return claimed as TRun
+}
+
+/** Short in-place retries that absorb a transient storage blip without re-running the model. */
+const FINISH_BACKOFF_MS = [50, 200, 600] as const
+
+async function finishWithRetries(
+  storage: AgentRunSessionHost["storage"],
+  finish: FinishAgentRunInput,
+  messages: readonly AppendAgentMessageInput[]
+): Promise<AgentRunRecord> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      if (messages.length === 0) return await storage.agents.runs.finish(finish)
+      return await storage.transaction(async (tx) => {
+        const agents = tx.agents
+        if (!agents) throw new Error("[Sixb] Agent storage is not configured.")
+        for (const message of messages) await agents.messages.append(message)
+        return agents.runs.finish(finish)
+      })
+    } catch (error) {
+      if (isTerminalOrExecutionGone(error)) throw new AgentExecutionLostError(finish.id)
+      const delay = FINISH_BACKOFF_MS[attempt]
+      if (delay === undefined) throw new AgentFinalizationError(finish.id, { cause: error })
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+}
