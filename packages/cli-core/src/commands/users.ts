@@ -11,6 +11,7 @@ import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS } from "../policies"
 import { GROUP_HELP } from "./metadata"
 import type { QueryOptions } from "./shared"
+import { idSegment } from "./shared"
 
 const USER_STATUSES = ["active", "suspended", "all"] as const
 
@@ -30,7 +31,7 @@ export async function users(api: ApiClient, args: readonly string[]): Promise<vo
     if (!user) fail("users get requires a user id or email.")
     // Sign-in mints ids as `usr_<uuid>`, so an `@` marks an email.
     if (!user.includes("@")) {
-      return writeJson(await api.get(`/api/users/${encodeURIComponent(user)}`))
+      return writeJson(await api.get(`/api/users/${idSegment(user)}`))
     }
 
     const page = await api.get("/api/users", { email: user })

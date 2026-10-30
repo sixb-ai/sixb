@@ -3,7 +3,7 @@ import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { CliError, EXIT_API, fail, writeJson, writeRequestResult, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { asRecord, parseQueryOptions, readJson } from "./shared"
+import { asRecord, idSegment, parseQueryOptions, readJson } from "./shared"
 
 /**
  * How long `actions request` waits for the run it requested. An agent's command is killed after 30
@@ -22,7 +22,7 @@ export async function actions(
   if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP.actions)
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "actions get", 1)
-    return writeJson(await api.get(`/api/actions/${encodeURIComponent(positionals[0] ?? "")}`))
+    return writeJson(await api.get(`/api/actions/${idSegment(positionals[0])}`))
   }
   if (sub === "list") {
     const options = parseQueryOptions(rest, { "--type": "objectTypeId" }, "actions list")
@@ -64,7 +64,7 @@ export async function actions(
     try {
       return writeRequestResult(
         await api.post(
-          `/api/actions/${encodeURIComponent(actionId)}`,
+          `/api/actions/${idSegment(actionId)}`,
           {
             params,
             ...(subjectType && subjectId

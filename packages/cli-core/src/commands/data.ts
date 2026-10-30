@@ -9,9 +9,7 @@ import {
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS } from "../policies"
 import { GROUP_HELP } from "./metadata"
-import type { QueryOptions } from "./shared"
-
-const segment = (value: string | undefined) => encodeURIComponent(value ?? "")
+import { idSegment, type QueryOptions } from "./shared"
 
 export async function datasets(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -24,7 +22,7 @@ export async function datasets(api: ApiClient, args: readonly string[]): Promise
 
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, "datasets get", 1)
-    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}`))
+    return writeJson(await api.get(`/api/datasets/${idSegment(positionals[0])}`))
   }
 
   if (sub === "versions") {
@@ -37,7 +35,7 @@ export async function datasets(api: ApiClient, args: readonly string[]): Promise
     const { default: fallback, maximum } = CLI_LIMITS.datasetVersions
     const limit = integerInRange("--limit", options["--limit"] ?? String(fallback), 1, maximum)
     return writeJson(
-      await api.get(`/api/datasets/${segment(positionals[0])}/versions`, { limit: String(limit) })
+      await api.get(`/api/datasets/${idSegment(positionals[0])}/versions`, { limit: String(limit) })
     )
   }
 
@@ -57,7 +55,7 @@ export async function datasets(api: ApiClient, args: readonly string[]): Promise
         ? {}
         : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }),
     }
-    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}/rows`, query))
+    return writeJson(await api.get(`/api/datasets/${idSegment(positionals[0])}/rows`, query))
   }
 
   fail(`Unknown datasets command '${sub}'.`)
@@ -79,7 +77,7 @@ export async function runnables(
 
   if (sub === "get") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1)
-    return writeJson(await api.get(`/api/${group}/${segment(positionals[0])}`))
+    return writeJson(await api.get(`/api/${group}/${idSegment(positionals[0])}`))
   }
 
   fail(`Unknown ${group} command '${sub}'.`)
