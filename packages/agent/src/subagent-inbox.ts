@@ -97,15 +97,7 @@ export class SubagentInbox {
           },
         }
       )
-      await this.mail.send({
-        id,
-        fromRunId: runId,
-        fromThreadId: threadId,
-        toRunId: parentRunId,
-        kind: "question",
-        text: question,
-        sentAt: new Date().toISOString(),
-      })
+      await this.mail.send({ id, toRunId: parentRunId, kind: "question", text: question })
 
       const settled = await waitForAbort(reply, signal)
       if (settled.kind === "deferred") this.#deferred = { id, text: question }

@@ -8,6 +8,7 @@ reach the same operations over HTTP, so none of them may assume they share a pro
 run-session.ts             AgentRunSession: conversation turns and child agents
 run-session-children.ts    a turn's children and mail
 run-liveness.ts            ending a run whose lease lapsed
+run-fence.ts               AgentExecutionLostError, and the writes that report it
 run-events.ts              the stream sink a session publishes live records through
 workflow-node-session.ts   WorkflowAgentNodeSession: workflow agent steps
 ```
@@ -34,7 +35,11 @@ lease renewal, which aborts the session's `cancelled`.
 Every durable write carries the session's token, and storage refuses it once another delivery
 reclaimed the run: finishing, the context checkpoint, workspace transitions, spawning a child and
 clearing a child's dead attempt. `assertOwned` checks the same before a side effect storage cannot
-fence, such as a sandbox action.
+fence, such as a sandbox action, and mail checks it before it sends.
+
+Whichever write finds the run gone throws `AgentExecutionLostError` (`run-fence.ts`), never a
+storage error, so a runner checks for one error. Mail is sent as the session's run, which names
+its sender, and only to its own children's threads or to the turn that spawned it.
 
 ## Operations
 

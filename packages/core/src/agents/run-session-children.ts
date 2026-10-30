@@ -18,6 +18,7 @@ import {
   hasActiveChildren,
   listChildApprovalsAwaiting,
 } from "./approvals"
+import { AgentExecutionLostError, fenced } from "./run-fence"
 import {
   type AgentInbox,
   type AgentMail,
@@ -69,9 +70,18 @@ export interface AgentRunChildren {
   clearAttempt(input: { readonly threadId: string; readonly runId: string }): Promise<void>
 }
 
+/** Mail as its sender writes it: the session says who sends it, and when. */
+export type AgentMailDraft = Pick<AgentMail, "id" | "kind" | "inReplyTo" | "text"> &
+  ({ readonly toThreadId: string } | { readonly toRunId: string })
+
 /** Mail between a turn and its children, through their inboxes. */
 export interface AgentRunMail {
-  send(mail: AgentMail): Promise<void>
+  /**
+   * Send as this run: a turn to the thread of one of its conversation's children, a child to the
+   * turn that spawned it. Refused with {@link AgentExecutionLostError} once the run is no longer
+   * this session's.
+   */
+  send(mail: AgentMailDraft): Promise<void>
   /** An inbox's mail after `afterCursor`, with the cursor to read on from. */
   read(
     inbox: AgentInbox,
@@ -127,33 +137,64 @@ export function agentRunChildren(
     },
     hasActive: () => hasActiveChildren(agents, run),
     spawn: (input) =>
-      host.storage.transaction(async (tx) => {
-        if (!tx.agents) throw new Error("[Sixb] Agent storage disappeared during child admission.")
-        await ensureExecutionRecord(tx.executions, input.execution)
-        return tx.agents.runs.createSubagent({
-          ...input.run,
-          projectId,
-          parentRunId: run.id,
-          parentExecutionToken: executionToken,
+      fenced(run.id, () =>
+        host.storage.transaction(async (tx) => {
+          if (!tx.agents)
+            throw new Error("[Sixb] Agent storage disappeared during child admission.")
+          await ensureExecutionRecord(tx.executions, input.execution)
+          return tx.agents.runs.createSubagent({
+            ...input.run,
+            projectId,
+            parentRunId: run.id,
+            parentExecutionToken: executionToken,
+          })
         })
-      }),
+      ),
     async clearAttempt({ threadId, runId }) {
-      await agents.messages.deleteByRunId({
-        projectId,
-        threadId,
-        runId,
-        fence: { runId: run.id, executionToken },
-      })
+      await fenced(run.id, () =>
+        agents.messages.deleteByRunId({
+          projectId,
+          threadId,
+          runId,
+          fence: { runId: run.id, executionToken },
+        })
+      )
     },
   }
 }
 
 export function agentRunMail(
-  host: Pick<AgentRunChildrenHost, "projectId" | "broker">
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  executionToken: string
 ): AgentRunMail {
   const { projectId, broker } = host
+  const agents = host.storage.agents
   return {
-    send: (mail) => publishAgentMail(broker, { projectId, mail }),
+    async send(draft) {
+      const current = await agents.runs.getById({ projectId, id: run.id })
+      if (current?.status !== "running" || current.execution?.token !== executionToken) {
+        throw new AgentExecutionLostError(run.id)
+      }
+      const sentAt = new Date().toISOString()
+      if ("toRunId" in draft) {
+        if (run.kind !== "subagent" || draft.toRunId !== run.parentRunId) {
+          throw new Error(`[Sixb] Agent run '${run.id}' may mail only the run that spawned it.`)
+        }
+        await publishAgentMail(broker, {
+          projectId,
+          mail: { ...draft, fromRunId: run.id, fromThreadId: run.threadId, sentAt },
+        })
+        return
+      }
+      const thread = await agents.threads.getById({ projectId, id: draft.toThreadId })
+      if (run.kind !== "conversation" || thread?.parent?.threadId !== run.threadId) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' may mail only the threads of its conversation's children.`
+        )
+      }
+      await publishAgentMail(broker, { projectId, mail: { ...draft, fromRunId: run.id, sentAt } })
+    },
     read: (inbox, afterCursor) =>
       readAgentMail(broker, {
         projectId,

@@ -25,12 +25,8 @@ import type {
 import { resolveAgentExecutionAuthorization } from "./authority"
 import { createAgentRunExecutionToken } from "./ids"
 import type { AgentMessagePart } from "./message"
-import {
-  AgentExecutionLostError,
-  type AgentRunPeople,
-  agentRunPeople,
-  watchAgentRunCancel,
-} from "./run-session"
+import { AgentExecutionLostError } from "./run-fence"
+import { type AgentRunPeople, agentRunPeople, watchAgentRunCancel } from "./run-session"
 
 /**
  * A workflow agent step's session: the step's agent node, claimed with a fresh execution token,

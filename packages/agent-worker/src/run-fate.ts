@@ -3,7 +3,6 @@ import {
   AgentExecutionLostError,
   type AgentRunSession,
   AgentTurnInterruptedError,
-  isTerminalOrExecutionGone,
 } from "@sixb/core/internal/agents"
 import type { AgentRunRecord, AppendAgentMessageInput } from "@sixb/core/storage"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
@@ -27,7 +26,7 @@ export function projectLease(
 ): () => void {
   return delivery.onLeaseRenewed((renewed) => {
     void session.renewLease(renewed.leaseExpiresAt).catch((error: unknown) => {
-      if (!isTerminalOrExecutionGone(error)) {
+      if (!(error instanceof AgentExecutionLostError)) {
         console.error(
           `[SixbAgentWorker] Could not project queue ownership for ${kind} run '${session.run.id}'.`,
           error
@@ -116,7 +115,7 @@ export async function retryPreparationInPlace<T>(
     } catch (error) {
       if (
         signal.aborted ||
-        isTerminalOrExecutionGone(error) ||
+        error instanceof AgentExecutionLostError ||
         !shouldRetryAgentPreparation(error, attempt + retry)
       ) {
         throw error

@@ -468,12 +468,7 @@ async function createCheckpoint(input: {
         createdAt: input.candidate.createdAt,
       })
     } catch (error) {
-      if (
-        error instanceof AgentStorageError &&
-        (error.code === "execution_lost" || error.code === "run_not_found")
-      ) {
-        throw new AgentExecutionLostError(input.run.id)
-      }
+      if (error instanceof AgentExecutionLostError) throw error
       if (error instanceof AgentStorageError) {
         throw new AgentContextCompactionError(
           "checkpoint_failed",

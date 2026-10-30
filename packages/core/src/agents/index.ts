@@ -155,6 +155,7 @@ export {
   NOOP_STREAM_SINK,
   withAgentActivityStream,
 } from "./run-events"
+export { AgentExecutionLostError } from "./run-fence"
 export {
   AgentTurnInterruptedError,
   agentRunLeaseLapsed,
@@ -181,16 +182,13 @@ export type {
   ClaimAgentRunInput,
 } from "./run-session"
 export {
-  AgentExecutionLostError,
   AgentFinalizationError,
   agentRunPeople,
   claimAgentRun,
-  isTerminalOrExecutionGone,
   openAgentRunSession,
   watchAgentRunCancel,
 } from "./run-session"
-export type { AgentRunChildren, AgentRunMail } from "./run-session-children"
-export { agentRunMail } from "./run-session-children"
+export type { AgentMailDraft, AgentRunChildren, AgentRunMail } from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
