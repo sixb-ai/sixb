@@ -743,6 +743,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       events: context.streamSink,
       security: this.host.definitions.security,
       maxActiveChildren: context.subagentConcurrencyPerRun,
+      sdk: this.host,
       afterFinish: (run) => this.afterRunFinished(run),
     }
   }

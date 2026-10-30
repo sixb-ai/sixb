@@ -48176,7 +48176,7 @@
       },
       "post": {
         "summary": "Create an artifact",
-        "description": "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.",
+        "description": "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner.",
         "tags": ["Artifacts"],
         "operationId": "createArtifact",
         "security": [

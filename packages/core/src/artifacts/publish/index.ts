@@ -8,6 +8,7 @@ export {
   artifactVersionWarnings,
   type PreparedArtifactVersion,
   type PublishArtifactInput,
+  type PublishedArtifact,
   prepareArtifactVersion,
   publishArtifact,
   storeArtifactVersion,

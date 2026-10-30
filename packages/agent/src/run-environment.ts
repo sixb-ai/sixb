@@ -6,6 +6,7 @@ import type {
   Principal,
 } from "@sixb/core"
 import {
+  type AgentRunArtifacts,
   type AgentRunSession,
   type AgentTurnHistory,
   conversationThreadId,
@@ -237,10 +238,9 @@ export async function createConversationAgentEnvironment(
       ...(input.thread && run.execution
         ? {
             publishing: {
+              artifacts: input.session.artifacts,
               threadId: input.thread.id,
               owner: input.thread.ownerPrincipal,
-              author: input.requestedBy ?? input.thread.ownerPrincipal,
-              executionToken: run.execution.token,
             },
           }
         : {}),
@@ -281,11 +281,6 @@ export async function createConversationAgentEnvironment(
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { run } = input
-  const execution = run.execution
-  if (!execution) {
-    throw new Error(`[SixbAgent] Subagent run '${run.id}' must hold an execution token.`)
-  }
   // A child's workspace is blank, so it has no source credentials to lose.
   const { sandbox, resumed = false } = await input.openSandbox({
     signal: input.signal ?? NEVER_ABORTED_SIGNAL,
@@ -293,7 +288,7 @@ export async function createSubagentEnvironment(
   })
 
   try {
-    return await startSubagentEnvironment({ ...input, execution, sandbox, resumed })
+    return await startSubagentEnvironment({ ...input, sandbox, resumed })
   } catch (error) {
     // Preparation failed before the worker got this environment: the child ends here, so its
     // workspace goes, as the worker's failure path would destroy it. A lost execution must touch
@@ -305,13 +300,12 @@ export async function createSubagentEnvironment(
 
 async function startSubagentEnvironment(
   input: CreateSubagentEnvironmentInput & {
-    readonly execution: NonNullable<SubagentRunRecord["execution"]>
     readonly sandbox: RunSandbox
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
   }
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation, execution, sandbox, resumed } = input
+  const { context, plan, run, conversation, sandbox, resumed } = input
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
@@ -360,10 +354,9 @@ async function startSubagentEnvironment(
     ...(conversation
       ? {
           publishing: {
+            artifacts: input.session.artifacts,
             threadId: conversation.id,
             owner: conversation.ownerPrincipal,
-            author: input.requestedBy ?? conversation.ownerPrincipal,
-            executionToken: execution.token,
           },
         }
       : {}),
@@ -469,14 +462,14 @@ interface AgentEnvironmentSetup
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
   /**
-   * A conversation, or a child of one, publishes artifacts into the thread as the thread's owner
-   * and edits them from storage; other runs return text.
+   * A conversation, or a child of one, publishes artifacts into its conversation, through its
+   * session, and edits them from their installed copies; other runs return text.
    */
   readonly publishing?: {
+    readonly artifacts: AgentRunArtifacts
+    /** The conversation's thread, and its owner, who owns what the run creates. */
     readonly threadId: string
     readonly owner: Principal
-    readonly author: Principal
-    readonly executionToken: string
   }
   /** A conversation's memory, or a child's to read: installed in the sandbox and in the prompt. */
   readonly memory?: ConversationMemory
@@ -550,15 +543,14 @@ async function startAgentEnvironment(
   const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
-  const artifactStorage = context.artifactPublishing.artifacts
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
-  if (publishing && artifactStorage) {
+  if (publishing) {
     // Read concurrently with sandbox creation; both run while the model starts.
     installedArtifacts = materializeThreadArtifacts({
       threadId: publishing.threadId,
       // As the requester: the turn installs nothing they could not read themselves.
-      artifacts: context.sixb.artifacts,
+      artifacts: publishing.artifacts,
       blobStorage: context.blobStorage,
       directory: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_DIRECTORY),
       manifestPath: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_MANIFEST),
@@ -567,19 +559,10 @@ async function startAgentEnvironment(
     // Surfaced where provisioning awaits it.
     installedArtifacts.catch(() => {})
     const publishTools = createPublishArtifactTools({
-      projectId: context.id,
-      storage: context.artifactPublishing,
-      artifacts: artifactStorage,
-      reader: context.sixb.artifacts,
-      blobStorage: context.blobStorage,
-      run: {
-        id: runId,
-        threadId: publishing.threadId,
-        executionToken: publishing.executionToken,
-        ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
-      },
+      artifacts: publishing.artifacts,
+      threadId: publishing.threadId,
       owner: publishing.owner,
-      author: publishing.author,
+      blobStorage: context.blobStorage,
       budget: fileBudget,
       resolveSandbox,
       installed: installedArtifacts,
@@ -653,7 +636,7 @@ async function startAgentEnvironment(
     sandbox.beforeFinalize?.(options) ?? Promise.resolve()
   const artifacts =
     publishing && installedArtifacts
-      ? { threadId: publishing.threadId, installed: installedArtifacts }
+      ? { reader: publishing.artifacts, installed: installedArtifacts }
       : undefined
   const runFiles: AgentRunFiles = {
     sandbox: resolveSandbox,
@@ -664,8 +647,7 @@ async function startAgentEnvironment(
 
       await installArtifactsPublishedBy({
         installed: await artifacts.installed,
-        threadId: artifacts.threadId,
-        artifacts: context.sixb.artifacts,
+        artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
         sandbox: (await ready).sandbox,
         runIds,

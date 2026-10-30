@@ -1950,6 +1950,7 @@ function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
       recoverAiModelCall: recoverAiModelCall(sixb),
       events: NOOP_STREAM_SINK,
       security: sixb.definitions.security,
+      sdk: sixb,
     },
     run
   )
@@ -1996,6 +1997,7 @@ function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
       recoverAiModelCall: context.recoverAiModelCall,
       events: context.streamSink,
       security: sixb.definitions.security,
+      sdk: sixb,
     },
     trackTeardown: () => {},
     reportFailure: () => {},
@@ -2133,7 +2135,6 @@ async function buildAgentWorkerContext(
   })
   return {
     ...context,
-    artifactPublishing: context.storage,
     sixb: agentSixb,
     blobStorage: agentSixb.blobs,
   }
@@ -8732,9 +8733,8 @@ describe("AgentWorker", () => {
 
     await installArtifactsPublishedBy({
       installed,
-      threadId: "thread",
       artifacts: {
-        list: async () => ({ artifacts: [artifact], hasMore: false, total: 1 }),
+        list: async () => [artifact],
         listVersions: async () => ({
           versions: [version(2, "someone-else"), version(1, "child-run")],
           hasMore: false,
@@ -10916,6 +10916,7 @@ describe("AgentWorker", () => {
           recoverAiModelCall: context.recoverAiModelCall,
           events: context.streamSink,
           security: host.definitions.security,
+          sdk: host,
         },
         run
       )

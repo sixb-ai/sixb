@@ -1,11 +1,13 @@
 import type { Broker } from "../broker"
 import type { AuthorizationRef } from "../execution"
+import { type AgentExecutionHost, bindDurableAgentExecution } from "../execution/agent"
 import {
   AiModelCallRecorder,
   createAiModelCallLimitController,
   type ModelCallAccountingStorage,
   type RecoverAiModelCall,
 } from "../models/execution/index"
+import type { Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
@@ -27,8 +29,14 @@ import {
   userCanRunAgent,
 } from "./authority"
 import { createAgentRunExecutionToken } from "./ids"
+import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
-import { AgentExecutionLostError, fenced, isTerminalOrExecutionGone } from "./run-fence"
+import {
+  AgentExecutionLostError,
+  assertAgentRunOwned,
+  fenced,
+  isTerminalOrExecutionGone,
+} from "./run-fence"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
@@ -123,6 +131,8 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly workspace: AgentRunWorkspace
   /** The messages of the run's conversation, its children's threads included. */
   readonly threads: AgentRunThreads
+  /** Its conversation's artifacts: what it reads of them as its requester, and what it publishes. */
+  readonly artifacts: AgentRunArtifacts
   /**
    * The authority the run's execution carries now: its requester's groups, as they are today. A
    * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
@@ -193,6 +203,11 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
   /**
+   * Binds the run's SDK as its requester, as the API binds a request with the run's token: what
+   * the run reads and publishes through its session goes through it.
+   */
+  readonly sdk: AgentExecutionHost
+  /**
    * What follows a run's end, once `finish` recorded it: a turn's children still at work are
    * stopped, and a turn paused on calls already decided goes on. Best effort: a failure is logged,
    * and the host's repair passes catch up.
@@ -238,6 +253,14 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
+  let sdk: Promise<Sixb> | undefined
+  const runSdk = () => {
+    sdk ??= bindRunSdk(host, run).catch((error: unknown) => {
+      sdk = undefined
+      throw error
+    })
+    return sdk
+  }
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
   // each renewal of its lease.
@@ -301,20 +324,9 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       })
       return finished
     },
-    async assertOwned() {
-      const current = await host.storage.agents.runs.getById({
-        projectId: host.projectId,
-        id: run.id,
-      })
-      if (
-        current?.status !== "running" ||
-        current.execution?.token !== executionToken ||
-        current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
-      ) {
-        throw new AgentExecutionLostError(run.id)
-      }
-    },
+    assertOwned: () => assertAgentRunOwned(agents, fence),
     threads: agentRunThreads(host, run, scope),
+    artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
     authorization: (ref) =>
       resolveInheritedAgentExecutionAuthorization({
         auth: host.storage.auth,
@@ -353,6 +365,26 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     },
     close: cancel.stop,
   }
+}
+
+/** The run's SDK, bound to its execution with the authority its requester holds now. */
+async function bindRunSdk(host: AgentRunSessionHost, run: AgentRunRecord): Promise<Sixb> {
+  const execution = await host.storage.executions.getById({
+    projectId: host.projectId,
+    id: run.executionId,
+  })
+  if (!execution) {
+    throw new Error(
+      `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+    )
+  }
+  const authorization = await resolveInheritedAgentExecutionAuthorization({
+    auth: host.storage.auth,
+    projectId: host.projectId,
+    authorizationRef: execution.authorizationRef,
+    security: host.security,
+  })
+  return bindDurableAgentExecution(host.sdk, { execution, runId: run.id, authorization })
 }
 
 async function openModelCalls(

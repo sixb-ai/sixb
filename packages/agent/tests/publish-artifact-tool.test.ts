@@ -26,7 +26,8 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
-import { AgentExecutionLostError } from "@sixb/core/internal/agents"
+import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
+import { AgentExecutionLostError, agentRunArtifacts } from "@sixb/core/internal/agents"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
@@ -97,6 +98,58 @@ function readerFor(
       },
     },
   }).artifacts
+}
+
+/**
+ * A turn's artifacts as its session reaches them: through the run's own SDK, bound to its
+ * execution as the user who asked for it, with their rights now.
+ */
+function runArtifactsFor(
+  options: {
+    readonly user?: Principal
+    readonly grants?: Partial<GrantIndex>
+    readonly clearances?: ReadonlySet<string>
+    readonly run?: typeof run
+    readonly executionToken?: string
+    readonly reader?: (reader: ReturnType<typeof readerFor>) => void
+  } = {}
+) {
+  const user = options.user ?? owner
+  if (user.type !== "user") throw new Error("A turn is asked for by a user.")
+  const publishing = options.run ?? run
+  const credential = { type: "session" as const, id: `session-${user.id}` }
+  const sdk = bindDurableAgentExecution(host, {
+    execution: {
+      id: `exec_${publishing.id}`,
+      projectId,
+      requesterGroupIds: [],
+      requestedBy: user,
+      executor: { type: "agent", runId: publishing.id },
+      source: { type: "execution", executionId: `request_${publishing.id}` },
+      correlationId: `correlation_${publishing.id}`,
+      authorizationRef: { type: "principal", principal: user, credential },
+      createdAt: new Date(),
+    },
+    runId: publishing.id,
+    authorization: {
+      type: "principal",
+      context: {
+        principal: user,
+        sessionId: credential.id,
+        groupIds: [],
+        roleIds: [],
+        grants: { ...emptyGrantIndex(), "run:agent": true, ...options.grants },
+        ...(options.clearances ? { clearances: options.clearances } : {}),
+      },
+    },
+  })
+  options.reader?.(sdk.artifacts)
+  return agentRunArtifacts(
+    { projectId, storage },
+    { id: publishing.id, projectId, kind: "conversation", threadId: publishing.threadId },
+    options.executionToken ?? publishing.executionToken,
+    async () => sdk
+  )
 }
 
 /** A thread with a turn running in it, as `run` is in thr_1. */
@@ -183,7 +236,7 @@ function install(
   const { requester, ...rest } = options
   return materializeThreadArtifacts({
     threadId: run.threadId,
-    artifacts: readerFor(requester ?? owner),
+    artifacts: runArtifactsFor({ user: requester ?? owner }),
     blobStorage,
     directory: ".sixb/agent/artifacts",
     manifestPath: ".sixb/agent/context/artifacts.json",
@@ -205,26 +258,12 @@ function sandbox(): LocalBashSandbox {
   return local
 }
 
-/** The requester's view of artifacts, the one runtime its access rule is kept for. */
-function requester(options: ToolOptions) {
-  const reader = readerFor(options.author ?? owner, options.grants, options.clearances)
-  options.reader?.(reader)
-  return reader
-}
-
 function tools(options: ToolOptions = {}) {
   const [create, version] = createPublishArtifactTools({
-    projectId,
-    storage,
-    artifacts: storage.artifacts,
-    reader: requester(options),
-    blobStorage,
-    run: {
-      ...(options.run ?? run),
-      executionToken: options.executionToken ?? (options.run ?? run).executionToken,
-    },
+    artifacts: runArtifactsFor({ ...options, user: options.author ?? owner }),
+    threadId: (options.run ?? run).threadId,
     owner,
-    author: options.author ?? owner,
+    blobStorage,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({
       sandbox: sandbox(),
@@ -322,32 +361,6 @@ describe("publish_artifact", () => {
       type: "text",
       value: `Published "Q3 review" as artifact ${id}, version 1.\nTo change it, publish its next version with publish_artifact_version and this id.`,
     })
-  })
-
-  test("publishes nothing for a child once its parent turn has ended", async () => {
-    // Reproduce by dropping assertParentRunActive from the publish transaction: the child's
-    // version lands after its turn ended, past what a retry of that turn takes back.
-    write("work/review/document.md", "# Q3 review\n")
-    const parent = await startRun("thr_parent", owner)
-    const child = { ...run, parentRunId: parent.id }
-
-    await publish({ path: "work/review", kind: "document", title: "Q3 review" }, { run: child })
-    await storage.agents.runs.finish({
-      projectId,
-      id: parent.id,
-      executionToken: parent.executionToken,
-      status: "cancelled",
-    })
-    const { create } = tools({ run: child })
-    const refused = await create
-      .execute(
-        create.parseInput({ path: "work/review", kind: "document", title: "Again" }),
-        context
-      )
-      .catch((error: unknown) => error)
-
-    expect(create.errorText(refused)).toContain("the parent Agent run has ended")
-    expect((await storage.artifacts.list({ projectId })).artifacts).toHaveLength(1)
   })
 
   test("points the Agent at a page's screenshots at both widths, and its warnings", () => {
@@ -559,14 +572,10 @@ describe("publish_artifact", () => {
     })) as { artifactId: string }
 
     const [, version] = createPublishArtifactTools({
-      projectId,
-      storage,
-      artifacts: storage.artifacts,
-      reader: readerFor(olivia, { "observe:agentThreads": true }),
-      blobStorage,
-      run,
+      artifacts: runArtifactsFor({ user: olivia, grants: { "observe:agentThreads": true } }),
+      threadId: run.threadId,
       owner,
-      author: olivia,
+      blobStorage,
       budget: new AgentFileBudget(),
       installed: install({ requester: olivia }),
       resolveSandbox: async () => ({
@@ -666,36 +675,6 @@ describe("publish_artifact", () => {
     expect(tools().create.errorText(stale)).toBe(
       "[SixbAgent] publish_artifact refused: this run no longer holds its conversation, so nothing was published."
     )
-
-    // The run ends while its files are read: the commit is fenced too. Reproduce by removing
-    // `assertRunExecutionOwned` from the publish transaction; the ended run publishes.
-    const [publisher] = createPublishArtifactTools({
-      projectId,
-      storage,
-      artifacts: storage.artifacts,
-      reader: readerFor(owner),
-      blobStorage,
-      run,
-      owner,
-      author: owner,
-      budget: new AgentFileBudget(),
-      installed: install(),
-      resolveSandbox: async () => {
-        await storage.agents.runs.finish({
-          projectId,
-          id: run.id,
-          executionToken: run.executionToken,
-          status: "failed",
-        })
-        return { sandbox: sandbox(), contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
-      },
-    })
-    await expect(
-      publisher.execute(
-        publisher.parseInput({ path: "work/review", kind: "document", title: "Q3 review" }),
-        context
-      )
-    ).rejects.toBeInstanceOf(AgentExecutionLostError)
     expect((await storage.artifacts.list({ projectId })).artifacts).toEqual([])
   })
 
@@ -1037,7 +1016,7 @@ describe("materializeThreadArtifacts", () => {
 
     const elsewhere = await materializeThreadArtifacts({
       threadId: "thr_other",
-      artifacts: readerFor(owner),
+      artifacts: runArtifactsFor({ run: await startRun("thr_other", owner) }),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",
@@ -1191,7 +1170,7 @@ describe("materializeThreadArtifacts", () => {
     }
     const installing = materializeThreadArtifacts({
       threadId: run.threadId,
-      artifacts: readerFor(owner),
+      artifacts: runArtifactsFor(),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",

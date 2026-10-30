@@ -3546,7 +3546,7 @@ export const listArtifacts = <ThrowOnError extends boolean = false>(
 /**
  * Create an artifact
  *
- * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.
+ * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner.
  */
 export const createArtifact = <ThrowOnError extends boolean = false>(
   options: Options<CreateArtifactData, ThrowOnError>

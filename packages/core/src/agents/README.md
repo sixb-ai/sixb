@@ -42,6 +42,16 @@ Whichever write finds the run gone throws `AgentExecutionLostError` (`run-fence.
 storage error, so a runner checks for one error. Mail is sent as the session's run, which names
 its sender, and only to its own children's threads or to the turn that spawned it.
 
+## Artifacts
+
+A run's artifacts are its conversation's: a child's are its parent's. It reads them through its own
+SDK, bound to its execution as its requester, the way the API binds a request with the run's token.
+What it publishes is owned by the conversation's owner, authored by the requester, and names the
+run and the conversation as its origin. `AgentRunArtifacts.publish` checks the run still holds its
+execution, and a child's parent still runs, before it prepares the version and again in the
+transaction that stores it. The session in a worker and `POST /api/artifacts` with a run token
+both publish through it.
+
 ## Operations
 
 ```text
@@ -53,6 +63,8 @@ context() · checkpoint                 what a run starts from, in one read (run
                                        compaction write, which answers the history that follows
 threads · children · mail              the conversation's messages, a turn's children, and mail
                                        between them; reads answer only for the run's conversation
+artifacts                              the conversation's artifacts, read as the requester, and
+                                       what the run publishes into it (run-artifacts.ts)
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
@@ -65,7 +77,5 @@ and a session over HTTP runs the same suite.
 ## Outside the session
 
 The worker's loops stay its own: dispatching queued runs, repairing approvals, recovering model-call
-records and finishing runs that never started. `publish_artifact` still writes artifact versions
-itself, through the worker context's `artifactPublishing`, until artifacts publish through the API.
-Project tools run with the run's execution-bound `sixb`, which reaches storage only through the
+records and finishing runs that never started. Project tools run with the run's execution-bound `sixb`, which reaches storage only through the
 run's authority.

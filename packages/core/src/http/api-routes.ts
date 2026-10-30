@@ -30,9 +30,17 @@ export interface SixbApiRoute {
 
 /**
  * `read` changes nothing (a read sent as POST); `memory` writes the Agent's own notes; `file` stores
- * a blob nothing points at yet; `model` costs what AI limits already bound.
+ * a blob nothing points at yet; `model` costs what AI limits already bound; `artifact` publishes
+ * into the run's conversation.
  */
-export type AgentApiEffect = "read" | "action" | "workflow" | "memory" | "file" | "model"
+export type AgentApiEffect =
+  | "read"
+  | "action"
+  | "workflow"
+  | "memory"
+  | "file"
+  | "model"
+  | "artifact"
 
 export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
   {
@@ -505,28 +513,29 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
-  // Artifacts are reachable with an access token, so the CLI and integrations can publish them. The
-  // Agent publishes through its own tool, not with its run token.
+  // Artifacts are reachable with an access token, so the CLI and integrations can publish them. A
+  // run token reads them as the run's requester, and publishes into the run's conversation.
   {
     operationId: "listArtifacts",
     method: "GET",
     path: "/api/artifacts",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "createArtifact",
     method: "POST",
     path: "/api/artifacts",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+    agentEffect: "artifact",
   },
   {
     operationId: "getArtifact",
     method: "GET",
     path: "/api/artifacts/:artifactId",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "deleteArtifact",
@@ -568,21 +577,22 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "POST",
     path: "/api/artifacts/:artifactId/versions",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
+    agentEffect: "artifact",
   },
   {
     operationId: "getArtifactVersion",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "getArtifactQuery",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/queries/:name",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "createArtifactFrame",
@@ -596,7 +606,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/content",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "headArtifactFileContent",
