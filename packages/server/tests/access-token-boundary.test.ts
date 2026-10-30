@@ -51,6 +51,17 @@ describe("access token auth boundary", () => {
       ["POST", "/api/share-grants"],
       ["GET", "/api/share-grants?definitionId=published-report"],
       ["DELETE", "/api/share-grants/shr_1"],
+      ["GET", "/api/datasets"],
+      ["GET", "/api/datasets/orders"],
+      ["GET", "/api/datasets/orders/versions"],
+      ["GET", "/api/datasets/orders/rows?limit=10"],
+      ["GET", "/api/syncs"],
+      ["GET", "/api/syncs/catalog"],
+      ["GET", "/api/sync-runs?syncId=catalog"],
+      ["GET", "/api/pipelines"],
+      ["GET", "/api/pipelines/catalog"],
+      ["GET", "/api/pipeline-runs"],
+      ["GET", "/api/pipeline-runs/run_1"],
     ] as const
 
     for (const [method, path] of allowedRoutes) {
@@ -77,10 +88,10 @@ describe("access token auth boundary", () => {
       ["GET", "/api/agent-threads/thr_1/messages"],
       ["POST", "/api/agent-threads/thr_1/messages"],
       ["GET", "/api/agent-runs/run_1"],
-      ["GET", "/api/syncs"],
+      // Reading syncs and pipelines takes a token; running one still takes a signed-in session.
       ["POST", "/api/syncs/catalog/runs"],
-      ["GET", "/api/pipelines"],
       ["POST", "/api/pipelines/catalog/runs"],
+      ["GET", "/api/datasets/orders/versions/v_1"],
       ["GET", "/api/auth/session"],
       ["GET", "/api/auth/membership-options"],
       ["GET", "/api/auth/members"],

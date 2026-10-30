@@ -21,16 +21,33 @@ const WORKFLOW_RUN_STATUSES = [
   "failed",
   "cancelled",
 ] as const
+const DATA_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const
+
+const STATUSES = {
+  action: ACTION_RUN_STATUSES,
+  workflow: WORKFLOW_RUN_STATUSES,
+  sync: DATA_RUN_STATUSES,
+  pipeline: DATA_RUN_STATUSES,
+} as const
+
+/** The list filters each kind adds to the common window, by flag and query parameter. */
+const FILTERS = {
+  action: { "--action": "actionId", "--type": "objectTypeId", "--id": "primaryId" },
+  workflow: { "--workflow": "workflowId" },
+  sync: { "--sync": "syncId", "--dataset": "datasetId" },
+  pipeline: { "--pipeline": "pipelineId" },
+} as const
 
 export async function runs(
   api: ApiClient,
-  kind: "action" | "workflow",
+  kind: keyof typeof STATUSES,
   args: readonly string[]
 ): Promise<void> {
   const [sub, ...rest] = args
-  const group = `${kind}-runs` as "action-runs" | "workflow-runs"
+  const group = `${kind}-runs` as const
   if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP[group])
-  if (sub === "get") {
+  // The API lists sync runs but has no route for one.
+  if (sub === "get" && kind !== "sync") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1)
     return writeJson(await api.get(`/api/${group}/${encodeURIComponent(positionals[0] ?? "")}`))
   }
@@ -43,15 +60,8 @@ export async function runs(
       "--offset": "offset",
       "--order": "order",
     }
-    const action = {
-      ...common,
-      "--action": "actionId",
-      "--type": "objectTypeId",
-      "--id": "primaryId",
-    }
-    const workflow = { ...common, "--workflow": "workflowId" }
     const options = normalizeWindowOptions(
-      parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`),
+      parseQueryOptions(rest, { ...common, ...FILTERS[kind] }, `${group} list`),
       {
         defaultLimit: CLI_LIMITS.list.default,
         maximumLimit: CLI_LIMITS.list.maximum,
@@ -60,11 +70,7 @@ export async function runs(
       }
     )
     if (options.status !== undefined) {
-      options.status = enumValue(
-        "--status",
-        options.status,
-        kind === "action" ? ACTION_RUN_STATUSES : WORKFLOW_RUN_STATUSES
-      )
+      options.status = enumValue("--status", options.status, STATUSES[kind])
     }
     for (const [name, flag] of [
       ["startedAfter", "--started-after"],

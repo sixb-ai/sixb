@@ -14,7 +14,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
-import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -85,6 +85,29 @@ async function seedSession(storage: InMemoryStorage, userId: string, groupIds: r
   return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
+async function seedAccessToken(
+  storage: InMemoryStorage,
+  userId: string,
+  groupIds: readonly string[]
+) {
+  const credential = createAccessTokenCredential("personal")
+  await storage.auth.users.create({ id: userId, projectId, email: `${userId}@acme.com` })
+  for (const groupId of groupIds) {
+    await storage.auth.groupMemberships.upsert({ projectId, userId, groupId, source: "manual" })
+  }
+  await storage.auth.accessTokens.create({
+    id: credential.tokenId,
+    projectId,
+    name: "CLI",
+    kind: "personal",
+    subject: { type: "user", id: userId },
+    tokenHash: credential.tokenHash,
+    createdAt: new Date("2026-10-09T10:00:00.000Z"),
+    expiresAt: new Date("2099-10-09T10:00:00.000Z"),
+  })
+  return { authorization: `Bearer ${credential.tokenValue}` }
+}
+
 describe("dataset routes with markings", () => {
   test("rows omit marked columns and list them in redactions", async () => {
     const { app, storage } = await createApp()
@@ -112,5 +135,29 @@ describe("dataset routes with markings", () => {
     expect(body.columns).toEqual(["id", "title", "amount"])
     expect(body.rows).toEqual([{ id: "inv-1", title: "July", amount: "120.00" }])
     expect(body.redactions).toBeUndefined()
+  })
+
+  // `sixb datasets` reads with an access token. Set listDatasets' accessToken to false in
+  // SIXB_API_ROUTES (and drop its security line); the access token gets a 403.
+  test("an access token reads with its holder's grants and clearances", async () => {
+    const { app, storage } = await createApp()
+    const staffToken = await seedAccessToken(storage, "usr_staff", [staff.id])
+    const outsiderToken = await seedAccessToken(storage, "usr_outsider", [])
+    const read = (path: string, headers: Record<string, string>) =>
+      app.fetch(new Request(`http://localhost/api/datasets${path}`, { headers }))
+
+    const listed = await read("", staffToken)
+    expect(listed.status).toBe(200)
+    expect((await listed.json()).map((dataset: { id: string }) => dataset.id)).toEqual([
+      "raw_invoices",
+    ])
+    expect(await (await read("/raw_invoices/rows", staffToken)).json()).toMatchObject({
+      columns: ["id", "title"],
+      redactions: { amount: { reason: "missing_clearance" } },
+    })
+
+    // No grant: the catalog is empty and the dataset is not found.
+    expect(await (await read("", outsiderToken)).json()).toEqual([])
+    expect((await read("/raw_invoices", outsiderToken)).status).toBe(404)
   })
 })

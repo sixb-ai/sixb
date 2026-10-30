@@ -167,6 +167,8 @@ var CLI_LIMITS = {
   telemetryHistory: { default: 100, maximum: 1000 },
   linkPage: { default: 100, maximum: 1000 },
   users: { default: 20, maximum: 200 },
+  datasetVersions: { default: 20, maximum: 100 },
+  datasetRows: { default: 100, maximum: 1000 },
   inspect: {
     depth: { default: 2, maximum: 3 },
     objects: { default: 20, maximum: 100 },
@@ -223,6 +225,13 @@ Actions and workflows:
   sixb action-runs list|get ...
   sixb workflows list|get|start ...
   sixb workflow-runs list|get ...
+
+Data:
+  sixb datasets list|get|versions|rows ...
+  sixb syncs list|get ...             Syncs you may run, each with its latest run
+  sixb sync-runs list ...
+  sixb pipelines list|get ...         Pipelines you may run, each with its latest run
+  sixb pipeline-runs list|get ...
 
 Files:
   sixb files upload|download ...
@@ -460,7 +469,57 @@ List options:
   --started-after|--started-before <RFC3339>
   --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
   --offset <n>                  Non-negative; defaults to 0
-  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  datasets: `Usage:
+  sixb datasets list
+  sixb datasets get <dataset-id>
+  sixb datasets versions <dataset-id> [--limit <1-${CLI_LIMITS.datasetVersions.maximum}>]
+  sixb datasets rows <dataset-id> [options]
+
+Rows options:
+  --version <version-id>        Defaults to the latest version
+  --columns <a,b,...>           Defaults to every column
+  --limit <1-${CLI_LIMITS.datasetRows.maximum}>              Defaults to ${CLI_LIMITS.datasetRows.default}
+  --offset <n>                  Non-negative; defaults to 0
+
+\`list\` and \`get\` show a dataset's schema, latest version and the syncs, pipelines and
+projections that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
+columns your clearances do not cover and names them under redactions.`,
+  syncs: `Usage:
+  sixb syncs list
+  sixb syncs get <sync-id>
+
+Lists the syncs you may run, each with its latest run. \`sixb sync-runs list\` shows the history.`,
+  "sync-runs": `Usage:
+  sixb sync-runs list [options]
+
+List options:
+  --sync <sync-id>
+  --dataset <dataset-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  pipelines: `Usage:
+  sixb pipelines list
+  sixb pipelines get <pipeline-id>
+
+Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
+history and each run's steps.`,
+  "pipeline-runs": `Usage:
+  sixb pipeline-runs list [options]
+  sixb pipeline-runs get <run-id>
+
+List options:
+  --pipeline <pipeline-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}
+
+\`get\` includes the run's steps.`
 };
 var QUERY_EXAMPLES = {
   exact: '{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}',
@@ -604,6 +663,60 @@ async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
     }
   }
   fail(`Unknown actions command '${sub}'.`);
+}
+
+// src/commands/data.ts
+var segment = (value) => encodeURIComponent(value ?? "");
+async function datasets(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.datasets);
+  if (sub === "list") {
+    parseCommandArgs(rest, {}, "datasets list");
+    return writeJson(await api.get("/api/datasets"));
+  }
+  if (sub === "get") {
+    const { positionals } = parseCommandArgs(rest, {}, "datasets get", 1);
+    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}`));
+  }
+  if (sub === "versions") {
+    const { positionals, options } = parseCommandArgs(rest, { "--limit": "string" }, "datasets versions", 1);
+    const { default: fallback, maximum } = CLI_LIMITS.datasetVersions;
+    const limit = integerInRange("--limit", options["--limit"] ?? String(fallback), 1, maximum);
+    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}/versions`, { limit: String(limit) }));
+  }
+  if (sub === "rows") {
+    const { positionals, options } = parseCommandArgs(rest, { "--version": "string", "--columns": "string", "--limit": "string", "--offset": "string" }, "datasets rows", 1);
+    const { default: fallback, maximum } = CLI_LIMITS.datasetRows;
+    const query = {
+      limit: String(integerInRange("--limit", options["--limit"] ?? String(fallback), 1, maximum)),
+      ...options["--version"] === undefined ? {} : { versionId: options["--version"] },
+      ...options["--columns"] === undefined ? {} : { columns: columnList(options["--columns"]) },
+      ...options["--offset"] === undefined ? {} : { offset: String(nonNegativeInteger("--offset", options["--offset"])) }
+    };
+    return writeJson(await api.get(`/api/datasets/${segment(positionals[0])}/rows`, query));
+  }
+  fail(`Unknown datasets command '${sub}'.`);
+}
+async function runnables(api, group, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP[group]);
+  if (sub === "list") {
+    parseCommandArgs(rest, {}, `${group} list`);
+    return writeJson(await api.get(`/api/${group}`));
+  }
+  if (sub === "get") {
+    const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
+    return writeJson(await api.get(`/api/${group}/${segment(positionals[0])}`));
+  }
+  fail(`Unknown ${group} command '${sub}'.`);
+}
+function columnList(value) {
+  const columns = value.split(",").map((column) => column.trim());
+  if (columns.some((column) => !column))
+    fail("--columns takes column names separated by commas.");
+  return columns.join(",");
 }
 
 // src/commands/files.ts
@@ -1591,12 +1704,25 @@ var WORKFLOW_RUN_STATUSES = [
   "failed",
   "cancelled"
 ];
+var DATA_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"];
+var STATUSES = {
+  action: ACTION_RUN_STATUSES,
+  workflow: WORKFLOW_RUN_STATUSES,
+  sync: DATA_RUN_STATUSES,
+  pipeline: DATA_RUN_STATUSES
+};
+var FILTERS = {
+  action: { "--action": "actionId", "--type": "objectTypeId", "--id": "primaryId" },
+  workflow: { "--workflow": "workflowId" },
+  sync: { "--sync": "syncId", "--dataset": "datasetId" },
+  pipeline: { "--pipeline": "pipelineId" }
+};
 async function runs(api, kind, args) {
   const [sub, ...rest] = args;
   const group = `${kind}-runs`;
   if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP[group]);
-  if (sub === "get") {
+  if (sub === "get" && kind !== "sync") {
     const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
     return writeJson(await api.get(`/api/${group}/${encodeURIComponent(positionals[0] ?? "")}`));
   }
@@ -1609,21 +1735,14 @@ async function runs(api, kind, args) {
       "--offset": "offset",
       "--order": "order"
     };
-    const action = {
-      ...common,
-      "--action": "actionId",
-      "--type": "objectTypeId",
-      "--id": "primaryId"
-    };
-    const workflow = { ...common, "--workflow": "workflowId" };
-    const options = normalizeWindowOptions(parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`), {
+    const options = normalizeWindowOptions(parseQueryOptions(rest, { ...common, ...FILTERS[kind] }, `${group} list`), {
       defaultLimit: CLI_LIMITS.list.default,
       maximumLimit: CLI_LIMITS.list.maximum,
       defaultOrder: DEFAULT_LIST_ORDER,
       offset: true
     });
     if (options.status !== undefined) {
-      options.status = enumValue("--status", options.status, kind === "action" ? ACTION_RUN_STATUSES : WORKFLOW_RUN_STATUSES);
+      options.status = enumValue("--status", options.status, STATUSES[kind]);
     }
     for (const [name, flag] of [
       ["startedAfter", "--started-after"],
@@ -1789,7 +1908,12 @@ var INSTANCE_COMMANDS = [
   "workflows",
   "workflow-runs",
   "users",
-  "models"
+  "models",
+  "datasets",
+  "syncs",
+  "sync-runs",
+  "pipelines",
+  "pipeline-runs"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
@@ -1818,6 +1942,16 @@ async function dispatch(api, command, args) {
       return users(api, args);
     case "models":
       return models(api, args);
+    case "datasets":
+      return datasets(api, args);
+    case "syncs":
+      return runnables(api, "syncs", args);
+    case "sync-runs":
+      return runs(api, "sync", args);
+    case "pipelines":
+      return runnables(api, "pipelines", args);
+    case "pipeline-runs":
+      return runs(api, "pipeline", args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }

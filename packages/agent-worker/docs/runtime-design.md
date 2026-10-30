@@ -33,6 +33,8 @@ the API (everything else returns `403`):
 | Actions | `GET /api/actions`, `GET /api/actions/:actionId`, `POST /api/actions/:actionId`, `GET /api/action-runs`, `GET /api/action-runs/:runId` |
 | Workflows | `GET /api/workflows`, `GET /api/workflows/:workflowId`, `POST .../:workflowId/runs`, `GET /api/workflow-runs`, `GET /api/workflow-runs/:runId` |
 | Files | `POST /api/files`, object/action/workflow-run/message `GET .../files/content` routes |
+| Datasets | `GET /api/datasets`, `GET /api/datasets/:datasetId` (+ `/versions`, `/rows`) |
+| Syncs and pipelines | `GET /api/syncs`, `GET /api/syncs/:syncId`, `GET /api/sync-runs`, `GET /api/pipelines`, `GET /api/pipelines/:pipelineId`, `GET /api/pipeline-runs`, `GET /api/pipeline-runs/:runId` |
 
 Requests run inside the run's own [execution](../../../docs/models/tools-and-authorization.md), like its project tools:
 what they start is part of the run, keeps the run's requester, and counts toward its usage. The
@@ -43,8 +45,8 @@ so only while the run is active; a request admitted before the run ends still fi
 Requests keep the API's own body limits. Staged and direct-provider uploads are not exposed.
 Agents must preview and ask for confirmation before starting a domain-changing action or workflow.
 Workflow agent nodes cannot start another workflow, which bounds recursive execution. Generic
-object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics, and
-infrastructure or administration routes stay closed to run tokens.
+object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics,
+starting a sync or pipeline, and infrastructure or administration routes stay closed to run tokens.
 
 Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK,
 with the authority a run-token request resolves; its type shows only object reads, actions, models and

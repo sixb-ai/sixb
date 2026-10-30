@@ -1686,7 +1686,10 @@ export const listDatasets = <ThrowOnError extends boolean = false>(
   options?: Options<ListDatasetsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListDatasetsResponses, ListDatasetsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/datasets",
     ...options,
   })
@@ -1698,7 +1701,10 @@ export const getDataset = <ThrowOnError extends boolean = false>(
   options: Options<GetDatasetData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetDatasetResponses, GetDatasetErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/datasets/{datasetId}",
     ...options,
   })
@@ -1714,7 +1720,10 @@ export const listDatasetVersions = <ThrowOnError extends boolean = false>(
     ListDatasetVersionsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/datasets/{datasetId}/versions",
     ...options,
   })
@@ -1740,7 +1749,10 @@ export const listDatasetRows = <ThrowOnError extends boolean = false>(
   options: Options<ListDatasetRowsData, ThrowOnError>
 ) =>
   (options.client ?? client).get<ListDatasetRowsResponses, ListDatasetRowsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/datasets/{datasetId}/rows",
     ...options,
   })
@@ -1752,7 +1764,10 @@ export const listSyncs = <ThrowOnError extends boolean = false>(
   options?: Options<ListSyncsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListSyncsResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/syncs",
     ...options,
   })
@@ -1764,7 +1779,10 @@ export const getSync = <ThrowOnError extends boolean = false>(
   options: Options<GetSyncData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetSyncResponses, GetSyncErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/syncs/{syncId}",
     ...options,
   })
@@ -1776,7 +1794,10 @@ export const listSyncRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListSyncRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListSyncRunsResponses, ListSyncRunsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/sync-runs",
     ...options,
   })
@@ -1807,7 +1828,10 @@ export const listPipelines = <ThrowOnError extends boolean = false>(
   options?: Options<ListPipelinesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListPipelinesResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/pipelines",
     ...options,
   })
@@ -1819,7 +1843,10 @@ export const getPipeline = <ThrowOnError extends boolean = false>(
   options: Options<GetPipelineData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetPipelineResponses, GetPipelineErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/pipelines/{pipelineId}",
     ...options,
   })
@@ -1831,7 +1858,10 @@ export const listPipelineRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListPipelineRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListPipelineRunsResponses, ListPipelineRunsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/pipeline-runs",
     ...options,
   })
@@ -1843,7 +1873,10 @@ export const getPipelineRun = <ThrowOnError extends boolean = false>(
   options: Options<GetPipelineRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetPipelineRunResponses, GetPipelineRunErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/pipeline-runs/{runId}",
     ...options,
   })

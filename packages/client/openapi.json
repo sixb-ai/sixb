@@ -18035,6 +18035,14 @@
         "summary": "List registered datasets",
         "tags": ["Datasets"],
         "operationId": "listDatasets",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -18209,6 +18217,14 @@
         "summary": "Get dataset metadata",
         "tags": ["Datasets"],
         "operationId": "getDataset",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "datasetId",
@@ -18413,6 +18429,14 @@
         "summary": "List dataset versions",
         "tags": ["Dataset Versions"],
         "operationId": "listDatasetVersions",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "datasetId",
@@ -18773,6 +18797,14 @@
         "summary": "Preview dataset rows",
         "tags": ["Dataset Rows"],
         "operationId": "listDatasetRows",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "datasetId",
@@ -19038,6 +19070,14 @@
         "summary": "List registered syncs",
         "tags": ["Syncs"],
         "operationId": "listSyncs",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -19315,6 +19355,14 @@
         "summary": "Get sync metadata",
         "tags": ["Syncs"],
         "operationId": "getSync",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "syncId",
@@ -19617,6 +19665,14 @@
         "summary": "List sync run history",
         "tags": ["Sync Runs"],
         "operationId": "listSyncRuns",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "syncId",
@@ -20032,6 +20088,14 @@
         "summary": "List registered pipelines",
         "tags": ["Pipelines"],
         "operationId": "listPipelines",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -20412,6 +20476,14 @@
         "summary": "Get pipeline metadata",
         "tags": ["Pipelines"],
         "operationId": "getPipeline",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "pipelineId",
@@ -20817,6 +20889,14 @@
         "summary": "List pipeline run history",
         "tags": ["Pipeline Runs"],
         "operationId": "listPipelineRuns",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "pipelineId",
@@ -21048,6 +21128,14 @@
         "summary": "Get pipeline run detail",
         "tags": ["Pipeline Runs"],
         "operationId": "getPipelineRun",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "runId",
