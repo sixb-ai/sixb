@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
 import { join } from "node:path"
+import type { ChildRunner } from "@sixb/agent"
 import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
@@ -157,10 +158,11 @@ import { createSixbApi, SixbServer } from "../../server/src/server"
 import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { normalizeApiBaseUrl, runApiCredential } from "../src/api-url"
-import { ChildRunner } from "../src/child-runner"
+import { workerChildren } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
+import { runnerContext } from "../src/execution-context"
 import { isTerminalRun } from "../src/run-fate"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
@@ -2004,10 +2006,10 @@ async function runChildren(
 /** The worker's child runner, for this project. */
 function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
   const context = workerContextOf(sixb)
-  return new ChildRunner({
+  return workerChildren({
     capacity,
-    host: sixb,
     context,
+    settings: context,
     sessions: {
       projectId: PROJECT_ID,
       storage: context.storage,
@@ -2018,6 +2020,7 @@ function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
       sdk: sixb,
       definitions: sixb.definitions,
     },
+    runnerContext: (child) => runnerContext(sixb, context, child),
     trackTeardown: () => {},
     reportFailure: () => {},
   })
@@ -2030,14 +2033,19 @@ async function startChildren(
   runIds: readonly string[],
   signal = new AbortController().signal
 ): Promise<void> {
-  const delivery = {
-    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    onLeaseRenewed: () => () => {},
-  }
+  const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString()
   for (const runId of runIds) {
     const run = await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: runId })
     if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
-    runner.start(run, { signal, delivery, family: new FamilyMailbox() })
+    runner.start(run, {
+      signal,
+      family: new FamilyMailbox(),
+      leaseExpiresAt: () => leaseExpiresAt,
+      holdLease: async (session) => {
+        await session.renewLease(leaseExpiresAt)
+        return () => {}
+      },
+    })
   }
 }
 
@@ -9099,7 +9107,7 @@ describe("AgentWorker", () => {
   })
 
   test("retries a child's claim that storage refused for a moment", async () => {
-    // Removal proof: claim without retryPreparationInPlace in ChildRunner.run; the child stays
+    // Removal proof: claim without retryPreparationInPlace in claimChild; the child stays
     // queued, and nothing would ever start it.
     const sixb = buildSixb(answerModel())
     const storage = agentStorageOf(sixb)
@@ -9135,13 +9143,12 @@ describe("AgentWorker", () => {
     // Each retry waits up to five seconds: drive them with fake time.
     jest.useFakeTimers()
     try {
+      const leaseExpiresAt = new Date(Date.now() + 3_600_000).toISOString()
       runner.start(queued, {
         signal: new AbortController().signal,
-        delivery: {
-          leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-          onLeaseRenewed: () => () => {},
-        },
         family: new FamilyMailbox(),
+        leaseExpiresAt: () => leaseExpiresAt,
+        holdLease: async () => () => {},
       })
       const child = await underFakeTime(
         async () => {

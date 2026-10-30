@@ -1,6 +1,10 @@
-import { agentRequester } from "@sixb/agent"
+import { type AgentExecutionContext, agentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
-import type { AgentExecutionAuthorization, AgentRunFileStore } from "@sixb/core/internal/agents"
+import type {
+  AgentExecutionAuthorization,
+  AgentRunFileStore,
+  AgentRunSession,
+} from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
 import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -40,5 +44,29 @@ export async function createAgentExecutionContext(input: {
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     ...(requester === undefined ? {} : { requester }),
     blobStorage: input.files ?? sixb.blobs,
+  }
+}
+
+/**
+ * A turn's or child's context, with what the worker's sandboxes need besides: its factory, and the
+ * run's SDK, which resolves a workspace recipe's parameters.
+ */
+export async function runnerContext(
+  host: AgentWorkerHost,
+  context: AgentWorkerContext,
+  run: {
+    readonly session: AgentRunSession
+    readonly context: AgentExecutionContext
+    readonly execution: ExecutionRecord
+  }
+): Promise<AgentRunnerContext> {
+  return {
+    ...run.context,
+    sandboxes: context.sandboxes,
+    sixb: bindDurableAgentExecution(host, {
+      execution: run.execution,
+      runId: run.session.run.id,
+      authorization: await run.session.authorization(run.execution.authorizationRef),
+    }),
   }
 }

@@ -15,6 +15,7 @@ export type { ConversationReaders } from "./message-authors"
 export type { AgentToolCaller } from "./model-adapters"
 export { agentRequester } from "./requester"
 export { runAgentTurn, stoppedByWorker } from "./run-agent-turn"
+export { type ChildParent, ChildRunner, type ChildRunnerHost } from "./run-child"
 export { type ConversationTurnRunner, runConversationTurn } from "./run-conversation-turn"
 export type {
   AgentExecutionEnvironment,
