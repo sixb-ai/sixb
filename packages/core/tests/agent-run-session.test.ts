@@ -381,6 +381,11 @@ describe("an agent run session's children and mail", () => {
       await first.conversation.createCheckpoint(checkpoint("ckpt-stale")).catch((error) => error)
     ).toBeInstanceOf(AgentExecutionLostError)
     expect((await second.conversation.createCheckpoint(checkpoint("ckpt-1"))).id).toBe("ckpt-1")
+    // A run that ended holds nothing either: the same error, not storage's own.
+    await second.finish({ status: "succeeded" })
+    expect(
+      await second.conversation.createCheckpoint(checkpoint("ckpt-2")).catch((error) => error)
+    ).toBeInstanceOf(AgentExecutionLostError)
     first.close()
     second.close()
   })
@@ -407,7 +412,7 @@ describe("an agent run session's children and mail", () => {
   // and the child mails a run that is not its parent. Drop the ownership read; the stale turn sends.
   test("mails only its own children or parent, and nothing once it lost its run", async () => {
     const { host, storage, run } = await setup()
-    const turn = await claimAgentRun(host, { run, leaseExpiresAt: LEASE })
+    const turn = await claimAgentRun(host, { run, leaseExpiresAt: LAPSED })
     if (!turn) throw new Error("Expected the run to be claimed.")
     const spawned = await spawnChild(storage, turn)
     const child = await claimAgentRun(host, {

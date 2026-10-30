@@ -850,9 +850,10 @@ export function assertAgentContextCheckpointAuthority(input: {
       `[${prefix}] Agent run '${run.id}' does not belong to thread '${create.threadId}'.`
     )
   }
+  // A run that ended no longer holds its execution, as a reclaimed one does not.
   if (run.status !== "running") {
     throw new AgentStorageError(
-      "invalid_state",
+      "execution_lost",
       `[${prefix}] Agent run '${run.id}' is not running (status '${run.status}').`
     )
   }
