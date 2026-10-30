@@ -37,6 +37,7 @@ function setup() {
       Response.json({
         path: new URL(request.url).pathname,
         authorization: request.headers.get("authorization"),
+        forwardedFor: request.headers.get("x-forwarded-for"),
       }),
   })
   const origin = `http://127.0.0.1:${server.port}`
@@ -71,12 +72,16 @@ function setup() {
     }
     return run(ready)
   }
-  const call = async (path: string) => {
-    const socket = guestCredentialedUrl(origin, paths).slice("unix:".length)
-    const response = await fetch(`http://localhost${path}`, { unix: socket })
-    return (await response.json()) as { path: string; authorization: string | null }
+  const socketOf = () => guestCredentialedUrl(origin, paths).slice("unix:".length)
+  const call = async (path: string, headers?: Record<string, string>) => {
+    const response = await fetch(`http://localhost${path}`, { unix: socketOf(), headers })
+    return (await response.json()) as {
+      path: string
+      authorization: string | null
+      forwardedFor: string | null
+    }
   }
-  return { paths, origin, credential, install, call }
+  return { paths, origin, credential, install, call, socketOf }
 }
 
 describe("guest credentials", () => {
@@ -88,12 +93,57 @@ describe("guest credentials", () => {
     expect(await call("/api/whoami")).toEqual({
       path: "/api/whoami",
       authorization: `Bearer ${first}`,
+      forwardedFor: null,
     })
     expect((await call("/health")).authorization).toBeNull()
 
     const second = `guest-${randomUUID()}`
     expect(await install([credential(second)])).toBe(0)
     expect((await call("/api/whoami")).authorization).toBe(`Bearer ${second}`)
+  })
+
+  // Guard proof: resolve the request's own URL against the origin in guestForwarder again; the
+  // absolute-form request reaches the other host.
+  test("forwards to its origin alone, and never says whom a request is from", async () => {
+    const { credential, install, call, socketOf } = setup()
+    const reached: string[] = []
+    const other = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        reached.push(request.url)
+        return new Response("other")
+      },
+    })
+    try {
+      expect(await install([credential(`guest-${randomUUID()}`)])).toBe(0)
+      const answer = await new Promise<string>((resolve, reject) => {
+        let text = ""
+        Bun.connect({
+          unix: socketOf(),
+          socket: {
+            open: (socket) => {
+              socket.write(
+                `GET http://127.0.0.1:${other.port}/api/x HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`
+              )
+            },
+            data: (_socket, chunk) => {
+              text += new TextDecoder().decode(chunk)
+            },
+            close: () => resolve(text),
+            error: (_socket, error) => reject(error),
+          },
+        }).catch(reject)
+      })
+
+      expect(reached).toEqual([])
+      expect(answer).toContain('"path":"/api/x"')
+      expect(
+        (await call("/api/whoami", { "x-forwarded-for": "203.0.113.9" })).forwardedFor
+      ).toBeNull()
+    } finally {
+      other.stop(true)
+    }
   })
 
   test("keeps the credentials root-only and out of the forwarder's arguments", async () => {
