@@ -198,7 +198,7 @@ export async function prepareHandedFiles(input: {
     const stat = await waitForAbort(input.blobStorage.stat(fileRef.blobId), signal)
     if (stat?.digest !== fileRef.digest) {
       throw new Error(
-        `[SixbAgentWorker] '${path}', handed over by parent run '${input.parentRunId}', is no longer in blob storage.`
+        `[SixbAgent] '${path}', handed over by parent run '${input.parentRunId}', is no longer in blob storage.`
       )
     }
     sandboxFiles.push({
@@ -450,7 +450,7 @@ async function storeFile(
     ...(expected.mediaType === undefined ? {} : { mediaType: expected.mediaType }),
   })
   if (stored.blobId !== expected.blobId) {
-    throw new Error(`[SixbAgentWorker] Blob storage stored '${path}' under another id.`)
+    throw new Error(`[SixbAgent] Blob storage stored '${path}' under another id.`)
   }
   return stored
 }
@@ -488,7 +488,7 @@ function toHandOffError(error: unknown, path: string): unknown {
 }
 
 function handOffError(problem: string): AgentToolPublicError {
-  return new AgentToolPublicError(`[SixbAgentWorker] spawn_agent cannot hand over ${problem}.`)
+  return new AgentToolPublicError(`[SixbAgent] spawn_agent cannot hand over ${problem}.`)
 }
 
 /** Why the files a child left in `out/` do not come back, or nothing when they do. */

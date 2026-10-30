@@ -607,7 +607,7 @@ describe("a child's question", () => {
       expect(finished).toMatchObject({ status: "succeeded" })
       expect(replies).toContainEqual({ answer: ANSWER })
       expect(replies).toContainEqual(
-        "[SixbAgentWorker] Ask one question at a time: your parent has not answered the last one yet."
+        "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
       )
       const waited = toolOutput(harness.parentRequests[2], "wait") as {
         readonly questions: readonly unknown[]
@@ -1215,7 +1215,7 @@ describe("a child paused on its question, in a later turn", () => {
 
       expect(replies).toContainEqual(expect.objectContaining({ delivery: "answer" }))
       expect(replies).toContainEqual(
-        "[SixbAgentWorker] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent."
+        "[SixbAgent] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent."
       )
     } finally {
       await settle(harness.worker.stop(), "worker stop")

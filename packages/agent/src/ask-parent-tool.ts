@@ -94,7 +94,7 @@ function parseAskParentInput(value: unknown): AskParentInput {
     typeof value.question !== "string" ||
     !value.question.trim()
   ) {
-    throw new AgentToolPublicError("[SixbAgentWorker] ask_parent expects a non-empty question.")
+    throw new AgentToolPublicError("[SixbAgent] ask_parent expects a non-empty question.")
   }
   return { question: value.question.trim() }
 }

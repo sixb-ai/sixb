@@ -817,10 +817,10 @@ describe("message_agent", () => {
       await requestTurn(harness)
 
       expect(toolOutput(harness.parentRequests[3], "late")).toBe(
-        "[SixbAgentWorker] 'compare-suppliers' already ended (succeeded), so it cannot read a message. Spawn a new child with another key to go on."
+        "[SixbAgent] 'compare-suppliers' already ended (succeeded), so it cannot read a message. Spawn a new child with another key to go on."
       )
       expect(toolOutput(harness.parentRequests[3], "unknown")).toBe(
-        "[SixbAgentWorker] 'compare-supplier' is not a child agent of this turn. Use the key you passed to spawn_agent."
+        "[SixbAgent] 'compare-supplier' is not a child agent of this turn. Use the key you passed to spawn_agent."
       )
     } finally {
       await settle(harness.worker.stop(), "worker stop")
@@ -892,7 +892,7 @@ describe("message_agent", () => {
         ],
       })
       expect(toolOutput(harness.parentRequests[4], "paused")).toBe(
-        "[SixbAgentWorker] 'compare-suppliers' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change."
+        "[SixbAgent] 'compare-suppliers' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change."
       )
     } finally {
       collectReleased.reached()
@@ -935,7 +935,7 @@ describe("message_agent", () => {
         finishReason: "awaiting_approval",
       })
       expect(toolOutput(harness.parentRequests[2], "steer")).toBe(
-        "[SixbAgentWorker] 'compare-suppliers' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change."
+        "[SixbAgent] 'compare-suppliers' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change."
       )
     } finally {
       refused.reached()
@@ -967,7 +967,7 @@ describe("message_agent", () => {
       await requestTurn(harness, first.run.threadId)
 
       expect(toolOutput(harness.parentRequests[4], "steer")).toBe(
-        "[SixbAgentWorker] 'compare-suppliers' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then."
+        "[SixbAgent] 'compare-suppliers' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then."
       )
     } finally {
       await settle(harness.worker.stop(), "worker stop")

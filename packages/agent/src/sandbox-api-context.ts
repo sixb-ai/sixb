@@ -74,7 +74,7 @@ export async function prepareAgentSandboxApiContext(
   if (!input.sandbox.credentialedUrl) {
     throw createSixbError(
       "agent.execution_failed",
-      `[SixbAgentWorker] Sandbox provider "${input.sandbox.provider}" advertises request credentials but its sandbox has no credentialedUrl.`
+      `[SixbAgent] Sandbox provider "${input.sandbox.provider}" advertises request credentials but its sandbox has no credentialedUrl.`
     )
   }
   const apiBaseUrl = input.sandbox.credentialedUrl(input.apiBaseUrl)
@@ -110,7 +110,7 @@ export async function prepareAgentSandboxApiContext(
     )
     if (cleared.exitCode !== 0 || cleared.timedOut) {
       throw new Error(
-        `[SixbAgentWorker] Could not clear ${join(input.contextDirectory, AGENT_ARTIFACTS_DIRECTORY)}: ${cleared.stderr.trim() || `exit ${cleared.exitCode}`}`
+        `[SixbAgent] Could not clear ${join(input.contextDirectory, AGENT_ARTIFACTS_DIRECTORY)}: ${cleared.stderr.trim() || `exit ${cleared.exitCode}`}`
       )
     }
   }

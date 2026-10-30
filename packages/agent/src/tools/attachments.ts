@@ -61,6 +61,6 @@ export function handedToolAttachments(input: {
 
 function unknownAttachment(key: string): AgentToolPublicError {
   return new AgentToolPublicError(
-    `[SixbAgentWorker] '${key}' is not an attachment of this run. Pass a key listed in $SIXB_ATTACHMENTS.`
+    `[SixbAgent] '${key}' is not an attachment of this run. Pass a key listed in $SIXB_ATTACHMENTS.`
   )
 }

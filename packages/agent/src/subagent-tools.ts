@@ -229,7 +229,7 @@ export class SubagentCoordinator {
   ) {
     const models = host.definitions.models?.language
     if (!models) {
-      throw new Error("[SixbAgentWorker] Subagent delegation requires a language model catalog.")
+      throw new Error("[SixbAgent] Subagent delegation requires a language model catalog.")
     }
     this.models = models
     this.#questions = new ChildQuestions(session.mail, parentRun.id)
@@ -252,7 +252,7 @@ export class SubagentCoordinator {
       waiting = await this.waitingQuestions()
     } catch (error) {
       console.error(
-        `[SixbAgentWorker] Agent run '${this.parentRun.id}' could not read which earlier sub-agents wait on a question; it goes on without them.`,
+        `[SixbAgent] Agent run '${this.parentRun.id}' could not read which earlier sub-agents wait on a question; it goes on without them.`,
         error
       )
     }
@@ -327,7 +327,7 @@ export class SubagentCoordinator {
       const remainingMs = stopAt - Date.now()
       if (remainingMs <= 0) {
         throw new Error(
-          `[SixbAgentWorker] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
+          `[SixbAgent] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
         )
       }
       // Its finish goes to the inbox of the attempt it ran under, not this turn's: read it again.
@@ -480,20 +480,20 @@ export class SubagentCoordinator {
     if (child?.kind !== "subagent" || child.parentRunId !== this.parentRun.id) {
       throw new AgentToolPublicError(
         (await this.latestChildUnder(key))
-          ? `[SixbAgentWorker] '${key}' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then.`
-          : `[SixbAgentWorker] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
+          ? `[SixbAgent] '${key}' is a child agent of an earlier turn, which ended with it. Spawn it again in this turn, with the same key if you like, and message it then.`
+          : `[SixbAgent] '${key}' is not a child agent of this turn. Use the key you passed to spawn_agent.`
       )
     }
     // Once its call is filed it pauses at the end of its step, before it would read a message.
     if (isPausedSubagentRun(child) || (await children.holdsRun(child.id))) {
       throw new AgentToolPublicError(
-        `[SixbAgentWorker] '${key}' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change.`
+        `[SixbAgent] '${key}' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change.`
       )
     }
     const { status } = child
     if (status !== "queued" && status !== "running") {
       throw new AgentToolPublicError(
-        `[SixbAgentWorker] '${key}' already ended (${status}), so it cannot read a message. Spawn a new child with another key to go on.`
+        `[SixbAgent] '${key}' already ended (${status}), so it cannot read a message. Spawn a new child with another key to go on.`
       )
     }
 
@@ -598,7 +598,7 @@ export class SubagentCoordinator {
     const question = await this.deferredQuestionOf(paused)
     if (!question) {
       throw new Error(
-        `[SixbAgentWorker] Subagent run '${paused.id}' paused on a question its thread does not hold.`
+        `[SixbAgent] Subagent run '${paused.id}' paused on a question its thread does not hold.`
       )
     }
     const answer: AgentMailPart = {
@@ -613,7 +613,7 @@ export class SubagentCoordinator {
     const admitted = await this.admitInTurn(async () => {
       if (await this.subagentRun(runId)) {
         throw new AgentToolPublicError(
-          `[SixbAgentWorker] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent.`
+          `[SixbAgent] '${key}' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent.`
         )
       }
       await this.clearDeadAttempts(paused, signal)
@@ -683,7 +683,7 @@ export class SubagentCoordinator {
       )
     } catch (error) {
       console.error(
-        `[SixbAgentWorker] Could not read the questions of Agent run '${this.parentRun.id}'; its children asking one are cancelled with the turn.`,
+        `[SixbAgent] Could not read the questions of Agent run '${this.parentRun.id}'; its children asking one are cancelled with the turn.`,
         error
       )
       return
@@ -706,7 +706,7 @@ export class SubagentCoordinator {
         deferred.push(question.runId)
       } catch (error) {
         console.error(
-          `[SixbAgentWorker] Could not tell subagent run '${question.runId}' that its question waits for a later turn; it is cancelled with the turn.`,
+          `[SixbAgent] Could not tell subagent run '${question.runId}' that its question waits for a later turn; it is cancelled with the turn.`,
           error
         )
       }
@@ -830,8 +830,8 @@ export class SubagentCoordinator {
         const after = (await this.continuesAfterAnswer(existing)) ? "your answer" : "the approval"
         throw new AgentToolPublicError(
           isTerminalSubagent(existing)
-            ? `[SixbAgentWorker] '${key}' already continued after ${after}, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
-            : `[SixbAgentWorker] '${key}' is the sub-agent that continues after ${after}; wait for it with wait_agent.`
+            ? `[SixbAgent] '${key}' already continued after ${after}, and wait_agent returns how it ended. To run it again, spawn it with a new key.`
+            : `[SixbAgent] '${key}' is the sub-agent that continues after ${after}; wait for it with wait_agent.`
         )
       }
       if (existing.kind === "subagent" && existing.parentRunId === this.parentRun.id) {
@@ -850,7 +850,7 @@ export class SubagentCoordinator {
     if (parent.execution?.token !== requiredExecutionToken(this.parentRun)) {
       throw new AgentStorageError(
         "execution_lost",
-        `[SixbAgentWorker] Parent Agent run '${parent.id}' is no longer owned by this execution.`
+        `[SixbAgent] Parent Agent run '${parent.id}' is no longer owned by this execution.`
       )
     }
     if ((await children.activeCount()) >= maxActive) {
@@ -980,7 +980,7 @@ export class SubagentCoordinator {
       const { failed } = await this.session.children.dispatch(run.id)
       if (failed !== undefined) {
         console.error(
-          `[SixbAgentWorker] Could not dispatch subagent run '${run.id}'; reconciliation will retry.`,
+          `[SixbAgent] Could not dispatch subagent run '${run.id}'; reconciliation will retry.`,
           failed
         )
       }
@@ -1015,7 +1015,7 @@ export class SubagentCoordinator {
           (run.parentRunId !== this.parentRun.id && !earlierTurns.has(run.parentRunId))
         ) {
           throw new AgentToolPublicError(
-            `[SixbAgentWorker] '${passedIds[index]}' is not a child of the current Agent run.`
+            `[SixbAgent] '${passedIds[index]}' is not a child of the current Agent run.`
           )
         }
         return run
@@ -1220,7 +1220,7 @@ export class SubagentCoordinator {
 
   private runFiles(): AgentRunFiles {
     if (!this.#runFiles) {
-      throw new Error("[SixbAgentWorker] Delegation tools ran before their run's environment.")
+      throw new Error("[SixbAgent] Delegation tools ran before their run's environment.")
     }
     return this.#runFiles
   }
@@ -1232,7 +1232,7 @@ export class SubagentCoordinator {
     if (model) return model
     const available = this.models.list().map(formatModelRef).join(", ")
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] Language model ${formatModelRef(ref)} is not configured for this project. ` +
+      `[SixbAgent] Language model ${formatModelRef(ref)} is not configured for this project. ` +
         `Use one of: ${available}. Omit model to use the project default.`
     )
   }
@@ -1247,7 +1247,7 @@ export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
     const metadata = defineLanguageModel(entry.model.definition)
     if (metadata.providerId !== entry.provider || metadata.modelId !== entry.modelId) {
       throw new Error(
-        "[SixbAgentWorker] Delegation model definition identity does not match its catalog entry."
+        "[SixbAgent] Delegation model definition identity does not match its catalog entry."
       )
     }
     const details: string[] = []
@@ -1410,12 +1410,12 @@ function waitInputSchema(maxRunIds: number): JsonObject {
 function normalizeRunIds(value: readonly string[], maxRunIds: number): readonly string[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > maxRunIds) {
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] wait_agent requires between 1 and ${maxRunIds} child run ids.`
+      `[SixbAgent] wait_agent requires between 1 and ${maxRunIds} child run ids.`
     )
   }
   const runIds = value.map((runId) => requireNonEmpty("wait_agent", runId, "runId"))
   if (new Set(runIds).size !== runIds.length) {
-    throw new AgentToolPublicError("[SixbAgentWorker] wait_agent run ids must be unique.")
+    throw new AgentToolPublicError("[SixbAgent] wait_agent run ids must be unique.")
   }
   return runIds
 }
@@ -1427,12 +1427,12 @@ function requireNonEmpty(
   maxLength?: number
 ): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new AgentToolPublicError(`[SixbAgentWorker] ${toolName} ${field} must not be empty.`)
+    throw new AgentToolPublicError(`[SixbAgent] ${toolName} ${field} must not be empty.`)
   }
   const normalized = value.trim()
   if (maxLength !== undefined && normalized.length > maxLength) {
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] ${toolName} ${field} must not exceed ${maxLength} characters.`
+      `[SixbAgent] ${toolName} ${field} must not exceed ${maxLength} characters.`
     )
   }
   return normalized
@@ -1440,7 +1440,7 @@ function requireNonEmpty(
 
 function requiredExecutionToken(run: ConversationAgentRunRecord): string {
   if (!run.execution?.token) {
-    throw new Error(`[SixbAgentWorker] Parent Agent run '${run.id}' has no execution token.`)
+    throw new Error(`[SixbAgent] Parent Agent run '${run.id}' has no execution token.`)
   }
   return run.execution.token
 }
@@ -1450,14 +1450,14 @@ function publicSpawnError(error: unknown, key: string, maxActive: number): unkno
   switch (error.code) {
     case "active_child_limit":
       return new AgentToolPublicError(
-        `[SixbAgentWorker] The current Agent run already has ${maxActive} active children. Wait for one before spawning another.`
+        `[SixbAgent] The current Agent run already has ${maxActive} active children. Wait for one before spawning another.`
       )
     case "duplicate_id":
       return new AgentToolPublicError(
-        `[SixbAgentWorker] spawn_agent key '${key}' was already used with different inputs.`
+        `[SixbAgent] spawn_agent key '${key}' was already used with different inputs.`
       )
     case "invalid_state":
-      return new AgentToolPublicError("[SixbAgentWorker] The parent Agent run is no longer active.")
+      return new AgentToolPublicError("[SixbAgent] The parent Agent run is no longer active.")
     default:
       return error
   }
@@ -1571,7 +1571,7 @@ function sameSpecBesidesFiles(
 
 function duplicateKey(key: string): AgentToolPublicError {
   return new AgentToolPublicError(
-    `[SixbAgentWorker] spawn_agent key '${key}' was already used with different inputs.`
+    `[SixbAgent] spawn_agent key '${key}' was already used with different inputs.`
   )
 }
 
@@ -1585,7 +1585,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
     Object.keys(value).some((key) => !["key", "task", "model", "reasoning", "files"].includes(key))
   ) {
     throw new AgentToolPublicError(
-      "[SixbAgentWorker] spawn_agent expects key, task, and optional model/reasoning/files."
+      "[SixbAgent] spawn_agent expects key, task, and optional model/reasoning/files."
     )
   }
   const key = requireNonEmpty("spawn_agent", value.key, "key", 128)
@@ -1594,7 +1594,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (typeof value.model === "string") {
     if (!isLanguageModelTier(value.model)) {
       throw new AgentToolPublicError(
-        `[SixbAgentWorker] Unknown spawn_agent model tier '${value.model}'. Use ${formatLanguageModelTiers()}, or a model reference.`
+        `[SixbAgent] Unknown spawn_agent model tier '${value.model}'. Use ${formatLanguageModelTiers()}, or a model reference.`
       )
     }
     model = value.model
@@ -1603,9 +1603,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
       !isJsonObject(value.model) ||
       Object.keys(value.model).some((key) => !["provider", "modelId"].includes(key))
     ) {
-      throw new AgentToolPublicError(
-        "[SixbAgentWorker] spawn_agent model requires provider and modelId."
-      )
+      throw new AgentToolPublicError("[SixbAgent] spawn_agent model requires provider and modelId.")
     }
     model = {
       provider: requireNonEmpty("spawn_agent", value.model.provider, "model.provider"),
@@ -1613,7 +1611,7 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
     }
   }
   if (value.reasoning !== undefined && !isModelReasoning(value.reasoning)) {
-    throw new AgentToolPublicError("[SixbAgentWorker] spawn_agent reasoning is invalid.")
+    throw new AgentToolPublicError("[SixbAgent] spawn_agent reasoning is invalid.")
   }
   const files = parseSpawnFiles(value.files)
   return {
@@ -1631,19 +1629,19 @@ function parseSpawnFiles(value: unknown): readonly string[] | undefined {
   const { maxFiles } = SANDBOX_ATTACHMENT_LIMITS
   if (!Array.isArray(value) || value.length > maxFiles) {
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] spawn_agent files must be a list of at most ${maxFiles} sandbox paths.`
+      `[SixbAgent] spawn_agent files must be a list of at most ${maxFiles} sandbox paths.`
     )
   }
   const files = value.map((path) => requireNonEmpty("spawn_agent", path, "files entry"))
   if (new Set(files).size !== files.length) {
-    throw new AgentToolPublicError("[SixbAgentWorker] spawn_agent files must not repeat a path.")
+    throw new AgentToolPublicError("[SixbAgent] spawn_agent files must not repeat a path.")
   }
   return files.length > 0 ? files : undefined
 }
 
 function parseMessageInput(value: unknown): MessageSubagentInput {
   if (!isJsonObject(value) || Object.keys(value).some((key) => key !== "key" && key !== "text")) {
-    throw new AgentToolPublicError("[SixbAgentWorker] message_agent expects key and text.")
+    throw new AgentToolPublicError("[SixbAgent] message_agent expects key and text.")
   }
   return {
     key: requireNonEmpty("message_agent", value.key, "key", 128),
@@ -1658,9 +1656,7 @@ function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInpu
     !Array.isArray(value.runIds) ||
     !value.runIds.every((id) => typeof id === "string")
   ) {
-    throw new AgentToolPublicError(
-      "[SixbAgentWorker] wait_agent expects an array of child run ids."
-    )
+    throw new AgentToolPublicError("[SixbAgent] wait_agent expects an array of child run ids.")
   }
   return { runIds: normalizeRunIds(value.runIds, maxRunIds) }
 }

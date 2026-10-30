@@ -284,7 +284,7 @@ export async function createSubagentEnvironment(
   const { run } = input
   const execution = run.execution
   if (!execution) {
-    throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
+    throw new Error(`[SixbAgent] Subagent run '${run.id}' must hold an execution token.`)
   }
   // A child's workspace is blank, so it has no source credentials to lose.
   const { sandbox, resumed = false } = await input.openSandbox({
@@ -389,7 +389,7 @@ export async function createWorkflowAgentNodeEnvironment(
   const execution = run.execution
   if (!execution) {
     throw new Error(
-      `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
+      `[SixbAgent] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
   // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
@@ -844,7 +844,7 @@ function disposeEnvironment(
   const teardown = ready
     .then(release, () => undefined)
     .catch((error) => {
-      console.error("[SixbAgentWorker] Could not release agent run sandbox:", error)
+      console.error("[SixbAgent] Could not release agent run sandbox:", error)
     })
   // Once provisioning has settled, await the release so cleanup completes inline.
   if (isSettled()) {
@@ -859,9 +859,7 @@ function disposeEnvironment(
 
 function appendBuiltInTool(tools: ModelTool[], tool: ModelTool): void {
   if (tools.some((candidate) => candidate.name === tool.name)) {
-    throw new Error(
-      `[SixbAgentWorker] Agent tool name '${tool.name}' is reserved by the worker runtime.`
-    )
+    throw new Error(`[SixbAgent] Agent tool name '${tool.name}' is reserved by the worker runtime.`)
   }
   tools.push(tool)
 }

@@ -38,6 +38,7 @@
     "@sixb/core": "workspace:*"
   },
   "devDependencies": {
+    "@sixb/cli-core": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/sandboxes-local": "workspace:*",
     "@types/bun": "latest",

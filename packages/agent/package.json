@@ -39,7 +39,6 @@
   },
   "devDependencies": {
     "@sixb/core": "workspace:*",
-    "@sixb/sandboxes-local": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

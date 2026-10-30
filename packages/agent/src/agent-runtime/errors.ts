@@ -16,7 +16,7 @@ export class AgentRuntimeProfileError extends Error {
     const remediation = remediationFor(check)
     const failure = exitCode === undefined ? reason : `${reason} (exit ${exitCode})`
     super(
-      `[SixbAgentWorker] Sandbox provider '${provider}' failed '${AGENT_RUNTIME_PROFILE}' check '${check}': ${failure}. ${remediation}`
+      `[SixbAgent] Sandbox provider '${provider}' failed '${AGENT_RUNTIME_PROFILE}' check '${check}': ${failure}. ${remediation}`
     )
     this.remediation = remediation
   }

@@ -3,15 +3,6 @@ import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 
-/** Failed preservation is a failure even when the run was also cancelled. */
-export class AgentEnvironmentSaveError extends Error {
-  readonly name = "AgentEnvironmentSaveError"
-
-  constructor() {
-    super("[SixbAgentWorker] Sandbox save or cleanup could not be confirmed. Recovery is required.")
-  }
-}
-
 /** A thread could not complete its required preflight compaction. */
 export class AgentContextCompactionError extends Error {
   readonly name = "AgentContextCompactionError"
@@ -22,7 +13,7 @@ export class AgentContextCompactionError extends Error {
     message: string,
     options?: ErrorOptions
   ) {
-    super(`[SixbAgentWorker] ${message}`, options)
+    super(`[SixbAgent] ${message}`, options)
   }
 }
 
@@ -35,7 +26,7 @@ export class AgentRequesterLeftThreadError extends Error {
 
   constructor(readonly runId: string) {
     super(
-      `[SixbAgentWorker] Agent run '${runId}' was cancelled: whoever asked for it no longer takes part in its thread.`
+      `[SixbAgent] Agent run '${runId}' was cancelled: whoever asked for it no longer takes part in its thread.`
     )
   }
 }
@@ -104,7 +95,7 @@ export class AgentTurnTimeoutError extends Error {
     readonly runId: string,
     readonly timeoutMs: number
   ) {
-    super(`[SixbAgentWorker] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
+    super(`[SixbAgent] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
   }
 }
 
@@ -116,23 +107,7 @@ export class AgentTurnTimeoutError extends Error {
 export class AgentTurnInterruptedError extends Error {
   readonly name = "AgentTurnInterruptedError"
   constructor(readonly runId: string) {
-    super(
-      `[SixbAgentWorker] Agent run '${runId}' was interrupted when the worker running it stopped.`
-    )
-  }
-}
-
-/**
- * A redelivered job found its run still owned by a live delivery: a duplicate job. The worker
- * leaves the run alone and retries the job once that delivery's projected lease lapses.
- */
-export class AgentRunOwnedElsewhereError extends Error {
-  readonly name = "AgentRunOwnedElsewhereError"
-  constructor(
-    readonly runId: string,
-    readonly ownedUntil: Date
-  ) {
-    super(`[SixbAgentWorker] Agent run '${runId}' is still owned by another delivery.`)
+    super(`[SixbAgent] Agent run '${runId}' was interrupted when the worker running it stopped.`)
   }
 }
 
@@ -156,9 +131,6 @@ export class AgentToolOutputError extends AgentToolPublicError {
     reason: string,
     options?: ErrorOptions
   ) {
-    super(
-      `[SixbAgentWorker] Agent tool '${toolName}' returned an invalid result; ${reason}.`,
-      options
-    )
+    super(`[SixbAgent] Agent tool '${toolName}' returned an invalid result; ${reason}.`, options)
   }
 }

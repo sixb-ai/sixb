@@ -45,7 +45,7 @@ export class AgentFileBudget {
 
   constructor(readonly maxBytes = DEFAULT_RUN_MAX_BYTES) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
-      throw new Error("[SixbAgentWorker] Agent file budget must be a safe non-negative integer.")
+      throw new Error("[SixbAgent] Agent file budget must be a safe non-negative integer.")
     }
   }
 
@@ -55,9 +55,7 @@ export class AgentFileBudget {
 
   reserve(bytes: number, toolName: string): AgentFileReservation {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
-      throw new Error(
-        "[SixbAgentWorker] Agent file reservation must be a safe non-negative integer."
-      )
+      throw new Error("[SixbAgent] Agent file reservation must be a safe non-negative integer.")
     }
     this.add(bytes, toolName)
     return new AgentFileReservation(this, bytes, toolName)
@@ -345,5 +343,5 @@ function toolFileSandboxPath(
 }
 
 function toolFileError(toolName: string, message: string): AgentToolPublicError {
-  return new AgentToolPublicError(`[SixbAgentWorker] Agent tool '${toolName}' ${message}.`)
+  return new AgentToolPublicError(`[SixbAgent] Agent tool '${toolName}' ${message}.`)
 }

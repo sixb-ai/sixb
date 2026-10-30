@@ -225,7 +225,7 @@ function throwReadError(path: string, exitCode: number, stderr: string): never {
 }
 
 function publicError(message: string): AgentToolPublicError {
-  return new AgentToolPublicError(`[SixbAgentWorker] read ${message}`)
+  return new AgentToolPublicError(`[SixbAgent] read ${message}`)
 }
 
 const READ_SCRIPT = `set -u

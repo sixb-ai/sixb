@@ -65,7 +65,7 @@ export function modelToolsFromAgentDefinitions(
     if (names.has(definition.name)) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${input.run.id}' has duplicate selected tool name '${definition.name}'.`,
+        `[SixbAgent] Agent run '${input.run.id}' has duplicate selected tool name '${definition.name}'.`,
         {
           details: input.errorDetails ?? agentToolRunErrorDetails(input.run),
         }
@@ -238,7 +238,7 @@ function toolOutcome(
 function assertUnreachableModelPart(part: never, errorDetails?: AgentErrorDetails): never {
   throw createSixbError(
     "internal.unexpected",
-    `[SixbAgentWorker] Model trace content '${(part as { type?: unknown }).type}' is not supported.`,
+    `[SixbAgent] Model trace content '${(part as { type?: unknown }).type}' is not supported.`,
     errorDetails === undefined ? undefined : { details: errorDetails }
   )
 }
