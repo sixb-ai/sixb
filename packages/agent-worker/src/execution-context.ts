@@ -40,8 +40,11 @@ export async function createAgentExecutionContext(input: {
         requestedBy: input.execution.requestedBy,
       })
 
+  // The run reaches shared state through its session; only publish_artifact keeps the storage.
+  const { storage, ...worker } = input.context
   return {
-    ...input.context,
+    ...worker,
+    artifactPublishing: storage,
     sixb,
     ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),

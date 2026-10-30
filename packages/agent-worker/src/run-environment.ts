@@ -599,7 +599,7 @@ async function startAgentEnvironment(
   const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
-  const artifactStorage = context.storage.artifacts
+  const artifactStorage = context.artifactPublishing.artifacts
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
   if (publishing && artifactStorage) {
@@ -617,7 +617,7 @@ async function startAgentEnvironment(
     installedArtifacts.catch(() => {})
     const publishTools = createPublishArtifactTools({
       projectId: context.id,
-      storage: context.storage,
+      storage: context.artifactPublishing,
       artifacts: artifactStorage,
       reader: context.sixb.artifacts,
       blobStorage: context.blobStorage,
@@ -732,7 +732,6 @@ async function startAgentEnvironment(
       ...(context.authorPrincipal === undefined
         ? {}
         : { authorPrincipal: context.authorPrincipal }),
-      storage: context.storage,
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,

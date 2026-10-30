@@ -8,7 +8,12 @@ import type {
   SecurityDefinitionCatalog,
 } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
-import { NOOP_STREAM_SINK, openAgentRunSession, type StreamSink } from "@sixb/core/internal/agents"
+import {
+  type AgentRunSessionHost,
+  NOOP_STREAM_SINK,
+  openAgentRunSession,
+  type StreamSink,
+} from "@sixb/core/internal/agents"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 
@@ -106,13 +111,15 @@ export async function runTurnInSession(
     readonly recoverAiModelCall?: RecoverAiModelCall
     /** Where the turn's live records go; nowhere when omitted. */
     readonly events?: StreamSink
+    /** The storage the test seeded, which the turn's session reads and writes. */
+    readonly storage: AgentRunSessionHost["storage"]
   }
 ) {
-  const { recoverAiModelCall = async () => {}, events = NOOP_STREAM_SINK, ...turn } = input
+  const { recoverAiModelCall = async () => {}, events = NOOP_STREAM_SINK, storage, ...turn } = input
   const session = await openAgentRunSession(
     {
       projectId: turn.context.id,
-      storage: turn.context.storage,
+      storage,
       broker: new InMemoryBroker(),
       recoverAiModelCall,
       events,

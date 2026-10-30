@@ -1955,10 +1955,11 @@ function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
   })
 }
 
+/** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
 async function buildAgentWorkerContext(
   sixb: TestSixb,
   input: { readonly apiBaseUrl?: string } = {}
-): Promise<AgentExecutionContext> {
+): Promise<AgentExecutionContext & Pick<AgentWorkerContext, "storage">> {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
   }
@@ -1996,6 +1997,7 @@ async function buildAgentWorkerContext(
   })
   return {
     ...context,
+    artifactPublishing: context.storage,
     sixb: agentSixb,
     blobStorage: agentSixb.blobs,
   }
@@ -6901,6 +6903,7 @@ describe("AgentWorker", () => {
     })
     try {
       await runTurnInSession({
+        storage: workerStorageOf(sixb.storage),
         context: environment.turnContext,
         plan,
         run,
@@ -11664,11 +11667,11 @@ describe("AgentWorker", () => {
     })
     const abort = new AbortController()
     const result = await runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
       recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: "Test system prompt.",
@@ -12222,11 +12225,11 @@ describe("AgentWorker", () => {
     })
 
     const promise = runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
       recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
@@ -12479,6 +12482,7 @@ describe("AgentWorker", () => {
     const start = Date.now()
     try {
       const turn = runTurnInSession({
+        storage: workerStorageOf(failingStorage),
         events: createBrokerStreamSink({
           broker: sixb.broker,
           projectId: PROJECT_ID,
@@ -12487,7 +12491,6 @@ describe("AgentWorker", () => {
         context: {
           id: PROJECT_ID,
           authorPrincipal: AGENT_PRINCIPAL,
-          storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
@@ -12528,6 +12531,7 @@ describe("AgentWorker", () => {
       })
     )
     await runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
       events: createBrokerStreamSink({
         broker: sixb.broker,
         projectId: PROJECT_ID,
@@ -12536,7 +12540,6 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
