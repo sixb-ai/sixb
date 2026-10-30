@@ -13,9 +13,11 @@ const DEFAULT_KILL_EXIT_CODE = 137
 /**
  * Spawn a child process and gather its {@link CommandResult}. Wraps Bun.spawn with timeout and
  * AbortSignal handling, and never throws. Command-agnostic: the wrapper makes no assumptions about
- * what it spawns, so sandbox providers share it. On timeout/abort it SIGKILLs the spawned process;
- * any provider whose spawned process merely fronts a longer-lived resource (e.g. a VM) is
- * responsible for reaping that resource in its own stop()/destroy().
+ * what it spawns, so sandbox providers share it. On timeout/abort it SIGKILLs the spawned process
+ * and everything it started: the command runs in a process group of its own, so a shell's child
+ * that still holds its output can't keep the call open. Any provider whose spawned process merely
+ * fronts a longer-lived resource (e.g. a VM) is responsible for reaping that resource in its own
+ * stop()/destroy().
  */
 export async function exec(options: ExecOptions): Promise<CommandResult> {
   const start = Date.now()
@@ -38,6 +40,7 @@ export async function exec(options: ExecOptions): Promise<CommandResult> {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      detached: true,
     })
   } catch (error) {
     return {
@@ -50,21 +53,26 @@ export async function exec(options: ExecOptions): Promise<CommandResult> {
 
   let timedOut = false
   let killed = false
+  const kill = (): void => {
+    killed = true
+    try {
+      process.kill(-proc.pid, "SIGKILL")
+    } catch {
+      // The group is gone: the command and everything it started already exited.
+      proc.kill("SIGKILL")
+    }
+  }
 
   const timer =
     options.timeoutMs !== undefined && options.timeoutMs > 0
       ? setTimeout(() => {
           timedOut = true
-          killed = true
-          proc.kill("SIGKILL")
+          kill()
         }, options.timeoutMs)
       : undefined
 
   const onAbort = (): void => {
-    if (!killed) {
-      killed = true
-      proc.kill("SIGKILL")
-    }
+    if (!killed) kill()
   }
   options.signal?.addEventListener("abort", onAbort)
   if (options.signal?.aborted) {
