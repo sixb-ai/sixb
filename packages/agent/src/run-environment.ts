@@ -1,10 +1,5 @@
 import { posix } from "node:path"
-import type {
-  AgentToolAttachments,
-  AgentToolRunInfo,
-  OntologyDocsCatalog,
-  Principal,
-} from "@sixb/core"
+import type { AgentToolAttachments, AgentToolRunInfo, Principal } from "@sixb/core"
 import {
   type AgentRunArtifacts,
   type AgentRunSession,
@@ -12,7 +7,7 @@ import {
   conversationThreadId,
 } from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
-import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
+import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
@@ -178,12 +173,11 @@ export async function createConversationAgentEnvironment(
   const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
   const loadMemory: LoadConversationMemory = (checkpoint) =>
     loadConversationMemory({
-      sixb: context.sixb,
+      session: input.session,
       asOf: checkpoint?.createdAt ?? threadCreatedAt,
-      shared: input.shared ?? false,
     })
   try {
-    const ontologyDocs = renderRunOntologyDocs(context)
+    const { ontologyDocs } = plan
     // Resolve application access before any compaction model call. Once acquired, this
     // environment owns preservation even if history, attachments or runtime preparation fail.
     const prepared = preflight
@@ -311,7 +305,7 @@ async function startSubagentEnvironment(
   const history = input.history.messages
   const [memory, handedContext, historyContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
-    loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt }),
+    loadConversationMemory({ session: input.session, asOf: input.thread.createdAt }),
     files.length
       ? prepareHandedFiles({
           projectId: context.id,
@@ -366,7 +360,7 @@ async function startSubagentEnvironment(
     }),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
-    ontologyDocs: renderRunOntologyDocs(context),
+    ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
     frameworkTools: input.frameworkTools,
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
@@ -425,7 +419,7 @@ export async function createWorkflowAgentNodeEnvironment(
       }),
       apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
-      ontologyDocs: renderRunOntologyDocs(context),
+      ontologyDocs: plan.ontologyDocs,
       errorDetails: input.errorDetails,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -676,49 +670,6 @@ async function startAgentEnvironment(
     },
     dispose,
   }
-}
-
-/** Requesters with the same view share rendered docs; a project has few distinct views. */
-const renderedOntologyDocs = new WeakMap<OntologyDocsCatalog, Map<string, RenderedOntologyDocs>>()
-const MAX_RENDERED_ONTOLOGY_VIEWS = 16
-
-/** Reference docs for the object types this run's requester can see, from its own view. */
-function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntologyDocs {
-  const { sixb, propertyClearance, ontologyDocs: catalog } = context
-  const objectTypes = sixb.objects.listTypes()
-  const actionsByType = new Map(
-    objectTypes.map((objectType) => [objectType.id, sixb.actions.listForType(objectType)])
-  )
-  // Definitions are immutable, so the visible types, restricted properties, and requestable actions
-  // determine the output.
-  const key = JSON.stringify(
-    objectTypes.map((objectType) => [
-      objectType.id,
-      [...(propertyClearance?.hiddenProperties(objectType.id)?.ids ?? [])],
-      actionsByType.get(objectType.id)?.map((action) => action.id),
-    ])
-  )
-  const views = renderedOntologyDocs.get(catalog) ?? new Map<string, RenderedOntologyDocs>()
-  renderedOntologyDocs.set(catalog, views)
-  const cached = views.get(key)
-  if (cached) return cached
-
-  const rendered = renderOntologyDocs({
-    catalog,
-    objectTypes,
-    valueTypesById: sixb.objects.getValueTypesById(),
-    actionsFor: (objectType) => actionsByType.get(objectType.id) ?? [],
-    ...(propertyClearance === undefined
-      ? {}
-      : {
-          restrictedPropertyIds: (objectTypeId) =>
-            propertyClearance.hiddenProperties(objectTypeId)?.ids,
-        }),
-  })
-  views.set(key, rendered)
-  const oldest = views.keys().next().value
-  if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
-  return rendered
 }
 
 /** The handed files' context, with what a continuation's history showed its tools. */

@@ -2080,7 +2080,9 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
 
 /** A turn's plan on the project's default model, without the models its `sixb` can call. */
 function executionPlanFor(sixb: TestSixb) {
-  const plan = readAgentRunPlan(sixb.definitions, { id: "plan", kind: "conversation" } as never)
+  const plan = readAgentRunPlan(sixb.definitions, { id: "plan", kind: "conversation" } as never, {
+    sixb: createTestSixb(sixb),
+  })
   return resolveRunPlan(sixb.definitions, { ...plan, sandboxModels: [] })
 }
 
@@ -2100,7 +2102,6 @@ function workerContextOf(
     keepsChildWorkspaces: typeof sixb.sandboxes.resume === "function",
     logging: sixb.logging,
     valueTypesById: sixb.definitions.ontology.getValueTypesById(),
-    ontologyDocs: sixb.definitions.agent.ontologyDocs,
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
@@ -12668,8 +12669,7 @@ describe("AgentWorker", () => {
       expect(reports[0]?.error).toMatchObject({
         code: "agent.execution_failed",
         retryable: false,
-        message:
-          "[Sixb] The conversation's language model is not available in models.language.",
+        message: "[Sixb] The conversation's language model is not available in models.language.",
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
@@ -13070,11 +13070,15 @@ describe("agent tools act as the requester", () => {
         errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
       })
     )
-    // The environment reads only the run's identity, execution token and handed files, and its
-    // thread's.
+    // The environment reads only the run's identity, execution and handed files, and its
+    // thread's: its session reads memory through the run's SDK.
     const childRun = {
       id: "child-run",
       parentRunId: "parent-run",
+      executionId: await createTestAgentExecution(sixb.storage, {
+        projectId: PROJECT_ID,
+        runId: "child-run",
+      }),
       execution,
       spec: { files: [{ path: "inputs/quote.txt", fileRef: quote }] },
     } as unknown as SubagentRunRecord

@@ -810,7 +810,6 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     keepsChildWorkspaces: keepsSubagentWorkspace(host.sandboxes),
     logging: host.logging,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
-    ontologyDocs: host.definitions.agent.ontologyDocs,
     // Normalize the server base URL once here, at the boundary. Everything downstream (the sandbox's
     // API address and run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),

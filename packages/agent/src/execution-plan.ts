@@ -1,5 +1,6 @@
 import type { AgentReasoning, AgentSkillDefinition, AgentToolDefinition } from "@sixb/core"
 import type { SandboxModel } from "@sixb/core/internal/agents"
+import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { LanguageModel } from "@sixb/core/models"
 
 /**
@@ -20,4 +21,6 @@ export interface ResolvedAgentExecutionPlan {
   readonly locale?: string
   /** Models the sandbox CLI can call beside the agent's own, listed in the prompt. */
   readonly sandboxModels?: readonly SandboxModel[]
+  /** Reference docs for the object types the run's requester can see, from their own view. */
+  readonly ontologyDocs: RenderedOntologyDocs
 }

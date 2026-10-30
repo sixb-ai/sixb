@@ -1,12 +1,7 @@
-import { AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER, type AgentMemoryRepo } from "@sixb/cli-core"
-import { AgentMemoryError, type AgentMemoryRepoView, type Sixb } from "@sixb/core"
+import { AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER } from "@sixb/cli-core"
+import type { AgentMemoryRepoView } from "@sixb/core"
+import type { AgentRunSession } from "@sixb/core/internal/agents"
 import type { AgentMemoryPromptContext } from "./agent-prompt"
-
-/** The repos a conversation installs and shows, in the order the prompt lists them. */
-const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user", "project"]
-
-/** Others read a shared conversation, so whoever sends the turn, it reaches no one's own memory. */
-const SHARED_CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["project"]
 
 /** The Agent's memory for one conversational run. */
 export interface ConversationMemory {
@@ -17,36 +12,16 @@ export interface ConversationMemory {
 }
 
 /**
- * Load the repos the run's requester can read. The prompt shows each `MEMORY.md` as it was at
- * `asOf`, the start of the thread or its latest compaction, so a save leaves the prompt and its
- * cache as they are until the context is next compacted; the installed files are the latest.
- * A requester without a repo of its own, such as a service account, and a shared conversation get
- * the project's alone.
+ * The repos the run's requester can read, through its session. The prompt shows each `MEMORY.md` as
+ * it was at `asOf`, the start of the thread or its latest compaction, so a save leaves the prompt
+ * and its cache as they are until the context is next compacted; the installed files are the
+ * latest.
  */
 export async function loadConversationMemory(input: {
-  readonly sixb: Sixb
+  readonly session: Pick<AgentRunSession, "memory">
   readonly asOf: Date
-  /** Others were added to the thread. */
-  readonly shared?: boolean
 }): Promise<ConversationMemory | undefined> {
-  const { sixb, asOf, shared = false } = input
-  const repos = shared ? SHARED_CONVERSATION_MEMORY_REPOS : CONVERSATION_MEMORY_REPOS
-  const loaded = (
-    await Promise.all(
-      repos.map(async (repo) => {
-        try {
-          const [latest, then] = await Promise.all([
-            sixb.agent.memory.get(repo),
-            sixb.agent.memory.get(repo, { asOf }),
-          ])
-          return [{ latest, then }]
-        } catch (error) {
-          if (error instanceof AgentMemoryError && error.code === "not_allowed") return []
-          throw error
-        }
-      })
-    )
-  ).flat()
+  const { shared, repos: loaded } = await input.session.memory({ asOf: input.asOf })
   if (loaded.length === 0) return undefined
 
   return {

@@ -80,6 +80,7 @@ describe("agent conversation context estimation", () => {
       instructions: "Answer clearly.",
       tools: [],
       skills: [],
+      ontologyDocs: { files: [], index: [] },
       maxSteps: 4,
     }
     await storage.aiUsage.recordModelCall({

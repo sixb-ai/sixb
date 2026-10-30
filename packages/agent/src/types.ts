@@ -1,15 +1,5 @@
-import type {
-  AuthorizablePrincipal,
-  OntologyDocsCatalog,
-  Sixb,
-  SixbDefinitions,
-  ValueType,
-} from "@sixb/core"
-import type {
-  AgentRunFileStore,
-  PropertyClearance,
-  RunModelLoopInput,
-} from "@sixb/core/internal/agents"
+import type { AuthorizablePrincipal, Sixb, SixbDefinitions, ValueType } from "@sixb/core"
+import type { AgentRunFileStore, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -27,7 +17,6 @@ export interface AgentRunSettings {
   readonly id: string
   readonly logging?: LoggingService
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly ontologyDocs: OntologyDocsCatalog
   /** The Sixb API origin the run's commands call, through their environment's credentialed address. */
   readonly apiBaseUrl: string
   /** How many children one conversation turn may have queued or running at once. */
@@ -47,8 +36,6 @@ export interface AgentProjectCatalogs {
 /** Provider ports activated only after an Agent execution scope is bound. */
 export interface AgentExecutionContext extends AgentRunSettings {
   readonly sixb: Sixb
-  /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
-  readonly propertyClearance?: PropertyClearance
   readonly authorPrincipal?: AuthorizablePrincipal
   /**
    * Who the run works for; absent when no principal started its chain of executions, or in a

@@ -13,6 +13,8 @@ import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
+  renderAgentRunOntologyDocs,
+  resolveAgentPropertyClearance,
   type WorkflowAgentNodeSession,
   WorkflowResumeDispatchError,
 } from "@sixb/core/internal/agents"
@@ -138,7 +140,20 @@ export async function executeWorkflowAgentNode(
       authorPrincipal: resolved.identity.principal,
     })
     const prepared = await prepareAgentModel(configuredPlan)
-    const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
+    const authorization = { type: "principal" as const, context: resolved.context }
+    const propertyClearance = resolveAgentPropertyClearance(
+      input.host.definitions.ontology,
+      authorization
+    )
+    const plan = Object.freeze({
+      ...configuredPlan,
+      model: prepared.model,
+      ontologyDocs: renderAgentRunOntologyDocs({
+        sixb: executionContext.sixb,
+        catalog: input.host.definitions.agent.ontologyDocs,
+        ...(propertyClearance === undefined ? {} : { propertyClearance }),
+      }),
+    })
     preparationComplete = true
 
     // Provisioning stops on `turnSignal` (cancellation, lost ownership or worker shutdown), never

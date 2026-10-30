@@ -168,6 +168,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
     }),
     tools: [],
     skills: [],
+    ontologyDocs: { files: [], index: [] },
   }
 
   await runTurnInSession({

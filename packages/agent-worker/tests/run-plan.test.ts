@@ -89,6 +89,7 @@ describe("resolveRunPlan", () => {
     skills: [skill("invoice-review")],
     toolNames: ["lookup"],
     sandboxModels: [],
+    ontologyDocs: { files: [], index: [] },
   }
 
   test("resolves the plan's model and tools, and adds the harness's skills", () => {
@@ -96,6 +97,7 @@ describe("resolveRunPlan", () => {
 
     expect(resolved).toEqual({
       model,
+      ontologyDocs: { files: [], index: [] },
       reasoning: "high",
       instructions: "Answer in French.",
       tools: [lookup],
