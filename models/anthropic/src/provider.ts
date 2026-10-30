@@ -570,22 +570,26 @@ class AnthropicLanguageModel implements LanguageModel {
           }),
     }
     return {
-      body: {
-        ...extra,
-        model: this.modelId,
-        messages: mapped.messages,
-        stream: true,
-        max_tokens: maxOutputTokens,
-        ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
-        ...(tools.length === 0
-          ? {}
-          : {
-              tools,
-              tool_choice: { type: "auto" },
-            }),
-        ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-        ...(thinking === undefined ? {} : { thinking }),
-      },
+      body: withPromptCaching(
+        {
+          ...extra,
+          model: this.modelId,
+          messages: mapped.messages,
+          stream: true,
+          max_tokens: maxOutputTokens,
+          ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
+          ...(tools.length === 0
+            ? {}
+            : {
+                tools,
+                tool_choice: { type: "auto" },
+              }),
+          ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
+          ...(thinking === undefined ? {} : { thinking }),
+        },
+        request.caching,
+        request.tools.length
+      ),
     }
   }
 
@@ -755,6 +759,48 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
 
 // The catalog exposes adaptive/manual support, but not whether thinking can be disabled.
 // Keep the same restriction for direct and offline bindings that have no catalog metadata.
+/**
+ * Anthropic caches only what a request marks, so the adapter marks the prefixes Sixb repeats:
+ *
+ * - the last local tool: tools render first and match across a project's threads and users;
+ * - the last system block: the system prompt holds for a thread across turns, even when replayed
+ *   history differs;
+ * - the conversation tail, through automatic caching: agent steps only append, so each step reads
+ *   what the previous one wrote.
+ *
+ * A one-shot request (no tools and no earlier answer) is left alone unless it asks for `"auto"`:
+ * nothing reads its prefix again, so a cache write would only add 25% to its input price.
+ * `caching: "off"` adds nothing, and a `cache_control` in the binding's `request` sets the TTL
+ * for every breakpoint, since longer TTLs must come first.
+ */
+function withPromptCaching(
+  body: JsonObject,
+  caching: "auto" | "off" | undefined,
+  localTools: number
+): JsonObject {
+  if (caching === "off") return body
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  const continues = messages.some((message) => object(message)?.role === "assistant")
+  if (caching !== "auto" && localTools === 0 && !continues) return body
+
+  const marker = object(body.cache_control) ?? { type: "ephemeral" }
+  const tools = Array.isArray(body.tools) ? body.tools : []
+  const system = Array.isArray(body.system) ? body.system : []
+  const lastSystem = object(system.at(-1))
+  const markSystem = lastSystem?.type === "text" && string(lastSystem.text) !== ""
+
+  return {
+    ...body,
+    cache_control: marker,
+    ...(localTools === 0
+      ? {}
+      : { tools: [...tools.slice(0, -1), { ...object(tools.at(-1)), cache_control: marker }] }),
+    ...(markSystem
+      ? { system: [...system.slice(0, -1), { ...lastSystem, cache_control: marker }] }
+      : {}),
+  }
+}
+
 /**
  * Claude 4.7 and later return empty thinking text unless a request asks for a summary, and Claude 5
  * and later think without a `thinking` field. Sixb shows reasoning, so wherever thinking runs on

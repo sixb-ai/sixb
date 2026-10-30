@@ -37,12 +37,30 @@ const model = provider("claude-opus-5", {
   reasoning: "high",
   maxOutputTokens: 16_384,
   request: {
-    cache_control: { type: "ephemeral" },
+    cache_control: { type: "ephemeral", ttl: "1h" },
   },
 })
 
 const definitions = await provider.catalog.list()
 ```
+
+## Prompt caching
+
+Anthropic caches only what a request marks, so the adapter marks the prefixes Sixb repeats, with no
+configuration:
+
+| Breakpoint | Reused by |
+| --- | --- |
+| Last local tool | Every thread and user of the project: tools render first |
+| Last system block | Later turns of a thread, even when replayed history differs |
+| Conversation tail (automatic caching) | The next agent step, which only appends |
+
+One-shot requests, with no tools and no earlier answer, such as compaction summaries and
+`generate()`, stay uncached: nothing reads their prefix again, and a cache write costs 1.25x input.
+Pass `caching: "auto"` to cache one anyway, or `caching: "off"` to send no breakpoints. The
+five-minute TTL suits agent steps and Sixb's model routing, which treats a thread's cache as warm
+for five minutes. A `cache_control` in the binding's `request`, as above, sets the TTL for every
+breakpoint, since Anthropic requires longer TTLs first.
 
 `reasoning` is the level Sixb applies when the model runs without an explicit choice; Sixb checks
 it against the model's capabilities at startup. `name` and `description` replace the catalog's
