@@ -556,6 +556,7 @@ class AnthropicLanguageModel implements LanguageModel {
       maxOutputTokens,
       this.modelId
     )
+    const thinking = summarizedThinking(reasoning.thinking, this.modelId)
     const outputConfig: JsonObject = {
       ...(existingOutputConfig ?? {}),
       ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
@@ -583,7 +584,7 @@ class AnthropicLanguageModel implements LanguageModel {
               tool_choice: { type: "auto" },
             }),
         ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-        ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),
+        ...(thinking === undefined ? {} : { thinking }),
       },
     }
   }
@@ -754,6 +755,29 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
 
 // The catalog exposes adaptive/manual support, but not whether thinking can be disabled.
 // Keep the same restriction for direct and offline bindings that have no catalog metadata.
+/**
+ * Claude 4.7 and later return empty thinking text unless a request asks for a summary, and Claude 5
+ * and later think without a `thinking` field. Sixb shows reasoning, so wherever thinking runs on
+ * those models, the adapter asks for summaries. Billing is the same; `disabled` takes no display.
+ */
+function summarizedThinking(
+  thinking: JsonObject | undefined,
+  modelId: string
+): JsonObject | undefined {
+  if (!/^claude-(?:[a-z]+-4-[78]|[a-z]+-(?:[5-9]|\d{2,})|mythos-preview)(?:-|$)/.test(modelId)) {
+    return thinking
+  }
+  if (thinking === undefined) {
+    const thinksByDefault = /^claude-(?:[a-z]+-(?:[5-9]|\d{2,})|mythos-preview)(?:-|$)/.test(
+      modelId
+    )
+    return thinksByDefault ? { type: "adaptive", display: "summarized" } : undefined
+  }
+  return thinking.type === "adaptive" || thinking.type === "enabled"
+    ? { ...thinking, display: "summarized" }
+    : thinking
+}
+
 function anthropicThinkingAlwaysOn(modelId: string): boolean {
   return /^claude-(?:fable-5|mythos-(?:5|preview))(?:-|$)/.test(modelId)
 }

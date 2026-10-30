@@ -97,6 +97,11 @@ reasoning: "high"
 reasoning: { budgetTokens: 8_192 }
 ```
 
+Claude 4.7 and later return empty thinking text unless a request asks for a summary, so wherever
+thinking runs on those models the adapter sends `display: "summarized"`, and on Claude 5 and later,
+which think by default, `thinking: { type: "adaptive", display: "summarized" }`. Thinking is billed
+the same either way; no configuration is needed to see a model's reasoning.
+
 Exact budgets must be at least 1,024 tokens and below the model call's `maxOutputTokens`. Unsupported
 named efforts (including `none`) emit a `[SixbAnthropic]` warning and omit the reasoning override,
 allowing the request to continue with provider-default reasoning. The live catalog normalizes

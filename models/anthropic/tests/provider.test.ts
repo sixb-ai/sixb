@@ -209,7 +209,8 @@ describe("Anthropic provider", () => {
         })
         expect(result.status).toBe("completed")
         expect(bodies.at(-1)).toMatchObject({ max_tokens: 8_192 })
-        expect(bodies.at(-1)?.thinking).toBeUndefined()
+        // Thinking stays on; the adapter only asks for its summary.
+        expect(bodies.at(-1)?.thinking).toEqual({ type: "adaptive", display: "summarized" })
       }
       expect(warn).toHaveBeenCalledTimes(3)
       await resolved.stream(request({ reasoning: "high" }))
@@ -389,16 +390,50 @@ describe("Anthropic provider", () => {
       await model.stream(request({ reasoning }))
     }
     await model.stream(request())
+    // Claude 4.7 hides thinking text unless asked; 4.6 summarizes by default.
+    const adaptive =
+      modelId === "claude-opus-4-7"
+        ? { type: "adaptive", display: "summarized" }
+        : { type: "adaptive" }
     expect(
       bodies.map((body) => ({ thinking: body.thinking, output_config: body.output_config }))
     ).toEqual([
-      { thinking: { type: "adaptive" }, output_config: { effort: "low" } },
-      { thinking: { type: "adaptive" }, output_config: { effort: "medium" } },
-      { thinking: { type: "adaptive" }, output_config: { effort: "high" } },
+      { thinking: adaptive, output_config: { effort: "low" } },
+      { thinking: adaptive, output_config: { effort: "medium" } },
+      { thinking: adaptive, output_config: { effort: "high" } },
       { thinking: { type: "disabled" }, output_config: undefined },
       { thinking: undefined, output_config: undefined },
       { thinking: undefined, output_config: undefined },
     ])
+  })
+
+  test.each([
+    ["claude-opus-5-5", undefined, { type: "adaptive", display: "summarized" }],
+    ["claude-sonnet-5-5", "high", { type: "adaptive", display: "summarized" }],
+    ["claude-haiku-5-5", "provider-default", { type: "adaptive", display: "summarized" }],
+    ["claude-opus-5", "none", { type: "disabled" }],
+    ["claude-opus-4-8", undefined, undefined],
+    ["claude-sonnet-4-6", "high", { type: "adaptive" }],
+  ] as const)("asks %s for summarized thinking wherever it would hide it (reasoning %s)", async (modelId, reasoning, thinking) => {
+    // Regression proof: send reasoning.thinking unchanged; Claude 5 thinking text comes back empty.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId,
+          capabilities: { reasoning: { canDisable: true, efforts: ["low", "medium", "high"] } },
+        },
+      ],
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = await provider(modelId).resolve!({ offline: true })
+    await model.stream(request({ reasoning }))
+    expect(bodies[0]?.thinking).toEqual(thinking)
   })
 
   test("uses configured credentials, metadata, and snapshotted request options", async () => {
