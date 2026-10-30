@@ -5,9 +5,9 @@ import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { renderCurrentTime } from "../src/agent-prompt"
-import { runAgentTurn } from "../src/run-agent-turn"
 import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
+import { runTurnInSession } from "./helpers"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "project"
@@ -172,7 +172,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
     maxSteps: 4,
   }
 
-  await runAgentTurn({
+  await runTurnInSession({
     context: {
       id: projectId,
       authorPrincipal: { type: "serviceAccount", id: "service_agent" },

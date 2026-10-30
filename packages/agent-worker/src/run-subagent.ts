@@ -1,5 +1,6 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
+  type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
@@ -20,7 +21,6 @@ import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { SubagentHistory } from "./subagent-continuation"
@@ -46,6 +46,8 @@ export async function runSubagent(input: {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly run: SubagentRunRecord
+  /** The child's session: its finish is fenced by the run's execution token. */
+  readonly session: AgentRunSession
   /** The child's own thread, and what its runs before this one left there. */
   readonly thread: AgentThreadRecord
   readonly history: SubagentHistory
@@ -62,15 +64,6 @@ export async function runSubagent(input: {
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime, inbox } = input
-  const executionToken = run.execution?.token
-  if (!executionToken) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Subagent run '${run.id}' has no execution token.`,
-      { details: { parentRunId: run.parentRunId, runId: run.id } }
-    )
-  }
-
   const messages = subagentModelMessages({
     context,
     thread,
@@ -115,7 +108,6 @@ export async function runSubagent(input: {
 
   return settleSubagent({
     ...input,
-    executionToken,
     generation,
     work,
     abortSignal,
@@ -189,7 +181,7 @@ async function finishSubagent(input: {
   readonly run: SubagentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly runFiles: AgentRunFiles
-  readonly executionToken: string
+  readonly session: AgentRunSession
   readonly abortSignal: AbortSignal
   readonly finishReason: AgentRunFinishReason
   readonly work: readonly AppendAgentMessageInput[]
@@ -211,12 +203,8 @@ async function finishSubagent(input: {
   await context.beforeFinalize?.({ discard: !paused })
   input.runtime.assertCanContinue()
 
-  const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
-    messages: input.work,
-    finish: {
-      projectId: context.id,
-      id: run.id,
-      executionToken: input.executionToken,
+  const finalized = await input.session.finish(
+    {
       status: "succeeded",
       modelId: input.plan.model.modelId,
       finishReason: input.finishReason,
@@ -226,7 +214,8 @@ async function finishSubagent(input: {
         ...(outputs.error === undefined ? {} : { filesError: outputs.error }),
       },
     },
-  })
+    input.work
+  )
   if (finalized.kind !== "subagent") {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' changed kind during finalization.`)
   }

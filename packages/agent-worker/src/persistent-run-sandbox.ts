@@ -6,7 +6,7 @@ import type {
   SandboxFactory,
   SandboxRequestCredential,
 } from "@sixb/core"
-import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
+import { AgentExecutionLostError, createAgentThreadSandboxName } from "@sixb/core/internal/agents"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type {
   AgentThreadRecord,
@@ -14,11 +14,7 @@ import type {
   SubagentRunRecord,
 } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
-import {
-  AgentEnvironmentSaveError,
-  AgentExecutionLostError,
-  assertRunExecutionOwned,
-} from "./errors"
+import { AgentEnvironmentSaveError, assertRunExecutionOwned } from "./errors"
 import {
   type AcquiredRunSandbox,
   type BeforeFinalizeOptions,

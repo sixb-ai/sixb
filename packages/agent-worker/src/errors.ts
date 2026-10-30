@@ -1,5 +1,6 @@
 import { AgentToolPublicError, type Storage } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
+import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 
 /** Failed preservation is a failure even when the run was also cancelled. */
@@ -36,14 +37,6 @@ export class AgentRequesterLeftThreadError extends Error {
     super(
       `[SixbAgentWorker] Agent run '${runId}' was cancelled: whoever asked for it no longer takes part in its thread.`
     )
-  }
-}
-
-/** This delivery's execution token is stale, so it must make no further durable writes. */
-export class AgentExecutionLostError extends Error {
-  readonly name = "AgentExecutionLostError"
-  constructor(readonly runId: string) {
-    super(`[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`)
   }
 }
 
@@ -97,25 +90,6 @@ export async function assertRunExecutionOwned(
   const current = await storage.agents?.runs.getById({ projectId: run.projectId, id: run.id })
 
   assertExecutionOwned({ current, executionToken: run.executionToken, runId: run.id })
-}
-
-/**
- * Recording an agent execution's terminal state failed on a non-terminal infrastructure error that
- * persisted across in-place retries. The execution is still running, so the worker must **not**
- * acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize once
- * storage recovers. Distinct from {@link AgentExecutionLostError} (run no longer ours → ack).
- */
-export class AgentFinalizationError extends Error {
-  readonly name = "AgentFinalizationError"
-  constructor(
-    readonly runId: string,
-    options?: ErrorOptions
-  ) {
-    super(
-      `[SixbAgentWorker] Could not finalize agent execution '${runId}'; storage is unavailable.`,
-      options
-    )
-  }
 }
 
 /**
