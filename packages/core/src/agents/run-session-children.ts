@@ -14,7 +14,7 @@ import type {
 } from "../storage/agents"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
 import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
-import { fenced } from "./run-fence"
+import { AgentRunRefusedError, fenced } from "./run-fence"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import { conversationThreadId } from "./thread-access"
 
@@ -124,7 +124,7 @@ export function agentRunThreads(
     },
     async messages(input) {
       if (!(await scope.includes(input.threadId))) {
-        throw new Error(
+        throw new AgentRunRefusedError(
           `[Sixb] Agent run '${run.id}' reads only its conversation's threads, not '${input.threadId}'.`
         )
       }
@@ -240,7 +240,7 @@ export function agentRunChildren(
         attempt.status === "queued" ||
         attempt.status === "running"
       ) {
-        throw new Error(
+        throw new AgentRunRefusedError(
           `[Sixb] Agent run '${run.id}' clears only an ended attempt of its conversation's children, not '${runId}'.`
         )
       }
@@ -264,14 +264,16 @@ function assertDelegable(
   const { model, toolNames } = child.spec
   const unknownTool = toolNames.find((name) => !delegable.tools.includes(name))
   if (unknownTool !== undefined) {
-    throw new Error(`[Sixb] Agent run '${run.id}' cannot hand a child tool '${unknownTool}'.`)
+    throw new AgentRunRefusedError(
+      `[Sixb] Agent run '${run.id}' cannot hand a child tool '${unknownTool}'.`
+    )
   }
   if (
     !delegable.models.some(
       (each) => each.provider === model.provider && each.modelId === model.modelId
     )
   ) {
-    throw new Error(
+    throw new AgentRunRefusedError(
       `[Sixb] Agent run '${run.id}' cannot delegate to model '${model.provider}/${model.modelId}'.`
     )
   }

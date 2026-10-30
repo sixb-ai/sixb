@@ -17,7 +17,6 @@ import {
   createSubagentRunId,
   createSubagentThreadId,
   NOOP_STREAM_SINK,
-  publishAgentRunCancel,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -341,25 +340,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(messages.messages.map((message) => message.id)).toContain("message-answer")
       session.close()
     })
-
-    test("is cancelled with its own run, and with a run named in cancelWith", async () => {
-      const { host, broker, run } = await seedAgentRun()
-      const session = await claim(host, {
-        run,
-        leaseExpiresAt: LEASE,
-        cancelWith: ["parent-run"],
-      })
-      if (!session) throw new Error("Expected the run to be claimed.")
-      const cancelled = new Promise<void>((resolve) =>
-        session.cancelled.addEventListener("abort", () => resolve(), { once: true })
-      )
-
-      await publishAgentRunCancel(broker, { projectId: PROJECT_ID, runId: "parent-run" })
-
-      await cancelled
-      expect(session.cancelled.aborted).toBe(true)
-      session.close()
-    })
   })
 
   describe("a cancel recorded on the run", () => {
@@ -375,6 +355,27 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(session.cancelled.aborted).toBe(true)
       session.close()
+    })
+
+    // Guard proof: drop the cancelWith read from renewLease; the child of a cancelled turn runs
+    // on wherever no broker reaches it.
+    test("cancels a child's session at its next renewal once its parent's cancel is recorded", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const turn = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!turn) throw new Error("Expected the run to be claimed.")
+      const child = await claim(host, {
+        run: await spawnChild(storage, turn),
+        leaseExpiresAt: LEASE,
+        cancelWith: [run.id],
+      })
+      if (!child) throw new Error("Expected the child to be claimed.")
+
+      await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: run.id })
+      await child.renewLease(LEASE)
+
+      expect(child.cancelled.aborted).toBe(true)
+      turn.close()
+      child.close()
     })
 
     // Guard proof: drop readCancel(run) from openAgentRunSession; the reclaimed session runs on.

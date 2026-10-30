@@ -83,8 +83,30 @@ finish                                 messages and the run's end in one transac
                                        host's afterFinish: children stopped, a decided turn resumed
 ```
 
-`tests/agent-run-session-contract.ts` is what every session does: the in-process one runs it now,
-and a session over HTTP runs the same suite.
+`tests/agent-run-session-contract.ts` is what every session does: the in-process one and the one
+over HTTP run the same suite.
+
+## Over HTTP
+
+A runner outside the worker reaches the same session through the API (`run-session-http.ts`, served
+by `run-session-serve.ts`). Each operation is one request to `/api/agent-runs/:runId/session/<name>`
+with the run's token, and the server answers it with the in-process session's own code: what it
+checks, fences and records is the same wherever the runner is.
+
+```text
+claim            POST /api/agent-runs/:runId/claim, as the person who asked for the turn
+                 children.claim, with the turn's token, for a child of that turn
+operations       JSON in, JSON out; dates, bytes and maps tagged (run-session-wire.ts)
+models.stream    the provider's events, one JSON line each; the server admits and records the call
+events           live records in batches, best effort
+files.*          put, open and stat; a file's id is its content's digest
+renewLease       answers whether the run, or the turn a child stops with, was cancelled: the only
+                 signal a runner over HTTP hears, at most two minutes apart
+```
+
+The server pins a runner's messages to its run's thread and drops any author they name, and caps
+the lease a runner asks for. `authorization()` is not offered: such a runner never binds the
+project.
 
 ## Outside the session
 

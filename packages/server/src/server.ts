@@ -55,6 +55,7 @@ import {
 } from "./openapi/security"
 import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
+import { agentRunSessionHandler } from "./routes/agent-runners"
 import { registerAuthRoutes } from "./routes/auth"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./routes/files"
 import { registerWebhookRoutes } from "./routes/webhooks"
@@ -262,6 +263,9 @@ export function createSixbApi(server: SixbServer) {
       maxAge: 600,
     })
   )
+  // A runner's session requests, before anything parses them: their run token speaks only there.
+  const serveRunnerSession = agentRunSessionHandler(host)
+  app.onRequest(async ({ request }) => (await serveRunnerSession(request)) ?? undefined)
   app.onRequest(async ({ request }) => {
     // An Agent's commands, as their run: decided before Elysia parses the body, which the approval
     // gate reads from a copy. No session, share or cookie speaks for such a request.
