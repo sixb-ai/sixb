@@ -5,14 +5,12 @@ import {
   type PausableModelLoopResult,
   runModelLoop,
   toModelMessages,
-  turnPausesOnHeldCalls,
 } from "@sixb/core/internal/agents"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
   type AgentRunDiagnostic,
   type AgentRunFinishReason,
   type AgentRunRecord,
-  type AgentStorage,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -244,12 +242,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         signal: abortSignal,
         onModelCallEnd: usageRecorder.onModelCallEnd,
         onEvent: async (chunk) => {
-          await context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
+          await input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
         },
         // The approval records decide, never the tool output: the model can send a command's
         // output elsewhere, or print one of its own. A held call waits for the children still
         // at work: pausing ends the turn, and that would cancel them.
-        pauseAfterStep: () => turnPausesOnHeldCalls(agents, run),
+        pauseAfterStep: () => input.session.heldCalls.pausesAfterStep(),
       })
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
@@ -287,14 +285,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     // A call held after the last step that ran tools, by a command left running in the sandbox or
     // by a child, pauses the turn too. Its end cancels the children still at work, so it first
     // waits for them: one that holds a call pauses by itself instead of being stopped.
-    if (result.status === "paused" || (await holdsApproval(agents, run))) {
+    if (result.status === "paused" || (await input.session.heldCalls.holdsRun())) {
       await input.children?.settle(stopWaitingAt, abortSignal)
     }
     const interruptedWhileWaiting = await finalizeIfInterrupted()
     if (interruptedWhileWaiting) return interruptedWhileWaiting
 
     const finishReason =
-      result.status === "paused" || (await holdsApproval(agents, run))
+      result.status === "paused" || (await input.session.heldCalls.holdsRun())
         ? "awaiting_approval"
         : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
@@ -330,8 +328,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       ]
     )
 
-    await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
-    await context.streamSink.publishRunFinished(finalizedRun)
+    await input.session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+    await input.session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   } finally {
     if (ownsRuntime) runtime.dispose()
@@ -342,9 +340,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
  * waiting, or decided and not reported to the model yet, its children's included.
  */
-function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): Promise<boolean> {
-  return agents.approvals.holdsRun({ projectId: run.projectId, runId: run.id })
-}
 
 /**
  * How long before its deadline a pausing turn stops waiting for its children: enough to record its
@@ -421,7 +416,7 @@ async function finalizeInterruptedTurn(input: {
   }
   if (!parts) {
     const finalizedRun = await session.finish(outcome)
-    await context.streamSink.publishRunFinished(finalizedRun)
+    await session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   }
 
@@ -439,7 +434,7 @@ async function finalizeInterruptedTurn(input: {
         : { authorPrincipal: context.authorPrincipal }),
     },
   ])
-  await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
-  await context.streamSink.publishRunFinished(finalizedRun)
+  await session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+  await session.events.publishRunFinished(finalizedRun)
   return finalizedRun
 }

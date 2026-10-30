@@ -145,6 +145,18 @@ export {
   retryAgentRun,
 } from "./request"
 export type {
+  CompactionCompletedInput,
+  CompactionFailedInput,
+  CompactionStartedInput,
+  StreamSink,
+} from "./run-events"
+export {
+  createBrokerStreamSink,
+  isolateStreamSink,
+  NOOP_STREAM_SINK,
+  withAgentActivityStream,
+} from "./run-events"
+export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,
   AgentRunScopeErrorCode,
@@ -152,6 +164,7 @@ export type {
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
+  AgentRunHeldCalls,
   AgentRunOutcome,
   AgentRunSession,
   AgentRunSessionHost,

@@ -13,7 +13,9 @@ import {
   type AppendAgentMessageInput,
   type FinishAgentRunInput,
 } from "../storage/agents"
+import { turnPausesOnHeldCalls } from "./approvals"
 import { createAgentRunExecutionToken } from "./ids"
+import type { StreamSink } from "./run-events"
 import { subscribeAgentRunCancel } from "./streams/protocol"
 
 /**
@@ -41,6 +43,14 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    */
   modelCalls(): Promise<AiModelCallRecorder>
   /**
+   * Live records for whoever watches the run: its start, chunks, compaction, finalized message and
+   * end. Best effort: a record that cannot be delivered never fails the run, whose finish is the
+   * durable record.
+   */
+  readonly events: StreamSink
+  /** Approvals that hold the run: they are created by the API its commands call, never here. */
+  readonly heldCalls: AgentRunHeldCalls
+  /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
    * once the last lease recorded lapses, so the session renews it as the queue does.
    */
@@ -58,6 +68,16 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   close(): void
 }
 
+export interface AgentRunHeldCalls {
+  /** Whether a call of this run, or of one of its children, waits for an approval. */
+  holdsRun(): Promise<boolean>
+  /**
+   * Whether a conversation turn pauses after the step it just took: a call of its own is held, or
+   * a child's is and no child is still at work.
+   */
+  pausesAfterStep(): Promise<boolean>
+}
+
 /** How a run ended; the session supplies which run, and its token. */
 export type AgentRunOutcome = FinishAgentRunInput extends infer Finish
   ? Finish extends FinishAgentRunInput
@@ -72,6 +92,8 @@ export interface AgentRunSessionHost {
   readonly broker: Broker
   /** Queues a model call's record when storage cannot take it while the run goes on. */
   readonly recoverAiModelCall: RecoverAiModelCall
+  /** Where live records go; the host keeps them best effort (see isolateStreamSink). */
+  readonly events: StreamSink
 }
 
 export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
@@ -119,6 +141,12 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     run,
     executionToken,
     cancelled: cancel.signal,
+    events: host.events,
+    heldCalls: {
+      holdsRun: () =>
+        host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
+      pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
+    },
     modelCalls() {
       modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
         modelCalls = undefined

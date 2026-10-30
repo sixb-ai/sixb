@@ -744,7 +744,6 @@ async function startAgentEnvironment(
       systemPrompt,
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
-      streamSink: context.streamSink,
       turnTimeoutMs: context.turnTimeoutMs,
     },
     dispose,

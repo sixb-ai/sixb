@@ -57,11 +57,13 @@ import {
   agentRunTokenRunId,
   createAgentRunExecutionToken,
   createAgentRunId,
+  createBrokerStreamSink,
   createSubagentRunId,
   createSubagentThreadId,
   ensureManagedAgentExecutionIdentity,
   holdAgentApprovalCall,
   isAgentToolResult,
+  NOOP_STREAM_SINK,
   openAgentRunSession,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
@@ -130,7 +132,6 @@ import {
   createWorkflowAgentNodeEnvironment,
 } from "../src/run-environment"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
-import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
 import { AgentFileBudget } from "../src/tools/tool-files"
 import { createAgentTurnRuntime } from "../src/turn-runtime"
@@ -10872,6 +10873,7 @@ describe("AgentWorker", () => {
           storage: context.storage,
           broker: host.broker,
           recoverAiModelCall: context.recoverAiModelCall,
+          events: context.streamSink,
         },
         run
       )
@@ -11647,7 +11649,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
         turnTimeoutMs: 60_000,
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
@@ -12206,7 +12207,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
@@ -12455,6 +12455,10 @@ describe("AgentWorker", () => {
     const start = Date.now()
     try {
       const turn = runTurnInSession({
+        events: createBrokerStreamSink({
+          broker: sixb.broker,
+          projectId: PROJECT_ID,
+        }),
         recoverAiModelCall: recoverAiModelCall(sixb),
         context: {
           id: PROJECT_ID,
@@ -12464,10 +12468,6 @@ describe("AgentWorker", () => {
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
-          streamSink: createBrokerStreamSink({
-            broker: sixb.broker,
-            projectId: PROJECT_ID,
-          }),
           turnTimeoutMs: 60_000,
         },
         plan: executionPlanFor(sixb),
@@ -12504,6 +12504,10 @@ describe("AgentWorker", () => {
       })
     )
     await runTurnInSession({
+      events: createBrokerStreamSink({
+        broker: sixb.broker,
+        projectId: PROJECT_ID,
+      }),
       recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
@@ -12513,10 +12517,6 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        streamSink: createBrokerStreamSink({
-          broker: sixb.broker,
-          projectId: PROJECT_ID,
-        }),
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),

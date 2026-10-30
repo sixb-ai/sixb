@@ -3,6 +3,6 @@ export type {
   CompactionFailedInput,
   CompactionStartedInput,
   StreamSink,
-} from "./stream-sink"
+} from "@sixb/core/internal/agents"
 export type { AgentWorkerHost, AgentWorkerOptions } from "./types"
 export { AgentWorker } from "./worker"
