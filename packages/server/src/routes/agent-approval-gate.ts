@@ -37,6 +37,8 @@ export interface AgentApiGateInput {
   readonly upstreamPath: string
   /** Read only for a call the gate may hold, so other calls' bodies stay unread. */
   readBody(): Promise<Uint8Array | undefined>
+  /** The request's Content-Type: the route parses the body by it, so the gate must agree. */
+  readonly contentType: string | null
   readonly run: AgentRunRecord | WorkflowAgentNodeRunRecord
   readonly agentExecution: NonNullable<RequestAuthState["agentExecution"]>
   readonly runExecution: AgentRunRequestExecution
@@ -170,14 +172,24 @@ function pathParam(upstreamPath: string): string {
   }
 }
 
-/** Parsed with the route's own schema, so the gate reads the body the route would. */
+/**
+ * Parsed with the route's own schema, so the gate reads the body the route would. Only as JSON:
+ * the route parses by Content-Type, so a body the two read differently would let an approved call
+ * through as another.
+ */
 async function readBody(input: AgentApiGateInput): Promise<Uint8Array | undefined> {
+  let body: Uint8Array | undefined
   try {
-    return await input.readBody()
+    body = await input.readBody()
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) throw refusal(413, error.message)
     throw error
   }
+  const mediaType = input.contentType?.split(";")[0]?.trim().toLowerCase()
+  if (body && body.byteLength > 0 && mediaType !== "application/json") {
+    throw refusal(415, "A call that may need approval sends its body as application/json.")
+  }
+  return body
 }
 
 function parseBody<TSchema extends z.ZodTypeAny>(

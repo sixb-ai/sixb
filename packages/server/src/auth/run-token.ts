@@ -80,6 +80,7 @@ export async function resolveRunTokenRequest(input: {
         MAX_GATED_BODY_BYTES,
         "The request body exceeds 1MB, the most a call that may need approval can send."
       ),
+    contentType: request.headers.get("content-type"),
     run,
     agentExecution: state.agentExecution,
     runExecution: state.runExecution,
