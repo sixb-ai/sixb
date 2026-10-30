@@ -272,6 +272,27 @@ export function runSandboxesContractSuite(
           await sandbox.destroy()
         }
       })
+
+      // An agent's commands are shell lines: the shell waits on `sleep`, which holds its output.
+      test("abort stops a shell and the commands it started", async () => {
+        const sandbox = await factory.create()
+        try {
+          const ac = new AbortController()
+          setTimeout(() => ac.abort(), shortTimeoutMs)
+          const start = Date.now()
+          const result = await sandbox.runCommand(
+            "sh",
+            ["-c", `sleep ${SLEEP_BUDGET_SECONDS} && echo finished`],
+            { signal: ac.signal }
+          )
+          const elapsed = Date.now() - start
+          expect(result.exitCode).not.toBe(0)
+          expect(result.stdout).not.toContain("finished")
+          expect(elapsed).toBeLessThan(SLEEP_BUDGET_SECONDS * 1000)
+        } finally {
+          await sandbox.destroy()
+        }
+      })
     })
 
     describe("file materialization", () => {
