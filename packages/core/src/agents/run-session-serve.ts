@@ -35,7 +35,8 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   checkpoint: (session, [input]) =>
     session.checkpoint(input as Parameters<AgentRunSession["checkpoint"]>[0]),
   finish: (session, [outcome, messages]) =>
-    session.finish(
+    finish(
+      session,
       outcome as Parameters<AgentRunSession["finish"]>[0],
       ownMessages(session.run, messages as Parameters<AgentRunSession["finish"]>[1])
     ),
@@ -246,6 +247,24 @@ async function renew(
 ): Promise<{ readonly cancelled: boolean }> {
   await session.renewLease(leaseExpiresAt)
   return { cancelled: session.cancelled.aborted }
+}
+
+/**
+ * End the run, and say so live: once it ended, its runner's token no longer reaches its session,
+ * so the server that recorded the end announces it, its answer first.
+ */
+async function finish(
+  session: AgentRunSession,
+  outcome: Parameters<AgentRunSession["finish"]>[0],
+  messages: Parameters<AgentRunSession["finish"]>[1]
+): Promise<AgentRunRecord> {
+  const finished = await session.finish(outcome, messages)
+  const answer = [...(messages ?? [])].reverse().find((message) => message.role === "assistant")
+  if (finished.kind === "conversation" && answer) {
+    await session.events.publishMessageFinalized({ run: finished, messageId: answer.id })
+  }
+  await session.events.publishRunFinished(finished)
+  return finished
 }
 
 /**

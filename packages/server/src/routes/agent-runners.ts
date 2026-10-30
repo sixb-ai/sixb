@@ -1,4 +1,4 @@
-import { principalsEqual, type SixbHostView } from "@sixb/core"
+import { principalsEqual, type SixbHostView, SYSTEM_PRINCIPAL } from "@sixb/core"
 import {
   type AgentRunSessionHost,
   afterAgentRunFinished,
@@ -107,10 +107,11 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
         const execution =
           run &&
           (await sessions.storage.executions.getById({ projectId: host.id, id: run.executionId }))
+        // With sign-in off, no one asked for a turn: the system did, as such a request acts.
         if (
           run?.kind !== "conversation" ||
-          !execution?.requestedBy ||
-          !principalsEqual(execution.requestedBy, requestActor(sixb))
+          !execution ||
+          !principalsEqual(execution.requestedBy ?? SYSTEM_PRINCIPAL, requestActor(sixb))
         ) {
           return answer(
             {
