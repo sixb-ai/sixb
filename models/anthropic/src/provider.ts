@@ -134,11 +134,6 @@ function configuredModelDefinitions(
   return configured
 }
 
-/** Shared zero-configuration Anthropic provider. */
-export const anthropic = createAnthropic({
-  apiKey: () => process.env.ANTHROPIC_API_KEY,
-})
-
 class RemoteAnthropicCatalog implements AnthropicCatalog {
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
@@ -239,6 +234,13 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
     return Object.freeze([...discovered.values()])
   }
 }
+
+// Created after the catalog class it constructs: bundlers keep class declarations in their temporal
+// dead zone until evaluated, so a browser bundle threw while importing the package.
+/** Shared zero-configuration Anthropic provider. */
+export const anthropic = createAnthropic({
+  apiKey: () => process.env.ANTHROPIC_API_KEY,
+})
 
 function catalogDefinition(value: unknown): LanguageModelDefinition | undefined {
   const model = object(value)
