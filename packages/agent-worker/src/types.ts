@@ -80,6 +80,11 @@ export interface AgentWorkerOptions {
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
   /**
+   * Maximum number of child agents this worker runs at once, across its turns. A child over it
+   * waits queued for a slot. Defaults to 4.
+   */
+  readonly subagentConcurrency?: number
+  /**
    * Maximum number of child agents one conversation turn may have queued or running at once. They
    * run in its worker, under its delivery. Defaults to 4.
    */

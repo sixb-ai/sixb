@@ -19,7 +19,7 @@ import { shouldRetryAgentPreparation } from "./delivery-policy"
 /** How long a run whose preparation keeps failing waits before its delivery comes back. */
 export const PRESTART_RETRY_BACKOFF_MS = 5_000
 /** A run's own preparation retries quickly first, so a storage blip does not delay the answer. */
-const PREPARATION_RETRY_BACKOFF_MS = [250, 1_000, PRESTART_RETRY_BACKOFF_MS] as const
+export const PREPARATION_RETRY_BACKOFF_MS = [250, 1_000, PRESTART_RETRY_BACKOFF_MS] as const
 
 /**
  * What a run that stopped with its runner records. A child's tells its parent what to do about it:

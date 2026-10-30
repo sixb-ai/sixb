@@ -262,9 +262,11 @@ The terminal run state is stored on the run record:
   `agentApi`, as the run, while the run holds its execution; it carries no other credential.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `8`.
+- `subagentConcurrency`: maximum number of child agents this worker runs at once, across its turns;
+  defaults to `4`. Children run in their parent's worker, under the parent's queue lease; one over
+  the limit waits queued for a slot.
 - `subagentConcurrencyPerRun`: maximum number of child agents one conversation turn keeps queued or
-  running at once; defaults to `4`. Children run in their parent's worker, under the parent's
-  queue lease, so a worker runs up to `concurrency` turns and their children.
+  running at once; defaults to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.

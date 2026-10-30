@@ -15,6 +15,7 @@ import {
   SubagentInbox,
   type SubagentWork,
   stoppedByWorker,
+  toAgentRunFailure,
 } from "@sixb/agent"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
@@ -24,6 +25,7 @@ import {
   type AgentRunSessionHost,
   claimAgentRun,
   conversationThreadId,
+  isTerminalOrExecutionGone,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { ModelUsageRecordingError } from "@sixb/core/internal/model-execution"
@@ -31,14 +33,18 @@ import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { isAbortError } from "@sixb/core/internal/workers"
 import type { AgentQueueJob } from "@sixb/core/queues"
 import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
+import { isPermanentAgentPreparationError } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
 import {
   agentRunFailureDetails,
   interruptedError,
   isTerminalRun,
+  PREPARATION_RETRY_BACKOFF_MS,
+  PRESTART_RETRY_BACKOFF_MS,
   projectLease,
   recordFate,
   retryPreparationInPlace,
+  waitForAbort,
 } from "./run-fate"
 import { childSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
@@ -61,6 +67,8 @@ export interface ChildRunnerDeps {
   readonly host: AgentWorkerHost
   readonly context: AgentWorkerContext
   readonly sessions: AgentRunSessionHost
+  /** How many children run here at once, across every turn; the rest wait their turn queued. */
+  readonly capacity: number
   trackTeardown(teardown: Promise<void>): void
   reportFailure(error: unknown, run: AgentRunRecord, failure: AgentRunFailure): void
 }
@@ -74,6 +82,9 @@ export interface ChildRunnerDeps {
 export class ChildRunner {
   /** Children running here, by run id: a child already running is never started twice. */
   private readonly running = new Map<string, RunningChild>()
+  /** Children holding one of the runner's slots, and those waiting for one, first come first. */
+  private active = 0
+  private readonly waiting: (() => void)[] = []
 
   constructor(private readonly deps: ChildRunnerDeps) {}
 
@@ -114,18 +125,111 @@ export class ChildRunner {
     parent: ParentDelivery,
     parentEnded: AbortSignal
   ): Promise<void> {
+    const stopped = AbortSignal.any([parent.signal, parentEnded])
+    if (!(await this.takeSlot(stopped))) return
+    try {
+      await this.runClaimed(queuedRun, parent, stopped)
+    } finally {
+      this.releaseSlot()
+    }
+  }
+
+  /** Wait for one of the runner's child slots: false once the child stops first. */
+  private takeSlot(stopped: AbortSignal): Promise<boolean> {
+    if (stopped.aborted) return Promise.resolve(false)
+    if (this.active < this.deps.capacity) {
+      this.active += 1
+      return Promise.resolve(true)
+    }
+    return new Promise((resolve) => {
+      const granted = (): void => {
+        stopped.removeEventListener("abort", gaveUp)
+        resolve(true)
+      }
+      const gaveUp = (): void => {
+        this.waiting.splice(this.waiting.indexOf(granted), 1)
+        resolve(false)
+      }
+      this.waiting.push(granted)
+      stopped.addEventListener("abort", gaveUp, { once: true })
+    })
+  }
+
+  /** A slot a child let go of passes to the child waiting longest. */
+  private releaseSlot(): void {
+    const next = this.waiting.shift()
+    if (next) next()
+    else this.active -= 1
+  }
+
+  /**
+   * Claim a queued child, retrying for as long as its parent runs: nothing redelivers a child, and
+   * its parent waits on it. One its claim refuses for good ends failed, so its parent's wait
+   * returns. Once the parent ends, the repair pass ends a child still queued.
+   */
+  private async claim(
+    queuedRun: SubagentRunRecord,
+    parent: ParentDelivery,
+    stopped: AbortSignal
+  ): Promise<AgentRunSession<SubagentRunRecord> | null> {
+    let refused: unknown
+    for (let retry = 0; ; retry += 1) {
+      try {
+        if (refused !== undefined) {
+          await this.failQueued(queuedRun, refused)
+          return null
+        }
+        return await claimAgentRun(this.deps.sessions, {
+          run: queuedRun,
+          modelId: queuedRun.spec.model.modelId,
+          leaseExpiresAt: parent.delivery.leaseExpiresAt,
+          cancelWith: [queuedRun.parentRunId],
+        })
+      } catch (error) {
+        if (stopped.aborted || isTerminalOrExecutionGone(error)) return null
+        if (refused === undefined && isPermanentAgentPreparationError(error)) {
+          refused = error
+          continue
+        }
+        if (retry === 0) {
+          console.error(
+            `[SixbAgentWorker] Could not claim subagent run '${queuedRun.id}'; retrying while its parent runs.`,
+            error
+          )
+        }
+      }
+      await waitForAbort(PREPARATION_RETRY_BACKOFF_MS[retry] ?? PRESTART_RETRY_BACKOFF_MS, stopped)
+      if (stopped.aborted) return null
+    }
+  }
+
+  private async failQueued(run: SubagentRunRecord, error: unknown): Promise<void> {
+    const { context } = this.deps
+    const completedAt = new Date()
+    const failure = toAgentRunFailure(error, {
+      status: "failed",
+      at: completedAt,
+      details: agentRunFailureDetails(run),
+    })
+    const failed = await context.storage.agents.runs.finishQueued({
+      projectId: context.id,
+      id: run.id,
+      status: "failed",
+      error: failure,
+      completedAt,
+    })
+    this.deps.reportFailure(error, failed, failure)
+    await context.streamSink.publishRunFinished(failed)
+  }
+
+  private async runClaimed(
+    queuedRun: SubagentRunRecord,
+    parent: ParentDelivery,
+    stopped: AbortSignal
+  ): Promise<void> {
     const { signal, delivery } = parent
-    const stopped = AbortSignal.any([signal, parentEnded])
-    // A child stops with its parent: cancelling the parent cancels it. Nothing redelivers a child,
-    // so a storage blip is retried here.
-    const session = await retryPreparationInPlace(1, stopped, () =>
-      claimAgentRun(this.deps.sessions, {
-        run: queuedRun,
-        modelId: queuedRun.spec.model.modelId,
-        leaseExpiresAt: delivery.leaseExpiresAt,
-        cancelWith: [queuedRun.parentRunId],
-      })
-    )
+    // A child stops with its parent: cancelling the parent cancels it.
+    const session = await this.claim(queuedRun, parent, stopped)
     if (!session) return
     const run = session.run
     const turnSignal = AbortSignal.any([stopped, session.cancelled])

@@ -86,6 +86,7 @@ import { executeWorkflowAgentNode } from "./workflow-node-execution"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
+const DEFAULT_SUBAGENT_CONCURRENCY = 4
 const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const MAX_TIMER_DURATION_MS = 2_147_483_647
@@ -158,6 +159,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           host,
           context: this.context,
           sessions: this.sessionHost(this.context),
+          capacity: normalizeConcurrency(
+            "subagentConcurrency",
+            options.subagentConcurrency ?? DEFAULT_SUBAGENT_CONCURRENCY
+          ),
           trackTeardown: (teardown) => this.trackTeardown(teardown),
           reportFailure: (error, run, failure) => this.reportFailure(error, run, 1, failure),
         })

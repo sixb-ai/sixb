@@ -154,8 +154,9 @@ Each child:
   [paused children](#paused-children).
 
 `subagentConcurrencyPerRun` children may be active per parent run, 4 by default. They run in the
-parent's runner (see [Child runs](#child-runs)), so a waiting parent never waits on capacity another
-turn holds. Child agents cannot delegate again or start workflows.
+parent's runner (see [Child runs](#child-runs)), up to `subagentConcurrency` at once across its
+turns, 4 by default; one over that waits queued for a slot. Parents hold no child slot, so a waiting
+parent never starves a child. Child agents cannot delegate again or start workflows.
 
 The delegation guide lists each model from its configured definition, never its provider catalog,
 so it stays the same from turn to turn and catalog I/O cannot fail a turn. Prices and runtime speed
@@ -343,7 +344,9 @@ A child runs in its parent's runner: `spawn_agent` creates its queued run, and t
 hands it to the runner's `startChild`, which claims it under the parent's delivery, its lease
 renewed with the parent's, and runs it beside the turn. Nothing queues it, so a runner that stops
 takes its children with it; its repair pass ends a child left running once its parent has ended and
-its lease has lapsed.
+its lease has lapsed. Nothing redelivers a child either, so its runner retries a claim that storage
+refuses for as long as the parent runs, and ends failed one it refuses for good: its parent's wait
+always returns.
 
 Child events are recorded in the broker, and reach whoever reads the conversation: the API lists
 its children, each its thread with the runs it took (`packages/core/src/agents/children.ts`, by

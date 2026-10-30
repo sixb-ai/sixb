@@ -43,6 +43,7 @@ export interface DevOptions {
   agentTurnTimeout?: string
   concurrency?: readonly string[]
   vectorConcurrency?: string
+  subagentConcurrency?: string
   subagentConcurrencyPerRun?: string
   /** Also open the app in a desktop window. The supervisor does, so the window outlives restarts. */
   desktop?: boolean
@@ -55,6 +56,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const subagents = resolveSubagentConcurrency({
+    perWorker: options.subagentConcurrency,
     perRun: options.subagentConcurrencyPerRun,
   })
   const entry = resolve(options.entry ?? "sixb.config.ts")
