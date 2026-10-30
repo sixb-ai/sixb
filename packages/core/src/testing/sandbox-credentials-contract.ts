@@ -10,6 +10,11 @@ export interface SandboxCredentialsContractSuiteOptions {
    * to its loopback address, which only a provider running commands on this host can reach.
    */
   readonly originFor?: (port: number) => string
+  /**
+   * Where the provider keeps credentials on the commands' side of the boundary, such as a guest
+   * forwarder's state: the suite tries to read everything under them.
+   */
+  readonly privatePaths?: readonly string[]
 }
 
 /**
@@ -86,12 +91,9 @@ export function runSandboxCredentialsContractSuite(
       await withSandbox([credential(secret)], async (sandbox) => {
         expect((await request(sandbox, origin, "/health")).authorization).toBeNull()
         expect(
-          (await request(sandbox, origin, "/api/x", ["-X", "DELETE"])).authorization
+          (await request(sandbox, origin, "/api/x", { method: "DELETE" })).authorization
         ).toBeNull()
-        const forged = await request(sandbox, origin, "/api/x", [
-          "-H",
-          "Authorization: Bearer guest",
-        ])
+        const forged = await request(sandbox, origin, "/api/x", { authorization: "Bearer guest" })
         expect(forged.authorization).toBe(`Bearer ${secret}`)
       })
     })
@@ -119,6 +121,9 @@ export function runSandboxCredentialsContractSuite(
             "ps -eo args 2>/dev/null",
             "cat /proc/*/environ /proc/*/cmdline 2>/dev/null | tr '\\0' '\\n'",
             "find . -type f -exec cat {} + 2>/dev/null",
+            ...(options.privatePaths ?? []).map(
+              (path) => `find '${path}' -type f -exec cat {} + 2>/dev/null`
+            ),
           ].join("; "),
         ])
         expect(looked.stdout.length).toBeGreaterThan(0)
@@ -134,7 +139,7 @@ async function request(
   sandbox: Sandbox,
   origin: string,
   path: string,
-  curlArgs: readonly string[] = []
+  options: { readonly method?: string; readonly authorization?: string } = {}
 ): Promise<{
   readonly method: string
   readonly path: string
@@ -142,12 +147,53 @@ async function request(
 }> {
   if (!sandbox.credentialedUrl) throw new Error("credentialedUrl is missing")
   const address = sandbox.credentialedUrl(origin)
-  const target = address.startsWith("unix:")
-    ? ["--unix-socket", address.slice("unix:".length), `http://localhost${path}`]
-    : [`${address.replace(/\/+$/, "")}${path}`]
-  const result = await sandbox.runCommand("curl", ["-sS", "-m", "10", ...curlArgs, ...target])
+  const result = await sandbox.runCommand("sh", ["-c", REQUEST_SCRIPT], {
+    env: {
+      SUITE_ADDRESS: address,
+      SUITE_PATH: path,
+      SUITE_METHOD: options.method ?? "GET",
+      SUITE_AUTHORIZATION: options.authorization ?? "",
+      SUITE_FETCH: FETCH_PROGRAM,
+    },
+  })
   if (result.exitCode !== 0) {
-    throw new Error(`curl through ${address} failed: ${result.stderr.trim() || result.exitCode}`)
+    throw new Error(
+      `a request through ${address} failed: ${result.stderr.trim() || result.exitCode}`
+    )
   }
   return JSON.parse(result.stdout)
 }
+
+// curl where the guest has it, else Bun or Node: a guest that runs the agent CLI has one of them.
+const REQUEST_SCRIPT = `set -eu
+if command -v curl >/dev/null 2>&1; then
+  set -- -sS -m 10 -X "$SUITE_METHOD"
+  [ -z "$SUITE_AUTHORIZATION" ] || set -- "$@" -H "Authorization: $SUITE_AUTHORIZATION"
+  case "$SUITE_ADDRESS" in
+    unix:*) exec curl "$@" --unix-socket "\${SUITE_ADDRESS#unix:}" "http://localhost$SUITE_PATH" ;;
+    *) exec curl "$@" "\${SUITE_ADDRESS%/}$SUITE_PATH" ;;
+  esac
+elif command -v bun >/dev/null 2>&1; then
+  exec bun -e "$SUITE_FETCH"
+else
+  exec node --input-type=module -e "$SUITE_FETCH"
+fi`
+
+const FETCH_PROGRAM = `const { SUITE_ADDRESS: address, SUITE_PATH: path, SUITE_METHOD: method } = process.env
+const headers = process.env.SUITE_AUTHORIZATION ? { authorization: process.env.SUITE_AUTHORIZATION } : {}
+if (!address.startsWith("unix:")) {
+  console.log(await (await fetch(address.replace(/\\/+$/, "") + path, { method, headers })).text())
+} else if (typeof Bun !== "undefined") {
+  console.log(await (await fetch("http://localhost" + path, { method, headers, unix: address.slice(5) })).text())
+} else {
+  const http = await import("node:http")
+  console.log(await new Promise((resolve, reject) => {
+    const sent = http.request({ socketPath: address.slice(5), path, method, headers: { ...headers, host: "localhost" } }, (response) => {
+      let body = ""
+      response.on("data", (chunk) => { body += chunk })
+      response.on("end", () => resolve(body))
+    })
+    sent.on("error", reject)
+    sent.end()
+  }))
+}`

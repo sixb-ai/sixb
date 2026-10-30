@@ -85,14 +85,23 @@ export function buildExecArgv(
     readonly command: string
     readonly args: readonly string[]
     readonly env: Readonly<Record<string, string>>
+    /**
+     * Guest variables the container CLI copies from its own environment (`--env KEY`), so their
+     * values are in no process's arguments, on the host or in the guest.
+     */
+    readonly inheritedEnv?: readonly string[]
     readonly interactive?: boolean
+    /** Leave the command running in the background (`--detach`). */
+    readonly detach?: boolean
   }
 ): string[] {
   return [
     config.bin,
     "exec",
     ...(params.interactive ? ["--interactive"] : []),
+    ...(params.detach ? ["--detach"] : []),
     ...buildEnvArgs(params.env),
+    ...(params.inheritedEnv ?? []).flatMap((key) => ["--env", key]),
     "--workdir",
     params.cwd,
     params.id,

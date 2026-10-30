@@ -8,10 +8,20 @@ import {
   type SandboxFileRecord,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
-import { exec } from "@sixb/core/sandboxes"
+import {
+  exec,
+  GUEST_COMMAND_UID,
+  GUEST_CREDENTIALS_ENV,
+  GUEST_FORWARDER_NOT_RUNNING,
+  type GuestCommand,
+  guestCredentialedUrl,
+  guestCredentialsCommands,
+  unprivilegedGuestArgv,
+} from "@sixb/core/sandboxes"
 import {
   buildCreateArgv,
   buildExecArgv,
@@ -125,12 +135,18 @@ export class SmolvmSandbox implements Sandbox {
 
       // Create the working directory in-guest up front, so it is a valid `--workdir` for the first
       // runCommand even when no files are materialized first. Run from "/" since it may not exist.
+      // Commands run as an unprivileged user (see runCommand): the directory is theirs.
       const workdirReady = await exec({
         argv: buildExecArgv(options.cli, {
           id,
           cwd: "/",
-          command: "mkdir",
-          args: ["-p", workingDirectory],
+          command: "sh",
+          args: [
+            "-c",
+            `mkdir -p "$1" && chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} "$1"`,
+            "sh",
+            workingDirectory,
+          ],
           env: {},
         }),
         cwd: process.cwd(),
@@ -140,6 +156,9 @@ export class SmolvmSandbox implements Sandbox {
         throw new SandboxError(
           `[Sandbox] smolvm working directory setup failed for ${id}: ${workdirReady.stderr.trim() || `exit ${workdirReady.exitCode}`}`
         )
+      }
+      if (options.requestCredentials?.length) {
+        await installGuestCredentials(options.cli, id, options.requestCredentials)
       }
     } catch (error) {
       // Best-effort cleanup of a half-created machine.
@@ -156,6 +175,25 @@ export class SmolvmSandbox implements Sandbox {
     })
   }
 
+  /** Replace the credentials the guest's forwarder adds; see {@link credentialedUrl}. */
+  readonly setRequestCredentials = async (
+    credentials: readonly SandboxRequestCredential[]
+  ): Promise<void> => {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot update request credentials`
+      )
+    }
+    await installGuestCredentials(this.cli, this.id, credentials)
+  }
+
+  /**
+   * A socket in the guest that forwards to `url` with the matching credential. A root forwarder
+   * holds the credentials; commands run unprivileged and cannot read them.
+   */
+  readonly credentialedUrl = (url: string): string => guestCredentialedUrl(url)
+
+  /** Every command runs as an unprivileged user, so it cannot read what the guest's root holds. */
   async runCommand(
     command: string,
     args: readonly string[] = [],
@@ -180,8 +218,15 @@ export class SmolvmSandbox implements Sandbox {
     this.inFlight.add(controller)
 
     try {
+      const [unprivileged = command, ...unprivilegedArgs] = unprivilegedGuestArgv(command, args)
       return await exec({
-        argv: buildExecArgv(this.cli, { id: this.id, cwd, command, args, env }),
+        argv: buildExecArgv(this.cli, {
+          id: this.id,
+          cwd,
+          command: unprivileged,
+          args: unprivilegedArgs,
+          env,
+        }),
         cwd: process.cwd(),
         env: hostEnv(),
         timeoutMs,
@@ -217,7 +262,8 @@ export class SmolvmSandbox implements Sandbox {
             files.map((file) => ({
               ...file,
               path: posix.resolve(this.workingDirectory, file.path),
-            }))
+            })),
+            this.workingDirectory
           ),
         ],
         env: {},
@@ -290,8 +336,14 @@ function isLoopbackOrigin(origin: string): boolean {
  * base64-decode the payload into place (base64 keeps binary/quoting safe), honoring an optional
  * mode. `set -e` aborts on the first failure so a partial write surfaces a non-zero exit.
  */
-export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
+export function buildWriteFilesScript(
+  files: readonly SandboxFileRecord[],
+  workingDirectory: string
+): string {
   const lines = ["set -e"]
+  // Written as root, owned by the command user: each file, and each directory it creates inside
+  // the working directory.
+  const owned = new Set<string>()
   for (const file of files) {
     const encoded = Buffer.from(file.contents).toString("base64")
     const quotedPath = shellQuote(file.path)
@@ -300,8 +352,71 @@ export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): stri
     if (file.mode !== undefined) {
       lines.push(`chmod ${file.mode.toString(8)} ${quotedPath}`)
     }
+    for (
+      let path = file.path;
+      path.startsWith(`${workingDirectory}/`);
+      path = posix.dirname(path)
+    ) {
+      owned.add(path)
+    }
+  }
+  if (owned.size > 0) {
+    lines.push(
+      `chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} ${[...owned].map(shellQuote).join(" ")}`
+    )
   }
   return lines.join("\n")
+}
+
+/** Install the credentials in the guest and start its forwarder, as root. */
+async function installGuestCredentials(
+  cli: SmolvmCliConfig,
+  id: string,
+  credentials: readonly SandboxRequestCredential[]
+): Promise<void> {
+  const { install, start, ready } = guestCredentialsCommands(credentials)
+  const installed = await rootExec(cli, id, install)
+  if (installed.exitCode === 3) {
+    throw new SandboxError(
+      `[Sandbox] smolvm request credentials need Bun or Node in the image of ${id}.`
+    )
+  }
+  // Never the output: a failed step must not echo what it was given.
+  const failed = () =>
+    new SandboxError(`[Sandbox] smolvm could not install request credentials in ${id}.`)
+  if (installed.exitCode === GUEST_FORWARDER_NOT_RUNNING) {
+    if ((await rootExec(cli, id, start, { detach: true })).exitCode !== 0) throw failed()
+  } else if (installed.exitCode !== 0) {
+    throw failed()
+  }
+  if ((await rootExec(cli, id, ready)).exitCode !== 0) throw failed()
+}
+
+/**
+ * Run a guest command as root. The credentials travel in the smolvm process's own environment
+ * (`--secret-env`), never in its arguments, which other users of the host could read.
+ */
+function rootExec(
+  cli: SmolvmCliConfig,
+  id: string,
+  command: GuestCommand,
+  options: { readonly detach?: boolean } = {}
+): Promise<CommandResult> {
+  const { [GUEST_CREDENTIALS_ENV]: secret, ...env } = command.env
+  const [program = "sh", ...args] = command.argv
+  return exec({
+    argv: buildExecArgv(cli, {
+      id,
+      cwd: "/",
+      command: program,
+      args,
+      env,
+      ...(secret === undefined ? {} : { secretEnv: [GUEST_CREDENTIALS_ENV] }),
+      ...(options.detach ? { detach: true } : {}),
+    }),
+    cwd: process.cwd(),
+    env: { ...hostEnv(), ...(secret === undefined ? {} : { [GUEST_CREDENTIALS_ENV]: secret }) },
+  })
 }
 
 /** Single-quote a value for safe interpolation into a POSIX shell script. */

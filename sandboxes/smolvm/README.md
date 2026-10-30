@@ -53,9 +53,25 @@ the archive is missing, `create()` throws a message telling you what to run.
 
 Any image works if it has Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+.
 Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:<version>`, or use a smaller image for
-faster boots. Run-time installs will not work because egress is locked down. Commands run as the
-image's user, and smolvm mounts `/workspace` owned by root: an image with a non-root `USER` cannot
-write its working directory.
+faster boots. Run-time installs will not work: egress is locked down and commands are not root
+(see below).
+
+## Commands run unprivileged
+
+Every command runs as uid 65534 (`nobody`) through `setpriv`, with no groups, capabilities or new
+privileges. The working directory and the files `writeFiles` materializes belong to that user, so
+commands can change them; elsewhere they can write only where the image lets anyone, such as
+`/tmp`. Install tools in the image: a command can no longer install packages as root. The image
+needs `setpriv` (util-linux, or BusyBox's).
+
+## Request credentials
+
+The factory supports request credentials (`supportsRequestCredentials`), such as the run token the
+agent worker adds to every call its commands make to the Sixb API. A forwarder runs as root in the
+guest and holds them; `credentialedUrl(url)` is its socket under `/var/lib/sixb-forward`, which
+forwards only to `url` and adds the credential that matches the request. The credentials reach the
+guest in a root process's environment, never in arguments, and stay in root-only files. The
+forwarder needs Bun or Node in the image.
 
 ## Options
 

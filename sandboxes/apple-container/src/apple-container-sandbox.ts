@@ -7,9 +7,19 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
+import {
+  GUEST_COMMAND_UID,
+  GUEST_CREDENTIALS_ENV,
+  GUEST_FORWARDER_NOT_RUNNING,
+  type GuestCommand,
+  guestCredentialedUrl,
+  guestCredentialsCommands,
+  unprivilegedGuestArgv,
+} from "@sixb/core/sandboxes"
 import {
   type AppleContainerCliConfig,
   buildCreateArgv,
@@ -50,8 +60,9 @@ const HOST_ENV_ALLOWLIST = [
   "XDG_DATA_HOME",
   "SSH_AUTH_SOCK",
 ] as const
-const WRITE_FILE_SCRIPT =
-  'mkdir -p -- "$(dirname -- "$1")" && cat > "$1" && if [ -n "$2" ]; then chmod "$2" "$1"; fi'
+// Written as root, then owned by the user commands run as: the file and each directory it created
+// inside the working directory, the remaining arguments.
+const WRITE_FILE_SCRIPT = `mkdir -p -- "$(dirname -- "$1")" && cat > "$1" && if [ -n "$2" ]; then chmod "$2" "$1"; fi && shift 2 && chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} -- "$@"`
 
 export class AppleContainerSandbox implements Sandbox {
   readonly id: string
@@ -150,6 +161,33 @@ export class AppleContainerSandbox implements Sandbox {
           `[Sandbox] apple-container start failed for ${id}: ${errorText(started)}`
         )
       }
+
+      // Commands run as an unprivileged user (see runCommand): the directory is theirs.
+      const owned = await runAppleContainerCli({
+        argv: buildExecArgv(options.cli, {
+          id,
+          cwd: "/",
+          command: "/bin/sh",
+          args: [
+            "-c",
+            `mkdir -p "$1" && chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} "$1"`,
+            "sh",
+            workingDirectory,
+          ],
+          env: {},
+        }),
+        cwd: process.cwd(),
+        env: hostEnv(),
+        timeoutMs: setupTimeoutMs,
+      })
+      if (owned.exitCode !== 0) {
+        throw new SandboxError(
+          `[Sandbox] apple-container working directory setup failed for ${id}: ${errorText(owned)}`
+        )
+      }
+      if (options.requestCredentials?.length) {
+        await installGuestCredentials(options.cli, id, setupTimeoutMs, options.requestCredentials)
+      }
     } catch (error) {
       await runAppleContainerCli({
         argv: buildDeleteArgv(options.cli, id),
@@ -179,6 +217,21 @@ export class AppleContainerSandbox implements Sandbox {
     })
   }
 
+  /** Replace the credentials the guest's forwarder adds; see {@link credentialedUrl}. */
+  readonly setRequestCredentials = async (
+    credentials: readonly SandboxRequestCredential[]
+  ): Promise<void> => {
+    this.assertRunning("update request credentials")
+    await installGuestCredentials(this.cli, this.id, this.setupTimeoutMs, credentials)
+  }
+
+  /**
+   * A socket in the guest that forwards to `url` with the matching credential. A root forwarder
+   * holds the credentials; commands run unprivileged and cannot read them.
+   */
+  readonly credentialedUrl = (url: string): string => guestCredentialedUrl(url)
+
+  /** Every command runs as an unprivileged user, so it cannot read what the guest's root holds. */
   async runCommand(
     command: string,
     args: readonly string[] = [],
@@ -187,13 +240,14 @@ export class AppleContainerSandbox implements Sandbox {
     this.assertRunning("run commands")
 
     const { controller, cleanup } = this.commandController(options.signal)
+    const [unprivileged = command, ...unprivilegedArgs] = unprivilegedGuestArgv(command, args)
     try {
       return await runAppleContainerCli({
         argv: buildExecArgv(this.cli, {
           id: this.id,
           cwd: posix.resolve(this.workingDirectory, options.cwd ?? "."),
-          command,
-          args,
+          command: unprivileged,
+          args: unprivilegedArgs,
           env: { ...this.sandboxEnv, ...(options.env ?? {}) },
         }),
         cwd: process.cwd(),
@@ -215,12 +269,20 @@ export class AppleContainerSandbox implements Sandbox {
     for (const file of files) {
       const target = this.resolveWithinWorkingDirectory(file.path)
       const mode = file.mode === undefined ? "" : file.mode.toString(8)
+      const owned: string[] = []
+      for (
+        let path = target;
+        path.startsWith(`${this.workingDirectory}/`);
+        path = posix.dirname(path)
+      ) {
+        owned.push(path)
+      }
       const result = await runAppleContainerCli({
         argv: buildExecArgv(this.cli, {
           id: this.id,
           cwd: "/",
           command: "/bin/sh",
-          args: ["-c", WRITE_FILE_SCRIPT, "sh", target, mode],
+          args: ["-c", WRITE_FILE_SCRIPT, "sh", target, mode, ...owned],
           env: {},
           interactive: true,
         }),
@@ -336,6 +398,62 @@ function normalizeWorkingDirectory(value: string | undefined): string {
   return value && value.length > 0
     ? posix.resolve("/", value)
     : posix.resolve("/", DEFAULT_WORKING_DIRECTORY)
+}
+
+/** Install the credentials in the guest and start its forwarder, as root. */
+async function installGuestCredentials(
+  cli: AppleContainerCliConfig,
+  id: string,
+  timeoutMs: number,
+  credentials: readonly SandboxRequestCredential[]
+): Promise<void> {
+  const { install, start, ready } = guestCredentialsCommands(credentials)
+  const installed = await rootExec(cli, id, timeoutMs, install)
+  if (installed.exitCode === 3) {
+    throw new SandboxError(
+      `[Sandbox] apple-container request credentials need Bun or Node in the image of ${id}.`
+    )
+  }
+  // Never the output: a failed step must not echo what it was given.
+  const failed = () =>
+    new SandboxError(`[Sandbox] apple-container could not install request credentials in ${id}.`)
+  if (installed.exitCode === GUEST_FORWARDER_NOT_RUNNING) {
+    if ((await rootExec(cli, id, timeoutMs, start, { detach: true })).exitCode !== 0) {
+      throw failed()
+    }
+  } else if (installed.exitCode !== 0) {
+    throw failed()
+  }
+  if ((await rootExec(cli, id, timeoutMs, ready)).exitCode !== 0) throw failed()
+}
+
+/**
+ * Run a guest command as root. The credentials travel in the container CLI's own environment
+ * (`--env KEY`), never in its arguments, which other users of the host could read.
+ */
+function rootExec(
+  cli: AppleContainerCliConfig,
+  id: string,
+  timeoutMs: number,
+  command: GuestCommand,
+  options: { readonly detach?: boolean } = {}
+): Promise<CommandResult> {
+  const { [GUEST_CREDENTIALS_ENV]: secret, ...env } = command.env
+  const [program = "/bin/sh", ...args] = command.argv
+  return runAppleContainerCli({
+    argv: buildExecArgv(cli, {
+      id,
+      cwd: "/",
+      command: program,
+      args,
+      env,
+      ...(secret === undefined ? {} : { inheritedEnv: [GUEST_CREDENTIALS_ENV] }),
+      ...(options.detach ? { detach: true } : {}),
+    }),
+    cwd: process.cwd(),
+    env: { ...hostEnv(), ...(secret === undefined ? {} : { [GUEST_CREDENTIALS_ENV]: secret }) },
+    timeoutMs,
+  })
 }
 
 function hostEnv(): Record<string, string> {

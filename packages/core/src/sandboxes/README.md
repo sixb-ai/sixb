@@ -62,7 +62,9 @@ reach `url` with the session's credentials added outside the guest. A provider w
 them returns `url` itself; one that forwards on the host returns its own address, such as
 `unix:/tmp/…/0.sock`, which reaches only `url`. The worker adds every run's own token for the Sixb
 API this way, beside a source's credentials, so the run's commands never hold it.
-`runSandboxCredentialsContractSuite` in `@sixb/core/testing` is the contract: a command reaches the
+A VM guest does the same from inside: its commands run as an unprivileged user and a root forwarder
+holds the credentials (`guestCredentialsCommands`, `unprivilegedGuestArgv`), as smolvm and Apple
+Container do. `runSandboxCredentialsContractSuite` in `@sixb/core/testing` is the contract: a command reaches the
 origin with the credential added, only matching requests get it, replacing it takes effect, and
 nothing a command can read (its env, process lists, `/proc`, its files) holds it.
 

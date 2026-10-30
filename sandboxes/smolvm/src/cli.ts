@@ -86,12 +86,23 @@ export function buildExecArgv(
     readonly command: string
     readonly args: readonly string[]
     readonly env: Readonly<Record<string, string>>
+    /**
+     * Guest variables read from the smolvm process's own environment (`--secret-env`), so their
+     * values are in no process's arguments, on the host or in the guest.
+     */
+    readonly secretEnv?: readonly string[]
+    /** Leave the command running in the background (`--detach`). */
+    readonly detach?: boolean
   }
 ): string[] {
   const argv = [config.bin, "machine", "exec", "--name", params.id, "--workdir", params.cwd]
   for (const [key, value] of Object.entries(params.env)) {
     argv.push("--env", `${key}=${value}`)
   }
+  for (const key of params.secretEnv ?? []) {
+    argv.push("--secret-env", `${key}=${key}`)
+  }
+  if (params.detach) argv.push("--detach")
   argv.push("--", params.command, ...params.args)
   return argv
 }
