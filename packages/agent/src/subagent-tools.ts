@@ -354,7 +354,7 @@ export class SubagentCoordinator {
     }[]
   > {
     const { children } = this.session
-    const trigger = await children.message(this.parentRun.triggerMessageId)
+    const trigger = await this.session.threads.message(this.parentRun.triggerMessageId)
     if (!trigger) return []
 
     const parts = trigger.parts.filter(
@@ -559,7 +559,7 @@ export class SubagentCoordinator {
 
   /** Whether a continuation went on with its parent's answer, as its trigger says. */
   private async continuesAfterAnswer(run: SubagentRunRecord): Promise<boolean> {
-    const trigger = await this.session.children.message(run.triggerMessageId)
+    const trigger = await this.session.threads.message(run.triggerMessageId)
     return trigger?.parts.some((part) => part.type === "mail" && part.kind === "answer") ?? false
   }
 
@@ -640,7 +640,7 @@ export class SubagentCoordinator {
   private async deferredQuestionOf(run: SubagentRunRecord): Promise<QuestionRef | undefined> {
     if (!isAwaitingAnswerRun(run)) return undefined
 
-    const { messages } = await this.session.children.messages({
+    const { messages } = await this.session.threads.messages({
       threadId: run.threadId,
       order: "desc",
       limit: 2,
@@ -730,7 +730,7 @@ export class SubagentCoordinator {
   async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
     for (;;) {
       const finished = this.#questions.nextChange()
-      if (!(await this.session.children.hasActive())) return
+      if ((await this.session.children.activeCount()) === 0) return
 
       const remainingMs = stopAt - Date.now()
       if (remainingMs <= 0) return
@@ -1064,7 +1064,7 @@ export class SubagentCoordinator {
     const sent = this.#sent.get(run.id)
     if (!sent || !isTerminalSubagent(run) || run.status === "failed") return {}
 
-    const { messages } = await this.session.children.messages({
+    const { messages } = await this.session.threads.messages({
       threadId: run.threadId,
       order: "asc",
     })

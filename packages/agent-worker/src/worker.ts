@@ -466,7 +466,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       execution,
       runId: run.id,
       names: turn.names,
-      authorization: await session.people.authorization(execution.authorizationRef),
+      authorization: await session.authorization(execution.authorizationRef),
       shared: (conversation?.participants.length ?? 0) > 0,
     })
     const model = await prepareAgentModel(plan)

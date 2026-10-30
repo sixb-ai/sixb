@@ -172,7 +172,6 @@ export type {
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
   AgentRunCheckpoint,
-  AgentRunConversation,
   AgentRunHeldCalls,
   AgentRunOutcome,
   AgentRunPeople,
@@ -189,7 +188,12 @@ export {
   openAgentRunSession,
   watchAgentRunCancel,
 } from "./run-session"
-export type { AgentMailDraft, AgentRunChildren, AgentRunMail } from "./run-session-children"
+export type {
+  AgentMailDraft,
+  AgentRunChildren,
+  AgentRunMail,
+  AgentRunThreads,
+} from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,

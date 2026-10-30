@@ -13,11 +13,7 @@ import type {
   SubagentRunRecord,
 } from "../storage/agents"
 import type { CreateExecutionInput } from "../storage/executions/types"
-import {
-  type AgentChildApprovalAwaiting,
-  hasActiveChildren,
-  listChildApprovalsAwaiting,
-} from "./approvals"
+import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
 import { AgentExecutionLostError, fenced } from "./run-fence"
 import {
   type AgentInbox,
@@ -28,13 +24,16 @@ import {
   subscribeAgentInbox,
 } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
+import { conversationThreadId } from "./thread-access"
 
 /**
  * A conversation turn's children, as its session reaches them: the runs it spawned, and those of
  * earlier turns of its conversation, with their threads and the approvals that hold them. Every
- * write is fenced by the turn's execution token.
+ * read answers only for runs of the run's own conversation, and every write is fenced by the
+ * turn's execution token.
  */
 export interface AgentRunChildren {
+  /** A run of this conversation: one of its turns, or a child of one; null for any other. */
   get(runId: string): Promise<AgentRunRecord | null>
   getMany(runIds: readonly string[]): Promise<readonly AgentRunRecord[]>
   /** The children of this conversation's turns, by spawn key or by how they paused. */
@@ -43,8 +42,6 @@ export interface AgentRunChildren {
   ): Promise<readonly SubagentRunRecord[]>
   /** One child thread's runs, oldest first: a child and its continuations. */
   threadRuns(threadId: string): Promise<readonly SubagentRunRecord[]>
-  message(messageId: string): Promise<AgentMessageRecord | null>
-  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
   /** The approvals a run's calls asked for, its children's included. */
   approvals(runId: string): Promise<readonly AgentApprovalRecord[]>
   holdsRun(runId: string): Promise<boolean>
@@ -54,7 +51,6 @@ export interface AgentRunChildren {
   ): Promise<ReadonlyMap<string, readonly AgentChildApprovalAwaiting[]>>
   /** How many of this turn's children are queued or running. */
   activeCount(): Promise<number>
-  hasActive(): Promise<boolean>
   /**
    * Create a child run of this turn, with its execution, in one transaction that refuses once the
    * turn no longer owns its run.
@@ -68,6 +64,71 @@ export interface AgentRunChildren {
    * so the turn can continue the child again. Refused once the turn no longer owns its run.
    */
   clearAttempt(input: { readonly threadId: string; readonly runId: string }): Promise<void>
+}
+
+/** The messages of the run's conversation: its threads, and its children's. */
+export interface AgentRunThreads {
+  /** A message of the conversation; null for one anywhere else. */
+  message(messageId: string): Promise<AgentMessageRecord | null>
+  /** A thread of the conversation's messages; any other thread is refused. */
+  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
+}
+
+/**
+ * Which threads a run may read: its conversation's own, and the threads of its children. A runner
+ * over HTTP can name any id, so the session answers for these alone. A thread's place never
+ * changes, so each is looked up once.
+ */
+export interface AgentRunScope {
+  includes(threadId: string): Promise<boolean>
+}
+
+export function agentRunScope(host: AgentRunChildrenHost, run: AgentRunRecord): AgentRunScope {
+  const conversations = new Map<string, Promise<string | null>>()
+  const conversationOf = (threadId: string) => {
+    let conversation = conversations.get(threadId)
+    if (!conversation) {
+      conversation = host.storage.agents.threads
+        .getById({ projectId: host.projectId, id: threadId })
+        .then((thread) => (thread ? conversationThreadId(thread) : null))
+      // A failed read is read again next time.
+      conversation.catch(() => conversations.delete(threadId))
+      conversations.set(threadId, conversation)
+    }
+    return conversation
+  }
+  return {
+    async includes(threadId) {
+      const [own, theirs] = await Promise.all([
+        conversationOf(run.threadId),
+        conversationOf(threadId),
+      ])
+      return own !== null && own === theirs
+    },
+  }
+}
+
+export function agentRunThreads(
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  scope: AgentRunScope
+): AgentRunThreads {
+  const { projectId } = host
+  const agents = host.storage.agents
+  return {
+    async message(messageId) {
+      const message = await agents.messages.getById({ projectId, id: messageId })
+      return message && (await scope.includes(message.threadId)) ? message : null
+    },
+    async messages(input) {
+      if (!(await scope.includes(input.threadId))) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' reads only its conversation's threads, not '${input.threadId}'.`
+        )
+      }
+      return agents.messages.list({ ...input, projectId })
+    },
+  }
 }
 
 /** Mail as its sender writes it: the session says who sends it, and when. */
@@ -106,23 +167,36 @@ export interface AgentRunChildrenHost {
 export function agentRunChildren(
   host: AgentRunChildrenHost,
   run: AgentRunRecord,
-  executionToken: string
+  executionToken: string,
+  scope: AgentRunScope
 ): AgentRunChildren {
   const { projectId } = host
   const agents = host.storage.agents
+  const get = async (runId: string) => {
+    const found = await agents.runs.getById({ projectId, id: runId })
+    return found && (await scope.includes(found.threadId)) ? found : null
+  }
 
   return {
-    get: (runId) => agents.runs.getById({ projectId, id: runId }),
-    getMany: (runIds) => agents.runs.getByIds({ projectId, ids: runIds }),
+    get,
+    async getMany(runIds) {
+      const found = await agents.runs.getByIds({ projectId, ids: runIds })
+      const included = await Promise.all(found.map((each) => scope.includes(each.threadId)))
+      return found.filter((_, index) => included[index])
+    },
     inConversation: (input) =>
       agents.runs.listThreadSubagents({ ...input, projectId, threadId: run.threadId }),
-    threadRuns: (threadId) => listSubagentThreadRuns(agents, { projectId, threadId }),
-    message: (messageId) => agents.messages.getById({ projectId, id: messageId }),
-    messages: (input) => agents.messages.list({ ...input, projectId }),
+    async threadRuns(threadId) {
+      if (!(await scope.includes(threadId))) return []
+      return listSubagentThreadRuns(agents, { projectId, threadId })
+    },
     async approvals(runId) {
+      if (!(await get(runId))) return []
       return (await agents.approvals.list({ projectId, runId })).approvals
     },
-    holdsRun: (runId) => agents.approvals.holdsRun({ projectId, runId }),
+    async holdsRun(runId) {
+      return (await get(runId)) !== null && agents.approvals.holdsRun({ projectId, runId })
+    },
     awaitingApproval: (childRunIds) =>
       listChildApprovalsAwaiting(agents, { projectId, parentRunId: run.id, childRunIds }),
     async activeCount() {
@@ -135,7 +209,6 @@ export function agentRunChildren(
       })
       return active.total
     },
-    hasActive: () => hasActiveChildren(agents, run),
     spawn: (input) =>
       fenced(run.id, () =>
         host.storage.transaction(async (tx) => {
