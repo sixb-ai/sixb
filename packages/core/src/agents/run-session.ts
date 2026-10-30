@@ -191,6 +191,12 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly events: StreamSink
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
+  /**
+   * What follows a run's end, once `finish` recorded it: a turn's children still at work are
+   * stopped, and a turn paused on calls already decided goes on. Best effort: a failure is logged,
+   * and the host's repair passes catch up.
+   */
+  readonly afterFinish?: (run: AgentRunRecord) => Promise<void>
 }
 
 export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
@@ -260,8 +266,17 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         queueLeaseExpiresAt: new Date(leaseExpiresAt),
       })
     },
-    finish: (outcome, messages) =>
-      finishWithRetries(host.storage, { ...outcome, ...fence }, messages ?? []),
+    async finish(outcome, messages) {
+      const finished = await finishWithRetries(
+        host.storage,
+        { ...outcome, ...fence },
+        messages ?? []
+      )
+      await host.afterFinish?.(finished).catch((error: unknown) => {
+        console.error(`[Sixb] What follows agent run '${run.id}' failed; repair retries it.`, error)
+      })
+      return finished
+    },
     async assertOwned() {
       const current = await host.storage.agents.runs.getById({
         projectId: host.projectId,
