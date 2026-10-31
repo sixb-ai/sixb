@@ -41,6 +41,11 @@ export interface AgentToolCallOptions {
   readonly signal: AbortSignal
   /** The bytes the run may still store; the put that would pass it is refused. */
   readonly maxFileBytes?: number
+  /**
+   * Where the runner keeps the run's files, which the paths `files.put` returns start with:
+   * `.sixb/agent` in the working directory when omitted, a directory of its own on a computer.
+   */
+  readonly contextDirectory?: string
 }
 
 /** What a project tool returned, and the files it stored for the run's sandbox. */
@@ -81,6 +86,8 @@ export async function runAgentTool(input: {
   readonly files: Pick<AgentRunFileStore, "put">
   /** The bytes its files may take in all: the run's budget left. */
   readonly maxFileBytes?: number
+  /** Where the runner keeps the run's files; see {@link AgentToolCallOptions}. */
+  readonly contextDirectory?: string
 }): Promise<AgentToolCallResult> {
   const { definition, call, signal } = input
   let toolInput: Readonly<Record<string, JsonValue>>
@@ -127,8 +134,9 @@ export async function runAgentTool(input: {
           },
         })
         stored.push({ fileRef, path })
-        // Where the runner copies it, in a sandbox that keeps its run files in the usual place.
-        return { fileRef, sandboxPath: posix.join(SANDBOX_CONTEXT_DIRECTORY, path) }
+        // Where the runner copies it.
+        const contextDirectory = input.contextDirectory ?? SANDBOX_CONTEXT_DIRECTORY
+        return { fileRef, sandboxPath: posix.join(contextDirectory, path) }
       },
     },
     attachments: input.attachments,
