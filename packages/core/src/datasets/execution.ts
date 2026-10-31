@@ -15,6 +15,12 @@ import type { DatasetVersionMarkings } from "../security/dataset-version-marking
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
+import {
+  type DatasetLineage,
+  type DatasetLineageInput,
+  datasetLineageDepth,
+  walkDatasetLineage,
+} from "./lineage"
 import type { DatasetDefinition } from "./types"
 import { writeDataset } from "./write"
 
@@ -58,6 +64,11 @@ export interface DatasetsRuntime {
    * version does not exist.
    */
   readRows(dataset: DatasetDefinition, input?: DatasetReadRowsInput): Promise<DatasetRows | null>
+  /**
+   * Walk the versions one version is computed from. Returns null when the reader cannot view the
+   * dataset, it has no version yet, or the requested version does not exist.
+   */
+  lineage(dataset: DatasetDefinition, input?: DatasetLineageInput): Promise<DatasetLineage | null>
   ingest(dataset: DatasetDefinition, input: DatasetIngestInput): Promise<DatasetIngestResult>
 }
 
@@ -124,6 +135,20 @@ export function createDatasetsRuntime(
         ...(redacted.size > 0 ? { redactions: missingClearanceRedactions(redacted) } : {}),
         rows,
       }
+    },
+    async lineage(dataset, input = {}) {
+      const depth = datasetLineageDepth(input.depth)
+      if (!allowed(dataset.id)) return null
+
+      const registered = source.getById(dataset.id)
+      if (!registered) throw new Error(`[Sixb] Dataset '${dataset.id}' is not registered.`)
+      const version =
+        input.versionId === undefined
+          ? await lakeStorage.getLatestVersion(registered.id)
+          : await lakeStorage.getVersion(registered.id, input.versionId)
+      if (!version) return null
+
+      return walkDatasetLineage(runtime, lakeStorage, version, depth)
     },
     async ingest(dataset, input) {
       assertPrivileged(runtime, "datasets.ingest")
