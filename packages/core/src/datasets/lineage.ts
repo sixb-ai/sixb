@@ -1,4 +1,4 @@
-import { canViewPipelineRun, isRuntimeAllowed } from "../authorization"
+import { canViewPrimitiveRun, isRuntimeAllowed } from "../authorization"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type {
   DatasetProducer,
@@ -158,17 +158,12 @@ function lineageVersion(
 /** The producer as the reader may see it, decided as the pipeline and sync run facades decide. */
 function visibleProducer(runtime: SixbRuntimeContext, producer: DatasetProducer): DatasetProducer {
   const { kind, id } = producer
-  if (id === undefined) return { kind }
+  if (id === undefined || kind === "ingest") return { kind }
 
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const visible =
-    kind === "pipeline"
-      ? authority.type === "unrestricted" ||
-        (authority.type === "principal" &&
-          canViewPipelineRun(authority.context, { pipelineId: id }))
-      : kind === "sync"
-        ? isRuntimeAllowed(runtime, { kind: "sync.run", syncId: id })
-        : false
+    authority.type === "unrestricted" ||
+    (authority.type === "principal" && canViewPrimitiveRun(authority.context, { kind, id }))
 
   if (!visible) return { kind }
 

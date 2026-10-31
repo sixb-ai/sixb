@@ -13,6 +13,7 @@ import type { DomainEventLog } from "../events"
 import type { ObjectEventHistory } from "../events/service"
 import type { RuntimeAuthorization } from "../execution"
 import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
+import type { LinkLineage, ObjectLineage } from "../lineage/types"
 import type { EmbeddingModelCatalog, RerankingModelCatalog, RerankingModelRef } from "../models"
 import type { ModelExecutionSession } from "../models/execution/session"
 import type {
@@ -1045,4 +1046,21 @@ export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>
     targetTypeId: string
     targetId: string
   }): Promise<void>
+
+  /**
+   * Where an object's current values come from: what makes it exist and what decided each of its
+   * properties, as far as this reader may see. Null when the reader cannot read the object.
+   */
+  lineage(id: string): Promise<ObjectLineage | null>
+
+  /**
+   * Where a link comes from, as far as this reader may see. Null when the reader cannot read both
+   * objects or the link, or the link does not exist.
+   */
+  linkLineage(input: {
+    sourceId: string
+    linkId: string
+    targetTypeId: string
+    targetId: string
+  }): Promise<LinkLineage | null>
 }

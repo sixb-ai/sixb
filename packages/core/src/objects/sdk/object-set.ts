@@ -11,9 +11,15 @@ import type { BlobStorage } from "../../blob-storage"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
 import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
+import { explainLink } from "../../lineage/link"
+import { explainObject } from "../../lineage/object"
+import type { LineageDependencies } from "../../lineage/projections"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
-import { assertPropertyTokenBelongsToObjectType } from "../../ontology/validation"
+import {
+  assertLinkTargetType,
+  assertPropertyTokenBelongsToObjectType,
+} from "../../ontology/validation"
 import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type {
   ObjectSet,
@@ -37,6 +43,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
     readonly objectType: TObjectType
     readonly authorization?: AuthorizationContext
     readonly blobStorage: Pick<BlobStorage, "stat" | "open">
+    readonly lineage: LineageDependencies
   }
 ): ObjectSet<TObjectType> {
   assertAuthorizedObjectReaderBinding({
@@ -208,6 +215,31 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
         linkId: input.linkId,
         targetTypeId: input.targetTypeId,
         targetId: input.targetId,
+      })
+    },
+
+    lineage: (id: string) =>
+      explainObject(params, params.lineage, { objectTypeId: objectType.id, primaryId: id }),
+
+    linkLineage: async (input: {
+      sourceId: string
+      linkId: string
+      targetTypeId: string
+      targetId: string
+    }) => {
+      const linkDefinition = requireLinkDefinition(objectType, input.linkId)
+      assertLinkTargetType(
+        objectType.id,
+        input.linkId,
+        linkDefinition,
+        input.targetTypeId,
+        (expected, actual) => ontology.isValidLinkTarget(expected, actual)
+      )
+
+      return explainLink(params, params.lineage, {
+        source: { objectTypeId: objectType.id, primaryId: input.sourceId },
+        linkId: input.linkId,
+        target: { objectTypeId: input.targetTypeId, primaryId: input.targetId },
       })
     },
   }

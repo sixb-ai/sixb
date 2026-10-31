@@ -24,10 +24,12 @@ export {
 export {
   canViewActionRun,
   canViewPipelineRun,
+  canViewPrimitiveRun,
   canViewProjection,
   canViewProjectionRun,
   canViewWorkflowIntervention,
   canViewWorkflowRun,
+  type PrimitiveRunSubject,
 } from "./run-visibility"
 export type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
 export { emptyGrantIndex } from "./types"
