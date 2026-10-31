@@ -1,5 +1,6 @@
 import { dirname } from "node:path"
 import type { SandboxNetworkPolicy } from "@sixb/core"
+import type { ForwarderPaths } from "../credential-forwarder"
 import { allowsOutboundNetwork } from "./network"
 
 export interface SeatbeltProfileInput {
@@ -9,8 +10,8 @@ export interface SeatbeltProfileInput {
   /** Real paths commands may neither read nor write, whatever else allows them. */
   readonly denyReadPaths: readonly string[]
   readonly network: SandboxNetworkPolicy
-  /** Where the sandbox's credential forwarder listens, reachable whatever the network. */
-  readonly forwarderDirectory?: string
+  /** The sandbox's credential forwarder, whose directory alone a command can reach. */
+  readonly forwarder?: ForwarderPaths
 }
 
 export interface SeatbeltArgvInput {
@@ -29,9 +30,12 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
 
   if (!allowsOutboundNetwork(input.network)) {
     lines.push("(deny network-outbound)")
-    if (input.forwarderDirectory !== undefined) {
-      lines.push(`(allow network-outbound (subpath ${sbplString(input.forwarderDirectory)}))`)
-    }
+  }
+  // Every sandbox's forwarder listens under one root: a command that reached another's would act
+  // with that sandbox's credentials.
+  if (input.forwarder !== undefined) {
+    lines.push(`(deny network-outbound (subpath ${sbplString(input.forwarder.root)}))`)
+    lines.push(`(allow network-outbound (subpath ${sbplString(input.forwarder.directory)}))`)
   }
 
   lines.push("(deny file-write*)")
@@ -52,6 +56,10 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
     const directories = ancestors(path).map((directory) => `(literal ${sbplString(directory)})`)
     if (directories.length > 0) lines.push(`(deny file-write* ${directories.join(" ")})`)
     lines.push(`(deny file-read* file-write* (subpath ${sbplString(path)}))`)
+  }
+  // Moved elsewhere, another sandbox's forwarder would sit outside the root the network rule names.
+  if (input.forwarder !== undefined) {
+    lines.push(`(deny file-write* (subpath ${sbplString(input.forwarder.root)}))`)
   }
 
   return `${lines.join("\n")}\n`

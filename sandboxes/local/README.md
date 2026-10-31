@@ -80,7 +80,8 @@ The commands' environment, files and process arguments never hold it.
 
 An origin may be `http://` as well as `https://`, so a local development API works. With
 `isolation: "none"`, a command can read this process's memory where the OS allows a user's
-processes to inspect one another; the OS sandbox backends don't.
+processes to inspect one another, and it can connect to every other local sandbox's forwarder,
+so it can make requests with their credentials; the OS sandbox backends allow neither.
 
 ## Network policy
 

@@ -27,6 +27,15 @@ afterEach(() => {
   root = undefined
 })
 
+/** Echoes what reached it, so a test can tell what the forwarder added. */
+function echo(request: Request): Response {
+  return Response.json({
+    path: new URL(request.url).pathname,
+    authorization: request.headers.get("authorization"),
+    forwardedFor: request.headers.get("x-forwarded-for"),
+  })
+}
+
 function setup() {
   // Under /tmp: a socket's path must fit in about 100 bytes.
   root = mkdtempSync("/tmp/sixb-guest-")
@@ -34,12 +43,7 @@ function setup() {
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (request) =>
-      Response.json({
-        path: new URL(request.url).pathname,
-        authorization: request.headers.get("authorization"),
-        forwardedFor: request.headers.get("x-forwarded-for"),
-      }),
+    fetch: echo,
   })
   const origin = `http://127.0.0.1:${server.port}`
   const credential = (secret: string): SandboxRequestCredential => ({
@@ -74,9 +78,16 @@ function setup() {
   }
   const install = (credentials: readonly SandboxRequestCredential[]) =>
     runInstall(guestCredentialsCommands(credentials, paths))
-  const socketOf = () => guestCredentialedUrl(origin, paths).slice("unix:".length)
-  const call = async (path: string, headers?: Record<string, string>) => {
-    const response = await fetch(`http://localhost${path}`, { unix: socketOf(), headers })
+  const socketOf = (to = origin) => guestCredentialedUrl(to, paths).slice("unix:".length)
+  const call = async (
+    path: string,
+    options: { headers?: Record<string, string>; method?: string; to?: string } = {}
+  ) => {
+    const response = await fetch(`http://localhost${path}`, {
+      unix: socketOf(options.to),
+      method: options.method,
+      headers: options.headers,
+    })
     return (await response.json()) as {
       path: string
       authorization: string | null
@@ -141,11 +152,47 @@ describe("guest credentials", () => {
       expect(reached).toEqual([])
       expect(answer).toContain('"path":"/api/x"')
       expect(
-        (await call("/api/whoami", { "x-forwarded-for": "203.0.113.9" })).forwardedFor
+        (await call("/api/whoami", { headers: { "x-forwarded-for": "203.0.113.9" } })).forwardedFor
       ).toBeNull()
     } finally {
       other.stop(true)
     }
+  })
+
+  // Guard proof: drop the origin comparison from `matches` in guestForwarder; the other origin
+  // gets this origin's credential.
+  test("a credential reaches its own origin alone, whatever the paths it shares", async () => {
+    const { credential, install, call } = setup()
+    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: echo })
+    const otherOrigin = `http://127.0.0.1:${other.port}`
+    try {
+      const secret = `guest-${randomUUID()}`
+      const otherSecret = `guest-${randomUUID()}`
+      const credentials = [
+        credential(secret),
+        { ...credential(otherSecret), origin: otherOrigin, path: { prefix: "/api/v2/" } },
+      ]
+      expect(await install(credentials)).toBe(0)
+
+      expect((await call("/api/v2/x")).authorization).toBe(`Bearer ${secret}`)
+      expect((await call("/api/v2/x", { to: otherOrigin })).authorization).toBe(
+        `Bearer ${otherSecret}`
+      )
+      expect((await call("/api/x", { to: otherOrigin })).authorization).toBeNull()
+    } finally {
+      other.stop(true)
+    }
+  })
+
+  // Guard proof: drop the method comparison from `matches` in guestForwarder; the DELETE gets the
+  // credential.
+  test("a request whose method the credential doesn't allow goes without it", async () => {
+    const { credential, install, call } = setup()
+    const secret = `guest-${randomUUID()}`
+    expect(await install([credential(secret)])).toBe(0)
+
+    expect((await call("/api/x", { method: "POST" })).authorization).toBe(`Bearer ${secret}`)
+    expect((await call("/api/x", { method: "DELETE" })).authorization).toBeNull()
   })
 
   // Azure writes root-only files through its API: the install step then carries no secret.

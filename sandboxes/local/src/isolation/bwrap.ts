@@ -1,4 +1,5 @@
 import type { SandboxNetworkPolicy } from "@sixb/core"
+import type { ForwarderPaths } from "../credential-forwarder"
 import { allowsOutboundNetwork } from "./network"
 
 export interface BwrapArgvInput {
@@ -10,6 +11,8 @@ export interface BwrapArgvInput {
   /** Existing real paths commands may not read, with what each is. */
   readonly denyReadPaths: readonly DeniedPath[]
   readonly network: SandboxNetworkPolicy
+  /** The sandbox's credential forwarder: its own directory alone shows under the root. */
+  readonly forwarder?: ForwarderPaths
 }
 
 export interface DeniedPath {
@@ -38,6 +41,12 @@ export function buildBwrapArgv(input: BwrapArgvInput): readonly string[] {
   for (const { path, kind } of input.denyReadPaths) {
     if (kind === "directory") argv.push("--tmpfs", path)
     else argv.push("--ro-bind", "/dev/null", path)
+  }
+  // Every sandbox's forwarder listens under one root, and a read-only mount doesn't stop a
+  // connect: the root shows empty but for this sandbox's directory, at the same path.
+  if (input.forwarder !== undefined) {
+    const { root, directory } = input.forwarder
+    argv.push("--tmpfs", root, "--ro-bind", directory, directory)
   }
   argv.push("--proc", "/proc", "--dev", "/dev")
 

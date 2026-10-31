@@ -46,6 +46,35 @@ describe("buildSeatbeltProfile", () => {
     expect(profile).toContain("(deny file-write*)")
   })
 
+  // Guard proof: drop the forwarder's rules from buildSeatbeltProfile; the profile lets a command
+  // connect to, or move, every sandbox's forwarder.
+  test.each([
+    ["none", { mode: "none" }, ["(deny network-outbound)"]],
+    ["restricted", { mode: "restricted", allow: [] }, []],
+    ["all", { mode: "all" }, []],
+  ] as const)('network.mode="%s" opens the forwarder root to this sandbox\'s directory alone', (_label, network, before) => {
+    const profile = buildSeatbeltProfile({
+      workingDirectory: "/private/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      denyReadPaths: [],
+      network,
+      forwarder: {
+        root: "/private/tmp/sixb-credentials-501",
+        directory: "/private/tmp/sixb-credentials-501/a1",
+      },
+    })
+    const lines = profile.trimEnd().split("\n")
+
+    expect(lines.filter((line) => line.includes("network-outbound"))).toEqual([
+      ...before,
+      '(deny network-outbound (subpath "/private/tmp/sixb-credentials-501"))',
+      '(allow network-outbound (subpath "/private/tmp/sixb-credentials-501/a1"))',
+    ])
+    // Last, after the /private/tmp allow it narrows.
+    expect(lines.at(-1)).toBe('(deny file-write* (subpath "/private/tmp/sixb-credentials-501"))')
+  })
+
   test("readWritePaths add file-write allow rules; readOnlyPaths are informational", () => {
     const profile = buildSeatbeltProfile({
       workingDirectory: "/private/tmp/wd",

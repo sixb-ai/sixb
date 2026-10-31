@@ -263,6 +263,7 @@ export class LocalSandbox implements Sandbox {
           (path): path is DeniedPath => path.kind !== undefined
         ),
         network: this.network,
+        forwarder: this.forwarder,
       })
     }
     if (this.backend === "seatbelt") {
@@ -272,7 +273,7 @@ export class LocalSandbox implements Sandbox {
         readWritePaths: this.readWritePaths,
         denyReadPaths: this.denyReadPaths.map(({ path }) => path),
         network: this.network,
-        forwarderDirectory: this.forwarder.directory,
+        forwarder: this.forwarder,
       })
       return buildSeatbeltArgv({ profile, command, args })
     }

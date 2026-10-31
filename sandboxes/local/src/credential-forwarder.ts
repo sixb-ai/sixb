@@ -1,15 +1,25 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import type { Stats } from "node:fs"
+import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { join } from "node:path"
 import type { SandboxRequestCredential, SandboxRequestMethod } from "@sixb/core"
 import { SandboxError } from "@sixb/core"
+
+/** Where a sandbox's forwarder listens, and the root every forwarder of this user shares. */
+export interface ForwarderPaths {
+  readonly root: string
+  readonly directory: string
+}
 
 /**
  * Adds a sandbox's request credentials outside its commands. Each target URL gets its own Unix
  * socket, in a directory only this user can open, served by this process: a command connects to
  * the socket, and the request goes on to that URL alone, with the credential that matches it. The
  * credentials live only in this process's memory, never in the commands' env or files.
+ *
+ * Every sandbox of this user keeps its directory under one root, so an OS sandbox can close the
+ * root to a command and open its own sandbox's directory alone.
  */
-export class CredentialForwarder {
+export class CredentialForwarder implements ForwarderPaths {
   private credentials: readonly SandboxRequestCredential[] = []
   /** By target URL: the socket that forwards to it, and its server. */
   private readonly targets = new Map<
@@ -17,12 +27,16 @@ export class CredentialForwarder {
     { readonly socket: string; readonly server: ReturnType<typeof Bun.serve> }
   >()
 
-  private constructor(readonly directory: string) {}
+  private constructor(
+    readonly root: string,
+    readonly directory: string
+  ) {}
 
   static async start(): Promise<CredentialForwarder> {
-    // mkdtemp creates the directory with mode 0700. Under /tmp, not $TMPDIR: a Unix socket's path
-    // must fit in about 100 bytes, and $TMPDIR can be long. Real, as an OS sandbox matches it.
-    return new CredentialForwarder(await realpath(await mkdtemp("/tmp/sixb-credentials-")))
+    const root = await forwarderRoot()
+
+    // mkdtemp creates the directory with mode 0700. Real, as an OS sandbox matches it.
+    return new CredentialForwarder(root, await realpath(await mkdtemp(`${root}/`)))
   }
 
   /** Replace every credential, as `Sandbox.setRequestCredentials` does. */
@@ -75,6 +89,38 @@ export class CredentialForwarder {
       // @ts-expect-error Bun streams a request body with duplex "half", as fetch requires.
       duplex: "half",
     })
+  }
+}
+
+/**
+ * This user's forwarder root, created on first use. Under /tmp, not $TMPDIR: a Unix socket's path
+ * must fit in about 100 bytes, and $TMPDIR can be long. Any user can create it first under /tmp,
+ * so an existing one is checked, never trusted.
+ */
+async function forwarderRoot(): Promise<string> {
+  const uid = process.getuid?.()
+  if (uid === undefined) {
+    throw new SandboxError("[Sandbox] local credentials need a host with Unix users.")
+  }
+
+  const root = `/tmp/sixb-credentials-${uid}`
+  await mkdir(root, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error
+  })
+  assertPrivateRoot(root, await lstat(root), uid)
+
+  return realpath(root)
+}
+
+/**
+ * Refuse a forwarder root this user doesn't own alone: whoever controls it, or what a link there
+ * points to, decides where the sockets live and who else can open them.
+ */
+export function assertPrivateRoot(path: string, stats: Stats, uid: number): void {
+  if (!stats.isDirectory() || stats.uid !== uid || (stats.mode & 0o077) !== 0) {
+    throw new SandboxError(
+      `[Sandbox] local cannot forward credentials: ${path} must be a directory only uid ${uid} can open. Remove it, and it is created again.`
+    )
   }
 }
 

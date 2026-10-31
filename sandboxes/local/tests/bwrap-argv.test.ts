@@ -110,4 +110,27 @@ describe("buildBwrapArgv", () => {
       "/tmp/wd/.env",
     ])
   })
+
+  // Guard proof: drop the forwarder's mounts from buildBwrapArgv; every sandbox's forwarder
+  // directory shows under the root.
+  test("the forwarder root is emptied after every other mount, then this sandbox's directory bound back", () => {
+    const argv = buildBwrapArgv({
+      command: "curl",
+      args: [],
+      workingDirectory: "/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      denyReadPaths: [{ path: "/home/ada/acme", kind: "directory" }],
+      network: { mode: "restricted", allow: [] },
+      forwarder: { root: "/tmp/sixb-credentials-1000", directory: "/tmp/sixb-credentials-1000/a1" },
+    })
+
+    expect(argv.slice(argv.indexOf("/home/ada/acme") + 1, argv.indexOf("--proc"))).toEqual([
+      "--tmpfs",
+      "/tmp/sixb-credentials-1000",
+      "--ro-bind",
+      "/tmp/sixb-credentials-1000/a1",
+      "/tmp/sixb-credentials-1000/a1",
+    ])
+  })
 })

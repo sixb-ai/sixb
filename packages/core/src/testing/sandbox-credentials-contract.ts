@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import type { Sandbox, SandboxFactory, SandboxRequestCredential } from "../sandboxes"
+import type { CommandResult, Sandbox, SandboxFactory, SandboxRequestCredential } from "../sandboxes"
 
 export interface SandboxCredentialsContractSuiteOptions {
   /** A factory that advertises `supportsRequestCredentials`. */
@@ -10,6 +10,11 @@ export interface SandboxCredentialsContractSuiteOptions {
    * to its loopback address, which only a provider running commands on this host can reach.
    */
   readonly originFor?: (port: number) => string
+  /**
+   * Whether one sandbox's commands are kept from another's credentials. Defaults to true; false
+   * only for a provider that runs commands without isolation.
+   */
+  readonly separatesSandboxes?: boolean
   /**
    * Where the provider keeps credentials on the commands' side of the boundary, such as a guest
    * forwarder's state: the suite tries to read everything under them.
@@ -29,34 +34,52 @@ export function runSandboxCredentialsContractSuite(
   describe(label, () => {
     let server: ReturnType<typeof Bun.serve>
     let origin: string
+    /** A second origin, so a test can tell a credential stays on its own. */
+    let otherServer: ReturnType<typeof Bun.serve>
+    let otherOrigin: string
     let factory: SandboxFactory
+    const received: (string | null)[] = []
 
-    beforeAll(async () => {
-      // Echoes what reached it, so a test can tell the credential was added on the way.
-      server = Bun.serve({
+    // Echoes what reached it, so a test can tell the credential was added on the way.
+    const listen = () =>
+      Bun.serve({
         hostname: "0.0.0.0",
         port: 0,
-        fetch: (request) =>
-          Response.json({
+        fetch: (request) => {
+          received.push(request.headers.get("authorization"))
+          return Response.json({
             method: request.method,
             path: new URL(request.url).pathname,
             authorization: request.headers.get("authorization"),
-          }),
+          })
+        },
       })
-      origin = options.originFor?.(server.port ?? 0) ?? `http://127.0.0.1:${server.port}`
+    const originOf = ({ port }: ReturnType<typeof Bun.serve>) =>
+      options.originFor?.(port ?? 0) ?? `http://127.0.0.1:${port}`
+
+    beforeAll(async () => {
+      server = listen()
+      otherServer = listen()
+      origin = originOf(server)
+      otherOrigin = originOf(otherServer)
       factory = await options.createFactory()
       expect(factory.supportsRequestCredentials).toBe(true)
     })
 
     afterAll(() => {
       server.stop(true)
+      otherServer.stop(true)
     })
 
-    const credential = (secret: string): SandboxRequestCredential => ({
+    const credential = (
+      secret: string,
+      overrides: Partial<SandboxRequestCredential> = {}
+    ): SandboxRequestCredential => ({
       origin,
       path: { prefix: "/api/" },
       method: ["GET", "POST"],
       headers: { Authorization: `Bearer ${secret}` },
+      ...overrides,
     })
 
     async function withSandbox(
@@ -64,7 +87,13 @@ export function runSandboxCredentialsContractSuite(
       use: (sandbox: Sandbox) => Promise<void>
     ): Promise<void> {
       const sandbox = await factory.create({
-        network: { mode: "restricted", allow: [{ name: "credentials-suite", origin }] },
+        network: {
+          mode: "restricted",
+          allow: [
+            { name: "credentials-suite", origin },
+            { name: "credentials-suite-other", origin: otherOrigin },
+          ],
+        },
         requestCredentials: credentials,
       })
       try {
@@ -98,6 +127,25 @@ export function runSandboxCredentialsContractSuite(
       })
     })
 
+    // Guard proof: drop the origin check from `matches` in @sixb/sandboxes-local's
+    // credential-forwarder.ts; the other origin gets this origin's credential.
+    test("a credential reaches its own origin alone, whatever the paths it shares", async () => {
+      const secret = `suite-${randomUUID()}`
+      const otherSecret = `suite-${randomUUID()}`
+      const credentials = [
+        credential(secret),
+        credential(otherSecret, { origin: otherOrigin, path: { prefix: "/api/v2/" } }),
+      ]
+      await withSandbox(credentials, async (sandbox) => {
+        const authorization = async (on: string, path: string) =>
+          (await request(sandbox, on, path)).authorization
+
+        expect(await authorization(origin, "/api/v2/x")).toBe(`Bearer ${secret}`)
+        expect(await authorization(otherOrigin, "/api/v2/x")).toBe(`Bearer ${otherSecret}`)
+        expect(await authorization(otherOrigin, "/api/x")).toBeNull()
+      })
+    })
+
     test("setRequestCredentials replaces the credentials, and an empty list removes them", async () => {
       const first = `suite-${randomUUID()}`
       const second = `suite-${randomUUID()}`
@@ -109,6 +157,28 @@ export function runSandboxCredentialsContractSuite(
         expect((await request(sandbox, origin, "/api/x")).authorization).toBeNull()
       })
     })
+
+    // Guard proof: drop the forwarder's rules from buildSeatbeltProfile (macOS) or buildBwrapArgv
+    // (Linux) in @sixb/sandboxes-local; B's command gets A's credential.
+    test.skipIf(options.separatesSandboxes === false)(
+      "a sandbox's commands can't use another sandbox's credentials",
+      async () => {
+        const secretA = `suite-${randomUUID()}`
+        const secretB = `suite-${randomUUID()}`
+        await withSandbox([credential(secretA)], async (a) => {
+          if (!a.credentialedUrl) throw new Error("credentialedUrl is missing")
+          const address = a.credentialedUrl(origin)
+
+          await withSandbox([credential(secretB)], async (b) => {
+            // The request may fail; whatever it reaches, A's credential must not come with it.
+            const result = await send(b, address, "/api/whoami")
+            expect(result.stdout).not.toContain(secretA)
+            expect(result.stderr).not.toContain(secretA)
+          })
+        })
+        expect(received).not.toContain(`Bearer ${secretA}`)
+      }
+    )
 
     test("nothing a command can read holds the credential", async () => {
       const secret = `suite-${randomUUID()}`
@@ -139,7 +209,7 @@ async function request(
   sandbox: Sandbox,
   origin: string,
   path: string,
-  options: { readonly method?: string; readonly authorization?: string } = {}
+  options: RequestOptions = {}
 ): Promise<{
   readonly method: string
   readonly path: string
@@ -147,7 +217,28 @@ async function request(
 }> {
   if (!sandbox.credentialedUrl) throw new Error("credentialedUrl is missing")
   const address = sandbox.credentialedUrl(origin)
-  const result = await sandbox.runCommand("sh", ["-c", REQUEST_SCRIPT], {
+  const result = await send(sandbox, address, path, options)
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `a request through ${address} failed: ${result.stderr.trim() || result.exitCode}`
+    )
+  }
+  return JSON.parse(result.stdout)
+}
+
+interface RequestOptions {
+  readonly method?: string
+  readonly authorization?: string
+}
+
+/** One request from a command, through `address`, whatever comes of it. */
+function send(
+  sandbox: Sandbox,
+  address: string,
+  path: string,
+  options: RequestOptions = {}
+): Promise<CommandResult> {
+  return sandbox.runCommand("sh", ["-c", REQUEST_SCRIPT], {
     env: {
       SUITE_ADDRESS: address,
       SUITE_PATH: path,
@@ -156,12 +247,6 @@ async function request(
       SUITE_FETCH: FETCH_PROGRAM,
     },
   })
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `a request through ${address} failed: ${result.stderr.trim() || result.exitCode}`
-    )
-  }
-  return JSON.parse(result.stdout)
 }
 
 // curl where the guest has it, else Bun or Node: a guest that runs the agent CLI has one of them.
