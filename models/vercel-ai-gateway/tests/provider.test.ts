@@ -552,7 +552,9 @@ describe("Vercel AI Gateway provider", () => {
     await model.stream(request({ maxOutputTokens: 512 }))
     await model.stream(request({ maxOutputTokens: 4_096, caching: "off" }))
     expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 2_048])
-    expect(bodies[0]?.providerOptions).toEqual({ gateway: { caching: "auto" } })
+    // A one-shot request to a model before GPT-5.6 sends no caching fields at all.
+    expect(bodies[0]?.providerOptions).toBeUndefined()
+    expect(bodies[0]).not.toHaveProperty("caching")
     expect(bodies[1]?.providerOptions).toBeUndefined()
     await expect(model.stream(request({ maxOutputTokens: 0 }))).rejects.toThrow(
       "positive safe integer"
@@ -900,7 +902,7 @@ describe("Vercel AI Gateway provider", () => {
               usage: {
                 input_tokens: 12,
                 output_tokens: 5,
-                input_tokens_details: { cached_tokens: 3 },
+                input_tokens_details: { cached_tokens: 3, cache_write_tokens: 4 },
                 output_tokens_details: { reasoning_tokens: 2 },
               },
               provider_metadata: {
@@ -980,14 +982,16 @@ describe("Vercel AI Gateway provider", () => {
         usage: {
           inputTokens: 12,
           outputTokens: 5,
-          uncachedInputTokens: 9,
+          // Regression proof: drop cache_write_tokens; writes count as uncached input again.
+          uncachedInputTokens: 5,
           cacheReadInputTokens: 3,
+          cacheWriteInputTokens: 4,
           textOutputTokens: 3,
           reasoningOutputTokens: 2,
           raw: {
             input_tokens: 12,
             output_tokens: 5,
-            input_tokens_details: { cached_tokens: 3 },
+            input_tokens_details: { cached_tokens: 3, cache_write_tokens: 4 },
             output_tokens_details: { reasoning_tokens: 2 },
           },
         },
