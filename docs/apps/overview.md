@@ -305,6 +305,11 @@ anywhere in the app open its page. For those who can open [Ontology](#ontology),
 on it, with Objects current. As with any built-in page, a page of your own at the same path
 replaces it.
 
+Each property's name is marked with where its value comes from: imported by a projection, edited,
+or set by telemetry. Selecting it shows the trail behind the value: the edit, who asked for it and
+the imported value it replaced, or the projection, the dataset version it applied and the datasets
+upstream of it. Steps the person cannot see are only counted. See [Lineage](../objects/lineage.md).
+
 What the page shows follows the person's grants: `can.view` on the type to read the object, and
 `can.apply` on an action to run it. See [Authorization](../auth/authorization.md).
 

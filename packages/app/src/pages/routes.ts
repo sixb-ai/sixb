@@ -69,6 +69,11 @@ export function pipelineHref(pipelineId: string, runId?: string): string {
   return `/data/pipelines/${encodeURIComponent(pipelineId)}${query}`
 }
 
+/** A projection's page in Data › Projections, with its mapping and runs. */
+export function projectionHref(projectionId: string): string {
+  return `/data/projections/${encodeURIComponent(projectionId)}`
+}
+
 /** A workflow run's page in Observability › Runs. */
 export function workflowRunHref(runId: string): string {
   return `/observability/runs/workflows/${encodeURIComponent(runId)}`

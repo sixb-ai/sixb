@@ -206,6 +206,11 @@ export function useSections(): readonly AppSection[] {
   )
 }
 
+/** Whether this person may open a built-in section, so a page can link to its pages. */
+export function useSectionOpen(id: AppSectionId): boolean {
+  return useSections().some((section) => section.id === id)
+}
+
 /**
  * The built-in section the current page belongs to, or `null` outside one. A shell drawn by hand
  * uses it to give section pages the whole frame: they bring their own margins, and some, such as a

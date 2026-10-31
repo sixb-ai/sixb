@@ -33,6 +33,11 @@ export function objectDetailKey(objectTypeId: string, primaryId: string): Invali
   return queryKeyWithPath("getObject", { objectId: objectIdKey(objectTypeId, primaryId) })
 }
 
+/** Where the object's values come from, which every change to the object can move. */
+export function objectLineageKey(objectTypeId: string, primaryId: string): InvalidationKey {
+  return queryKeyWithPath("getObjectLineage", { objectTypeId, objectId: primaryId })
+}
+
 export function relationshipKey(objectTypeId: string, primaryId: string): InvalidationKey {
   return queryKeyWithQuery("listRelationships", {
     objectId: objectIdKey(objectTypeId, primaryId),
@@ -40,7 +45,11 @@ export function relationshipKey(objectTypeId: string, primaryId: string): Invali
 }
 
 export function objectChangedKeys(objectTypeId: string, primaryId: string): InvalidationKey[] {
-  return [objectDetailKey(objectTypeId, primaryId), ...objectCollectionKeys()]
+  return [
+    objectDetailKey(objectTypeId, primaryId),
+    objectLineageKey(objectTypeId, primaryId),
+    ...objectCollectionKeys(),
+  ]
 }
 
 export function workflowChangedKeys(workflowId: string, runId: string): InvalidationKey[] {
