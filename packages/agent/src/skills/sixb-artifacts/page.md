@@ -189,7 +189,7 @@ light and in dark mode or in the one mode its `theme.json` pins, and warns about
 screen's right edge, drawn over other text, or cut off; text under 12px; a control under 24px;
 text under WCAG AA contrast; an image that did not load; or a script error. Each warning names the
 width, the element as CSS names it, and where it is on the page. The result names the screenshots,
-`desktop.png` and `phone.png`, each the page's top 4000px, under `.sixb/agent/checks/`. The page's
+`desktop.png` and `phone.png`, each the page's top 4000px, under `$SIXB_CONTEXT_DIR/checks/`. The page's
 queries run as the user who asked, so the screenshots show their rows; a query that fails for them
 is a warning, and the page is checked with `sixb.query` rejecting.
 

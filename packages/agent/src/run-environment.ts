@@ -484,6 +484,7 @@ async function startAgentEnvironment(
       specs: plan.tools,
       runId,
       callTool: input.callTool,
+      contextDirectory: sandbox.contextDirectory,
       fileBytesLeft: () => fileBudget.maxBytes - fileBudget.reservedBytes,
       installFiles: ({ toolName, files, signal }) =>
         installAgentToolFiles({
