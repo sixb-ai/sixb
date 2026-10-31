@@ -1,3 +1,4 @@
+import { resolveAgentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   type AgentExecutionAuthorization,
@@ -5,8 +6,7 @@ import {
   resolveAgentPropertyClearance,
 } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
-import { resolveAgentRequester } from "./requester"
-import type { AgentExecutionContext, AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export async function createAgentExecutionContext(input: {
   readonly context: AgentWorkerContext
@@ -17,10 +17,10 @@ export async function createAgentExecutionContext(input: {
   /** Who the run's requester is, named in its prompt. */
   readonly people: Pick<AgentRunPeople, "user">
   readonly authorization: AgentExecutionAuthorization
-  readonly authorPrincipal?: AgentExecutionContext["authorPrincipal"]
+  readonly authorPrincipal?: AgentRunnerContext["authorPrincipal"]
   /** Others take part in the run's thread, so each user message names its author instead. */
   readonly shared?: boolean
-}): Promise<AgentExecutionContext> {
+}): Promise<AgentRunnerContext> {
   const sixb = bindDurableAgentExecution(input.host, {
     execution: input.execution,
     ...(input.actorId === undefined ? {} : { actorId: input.actorId }),

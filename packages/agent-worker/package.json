@@ -32,13 +32,13 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 300 bun test ./tests/layout-check.e2e.ts",
     "prepack": "bun run build"
   },
   "peerDependencies": {
     "@sixb/core": "workspace:*"
   },
   "devDependencies": {
+    "@sixb/cli-core": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/sandboxes-local": "workspace:*",
     "@types/bun": "latest",
@@ -58,6 +58,6 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@sixb/cli-core": "workspace:^"
+    "@sixb/agent": "workspace:*"
   }
 }

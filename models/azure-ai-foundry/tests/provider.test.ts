@@ -6,7 +6,7 @@ import type {
   LanguageModelStreamEvent,
   ModelUsage,
 } from "@sixb/core/models"
-import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"

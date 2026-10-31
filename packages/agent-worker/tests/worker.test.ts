@@ -39,6 +39,7 @@ import {
   type RunCommandOptions,
   type Sandbox,
   type SandboxConfig,
+  type SandboxDefinition,
   type SandboxFactory,
   type SandboxFileRecord,
   type SandboxRequestCredential,
@@ -53,6 +54,7 @@ import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
+  type AgentRunSession,
   agentRunQueueJobId,
   agentRunTokenRunId,
   claimWorkflowAgentNode,
@@ -67,6 +69,7 @@ import {
   NOOP_STREAM_SINK,
   openAgentRunSession,
   publishAgentRunCancel,
+  type WorkflowAgentNodeSession,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
@@ -108,6 +111,7 @@ import {
   type ExecutionRecord,
   type RecordAiModelCallInput,
   type SubagentRunRecord,
+  type WorkflowAgentNodeRunRecord,
   type WorkflowRunStorage,
 } from "@sixb/core/storage"
 import {
@@ -116,38 +120,47 @@ import {
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
-import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { renderAgentSystemPrompt, renderCurrentTime } from "../src/agent-prompt"
-import { normalizeApiBaseUrl } from "../src/api-url"
-import { InstalledArtifacts, installArtifactsPublishedBy } from "../src/artifacts/materialize"
-import { prepareAgentAttachments } from "../src/attachments"
-import { storeChildOutputs } from "../src/child-files"
-import * as conversationPreparation from "../src/context-compaction"
-import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
-import { AgentRunOwnedElsewhereError, AgentTurnTimeoutError } from "../src/errors"
-import { resolveAgentExecutionPlan } from "../src/execution-plan"
-import { stoppedByWorker } from "../src/run-agent-turn"
-import * as agentEnvironment from "../src/run-environment"
+import { renderAgentSystemPrompt, renderCurrentTime } from "../../agent/src/agent-prompt"
+import {
+  InstalledArtifacts,
+  installArtifactsPublishedBy,
+} from "../../agent/src/artifacts/materialize"
+import { prepareAgentAttachments } from "../../agent/src/attachments"
+import { storeChildOutputs } from "../../agent/src/child-files"
+import * as conversationPreparation from "../../agent/src/context-compaction"
+import { AgentTurnTimeoutError } from "../../agent/src/errors"
+import { resolveAgentExecutionPlan } from "../../agent/src/execution-plan"
+import { stoppedByWorker } from "../../agent/src/run-agent-turn"
+import * as agentEnvironment from "../../agent/src/run-environment"
 import {
   createConversationAgentEnvironment,
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
-} from "../src/run-environment"
-import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
-import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
-import { AgentFileBudget } from "../src/tools/tool-files"
-import { createAgentTurnRuntime } from "../src/turn-runtime"
+} from "../../agent/src/run-environment"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
+import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../../agent/src/subagent-tools"
+import { AgentFileBudget } from "../../agent/src/tools/tool-files"
+import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
+import type { AgentRunFiles } from "../../agent/src/types"
+import { waitFor as pollFor, runTurnInSession } from "../../agent/tests/helpers"
+import {
+  testStream,
+  WorkerTestModel,
+  type WorkerTestStreamEvent,
+} from "../../agent/tests/worker-model-fixture"
+import { AgentWorker, type AgentWorkerOptions } from "../src"
+import { normalizeApiBaseUrl } from "../src/api-url"
+import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
+import { AgentRunOwnedElsewhereError } from "../src/errors"
+import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
-  AgentExecutionContext,
-  AgentRunFiles,
+  AgentRunnerContext,
   AgentWorkerContext,
   AgentWorkerHost,
   AgentWorkerStorage,
 } from "../src/types"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
-import { waitFor as pollFor, runTurnInSession } from "./helpers"
-import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -1898,6 +1911,54 @@ function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   return storage
 }
 
+/** A conversation environment's input as the worker builds it: with the sandbox it opens. */
+function withConversationSandbox<
+  T extends {
+    readonly context: AgentRunnerContext
+    readonly session: AgentRunSession<ConversationAgentRunRecord>
+    readonly run: ConversationAgentRunRecord
+    readonly thread?: AgentThreadRecord | null
+    readonly sandboxDefinition?: SandboxDefinition
+  },
+>({ sandboxDefinition, ...input }: T) {
+  return {
+    ...input,
+    openSandbox: conversationSandbox({
+      context: input.context,
+      session: input.session,
+      run: input.run,
+      ...(input.thread === undefined ? {} : { thread: input.thread }),
+      ...(sandboxDefinition === undefined ? {} : { definition: sandboxDefinition }),
+    }),
+  }
+}
+
+/** A child environment's input as the worker builds it: with the sandbox it opens. */
+function withChildSandbox<
+  T extends {
+    readonly context: AgentRunnerContext
+    readonly session: AgentRunSession<SubagentRunRecord>
+    readonly run: SubagentRunRecord
+    readonly thread: AgentThreadRecord
+  },
+>(input: T) {
+  return { ...input, openSandbox: childSandbox(input) }
+}
+
+/** A workflow step environment's input as the worker builds it: the project's blank sandbox. */
+function withStepSandbox<
+  T extends {
+    readonly context: AgentRunnerContext
+    readonly session: Pick<WorkflowAgentNodeSession, "assertOwned">
+    readonly run: WorkflowAgentNodeRunRecord
+  },
+>({ session, ...input }: T) {
+  return {
+    ...input,
+    openSandbox: workflowStepSandbox({ context: input.context, session, run: input.run }),
+  }
+}
+
 /** The session of a run the test started, as the worker opens it once it claims the run. */
 function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
   return openAgentRunSession(
@@ -1960,7 +2021,9 @@ function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
 async function buildAgentWorkerContext(
   sixb: TestSixb,
   input: { readonly apiBaseUrl?: string } = {}
-): Promise<AgentExecutionContext & Pick<AgentWorkerContext, "storage">> {
+): Promise<
+  AgentRunnerContext & Pick<AgentWorkerContext, "storage" | "recoverAiModelCall" | "streamSink">
+> {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
   }
@@ -1968,6 +2031,7 @@ async function buildAgentWorkerContext(
     id: sixb.id,
     storage: workerStorageOf(sixb.storage),
     sandboxes: sixb.sandboxes,
+    keepsChildWorkspaces: typeof sixb.sandboxes.resume === "function",
     logging: sixb.logging,
     valueTypesById: sixb.definitions.ontology.getValueTypesById(),
     ontologyDocs: sixb.definitions.agent.ontologyDocs,
@@ -2642,15 +2706,17 @@ describe("AgentWorker", () => {
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const run = await reserveRequestedRun(host, requested)
     try {
-      const error = await createConversationAgentEnvironment({
-        session: await runSessionOf(host, run),
-        context: await buildAgentWorkerContext(host),
-        plan: executionPlanFor(host),
-        thread,
-        sandboxDefinition: host.sandboxDefinition,
-        run,
-        signal: controller.signal,
-      }).catch((caught: unknown) => caught)
+      const error = await createConversationAgentEnvironment(
+        withConversationSandbox({
+          session: await runSessionOf(host, run),
+          context: await buildAgentWorkerContext(host),
+          plan: executionPlanFor(host),
+          thread,
+          sandboxDefinition: host.sandboxDefinition,
+          run,
+          signal: controller.signal,
+        })
+      ).catch((caught: unknown) => caught)
       expect(error).toBe(lost)
       expect(stop).not.toHaveBeenCalled()
       expect(sandbox.destroyed).toBe(false)
@@ -4688,7 +4754,7 @@ describe("AgentWorker", () => {
     await expect(
       worker.decideExecutionError(
         claimed,
-        createSixbError("internal.unexpected", "[SixbAgentWorker] Deterministic worker failure.", {
+        createSixbError("internal.unexpected", "[SixbAgent] Deterministic worker failure.", {
           details: { runId: "run-1", threadId: "thread-1" },
         })
       )
@@ -6802,18 +6868,22 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
-      createConversationAgentEnvironment({
-        session: await runSessionOf(sixb, firstRun),
-        context,
-        plan: plan,
-        run: firstRun,
-      }),
-      createConversationAgentEnvironment({
-        session: await runSessionOf(sixb, secondRun),
-        context,
-        plan: plan,
-        run: secondRun,
-      }),
+      createConversationAgentEnvironment(
+        withConversationSandbox({
+          session: await runSessionOf(sixb, firstRun),
+          context,
+          plan: plan,
+          run: firstRun,
+        })
+      ),
+      createConversationAgentEnvironment(
+        withConversationSandbox({
+          session: await runSessionOf(sixb, secondRun),
+          context,
+          plan: plan,
+          run: secondRun,
+        })
+      ),
     ])
     let firstDisposed = false
     let secondDisposed = false
@@ -6894,12 +6964,14 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
 
-    const environment = await createConversationAgentEnvironment({
-      session: await runSessionOf(sixb, run),
-      context,
-      plan: plan,
-      run,
-    })
+    const environment = await createConversationAgentEnvironment(
+      withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context,
+        plan: plan,
+        run,
+      })
+    )
     try {
       await environment.turnContext.sandboxReady
       const sandbox = sandboxes.sandboxes[0]
@@ -6976,12 +7048,14 @@ describe("AgentWorker", () => {
       await requestAgent(sixb, { text: "Use the attachment.", attachments: [fileRef] })
     )
     const plan = executionPlanFor(sixb)
-    const environment = await createConversationAgentEnvironment({
-      session: await runSessionOf(sixb, run),
-      context: await buildAgentWorkerContext(sixb),
-      plan,
-      run,
-    })
+    const environment = await createConversationAgentEnvironment(
+      withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context: await buildAgentWorkerContext(sixb),
+        plan,
+        run,
+      })
+    )
     try {
       await runTurnInSession({
         storage: workerStorageOf(sixb.storage),
@@ -7066,12 +7140,14 @@ describe("AgentWorker", () => {
 
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
-    const environment = await createConversationAgentEnvironment({
-      session: await runSessionOf(sixb, run),
-      context,
-      plan: plan,
-      run,
-    })
+    const environment = await createConversationAgentEnvironment(
+      withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context,
+        plan: plan,
+        run,
+      })
+    )
     expect(environment.turnContext.systemPrompt).toContain("<sixb_runtime_context>")
     expect(recording.sandboxes).toHaveLength(0)
 
@@ -7097,19 +7173,21 @@ describe("AgentWorker", () => {
     const context = await buildAgentWorkerContext(sixb)
 
     // The locale is read only to build the system prompt, after provisioning has started.
-    const failing: AgentExecutionContext = Object.defineProperty({ ...context }, "locale", {
+    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "locale", {
       get: () => {
         throw new Error("locale unavailable")
       },
     })
 
     await expect(
-      createConversationAgentEnvironment({
-        session: await runSessionOf(sixb, run),
-        context: failing,
-        plan: executionPlanFor(sixb),
-        run,
-      })
+      createConversationAgentEnvironment(
+        withConversationSandbox({
+          session: await runSessionOf(sixb, run),
+          context: failing,
+          plan: executionPlanFor(sixb),
+          run,
+        })
+      )
     ).rejects.toThrow("locale unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
@@ -7138,15 +7216,17 @@ describe("AgentWorker", () => {
     const context = await buildAgentWorkerContext(sixb)
 
     let detached: Promise<void> | null = null
-    const environment = await createConversationAgentEnvironment({
-      session: await runSessionOf(sixb, run),
-      context,
-      plan: plan,
-      run,
-      onDetachedTeardown: (teardown) => {
-        detached = teardown
-      },
-    })
+    const environment = await createConversationAgentEnvironment(
+      withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context,
+        plan: plan,
+        run,
+        onDetachedTeardown: (teardown: Promise<void>) => {
+          detached = teardown
+        },
+      })
+    )
 
     // Dispose while boot is still gated (in flight): the teardown is detached, not awaited inline,
     // and nothing has been created or destroyed yet.
@@ -7533,7 +7613,7 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         state: "output-error",
         errorText:
-          "[SixbAgentWorker] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
+          "[SixbAgent] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
       })
 
       const second = await requestAgent(sixb, {
@@ -8465,7 +8545,7 @@ describe("AgentWorker", () => {
       expect(parent.status).toBe("succeeded")
       expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toBeNull()
       expect(JSON.stringify(parentCalls[2]?.messages.at(-1))).toContain(
-        `[SixbAgentWorker] spawn_agent cannot hand over ${reason}`
+        `[SixbAgent] spawn_agent cannot hand over ${reason}`
       )
     } finally {
       await stopUnderFakeTime(worker)
@@ -8662,7 +8742,7 @@ describe("AgentWorker", () => {
     const [a, b, c, d] = runIds as [string, string, string, string]
     const { runFiles } = recordingRunFiles(sixb, {
       installArtifactsFrom: async () => {
-        throw new Error("[SixbAgentWorker] Could not install artifacts art_q3.")
+        throw new Error("[SixbAgent] Could not install artifacts art_q3.")
       },
     })
     coordinator.attach(runFiles)
@@ -9710,7 +9790,7 @@ describe("AgentWorker", () => {
             type: "tool-call",
             toolCallId: `invalid-model-${index}`,
             state: "output-error",
-            errorText: `[SixbAgentWorker] Language model ${JSON.stringify(model)} is not configured for this project. Use one of: {"provider":"parent-provider","modelId":"parent-model"}, {"provider":"gateway","modelId":"deepseek/deepseek-v4-flash-vision-exp"}. Omit model to use the project default.`,
+            errorText: `[SixbAgent] Language model ${JSON.stringify(model)} is not configured for this project. Use one of: {"provider":"parent-provider","modelId":"parent-model"}, {"provider":"gateway","modelId":"deepseek/deepseek-v4-flash-vision-exp"}. Omit model to use the project default.`,
           })
         )
         await expect(
@@ -12909,7 +12989,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         retryable: false,
         message:
-          "[SixbAgentWorker] The conversation's language model is not available in models.language.",
+          "[SixbAgent] The conversation's language model is not available in models.language.",
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
@@ -13287,27 +13367,29 @@ describe("agent tools act as the requester", () => {
     const context = await buildAgentWorkerContext(sixb)
     const plan = executionPlanFor(sixb)
     const execution = freshTestExecution()
-    const task = await createWorkflowAgentNodeEnvironment({
-      // The test's node is not stored, and nothing here acts on its sandbox.
-      session: { assertOwned: async () => {} },
-      context,
-      plan,
-      run: {
-        projectId: PROJECT_ID,
-        nodeRunId: "task-run:node:0",
-        executionId: "task-execution",
-        actorId: "task-actor",
-        status: "running",
-        prompt: "Read the quote.",
-        attempt: 1,
-        execution,
-        createdAt: new Date(),
-      },
-      workflowId: "quotes",
-      stepId: "read-quote",
-      nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
-      errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
-    })
+    const task = await createWorkflowAgentNodeEnvironment(
+      withStepSandbox({
+        // The test's node is not stored, and nothing here acts on its sandbox.
+        session: { assertOwned: async () => {} },
+        context,
+        plan,
+        run: {
+          projectId: PROJECT_ID,
+          nodeRunId: "task-run:node:0",
+          executionId: "task-execution",
+          actorId: "task-actor",
+          status: "running",
+          prompt: "Read the quote.",
+          attempt: 1,
+          execution,
+          createdAt: new Date(),
+        },
+        workflowId: "quotes",
+        stepId: "read-quote",
+        nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
+        errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
+      })
+    )
     // The environment reads only the run's identity, execution token and handed files, and its
     // thread's.
     const childRun = {
@@ -13321,14 +13403,16 @@ describe("agent tools act as the requester", () => {
       parent: { threadId: "parent-thread", spawnedBy: "parent-run", key: "quote" },
       createdAt: new Date(),
     } as unknown as AgentThreadRecord
-    const child = await createSubagentEnvironment({
-      session: await runSessionOf(sixb, childRun),
-      context,
-      plan,
-      run: childRun,
-      thread: childThread,
-      history: { messages: [] },
-    })
+    const child = await createSubagentEnvironment(
+      withChildSandbox({
+        session: await runSessionOf(sixb, childRun),
+        context,
+        plan,
+        run: childRun,
+        thread: childThread,
+        history: { messages: [] },
+      })
+    )
     const openQuote = (environment: typeof task, key: string) => {
       const tool = environment.turnContext.tools.find(({ name }) => name === readAttachment.name)
       return tool?.execute(

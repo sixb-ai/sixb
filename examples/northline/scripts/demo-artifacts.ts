@@ -483,7 +483,7 @@ const bright = await publish({
 // The Agent's example workbooks, as its skill ships them.
 const sheetExamples = resolve(
   import.meta.dir,
-  "../../../packages/agent-worker/src/skills/sixb-artifacts/examples/sheet"
+  "../../../packages/agent/src/skills/sixb-artifacts/examples/sheet"
 )
 async function exampleSheetFiles(name: string): Promise<Record<string, FileRef>> {
   const directory = resolve(sheetExamples, name)

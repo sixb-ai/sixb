@@ -1,6 +1,8 @@
 # @sixb/agent-worker
 
 Runs conversation, headless workflow-agent, and model-accounting recovery jobs for a Sixb project.
+It is the cloud runner of the agent harness, [@sixb/agent](../agent/README.md): it claims runs from
+the queues, opens their sessions and sandboxes, and hands them to the harness.
 
 The worker claims durable conversation runs created by `sixb.agent.runs.request(...)` and agent workflow
 nodes parked by the workflow worker. It starts or reclaims the execution, renews queue ownership,
@@ -78,23 +80,23 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   (else its last text). A child whose call waits for approval pauses, its work in its thread, and comes
   back `awaiting_approval`; the turn pauses once no other child is at work, and the turn that
   resumes it continues the child first (see
-  [paused children](./docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
+  [paused children](../agent/docs/runtime-design.md#paused-children)). `spawn_agent`'s `files` copy
   paths of the parent's sandbox into the child's; what a child that succeeds writes to `out/` comes
   back as files of `wait_agent`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is
   installed in the parent's `$SIXB_ARTIFACTS` (see
-  [runtime design](./docs/runtime-design.md#child-runs)). It returns a minute before
+  [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns a minute before
   the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
   `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
   before its next step, or answers again when it came as it answered, and `wait_agent` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
-  [messages to a child](./docs/runtime-design.md#messages-to-a-child)). Children get
+  [messages to a child](../agent/docs/runtime-design.md#messages-to-a-child)). Children get
   `ask_parent`, which waits for the parent's answer: `wait_agent` returns as soon as a child of
   the turn asks, with its question in `questions`, and `message_agent` to that child is the
   answer. Before a turn records its end, each child still waiting pauses `awaiting_answer`, the
   next turn reads which children wait, and its `message_agent` to the key continues it with the
   answer (see
-  [questions to the parent](./docs/runtime-design.md#questions-to-the-parent)).
+  [questions to the parent](../agent/docs/runtime-design.md#questions-to-the-parent)).
 - Project context comes from the host definitions that `createSixb()` discovered and validated,
   never from the worker's filesystem: conversations and their children receive `SIXB.md` as their
   instructions and every skill in `definitions.agent.skills`; a workflow agent step receives only
@@ -144,7 +146,7 @@ Earlier files in the retained conversation are discoverable through the sandbox'
 attachments and file-producing tool results retain their model-input projections.
 
 `publish_artifact` creates an artifact and `publish_artifact_version` publishes the next version of
-one (`src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
+one (`../agent/src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
 a mode carried by an optional or null argument is where models differ, and with every property
 required each model adapter sends both schemas strict. Offered only to conversations whose storage
 holds artifacts, each reads a file or directory from the sandbox, stores its bytes against the run's
@@ -158,20 +160,20 @@ execution token and asks core's access rule again, so a run reclaimed by another
 requester removed meanwhile, publishes nothing. The version exists when the tool returns: the
 conversation shows it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the
 run's messages. After a deck publishes, the
-layout check (`src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
+layout check (`../agent/src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
 the files the version holds; it bounds every wait on the page and exits before its command's
 timeout, so a deck that hangs costs a partial report rather than a browser left running.
 
-Before each conversation run, `src/artifacts/materialize.ts` installs the latest version of each
+Before each conversation run, `../agent/src/artifacts/materialize.ts` installs the latest version of each
 artifact the thread published under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
 newest first within a byte budget; an artifact whose files cannot be read is listed without them.
 Each publish replaces its artifact's copy and entry, so both stay the latest version during the run.
-The built-in `sixb-artifacts` skill (`src/skills/`) describes the formats the publisher accepts; its
+The built-in `sixb-artifacts` skill (`../agent/src/skills/`) describes the formats the publisher accepts; its
 examples are published in the tests.
 
 ## Memory
 
-Before each conversation run, `src/conversation-memory.ts` reads the requester's `user` repo and
+Before each conversation run, `../agent/src/conversation-memory.ts` reads the requester's `user` repo and
 the `project` repo, which every conversation builds up, through `sixb.agent.memory`, so the
 requester's own access decides what is installed, and installs their latest files under
 `$SIXB_MEMORY_DIR/<repo>/`, with a starter `MEMORY.md` while a repo has none.
@@ -186,7 +188,7 @@ The `<sixb_memory>` section closes the system prompt with when and how to save, 
 mid-thread leaves the prompt, and the prompt cache, unchanged; the installed files are always the
 latest. Its examples are each one command that edits `MEMORY.md` and saves it: given the edit and
 the save as two steps, small models stop after the edit or save without one. Organizing topic files
-and merging a conflict is the `sixb-memory` skill (`src/skills/sixb-memory/`): it is installed with
+and merging a conflict is the `sixb-memory` skill (`../agent/src/skills/sixb-memory/`): it is installed with
 the memory and named by the section rather than listed in the skill catalog, so runs without memory
 keep their prompt as it was. Compaction estimates the section like the rest of the prompt, and the
 continuation after a checkpoint shows the memory as of that checkpoint.

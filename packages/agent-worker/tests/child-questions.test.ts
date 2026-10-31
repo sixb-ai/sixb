@@ -33,9 +33,9 @@ import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/models"
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
+import { ChildQuestions } from "../../agent/src/child-questions"
+import { testStream, WorkerTestModel } from "../../agent/tests/worker-model-fixture"
 import { AgentWorker } from "../src"
-import { ChildQuestions } from "../src/child-questions"
-import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // A child asks its parent with ask_parent: the parent's wait_agent returns the question at once,
 // and message_agent answers it while the child waits. When the parent's turn ends first, the child
@@ -607,7 +607,7 @@ describe("a child's question", () => {
       expect(finished).toMatchObject({ status: "succeeded" })
       expect(replies).toContainEqual({ answer: ANSWER })
       expect(replies).toContainEqual(
-        "[SixbAgentWorker] Ask one question at a time: your parent has not answered the last one yet."
+        "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
       )
       const waited = toolOutput(harness.parentRequests[2], "wait") as {
         readonly questions: readonly unknown[]
@@ -1215,7 +1215,7 @@ describe("a child paused on its question, in a later turn", () => {
 
       expect(replies).toContainEqual(expect.objectContaining({ delivery: "answer" }))
       expect(replies).toContainEqual(
-        "[SixbAgentWorker] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent."
+        "[SixbAgent] 'west' already continues with the answer you sent it this turn. Message it again once it is at work, or wait for it with wait_agent."
       )
     } finally {
       await settle(harness.worker.stop(), "worker stop")

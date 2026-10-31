@@ -3,6 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
+      "@sixb/agent": ["./packages/agent/src/index.ts"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/anthropic": ["./models/anthropic/src/index.ts"],
       "@sixb/typesafe": ["./models/typesafe/src/index.ts"],

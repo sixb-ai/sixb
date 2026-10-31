@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
-import { prepareAgentModel } from "../../../packages/agent-worker/src/context-budget"
+import { prepareAgentModel } from "../../../packages/agent/src/context-budget"
 import { createAzureAIFoundry } from "../src"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"

@@ -35,7 +35,7 @@ function refused(input: Record<string, unknown>): NormalizedPart {
       toolName: "id" in input ? "publish_artifact_version" : "publish_artifact",
       state: "output-error",
       input: { path: "work/review", ...input },
-      errorText: "[SixbAgentWorker] publish_artifact refused: there is nothing to publish.",
+      errorText: "[SixbAgent] publish_artifact refused: there is nothing to publish.",
     },
   }
 }

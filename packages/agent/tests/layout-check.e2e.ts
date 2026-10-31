@@ -1,0 +1,440 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { ArtifactTheme } from "@sixb/core/artifacts"
+import { type CheckedQuery, checkLayout } from "../src/artifacts/layout-check/layout-check"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
+import { LocalBashSandbox } from "./helpers"
+
+// The layout check in a real headless Chromium, through Playwright for Node as the agent image
+// ships it: at /opt/sixb/js/node_modules/playwright, or where SIXB_PLAYWRIGHT points (with
+// SIXB_CHROMIUM naming a browser when Playwright has none of its own). Without either it skips.
+//
+//   SIXB_PLAYWRIGHT=<dir>/node_modules/playwright-core \
+//   SIXB_CHROMIUM="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+//   bun test ./packages/agent/tests/layout-check.e2e.ts
+const IMAGE_PLAYWRIGHT = "/opt/sixb/js/node_modules/playwright"
+const playwright =
+  process.env.SIXB_PLAYWRIGHT ?? (existsSync(IMAGE_PLAYWRIGHT) ? IMAGE_PLAYWRIGHT : "")
+
+const DECK = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Checked</title>
+<style>#photo::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent) }</style></head>
+<body>
+  <section class="slide title">
+    <p class="eyebrow"><span>Q3 2026</span><span>Review</span></p>
+    <h1>Q3 review</h1>
+    <p>Everything on this slide reads well.</p>
+    <div style="position: absolute; left: 900px; top: 120px">
+      <div style="font-size: 120px; line-height: 0.7">94%</div>
+      <div>Within SLA</div>
+    </div>
+    <p class="source">October 22, 2026</p>
+  </section>
+  <section class="slide">
+    <h2>Small and pale</h2>
+    <p style="font-size: 14px">Fine print</p>
+    <p style="color: #bbbbbb">Pale words</p>
+  </section>
+  <section class="slide">
+    <h2>Past the edge</h2>
+    <div style="position: absolute; left: 1100px; top: 300px; width: 400px">Off the slide</div>
+    <img src="img/missing.png" alt="" style="width: 200px; height: 100px">
+    <div style="height: 40px; overflow: hidden">One<br>Two<br>Three</div>
+  </section>
+  <section class="slide">
+    <h2>A heading</h2>
+    <p style="margin-top: -60px">Over the heading</p>
+    <div style="position: absolute; left: 96px; top: 600px">Into the footer</div>
+  </section>
+  <section class="slide chart">
+    <h2>Charts</h2>
+    <svg viewBox="0 0 400 100" style="width: 400px; height: 100px" role="img" aria-label="A bar">
+      <rect width="300" height="60" fill="#101010"/>
+      <text x="12" y="40" font-size="24" fill="#ffffff">On its bar</text>
+    </svg>
+    <svg viewBox="0 0 2000 200" style="width: 400px; height: 40px" role="img" aria-label="Tiny">
+      <text x="0" y="120" font-size="60" fill="var(--foreground)">Tiny label</text>
+    </svg>
+    <sixb-embed src="artifact:art_0000000000#chart=revenue" title="Revenue" style="height: 160px"></sixb-embed>
+    <img src="artifact:art_0000000000/figures/map.png" alt="" style="width: 200px; height: 80px">
+  </section>
+  <section class="slide image bleed" id="photo">
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23303030'/%3E%3C/svg%3E" alt="">
+    <h2 style="position: absolute; left: 96px; bottom: 88px; z-index: 1; color: #ffffff">On a photo</h2>
+  </section>
+</body>
+</html>`
+
+/**
+ * A page that reads well at 1280px but not on a phone: a fixed-width box wider than 390px, beside
+ * a wide table that scrolls in its own box, which is fine. It also has a card whose background
+ * fades between themes, fine print, a control too small to hit, and a script that throws.
+ */
+const PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Planner</title></head>
+<body>
+  <main>
+    <h1>Fleet planner</h1>
+    <p class="lede">Everything here reads well at a laptop's width.</p>
+    <div id="fixed" style="width: 640px">A box as wide as a laptop's column</div>
+    <div class="table-scroll"><table style="min-width: 800px"><tr><td>A wide table</td><td>scrolls in its box</td></tr></table></div>
+    <div class="card" style="transition: background-color 1s">A card that fades into the theme</div>
+    <p style="font-size: 10px">Fine print</p>
+    <button type="button" style="min-height: 0; height: 18px; padding: 0 4px">x</button>
+  </main>
+  <script>
+    // Drawn again in each theme, as a chart on a canvas is.
+    addEventListener("sixb:theme", (event) => {
+      if (event.detail.dark) document.querySelector("main").insertAdjacentHTML("beforeend", '<p style="font-size: 9px">Redrawn for dark</p>')
+    })
+    plan()
+  </script>
+</body>
+</html>`
+
+/** A deck whose script stops answering once the check asks for its second slide. */
+const HANGING_DECK = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hangs</title></head>
+<body>
+  <section class="slide"><h2>One</h2></section>
+  <section class="slide"><h2>Two</h2></section>
+  <script>
+    addEventListener("message", (event) => {
+      if (event.data?.method === "goto" && event.data.params?.slide === 2) {
+        setTimeout(() => { for (;;) {} })
+      }
+    })
+  </script>
+</body>
+</html>`
+
+/** The processes running now whose command line names Playwright's browser profile. */
+async function browsers(): Promise<Set<string>> {
+  const ps = Bun.spawn(["ps", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
+  const kill = setTimeout(() => ps.kill("SIGKILL"), 10_000)
+  try {
+    const [output] = await Promise.all([new Response(ps.stdout).text(), ps.exited])
+    return new Set(
+      output
+        .split("\n")
+        .filter((line) => line.includes("playwright_chromiumdev_profile"))
+        .map((line) => line.trim().split(/\s+/)[0] ?? "")
+    )
+  } finally {
+    clearTimeout(kill)
+  }
+}
+
+describe.skipIf(!playwright)("the layout check in a browser", () => {
+  let root: string
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-layout-e2e-")))
+    mkdirSync(join(root, "deck/img"), { recursive: true })
+    writeFileSync(join(root, "deck/index.html"), DECK)
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  const check = (
+    deck: string,
+    files: readonly string[],
+    name: string,
+    theme?: ArtifactTheme,
+    layout: "deck" | "page" = "deck",
+    queries?: Readonly<Record<string, CheckedQuery>>
+  ) =>
+    checkLayout({
+      layout,
+      handle: {
+        sandbox: new LocalBashSandbox(root),
+        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+        env: {
+          SIXB_PLAYWRIGHT: playwright,
+          ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+        },
+      },
+      directory: join(root, "deck"),
+      files,
+      entry: new TextEncoder().encode(deck),
+      name,
+      ...(theme ? { theme } : {}),
+      ...(queries ? { queries } : {}),
+      signal: AbortSignal.timeout(90_000),
+    })
+
+  test(
+    "finds each problem on its slide, and nothing on a slide that reads well",
+    async () => {
+      // Reproduce the SVG case by measuring only CSS backgrounds in the probe: the label on its
+      // bar reads as white on the slide. What the fifth slide shows from other artifacts is the
+      // app's to draw: an empty box here, not a broken image. Reproduce the first slide's by
+      // measuring text lines at their font's full height: a number set tight over its label
+      // reads as drawn over it. The sixth slide's heading is on a photo, whose colors no style
+      // names: reproduce by measuring under the photo, or past it to the slide that its scrim
+      // lifts above it in the stack, and the white heading reads as white on white.
+      const result = await check(DECK, ["index.html"], "checked")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toHaveLength(6)
+      const found = result.warnings.map((warning) => `${warning.part ?? "-"} ${warning.code}`)
+      expect(found.sort()).toEqual(
+        [
+          "- layout_load_error",
+          "2 layout_contrast",
+          "2 layout_small_text",
+          "3 layout_broken_image",
+          "3 layout_clipped",
+          "3 layout_outside",
+          "4 layout_footer",
+          "4 layout_overlap",
+          "5 layout_small_text",
+        ].sort()
+      )
+      expect(result.warnings.find((warning) => warning.part === "5")?.message).toContain(
+        "“Tiny label” is 12px"
+      )
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "measures a deck in the mode and the tokens its theme.json sets",
+    async () => {
+      // The reader's frame applies the deck's theme.json over the app's theme. Reproduce by
+      // measuring in Sixb's themes alone: the pale note passes, and the fixed ink fails in dark.
+      const deck = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Themed</title></head><body>
+  <section class="slide"><h2>A light deck</h2>
+    <p class="note">A pale note</p>
+    <p style="color: #202020">Ink that stays dark</p>
+  </section></body></html>`
+      const result = await check(deck, ["index.html"], "themed", {
+        mode: "light",
+        tokens: { "--muted-foreground": "#c8c8c8" },
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.warnings.map((warning) => warning.message)).toEqual([
+        expect.stringContaining("p.note “A pale note” has a contrast of"),
+      ])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "shows only the files the version publishes",
+    async () => {
+      // The reader gets the published files, so an image beside the deck that it does not
+      // publish is missing for them. Reproduce by serving the deck's whole directory.
+      const svg =
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 1'><rect width='2' height='1'/></svg>"
+      writeFileSync(join(root, "deck/img/listed.svg"), svg)
+      writeFileSync(join(root, "deck/img/unlisted.svg"), svg)
+      const deck = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Images</title></head><body>
+  <section class="slide image"><h2>Two images</h2>
+    <img src="img/listed.svg" alt="" style="width: 200px; height: 100px">
+    <img src="img/unlisted.svg" alt="" style="width: 200px; height: 100px">
+  </section></body></html>`
+      const result = await check(deck, ["index.html", "img/listed.svg"], "published")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      const messages = result.warnings.map((warning) => warning.message).join("\n")
+      expect(messages).toContain("img/unlisted.svg did not load (404)")
+      expect(messages).not.toContain("img/listed.svg")
+      expect(result.warnings.map((warning) => warning.code)).toContain("layout_broken_image")
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "checks a page at a laptop's width and a phone's, for what a page gets wrong",
+    async () => {
+      // Reproduce by dropping the `scrolls` test in the probe's page rule: the table that scrolls
+      // in its own box is reported as running past the screen too.
+      const result = await check(PAGE, ["index.html"], "page", undefined, "page")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toEqual([
+        ".sixb/agent/checks/page/desktop.png",
+        ".sixb/agent/checks/page/phone.png",
+      ])
+      const codes = result.warnings.map((warning) => `${warning.code}@${warning.part ?? ""}`)
+      expect(codes).toContain("layout_wide@phone")
+      expect(codes).not.toContain("layout_wide@desktop")
+      expect(codes).toContain("layout_small_target@desktop")
+      expect(codes).toContain("layout_small_text@desktop")
+      // Contrast is measured on what the reader sees: a card's colors once their transition
+      // ends, and nothing for the table's cells out of view in its box. Reproduce by removing
+      // check.cjs's style that stops transitions, or the probe's viewport test: the card or a
+      // cell reads as light text on white.
+      expect(codes.filter((code) => code.startsWith("layout_contrast"))).toEqual([])
+      // The page heard the theme arrive: what it draws for dark mode is measured. Reproduce by
+      // removing the runtime's sixb:theme event: the dark-mode text is never drawn.
+      expect(result.warnings.some((warning) => warning.message.includes("Redrawn for dark"))).toBe(
+        true
+      )
+      const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
+      expect(wide).toHaveLength(1)
+      expect(wide[0]?.message).toContain("div “A box as wide as a laptop's column”")
+      expect(
+        result.warnings.some(
+          (warning) => warning.code === "layout_load_error" && warning.message.includes("plan")
+        )
+      ).toBe(true)
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "runs a page that keeps data, its values kept in memory while it is open",
+    async () => {
+      // Opened alone, as the check opens it, a page has no app to keep its values. Reproduce by
+      // posting every call from the runtime, alone or not: the page waits on its data forever,
+      // and the fine print it draws from it never appears.
+      const keeping = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Keeps</title></head>
+<body>
+  <main><h1>Keeps its inputs</h1></main>
+  <script>
+    (async () => {
+      await sixb.state.set("inputs", { rate: 450 })
+      const inputs = await sixb.state.get("inputs")
+      const keys = await sixb.state.keys()
+      document.querySelector("main").insertAdjacentHTML(
+        "beforeend",
+        '<p style="font-size: 9px">Kept ' + inputs.rate + " under " + keys.join() + "</p>"
+      )
+    })()
+  </script>
+</body>
+</html>`
+      const result = await check(keeping, ["index.html"], "keeping", undefined, "page")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(
+        result.warnings.some((warning) => warning.message.includes("Kept 450 under inputs"))
+      ).toBe(true)
+      expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "runs a page on its queries' rows, as they answered the requester",
+    async () => {
+      // Opened alone, a page reads its queries beside the runtime, where the check serves what
+      // they returned for the requester, and what one that failed for them refused with. The page
+      // draws both in fine print, which the check reports. Reproduce by leaving the queries out of
+      // check.cjs's server: neither is drawn as read, and the page reads only "No query".
+      const reading = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Overdue</title></head>
+<body>
+  <main><h1>Overdue invoices</h1></main>
+  <script>
+    const note = (text) =>
+      document.querySelector("main").insertAdjacentHTML("beforeend", '<p style="font-size: 9px">' + text + "</p>")
+    sixb.query("overdue").then(({ objects, total }) =>
+      note("Read " + total + ": " + objects.map((row) => row.primaryId).join())
+    )
+    sixb.query("blocked").catch((error) => note("Refused: " + error.message))
+  </script>
+</body>
+</html>`
+      const result = await check(reading, ["index.html"], "reading", undefined, "page", {
+        overdue: {
+          result: {
+            kind: "objects",
+            objects: [{ primaryId: "inv_1" }, { primaryId: "inv_2" }],
+            total: 2,
+            truncated: false,
+          },
+        },
+        blocked: { error: "Principal 'usr_owner' is not allowed to view object type 'Invoice'." },
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      const messages = result.warnings.map((warning) => warning.message).join("\n")
+      expect(messages).toContain("Read 2: inv_1,inv_2")
+      expect(messages).toContain("Refused: Principal 'usr_owner' is not allowed to view")
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "checks each of a canvas's boards at its own size, naming the board",
+    async () => {
+      // A phone board that reads well, and one whose fixed-width box is wider than the board.
+      // Reproduce by opening every board at 1280px: the narrow board's box fits, and no
+      // warning names it.
+      mkdirSync(join(root, "canvas/boards"), { recursive: true })
+      const board = (body: string) =>
+        `<!doctype html><html><head><link rel="stylesheet" href="shared.css"></head><body><main>${body}</main></body></html>`
+      const fine = board('<h1>Welcome</h1><p class="lede">Every job, one tap away.</p>')
+      const broken = board(
+        '<h1>Regions</h1><div style="width: 560px">North, Harbor, Keystone</div>'
+      )
+      writeFileSync(join(root, "canvas/boards/welcome.html"), fine)
+      writeFileSync(join(root, "canvas/boards/region.html"), broken)
+      writeFileSync(join(root, "canvas/boards/shared.css"), "h1 { letter-spacing: -0.02em }")
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "welcome",
+            file: "boards/welcome.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(fine),
+          },
+          {
+            id: "region",
+            file: "boards/region.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(broken),
+          },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+          env: {
+            SIXB_PLAYWRIGHT: playwright,
+            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+          },
+        },
+        directory: join(root, "canvas"),
+        files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
+        name: "canvas",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toEqual([
+        ".sixb/agent/checks/canvas/boards/welcome.png",
+        ".sixb/agent/checks/canvas/boards/region.png",
+      ])
+      const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
+      expect(wide.map((warning) => warning.part)).toEqual(["region"])
+      expect(wide[0]?.message).toStartWith("Board 'region': div “North, Harbor, Keystone”")
+      // The boards found the kit and their shared stylesheet: nothing failed to load.
+      expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "reports what it found when the deck stops answering, and leaves no browser behind",
+    async () => {
+      // Reproduce by removing check.cjs's bounds and deadline: the check waits on the frozen
+      // page until the command's timeout kills node, and Chromium keeps running.
+      const before = await browsers()
+      const result = await check(HANGING_DECK, ["index.html"], "hanging")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toEqual([".sixb/agent/checks/hanging/slide-01.png"])
+      expect(result.warnings.at(-1)).toMatchObject({ code: "layout_incomplete" })
+      expect(result.warnings.at(-1)?.message).toContain("slide 2 in light mode did not respond")
+      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
+      expect(await left()).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+})

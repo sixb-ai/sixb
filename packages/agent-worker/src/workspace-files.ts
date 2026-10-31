@@ -1,5 +1,5 @@
+import { SANDBOX_CONTEXT_DIRECTORY } from "@sixb/agent"
 import type { Sandbox } from "@sixb/core"
-import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
 
 /** The script's exit status when the repository claims the directory reserved for run files. */

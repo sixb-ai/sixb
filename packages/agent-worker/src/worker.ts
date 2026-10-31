@@ -1,3 +1,34 @@
+import {
+  type AgentExecutionEnvironment,
+  AgentRequesterLeftThreadError,
+  type AgentRunFailure,
+  AgentTurnInterruptedError,
+  type AgentTurnRuntime,
+  AgentTurnTimeoutError,
+  type ConversationAgentExecutionEnvironment,
+  type ConversationReaders,
+  conversationReaders,
+  createAgentTurnRuntime,
+  createAskParentTool,
+  createConversationAgentEnvironment,
+  createSubagentEnvironment,
+  DEFAULT_MAX_STEPS,
+  isLostExecution,
+  listSandboxModels,
+  loadSubagentHistory,
+  prepareAgentModel,
+  type ResolvedAgentExecutionPlan,
+  resolveAgentExecutionPlan,
+  resolveSubagentExecutionPlan,
+  runAgentTurn,
+  runSubagent,
+  SubagentCoordinator,
+  SubagentInbox,
+  type SubagentWork,
+  stoppedByWorker,
+  toAgentExecutionFailure,
+  toAgentRunFailure,
+} from "@sixb/agent"
 import { principalsEqual } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
@@ -41,44 +72,17 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals, resumeIfDecided } from "./approval-repair"
-import { createAskParentTool } from "./ask-parent-tool"
-import { prepareAgentModel } from "./context-budget"
 import {
   isPermanentAgentPreparationError,
   MAX_AGENT_DELIVERY_ATTEMPTS,
   shouldRetryAgentPreparation,
 } from "./delivery-policy"
-import {
-  AgentEnvironmentSaveError,
-  AgentRequesterLeftThreadError,
-  AgentRunOwnedElsewhereError,
-  AgentTurnInterruptedError,
-  AgentTurnTimeoutError,
-  isLostExecution,
-} from "./errors"
+import { AgentEnvironmentSaveError, AgentRunOwnedElsewhereError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import {
-  listSandboxModels,
-  type ResolvedAgentExecutionPlan,
-  resolveAgentExecutionPlan,
-  resolveSubagentExecutionPlan,
-} from "./execution-plan"
-import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
-import { type ConversationReaders, conversationReaders } from "./message-authors"
-import { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
-import {
-  type AgentExecutionEnvironment,
-  type ConversationAgentExecutionEnvironment,
-  createConversationAgentEnvironment,
-  createSubagentEnvironment,
-} from "./run-environment"
-import { runSubagent, type SubagentWork } from "./run-subagent"
-import { loadSubagentHistory } from "./subagent-continuation"
-import { SubagentInbox } from "./subagent-inbox"
-import { SubagentCoordinator } from "./subagent-tools"
-import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
+import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
+import { childSandbox, conversationSandbox } from "./run-sandboxes"
 import type {
-  AgentExecutionContext,
+  AgentRunnerContext,
   AgentWorkerContext,
   AgentWorkerHost,
   AgentWorkerOptions,
@@ -113,7 +117,7 @@ interface PreparedConversationTurn {
   readonly shared: boolean
   readonly plan: ResolvedAgentExecutionPlan
   readonly execution: ExecutionRecord
-  readonly executionContext: AgentExecutionContext
+  readonly executionContext: AgentRunnerContext
   readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
 }
 
@@ -319,7 +323,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           : { requestedBy: prepared.execution.requestedBy }),
         ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
         shared: prepared.shared,
-        sandboxDefinition: this.host.sandboxDefinition,
+        openSandbox: conversationSandbox({
+          context: prepared.executionContext,
+          session,
+          run,
+          thread: prepared.thread,
+          ...(this.host.sandboxDefinition === undefined
+            ? {}
+            : { definition: this.host.sandboxDefinition }),
+        }),
         preflight: { budget: prepared.model.budget, runtime },
         context: prepared.executionContext,
         plan,
@@ -632,6 +644,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const inbox = new SubagentInbox(session.mail, run, history.messages)
       environment = await createSubagentEnvironment({
         session,
+        openSandbox: childSandbox({ context: executionContext, session, run, thread: childThread }),
         context: executionContext,
         plan,
         run,
@@ -1147,6 +1160,7 @@ function buildAgentContext(
     id: host.id,
     storage,
     sandboxes: host.sandboxes,
+    keepsChildWorkspaces: keepsSubagentWorkspace(host.sandboxes),
     logging: host.logging,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
     ontologyDocs: host.definitions.agent.ontologyDocs,
