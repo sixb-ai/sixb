@@ -2,6 +2,62 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-31 — Framework 0.1.26
+
+### Highlights
+
+- Work with the Agent from your terminal: `sixb` alone opens Sixb, and a conversation can run on
+  your computer, in the folder you opened it in. `sixb agent "..."` asks once from a script.
+- One agent harness for every runner, in the new `@sixb/agent` package. A runner outside the
+  worker reaches its run over HTTP; the agent worker becomes the cloud runner.
+- Keep the run's token out of the Agent's commands: every sandbox provider adds it to API requests
+  where commands cannot read it. The commands call the normal API; `/__sixb/agent-api` is gone.
+- Agent turns have no time or step limit, and sub-agents run beside their turn, without a queue.
+- Redesign the composer: one settings chip for model, thinking and permissions, a `+` menu, slash
+  commands, pasted images, files sent alone, and writing while the Agent answers. A notification
+  sound plays when a turn ends.
+- Look a member up by email with `sixb.users.get({ email })`, map `ref.user()` properties from
+  member emails with `userRef.fromEmail(column)`, and seed members in tests with `seedTestUsers`.
+- Read datasets, syncs and pipelines with `sixb datasets`, `sixb syncs` and `sixb pipelines`.
+- Speed up object queries on PostgreSQL and SQLite, and cut about 30 s from an SSH deploy.
+- Anthropic prices models from models.dev, shows thinking summaries and caches agent prompts by
+  default; Vercel AI Gateway caches what agents reuse. Connect Facebook Pages through Facebook
+  Login with the Meta connector.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server and CLI together to `0.1.26`, with
+  `@sixb/agent` `0.1.0`. Upgrade the other packages listed below; rebuild application assets.
+- Run the migrations: PostgreSQL `082-agent-run-cancel-requests` and `083-agent-thread-runs-on`,
+  SQLite `080-agent-run-cancel-requests` and `081-agent-thread-runs-on`.
+- A custom sandbox provider must set `supportsRequestCredentials`; `createSixb` fails at startup
+  otherwise. smolvm and Apple Container commands no longer run as root: bake tools into the image,
+  which needs Bun or Node.
+- An approval-gated call must be sent as `application/json` (415 otherwise).
+- Removed: `queues.agentChildren`, `turnTimeoutMs`, `defaultMaxSteps`, `--agent-turn-timeout`,
+  `SIXB_AGENT_TURN_TIMEOUT` and `services.workers.agentTurnTimeout`.
+- `@sixb/app` replaces `ModelControls`, `AutoModelChip` and `ApprovalModeChip` with
+  `ComposerSettings`.
+- New projects need Bun 1.4.4 or later.
+
+### Package versions
+
+- `0.1.26`: `@sixb/core`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.24`: `@sixb/client`.
+- `0.1.18`: `@sixb/app`.
+- `0.1.10`: `@sixb/cli-core`.
+- `0.1.9`: `@sixb/vercel-ai-gateway`.
+- `0.1.8`: `@sixb/queues-bullmq`, `@sixb/sandboxes-vercel`.
+- `0.1.7`: `create-sixb`, `@sixb/broker-redis`, `@sixb/sandboxes-apple-container`,
+  `@sixb/sandboxes-local`, `@sixb/sandboxes-smolvm`.
+- `0.1.6`: `@sixb/anthropic`, `@sixb/azure-ai-foundry`, `@sixb/connector-meta`.
+- `0.1.4`: `@sixb/deploy-ssh`.
+- `0.1.3`: `@sixb/model-protocols`.
+- `0.1.2`: `@sixb/sandboxes-azure`.
+- `0.1.0`: `@sixb/agent` (new).
+
 ## 2026-10-29 — Framework 0.1.25
 
 ### Highlights

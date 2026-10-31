@@ -1,6 +1,6 @@
 {
   "name": "@sixb/server",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "HTTP and WebSocket API server for Sixb",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/model-protocols",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Internal model protocol implementations for Sixb providers",
   "homepage": "https://sixb.ai",
   "bugs": {

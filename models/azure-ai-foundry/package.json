@@ -1,6 +1,6 @@
 {
   "name": "@sixb/azure-ai-foundry",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Azure AI Foundry model provider for Sixb",
   "homepage": "https://sixb.ai",
   "bugs": {
