@@ -13,7 +13,6 @@ import {
   abortFileUpload,
   addAgentThreadParticipants,
   addConnectorConnection,
-  appendTelemetry,
   cancelAgentRun,
   cancelAgentRunById,
   cancelWorkflowIntervention,
@@ -171,7 +170,6 @@ import {
   recreateAgentThreadSandbox,
   refreshAuthSession,
   removeAgentThreadParticipant,
-  removeObjectLink,
   requestAction,
   requestPipelineRun,
   requestSyncRun,
@@ -202,8 +200,6 @@ import {
   updateAuthProfile,
   uploadFileContent,
   uploadFileRaw,
-  upsertObject,
-  upsertObjectLink,
 } from "../sdk.gen"
 import type {
   AbortFileUploadData,
@@ -215,9 +211,6 @@ import type {
   AddConnectorConnectionData,
   AddConnectorConnectionError,
   AddConnectorConnectionResponse,
-  AppendTelemetryData,
-  AppendTelemetryError,
-  AppendTelemetryResponse,
   CancelAgentRunByIdData,
   CancelAgentRunByIdError,
   CancelAgentRunByIdResponse,
@@ -672,9 +665,6 @@ import type {
   RefreshAuthSessionResponse,
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantError,
-  RemoveObjectLinkData,
-  RemoveObjectLinkError,
-  RemoveObjectLinkResponse,
   RequestActionData,
   RequestActionError,
   RequestActionResponse,
@@ -765,12 +755,6 @@ import type {
   UploadFileRawData,
   UploadFileRawError,
   UploadFileRawResponse,
-  UpsertObjectData,
-  UpsertObjectError,
-  UpsertObjectLinkData,
-  UpsertObjectLinkError,
-  UpsertObjectLinkResponse,
-  UpsertObjectResponse,
 } from "../types.gen"
 
 /**
@@ -4065,29 +4049,6 @@ export const getObjectOptions = (options: Options<GetObjectData>) =>
     queryKey: getObjectQueryKey(options),
   })
 
-/**
- * Create or update object
- */
-export const upsertObjectMutation = (
-  options?: Partial<Options<UpsertObjectData>>
-): UseMutationOptions<UpsertObjectResponse, UpsertObjectError, Options<UpsertObjectData>> => {
-  const mutationOptions: UseMutationOptions<
-    UpsertObjectResponse,
-    UpsertObjectError,
-    Options<UpsertObjectData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await upsertObject({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
-
 export const getObjectLineageQueryKey = (options: Options<GetObjectLineageData>) =>
   createQueryKey("getObjectLineage", options)
 
@@ -6268,60 +6229,6 @@ export const listModelsOptions = (options?: Options<ListModelsData>) =>
     queryKey: listModelsQueryKey(options),
   })
 
-/**
- * Remove object link
- */
-export const removeObjectLinkMutation = (
-  options?: Partial<Options<RemoveObjectLinkData>>
-): UseMutationOptions<
-  RemoveObjectLinkResponse,
-  RemoveObjectLinkError,
-  Options<RemoveObjectLinkData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    RemoveObjectLinkResponse,
-    RemoveObjectLinkError,
-    Options<RemoveObjectLinkData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await removeObjectLink({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
-
-/**
- * Create or update object link
- */
-export const upsertObjectLinkMutation = (
-  options?: Partial<Options<UpsertObjectLinkData>>
-): UseMutationOptions<
-  UpsertObjectLinkResponse,
-  UpsertObjectLinkError,
-  Options<UpsertObjectLinkData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    UpsertObjectLinkResponse,
-    UpsertObjectLinkError,
-    Options<UpsertObjectLinkData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await upsertObjectLink({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
-
 export const getObjectLinkLineageQueryKey = (options: Options<GetObjectLinkLineageData>) =>
   createQueryKey("getObjectLinkLineage", options)
 
@@ -6348,33 +6255,6 @@ export const getObjectLinkLineageOptions = (options: Options<GetObjectLinkLineag
     },
     queryKey: getObjectLinkLineageQueryKey(options),
   })
-
-/**
- * Append telemetry point
- */
-export const appendTelemetryMutation = (
-  options?: Partial<Options<AppendTelemetryData>>
-): UseMutationOptions<
-  AppendTelemetryResponse,
-  AppendTelemetryError,
-  Options<AppendTelemetryData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    AppendTelemetryResponse,
-    AppendTelemetryError,
-    Options<AppendTelemetryData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await appendTelemetry({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
 
 /**
  * Get bulk telemetry history

@@ -244,8 +244,8 @@ describe("conditional view grants over HTTP", () => {
     ])
   })
 
-  test("an action or a write on a hidden invoice finds nothing to act on", async () => {
-    const { trusted, call } = await createApp()
+  test("an action on a hidden invoice finds nothing to act on", async () => {
+    const { call } = await createApp()
 
     const send = (caller: Caller, primaryId: string) =>
       call(
@@ -258,23 +258,6 @@ describe("conditional view grants over HTTP", () => {
     expect((await send("alice", "inv-2")).status).toBe(404)
     expect((await send("alice", "inv-404")).status).toBe(404)
     expect((await send("bob", "inv-2")).status).toBe(200)
-
-    const put = (caller: Caller, primaryId: string) =>
-      call(caller, `/api/objects/invoice/${primaryId}`, {
-        method: "PUT",
-        body: JSON.stringify({ properties: { status: "open" } }),
-      })
-
-    expect((await put("alice", "inv-3")).status).toBe(200)
-
-    // A create on the id of an invoice Alice cannot see tells her the id is taken, and nothing
-    // else; the invoice stays as it was.
-    const taken = await put("alice", "inv-2")
-    expect(taken.status).toBe(409)
-    expect(await taken.json()).toMatchObject({ code: "object.unique_violation" })
-    expect(await trusted.objects(Invoice).get("inv-2")).toMatchObject({
-      properties: { status: "draft" },
-    })
   })
 })
 

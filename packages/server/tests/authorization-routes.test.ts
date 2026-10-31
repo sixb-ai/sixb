@@ -136,7 +136,6 @@ const commercial = defineGroup("commercial")
 const operations = defineGroup("operations")
 const admins = defineGroup("admins")
 const writers = defineGroup("writers")
-const ingest = defineGroup("ingest")
 const reviewers = defineGroup("reviewers")
 
 const contractOperator = defineRole("contract.operator", {
@@ -173,12 +172,6 @@ const contractReviewer = defineRole("contract.reviewer", {
   grants: [can.view(Contract).where((contract) => contract.p.id.eq("c1")), can.apply(sendContract)],
 })
 
-// Telemetry only, with no view grant at all: the ingest principal.
-const contractIngestor = defineRole("contract.ingestor", {
-  grantedTo: [ingest],
-  grants: [can.append(Contract)],
-})
-
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const sixb = new SixbHost({
@@ -199,15 +192,8 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     queues: new InMemoryQueues(),
     actions: [sendContract],
     workflows: [renewContract],
-    groups: [commercial, operations, admins, writers, ingest, reviewers],
-    roles: [
-      contractOperator,
-      operationsRunner,
-      adminOperator,
-      contractWriter,
-      contractIngestor,
-      contractReviewer,
-    ],
+    groups: [commercial, operations, admins, writers, reviewers],
+    roles: [contractOperator, operationsRunner, adminOperator, contractWriter, contractReviewer],
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
@@ -578,7 +564,7 @@ describe("authorized object routes", () => {
     })
   })
 
-  test("disabled auth keeps the object read and write routes privileged", async () => {
+  test("disabled auth keeps the object read routes privileged", async () => {
     const { app } = await createApp({ auth: false })
 
     const response = await app.fetch(new Request("http://localhost/api/objects"))
@@ -622,154 +608,6 @@ describe("authorized object routes", () => {
         },
       ],
     })
-
-    const upsert = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c2", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: { id: "c2" } }),
-      })
-    )
-    expect(upsert.status).toBe(200)
-
-    const append = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c2/telemetry/temperature", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value: 30, at: "2026-05-16T11:00:00.000Z" }),
-      })
-    )
-    expect(append.status).toBe(200)
-  })
-
-  test("object writes require edit, not just view", async () => {
-    const { app, storage } = await createApp()
-    const viewer = await seedSession(storage, ["commercial"], "usr_view")
-    const writer = await seedSession(storage, ["writers"], "usr_write")
-
-    const body = JSON.stringify({ properties: { id: "c1" } })
-
-    const denied = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1", {
-        method: "PUT",
-        headers: viewer.csrfHeaders,
-        body,
-      })
-    )
-    expect(denied.status).toBe(403)
-
-    const allowed = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1", {
-        method: "PUT",
-        headers: writer.csrfHeaders,
-        body,
-      })
-    )
-    expect(allowed.status).toBe(200)
-
-    // The writer's grant names Contract only, so Invoice stays closed.
-    const otherType = await app.fetch(
-      new Request("http://localhost/api/objects/invoice/i2", {
-        method: "PUT",
-        headers: writer.csrfHeaders,
-        body: JSON.stringify({ properties: { id: "i2" } }),
-      })
-    )
-    expect(otherType.status).toBe(403)
-  })
-
-  test("the write route does not say which object types exist", async () => {
-    const { app, storage } = await createApp()
-    // `operations` holds run grants only — no view of any object type.
-    const outsider = await seedSession(storage, ["operations"], "usr_outsider")
-
-    const registered = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1", {
-        method: "PUT",
-        headers: outsider.csrfHeaders,
-        body: JSON.stringify({ properties: { id: "c1" } }),
-      })
-    )
-    const unregistered = await app.fetch(
-      new Request("http://localhost/api/objects/ghost/g1", {
-        method: "PUT",
-        headers: outsider.csrfHeaders,
-        body: JSON.stringify({ properties: { id: "g1" } }),
-      })
-    )
-
-    // `listObjectTypes` shows this principal nothing. The authorized catalog therefore treats a
-    // hidden type exactly like an unknown type before the write runs, so neither status reveals
-    // whether the requested id belongs to the registered type universe.
-    expect([registered.status, unregistered.status]).toEqual([404, 404])
-
-    const listed = await app.fetch(
-      new Request("http://localhost/api/object-types", { headers: outsider.headers })
-    )
-    expect(await listed.json()).toEqual([])
-  })
-
-  test("link writes require edit on the source and view on the target", async () => {
-    const { app, storage } = await createApp()
-    const viewer = await seedSession(storage, ["commercial"], "usr_view")
-    const writer = await seedSession(storage, ["writers"], "usr_write")
-
-    const linkUrl = "http://localhost/api/objects/contract/c1/links/invoice"
-    const body = JSON.stringify({ targetTypeId: "invoice", targetId: "i1" })
-
-    // `commercial` views Contract but neither edits it nor views Invoice.
-    const denied = await app.fetch(
-      new Request(linkUrl, { method: "PUT", headers: viewer.csrfHeaders, body })
-    )
-    expect(denied.status).toBe(403)
-
-    const allowed = await app.fetch(
-      new Request(linkUrl, { method: "PUT", headers: writer.csrfHeaders, body })
-    )
-    expect(allowed.status).toBe(200)
-
-    const removedByViewer = await app.fetch(
-      new Request(`${linkUrl}?targetTypeId=invoice&targetId=i1`, {
-        method: "DELETE",
-        headers: viewer.csrfHeaders,
-      })
-    )
-    expect(removedByViewer.status).toBe(403)
-
-    const removed = await app.fetch(
-      new Request(`${linkUrl}?targetTypeId=invoice&targetId=i1`, {
-        method: "DELETE",
-        headers: writer.csrfHeaders,
-      })
-    )
-    expect(removed.status).toBe(200)
-  })
-
-  test("telemetry appends need the append grant, and it needs no view grant", async () => {
-    const { app, storage } = await createApp()
-    const writer = await seedSession(storage, ["writers"], "usr_write")
-    const ingestor = await seedSession(storage, ["ingest"], "usr_ingest")
-
-    const url = "http://localhost/api/objects/contract/c1/telemetry/temperature"
-    const body = JSON.stringify({ value: 21, at: "2026-05-16T11:00:00.000Z" })
-
-    // Editing Contract does not carry the right to push points at it.
-    const denied = await app.fetch(
-      new Request(url, { method: "POST", headers: writer.csrfHeaders, body })
-    )
-    expect(denied.status).toBe(403)
-
-    // The ingest principal holds `append` and nothing else — no view grant at all.
-    const allowed = await app.fetch(
-      new Request(url, { method: "POST", headers: ingestor.csrfHeaders, body })
-    )
-    expect(allowed.status).toBe(200)
-
-    // And it still cannot read the object it just wrote to.
-    const read = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1", { headers: ingestor.headers })
-    )
-    expect(read.status).toBe(404)
   })
 
   test("dataset routes narrow to viewable datasets and hide forbidden identities", async () => {

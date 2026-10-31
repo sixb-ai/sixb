@@ -17,9 +17,6 @@ import type {
   AddConnectorConnectionData,
   AddConnectorConnectionErrors,
   AddConnectorConnectionResponses,
-  AppendTelemetryData,
-  AppendTelemetryErrors,
-  AppendTelemetryResponses,
   CancelAgentRunByIdData,
   CancelAgentRunByIdErrors,
   CancelAgentRunByIdResponses,
@@ -499,9 +496,6 @@ import type {
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantErrors,
   RemoveAgentThreadParticipantResponses,
-  RemoveObjectLinkData,
-  RemoveObjectLinkErrors,
-  RemoveObjectLinkResponses,
   RequestActionData,
   RequestActionErrors,
   RequestActionResponses,
@@ -592,12 +586,6 @@ import type {
   UploadFileRawData,
   UploadFileRawErrors,
   UploadFileRawResponses,
-  UpsertObjectData,
-  UpsertObjectErrors,
-  UpsertObjectLinkData,
-  UpsertObjectLinkErrors,
-  UpsertObjectLinkResponses,
-  UpsertObjectResponses,
 } from "./types.gen"
 
 export type Options<
@@ -2586,26 +2574,6 @@ export const getObject = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Create or update object
- */
-export const upsertObject = <ThrowOnError extends boolean = false>(
-  options: Options<UpsertObjectData, ThrowOnError>
-) =>
-  (options.client ?? client).put<UpsertObjectResponses, UpsertObjectErrors, ThrowOnError>({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/objects/{objectTypeId}/{objectId}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  })
-
-/**
  * Get where an object's values come from
  *
  * What makes the object exist and what decided each property it holds, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
@@ -3894,46 +3862,6 @@ export const listModels = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Remove object link
- */
-export const removeObjectLink = <ThrowOnError extends boolean = false>(
-  options: Options<RemoveObjectLinkData, ThrowOnError>
-) =>
-  (options.client ?? client).delete<
-    RemoveObjectLinkResponses,
-    RemoveObjectLinkErrors,
-    ThrowOnError
-  >({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
-    ...options,
-  })
-
-/**
- * Create or update object link
- */
-export const upsertObjectLink = <ThrowOnError extends boolean = false>(
-  options: Options<UpsertObjectLinkData, ThrowOnError>
-) =>
-  (options.client ?? client).put<UpsertObjectLinkResponses, UpsertObjectLinkErrors, ThrowOnError>({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  })
-
-/**
  * Get where an object link comes from
  *
  * What makes the link exist, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
@@ -3952,26 +3880,6 @@ export const getObjectLinkLineage = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}/lineage",
     ...options,
-  })
-
-/**
- * Append telemetry point
- */
-export const appendTelemetry = <ThrowOnError extends boolean = false>(
-  options: Options<AppendTelemetryData, ThrowOnError>
-) =>
-  (options.client ?? client).post<AppendTelemetryResponses, AppendTelemetryErrors, ThrowOnError>({
-    security: [
-      { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
   })
 
 /**
