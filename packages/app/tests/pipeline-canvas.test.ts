@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GetPipelineResponse } from "@sixb/client"
-import { layoutPipeline } from "../src/pages/data/pipeline-canvas"
+import { layoutPipeline } from "../src/pages/console/data/pipeline-canvas"
 
 type Step = GetPipelineResponse["graph"]["nodes"][number]["step"]
 

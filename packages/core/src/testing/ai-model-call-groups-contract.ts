@@ -6,7 +6,7 @@ import type { AiStorageContractSuiteOptions } from "./ai-cost-storage-contract"
 import { createTestWorkflowExecution } from "./workflow-execution"
 
 export type AiModelCallGroupsContractStorage = Required<
-  Pick<Storage, "agents" | "aiUsage" | "aiCosts" | "executions" | "workflowRuns">
+  Pick<Storage, "agents" | "aiUsage" | "aiCosts" | "auth" | "executions" | "workflowRuns">
 >
 
 const projectId = "model-call-groups"
@@ -98,6 +98,126 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
 
     // Removal proof: drop tokenless_count from a storage's group query (or tokenlessCount from
     // summarize); the mixed run then hides its token total behind the image call.
+    // Removal proof: drop the `person` or `modelSeries` dimension from a storage's overview, or
+    // one condition of its kind, source or requester filter; this test then fails on that part.
+    test("breaks spend down by who asked and by model per period, and narrows to either", async () => {
+      const storage = await options.createStorage()
+      try {
+        await options.setup?.(storage)
+        const twoDays = { ...range, to: new Date("2026-09-03T00:00:00Z") }
+        await storage.auth.users.create({ projectId, id: "usr_ava", email: "ava@example.com" })
+        await storage.auth.users.create({ projectId, id: "usr_ben", email: "ben@example.com" })
+        await storage.auth.serviceAccounts.create({ projectId, id: "svc_bot", name: "Bot" })
+        // A workflow and two actions someone asked for, and a request nobody did.
+        const runs = [
+          {
+            id: "ava",
+            kind: "workflow",
+            by: { type: "user", id: "usr_ava" },
+            model: "large",
+            day: "01",
+          },
+          {
+            id: "ben",
+            kind: "action",
+            by: { type: "user", id: "usr_ben" },
+            model: "small",
+            day: "02",
+          },
+          {
+            id: "bot",
+            kind: "action",
+            by: { type: "serviceAccount", id: "svc_bot" },
+            model: "embed",
+            day: "02",
+          },
+          { id: "req", kind: "request", model: "small", day: "02" },
+        ] as const
+        for (const run of runs) {
+          const execution = await storage.executions.create({
+            projectId,
+            id: run.id,
+            ...("by" in run ? { requestedBy: run.by } : {}),
+            ...(run.kind === "request"
+              ? {
+                  executor: { type: "request", requestId: run.id },
+                  source: { type: "http", requestId: run.id },
+                  authorizationRef: { type: "disabled" },
+                }
+              : {
+                  executor: { type: "primitive", kind: run.kind, runId: run.id },
+                  source: { type: "event", eventId: run.id },
+                  authorizationRef: {
+                    type: "trustedPrimitive",
+                    primitive: { kind: run.kind, id: "close", runId: run.id },
+                  },
+                }),
+            correlationId: run.id,
+          })
+          await storage.aiUsage.recordModelCall({
+            projectId,
+            id: run.id,
+            executionId: execution.id,
+            attempt: 1,
+            callId: run.id,
+            requesterGroupIds: [],
+            providerId: "test",
+            requestedModelId: run.model,
+            modelKind: run.model === "embed" ? "embedding" : "language",
+            responseId: run.id,
+            usage: { inputTokens: 2, outputTokens: 3 },
+            occurredAt: new Date(`2026-09-${run.day}T12:00:00Z`),
+          })
+        }
+
+        const overview = await storage.aiCosts.queryProjectOverview({ ...twoDays, bucket: "day" })
+        const people = overview.people
+          .map((entry) => `${entry.requester?.id ?? "nobody"}:${entry.modelCallCount}`)
+          .sort()
+        expect(people).toEqual(["nobody:1", "svc_bot:1", "usr_ava:1", "usr_ben:1"])
+        const perDay = Object.fromEntries(
+          overview.modelSeries.map((entry) => [
+            entry.modelId,
+            entry.series.map((bucket) => bucket.modelCallCount),
+          ])
+        )
+        expect(perDay).toEqual({ large: [1, 0], small: [0, 2], embed: [0, 1] })
+
+        const count = async (
+          filters: Partial<Parameters<typeof storage.aiCosts.listModelCalls>[0]>
+        ) => {
+          const [calls, groups, totals] = await Promise.all([
+            storage.aiCosts.listModelCalls({ ...twoDays, ...filters }),
+            storage.aiCosts.listModelCallGroups({ ...twoDays, ...filters }),
+            storage.aiCosts.queryProjectOverview({ ...twoDays, ...filters, bucket: "day" }),
+          ])
+          // The three reads narrow alike.
+          expect(groups.total).toBe(calls.total)
+          expect(totals.totals.modelCallCount).toBe(calls.total)
+          return calls.total
+        }
+        expect(await count({ requester: { type: "user", id: "usr_ava" } })).toBe(1)
+        expect(await count({ requester: { type: "serviceAccount", id: "svc_bot" } })).toBe(1)
+        expect(await count({ requester: "none" })).toBe(1)
+        expect(await count({ source: { kind: "action" } })).toBe(2)
+        expect(await count({ source: { kind: "workflow", workflowId: "close" } })).toBe(1)
+        expect(await count({ source: { kind: "workflow", workflowId: "other" } })).toBe(0)
+        expect(await count({ source: { kind: "workflow" } })).toBe(1)
+        expect(await count({ source: { kind: "other" } })).toBe(1)
+        expect(await count({ source: { kind: "agent" } })).toBe(0)
+        expect(await count({ modelKind: "embedding" })).toBe(1)
+
+        const groups = await storage.aiCosts.listModelCallGroups(twoDays)
+        expect(groups.items.find((group) => group.executionId === "ben")?.requester).toEqual({
+          type: "user",
+          id: "usr_ben",
+        })
+        expect(groups.items.find((group) => group.executionId === "req")?.requester).toBeUndefined()
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("sums media per run, and tokenless calls leave no gap in its tokens", async () => {
       const storage = await options.createStorage()
       try {
@@ -222,6 +342,102 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
           expect(group?.attribution).toEqual(attribution)
           expect(group?.executions[0]?.attribution).toEqual(attribution)
         }
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
+    // Removal proof: key the groups by root execution again (aiModelCallGroupKey and the SQL
+    // group_key returning root_execution_id); the turns then come back as two groups.
+    test("lists a conversation's turns as one group, and sorts by cost", async () => {
+      const storage = await options.createStorage()
+      try {
+        await options.setup?.(storage)
+        await seed(storage)
+        // A later turn in the first conversation, costlier than everything before it.
+        const executionId = await createTestAgentExecution(storage, {
+          projectId,
+          runId: "third",
+          executionId: "exec_third",
+          authority: "inherited",
+        })
+        await storage.agents.runs.create({
+          id: "third",
+          projectId,
+          executionId,
+          threadId: "thread",
+          triggerMessageId: "message_third",
+          spec: { model: { provider: "parent-provider", modelId: "large" } },
+        })
+        const usage = await storage.aiUsage.recordModelCall({
+          id: "usage_third",
+          projectId,
+          executionId,
+          attempt: 1,
+          callId: "call_third",
+          requesterGroupIds: [],
+          providerId: "parent-provider",
+          requestedModelId: "large",
+          responseId: "response_third",
+          usage: { inputTokens: 40, cacheReadInputTokens: 30, outputTokens: 2 },
+          occurredAt: new Date("2026-09-01T12:00:25Z"),
+        })
+        await storage.aiCosts.recordModelCallCost({
+          projectId,
+          usageRecordId: usage.record.id,
+          status: "rated",
+          billingIdentity: { providerId: "parent-provider", modelId: "large" },
+          pricingContext: {},
+          priceSource: {
+            sourceId: "provider-reported",
+            sourceEntryId: "cost_third",
+            sourceVersion: "test",
+            observedAt: new Date("2026-09-01T12:05:00Z"),
+          },
+          components: [],
+          money: { currency: "USD", amountNanos: "1000" },
+          ratedAt: new Date("2026-09-01T12:05:00Z"),
+        })
+
+        const recent = await storage.aiCosts.listModelCallGroups(range)
+        expect(recent.total).toBe(2)
+        expect(recent.items.map((group) => group.executionId)).toEqual([
+          "exec_second",
+          "exec_parent",
+        ])
+        expect(recent.items[1]).toMatchObject({
+          modelCallCount: 33,
+          attribution: { kind: "agent", agentRunId: "parent", threadId: "thread" },
+          costs: { amounts: [{ currency: "EUR" }, { currency: "USD", amountNanos: "1300" }] },
+        })
+        expect(recent.items[1]?.executions.map((execution) => execution.executionId)).toEqual([
+          "exec_parent",
+          "exec_child",
+          "exec_third",
+        ])
+        expect(recent.items[1]?.executions[2]).toMatchObject({
+          inputTokens: 40,
+          cacheReadInputTokens: 30,
+          models: [
+            {
+              providerId: "parent-provider",
+              modelId: "large",
+              modelCallCount: 1,
+              costs: { amounts: [{ currency: "USD", amountNanos: "1000" }] },
+            },
+          ],
+        })
+
+        // The second conversation has the latest call; the first costs more. A conversation whose
+        // range opens inside a sub-agent still reads as the turn that started it.
+        const byCost = await storage.aiCosts.listModelCallGroups({
+          ...range,
+          from: new Date("2026-09-01T12:00:20Z"),
+          sort: "cost",
+          limit: 1,
+        })
+        expect(byCost).toMatchObject({ total: 2, hasMore: true })
+        expect(byCost.items.map((group) => group.executionId)).toEqual(["exec_parent"])
       } finally {
         await options.cleanup?.(storage)
       }
@@ -403,11 +619,13 @@ async function seedWorkflowCall(
 }
 
 async function seed(storage: AiModelCallGroupsContractStorage) {
-  await storage.agents.threads.create({
-    id: "thread",
-    projectId,
-    ownerPrincipal: { type: "user", id: "user" },
-  })
+  for (const id of ["thread", "second_thread"]) {
+    await storage.agents.threads.create({
+      id,
+      projectId,
+      ownerPrincipal: { type: "user", id: "user" },
+    })
+  }
   for (const runId of ["parent", "second"]) {
     const executionId = await createTestAgentExecution(storage, {
       projectId,
@@ -419,7 +637,7 @@ async function seed(storage: AiModelCallGroupsContractStorage) {
       id: runId,
       projectId,
       executionId,
-      threadId: "thread",
+      threadId: runId === "parent" ? "thread" : "second_thread",
       triggerMessageId: `message_${runId}`,
       spec: { model: { provider: "parent-provider", modelId: "large" } },
     })

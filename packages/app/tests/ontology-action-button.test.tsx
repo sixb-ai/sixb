@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { SectionsProvider } from "../src/pages"
-import { ActionButton } from "../src/pages/ontology/components/action-button"
+import { ActionButton } from "../src/pages/console/ontology/components/action-button"
 import { notify } from "../src/pages/section-page"
 import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
@@ -80,7 +80,7 @@ function renderButton(objectId: string, locale = "en") {
   return render(
     <QueryClientProvider client={queryClient}>
       <LocaleProvider locale={locale}>
-        <SectionsProvider visibility={undefined}>
+        <SectionsProvider>
           <MemoryRouter>
             <ActionButton
               objectId={objectId}

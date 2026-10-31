@@ -5,10 +5,22 @@ View consumption in your app and set monthly limits for your project or specific
 
 ## View usage
 
-Open **Observability › AI usage** from your app's user menu to see token usage and costs. Filter
-by date range, provider, or model, and open an execution under **Model calls** to inspect its
-individual calls. Seeing usage requires `can.observe(agent.usage)` in a
-[role](../auth/authorization.md); adding and changing limits requires `can.manage(agent.usage)`.
+Open **Settings › Usage** from your app's user menu to see what models were called and what
+they cost over the last 24 hours, 7, 30 or 90 days. **Spend** shows:
+
+| Part | What it shows |
+| --- | --- |
+| Summary | Spend and its change from the period before, tokens and how much was read from cache, model calls, conversations and runs, and the project's monthly cost limit |
+| Chart | Cost, tokens or calls per day, stacked by model |
+| Breakdown | Spend by model, source (agent chats, each workflow, actions), person or kind of model, with its change and trend |
+| Conversations and runs | Every conversation, workflow run and action run that called a model. Open one for its turns or steps, then a call to see how it was priced |
+
+Clicking a day, a model or a breakdown row filters the whole page to it. The filters are kept
+in the address, so a filtered page can be shared. A conversation's title and turns show only to
+people who can open it; everyone who can see usage sees its totals.
+
+Seeing usage requires `can.observe(agent.usage)` in a [role](../auth/authorization.md); adding
+and changing limits on the **Limits** tab requires `can.manage(agent.usage)`.
 
 Usage and cost depend on what the provider reports and the available pricing. Missing values
 remain unknown rather than being counted as zero.
@@ -20,7 +32,7 @@ for projects that only use decision, embedding, or audio models. Accounting reco
 
 ## Set a monthly limit
 
-In **AI usage**, choose **Add limit** under **Monthly limits**:
+In **Settings › Usage › Limits**, choose **Add limit**:
 
 1. Choose the project, user, service account, or group the limit applies to.
 2. Select **Cost** or **Tokens** and enter the monthly amount.

@@ -36,7 +36,7 @@ import {
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bot, Check, ChevronRight, Copy, KeyRound, Loader2, Lock, Plus, Power } from "lucide-react"
 import { type SubmitEvent, useEffect, useMemo, useState } from "react"
-import { notify, SectionPage } from "../section-page"
+import { notify } from "../section-page"
 import {
   apiErrorMessage,
   Field,
@@ -95,13 +95,21 @@ function AccountMark({
   )
 }
 
-/** Settings › Service accounts: identities for automation, managed under a membership policy. */
-export function SettingsServiceAccountsPage() {
+/**
+ * Settings › Members › Service accounts: identities for automation, managed under a membership
+ * policy. The page around it owns the button that creates one.
+ */
+export function ServiceAccountsTab({
+  createOpen,
+  onCreateOpenChange: setCreateOpen,
+}: {
+  readonly createOpen: boolean
+  readonly onCreateOpenChange: (open: boolean) => void
+}) {
   const allMessages = useSettingsMessages()
   const messages = allMessages.serviceAccounts
   const queryClient = useQueryClient()
   const format = useFormat()
-  const [createOpen, setCreateOpen] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null)
@@ -205,13 +213,7 @@ export function SettingsServiceAccountsPage() {
   ) : null
 
   return (
-    <SectionPage
-      section="settings"
-      page="service-accounts"
-      title={messages.title}
-      description={messages.description}
-      actions={accounts.length > 0 ? newAccountButton : null}
-    >
+    <>
       <Panel>
         {optionsQuery.isPending || accountsQuery.isPending ? (
           <PanelSkeleton rows={3} />
@@ -465,7 +467,7 @@ export function SettingsServiceAccountsPage() {
         created={createdToken}
         disabled={selected?.status !== "active"}
       />
-    </SectionPage>
+    </>
   )
 }
 

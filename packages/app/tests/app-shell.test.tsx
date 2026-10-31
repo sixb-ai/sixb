@@ -35,6 +35,14 @@ afterEach(() => {
 const signedIn: GetAuthSessionResponse = {
   authenticated: true,
   user: { id: "user-1", email: "morgan@example.com", displayName: "Morgan Reyes", groupIds: [] },
+  access: {
+    console: false,
+    logs: false,
+    members: false,
+    serviceAccounts: false,
+    usage: false,
+    activity: false,
+  },
   session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
 }
 
@@ -55,7 +63,7 @@ function renderInApp(
   const app = <MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>
   return render(
     <QueryClientProvider client={queryClient}>
-      {options.sections ? <SectionsProvider visibility={undefined}>{app}</SectionsProvider> : app}
+      {options.sections ? <SectionsProvider>{app}</SectionsProvider> : app}
     </QueryClientProvider>
   )
 }

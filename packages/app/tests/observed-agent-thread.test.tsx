@@ -7,9 +7,10 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { observedThreadPollMs, observedTranscriptPollMs } from "../src/agent/observed-conversation"
 import { messageFileSource } from "../src/artifacts/file-source"
 import { SectionsProvider } from "../src/pages"
-import { ObservabilityAgentThreadPage } from "../src/pages/observability/activity/thread"
+import { SettingsActivityThreadPage } from "../src/pages/settings/activity/thread"
 import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
+import { settingsManagerSession } from "./helpers/session"
 
 installDom([
   "document",
@@ -195,15 +196,15 @@ function renderThread(scenario: Partial<Scenario> = {}) {
   })
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  queryClient.setQueryData(getAuthSessionQueryKey(), { authenticated: false, authEnabled: false })
+  queryClient.setQueryData(getAuthSessionQueryKey(), settingsManagerSession)
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={undefined}>
-        <MemoryRouter initialEntries={["/observability/activity/threads/thr_1"]}>
+      <SectionsProvider>
+        <MemoryRouter initialEntries={["/settings/activity/threads/thr_1"]}>
           <Routes>
             <Route
-              path="/observability/activity/threads/:threadId"
-              element={<ObservabilityAgentThreadPage />}
+              path="/settings/activity/threads/:threadId"
+              element={<SettingsActivityThreadPage />}
             />
           </Routes>
         </MemoryRouter>

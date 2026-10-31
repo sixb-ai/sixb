@@ -339,6 +339,114 @@ describe("AI accounting routes", () => {
     })
   })
 
+  // Removal proof: drop accountingFilters from the overview route, requesterDetails' names, or
+  // the prompts from serializeGroup; the matching expectation then fails.
+  test("names who asked, narrows to a person, source or kind, and says what a turn asked", async () => {
+    const storage = new InMemoryStorage()
+    await storage.auth.users.create({
+      projectId,
+      id: "usr_priya",
+      email: "priya@example.com",
+      displayName: "Priya",
+    })
+    await storage.agents.threads.create({
+      id: "thread_1",
+      projectId,
+      ownerPrincipal: { type: "user", id: "usr_priya" },
+    })
+    await storage.agents.messages.append({
+      id: "message_1",
+      projectId,
+      threadId: "thread_1",
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text: "Summarize the Harbor Foods\n  visits" }],
+    })
+    await createTestAgentExecution(storage, {
+      projectId,
+      runId: "run_1",
+      executionId: "execution_1",
+    })
+    await storage.agents.runs.create({
+      id: "run_1",
+      projectId,
+      executionId: "execution_1",
+      threadId: "thread_1",
+      triggerMessageId: "message_1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
+    })
+    // An action Priya asked for, beside the conversation.
+    await storage.executions.create({
+      projectId,
+      id: "action_1",
+      requestedBy: { type: "user", id: "usr_priya" },
+      executor: { type: "primitive", kind: "action", runId: "action_1" },
+      source: { type: "event", eventId: "action_1" },
+      correlationId: "action_1",
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "action", id: "close", runId: "action_1" },
+      },
+    })
+    for (const [id, executionId, modelKind] of [
+      ["usage_1", "execution_1", "language"],
+      ["usage_2", "action_1", "embedding"],
+    ] as const) {
+      await storage.aiUsage.recordModelCall({
+        id,
+        projectId,
+        executionId,
+        attempt: 1,
+        callId: id,
+        requesterGroupIds: [],
+        providerId: "openai",
+        requestedModelId: modelKind === "embedding" ? "embed" : "gpt-5",
+        modelKind,
+        responseId: id,
+        usage: { inputTokens: 10, outputTokens: 5 },
+        occurredAt: new Date("2026-09-10T12:30:00.000Z"),
+      })
+    }
+    const app = aiRoutes(createHost(storage))
+    const get = async (path: string, filters: Record<string, string> = {}) => {
+      const response = await app.handle(
+        new Request(
+          `http://localhost${path}?${new URLSearchParams({
+            from: "2026-09-10T12:00:00.000Z",
+            to: "2026-09-10T14:00:00.000Z",
+            ...(path.endsWith("overview") ? { bucket: "hour" } : {}),
+            ...filters,
+          })}`
+        )
+      )
+      expect(response.status).toBe(200)
+      return (await response.json()) as Record<string, unknown>
+    }
+    const calls = async (filters: Record<string, string>) =>
+      ((await get("/api/ai/accounting/overview", filters)).totals as { modelCallCount: number })
+        .modelCallCount
+
+    expect(await calls({ person: "user:usr_priya" })).toBe(1)
+    expect(await calls({ person: "none" })).toBe(1)
+    expect(await calls({ source: "action" })).toBe(1)
+    expect(await calls({ source: "agent" })).toBe(1)
+    expect(await calls({ kind: "embedding" })).toBe(1)
+    expect((await get("/api/ai/accounting/overview")).people).toContainEqual(
+      expect.objectContaining({
+        requester: { type: "user", id: "usr_priya", name: "Priya", email: "priya@example.com" },
+      })
+    )
+    const groups = (await get("/api/ai/model-call-groups")).items as {
+      executionId: string
+      requester?: { name?: string }
+      executions: { executionId: string; prompt?: string }[]
+    }[]
+    expect(groups.find((group) => group.executionId === "execution_1")?.executions[0]?.prompt).toBe(
+      "Summarize the Harbor Foods visits"
+    )
+    expect(groups.find((group) => group.executionId === "action_1")?.requester?.name).toBe("Priya")
+  })
+
   test("lists model calls with pricing context and unpriceable diagnostics", async () => {
     const app = await createApp()
     const response = await app.handle(

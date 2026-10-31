@@ -350,6 +350,11 @@ export interface MemberSummary {
    */
   readonly managedGroupIds: readonly string[]
   readonly capabilities: MemberCapabilities
+  /**
+   * When they last used the project: their most recent session's last request, refreshed about
+   * once a minute, or its sign-in. Absent for someone who never signed in.
+   */
+  readonly lastActiveAt?: Date
 }
 
 export interface ListMembersResult {

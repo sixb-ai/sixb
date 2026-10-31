@@ -168,33 +168,6 @@ describe("custom app metadata and manifest generation", () => {
     expect(error.message).toContain("metadata.themeColor must be a non-empty string")
   })
 
-  // Regression proof: remove validateVisibility's call in metadata.ts and both rejections fail.
-  test("rejects a visibility export with an unknown section or values that are not groups", async () => {
-    const fixture = await createFixture()
-    roots.push(fixture.root)
-    const writeVisibility = (source: string) =>
-      writeFile(
-        join(fixture.appDir, "layout.tsx"),
-        `export const visibility = ${source}\nexport default function Layout() { return null }\n`
-      )
-
-    await writeVisibility(`{ settings: [{ kind: "group", id: "admins" }] }`)
-    await generateAppEntry(fixture.root, fixture.generatedDir)
-
-    await writeVisibility(`{ settings: [{ kind: "group", id: "admins" }], data: [] }`)
-    await generateAppEntry(fixture.root, fixture.generatedDir)
-
-    await writeVisibility(`{ billing: [] }`)
-    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "'billing' is not a built-in section. Sections: data, observability, ontology, settings."
-    )
-
-    await writeVisibility(`{ settings: ["admins"] }`)
-    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "visibility.settings must be a list of groups"
-    )
-  })
-
   // Regression proof: remove the agentToolViews call in metadata.ts and the three rejections fail;
   // the app would then generate and fail only in the browser.
   test("rejects a toolViews export that is not a list of views, one per tool", async () => {

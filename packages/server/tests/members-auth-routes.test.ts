@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { magicLink } from "@sixb/auth-magic-link"
 import {
+  agent,
+  can,
   defineGroup,
   defineMembershipPolicy,
   defineObjectType,
+  defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
   type MembershipPolicyDefinition,
+  project,
   prop,
+  type RoleDefinition,
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
@@ -32,7 +37,10 @@ const Device = defineObjectType({
 })
 
 function createRuntime(
-  options: { readonly membershipPolicies?: readonly MembershipPolicyDefinition[] } = {}
+  options: {
+    readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
+    readonly roles?: readonly RoleDefinition[]
+  } = {}
 ) {
   const storage = new InMemoryStorage()
   const sixb = new SixbHost({
@@ -45,6 +53,7 @@ function createRuntime(
     queues: new InMemoryQueues(),
     groups: [securityAdmins, commercial, finance],
     membershipPolicies: options.membershipPolicies ?? [defaultMembershipPolicy()],
+    roles: options.roles,
     auth: magicLink({
       allowedDomains: ["acme.com"],
       async sendMagicLink() {},
@@ -158,6 +167,72 @@ function jsonRequest(
 }
 
 describe("auth member routes", () => {
+  // The app opens the Console and lists Settings › Members and Service accounts from this, so a
+  // person never opens a page the policies and grants keep them from using. Reproduce: send
+  // `access` as all true from authSessionBody.
+  test("the session says whether a person may open the Console and each Settings project page", async () => {
+    const sessionAccess = async (app: ReturnType<typeof createRuntime>["app"], cookie: string) => {
+      const response = await app.handle(jsonRequest("/api/auth/session", { cookie }))
+      expect(response.status).toBe(200)
+      return ((await response.json()) as { readonly access: unknown }).access
+    }
+
+    const { app, storage } = createRuntime()
+    const admin = await seedAdminSession(storage)
+    await seedUser(storage, { id: "usr_groupless", email: "groupless@acme.com" })
+    const groupless = await seedSession(storage, { userId: "usr_groupless" })
+    const none = {
+      console: false,
+      logs: false,
+      members: false,
+      serviceAccounts: false,
+      usage: false,
+      activity: false,
+    }
+    expect(await sessionAccess(app, admin.cookie)).toEqual({ ...none, members: true })
+    expect(await sessionAccess(app, groupless.cookie)).toEqual(none)
+
+    const withServiceAccounts = createRuntime({
+      membershipPolicies: [
+        defineMembershipPolicy("service-accounts", {
+          grantedTo: [securityAdmins],
+          scope: [finance],
+          can: ["serviceAccounts"],
+        }),
+      ],
+    })
+    const serviceAdmin = await seedAdminSession(withServiceAccounts.storage)
+    expect(await sessionAccess(withServiceAccounts.app, serviceAdmin.cookie)).toEqual({
+      ...none,
+      serviceAccounts: true,
+    })
+
+    // The Console, Logs, Usage and Activity follow grants.
+    const observing = createRuntime({
+      membershipPolicies: [],
+      roles: [
+        defineRole("observer", {
+          grantedTo: [finance],
+          grants: [
+            can.observe(agent.usage),
+            can.observe(project.activity),
+            can.observe(project.console),
+            can.observe(project.logs),
+          ],
+        }),
+      ],
+    })
+    await seedUser(observing.storage, { id: "usr_finance", groupIds: ["finance"] })
+    const observer = await seedSession(observing.storage, { userId: "usr_finance" })
+    expect(await sessionAccess(observing.app, observer.cookie)).toEqual({
+      ...none,
+      usage: true,
+      activity: true,
+      console: true,
+      logs: true,
+    })
+  })
+
   test("lists scoped members and returns membership options", async () => {
     const { app, storage } = createRuntime()
     const admin = await seedAdminSession(storage)
@@ -182,11 +257,27 @@ describe("auth member routes", () => {
     const options = await app.fetch(
       jsonRequest("/api/auth/membership-options", { cookie: admin.cookie })
     )
+    // A session that has ended still says when they were last here; usr_groupless never signed in.
+    await storage.auth.sessions.create({
+      id: "ses_commercial",
+      projectId,
+      userId: "usr_commercial",
+      strategyId: "magic-link",
+      tokenHash: "hash_commercial",
+      createdAt: new Date("2026-05-18T09:00:00.000Z"),
+      expiresAt: new Date("2026-05-19T09:00:00.000Z"),
+    })
+    await storage.auth.sessions.touch({
+      projectId,
+      id: "ses_commercial",
+      lastSeenAt: new Date("2026-05-18T16:30:00.000Z"),
+    })
     const list = await app.fetch(
       jsonRequest("/api/auth/members?order=asc", { cookie: admin.cookie })
     )
     const body = (await list.json()) as {
       readonly members: readonly {
+        readonly lastActiveAt?: string
         readonly user: { readonly id: string; readonly status: string }
         readonly groupIds: readonly string[]
         readonly capabilities: {
@@ -212,11 +303,13 @@ describe("auth member routes", () => {
     expect(body.members[0]).toMatchObject({
       groupIds: ["commercial"],
       capabilities: { assignGroups: true, suspend: true, reactivate: false },
+      lastActiveAt: "2026-05-18T16:30:00.000Z",
     })
     expect(body.members[1]).toMatchObject({
       groupIds: [],
       capabilities: { assignGroups: true, suspend: true, reactivate: false },
     })
+    expect(body.members[1]?.lastActiveAt).toBeUndefined()
     expect(body.total).toBe(2)
   })
 
