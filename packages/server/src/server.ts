@@ -269,7 +269,7 @@ export function createSixbApi(server: SixbServer) {
       maxAge: 600,
     })
   )
-  // A runner's session requests, before anything parses them: their run token speaks only there.
+  // A runner's session requests, before anything parses them: a runner token speaks only there.
   const serveRunnerSession = agentRunSessionHandler(host)
   app.onRequest(async ({ request }) => (await serveRunnerSession(request)) ?? undefined)
   app.onRequest(async ({ request }) => {

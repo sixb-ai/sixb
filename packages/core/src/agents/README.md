@@ -95,12 +95,17 @@ over HTTP run the same suite.
 
 A runner outside the worker reaches the same session through the API (`run-session-http.ts`, served
 by `run-session-serve.ts`). Each operation is one request to `/api/agent-runs/:runId/session/<name>`
-with the run's token, and the server answers it with the in-process session's own code: what it
-checks, fences and records is the same wherever the runner is.
+with the runner token its claim returned, and the server answers it with the in-process session's
+own code: what it checks, fences and records is the same wherever the runner is.
+
+The runner token is not the run token. The sandbox's credential adds the run token to every call
+its commands make under `/api/`, so a command that reached the session could finish the run, write
+its messages or call its models. Both are signed under the run's execution, for different purposes:
+the session refuses a run token, and the rest of the API refuses a runner token.
 
 ```text
 claim            POST /api/agent-runs/:runId/claim, as the person who asked for the turn
-                 children.claim, with the turn's token, for a child of that turn
+                 children.claim, with the turn's runner token, for a child of that turn
                  a queued run only: one whose runner stopped ends interrupted, never replayed
 operations       JSON in, JSON out; dates, bytes and maps tagged (run-session-wire.ts)
 models.stream    the provider's events, one JSON line each; the server admits and records the call
@@ -110,7 +115,7 @@ renewLease       answers whether the run, or the turn a child stops with, was ca
                  signal a runner over HTTP hears, at most two minutes apart
 ```
 
-Once a run ended, its token reaches nothing, so `finish` over HTTP also announces the end live: its
+Once a run ended, its runner token reaches nothing, so `finish` over HTTP also announces the end live: its
 answer, then the run's end, from the server that recorded them.
 
 The server pins a runner's messages to its run's thread and drops any author they name, and caps

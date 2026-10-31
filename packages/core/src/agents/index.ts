@@ -241,6 +241,7 @@ export {
   agentRunTokenRunId,
   createAgentRunToken,
   findAgentApiRoute,
+  isAgentRunnerToken,
   isAgentRunToken,
   isAllowedAgentApiRequest,
   isValidAgentRunToken,

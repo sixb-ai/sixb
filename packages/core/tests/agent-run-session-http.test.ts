@@ -2,10 +2,10 @@ import {
   type AgentRunSession,
   claimAgentRun,
   claimAgentRunForRunner,
-  createAgentRunToken,
   createHttpAgentRunSession,
   serveAgentRunSession,
 } from "../src/agents"
+import { createAgentRunnerToken } from "../src/agents/run-token"
 import type { AgentRunRecord } from "../src/storage/agents"
 import {
   type ClaimAgentRunSession,
@@ -23,7 +23,7 @@ const claimOverHttp: ClaimAgentRunSession = async (host, input) => {
   if (!claimed) return null
   return createHttpAgentRunSession({
     apiUrl: "http://sixb.test",
-    runToken: claimed.runToken,
+    runnerToken: claimed.runnerToken,
     run: claimed.run,
     fetch: async (request) =>
       (await serveAgentRunSession(host, request)) ?? new Response(null, { status: 404 }),
@@ -42,7 +42,11 @@ async function takeOver(...args: Parameters<ClaimAgentRunSession>) {
   const { run, executionToken } = session
   return {
     run,
-    runToken: createAgentRunToken({ projectId: host.projectId, runId: run.id, executionToken }),
+    runnerToken: createAgentRunnerToken({
+      projectId: host.projectId,
+      runId: run.id,
+      executionToken,
+    }),
   }
 }
 

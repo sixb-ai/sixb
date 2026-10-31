@@ -8,6 +8,7 @@ import {
   encodeWireError,
   encodeWireValue,
   endLapsedAgentRuns,
+  isAgentRunnerToken,
   isolateStreamSink,
   serveAgentRunSession,
   withAgentActivityStream,
@@ -17,8 +18,9 @@ import type { Elysia } from "elysia"
 import { requestActor, requireRequestSixb } from "../auth/scope"
 
 // A runner outside the worker, such as one on a person's computer, runs a turn through the API:
-// it claims the turn as the person who asked for it, then reaches the turn's session with the run
-// token the claim returns (see serveAgentRunSession). Neither route is part of the public API.
+// it claims the turn as the person who asked for it, then reaches the turn's session with the
+// runner token the claim returns (see serveAgentRunSession). Neither route is part of the public
+// API.
 
 /** The session host the API opens a run's session against: the worker's, without the worker. */
 export function agentRunSessionHost(host: SixbHostView): AgentRunSessionHost | null {
@@ -69,8 +71,8 @@ export function startLapsedRunSweeper(host: SixbHostView): () => void {
 }
 
 /**
- * Answer a runner's session request before the API parses it: its run token speaks only for its
- * run's session. Null for any other request.
+ * Answer a runner's session request before the API parses it: its runner token speaks only for its
+ * run's session, and any other route refuses it. Null for any other request.
  */
 export function agentRunSessionHandler(
   host: SixbHostView
@@ -78,8 +80,19 @@ export function agentRunSessionHandler(
   let sessions: AgentRunSessionHost | null | undefined
   return async (request) => {
     sessions ??= agentRunSessionHost(host)
-    if (!sessions) return null
-    return serveAgentRunSession(sessions, request)
+    const served = sessions ? await serveAgentRunSession(sessions, request) : null
+    if (served) return served
+
+    // It carries the runner's authority over its run, not anyone's over the project.
+    const token = request.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1]
+    if (token === undefined || !isAgentRunnerToken(token)) return null
+    const { pathname } = new URL(request.url)
+    return Response.json(
+      {
+        error: `[SixbServer] A runner token cannot call ${request.method} ${pathname}: it reaches only its run's session.`,
+      },
+      { status: 403 }
+    )
   }
 }
 

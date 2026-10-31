@@ -17,8 +17,9 @@ import {
 } from "./run-session-wire"
 
 // A run's session as a runner reaches it over HTTP: the same operations as the in-process session,
-// each one request with the run's token (see serveAgentRunSession). The runner holds no storage,
-// broker or project: a cancel reaches it at its lease renewals, which it makes itself.
+// each one request with the runner token its claim returned (see serveAgentRunSession). The runner
+// holds no storage, broker or project: a cancel reaches it at its lease renewals, which it makes
+// itself. Its sandbox gets the run token instead, which never reaches this session.
 
 /** How live records go up: gathered for this long, then sent together. */
 const EVENT_BATCH_MS = 100
@@ -26,8 +27,8 @@ const EVENT_BATCH_MS = 100
 export interface HttpAgentRunSessionInput<TRun extends AgentRunRecord> {
   /** The API's origin, such as `https://api.example.com`. */
   readonly apiUrl: string
-  /** The token its claim returned, which every request carries. */
-  readonly runToken: string
+  /** The runner token its claim returned, which every request carries. */
+  readonly runnerToken: string
   /** The run as its claim left it. */
   readonly run: TRun
   /** Sends a request; defaults to `fetch`. */
@@ -55,7 +56,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     return send(
       new Request(url, {
         ...init,
-        headers: { authorization: `Bearer ${input.runToken}`, ...(init.headers ?? {}) },
+        headers: { authorization: `Bearer ${input.runnerToken}`, ...(init.headers ?? {}) },
       })
     )
   }
@@ -205,10 +206,10 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
   return session as AgentRunSession<TRun>
 }
 
-/** What a claim answers: the claimed run, and the token its session's requests carry. */
+/** What a claim answers: the claimed run, and the runner token its session's requests carry. */
 interface ClaimedRun<TRun extends AgentRunRecord> {
   readonly run: TRun
-  readonly runToken: string
+  readonly runnerToken: string
 }
 
 /**
@@ -237,8 +238,8 @@ export async function claimAgentRunOverHttp(input: {
 }
 
 /**
- * Claim a child of a turn this runner runs, with the turn's token: the runner runs its turns'
- * children itself. Null when the child ended or another runner holds it.
+ * Claim a child of a turn this runner runs, with the turn's runner token: the runner runs its
+ * turns' children itself. Null when the child ended or another runner holds it.
  */
 export async function claimAgentRunChildOverHttp(
   turn: HttpAgentRunSessionInput<ConversationAgentRunRecord>,
@@ -248,7 +249,10 @@ export async function claimAgentRunChildOverHttp(
   const response = await send(
     new Request(new URL(agentRunSessionPath(turn.run.id, "children.claim"), turn.apiUrl), {
       method: "POST",
-      headers: { authorization: `Bearer ${turn.runToken}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${turn.runnerToken}`,
+        "content-type": "application/json",
+      },
       body: encodeWireValue({ args: [input.childRunId, input.leaseExpiresAt] }),
     })
   )

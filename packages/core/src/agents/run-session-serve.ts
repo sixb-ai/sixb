@@ -15,12 +15,15 @@ import {
   parseAgentRunSessionPath,
   wireErrorStatus,
 } from "./run-session-wire"
-import { agentRunTokenRunId, createAgentRunToken, isValidAgentRunToken } from "./run-token"
+import { agentRunnerTokenRunId, createAgentRunnerToken, isValidAgentRunnerToken } from "./run-token"
 
 // The server side of a session a runner reaches over HTTP. Each request names the run and carries
-// its run token, issued under the run's current execution: the request opens the run's session,
+// its runner token, issued under the run's current execution: the request opens the run's session,
 // runs one operation of it, and closes it. Every operation is the in-process session's own, so
 // what it checks, fences and records is the same wherever the runner is.
+//
+// The run token its sandbox's commands call the API with never reaches it: they would finish the
+// run, write its messages and call its models as its runner.
 
 type Operation = (
   session: AgentRunSession,
@@ -151,8 +154,9 @@ export async function serveAgentRunSession(
 
 /**
  * Claim a queued run for a runner that reaches it over HTTP: the caller decides who may. Returns
- * the claimed run and the run token its runner sends with every session request, or null when the
- * run ended or another runner holds it.
+ * the claimed run and the runner token its runner sends with every session request, or null when
+ * the run ended or another runner holds it. The run token its commands get comes from the run's
+ * execution token, as the worker's does.
  *
  * A running run is never taken over: it already streamed and billed what it did. Once its lease
  * lapsed, it ends interrupted here, as the lapsed-run sweep would end it, and the claim is refused.
@@ -160,7 +164,7 @@ export async function serveAgentRunSession(
 export async function claimAgentRunForRunner(
   host: AgentRunSessionHost,
   input: { readonly run: AgentRunRecord; readonly leaseExpiresAt: string }
-): Promise<{ readonly run: AgentRunRecord; readonly runToken: string } | null> {
+): Promise<{ readonly run: AgentRunRecord; readonly runnerToken: string } | null> {
   if (input.run.status === "running") {
     const ended =
       agentRunLeaseLapsed(input.run) &&
@@ -183,7 +187,7 @@ export async function claimAgentRunForRunner(
   await session.close()
   return {
     run: session.run,
-    runToken: createAgentRunToken({
+    runnerToken: createAgentRunnerToken({
       projectId: host.projectId,
       runId: session.run.id,
       executionToken: session.executionToken,
@@ -204,8 +208,8 @@ function capLease(leaseExpiresAt: string): string {
 }
 
 /**
- * A runner runs its turn's children itself, so it claims them with the turn's token: only a child
- * of that turn, which the turn spawned.
+ * A runner runs its turn's children itself, so it claims them with the turn's runner token: only a
+ * child of that turn, which the turn spawned.
  */
 async function claimChild(
   host: AgentRunSessionHost,
@@ -226,16 +230,24 @@ async function claimChild(
   return json({ result: await claimAgentRunForRunner(host, { run: child, leaseExpiresAt }) })
 }
 
-/** The run a request's token holds now: the run it names, still running under that execution. */
+/**
+ * The run a request's runner token holds now: the run it names, still running under that
+ * execution. A run token is refused: it is what the run's own commands hold.
+ */
 async function admitRunner(
   host: AgentRunSessionHost,
   request: Request,
   runId: string
 ): Promise<AgentRunRecord | Response> {
   const token = request.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1]
-  if (!token || agentRunTokenRunId(token) !== runId) {
+  if (!token || agentRunnerTokenRunId(token) !== runId) {
     return json(
-      { error: { kind: "Error", message: "[Sixb] A run's session takes that run's token." } },
+      {
+        error: {
+          kind: "Error",
+          message: "[Sixb] A run's session takes the runner token its claim returned.",
+        },
+      },
       401
     )
   }
@@ -245,7 +257,7 @@ async function admitRunner(
     !run ||
     run.status !== "running" ||
     !executionToken ||
-    !isValidAgentRunToken({ projectId: host.projectId, runId, executionToken, token })
+    !isValidAgentRunnerToken({ projectId: host.projectId, runId, executionToken, token })
   ) {
     // Its execution ended or moved to another runner: what the runner reads as lost ownership.
     const wire = encodeWireError(new AgentExecutionLostError(runId))
@@ -267,7 +279,7 @@ async function renew(
 }
 
 /**
- * End the run, and say so live: once it ended, its runner's token no longer reaches its session,
+ * End the run, and say so live: once it ended, its runner token no longer reaches its session,
  * so the server that recorded the end announces it, its answer first.
  */
 async function finish(
