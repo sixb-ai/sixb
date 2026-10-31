@@ -56,6 +56,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.manage(accounting)` | Manage a connector's OAuth accounts. `can.manage(agent.usage)` manages AI limits; `can.manage(agent.memory)` deletes the agent's memory shared by the whole project, which everyone who can run the agent reads and adds to. |
 | `can.observe(project.logs)` | Read captured logs. `can.observe(agent.usage)` reads AI usage. |
 | `can.observe(project.activity)` | Read the app's [visits and page views](../apps/activity.md). |
+| `can.observe(project.console)` | Open the app's [Console](../apps/overview.md#choose-who-sees-the-console). Each of its pages still takes its own grants. |
 | `can.observe(agent.threads)` | Read other users' [agent conversations](../apps/activity.md#read-a-conversation), read-only. It shows everything the agent showed them, whatever the reader's own permissions. |
 | `can.view(project.users)` | Read the [member directory](members.md#read-the-member-directory): names, emails, avatars, and status. |
 | `can.share(invoiceShare)` | Issue and revoke links from a [Share definition](shared-access.md). |
@@ -134,9 +135,10 @@ Limits:
 ## Choose who sees the app's sections
 
 Every signed-in member opens the project's app. Roles decide what each member can read and do in
-it. To show the app's Data, Observability, Ontology and Settings pages only to some groups, set the
-app's [`visibility`](../apps/overview.md#choose-who-sees-a-section). Visibility only hides screens:
-the API still checks each request against the caller's grants.
+it. The [Console](../apps/overview.md#choose-who-sees-the-console) opens to those with
+`can.observe(project.console)`; Settings shows each project page to whoever may do what it is for,
+such as `can.observe(agent.usage)` for Usage. Hiding a screen protects no data: the API still checks
+each request against the caller's grants.
 
 ## Permissions during execution
 

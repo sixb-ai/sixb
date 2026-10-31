@@ -3,17 +3,21 @@ import {
   aiModelCallGroupFragmentFromRow,
   buildAiModelCallGroupsFromFragments,
   normalizeAiModelCallAccountingQuery,
+  normalizeAiModelCallGroupSort,
   TOKENLESS_MODEL_KINDS,
 } from "@sixb/core/internal/ai-cost-storage-provider"
 import type { ListAiModelCallGroupsInput, ListAiModelCallGroupsResult } from "@sixb/core/storage"
+import { pgAccountingFilterSql, pgAccountingFilterValues } from "./ai-accounting-filters"
 import type { PgStoreClient } from "./transactions"
 
-/** Paginate initiating executions, then aggregate their matching calls without loading usage payloads. */
+/** Paginate conversations, workflow runs and other initiating executions, then aggregate their matching calls without loading usage payloads. */
 export async function listAiModelCallGroups(
   sql: PgStoreClient,
   input: ListAiModelCallGroupsInput
 ): Promise<ListAiModelCallGroupsResult> {
   const query = normalizeAiModelCallAccountingQuery(input)
+  const sort = normalizeAiModelCallGroupSort(input.sort)
+  const filter = pgAccountingFilterValues(query)
   const parameters = [
     query.projectId,
     query.from.toISOString(),
@@ -21,17 +25,23 @@ export async function listAiModelCallGroups(
     query.providerId ?? null,
     query.modelId ?? null,
     query.valuationStatus ?? null,
+    filter.kind,
+    filter.source,
+    filter.workflow,
+    filter.mode,
+    filter.id,
   ]
   const [count] = await sql.unsafe<{ total: string }[]>(COUNT_SQL, parameters)
   const rows = await sql.unsafe<AiModelCallGroupRow[]>(PAGE_SQL, [
     ...parameters,
     query.limit,
     query.offset,
+    sort,
   ])
   const total = Number(count?.total)
   if (!Number.isSafeInteger(total) || total < 0)
     throw new RangeError("[Sixb] Invalid model-call group count.")
-  const items = buildAiModelCallGroupsFromFragments(rows.map(aiModelCallGroupFragmentFromRow))
+  const items = buildAiModelCallGroupsFromFragments(rows.map(aiModelCallGroupFragmentFromRow), sort)
   return { items, total, hasMore: query.offset + items.length < total }
 }
 
@@ -41,8 +51,15 @@ const TOKENLESS_KINDS = TOKENLESS_MODEL_KINDS.map((kind) => `'${kind}'`).join(",
 const FILTERED_SQL = `
 WITH filtered AS (
   SELECT COALESCE(root_agent.execution_id, usage.execution_id) AS root_execution_id,
+    -- What the call is listed under, as aiModelCallGroupKey computes it.
+    CASE
+      WHEN root_agent.thread_id IS NOT NULL THEN 'thread:' || root_agent.thread_id
+      WHEN workflow_node.workflow_run_id IS NOT NULL THEN 'workflowRun:' || workflow_node.workflow_run_id
+      ELSE COALESCE(root_agent.execution_id, usage.execution_id)
+    END AS group_key,
     usage.execution_id, usage.provider_id, usage.requested_model_id, usage.occurred_at,
-    usage.total_tokens, usage.model_kind, usage.output_images, usage.input_characters,
+    usage.total_tokens, usage.input_tokens, usage.cache_read_input_tokens,
+    usage.model_kind, usage.output_images, usage.input_characters,
     usage.audio_duration_ms,
     execution.executor_kind, execution.executor_id, execution.authority_primitive_id AS primitive_id,
     COALESCE(cost.status, 'unvalued') AS valuation_status,
@@ -55,7 +72,8 @@ WITH filtered AS (
     workflow_node.node_id AS workflow_agent_step_id,
     workflow_agent.node_run_id AS workflow_node_run_id,
     workflow_node.workflow_id AS workflow_id,
-    workflow_node.workflow_run_id AS workflow_run_id
+    workflow_node.workflow_run_id AS workflow_run_id,
+    execution.requested_by_user_id, execution.requested_by_service_account_id
   FROM ai_model_call_usage AS usage
   JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
   LEFT JOIN agent_runs AS direct_agent
@@ -75,23 +93,28 @@ WITH filtered AS (
     AND ($4::text IS NULL OR usage.provider_id = $4)
     AND ($5::text IS NULL OR usage.requested_model_id = $5)
     AND ($6::text IS NULL OR COALESCE(cost.status, 'unvalued') = $6)
+    AND ${pgAccountingFilterSql(7)}
 ), roots AS (
-  SELECT root_execution_id, MAX(occurred_at) AS last_call_at
-  FROM filtered GROUP BY root_execution_id
+  SELECT group_key, MAX(occurred_at) AS last_call_at, SUM(COALESCE(amount_nanos, 0)) AS cost_nanos
+  FROM filtered GROUP BY group_key
 )
 `
 const COUNT_SQL = `${FILTERED_SQL} SELECT CAST(COUNT(*) AS TEXT) AS total FROM roots`
 const PAGE_SQL = `${FILTERED_SQL}, page AS (
-  SELECT root_execution_id FROM roots
-  ORDER BY last_call_at DESC, root_execution_id COLLATE "C" ASC LIMIT $7 OFFSET $8
+  SELECT group_key FROM roots
+  ORDER BY CASE WHEN $14::text = 'cost' THEN cost_nanos END DESC NULLS LAST,
+    last_call_at DESC, group_key COLLATE "C" ASC
+  LIMIT $12 OFFSET $13
 )
-SELECT filtered.root_execution_id, execution_id, provider_id, requested_model_id,
+SELECT filtered.group_key, root_execution_id, execution_id, provider_id, requested_model_id,
   MIN(occurred_at) AS first_call_at, MAX(occurred_at) AS last_call_at,
   CAST(COUNT(*) AS TEXT) AS call_count,
   CAST(COUNT(total_tokens) AS TEXT) AS token_count,
   CAST(COUNT(CASE WHEN total_tokens IS NULL AND model_kind IN (${TOKENLESS_KINDS}) THEN 1 END) AS TEXT)
     AS tokenless_count,
   CAST(SUM(total_tokens) AS TEXT) AS total_tokens,
+  CAST(SUM(input_tokens) AS TEXT) AS input_tokens,
+  CAST(SUM(cache_read_input_tokens) AS TEXT) AS cache_read_input_tokens,
   CAST(SUM(output_images) AS TEXT) AS output_images,
   CAST(SUM(input_characters) AS TEXT) AS input_characters,
   CAST(SUM(audio_duration_ms) AS TEXT) AS audio_duration_ms,
@@ -108,8 +131,10 @@ SELECT filtered.root_execution_id, execution_id, provider_id, requested_model_id
   MAX(workflow_agent_step_id) AS workflow_agent_step_id,
   MAX(workflow_node_run_id) AS workflow_node_run_id,
   MAX(workflow_id) AS workflow_id,
-  MAX(workflow_run_id) AS workflow_run_id
-FROM filtered JOIN page ON page.root_execution_id = filtered.root_execution_id
-GROUP BY filtered.root_execution_id, execution_id, provider_id, requested_model_id,
+  MAX(workflow_run_id) AS workflow_run_id,
+  MAX(requested_by_user_id) AS requested_by_user_id,
+  MAX(requested_by_service_account_id) AS requested_by_service_account_id
+FROM filtered JOIN page ON page.group_key = filtered.group_key
+GROUP BY filtered.group_key, root_execution_id, execution_id, provider_id, requested_model_id,
   valuation_status, amount_currency
 `

@@ -5,7 +5,7 @@ import {
   isFilterableProperty,
   isSortableProperty,
   type QueryProperty,
-} from "../src/pages/ontology/lib/object-query"
+} from "../src/pages/console/ontology/lib/object-query"
 
 function property(
   schema: unknown,

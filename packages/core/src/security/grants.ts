@@ -171,6 +171,7 @@ const UNVIEWABLE_PROJECT_REFERENCES: ReadonlySet<unknown> = new Set([
   project,
   project.logs,
   project.activity,
+  project.console,
 ])
 
 function view<const TObjectTypeId extends string>(
@@ -387,6 +388,7 @@ function isAgentUsageReference(input: unknown): input is AgentUsageReference {
 type ObservableReference =
   | ProjectReference["logs"]
   | ProjectReference["activity"]
+  | ProjectReference["console"]
   | AgentUsageReference
   | AgentThreadsReference
 
@@ -397,6 +399,7 @@ type ObservableReference =
 const OBSERVABLE_REFERENCES: Readonly<Record<ObservableReference["kind"], string>> = {
   logs: "project.logs",
   activity: "project.activity",
+  console: "project.console",
   aiUsage: "agent.usage",
   agentThreads: "agent.threads",
 }

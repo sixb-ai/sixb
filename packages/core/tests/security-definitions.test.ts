@@ -613,13 +613,14 @@ describe("role definitions", () => {
     ]
     for (const input of inputs) {
       expect(() => observe(input)).toThrow(
-        "[Sixb] can.observe accepts project.logs or project.activity or agent.usage or agent.threads."
+        "[Sixb] can.observe accepts project.logs or project.activity or project.console or agent.usage or agent.threads."
       )
     }
     expect(() => manage(project.logs)).toThrow(SecurityValidationError)
     expect(Object.isFrozen(project)).toBe(true)
     expect(Object.isFrozen(project.logs)).toBe(true)
     expect(Object.isFrozen(project.activity)).toBe(true)
+    expect(Object.isFrozen(project.console)).toBe(true)
     expect(Object.isFrozen(project.users)).toBe(true)
   })
 

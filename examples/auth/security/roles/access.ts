@@ -23,6 +23,8 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
     can.append(every.object()),
     can.apply(every.action()),
     can.run(every.workflow()),
+    // The Console; each of its pages still takes the grants above.
+    can.observe(project.console),
     can.observe(project.logs),
     can.observe(agent.usage),
     can.manage(agent.usage),

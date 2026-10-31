@@ -26,4 +26,4 @@ The following assets were retrieved from icons linked by the services' official 
 - `plaud.png`: https://web-static.plaud.ai/plaud-web3/prod-261001-083619-main-7575c8ce1f/favicon-light.png
 
 Adding an icon: drop the file here, then key it by the connector's adapter `type` in
-`src/pages/data/shared.tsx` and set `icon` in `apps/docs/src/docs/connectorCatalog.ts`.
+`src/pages/console/data/shared.tsx` and set `icon` in `apps/docs/src/docs/connectorCatalog.ts`.

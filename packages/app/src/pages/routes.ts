@@ -20,29 +20,29 @@ export function artifactHref(
   return `/artifacts/${encodeURIComponent(artifactId)}${query ? `?${query}` : ""}`
 }
 
-/** An object type's page in Ontology › Object types. */
+/** An object type's page in Console › Object types. */
 export function objectTypeHref(objectTypeId: string): string {
-  return `/ontology/object-types/${encodeURIComponent(objectTypeId)}`
+  return `/console/object-types/${encodeURIComponent(objectTypeId)}`
 }
 
-/** A type's objects in Ontology › Objects. */
+/** A type's objects in Console › Objects. */
 export function objectsOfTypeHref(objectTypeId: string): string {
-  return `/ontology/objects?type=${encodeURIComponent(objectTypeId)}`
+  return `/console/objects?type=${encodeURIComponent(objectTypeId)}`
 }
 
-/** Ontology › Graph with one type selected. */
+/** Console › Graph with one type selected. */
 export function graphTypeHref(objectTypeId: string): string {
-  return `/ontology/graph?type=${encodeURIComponent(objectTypeId)}`
+  return `/console/graph?type=${encodeURIComponent(objectTypeId)}`
 }
 
-/** A rule's page in Ontology › Rules. */
+/** A rule's page in Console › Rules. */
 export function ruleHref(ruleId: string): string {
-  return `/ontology/rules/${encodeURIComponent(ruleId)}`
+  return `/console/rules/${encodeURIComponent(ruleId)}`
 }
 
-/** A workflow's canvas in Ontology › Workflows. */
+/** A workflow's canvas in Console › Workflows. */
 export function workflowHref(workflowId: string): string {
-  return `/ontology/workflows/${encodeURIComponent(workflowId)}`
+  return `/console/workflows/${encodeURIComponent(workflowId)}`
 }
 
 /** A workflow's canvas with one run over it, and one of its steps open. */
@@ -52,17 +52,17 @@ export function workflowCanvasHref(workflowId: string, runId: string, nodeId?: s
   return `${workflowHref(workflowId)}?${params}`
 }
 
-/** A workflow run's page in Observability › Runs. */
+/** A workflow run's page, under Console › Workflows. */
 export function workflowRunHref(runId: string): string {
-  return `/observability/runs/workflows/${encodeURIComponent(runId)}`
+  return `/console/workflows/runs/${encodeURIComponent(runId)}`
 }
 
-/** An action run's page in Observability › Runs. */
+/** An action run's page, under Console › Actions. */
 export function actionRunHref(runId: string): string {
-  return `/observability/runs/actions/${encodeURIComponent(runId)}`
+  return `/console/actions/runs/${encodeURIComponent(runId)}`
 }
 
-/** Someone else's Agent conversation, read-only, in Observability › Activity. */
+/** Someone else's Agent conversation, read-only, in Settings › Activity. */
 export function observedThreadHref(threadId: string): string {
-  return `/observability/activity/threads/${encodeURIComponent(threadId)}`
+  return `/settings/activity/threads/${encodeURIComponent(threadId)}`
 }

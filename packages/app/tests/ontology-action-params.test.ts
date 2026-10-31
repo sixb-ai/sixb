@@ -6,7 +6,7 @@ import {
   buildActionParams,
   buildObjectActionParams,
   describeActionParamInput,
-} from "../src/pages/ontology/lib/action-params"
+} from "../src/pages/console/ontology/lib/action-params"
 
 const fileRef: FileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

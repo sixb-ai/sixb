@@ -23,7 +23,7 @@ When an invoice starts matching, Sixb emits `rule.triggered`. When it stops matc
 `rule.resolved`. Further changes while it remains active do not create a new transition. It can
 trigger again after resolving.
 
-Sixb evaluates the condition as objects and links change. Open **Ontology › Rules** in your app to
+Sixb evaluates the condition as objects and links change. Open **Console › Rules** in your app to
 inspect active matches.
 
 ## Combine conditions

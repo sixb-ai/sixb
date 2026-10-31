@@ -19,7 +19,7 @@ import {
   Workflow,
 } from "lucide-react"
 import { Fragment, useId, useMemo, useRef, useState } from "react"
-import { humanizeIdentifier } from "../../pages/ontology/lib/labels"
+import { humanizeIdentifier } from "../../pages/console/ontology/lib/labels"
 import { ObjectRefLinksContext, useValueTypes, ValueTree, valueSchema } from "../../pages/values"
 import {
   type AgentApproval,

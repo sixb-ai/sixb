@@ -1,7 +1,9 @@
-import type { SixbHostView } from "@sixb/core"
+import type { AgentMessagePart, SixbHostView } from "@sixb/core"
 import type {
   AiAccountingAggregate,
+  AiAccountingFilters,
   AiAccountingOverview,
+  AiAccountingRequester,
   AiLimitPolicy,
   AiLimitPolicyStatus,
   AiModelCallAccountingItem,
@@ -45,7 +47,78 @@ function serializeAggregate(aggregate: AiAccountingAggregate) {
   }
 }
 
-function serializeOverview(overview: AiAccountingOverview) {
+/** The person, source and kind filters a query names, as the storage reads them. */
+function accountingFilters(parsed: {
+  readonly person?: string
+  readonly source?: string
+  readonly kind?: AiAccountingFilters["modelKind"]
+}): Partial<Pick<AiAccountingFilters, "requester" | "source" | "modelKind">> {
+  const colon = parsed.person?.indexOf(":") ?? -1
+  return {
+    ...(parsed.person === undefined
+      ? {}
+      : {
+          requester:
+            parsed.person === "none"
+              ? ("none" as const)
+              : {
+                  type: parsed.person.slice(0, colon) as AiAccountingRequester["type"],
+                  id: parsed.person.slice(colon + 1),
+                },
+        }),
+    ...(parsed.source === undefined
+      ? {}
+      : {
+          source: parsed.source.startsWith("workflow:")
+            ? { kind: "workflow" as const, workflowId: parsed.source.slice("workflow:".length) }
+            : { kind: parsed.source as "agent" | "action" | "workflow" | "other" },
+        }),
+    ...(parsed.kind === undefined ? {} : { modelKind: parsed.kind }),
+  }
+}
+
+type RequesterDetails = ReadonlyMap<string, { readonly name?: string; readonly email?: string }>
+
+const requesterKey = (requester: AiAccountingRequester) => `${requester.type}:${requester.id}`
+
+/** Each requester's name and email, read once for the page they are on. */
+async function requesterDetails(
+  host: SixbHostView,
+  requesters: readonly (AiAccountingRequester | undefined)[]
+): Promise<RequesterDetails> {
+  const auth = host.storage.auth
+  const details = new Map<string, { name?: string; email?: string }>()
+  if (!auth) return details
+  const unique = [
+    ...new Map(
+      requesters.flatMap((requester) => (requester ? [[requesterKey(requester), requester]] : []))
+    ).values(),
+  ]
+  const userIds = unique.flatMap((requester) => (requester.type === "user" ? [requester.id] : []))
+  if (userIds.length > 0) {
+    for (const user of await auth.users.getByIds({ projectId: host.id, ids: userIds })) {
+      details.set(`user:${user.id}`, {
+        ...(user.displayName ? { name: user.displayName } : {}),
+        email: user.email,
+      })
+    }
+  }
+  for (const requester of unique) {
+    if (requester.type !== "serviceAccount") continue
+    const account = await auth.serviceAccounts.getById({ projectId: host.id, id: requester.id })
+    if (account) details.set(requesterKey(requester), { name: account.name })
+  }
+  return details
+}
+
+function serializeRequester(
+  requester: AiAccountingRequester | undefined,
+  details: RequesterDetails
+) {
+  return requester ? { ...requester, ...details.get(requesterKey(requester)) } : undefined
+}
+
+function serializeOverview(overview: AiAccountingOverview, details: RequesterDetails) {
   return AiAccountingOverviewResponseSchema.parse({
     range: {
       from: overview.range.from.toISOString(),
@@ -58,10 +131,23 @@ function serializeOverview(overview: AiAccountingOverview) {
       end: period.end.toISOString(),
       ...serializeAggregate(period),
     })),
+    modelSeries: overview.modelSeries.map((model) => ({
+      providerId: model.providerId,
+      modelId: model.modelId,
+      series: model.series.map((period) => ({
+        start: period.start.toISOString(),
+        end: period.end.toISOString(),
+        ...serializeAggregate(period),
+      })),
+    })),
     models: overview.models.map((model) => ({
       providerId: model.providerId,
       modelId: model.modelId,
       ...serializeAggregate(model),
+    })),
+    people: overview.people.map((person) => ({
+      ...(person.requester ? { requester: serializeRequester(person.requester, details) } : {}),
+      ...serializeAggregate(person),
     })),
     kinds: overview.kinds.map((kind) => ({
       ...(kind.modelKind === undefined ? {} : { modelKind: kind.modelKind }),
@@ -173,29 +259,54 @@ function handleAiLimitRouteError(error: unknown, set: { status?: number | string
 async function serializeGroup(
   group: AiModelCallGroup,
   host: SixbHostView,
-  sixb: RequestAuthState["sixb"]
+  sixb: RequestAuthState["sixb"],
+  details: RequesterDetails
 ) {
   // Accounting is project-wide; conversation titles and delegation keys remain private.
   const thread =
     group.attribution?.kind === "agent" && sixb
       ? await sixb.agent.threads.getById(group.attribution.threadId)
       : null
-  const childIds = thread
+  // The conversation's turns and sub-agents, read together, for the sub-agents' names and what
+  // each turn was asked.
+  const agents = host.storage.agents
+  const runIds = thread
     ? group.executions.flatMap((execution) =>
-        execution.attribution?.kind === "subagent" ? [execution.attribution.subagentRunId] : []
+        execution.attribution?.kind === "agent"
+          ? [execution.attribution.agentRunId]
+          : execution.attribution?.kind === "subagent"
+            ? [execution.attribution.subagentRunId]
+            : []
       )
     : []
-  const children =
-    childIds.length > 0
-      ? ((await host.storage.agents?.runs.getByIds({ projectId: host.id, ids: childIds })) ?? [])
+  const runs =
+    agents && runIds.length > 0
+      ? await agents.runs.getByIds({ projectId: host.id, ids: runIds })
       : []
   const labels = new Map(
-    children.flatMap((run) =>
+    runs.flatMap((run) =>
       run.kind === "subagent" ? [[run.executionId, run.spawnKey] as const] : []
     )
   )
+  const prompts = new Map(
+    agents
+      ? await Promise.all(
+          runs.flatMap((run) =>
+            run.kind === "conversation"
+              ? [
+                  agents.messages
+                    .getById({ projectId: host.id, id: run.triggerMessageId })
+                    .then((message) => [run.executionId, message && promptOf(message)] as const),
+                ]
+              : []
+          )
+        )
+      : []
+  )
+  const { requester, ...rest } = group
   return {
-    ...group,
+    ...rest,
+    ...(requester ? { requester: serializeRequester(requester, details) } : {}),
     label: thread?.title,
     canOpenThread: thread !== null,
     firstCallAt: group.firstCallAt.toISOString(),
@@ -203,10 +314,22 @@ async function serializeGroup(
     executions: group.executions.map((execution) => ({
       ...execution,
       label: labels.get(execution.executionId),
+      prompt: prompts.get(execution.executionId) ?? undefined,
       firstCallAt: execution.firstCallAt.toISOString(),
       lastCallAt: execution.lastCallAt.toISOString(),
     })),
   }
+}
+
+/** The opening of the message that started a turn, on one line. */
+function promptOf(message: { readonly parts: readonly AgentMessagePart[] }): string | undefined {
+  const text = message.parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!text) return undefined
+  return text.length > 160 ? `${text.slice(0, 159)}…` : text
 }
 
 export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
@@ -227,8 +350,13 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
           bucket: parsed.bucket,
           providerId: parsed.providerId,
           modelId: parsed.modelId,
+          ...accountingFilters(parsed),
         })
-        return serializeOverview(overview)
+        const details = await requesterDetails(
+          host,
+          overview.people.map((person) => person.requester)
+        )
+        return serializeOverview(overview, details)
       } catch (error) {
         return handleRouteError(error, set)
       }
@@ -266,6 +394,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
           to: new Date(parsed.to),
           providerId: parsed.providerId,
           modelId: parsed.modelId,
+          ...accountingFilters(parsed),
           executionId: parsed.executionId,
           valuationStatus: parsed.valuationStatus,
           limit: parseOptionalInt(parsed.limit),
@@ -530,13 +659,21 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
           to: new Date(parsed.to),
           providerId: parsed.providerId,
           modelId: parsed.modelId,
+          ...accountingFilters(parsed),
           valuationStatus: parsed.valuationStatus,
+          sort: parsed.sort,
           limit: parseOptionalInt(parsed.limit),
           offset: parseOptionalInt(parsed.offset),
         })
+        const details = await requesterDetails(
+          host,
+          result.items.map((group) => group.requester)
+        )
         return AiModelCallGroupsResponseSchema.parse({
           ...result,
-          items: await Promise.all(result.items.map((group) => serializeGroup(group, host, sixb))),
+          items: await Promise.all(
+            result.items.map((group) => serializeGroup(group, host, sixb, details))
+          ),
         })
       } catch (error) {
         return handleRouteError(error, set)

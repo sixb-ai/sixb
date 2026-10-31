@@ -15,6 +15,7 @@ import {
   listAuthInvitationsQueryKey,
   listAuthMembersOptions,
   listAuthMembersQueryKey,
+  listAuthServiceAccountsOptions,
   reactivateAuthMemberMutation,
   revokeAuthInvitationMutation,
   suspendAuthMemberMutation,
@@ -48,33 +49,36 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Ban,
+  ChevronRight,
+  Link2,
   Loader2,
-  Mail,
   MoreHorizontal,
   PanelRight,
   Pencil,
+  Plus,
   RotateCcw,
-  Search,
-  UserPlus,
   UsersRound,
+  X,
 } from "lucide-react"
 import { type ReactNode, type SubmitEvent, useEffect, useMemo, useState } from "react"
-import { useCurrentUser } from "../../session"
+import { useSearchParams } from "react-router-dom"
+import { useCurrentUser, useSessionAccess } from "../../session"
 import { notify, SectionPage } from "../section-page"
 import {
   apiErrorMessage,
   Field,
   IconTile,
   MetaDot,
+  PageTabs,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
   Pill,
-  ToolbarTabs,
   useFormat,
 } from "../section-ui"
 import {
@@ -83,10 +87,12 @@ import {
   FormError,
   GroupChips,
   GroupPicker,
+  groupLabel,
   PersonAvatar,
   Warning,
 } from "./controls"
 import { type SettingsMessages, useSettingsMessages } from "./messages"
+import { ServiceAccountsTab } from "./service-accounts"
 
 type Member = ListAuthMembersResponse["members"][number]
 type MemberUser = Member["user"]
@@ -119,16 +125,22 @@ function inviteDisabledReason(
   return messages.notAllowed
 }
 
-/** Settings › Members: the people who can sign in, their groups, and invitations. */
+type MembersTab = "people" | "groups" | "service-accounts"
+
+/**
+ * Settings › Members: who can sign in and the groups that decide what they can open, with the
+ * service accounts that act for automation. Each tab shows to whoever may manage it.
+ */
 export function SettingsMembersPage() {
   const allMessages = useSettingsMessages()
   const messages = allMessages.members
   const queryClient = useQueryClient()
   const currentUser = useCurrentUser()
+  const access = useSessionAccess()
   const format = useFormat()
-  const [query, setQuery] = useState("")
-  const [activeTab, setActiveTab] = useState<"members" | "invitations">("members")
+  const [searchParams, setSearchParams] = useSearchParams()
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [createAccountOpen, setCreateAccountOpen] = useState(false)
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null)
   const [draftGroupIds, setDraftGroupIds] = useState<string[]>([])
@@ -140,11 +152,33 @@ export function SettingsMembersPage() {
   const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
   const [showPastInvitations, setShowPastInvitations] = useState(false)
 
+  // The tabs this person may use, in order; the address names one, or the first opens.
+  const tabs: readonly MembersTab[] = [
+    ...(access?.members ? (["people", "groups"] as const) : []),
+    ...(access?.serviceAccounts ? (["service-accounts"] as const) : []),
+  ]
+  const requested = searchParams.get("tab")
+  const tab = tabs.find((candidate) => candidate === requested) ?? tabs[0] ?? "people"
+  const groupFilter = tab === "people" ? searchParams.get("group") : null
+  const showTab = (next: MembersTab, group?: string) => {
+    setSearchParams(next === tabs[0] && !group ? {} : { tab: next, ...(group ? { group } : {}) }, {
+      replace: false,
+    })
+  }
+  const filterByGroup = (group: string | null) =>
+    setSearchParams(group ? { tab: "people", group } : {}, { replace: true })
+
   const optionsQuery = useQuery({ ...getAuthMembershipOptionsOptions(), retry: false })
   const membersQuery = useQuery({ ...listAuthMembersOptions(memberListOptions), retry: false })
   const inviteOptionsQuery = useQuery({ ...getAuthInvitationOptionsOptions(), retry: false })
   const invitationsQuery = useQuery({
     ...listAuthInvitationsOptions(invitationListOptions),
+    retry: false,
+  })
+  // For the tab's count; the tab itself reads the same list.
+  const accountsQuery = useQuery({
+    ...listAuthServiceAccountsOptions(),
+    enabled: access?.serviceAccounts === true,
     retry: false,
   })
 
@@ -155,6 +189,10 @@ export function SettingsMembersPage() {
     const all = [...(inviteOptionsQuery.data?.groups ?? []), ...(assignableGroups ?? [])]
     return new Map<string, AuthGroupOption>(all.map((group) => [group.id, group]))
   }, [assignableGroups, inviteOptionsQuery.data])
+  const groups = useMemo(
+    () => [...groupsById.values()].sort((a, b) => groupLabel(a).localeCompare(groupLabel(b))),
+    [groupsById]
+  )
   const inviteOptions = inviteOptionsQuery.data
   const invitations = invitationsQuery.data?.invitations ?? []
   const pendingInvitations = invitations.filter((invitation) => invitation.status === "pending")
@@ -163,15 +201,10 @@ export function SettingsMembersPage() {
     ? null
     : inviteDisabledReason(inviteOptions, messages.invite)
 
-  const visibleMembers = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (!needle) return members
-    return members.filter(
-      (member) =>
-        member.user.email.toLowerCase().includes(needle) ||
-        member.user.displayName?.toLowerCase().includes(needle) === true
-    )
-  }, [members, query])
+  const inGroup = (groupIds: readonly string[]) => !groupFilter || groupIds.includes(groupFilter)
+  const visibleMembers = members.filter((member) => inGroup(member.groupIds))
+  // Someone invited is one of the people, not yet joined: they follow those who have.
+  const visibleInvitations = pendingInvitations.filter((invitation) => inGroup(invitation.groupIds))
 
   const findMember = (id: string | null | undefined) =>
     members.find((member) => member.user.id === id) ?? null
@@ -239,11 +272,36 @@ export function SettingsMembersPage() {
           ? messages.invite.sent(result.invitation.email)
           : messages.invite.created(result.invitation.email)
       )
-      // Show the new invitation where it now lives.
-      setActiveTab("invitations")
+      // The invitation leads the people, where it now lives.
+      if (tab !== "people") showTab("people")
       await refreshInvitations()
     },
   })
+
+  const renewInvitation = useMutation({
+    ...createAuthInvitationMutation(),
+    onSuccess: async (result) => {
+      const { email } = result.invitation
+      const link = result.delivery.link
+      if (link) {
+        // Copied where the browser allows it, shown to copy by hand where it does not.
+        const copied = await navigator.clipboard?.writeText(link.url).then(
+          () => true,
+          () => false
+        )
+        if (copied) notify.success(messages.invitations.linkCopied(email))
+        else setRevealedLink({ ...link, email })
+      } else {
+        notify.success(messages.invitations.sentAgain(email))
+      }
+      await refreshInvitations()
+    },
+    onError: (error) => notify.error(apiErrorMessage(error, messages.invite.createFailed)),
+  })
+  const renewInvite = (invitation: Invitation) =>
+    renewInvitation.mutate({
+      body: { email: invitation.email, groupIds: [...invitation.groupIds], revealLink: true },
+    })
 
   const revokeInvitation = useMutation({
     ...revokeAuthInvitationMutation(),
@@ -285,63 +343,167 @@ export function SettingsMembersPage() {
     )
   }
 
-  const invitationRow = (invitation: Invitation) => (
-    <PanelRow
-      key={invitation.id}
-      muted={invitation.status !== "pending"}
-      leading={<IconTile icon={Mail} />}
-      title={
-        <>
-          <span className="truncate">{invitation.email}</span>
-          {isExpired(invitation) ? (
-            <Pill tone="warn">{messages.invitations.status.expired}</Pill>
-          ) : invitation.status === "pending" ? (
-            <Pill tone="info">{messages.invitations.status.pending}</Pill>
-          ) : invitation.status === "accepted" ? (
-            <Pill tone="ok">{messages.invitations.status.accepted}</Pill>
-          ) : (
-            <Pill tone="muted">{messages.invitations.status.revoked}</Pill>
-          )}
-        </>
-      }
-      meta={
-        <>
-          <span>{messages.invitations.invited(format.relative(invitation.createdAt))}</span>
-          {invitation.status === "pending" ? (
-            <>
-              <MetaDot />
-              <span>
-                {isExpired(invitation)
-                  ? messages.invitations.expiredOn(format.date(invitation.expiresAt))
-                  : messages.invitations.expiresOn(format.date(invitation.expiresAt))}
-              </span>
-            </>
-          ) : null}
-        </>
-      }
-      trailing={
-        <>
-          <span className="hidden md:inline-flex">
-            <GroupChips groupIds={invitation.groupIds} groupsById={groupsById} />
-          </span>
-          {invitation.status === "pending" ? (
-            <Button
+  const invitationRow = (invitation: Invitation) => {
+    const pending = invitation.status === "pending"
+    const renewing =
+      renewInvitation.isPending && renewInvitation.variables?.body.email === invitation.email
+    return (
+      <PeopleRow
+        key={invitation.id}
+        invited
+        muted={!pending}
+        avatar={<InviteeAvatar email={invitation.email} />}
+        name={invitation.email}
+        detail={
+          isExpired(invitation)
+            ? messages.invitations.expiredOn(format.date(invitation.expiresAt))
+            : pending
+              ? messages.invitations.invited(format.relative(invitation.createdAt))
+              : invitation.status === "accepted"
+                ? messages.invitations.status.accepted
+                : messages.invitations.status.revoked
+        }
+        groups={<GroupChips groupIds={invitation.groupIds} groupsById={groupsById} />}
+        status={
+          pending ? (
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              disabled={revokingInvitationId === invitation.id}
-              onClick={() => revokeInvite(invitation.id)}
-              className="text-muted-foreground hover:bg-destructive/8 hover:text-destructive"
+              disabled={renewing}
+              onClick={() => renewInvite(invitation)}
+              className="text-[0.8125rem] font-medium text-foreground hover:underline hover:underline-offset-4 disabled:opacity-60"
             >
-              {revokingInvitationId === invitation.id
-                ? allMessages.common.revoking
-                : allMessages.common.revoke}
-            </Button>
-          ) : null}
-        </>
-      }
-    />
-  )
+              {renewing ? messages.invitations.renewing : messages.invitations.copyNewLink}
+            </button>
+          ) : null
+        }
+        menu={
+          pending ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  aria-label={messages.actionsFor(invitation.email)}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuItem disabled={renewing} onSelect={() => renewInvite(invitation)}>
+                  <Link2 />
+                  {messages.invitations.copyNewLink}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={revokingInvitationId === invitation.id}
+                  onSelect={() => revokeInvite(invitation.id)}
+                >
+                  <Ban />
+                  {allMessages.common.revoke}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null
+        }
+      />
+    )
+  }
+
+  const memberRow = (member: Member) => {
+    const name = displayName(member.user)
+    const active = member.user.status === "active"
+    const isSelf = member.user.id === currentUser?.id
+    return (
+      <PeopleRow
+        key={member.user.id}
+        onOpen={() => setSelectedMemberId(member.user.id)}
+        muted={!active}
+        avatar={
+          <MemberAvatar
+            name={member.user.displayName}
+            email={member.user.email}
+            avatarUrl={member.user.avatarUrl}
+          />
+        }
+        name={
+          <>
+            {name}
+            {isSelf ? (
+              <span className="font-normal text-muted-foreground"> {messages.youMark}</span>
+            ) : null}
+          </>
+        }
+        detail={
+          name === member.user.email
+            ? messages.joined(format.date(member.user.createdAt))
+            : member.user.email
+        }
+        groups={
+          <GroupChips
+            groupIds={member.groupIds}
+            managedGroupIds={member.managedGroupIds}
+            groupsById={groupsById}
+          />
+        }
+        status={
+          !active ? (
+            <span className="text-amber-700 dark:text-amber-400">{messages.status.suspended}</span>
+          ) : member.lastActiveAt === undefined ? (
+            <span className="text-muted-foreground">{messages.neverSignedIn}</span>
+          ) : Date.now() - Date.parse(member.lastActiveAt) < ACTIVE_NOW_MS ? (
+            <span className="text-foreground/80">{messages.activeNow}</span>
+          ) : (
+            <span className="text-muted-foreground">{format.relative(member.lastActiveAt)}</span>
+          )
+        }
+        menu={
+          <MemberMenu
+            member={member}
+            name={name}
+            onOpen={() => setSelectedMemberId(member.user.id)}
+            onEditGroups={() => openEditGroups(member)}
+            onAction={(type) => setPendingAction({ type, memberId: member.user.id })}
+          />
+        }
+      />
+    )
+  }
+
+  const counts: Record<MembersTab, number | undefined> = {
+    people: membersQuery.data?.total,
+    groups: optionsQuery.data ? groups.length : undefined,
+    "service-accounts": accountsQuery.data?.serviceAccounts.length,
+  }
+  const labels: Record<MembersTab, string> = {
+    people: messages.tabs.people,
+    groups: messages.tabs.groups,
+    "service-accounts": messages.tabs.serviceAccounts,
+  }
+  const tabBar =
+    tabs.length > 1 ? (
+      <PageTabs
+        variant="segmented"
+        tabs={tabs.map((id) => ({ id, label: labels[id], count: counts[id] }))}
+        value={tab}
+        onChange={(next) => showTab(next)}
+      />
+    ) : null
+
+  const headerAction =
+    tab === "service-accounts" ? (
+      <Button type="button" size="sm" onClick={() => setCreateAccountOpen(true)}>
+        <Plus />
+        {allMessages.serviceAccounts.newAccount}
+      </Button>
+    ) : inviteOptions && disabledReason === null ? (
+      <Button type="button" size="sm" onClick={() => setInviteOpen(true)}>
+        <Plus />
+        {messages.inviteButton}
+      </Button>
+    ) : null
 
   return (
     <SectionPage
@@ -349,153 +511,101 @@ export function SettingsMembersPage() {
       page="members"
       title={messages.title}
       description={messages.description}
-      actions={
-        inviteOptions && disabledReason === null ? (
-          <Button type="button" size="sm" onClick={() => setInviteOpen(true)}>
-            <UserPlus />
-            {messages.inviteButton}
-          </Button>
-        ) : null
-      }
+      actions={headerAction}
     >
-      <Panel
-        toolbar={
-          <>
-            <ToolbarTabs
-              value={activeTab}
-              onChange={setActiveTab}
-              tabs={[
-                { id: "members", label: messages.tabs.members, count: membersQuery.data?.total },
-                {
-                  id: "invitations",
-                  label: messages.tabs.invitations,
-                  count: invitationsQuery.data ? pendingInvitations.length : undefined,
-                },
-              ]}
-            />
-            {activeTab === "members" && members.length > 0 ? (
-              <div className="relative ml-auto w-full sm:w-60">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={messages.search}
-                  aria-label={messages.search}
-                  className="h-8 pl-8 text-[0.8125rem]"
-                />
-              </div>
-            ) : null}
-          </>
-        }
-        footer={disabledReason && !inviteOptionsQuery.isPending ? disabledReason : undefined}
-      >
-        {activeTab === "members" ? (
-          membersQuery.isPending ? (
-            <PanelSkeleton rows={4} />
-          ) : membersQuery.isError ? (
-            <PanelEmpty
-              tone="error"
-              icon={UsersRound}
-              title={messages.unavailable}
-              description={apiErrorMessage(membersQuery.error, messages.loadFailed)}
-            />
-          ) : visibleMembers.length === 0 ? (
+      {tabBar}
+      {tab === "service-accounts" ? (
+        <ServiceAccountsTab
+          createOpen={createAccountOpen}
+          onCreateOpenChange={setCreateAccountOpen}
+        />
+      ) : tab === "groups" ? (
+        <Panel footer={messages.groups.footnote}>
+          {optionsQuery.isPending || membersQuery.isPending ? (
+            <PanelSkeleton rows={3} />
+          ) : groups.length === 0 ? (
             <PanelEmpty
               icon={UsersRound}
-              title={members.length === 0 ? messages.noneTitle : messages.noMatchTitle}
-              description={
-                members.length === 0 ? messages.noneDescription : messages.noMatchDescription
-              }
+              title={messages.groups.noneTitle}
+              description={messages.groups.noneDescription}
             />
           ) : (
-            visibleMembers.map((member) => {
-              const name = displayName(member.user)
-              const active = member.user.status === "active"
-              const isSelf = member.user.id === currentUser?.id
-              return (
-                <PanelRow
-                  key={member.user.id}
-                  onClick={() => setSelectedMemberId(member.user.id)}
-                  muted={!active}
-                  leading={
-                    <PersonAvatar
-                      name={member.user.displayName}
-                      email={member.user.email}
-                      avatarUrl={member.user.avatarUrl}
-                    />
-                  }
-                  title={
-                    <>
-                      <span className="truncate">{name}</span>
-                      {isSelf ? <Pill>{messages.you}</Pill> : null}
-                      {active ? null : <Pill tone="warn">{messages.status.suspended}</Pill>}
-                    </>
-                  }
-                  meta={
-                    name === member.user.email ? (
-                      <span>{messages.joined(format.date(member.user.createdAt))}</span>
-                    ) : (
-                      <span className="truncate">{member.user.email}</span>
-                    )
-                  }
-                  trailing={
-                    <>
-                      <span className="hidden md:inline-flex">
-                        <GroupChips
-                          groupIds={member.groupIds}
-                          managedGroupIds={member.managedGroupIds}
-                          groupsById={groupsById}
-                        />
-                      </span>
-                      <MemberMenu
-                        member={member}
-                        name={name}
-                        onOpen={() => setSelectedMemberId(member.user.id)}
-                        onEditGroups={() => openEditGroups(member)}
-                        onAction={(type) => setPendingAction({ type, memberId: member.user.id })}
-                      />
-                    </>
-                  }
-                />
-              )
-            })
-          )
-        ) : invitationsQuery.isPending ? (
-          <PanelSkeleton rows={2} />
-        ) : invitationsQuery.isError ? (
-          <PanelEmpty
-            tone="error"
-            icon={Mail}
-            title={messages.invitations.unavailable}
-            description={apiErrorMessage(invitationsQuery.error, messages.invitations.loadFailed)}
-          />
-        ) : (
-          <>
-            {pendingInvitations.length === 0 ? (
+            groups.map((group) => (
+              <GroupRow
+                key={group.id}
+                group={group}
+                members={members.filter((member) => member.groupIds.includes(group.id))}
+                invited={
+                  pendingInvitations.filter((invitation) => invitation.groupIds.includes(group.id))
+                    .length
+                }
+                onOpen={() => showTab("people", group.id)}
+              />
+            ))
+          )}
+        </Panel>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {groupFilter ? (
+            <span className="inline-flex h-[30px] items-center gap-1.5 self-start rounded-lg bg-muted pr-[3px] pl-2.5 text-[0.8125rem]">
+              <span className="text-muted-foreground">{messages.groupFilter}</span>
+              <span className="font-medium">
+                {groupsById.get(groupFilter)
+                  ? groupLabel(groupsById.get(groupFilter)!)
+                  : groupFilter}
+              </span>
+              <button
+                type="button"
+                aria-label={messages.clearGroupFilter}
+                onClick={() => filterByGroup(null)}
+                className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            </span>
+          ) : null}
+          <div className="overflow-hidden rounded-2xl border border-border/80 bg-card">
+            {membersQuery.isPending || invitationsQuery.isPending ? (
+              <PanelSkeleton rows={4} />
+            ) : membersQuery.isError ? (
               <PanelEmpty
-                icon={Mail}
-                title={messages.invitations.emptyTitle}
-                description={messages.invitations.emptyDescription}
+                tone="error"
+                icon={UsersRound}
+                title={messages.unavailable}
+                description={apiErrorMessage(membersQuery.error, messages.loadFailed)}
+              />
+            ) : visibleMembers.length === 0 && visibleInvitations.length === 0 ? (
+              <PanelEmpty
+                icon={UsersRound}
+                title={groupFilter ? messages.noMatchTitle : messages.noneTitle}
+                description={groupFilter ? messages.noMatchDescription : messages.noneDescription}
               />
             ) : (
-              pendingInvitations.map(invitationRow)
+              <>
+                {visibleMembers.map(memberRow)}
+                {visibleInvitations.map(invitationRow)}
+              </>
             )}
-            {showPastInvitations ? pastInvitations.map(invitationRow) : null}
-            {pastInvitations.length > 0 ? (
+            {showPastInvitations && !groupFilter ? pastInvitations.map(invitationRow) : null}
+            {pastInvitations.length > 0 && !groupFilter ? (
               <button
                 type="button"
                 onClick={() => setShowPastInvitations((shown) => !shown)}
-                className="flex w-full px-4 py-2.5 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                className="flex w-full border-t border-border/60 px-[18px] py-2.5 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
               >
                 {showPastInvitations
                   ? messages.invitations.hidePast
                   : messages.invitations.showPast(pastInvitations.length)}
               </button>
             ) : null}
-          </>
-        )}
-      </Panel>
+            {disabledReason && !inviteOptionsQuery.isPending ? (
+              <div className="border-t border-border/60 bg-muted/40 px-[18px] py-3 text-[0.8125rem] text-muted-foreground">
+                {disabledReason}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {inviteOptions ? (
         <InviteDialog
@@ -657,6 +767,186 @@ export function SettingsMembersPage() {
         </DialogContent>
       </Dialog>
     </SectionPage>
+  )
+}
+
+// Signed-in activity is recorded about once a minute, so a few minutes reads as now.
+const ACTIVE_NOW_MS = 5 * 60_000
+
+/**
+ * One person in the People table: who, their groups, when they were last here, and their
+ * actions. A member's row opens their details; an invitation's has none to open.
+ */
+function PeopleRow({
+  avatar,
+  name,
+  detail,
+  groups,
+  status,
+  menu,
+  onOpen,
+  muted,
+  invited,
+}: {
+  readonly avatar: ReactNode
+  readonly name: ReactNode
+  readonly detail: ReactNode
+  readonly groups: ReactNode
+  readonly status: ReactNode
+  readonly menu: ReactNode
+  readonly onOpen?: () => void
+  readonly muted?: boolean
+  readonly invited?: boolean
+}) {
+  const who = (
+    <>
+      {avatar}
+      <span className="flex min-w-0 flex-col leading-[1.3]">
+        <span className="truncate font-medium">{name}</span>
+        <span className="truncate text-[0.78rem] text-muted-foreground">{detail}</span>
+      </span>
+    </>
+  )
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[minmax(0,1fr)_32px] items-center gap-4 border-t border-border/60 px-[18px] py-3 text-sm first:border-t-0 md:grid-cols-[minmax(220px,1.6fr)_minmax(180px,1.2fr)_140px_32px]",
+        invited && "bg-muted/30",
+        onOpen && "hover:bg-muted/40"
+      )}
+    >
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className={cn("flex min-w-0 items-center gap-3 text-left", muted && "opacity-60")}
+        >
+          {who}
+        </button>
+      ) : (
+        <span className={cn("flex min-w-0 items-center gap-3", muted && "opacity-60")}>{who}</span>
+      )}
+      <span className="hidden min-w-0 md:flex">{groups}</span>
+      <span className="hidden text-[0.8125rem] md:block">{status}</span>
+      <span className="flex justify-end">{menu}</span>
+    </div>
+  )
+}
+
+// Muted, distinct tones; a person keeps theirs, chosen by their email.
+const AVATAR_TONES = ["#4f8233", "#3d5a99", "#8a5a2b", "#6b4c9a", "#2f7d78", "#9a4c5f", "#5f6b2f"]
+
+function toneOf(email: string): string {
+  let hash = 0
+  for (const char of email.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length]!
+}
+
+/** A member's picture, or their initial on their tone. */
+function MemberAvatar({
+  name,
+  email,
+  avatarUrl,
+}: {
+  readonly name?: string
+  readonly email: string
+  readonly avatarUrl?: string
+}) {
+  // A picture that does not load, such as one the app's content policy blocks, shows the initial.
+  const [broken, setBroken] = useState(false)
+  if (avatarUrl && !broken) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        onError={() => setBroken(true)}
+        className="size-[34px] shrink-0 rounded-[10px] object-cover"
+      />
+    )
+  }
+  return (
+    <span
+      aria-hidden
+      className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] text-sm font-semibold text-white"
+      style={{ background: toneOf(email) }}
+    >
+      {(name || email).charAt(0).toUpperCase()}
+    </span>
+  )
+}
+
+/** Someone invited, not yet a member: a dashed outline where their picture will be. */
+function InviteeAvatar({ email }: { readonly email: string }) {
+  return (
+    <span
+      aria-hidden
+      className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] border border-dashed border-foreground/25 bg-background text-sm font-semibold text-muted-foreground"
+    >
+      {email.charAt(0).toUpperCase()}
+    </span>
+  )
+}
+
+/** A group with the people in it: who and how many. */
+function GroupRow({
+  group,
+  members,
+  invited,
+  onOpen,
+}: {
+  readonly group: AuthGroupOption
+  readonly members: readonly Member[]
+  readonly invited: number
+  readonly onOpen: () => void
+}) {
+  const messages = useSettingsMessages().members.groups
+  const label = groupLabel(group)
+  const shown = members.slice(0, 4)
+  return (
+    <PanelRow
+      onClick={onOpen}
+      leading={<IconTile icon={UsersRound} />}
+      title={<span className="truncate">{label}</span>}
+      meta={
+        <>
+          {group.description ? (
+            <>
+              <span className="truncate">{group.description}</span>
+              <MetaDot />
+            </>
+          ) : null}
+          <span>{members.length === 0 ? messages.nobody : messages.people(members.length)}</span>
+          {invited > 0 ? (
+            <>
+              <MetaDot />
+              <span>{messages.invited(invited)}</span>
+            </>
+          ) : null}
+        </>
+      }
+      trailing={
+        <>
+          {shown.length > 0 ? (
+            <span className="hidden -space-x-1.5 sm:flex" aria-hidden>
+              {shown.map((member) => (
+                <span key={member.user.id} className="rounded-full ring-2 ring-card">
+                  <PersonAvatar
+                    size="sm"
+                    name={member.user.displayName}
+                    email={member.user.email}
+                    avatarUrl={member.user.avatarUrl}
+                  />
+                </span>
+              ))}
+            </span>
+          ) : null}
+          <ChevronRight
+            className="size-4 text-muted-foreground/60"
+            aria-label={messages.showPeople(label)}
+          />
+        </>
+      }
+    />
   )
 }
 

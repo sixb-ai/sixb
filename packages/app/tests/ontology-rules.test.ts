@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createSixbClient, listSyncRuns } from "@sixb/client"
-import { unknownActiveStates } from "../src/pages/ontology/rules"
+import { unknownActiveStates } from "../src/pages/console/ontology/rules"
 import { isUnrecorded } from "../src/pages/section-ui"
 
 function respondWith(response: () => Response) {

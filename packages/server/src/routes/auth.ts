@@ -24,6 +24,7 @@ import {
   verifyCsrfToken,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
+import { isAllowed } from "@sixb/core/internal/authorization"
 import {
   type AccessTokenRecord,
   type AuthStorage,
@@ -118,6 +119,14 @@ type AuthenticatedAuthSessionResponse = {
     readonly displayName?: string
     readonly avatarUrl?: string
     readonly groupIds: readonly string[]
+  }
+  readonly access: {
+    readonly members: boolean
+    readonly serviceAccounts: boolean
+    readonly usage: boolean
+    readonly activity: boolean
+    readonly console: boolean
+    readonly logs: boolean
   }
   readonly session: {
     readonly id: string
@@ -588,7 +597,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           return signedOutSessionResponse(host)
         }
         if (caller.session.bearer) {
-          return jsonResponse(authSessionBody(caller), 200)
+          return jsonResponse(authSessionBody(host, caller), 200)
         }
 
         const session = hasForegroundSessionActivity(request)
@@ -614,7 +623,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               })
             : null
         return authSessionJsonResponse(
-          { ...authSessionBody(session), csrfToken: csrf.token },
+          { ...authSessionBody(host, session), csrfToken: csrf.token },
           renewal?.headers ?? (csrf.setCookie ? [csrf.setCookie] : [])
         )
       },
@@ -2325,8 +2334,12 @@ function resolveSessionCsrfToken(input: {
 }
 
 function authSessionBody(
+  host: SixbHostView,
   session: AuthenticatedAuthSession
 ): Omit<AuthenticatedAuthSessionResponse, "csrfToken"> {
+  // The same policies and grants the pages' own routes check.
+  const capabilities = host.auth.getMembershipCapabilities({ callerGroups: session.groupIds }).holds
+  const authorization = host.auth.contextFromSession(session)
   return {
     authenticated: true,
     user: {
@@ -2335,6 +2348,14 @@ function authSessionBody(
       displayName: session.user.displayName,
       avatarUrl: session.user.avatarUrl,
       groupIds: [...session.groupIds],
+    },
+    access: {
+      members: capabilities.invite || capabilities.assignGroups || capabilities.suspend,
+      serviceAccounts: capabilities.serviceAccounts,
+      usage: isAllowed(authorization, { kind: "aiUsage.observe" }),
+      activity: isAllowed(authorization, { kind: "activity.observe" }),
+      console: isAllowed(authorization, { kind: "console.observe" }),
+      logs: isAllowed(authorization, { kind: "logs.observe" }),
     },
     session: { id: session.session.id, expiresAt: toIsoString(session.session.expiresAt) },
   }
@@ -3105,6 +3126,7 @@ function serializeMemberSummary(member: MemberSummary) {
   return {
     ...serializeManagedMember(member),
     capabilities: member.capabilities,
+    ...(member.lastActiveAt ? { lastActiveAt: toIsoString(member.lastActiveAt) } : {}),
   }
 }
 

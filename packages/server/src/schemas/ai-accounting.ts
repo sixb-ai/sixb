@@ -14,11 +14,37 @@ export const AiMoneySchema = z.object({
 export const AiAccountingBucketSchema = z.enum(["hour", "day", "week"])
 export const AiValuationStatusSchema = z.enum(["rated", "unpriceable", "unvalued"])
 
+const ModelKindSchema = z.enum([
+  "language",
+  "image",
+  "video",
+  "embedding",
+  "decision",
+  "transcription",
+  "speech",
+  "reranking",
+])
+
 export const AiAccountingRangeQuerySchema = z.object({
   from: IsoDateSchema,
   to: IsoDateSchema,
   providerId: z.string().trim().min(1).optional(),
   modelId: z.string().trim().min(1).optional(),
+  person: z
+    .string()
+    .regex(/^(none|user:.+|serviceAccount:.+)$/)
+    .optional()
+    .describe(
+      "Calls one person or service account asked for, as user:<id> or serviceAccount:<id>, or none for those nobody did, such as a schedule's"
+    ),
+  source: z
+    .string()
+    .regex(/^(agent|action|other|workflow|workflow:.+)$/)
+    .optional()
+    .describe(
+      "Calls from agent conversations and their sub-agents, actions, workflows or one as workflow:<id>, or other"
+    ),
+  kind: ModelKindSchema.optional().describe("Calls to one kind of model"),
 })
 
 export const AiAccountingOverviewQuerySchema = AiAccountingRangeQuerySchema.extend({
@@ -39,16 +65,12 @@ export const AiCostSummarySchema = z.object({
   unvaluedCallCount: z.number().int().nonnegative(),
 })
 
-const ModelKindSchema = z.enum([
-  "language",
-  "image",
-  "video",
-  "embedding",
-  "decision",
-  "transcription",
-  "speech",
-  "reranking",
-])
+const AiAccountingRequesterSchema = z.object({
+  type: z.enum(["user", "serviceAccount"]),
+  id: z.string(),
+  name: z.string().optional().describe("Their name, or a service account's"),
+  email: z.string().optional(),
+})
 
 const AiAccountingAggregateSchema = z.object({
   modelCallCount: z.number().int().nonnegative(),
@@ -89,12 +111,32 @@ export const AiAccountingOverviewResponseSchema = z.object({
       end: IsoDateSchema,
     })
   ),
+  modelSeries: z
+    .array(
+      z.object({
+        providerId: z.string(),
+        modelId: z.string(),
+        series: z.array(
+          AiAccountingAggregateSchema.extend({ start: IsoDateSchema, end: IsoDateSchema })
+        ),
+      })
+    )
+    .describe("Each model's own series, every period included"),
   models: z.array(
     AiAccountingAggregateSchema.extend({
       providerId: z.string(),
       modelId: z.string(),
     })
   ),
+  people: z
+    .array(
+      AiAccountingAggregateSchema.extend({
+        requester: AiAccountingRequesterSchema.optional().describe(
+          "Absent for the calls nobody asked for, such as a schedule's"
+        ),
+      })
+    )
+    .describe("Who asked for the calls"),
   kinds: z.array(
     AiAccountingAggregateSchema.extend({
       modelKind: ModelKindSchema.optional().describe(
@@ -278,6 +320,11 @@ export const AiModelCallAccountingListResponseSchema = z.object({
 
 export const AiModelCallGroupsQuerySchema = AiModelCallAccountingListQuerySchema.omit({
   executionId: true,
+}).extend({
+  sort: z
+    .enum(["recent", "cost"])
+    .optional()
+    .describe("Most recent first, the default, or costliest first"),
 })
 
 const AiModelCallExecutionSummarySchema = z.object({
@@ -290,23 +337,39 @@ const AiModelCallExecutionSummarySchema = z.object({
     .nonnegative()
     .optional()
     .describe("Present when every call that reports tokens did; images and speech don't."),
+  inputTokens: z.number().int().nonnegative().optional(),
+  cacheReadInputTokens: z.number().int().nonnegative().optional(),
   outputImages: z.number().int().nonnegative().optional(),
   inputCharacters: z.number().int().nonnegative().optional(),
   audioDurationMs: z.number().int().nonnegative().optional(),
   costs: AiCostSummarySchema,
   firstCallAt: IsoDateSchema,
   lastCallAt: IsoDateSchema,
-  models: z.array(AiBillingIdentitySchema),
+  models: z.array(
+    AiBillingIdentitySchema.extend({
+      modelCallCount: z.number().int().nonnegative(),
+      costs: AiCostSummarySchema,
+    })
+  ),
   /** Present only when the caller can read the initiating conversation. */
   label: z.string().optional(),
+  prompt: z
+    .string()
+    .optional()
+    .describe("What a turn was asked, when the caller can read its conversation"),
 })
 
 export const AiModelCallGroupsResponseSchema = z.object({
   items: z.array(
-    AiModelCallExecutionSummarySchema.omit({ models: true }).extend({
-      executions: z.array(AiModelCallExecutionSummarySchema),
-      canOpenThread: z.boolean(),
-    })
+    AiModelCallExecutionSummarySchema.omit({ models: true, prompt: true })
+      .extend({
+        executions: z
+          .array(AiModelCallExecutionSummarySchema)
+          .describe("A conversation's turns and sub-agents, or a workflow run's agent steps"),
+        canOpenThread: z.boolean(),
+        requester: AiAccountingRequesterSchema.optional().describe("Who started it"),
+      })
+      .describe("One conversation, workflow run, or other execution that called models")
   ),
   total: z.number().int().nonnegative(),
   hasMore: z.boolean(),

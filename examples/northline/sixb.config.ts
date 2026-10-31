@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { magicLink } from "@sixb/auth-magic-link"
 import { LocalBlobStorage } from "@sixb/blob-local"
 import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { DuckLakeStorage } from "@sixb/ducklake"
@@ -8,6 +9,7 @@ import { SqliteStorage } from "@sixb/sqlite"
 import { imageModels, languageModels } from "./ai/models"
 import { lookupResponsePolicy } from "./ai/tools"
 import { productionRuntime } from "./lib/runtime/production"
+import { localAdmins } from "./security/groups/local-admins"
 
 const localLakePath = ".sixb/lake"
 mkdirSync(localLakePath, { recursive: true })
@@ -29,13 +31,27 @@ export const sixb = createSixb({
     }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: production?.queues ?? new InMemoryQueues(),
-  // A public demo: anyone with the link can use it, deployed or not.
-  auth: {
-    id: "northline",
-    kind: "disabled",
-    disabled: true,
-    allowDisabledInProduction: true,
-  },
+  // A public demo: anyone with the link can use it, deployed or not. Local only:
+  // NORTHLINE_AUTH=magic-link signs in as you@example.com, a local admin, to see Settings.
+  auth:
+    process.env.NORTHLINE_AUTH === "magic-link"
+      ? magicLink({
+          allowedDomains: ["example.com"],
+          bootstrapUsers: ["you@example.com"],
+          bootstrapGroups: [localAdmins],
+          rateLimit: false,
+          async sendMagicLink({ url }) {
+            // The dev footer makes the terminal link hard to copy, so it also lands in a file.
+            writeFileSync(".sixb/sign-in-link.txt", `${url}\n`)
+            console.log(`[Northline] Sign-in link: ${url}`)
+          },
+        })
+      : {
+          id: "northline",
+          kind: "disabled",
+          disabled: true,
+          allowDisabledInProduction: true,
+        },
   sandboxes:
     process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
       ? new SmolvmSandboxFactory({

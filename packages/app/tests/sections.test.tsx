@@ -2,9 +2,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import type { GetAuthSessionResponse } from "@sixb/client"
 import {
   getAuthAccessManagementOptionsQueryKey,
+  getAuthInvitationOptionsQueryKey,
   getAuthMembershipOptionsQueryKey,
   getAuthSessionQueryKey,
   listActionsOptions,
+  listAuthInvitationsQueryKey,
+  listAuthMembersQueryKey,
   listAuthServiceAccountsQueryKey,
   listAuthSessionsQueryKey,
   listObjectTypesOptions,
@@ -13,19 +16,17 @@ import {
   listWorkflowsOptions,
   objectCountOptions,
 } from "@sixb/client/hooks"
-import { defineGroup } from "@sixb/core/security"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { type AppSectionId, AppShell, type AppVisibility, useSections } from "../src"
+import { type AppSectionId, AppShell, useSections } from "../src"
 import {
-  DataSyncPage,
-  DataSyncsPage,
+  ConsoleSyncPage,
+  ConsoleSyncsPage,
   SectionsProvider,
   SettingsMembersPage,
   SettingsPersonalPage,
-  SettingsServiceAccountsPage,
 } from "../src/pages"
 import { resolveOpenSections } from "../src/sections/sections"
 import { installDom } from "./helpers/dom"
@@ -40,6 +41,8 @@ const browser = installDom([
   "Element",
   "HTMLElement",
   "HTMLInputElement",
+  "HTMLFormElement",
+  "HTMLSelectElement",
   "Event",
   "EventTarget",
   "MouseEvent",
@@ -66,11 +69,39 @@ afterAll(() => {
   sockets?.restore()
 })
 
-const admins = defineGroup("admins", { label: "Admins" })
-const allSettingsPages = ["personal", "developers", "memory", "members", "service-accounts"]
-const allDataPages = ["connectors", "syncs", "datasets", "pipelines", "projections"]
+const allSettingsPages = ["personal", "developers", "memory", "members", "usage", "activity"]
+const manager = {
+  console: true,
+  logs: true,
+  members: true,
+  serviceAccounts: true,
+  usage: true,
+  activity: true,
+}
+const nobody = {
+  console: false,
+  logs: false,
+  members: false,
+  serviceAccounts: false,
+  usage: false,
+  activity: false,
+}
+const dataPages = ["connectors", "syncs", "datasets", "pipelines", "projections"]
+const allConsolePages = [
+  ...dataPages,
+  "object-types",
+  "objects",
+  "graph",
+  "actions",
+  "workflows",
+  "rules",
+  "logs",
+]
 
-function sessionFor(groupIds: readonly string[]): GetAuthSessionResponse {
+function sessionFor(
+  groupIds: readonly string[],
+  access: typeof manager = manager
+): GetAuthSessionResponse {
   return {
     authenticated: true,
     user: {
@@ -79,6 +110,7 @@ function sessionFor(groupIds: readonly string[]): GetAuthSessionResponse {
       displayName: "Morgan Reyes",
       groupIds: [...groupIds],
     },
+    access,
     session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
   }
 }
@@ -88,7 +120,6 @@ function renderApp(
   options: {
     readonly path: string
     readonly session?: GetAuthSessionResponse | null
-    readonly visibility?: AppVisibility
     readonly data?: readonly (readonly [readonly unknown[], unknown])[]
   }
 ) {
@@ -105,7 +136,7 @@ function renderApp(
   for (const [key, value] of options.data ?? []) queryClient.setQueryData(key, value)
   return render(
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={options.visibility}>
+      <SectionsProvider>
         <MemoryRouter initialEntries={[options.path]}>
           <Routes>
             <Route path="/" element={<p>Home page</p>} />
@@ -141,91 +172,106 @@ describe("who sees each section", () => {
       .flatMap((open) => open.pages.map((page) => page.id))
 
   const yours = ["personal", "developers", "memory"]
-  const staff = { groupIds: ["staff"] }
-  const adminUser = { groupIds: ["admins"] }
   const cases: {
     readonly name: string
     readonly section: AppSectionId
-    readonly user: { groupIds: string[] } | null
-    readonly visibility: AppVisibility | undefined
+    readonly signedIn: boolean
+    readonly access?: typeof manager
     readonly pages: readonly string[]
   }[] = [
-    // A signed-in person sees every Settings page unless visibility narrows it.
+    // Settings opens to everyone signed in; a project page to whoever may do what it is for.
     {
-      name: "Settings, signed in",
+      name: "Settings, may manage nothing",
       section: "settings",
-      user: { groupIds: [] },
-      visibility: undefined,
-      pages: allSettingsPages,
-    },
-    {
-      name: "Settings, in the listed group",
-      section: "settings",
-      user: adminUser,
-      visibility: { settings: [admins] },
-      pages: allSettingsPages,
-    },
-    // Outside the listed groups only the pages about yourself stay.
-    {
-      name: "Settings, outside the listed group",
-      section: "settings",
-      user: staff,
-      visibility: { settings: [admins] },
+      signedIn: true,
+      access: nobody,
       pages: yours,
     },
     {
-      name: "Settings, no group listed",
+      name: "Settings, may manage members",
       section: "settings",
-      user: adminUser,
-      visibility: { settings: [] },
-      pages: yours,
+      signedIn: true,
+      access: { ...nobody, members: true },
+      pages: [...yours, "members"],
+    },
+    {
+      name: "Settings, may manage service accounts",
+      section: "settings",
+      signedIn: true,
+      access: { ...nobody, serviceAccounts: true },
+      // Members holds Service accounts as a tab.
+      pages: [...yours, "members"],
+    },
+    {
+      name: "Settings, may observe AI usage",
+      section: "settings",
+      signedIn: true,
+      access: { ...nobody, usage: true },
+      pages: [...yours, "usage"],
+    },
+    {
+      name: "Settings, may observe activity",
+      section: "settings",
+      signedIn: true,
+      access: { ...nobody, activity: true },
+      pages: [...yours, "activity"],
+    },
+    {
+      name: "Settings, may do everything",
+      section: "settings",
+      signedIn: true,
+      access: manager,
+      pages: allSettingsPages,
     },
     // Settings needs a signed-in person.
     {
       name: "Settings, signed out",
       section: "settings",
-      user: null,
-      visibility: undefined,
+      signedIn: false,
       pages: [],
     },
-    // Data is open without auth, and visibility narrows it to the listed groups.
+    // The Console is open without auth; signed in, it takes can.observe(project.console).
     {
-      name: "Data, signed out",
-      section: "data",
-      user: null,
-      visibility: undefined,
-      pages: allDataPages,
+      name: "Console, auth off",
+      section: "console",
+      signedIn: false,
+      pages: allConsolePages,
     },
     {
-      name: "Data, signed in",
-      section: "data",
-      user: staff,
-      visibility: undefined,
-      pages: allDataPages,
-    },
-    {
-      name: "Data, outside the listed group",
-      section: "data",
-      user: staff,
-      visibility: { data: [admins] },
+      name: "Console, signed in without the grant",
+      section: "console",
+      signedIn: true,
+      access: nobody,
       pages: [],
     },
+    // Logs, like Usage and Activity, opens to whoever may read them.
     {
-      name: "Data, in the listed group",
-      section: "data",
-      user: adminUser,
-      visibility: { data: [admins] },
-      pages: allDataPages,
+      name: "Console, signed in with the grant",
+      section: "console",
+      signedIn: true,
+      access: { ...nobody, console: true },
+      pages: allConsolePages.filter((page) => page !== "logs"),
+    },
+    {
+      name: "Console, signed in with the grant and logs",
+      section: "console",
+      signedIn: true,
+      access: { ...nobody, console: true, logs: true },
+      pages: allConsolePages,
     },
   ]
 
-  test.each(cases)("$name", ({ section, user, visibility, pages }) => {
-    expect(pagesOf({ user, visibility, enabled: true }, section)).toEqual([...pages])
+  test.each(cases)("$name", ({ section, signedIn, access = null, pages }) => {
+    expect(pagesOf({ signedIn, access, enabled: true }, section)).toEqual([...pages])
   })
 
   test("shared links get no sections", () => {
     expect(
-      resolveOpenSections({ user: { groupIds: [] }, visibility: undefined, enabled: false })
+      resolveOpenSections({
+        signedIn: true,
+        access: manager,
+        enabled: false,
+      })
     ).toEqual([])
   })
 })
@@ -281,7 +327,11 @@ describe("section navigation", () => {
       "/settings/developers",
       "/settings/memory",
     ])
-    expect(hrefsIn("Project")).toEqual(["/settings/members", "/settings/service-accounts"])
+    expect(hrefsIn("Project")).toEqual([
+      "/settings/members",
+      "/settings/usage",
+      "/settings/activity",
+    ])
     // The sidebar holds the section's pages instead of the app's nav.
     expect(view.queryByText("Quotes")).toBeNull()
     expect(view.container.ownerDocument.querySelector('nav[aria-label="Settings"]')).toBeNull()
@@ -303,7 +353,7 @@ describe("section navigation", () => {
   // UserMenu lists what useSections returns. happy-dom cannot open its dropdown (Radix picks a no-op
   // layout effect when it loads before the DOM globals exist, so the portal never mounts), so this
   // reads the same hook. Regression proof: give AppShell's SectionNav a fallback that lists the
-  // sections and the sidebar links to Data; drop `signedOut` from UserMenu and the button reads
+  // sections and the sidebar links to the Console; drop `signedOut` from UserMenu and the button reads
   // Preferences.
   test("the sections open from the user menu, and the sidebar holds the app's own nav", () => {
     function MenuSections() {
@@ -323,44 +373,37 @@ describe("section navigation", () => {
 
     const view = renderApp(shell, { path: "/quotes" })
     expect(sidebarLinks(view.container)).toEqual(["/quotes"])
-    expect(
-      view.getByText(
-        "Data /data/connectors, Observability /observability/runs, Ontology /ontology/object-types, Settings /settings/personal"
-      )
-    ).toBeDefined()
+    expect(view.getByText("Console /console/connectors, Settings /settings/personal")).toBeDefined()
     expect(view.getByRole("button", { name: /Morgan Reyes/ })).toBeDefined()
     cleanup()
 
     // With auth off nobody signs in: the button says so, Settings is gone, the rest stay.
     const signedOut = renderApp(shell, { path: "/quotes", session: null })
     expect(sidebarLinks(signedOut.container)).toEqual(["/quotes"])
-    expect(
-      signedOut.getByText(
-        "Data /data/connectors, Observability /observability/runs, Ontology /ontology/object-types"
-      )
-    ).toBeDefined()
+    expect(signedOut.getByText("Console /console/connectors")).toBeDefined()
     expect(signedOut.getByRole("button", { name: "Sign-in off" })).toBeDefined()
   })
 
-  test("inside Data the sidebar lists its pages, without group headings", () => {
+  test("inside the Console the sidebar lists its pages, Data's under one heading", () => {
     const view = renderApp(
       <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
-        <DataSyncsPage />
+        <ConsoleSyncsPage />
       </AppShell>,
-      { path: "/data/syncs", data: [[listSyncsQueryKey(), []]] }
+      { path: "/console/syncs", data: [[listSyncsQueryKey(), []]] }
     )
     expect(view.getByRole("heading", { name: "Syncs" })).toBeDefined()
     const nav = view.getByText("Connectors").closest('[data-slot="sidebar-group"]')
+    expect(nav?.querySelector('[data-slot="sidebar-group-label"]')?.textContent).toBe("Data")
     expect(
       [...(nav?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href"))
-    ).toEqual(allDataPages.map((page) => `/data/${page}`))
+    ).toEqual(dataPages.map((page) => `/console/${page}`))
     expect(view.queryByText("Quotes")).toBeNull()
     expect(view.getByText("No syncs")).toBeDefined()
   })
   // An object's page sits outside every section so grants alone decide who reads it, yet it opens
   // from Objects. Regression proof: drop `activeFor` from the Objects page in the catalog and the
   // sidebar falls back to the app's nav.
-  test("an object's page keeps the Ontology sidebar, with Objects current", () => {
+  test("an object's page keeps the Console sidebar, with Objects current", () => {
     const counts = [
       [listObjectTypesOptions().queryKey, []],
       [objectCountOptions().queryKey, 15],
@@ -368,61 +411,58 @@ describe("section navigation", () => {
       [listWorkflowsOptions().queryKey, []],
       [listRulesOptions().queryKey, []],
     ] as const
-    const objectPage = (visibility?: AppVisibility) =>
+    const objectPage = (session?: GetAuthSessionResponse) =>
       renderApp(
         <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
           <p>Object page</p>
         </AppShell>,
-        { path: "/objects/Account/A-1005", visibility, data: counts }
+        { path: "/objects/Account/A-1005", session, data: counts }
       )
 
     const view = objectPage()
     expect(view.queryByText("Quotes")).toBeNull()
-    expect(view.getByText("Ontology")).toBeDefined()
+    expect(view.getByText("Console")).toBeDefined()
     const objects = view.getByRole("link", { name: /Objects/ })
-    expect(objects.getAttribute("href")).toBe("/ontology/objects")
+    expect(objects.getAttribute("href")).toBe("/console/objects")
     expect(objects.getAttribute("data-active")).toBe("true")
     cleanup()
 
     // Without the section the page still opens, in the app's own sidebar.
-    const hidden = objectPage({ ontology: [] })
+    const hidden = objectPage(sessionFor([], nobody))
     expect(hidden.getByText("Quotes")).toBeDefined()
-    expect(hidden.queryByText("Ontology")).toBeNull()
+    expect(hidden.queryByText("Console")).toBeNull()
     expect(hidden.getByText("Object page")).toBeDefined()
   })
 })
 
-describe("visibility on section pages", () => {
-  // Regression proof: delete the `allowed` check in SectionPage and this renders the members page.
-  test("a hidden page sends its URL home", () => {
+describe("who may open a section page", () => {
+  // Regression proof: delete the `closed` redirect in SectionPage and this renders the members page.
+  test("a project page someone may not use sends its URL home", () => {
     const view = renderApp(<SettingsMembersPage />, {
       path: "/settings/members",
-      session: sessionFor(["staff"]),
-      visibility: { settings: [admins] },
+      session: sessionFor(["staff"], nobody),
     })
     expect(view.getByText("Home page")).toBeDefined()
   })
 
-  test("a Data page outside the listed groups sends its URL home, detail pages included", () => {
+  test("a Console page sends someone without the grant home, detail pages included", () => {
     for (const [page, path] of [
-      [<DataSyncsPage key="list" />, "/data/syncs"],
-      [<DataSyncPage key="detail" />, "/data/syncs/sync-orbit"],
+      [<ConsoleSyncsPage key="list" />, "/console/syncs"],
+      [<ConsoleSyncPage key="detail" />, "/console/syncs/sync-orbit"],
     ] as const) {
       const view = renderApp(page, {
         path,
-        session: sessionFor(["staff"]),
-        visibility: { data: [admins] },
+        session: sessionFor(["staff"], { ...manager, console: false }),
       })
       expect(view.getByText("Home page")).toBeDefined()
       cleanup()
     }
   })
 
-  test("a page about yourself stays open outside the listed groups", () => {
+  test("a page about yourself stays open to someone who may manage nothing", () => {
     const view = renderApp(<SettingsPersonalPage />, {
       path: "/settings/personal",
-      session: sessionFor(["staff"]),
-      visibility: { settings: [admins] },
+      session: sessionFor(["staff"], nobody),
       data: personalData,
     })
     expect(view.getByRole("heading", { name: "Personal" })).toBeDefined()
@@ -430,33 +470,134 @@ describe("visibility on section pages", () => {
   })
 })
 
-describe("service accounts", () => {
-  const membershipOptions = (serviceAccounts: boolean) =>
+describe("members", () => {
+  const ava = {
+    user: {
+      id: "usr_ava",
+      email: "ava@example.com",
+      displayName: "Ava Stone",
+      status: "active" as const,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    },
+    groupIds: ["admins"],
+    managedGroupIds: [],
+    capabilities: { assignGroups: true, suspend: true, reactivate: false },
+    // Just now, for "Active now".
+    lastActiveAt: new Date().toISOString(),
+  }
+  // Ben never signed in.
+  const ben = {
+    user: { ...ava.user, id: "usr_ben", email: "ben@example.com", displayName: "Ben Ortiz" },
+    groupIds: ["staff"],
+    managedGroupIds: [],
+    capabilities: ava.capabilities,
+  }
+  const groups = [
+    { id: "admins", label: "Admins", description: "Run the project" },
+    { id: "staff", label: "Staff" },
+  ]
+  const data = (serviceAccounts = true) =>
     [
-      getAuthMembershipOptionsQueryKey(),
-      {
-        groups: [],
-        serviceAccountGroups: serviceAccounts ? [{ id: "admins", label: "Admins" }] : [],
-        capabilities: { invite: false, assignGroups: false, suspend: false, serviceAccounts },
-      },
+      [
+        getAuthMembershipOptionsQueryKey(),
+        {
+          groups,
+          serviceAccountGroups: serviceAccounts ? [groups[0]] : [],
+          capabilities: { invite: true, assignGroups: true, suspend: true, serviceAccounts },
+        },
+      ],
+      [
+        listAuthMembersQueryKey({ query: { order: "asc", limit: "100" } }),
+        { members: [ava, ben], hasMore: false, total: 2 },
+      ],
+      [
+        listAuthInvitationsQueryKey({ query: { order: "desc", limit: "100" } }),
+        {
+          invitations: [
+            {
+              id: "inv_1",
+              email: "cleo@example.com",
+              groupIds: ["staff"],
+              status: "pending",
+              createdAt: "2026-10-29T00:00:00.000Z",
+              updatedAt: "2026-10-29T00:00:00.000Z",
+              expiresAt: "2099-11-05T00:00:00.000Z",
+            },
+          ],
+          hasMore: false,
+          total: 1,
+        },
+      ],
+      [
+        getAuthInvitationOptionsQueryKey(),
+        {
+          groups,
+          canInviteWithoutGroups: false,
+          capabilities: { createInvitation: { state: "enabled" } },
+        },
+      ],
+      [listAuthServiceAccountsQueryKey(), { serviceAccounts: [] }],
     ] as const
+  // The people listed, in order: each row shows its email.
+  const rowText = (view: ReturnType<typeof renderApp>) => [
+    ...new Set(view.container.textContent?.match(/(?:ava|ben|cleo)@example\.com/g) ?? []),
+  ]
 
-  test("creating one is offered only under a serviceAccounts membership policy", () => {
-    const empty = [listAuthServiceAccountsQueryKey(), { serviceAccounts: [] }] as const
-
-    const denied = renderApp(<SettingsServiceAccountsPage />, {
-      path: "/settings/service-accounts",
-      data: [membershipOptions(false), empty],
-    })
-    expect(denied.getByText("Service accounts are managed by admins")).toBeDefined()
-    expect(denied.queryByRole("button", { name: "New service account" })).toBeNull()
+  // Removal proof: list the invitations before the members and Cleo comes first.
+  test("People lists members, then who is invited, and a group narrows both", () => {
+    const view = renderApp(<SettingsMembersPage />, { path: "/settings/members", data: data() })
+    expect(rowText(view)).toEqual(["ava@example.com", "ben@example.com", "cleo@example.com"])
+    expect(view.getByText("Active now")).toBeDefined()
+    expect(view.getByText("Not signed in yet")).toBeDefined()
+    expect(view.getAllByRole("button", { name: "Copy new link" }).length).toBeGreaterThan(0)
     cleanup()
 
-    const allowed = renderApp(<SettingsServiceAccountsPage />, {
-      path: "/settings/service-accounts",
-      data: [membershipOptions(true), empty],
+    const staffOnly = renderApp(<SettingsMembersPage />, {
+      path: "/settings/members?tab=people&group=staff",
+      data: data(),
     })
-    expect(allowed.getByRole("button", { name: "New service account" })).toBeDefined()
+    const shown = rowText(staffOnly).join(" ")
+    expect(shown).toContain("cleo@example.com")
+    expect(shown).toContain("ben@example.com")
+    expect(shown).not.toContain("ava@example.com")
+  })
+
+  // Regression proof: drop the `onOpen` from GroupRow and the click leaves Groups in place.
+  test("Groups shows who is in each, and opens its people", () => {
+    const view = renderApp(<SettingsMembersPage />, {
+      path: "/settings/members?tab=groups",
+      data: data(),
+    })
+    const adminsRow = view.getByText("Admins", { selector: "span" }).closest("button")
+    expect(adminsRow?.textContent).toContain("1 person")
+    const staffRow = view.getByText("Staff", { selector: "span" }).closest("button")
+    expect(staffRow?.textContent).toContain("1 invited")
+
+    fireEvent.click(adminsRow as HTMLElement)
+    expect(rowText(view).join(" ")).toContain("ava@example.com")
+    expect(rowText(view).join(" ")).not.toContain("ben@example.com")
+  })
+
+  test("Service accounts is a tab for whoever may manage them", () => {
+    const denied = renderApp(<SettingsMembersPage />, {
+      path: "/settings/members?tab=service-accounts",
+      session: sessionFor([], { ...manager, serviceAccounts: false }),
+      data: data(false),
+    })
+    expect(denied.queryByRole("tab", { name: /Service accounts/ })).toBeNull()
+    // The address names a tab they may not use, so People opens instead.
+    expect(denied.getByRole("button", { name: "Invite people" })).toBeDefined()
+    cleanup()
+
+    const allowed = renderApp(<SettingsMembersPage />, {
+      path: "/settings/members?tab=service-accounts",
+      data: data(),
+    })
+    expect(allowed.getByRole("tab", { name: /Service accounts/ })).toBeDefined()
+    expect(allowed.getAllByRole("button", { name: "New service account" }).length).toBeGreaterThan(
+      0
+    )
     expect(allowed.getByText("No service accounts yet")).toBeDefined()
   })
 })

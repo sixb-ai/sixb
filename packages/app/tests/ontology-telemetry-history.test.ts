@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { getHistoryBounds, isSampleInBounds } from "../src/pages/ontology/lib/telemetry-history"
+import {
+  getHistoryBounds,
+  isSampleInBounds,
+} from "../src/pages/console/ontology/lib/telemetry-history"
 
 describe("telemetry history bounds", () => {
   test("keeps live samples inside a custom range", () => {

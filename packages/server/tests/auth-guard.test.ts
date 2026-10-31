@@ -382,6 +382,14 @@ describe("server auth guard", () => {
         displayName: "Ava Chen",
         groupIds: ["security-admins"],
       },
+      access: {
+        console: false,
+        logs: false,
+        members: false,
+        serviceAccounts: false,
+        usage: false,
+        activity: false,
+      },
       session: {
         id: "ses_1",
         expiresAt: "2099-05-16T10:00:00.000Z",

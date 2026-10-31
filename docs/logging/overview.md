@@ -32,7 +32,7 @@ Keep fields JSON-serializable and avoid logging credentials. Let failures propag
 
 ## View logs
 
-Open **Observability › Logs** from your app's user menu to follow logs live and filter them by kind or level. Workflow and action run pages include their own logs. Reading logs requires `can.observe(project.logs)` in a [role](../auth/authorization.md).
+Open **Console › Logs** from your app's user menu to follow logs live and filter them by kind or level. Workflow and action run pages include their own logs. Reading logs requires `can.observe(project.logs)` in a [role](../auth/authorization.md).
 
 Capture is enabled at `info` level by default. Stored logs have bounded retention; use an external output provider when you need longer retention.
 

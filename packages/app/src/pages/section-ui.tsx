@@ -439,6 +439,80 @@ export function PanelEmpty({
 }
 
 /** Segmented tabs in a panel's toolbar, each with a count. */
+/**
+ * A page's own tabs, under its title: what the page shows, not a filter of what it lists.
+ * `underline` runs along a rule; `segmented` sits on a gray track, for a page whose tabs are
+ * lists of one kind, such as Members.
+ */
+export function PageTabs<TTab extends string>({
+  tabs,
+  value,
+  onChange,
+  variant = "underline",
+}: {
+  readonly tabs: readonly { readonly id: TTab; readonly label: string; readonly count?: number }[]
+  readonly value: TTab
+  readonly onChange: (tab: TTab) => void
+  readonly variant?: "underline" | "segmented"
+}) {
+  if (variant === "segmented") {
+    return (
+      <div
+        role="tablist"
+        className="-mt-2 inline-flex gap-0.5 self-start rounded-[10px] bg-muted p-0.5"
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={value === tab.id}
+            onClick={() => onChange(tab.id)}
+            className={cn(
+              "inline-flex h-[30px] items-center gap-1.5 rounded-lg px-3 text-[0.84rem] text-muted-foreground transition-colors hover:text-foreground",
+              value === tab.id &&
+                "bg-background font-medium text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.08)]"
+            )}
+          >
+            {tab.label}
+            {tab.count === undefined ? null : (
+              <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div role="tablist" className="-mt-3 flex gap-6 border-b border-border">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={value === tab.id}
+          onClick={() => onChange(tab.id)}
+          className={cn(
+            "-mb-px flex h-10 items-center gap-1.5 border-b-2 text-sm transition-colors",
+            value === tab.id
+              ? "border-foreground font-medium text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {tab.label}
+          {tab.count === undefined ? null : (
+            <span className="text-xs font-normal tabular-nums text-muted-foreground">
+              {tab.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function ToolbarTabs<TTab extends string>({
   tabs,
   value,

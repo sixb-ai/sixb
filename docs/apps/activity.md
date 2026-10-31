@@ -6,7 +6,7 @@ See who uses your app, what they view and what they do there. Turn it on in `cre
 activity: { enabled: true }
 ```
 
-Then open **Observability › Activity** from the user menu. Reading it takes
+Then open **Settings › Activity** from the user menu. Reading it takes
 `can.observe(project.activity)` in a [role](../auth/authorization.md):
 
 ```ts
@@ -82,6 +82,6 @@ cannot read other users' conversations.
 ## Privacy and limits
 
 - Never recorded: URLs and their values, page contents, form values, element text and IP addresses.
-- The built-in Data, Observability, Ontology and Settings pages are not recorded.
+- The built-in Console and Settings pages are not recorded.
 - Use SQLite or PostgreSQL to keep history across restarts. It has no automatic expiration.
 - Browsers can fail to deliver events: use activity to understand usage, not as an audit trail.

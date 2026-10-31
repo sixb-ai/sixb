@@ -262,10 +262,11 @@ export function assertGrantDefinition(
     value.target !== "logs" &&
     value.target !== "aiUsage" &&
     value.target !== "activity" &&
-    value.target !== "agentThreads"
+    value.target !== "agentThreads" &&
+    value.target !== "console"
   ) {
     throw createError(
-      `[Sixb] ${field} observe grant target must be 'logs', 'aiUsage', 'activity', or 'agentThreads'.`
+      `[Sixb] ${field} observe grant target must be 'logs', 'aiUsage', 'activity', 'agentThreads', or 'console'.`
     )
   }
 
@@ -280,8 +281,8 @@ export function assertGrantDefinition(
     )
   }
 
-  // The member directory, the agent, logs, AI usage, activity, Agent conversations and Agent
-  // memory are one surface each, so their grants select nothing. The checks above settled the
+  // The member directory, the agent, logs, AI usage, activity, Agent conversations, the Console
+  // and Agent memory are one surface each, so their grants select nothing. The checks above settled the
   // capability and target, so the kind is known.
   if (isSingletonGrantKind(grantKindOf(value as unknown as GrantDefinition))) {
     if (value.selection !== undefined) {

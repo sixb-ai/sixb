@@ -43,24 +43,16 @@ export const en = {
   artifacts: "Artifacts",
   sections: {
     back: "Back",
-    data: {
-      label: "Data",
+    console: {
+      label: "Console",
+      groups: { data: "Data", ontology: "Ontology" },
       pages: {
+        logs: "Logs",
         connectors: "Connectors",
         syncs: "Syncs",
         datasets: "Datasets",
         pipelines: "Pipelines",
         projections: "Projections",
-      },
-    },
-    observability: {
-      label: "Observability",
-      pages: { runs: "Runs", logs: "Logs", "ai-usage": "AI usage", activity: "Activity" },
-    },
-    ontology: {
-      label: "Ontology",
-      groups: { model: "Model", logic: "Logic" },
-      pages: {
         "object-types": "Object types",
         objects: "Objects",
         graph: "Graph",
@@ -77,7 +69,8 @@ export const en = {
         developers: "Developers",
         memory: "Memory",
         members: "Members",
-        "service-accounts": "Service accounts",
+        usage: "Usage",
+        activity: "Activity",
       },
     },
   },
@@ -135,29 +128,16 @@ export const fr: Translation<AppMessages> = {
   artifacts: "Artefacts",
   sections: {
     back: "Retour",
-    data: {
-      label: "Données",
+    console: {
+      label: "Console",
+      groups: { data: "Données", ontology: "Ontologie" },
       pages: {
+        logs: "Journaux",
         connectors: "Connecteurs",
         syncs: "Synchronisations",
         datasets: "Jeux de données",
         pipelines: "Pipelines",
         projections: "Projections",
-      },
-    },
-    observability: {
-      label: "Observabilité",
-      pages: {
-        runs: "Exécutions",
-        logs: "Journaux",
-        "ai-usage": "Usage de l’IA",
-        activity: "Activité",
-      },
-    },
-    ontology: {
-      label: "Ontologie",
-      groups: { model: "Modèle", logic: "Logique" },
-      pages: {
         "object-types": "Types d’objets",
         objects: "Objets",
         graph: "Graphe",
@@ -174,7 +154,8 @@ export const fr: Translation<AppMessages> = {
         developers: "Développeurs",
         memory: "Mémoire",
         members: "Membres",
-        "service-accounts": "Comptes de service",
+        usage: "Usage",
+        activity: "Activité",
       },
     },
   },
