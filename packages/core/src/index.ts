@@ -580,6 +580,7 @@ export {
 // `@sixb/core/lake-storage`.
 
 export type {
+  DatasetColumnRef,
   DatasetProducer,
   DatasetRow,
   DatasetVersion,
@@ -1018,6 +1019,19 @@ export type {
 } from "./error-reporting/types"
 export type { SixbErrorCode, SixbFailure } from "./errors/types"
 export type { EventsRuntime } from "./events/execution"
+export type {
+  EditLineageSource,
+  IdentityLineageSource,
+  LineageSource,
+  LinkExistenceLineage,
+  LinkLineage,
+  ObjectLineage,
+  ProjectionLineageSource,
+  PropertyLineage,
+  PropertyResolution,
+  ReplacedPropertyValue,
+  TelemetryLineageSource,
+} from "./lineage/types"
 export type { LogsRuntime } from "./logging/execution"
 export type {
   OntologyMaintenanceCleanupSnapshot,

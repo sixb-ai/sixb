@@ -6,6 +6,7 @@ import {
   assertAuthorizedObjectReaderBinding,
   getAuthorizedOntologyView,
 } from "../execution/authorized-object-reader"
+import type { LineageDependencies } from "../lineage/projections"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import { assertObjectTypeRegistered } from "../ontology/validation/properties"
 import { shareOntologyMutationRuntime } from "../runtime/ontology-mutations"
@@ -103,6 +104,8 @@ export interface ExecutionObjectSet<TObjectType extends ObjectTypeWithPropertyTo
   upsertLink: ObjectSet<TObjectType>["upsertLink"]
   removeLink: ObjectSet<TObjectType>["removeLink"]
   appendTelemetryBatch: ObjectSet<TObjectType>["appendTelemetryBatch"]
+  lineage: ObjectSet<TObjectType>["lineage"]
+  linkLineage: ObjectSet<TObjectType>["linkLineage"]
 
   byId(id: string): ExecutionObjectByIdHandle<TObjectType>
 }
@@ -150,7 +153,8 @@ export interface ObjectsRuntime extends ExecutionObjectOperations {
 export function createObjectsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  blobStorage: Pick<BlobStorage, "stat" | "open">
+  blobStorage: Pick<BlobStorage, "stat" | "open">,
+  lineage: LineageDependencies
 ): ObjectsRuntime {
   const runtimeAuthorization = runtime.runtimeAuthorization
   const objectReader = runtime.objectReader
@@ -185,6 +189,7 @@ export function createObjectsRuntime(
         execution,
         objectType,
         blobStorage,
+        lineage,
       }) as ExecutionObjectSet<TObjectType>
     },
     {
