@@ -81,10 +81,13 @@ import {
   getConnectorConnectionRun,
   getDataset,
   getDatasetVersion,
+  getDatasetVersionLineage,
   getLatestTelemetry,
   getObject,
   getObjectByUniqueProperty,
   getObjectFileContent,
+  getObjectLineage,
+  getObjectLinkLineage,
   getObjectType,
   getObservedAgentChildFileContent,
   getObservedAgentMessageFileContent,
@@ -413,6 +416,9 @@ import type {
   GetDatasetResponse,
   GetDatasetVersionData,
   GetDatasetVersionError,
+  GetDatasetVersionLineageData,
+  GetDatasetVersionLineageError,
+  GetDatasetVersionLineageResponse,
   GetDatasetVersionResponse,
   GetLatestTelemetryData,
   GetLatestTelemetryError,
@@ -425,6 +431,12 @@ import type {
   GetObjectFileContentData,
   GetObjectFileContentError,
   GetObjectFileContentResponse,
+  GetObjectLineageData,
+  GetObjectLineageError,
+  GetObjectLineageResponse,
+  GetObjectLinkLineageData,
+  GetObjectLinkLineageError,
+  GetObjectLinkLineageResponse,
   GetObjectResponse,
   GetObjectTypeData,
   GetObjectTypeError,
@@ -2588,6 +2600,33 @@ export const getDatasetVersionOptions = (options: Options<GetDatasetVersionData>
     queryKey: getDatasetVersionQueryKey(options),
   })
 
+export const getDatasetVersionLineageQueryKey = (options: Options<GetDatasetVersionLineageData>) =>
+  createQueryKey("getDatasetVersionLineage", options)
+
+/**
+ * Get the versions a dataset version is computed from
+ *
+ * Walks the version's inputs upstream, `depth` steps (1 to 20, default 5). A version whose dataset the caller cannot view is left out with everything upstream of it, and counted in `restricted`.
+ */
+export const getDatasetVersionLineageOptions = (options: Options<GetDatasetVersionLineageData>) =>
+  queryOptions<
+    GetDatasetVersionLineageResponse,
+    GetDatasetVersionLineageError,
+    GetDatasetVersionLineageResponse,
+    ReturnType<typeof getDatasetVersionLineageQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getDatasetVersionLineage({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getDatasetVersionLineageQueryKey(options),
+  })
+
 export const listDatasetRowsQueryKey = (options: Options<ListDatasetRowsData>) =>
   createQueryKey("listDatasetRows", options)
 
@@ -4048,6 +4087,33 @@ export const upsertObjectMutation = (
   }
   return mutationOptions
 }
+
+export const getObjectLineageQueryKey = (options: Options<GetObjectLineageData>) =>
+  createQueryKey("getObjectLineage", options)
+
+/**
+ * Get where an object's values come from
+ *
+ * What makes the object exist and what decided each property it holds, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
+ */
+export const getObjectLineageOptions = (options: Options<GetObjectLineageData>) =>
+  queryOptions<
+    GetObjectLineageResponse,
+    GetObjectLineageError,
+    GetObjectLineageResponse,
+    ReturnType<typeof getObjectLineageQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObjectLineage({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObjectLineageQueryKey(options),
+  })
 
 /**
  * Get object by a unique property
@@ -6255,6 +6321,33 @@ export const upsertObjectLinkMutation = (
   }
   return mutationOptions
 }
+
+export const getObjectLinkLineageQueryKey = (options: Options<GetObjectLinkLineageData>) =>
+  createQueryKey("getObjectLinkLineage", options)
+
+/**
+ * Get where an object link comes from
+ *
+ * What makes the link exist, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
+ */
+export const getObjectLinkLineageOptions = (options: Options<GetObjectLinkLineageData>) =>
+  queryOptions<
+    GetObjectLinkLineageResponse,
+    GetObjectLinkLineageError,
+    GetObjectLinkLineageResponse,
+    ReturnType<typeof getObjectLinkLineageQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObjectLinkLineage({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObjectLinkLineageQueryKey(options),
+  })
 
 /**
  * Append telemetry point

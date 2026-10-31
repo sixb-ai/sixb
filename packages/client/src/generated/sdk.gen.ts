@@ -218,6 +218,9 @@ import type {
   GetDatasetResponses,
   GetDatasetVersionData,
   GetDatasetVersionErrors,
+  GetDatasetVersionLineageData,
+  GetDatasetVersionLineageErrors,
+  GetDatasetVersionLineageResponses,
   GetDatasetVersionResponses,
   GetLatestTelemetryData,
   GetLatestTelemetryErrors,
@@ -230,6 +233,12 @@ import type {
   GetObjectFileContentData,
   GetObjectFileContentErrors,
   GetObjectFileContentResponses,
+  GetObjectLineageData,
+  GetObjectLineageErrors,
+  GetObjectLineageResponses,
+  GetObjectLinkLineageData,
+  GetObjectLinkLineageErrors,
+  GetObjectLinkLineageResponses,
   GetObjectResponses,
   GetObjectTypeData,
   GetObjectTypeErrors,
@@ -1746,6 +1755,27 @@ export const getDatasetVersion = <ThrowOnError extends boolean = false>(
   )
 
 /**
+ * Get the versions a dataset version is computed from
+ *
+ * Walks the version's inputs upstream, `depth` steps (1 to 20, default 5). A version whose dataset the caller cannot view is left out with everything upstream of it, and counted in `restricted`.
+ */
+export const getDatasetVersionLineage = <ThrowOnError extends boolean = false>(
+  options: Options<GetDatasetVersionLineageData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetDatasetVersionLineageResponses,
+    GetDatasetVersionLineageErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/datasets/{datasetId}/versions/{versionId}/lineage",
+    ...options,
+  })
+
+/**
  * Preview dataset rows
  */
 export const listDatasetRows = <ThrowOnError extends boolean = false>(
@@ -2573,6 +2603,23 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Get where an object's values come from
+ *
+ * What makes the object exist and what decided each property it holds, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
+ */
+export const getObjectLineage = <ThrowOnError extends boolean = false>(
+  options: Options<GetObjectLineageData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetObjectLineageResponses, GetObjectLineageErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/objects/{objectTypeId}/{objectId}/lineage",
+    ...options,
   })
 
 /**
@@ -3884,6 +3931,27 @@ export const upsertObjectLink = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Get where an object link comes from
+ *
+ * What makes the link exist, for the current state. Steps the caller cannot view are left out and counted in `restricted`.
+ */
+export const getObjectLinkLineage = <ThrowOnError extends boolean = false>(
+  options: Options<GetObjectLinkLineageData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetObjectLinkLineageResponses,
+    GetObjectLinkLineageErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}/lineage",
+    ...options,
   })
 
 /**
