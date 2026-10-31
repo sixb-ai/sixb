@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
 import { type CheckedQuery, checkLayout } from "../src/artifacts/layout-check/layout-check"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { LocalBashSandbox } from "./helpers"
 
 // The layout check in a real headless Chromium, through Playwright for Node as the agent image
@@ -150,6 +151,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       layout,
       handle: {
         sandbox: new LocalBashSandbox(root),
+        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
         env: {
           SIXB_PLAYWRIGHT: playwright,
           ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
@@ -393,6 +395,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
         ],
         handle: {
           sandbox: new LocalBashSandbox(root),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           env: {
             SIXB_PLAYWRIGHT: playwright,
             ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),

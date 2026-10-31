@@ -7,6 +7,7 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { AgentFileBudget, createAgentToolFiles } from "../src/tools/tool-files"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -20,7 +21,7 @@ describe("agent tool files", () => {
       toolCallId: "../../unsafe provider call id",
       signal: new AbortController().signal,
       blobStorage,
-      resolveSandbox: async () => ({ sandbox }),
+      resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
     })
 
     const file = await files.put({
@@ -46,6 +47,22 @@ describe("agent tool files", () => {
     ).toEqual(PNG_BYTES)
   })
 
+  test("places a tool's file in the run's context directory, wherever it is", async () => {
+    const sandbox = new ToolFileSandbox()
+    const files = createAgentToolFiles({
+      toolName: "create_image",
+      toolCallId: "call-1",
+      signal: new AbortController().signal,
+      blobStorage: new InMemoryBlobStorage(),
+      resolveSandbox: async () => ({ sandbox, contextDirectory: "/tmp/sixb-agent/run_1" }),
+    })
+
+    const file = await files.put({ body: PNG_BYTES, fileName: "chart.png" })
+
+    expect(file.sandboxPath).toStartWith("/tmp/sixb-agent/run_1/tool-files/")
+    expect(sandbox.writtenFiles[0]?.path).toBe(file.sandboxPath)
+  })
+
   test("rejects unsafe file names before storing or provisioning a sandbox", async () => {
     let sandboxResolutions = 0
     const sandbox = new ToolFileSandbox()
@@ -56,7 +73,7 @@ describe("agent tool files", () => {
       blobStorage: new InMemoryBlobStorage(),
       resolveSandbox: async () => {
         sandboxResolutions += 1
-        return { sandbox }
+        return { sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
       },
     })
 
@@ -83,7 +100,7 @@ describe("agent tool files", () => {
       blobStorage: new InMemoryBlobStorage(),
       resolveSandbox: async () => {
         sandboxResolutions += 1
-        return { sandbox: new ToolFileSandbox() }
+        return { sandbox: new ToolFileSandbox(), contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
       },
       fileMaxBytes: 4,
     })
@@ -108,7 +125,7 @@ describe("agent tool files", () => {
       blobStorage: new InMemoryBlobStorage(),
       resolveSandbox: async () => {
         sandboxResolutions += 1
-        return { sandbox: new ToolFileSandbox() }
+        return { sandbox: new ToolFileSandbox(), contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
       },
     })
 
@@ -141,7 +158,7 @@ describe("agent tool files", () => {
         blobStorage,
         budget,
         fileMaxBytes: 10,
-        resolveSandbox: async () => ({ sandbox }),
+        resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
       })
 
     const first = createPublisher("parallel-1").put({
@@ -190,7 +207,7 @@ describe("agent tool files", () => {
       signal: abort.signal,
       blobStorage,
       budget,
-      resolveSandbox: async () => ({ sandbox }),
+      resolveSandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
     })
 
     const upload = files.put({ body: new Uint8Array(4), fileName: "cancelled.bin" })

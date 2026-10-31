@@ -10,12 +10,12 @@ const SANDBOX_MAIN_HELP = `Sixb agent CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
+The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and API gateway
+  sixb doctor                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -65,11 +65,11 @@ For query IR, run \`sixb objects query --help\` and \`sixb objects query --examp
 
 const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI")
   .replace(
-    "The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.",
+    "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
     "The CLI uses the selected local profile and its API credentials."
   )
   .replace(
-    "  sixb doctor                         Check the sandbox and API gateway\n  sixb context                        Print the current run context\n",
+    "  sixb doctor                         Check the sandbox and its API access\n  sixb context                        Print the current run context\n",
     ""
   )
   .replace(
@@ -77,7 +77,7 @@ const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instan
     ""
   )
 
-  // The agent reaches models through its run's gateway once the model routes allow it.
+  // The agent reaches models with its run token once the model routes allow it.
   .replace(
     "Files:\n  sixb files upload|download ...\n",
     "Files:\n  sixb files upload|download ...\n\nModels:\n  sixb models list [--kind <kind>]    Configured models of every kind, with prices\n  sixb models get <model>             One model's options and rate card\n  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help\n"
@@ -256,7 +256,8 @@ List options:
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
-  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>`,
+  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download url <content-url> --output <local-path>`,
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>

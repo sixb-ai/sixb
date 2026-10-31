@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
 import type { Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
 import {
   prepareWorkspaceRunFiles,
@@ -39,6 +40,7 @@ test("git add . stages only project files across creation and resume", async () 
     expect((await clean(sandbox)).exitCode).toBe(0)
     await prepareAgentSandboxApiContext({
       sandbox,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       projectId: "test",
       runId,
       apiBaseUrl: "https://gateway.invalid/synthetic-capability",

@@ -3,6 +3,7 @@ import { dispatch } from "./commands"
 
 export interface SandboxInstanceCliMode {
   readonly kind: "sandbox"
+  /** The sandbox's credentialed address for the API: the run's token is added on the way out. */
   readonly baseUrl: string
   readonly runContextPath: string
 }
@@ -36,11 +37,11 @@ export function createInstanceApiClient(mode: InstanceCliMode): ApiClient {
         : "The selected Sixb profile has no API URL.",
     unavailableMessage:
       mode.kind === "sandbox"
-        ? "The Sixb API gateway could not be reached."
+        ? "The Sixb API could not be reached from the sandbox."
         : "The Sixb API could not be reached.",
     unavailableHint:
       mode.kind === "sandbox"
-        ? "Run 'sixb doctor' to verify the sandbox runtime and gateway."
+        ? "Run 'sixb doctor' to verify the sandbox runtime and its API access."
         : "Run 'sixb status' to verify the current profile.",
   })
 }

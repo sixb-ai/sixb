@@ -23,7 +23,8 @@ digest. Custom images used by agents need:
 - `/bin/sh`
 - standard file utilities for reads and output collection
 - CA certificates and Bun 1.3+ or Node 22+ for the portable `sixb` CLI
-- `dirname`, `mkdir`, `cat`, and optionally `chmod` for file materialization
+- `dirname`, `mkdir`, `cat`, `chown`, and optionally `chmod` for file materialization
+- `setpriv` (util-linux) to run commands unprivileged
 
 `curl` and `jq` are not required.
 
@@ -40,6 +41,23 @@ Each run creates a fresh container, starts it with a small keep-alive command, m
 skills/context through `writeFiles(...)`, runs commands with `container exec`, then stops and deletes
 the container on `destroy()`.
 
+## Commands run unprivileged
+
+Every command runs as uid 65534 (`nobody`) through `setpriv`, with no groups, capabilities or new
+privileges. The working directory and the files `writeFiles` materializes belong to that user, so
+commands can change them; elsewhere they can write only where the image lets anyone, such as
+`/tmp`. Install tools in the image: a command can no longer install packages as root. The image
+needs `setpriv` (util-linux, or BusyBox's).
+
+## Request credentials
+
+The factory supports request credentials (`supportsRequestCredentials`), such as the run token the
+agent worker adds to every call its commands make to the Sixb API. A forwarder runs as root in the
+guest and holds them; `credentialedUrl(url)` is its socket under `/var/lib/sixb-forward`, which
+forwards only to `url` and adds the credential that matches the request. The credentials reach the
+guest in a root process's environment, never in arguments, and stay in root-only files. The
+forwarder needs Bun or Node in the image.
+
 ## Network Policy
 
 Apple Container's documented CLI does not expose per-origin egress allow-listing. This provider maps
@@ -52,7 +70,7 @@ Sixb's network policies conservatively where it can:
 | `{ mode: "restricted" }` | Warns and degrades to the configured default network. |
 
 The downgrade matches Sixb's provider contract for backends that cannot enforce restricted egress.
-Use `@sixb/sandboxes-smolvm` or `@sixb/sandboxes-vercel` when the agent gateway must be the only
+Use `@sixb/sandboxes-smolvm` or `@sixb/sandboxes-vercel` when the Sixb API must be the only
 reachable origin.
 
 ## Options

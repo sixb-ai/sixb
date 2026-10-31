@@ -134,6 +134,7 @@ function createRuntime(options: { readonly auth?: boolean; readonly sandbox?: bo
     ...(options.sandbox
       ? {
           sandboxes: {
+            supportsRequestCredentials: true,
             create: async () => {
               throw new Error("Must not create a sandbox")
             },

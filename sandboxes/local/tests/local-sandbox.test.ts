@@ -27,6 +27,20 @@ describe("LocalSandbox shell-injection regression", () => {
     }
   })
 
+  // Guard proof: drop the devices' allow rule from buildSeatbeltProfile; on macOS this fails.
+  test("a command can discard its output to /dev/null", async () => {
+    const sandbox = await new LocalSandboxFactory().create()
+    try {
+      const result = await sandbox.runCommand("/bin/sh", [
+        "-c",
+        "echo noise 2>/dev/null >/dev/null && echo ok",
+      ])
+      expect(result).toMatchObject({ exitCode: 0, stdout: "ok\n" })
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("LocalSandbox.detectIsolation reports the host backend", () => {
     const probe = LocalSandbox.detectIsolation()
     expect(["seatbelt", "bwrap", "none"]).toContain(probe.backend)

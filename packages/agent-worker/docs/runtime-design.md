@@ -18,10 +18,11 @@ Action and returns its terminal run in the same command.
 
 ## Reaching your data
 
-Inside the sandbox, the `sixb` CLI calls a run-scoped gateway that exposes a restricted slice of
-the live project API. The worker configures that transport without exposing a bearer token, so the
-agent works against current project data instead of a snapshot. These routes are available through
-the CLI and gateway (everything else returns `403`):
+Inside the sandbox, the `sixb` CLI calls the live project API with the run's token, so the agent
+works against current project data instead of a snapshot. The provider adds the token outside the
+guest (Vercel's firewall, a forwarder on the host or in a VM guest) and commands reach the API at
+the sandbox's credentialed address, so no command holds it. The token opens a restricted slice of
+the API (everything else returns `403`):
 
 | Area | Routes |
 | --- | --- |
@@ -39,23 +40,22 @@ agent can only see and act on what its groups allow — the same checks as any o
 workflow task keeps its groups when auth is disabled. Access is checked when a request is admitted,
 so only while the run is active; a request admitted before the run ends still finishes in it.
 
-The upload route keeps its normal simple-file ceiling and gets a route-specific gateway body limit;
-other gateway requests remain capped at 1 MB. Staged and direct-provider uploads are not exposed.
+Requests keep the API's own body limits. Staged and direct-provider uploads are not exposed.
 Agents must preview and ask for confirmation before starting a domain-changing action or workflow.
 Workflow agent nodes cannot start another workflow, which bounds recursive execution. Generic
 object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics, and
-infrastructure or administration routes remain outside the gateway.
+infrastructure or administration routes stay closed to run tokens.
 
 Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK,
-with the authority the gateway resolves; its type shows only object reads, actions, models and
+with the authority a run-token request resolves; its type shows only object reads, actions, models and
 connectors. The model supplies only ids, and the SDK checks every read and request against the
 run's authority: the user's access for a conversation, the task's groups for a workflow task. Tool
-authority is resolved once, at turn start, while the gateway re-resolves it on every request. Their
-model calls use the run's accounting recorder; a gateway request gets its own, on the run's attempt.
+authority is resolved once, at turn start, while a run-token request re-resolves it every time. Their
+model calls use the run's accounting recorder; a run-token request gets its own, on the run's attempt.
 Their `attachments` open a manifest key only in a message of the run's own thread, like the
-gateway's message file route, or among a workflow task's input files.
+message file route, or among a workflow task's input files.
 
-Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
+Workflow run detail includes the run's top-level output after success. Responses to a run token omit
 the route's internal node records, and only top-level input/output file paths are available.
 
 ## Usage persistence
@@ -86,11 +86,17 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
   [paused children](#paused-children)). Run teardown never destroys it; only a subagent that ended
   does, through `beforeFinalize({ discard: true })`.
 
+A `RunSandbox` also names the run's **context directory** (`$SIXB_CONTEXT_DIR`), where the run's
+files go: skills, ontology docs, memory, attachments, artifacts, tool files, children's files and
+the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
+checkout excludes from Git. Every path the worker writes, checks or names in the prompt comes from
+it, as the agent names it: relative to the working directory, or absolute.
+
 For a blank sandbox:
 
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
-   whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
-   else.
+   whose only allowed origin is the Sixb API. The agent can reach the API, with its run token,
+   and nothing else.
 2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
    sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
 3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
@@ -103,16 +109,16 @@ sandbox still booting then is destroyed once it is ready.
 
 A workspace, a thread's or a step's, is ready before the first model call instead, so the system
 prompt can describe the checkout, and its network follows its recipe, which always includes the
-gateway. For a step's workspace:
+Sixb API. For a step's workspace:
 
 - A step whose sandbox fails to provision after model preparation fails the node; it is not
   retried, because the clone and setup may have run.
 - A worker crash leaves a step's ephemeral sandbox running until the provider's own timeout, as it
   does for a blank sandbox.
 
-Because a blank sandbox's egress is locked to the gateway, its agent's only way to read or write
-app data is through that gateway — there is no open internet. See
-[Agent tools and the gateway](../../../docs/models/tools-and-authorization.md) for what the gateway exposes.
+Because a blank sandbox's egress is locked to the Sixb API, its agent's only way to read or write
+app data is the API, with its run token — there is no open internet. See
+[Agent tools](../../../docs/models/tools-and-authorization.md) for what the run token opens.
 
 ## Child agents
 
@@ -128,7 +134,7 @@ Each child:
 - receives all project tools plus an isolated, blank sandbox, kept while it pauses on a provider
   that resumes sandboxes, and scoped Sixb API access;
 - knows the project as its parent does: `SIXB.md`, the skills, the ontology index, the requester's
-  time zone and locale, and the memory, which it reads and the gateway refuses to let it save;
+  time zone and locale, and the memory, which it reads and the API refuses to let it save;
 - gets the conversation prompt's data rules, never its rules for talking to the user;
 - publishes artifacts into its conversation (`conversationThreadId`) as its own run, so a retry of
   the parent removes them with the parent's own;
@@ -138,7 +144,7 @@ Each child:
   stream (see [Child threads](#child-threads));
 - stops with its parent: when the parent finishes, is cancelled or times out. Its wall clock ends at
   the parent's deadline, which its spec carries, so its wait in the queue counts against it. Once
-  its parent has ended, the gateway and the publish transaction refuse it. A child waiting on its
+  its parent has ended, the API and the publish transaction refuse it. A child waiting on its
   question when its parent finishes pauses instead: see [questions to the parent](#questions-to-the-parent);
 - is never replayed: found `running` on redelivery, it ends `interrupted`, since it may already have
   run actions or published. Its parent decides whether to spawn it again;

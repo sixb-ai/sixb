@@ -58,8 +58,8 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   are recorded with unknown final usage and cost, retaining received native IDs. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
-  changes afterward. The run also persists the queue-returned lease expiration for gateway
-  authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
+  changes afterward. The run also persists the queue-returned lease expiration for run-token
+  admission. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
 - Conversations get `spawn_agent`, `wait_agent` and `message_agent`. `spawn_agent` takes a tier or one of the exact
@@ -171,7 +171,7 @@ the `project` repo, which every conversation builds up, through `sixb.agent.memo
 requester's own access decides what is installed, and installs their latest files under
 `$SIXB_MEMORY_DIR/<repo>/`, with a starter `MEMORY.md` while a repo has none.
 `context/memory.json` records the revision and each file's SHA-256 as installed; `sixb memory
-save` (`src/agent-cli/commands/memory.ts`) sends the files that differ from it through the gateway,
+save` (`src/agent-cli/commands/memory.ts`) sends the files that differ from it with the run token,
 which records the run's thread as the save's source. `src/agent-runtime/memory.ts` holds that
 layout for both sides. A requester with no repo of its own, such as a service account, gets the
 project's alone.
@@ -243,13 +243,14 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `apiBaseUrl`: required for agent execution; Sixb server origin that hosts the agent API gateway. The worker injects a
-  run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, installs the self-documenting `sixb`
-  CLI on `PATH`, writes the run's project skills into `SIXB_SKILLS_DIR` and ontology docs into
-  `SIXB_ONTOLOGY_DIR`, and creates the sandbox
-  with a restricted network policy allowing the server origin. The gateway authorizes scoped
-  ontology, object, telemetry, file publication, action, and workflow routes from the run execution
-  token and restored execution authority; no bearer token is exposed to the sandbox.
+- `apiBaseUrl`: required for agent execution; the Sixb server origin the run's commands call. The
+  run's token is one of the sandbox's request credentials, so commands get the sandbox's
+  credentialed address as `SIXB_API_BASE_URL`, never the token; the worker refuses to start on
+  sandboxes that cannot add credentials. The worker installs the self-documenting `sixb` CLI on
+  `PATH`, writes the run's project skills into
+  `SIXB_SKILLS_DIR` and ontology docs into `SIXB_ONTOLOGY_DIR`, and creates the sandbox with a
+  restricted network policy allowing the server origin. The run token opens only the routes marked
+  `agentApi`, as the run, while the run holds its execution; it carries no other credential.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `8`.
 - `subagentConcurrency`: maximum number of child agents this worker executes at once, on a lane of

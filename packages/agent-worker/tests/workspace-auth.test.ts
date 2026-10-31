@@ -33,6 +33,7 @@ function fixture(authorize: () => Promise<SandboxSourceCredentials>) {
   const auth = new WorkspaceAuthSession({
     auth: { authorize },
     source: { type: "git", url: "https://github.com/acme/repo.git" },
+    alongside: [],
     signal: controller.signal,
     assertOwner: async () => {
       if (!owner) throw new Error("lost")

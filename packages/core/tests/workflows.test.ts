@@ -228,8 +228,8 @@ describe("agent step sandboxes", () => {
       factory({ source: { ...source, access: "write" } }),
     ],
     [
-      "is invalid: Sandbox source auth needs a provider that injects request credentials outside the sandbox: use @sixb/sandboxes-vercel, or remove auth.",
-      factory({ source: { ...source, access: "write" }, auth: { authorize } }, false),
+      "is invalid: Agent sandboxes need a provider that adds request credentials outside the sandbox, so the agent's commands never hold its token: use a provider whose factory sets supportsRequestCredentials, such as @sixb/sandboxes-local or @sixb/sandboxes-vercel.",
+      factory({ source }, false),
     ],
   ]
 

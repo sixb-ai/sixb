@@ -1,8 +1,17 @@
+import type { Sandbox } from "@sixb/core"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
-import type { AgentSandboxHandle } from "./sandbox-handle"
+
+/**
+ * Where a provider's sandbox keeps a run's files: in its working directory, which a Git checkout
+ * excludes (see `prepareWorkspaceRunFiles`).
+ */
+export const SANDBOX_CONTEXT_DIRECTORY = ".sixb/agent"
 
 /** The sandbox a run works in, with what the system prompt may say about it. */
-export interface AcquiredRunSandbox extends AgentSandboxHandle {
+export interface AcquiredRunSandbox {
+  readonly sandbox: Sandbox
+  /** The workspace's environment; provisioning adds the run's. */
+  readonly env?: Readonly<Record<string, string>>
   /** Facts about a prepared workspace; absent for a blank sandbox. */
   readonly promptContext?: AgentWorkspacePromptContext
   /** When the workspace was recreated and its earlier files were lost. */
@@ -28,13 +37,18 @@ export interface RunSandbox {
    * exist first; a blank sandbox boots concurrently and tools wait for it only when used.
    */
   readonly waitBeforeModel: boolean
+  /**
+   * Where the run's files go, known before acquisition so the prompt can name them. As the agent
+   * names it: relative to the working directory, or absolute.
+   */
+  readonly contextDirectory: string
   /** Called once, when the run environment starts. */
   acquire(): Promise<AcquiredRunSandbox>
   /**
    * Give back an acquired sandbox, after the run or a failed provisioning. Absent when the run
    * has nothing to give back, so teardown never waits on it.
    */
-  release?(acquired: AgentSandboxHandle): Promise<void>
+  release?(acquired: AcquiredRunSandbox): Promise<void>
   /** Confirm preservation before the run's terminal write. Idempotent: the first call decides. */
   beforeFinalize?(options?: BeforeFinalizeOptions): Promise<void>
 }

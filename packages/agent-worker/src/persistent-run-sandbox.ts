@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto"
-import type { Sandbox, SandboxDefinition, SandboxEnvironment, SandboxFactory } from "@sixb/core"
+import type {
+  Sandbox,
+  SandboxDefinition,
+  SandboxEnvironment,
+  SandboxFactory,
+  SandboxRequestCredential,
+} from "@sixb/core"
 import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type {
@@ -13,7 +19,12 @@ import {
   AgentExecutionLostError,
   assertRunExecutionOwned,
 } from "./errors"
-import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
+import {
+  type AcquiredRunSandbox,
+  type BeforeFinalizeOptions,
+  type RunSandbox,
+  SANDBOX_CONTEXT_DIRECTORY,
+} from "./run-sandbox"
 import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
@@ -26,6 +37,8 @@ interface PersistentRunSandboxInput {
   readonly thread: AgentThreadRecord
   readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly signal: AbortSignal
+  /** The run's credential for the Sixb API, added when the factory adds credentials. */
+  readonly apiCredential: SandboxRequestCredential
   readonly onAuthFailure: (error: Error) => void
 }
 
@@ -110,6 +123,7 @@ class PersistentSandboxSession {
       auth: definition?.auth,
       factory: context.sandboxes,
       apiOrigin: new URL(context.apiBaseUrl).origin,
+      apiCredential: input.apiCredential,
       signal,
       assertOwner: () => this.assertOwner(),
       onAuthFailure,
@@ -169,6 +183,7 @@ class PersistentSandboxSession {
 
     return {
       waitBeforeModel: false,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       resumed: false,
       acquire: () => {
         if (finalized) return Promise.reject(sandboxError("is being saved."))
@@ -214,9 +229,7 @@ class PersistentSandboxSession {
       const resumed = await this.wait(
         this.resume(this.name, {
           ...this.access.sessionOptions,
-          // An empty list confirms that this run's recipe needs no source auth.
-          requestCredentials:
-            this.access.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
+          requestCredentials: this.access.requestCredentials,
         })
       )
       this.resumed = true
@@ -287,6 +300,7 @@ class PersistentSandboxSession {
     // a sub-agent's that ended; a lost execution leaves it to the run's current owner.
     return {
       waitBeforeModel: true,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       resumed: this.resumed,
       acquire: async () => acquired,
       beforeFinalize: (options?: BeforeFinalizeOptions) => {
@@ -312,6 +326,9 @@ class PersistentSandboxSession {
         return session.status
       },
       workingDirectory: session.workingDirectory,
+      ...(session.credentialedUrl
+        ? { credentialedUrl: session.credentialedUrl.bind(session) }
+        : {}),
       runCommand: (command, args, options) =>
         this.track(() =>
           session.runCommand(command, args, {

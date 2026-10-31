@@ -59,6 +59,8 @@ const DEFAULT_BIN = "smolvm"
 export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
   implements SandboxFactory<TParams>
 {
+  /** A root forwarder in the guest adds them; commands run unprivileged. Needs Bun or Node. */
+  readonly supportsRequestCredentials = true
   readonly configuration: SandboxConfig<TParams>
   private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined
@@ -68,9 +70,6 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
-    if (options.requestCredentials !== undefined) {
-      throw new SandboxError("[Sandbox] smolvm does not support secure request credentials.")
-    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] smolvm does not support persistent sandboxes.")
@@ -85,6 +84,9 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
       network: options.network ?? this.configuration.network,
       env: { ...this.configuration.env, ...options.env },
       workingDirectory: options.workingDirectory,
+      ...(options.requestCredentials === undefined
+        ? {}
+        : { requestCredentials: options.requestCredentials }),
     })
     try {
       return await initializeSandboxEnvironment(sandbox, environment, options.signal)

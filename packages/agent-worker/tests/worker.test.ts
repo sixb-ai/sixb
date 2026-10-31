@@ -51,6 +51,7 @@ import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   agentRunQueueJobId,
+  agentRunTokenRunId,
   createAgentRunExecutionToken,
   createAgentRunId,
   createSubagentRunId,
@@ -132,6 +133,7 @@ import {
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "../src/run-environment"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
 import { AgentFileBudget } from "../src/tools/tool-files"
@@ -1089,6 +1091,7 @@ function testSkill(name: string): AgentSkillDefinition {
 function testSystemPrompt(): string {
   return renderAgentSystemPrompt({
     mode: "conversation",
+    contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     skills: [],
   })
 }
@@ -1110,6 +1113,11 @@ class RecordingSandbox implements Sandbox {
   /** Symbolic links, by the absolute path of the link to the absolute path it leads to. */
   readonly links = new Map<string, string>()
   destroyed = false
+
+  /** As a firewall adds credentials: the URL itself. */
+  credentialedUrl(url: string): string {
+    return url
+  }
 
   constructor(id: string, provider = "recording") {
     this.id = id
@@ -1326,7 +1334,14 @@ class RecordingSandbox implements Sandbox {
   }
 }
 
+/** The run a sandbox's run-token credential belongs to: the token its forwarder adds. */
+function runTokenRunId(options: CreateSandboxOptions | undefined): string | undefined {
+  const authorization = options?.requestCredentials?.[0]?.headers?.Authorization ?? ""
+  return agentRunTokenRunId(authorization.replace(/^Bearer /, ""))
+}
+
 class RecordingSandboxFactory implements SandboxFactory {
+  readonly supportsRequestCredentials = true
   readonly sandboxes: RecordingSandbox[] = []
   readonly createOptions: CreateSandboxOptions[] = []
 
@@ -1519,6 +1534,7 @@ function provisioningGate() {
 
 /** A factory whose provisioning always fails (e.g. missing isolation backend). */
 class FailingSandboxFactory implements SandboxFactory {
+  readonly supportsRequestCredentials = true
   async create(): Promise<Sandbox> {
     throw new Error("sandbox provisioning unavailable")
   }
@@ -2587,6 +2603,7 @@ describe("AgentWorker", () => {
       answerModel(),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         create: async () => sandbox,
         resume: async () => sandbox,
       },
@@ -2633,6 +2650,7 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         create: async () => {
           acquired = true
           return sandbox
@@ -2701,6 +2719,7 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         create: provision,
         resume: provision,
       },
@@ -2738,6 +2757,7 @@ describe("AgentWorker", () => {
       answerModel(),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         create: (options) => {
           if (!options?.persistence) throw new Error("No ephemeral fallback")
           requestedName = options.persistence.name
@@ -2846,7 +2866,12 @@ describe("AgentWorker", () => {
         expect(options).not.toHaveProperty("persistence")
         // Even source-free recipes explicitly confirm current auth requirements on resume.
         expect(options?.requestCredentials).toBeDefined()
-        if (!withSource) expect(options?.requestCredentials).toEqual([])
+        // Without a source, only the run's own credential for the Sixb API.
+        if (!withSource) {
+          expect(options?.requestCredentials?.map((credential) => credential.origin)).toEqual([
+            new URL(TEST_AGENT_API_BASE_URL).origin,
+          ])
+        }
         resumes++
         policies.push(options?.network)
         names.push(name)
@@ -3036,7 +3061,9 @@ describe("AgentWorker", () => {
         async create(options) {
           names.push(options!.persistence!.name)
           if (withSource)
-            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
+            expect(options?.requestCredentials?.at(-1)?.headers.Authorization).toBe(
+              `token-${issued}`
+            )
           const session = Object.assign(new RecordingSandbox(`replacement-${sessions.length}`), {
             setRequestCredentials: async () => {},
           })
@@ -3045,7 +3072,9 @@ describe("AgentWorker", () => {
         },
         async resume(name, options) {
           if (withSource)
-            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
+            expect(options?.requestCredentials?.at(-1)?.headers.Authorization).toBe(
+              `token-${issued}`
+            )
           resumes++
           if (resumes === 1) throw new SandboxStateUnavailableError("expired")
           expect(name).toBe(names[1])
@@ -3150,6 +3179,7 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         async create(options) {
           creates++
           names.push(options!.persistence!.name)
@@ -3279,15 +3309,28 @@ describe("AgentWorker", () => {
     }
   })
 
-  test.each([
-    "unsupported",
-    "denied",
-  ] as const)("rejects %s authentication before acquiring workspace state", async (failure) => {
+  // SixbHost rejects such sandboxes at construction. A worker host is structural, so the worker
+  // keeps its own guard. Regression proof: remove the check from buildAgentContext; it starts.
+  test("refuses to start on sandboxes that cannot add the run token", () => {
+    const built = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory())
+    const host = new Proxy(built, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver)
+        return property === "sandboxes" ? { ...value, supportsRequestCredentials: false } : value
+      },
+    })
+
+    expect(() => new AgentWorker(host, workerOptions())).toThrow(
+      "Agent sandboxes need a provider that adds request credentials outside the sandbox"
+    )
+  })
+
+  test("rejects denied authentication before acquiring workspace state", async () => {
     // Regression proof: move auth preparation after acquire/create; state or provider counts change.
     let provisions = 0
     let authorizations = 0
     let modelCalls = 0
-    const built = buildSixb(
+    const host = buildSixb(
       answerModel(() => {
         modelCalls++
       }),
@@ -3315,19 +3358,6 @@ describe("AgentWorker", () => {
         },
       }
     )
-    // SixbHost rejects this pairing at construction. A worker host is structural, so the worker
-    // keeps its own guard: give it a provider without credential injection.
-    const host =
-      failure === "unsupported"
-        ? new Proxy(built, {
-            get(target, property, receiver) {
-              const value = Reflect.get(target, property, receiver)
-              return property === "sandboxes"
-                ? { ...value, supportsRequestCredentials: false }
-                : value
-            },
-          })
-        : built
     attachSixbErrorReporter(host, () => {})
     const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
@@ -3348,7 +3378,7 @@ describe("AgentWorker", () => {
       ).toBeUndefined()
       expect(provisions).toBe(0)
       expect(modelCalls).toBe(0)
-      expect(authorizations).toBe(failure === "unsupported" ? 0 : 1)
+      expect(authorizations).toBe(1)
     } finally {
       await worker.stop()
       completion.restore()
@@ -3630,14 +3660,14 @@ describe("AgentWorker", () => {
     // Every request reaches the provider, at creation and on renewal.
     const targets = (credentials: readonly SandboxRequestCredential[] | undefined) =>
       credentials?.map((credential) => [credential.origin, credential.headers.Authorization])
+    // The run's own credential for the Sixb API comes first, and every renewal keeps it.
+    const run = [api, expect.stringMatching(/^Bearer sixb_run_v1_/)]
     expect(targets(created?.requestCredentials)).toEqual([
+      run,
       [repository, "token-1"],
       [graphql, "token-1"],
     ])
-    expect(targets(injections[0])).toEqual([
-      [repository, "token-2"],
-      [graphql, "token-2"],
-    ])
+    expect(targets(injections[0])).toEqual([run, [repository, "token-2"], [graphql, "token-2"]])
   })
 
   test("reports a repository that claims the run-file directory when a thread acquires it", async () => {
@@ -3648,7 +3678,11 @@ describe("AgentWorker", () => {
     const host = buildSixb(
       answerModel(() => {}),
       new InMemoryBroker(),
-      { create: async () => sandbox, resume: async () => sandbox },
+      {
+        supportsRequestCredentials: true,
+        create: async () => sandbox,
+        resume: async () => sandbox,
+      },
       { sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } } }
     )
     attachSixbErrorReporter(host, (error) => {
@@ -4981,6 +5015,7 @@ describe("AgentWorker", () => {
     // creation is cancelled first.
     const recording = new RecordingSandboxFactory()
     const sandboxes: SandboxFactory = {
+      supportsRequestCredentials: true,
       create: async (options) => {
         creation = options?.signal
         await new Promise<void>((resolve, reject) => {
@@ -5124,6 +5159,9 @@ describe("AgentWorker", () => {
             mode: "restricted",
             allow: [{ name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin }],
           },
+          requestCredentials: [
+            expect.objectContaining({ origin: new URL(TEST_AGENT_API_BASE_URL).origin }),
+          ],
           signal: expect.any(AbortSignal),
         },
       ])
@@ -5174,7 +5212,8 @@ describe("AgentWorker", () => {
       expect(step.createOptions[0]?.persistence).toBeUndefined()
 
       const { events } = step
-      expect(events.slice(0, 2)).toEqual(["create", "clone"])
+      // Created with the run's own credential for the Sixb API, before the clone.
+      expect(events.slice(0, 2)).toEqual(["inject", "clone"])
       expect(events.indexOf("exclude-run-files")).toBeGreaterThan(-1)
       expect(events.indexOf("exclude-run-files")).toBeLessThan(events.indexOf("write-run-files"))
       expect(events.at(-1)).toBe("destroy")
@@ -5226,6 +5265,7 @@ describe("AgentWorker", () => {
 
       expect(step.createOptions[0]?.env).toEqual({ GIT_AUTHOR_NAME: "Step agent" })
       expect(step.createOptions[0]?.requestCredentials).toEqual([
+        expect.objectContaining({ origin: new URL(TEST_AGENT_API_BASE_URL).origin }),
         expect.objectContaining({ headers: { Authorization: "step-secret" } }),
       ])
       expect(system).toContain("Repository access is authenticated outside the sandbox")
@@ -5849,7 +5889,7 @@ describe("AgentWorker", () => {
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model,
       runId,
-      sandboxes: { create: () => sandbox.promise },
+      sandboxes: { supportsRequestCredentials: true, create: () => sandbox.promise },
     })
     const errors: unknown[] = []
     const reporter = attachSixbErrorReporter(sixb, (error) => {
@@ -6636,7 +6676,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
+  test("creates isolated run tokens and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
     const plan = executionPlanFor(sixb)
@@ -6678,16 +6718,13 @@ describe("AgentWorker", () => {
       ])
       const firstBaseUrl = stdoutValue(firstBash.stdout, "base")
       const secondBaseUrl = stdoutValue(secondBash.stdout, "base")
-
-      expect(firstBaseUrl).not.toBe(secondBaseUrl)
-      expect(firstBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
-      expect(secondBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
+      // One API, each sandbox adding its own run's token.
+      expect(firstBaseUrl).toBe("http://sixb-api.local")
+      expect(secondBaseUrl).toBe("http://sixb-api.local")
       expect(new URL(firstBaseUrl).origin).toBe(origins[0])
       expect(new URL(secondBaseUrl).origin).toBe(origins[1])
-      expect(firstBaseUrl).toContain(`/${encodeURIComponent(firstRun.id)}/`)
-      expect(secondBaseUrl).toContain(`/${encodeURIComponent(secondRun.id)}/`)
-      expect(firstBaseUrl).not.toContain("sixb_sat_")
-      expect(secondBaseUrl).not.toContain("sixb_sat_")
+      const runIds = sandboxes.createOptions.map(runTokenRunId)
+      expect(new Set(runIds)).toEqual(new Set([firstRun.id, secondRun.id]))
       expect(firstBash.stdout).toContain(`run=${firstRun.id}`)
       expect(secondBash.stdout).toContain(`run=${secondRun.id}`)
       expect(firstBash.stdout).toContain(`thread=${firstRun.threadId}`)
@@ -6775,7 +6812,9 @@ describe("AgentWorker", () => {
       })
       expect(manifest.attachments[0].sandboxPath).toStartWith(".sixb/agent/attachments/")
       expect(manifest.attachments[0].sandboxPath).toEndWith("1-note.txt")
-      expect(manifest.attachments[0].contentUrl).toContain("/__sixb/agent-api/")
+      expect(manifest.attachments[0].contentUrl).toStartWith(
+        "http://sixb-api.local/api/agent-threads/"
+      )
     } finally {
       await environment.dispose()
     }
@@ -6872,6 +6911,7 @@ describe("AgentWorker", () => {
       messages,
       blobStorage,
       apiBaseUrl: TEST_AGENT_API_BASE_URL,
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
       inlineImages: true,
     })
 
@@ -6896,6 +6936,7 @@ describe("AgentWorker", () => {
     })
     const recording = new RecordingSandboxFactory()
     const sandboxes: SandboxFactory = {
+      supportsRequestCredentials: true,
       async create(options: CreateSandboxOptions = {}) {
         await gate
         return recording.create(options)
@@ -6964,6 +7005,7 @@ describe("AgentWorker", () => {
     })
     const recording = new RecordingSandboxFactory()
     const sandboxes: SandboxFactory = {
+      supportsRequestCredentials: true,
       async create(options: CreateSandboxOptions = {}) {
         await gate
         return recording.create(options)
@@ -8444,7 +8486,7 @@ describe("AgentWorker", () => {
   ) {
     const sandbox = new RecordingSandbox("run-files")
     const runFiles: AgentRunFiles = {
-      sandbox: async () => ({ sandbox }),
+      sandbox: async () => ({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY }),
       blobStorage: sixb.blobStorage,
       budget: options.budget ?? new AgentFileBudget(),
       installArtifactsFrom: options.installArtifactsFrom ?? (async () => {}),
@@ -10321,9 +10363,9 @@ describe("AgentWorker", () => {
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
       expect(command?.options.cwd).toBe("/workspace")
-      expect(command?.options.env?.SIXB_API_BASE_URL).toStartWith(
-        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(run.id)}/`
-      )
+      expect(command?.options.env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
+      expect(command?.options.env).not.toHaveProperty("SIXB_TOKEN")
+      expect(runTokenRunId(createOptions)).toBe(run.id)
       expect(command?.options.env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
       expect(command?.options.timeout).toBe(1234)
       expect(command?.options.signal).toBeInstanceOf(AbortSignal)
@@ -10843,6 +10885,7 @@ describe("AgentWorker", () => {
         return await conversationPreparation.prepareAgentConversationContext({
           context,
           plan: executionPlanFor(host),
+          contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           ontologyIndex: renderOntologyDocs({
             catalog: host.definitions.agent.ontologyDocs,
             objectTypes: context.sixb.objects.listTypes(),
@@ -11318,9 +11361,9 @@ describe("AgentWorker", () => {
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "print-sixb-env"])
       const env = command?.options.env
-      expect(env?.SIXB_API_BASE_URL).toStartWith(
-        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(runId)}/`
-      )
+      expect(env?.SIXB_API_BASE_URL).toBe("http://localhost:3002")
+      expect(env).not.toHaveProperty("SIXB_TOKEN")
+      expect(runTokenRunId(createOptions)).toBe(runId)
       expect(env?.SIXB_PROJECT_ID).toBe(PROJECT_ID)
       expect(env?.SIXB_ACTOR_ID).toBeUndefined()
       expect(env?.SIXB_THREAD_ID).toBe(threadId)
@@ -13183,7 +13226,14 @@ describe("agent tools act as the requester", () => {
     }
     try {
       expect(JSON.parse(task.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
-        attachments: [{ key: "input.quote", path: "input.quote" }],
+        attachments: [
+          {
+            key: "input.quote",
+            path: "input.quote",
+            materialized: true,
+            sandboxPath: ".sixb/agent/attachments/workflow-input/0-quote.txt",
+          },
+        ],
       })
       expect(JSON.parse(child.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
         attachments: [{ key: "inputs/quote.txt", sandboxPath: "inputs/quote.txt" }],

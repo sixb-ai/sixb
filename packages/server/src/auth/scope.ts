@@ -2,11 +2,7 @@ import { type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "@sixb/core/internal/agents"
 import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
 import type { Sixb } from "@sixb/core/internal/request-execution"
-import type {
-  AgentRunRecord,
-  ConversationAgentRunRecord,
-  ExecutionRecord,
-} from "@sixb/core/storage"
+import type { ConversationAgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
 import type { ServerAuthGuardDecision } from "./guard"
 
 /**
@@ -17,47 +13,22 @@ import type { ServerAuthGuardDecision } from "./guard"
  */
 export interface RequestAuthState {
   readonly sixb: Sixb | null
-  /** Present for requests proxied through the run-scoped agent API gateway. */
+  /** Present for a conversation run's run-token requests. */
   readonly agentRun?: ConversationAgentRunRecord
-  /** Identifies which kind of active agent execution owns a gateway request. */
+  /** Identifies which kind of active agent execution owns a run-token request. */
   readonly agentExecution?:
     | { readonly kind: "conversation"; readonly runId: string }
     | { readonly kind: "subagent"; readonly runId: string; readonly parentRunId: string }
     | { readonly kind: "workflow"; readonly nodeRunId: string }
 }
 
-/** The agent run execution a gateway request runs inside, read from server-side records only. */
-export interface AgentGatewayRunExecution {
+/** The agent run execution a run-token request runs inside, read from server-side records only. */
+export interface AgentRunRequestExecution {
   readonly execution: ExecutionRecord
   readonly actorId?: string
   readonly runId: string
   readonly attempt: number
   readonly authorization: AgentExecutionAuthorization
-}
-
-export interface InternalRequestAuthState {
-  readonly runExecution: AgentGatewayRunExecution
-  readonly agentRun?: AgentRunRecord
-  readonly agentExecution?: RequestAuthState["agentExecution"]
-}
-
-const internalRequestAuthState = new WeakMap<Request, InternalRequestAuthState>()
-
-export function registerInternalRequestAuthState(
-  request: Request,
-  authState: InternalRequestAuthState
-): void {
-  internalRequestAuthState.set(request, authState)
-}
-
-export function consumeInternalRequestAuthState(
-  request: Request
-): InternalRequestAuthState | undefined {
-  const authState = internalRequestAuthState.get(request)
-  if (authState) {
-    internalRequestAuthState.delete(request)
-  }
-  return authState
 }
 
 /**
@@ -100,7 +71,7 @@ export function requestActor(sixb: Pick<Sixb, "execution">): Principal {
 
 /**
  * The caller the auth guard resolved for this request. Null on public routes, for shared-access and
- * agent-gateway requests, and when auth is disabled.
+ * run-token requests, and when auth is disabled.
  */
 export function requestCaller(context: unknown): AuthenticatedRequestAuthSession | null {
   const auth = (context as { readonly auth?: ServerAuthGuardDecision }).auth

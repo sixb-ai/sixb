@@ -1,4 +1,4 @@
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type {
   AgentMemoryRepoView,
   AgentProjectFile,
@@ -6,6 +6,7 @@ import type {
   Sandbox,
   SandboxFileRecord,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { loadAgentCliAssets } from "./agent-cli-assets"
 import {
   AGENT_MEMORY_ENTRY,
@@ -19,12 +20,12 @@ import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 
 /**
- * Where a conversation's artifacts are installed, and their manifest, relative to the sandbox
- * working directory. Both are under `.sixb/agent`, which a sandbox that outlives the run clears
- * when it opens, so each run's install starts empty.
+ * Where a conversation's artifacts are installed, and their manifest, relative to the context
+ * directory. A sandbox that outlives the run clears that directory when it opens, so each run's
+ * install starts empty.
  */
-export const AGENT_ARTIFACTS_DIRECTORY = ".sixb/agent/artifacts"
-export const AGENT_ARTIFACTS_MANIFEST = ".sixb/agent/context/artifacts.json"
+export const AGENT_ARTIFACTS_DIRECTORY = "artifacts"
+export const AGENT_ARTIFACTS_MANIFEST = "context/artifacts.json"
 const ARTIFACTS_RESET_TIMEOUT_MS = 30_000
 
 export interface AgentSandboxApiContext {
@@ -33,6 +34,9 @@ export interface AgentSandboxApiContext {
 
 export interface PrepareAgentSandboxApiContextInput {
   readonly sandbox: Sandbox
+  /** Where the run's files go: relative to the working directory, or absolute. */
+  readonly contextDirectory: string
+  /** The API origin; commands reach it at the sandbox's credentialed address for it. */
   readonly apiBaseUrl: string
   readonly projectId: string
   readonly actorId?: string
@@ -51,7 +55,7 @@ export interface PrepareAgentSandboxApiContextInput {
 export async function prepareAgentSandboxApiContext(
   input: PrepareAgentSandboxApiContextInput
 ): Promise<AgentSandboxApiContext> {
-  const contextDir = join(input.sandbox.workingDirectory, ".sixb", "agent")
+  const contextDir = resolve(input.sandbox.workingDirectory, input.contextDirectory)
   const skillsDir = join(contextDir, "skills")
   const ontologyDir = join(contextDir, "ontology")
   const binDir = join(contextDir, "bin")
@@ -61,13 +65,22 @@ export async function prepareAgentSandboxApiContext(
   const runtimeProbePath = join(contextDir, "runtime", "read-probe.txt")
   const attachmentsManifestPath = join(contextDir, "context", "attachments.json")
   const attachmentsDir = join(contextDir, "attachments")
-  const artifactsDir = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_DIRECTORY)
-  const artifactsManifestPath = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_MANIFEST)
+  const artifactsDir = join(contextDir, AGENT_ARTIFACTS_DIRECTORY)
+  const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
   const cli = await loadAgentCliAssets()
+  // The run's commands reach the API through the sandbox's credentialed address, which adds the
+  // run token on the way out: no command holds it.
+  if (!input.sandbox.credentialedUrl) {
+    throw createSixbError(
+      "agent.execution_failed",
+      `[SixbAgentWorker] Sandbox provider "${input.sandbox.provider}" advertises request credentials but its sandbox has no credentialedUrl.`
+    )
+  }
+  const apiBaseUrl = input.sandbox.credentialedUrl(input.apiBaseUrl)
 
-  // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
-  // api-url.ts), so it is used verbatim — no second normalization pass here.
+  // apiBaseUrl arrives already normalized (see worker.ts), so it is used verbatim. No file or env
+  // var of the run holds the token: the sandbox adds it to requests to apiBaseUrl.
   const runContext = JSON.stringify(
     {
       projectId: input.projectId,
@@ -75,7 +88,7 @@ export async function prepareAgentSandboxApiContext(
       ...(input.threadId ? { threadId: input.threadId } : {}),
       runId: input.runId,
       runtimeProfile: AGENT_RUNTIME_PROFILE,
-      apiBaseUrl: input.apiBaseUrl,
+      apiBaseUrl,
       attachmentsManifestPath,
       attachmentsDir,
       ...(input.artifacts ? { artifactsManifestPath, artifactsDir } : {}),
@@ -97,7 +110,7 @@ export async function prepareAgentSandboxApiContext(
     )
     if (cleared.exitCode !== 0 || cleared.timedOut) {
       throw new Error(
-        `[SixbAgentWorker] Could not clear ${AGENT_ARTIFACTS_DIRECTORY}: ${cleared.stderr.trim() || `exit ${cleared.exitCode}`}`
+        `[SixbAgentWorker] Could not clear ${join(input.contextDirectory, AGENT_ARTIFACTS_DIRECTORY)}: ${cleared.stderr.trim() || `exit ${cleared.exitCode}`}`
       )
     }
   }
@@ -132,7 +145,7 @@ export async function prepareAgentSandboxApiContext(
           { path: artifactsManifestPath, contents: input.artifacts.manifestJson },
           ...input.artifacts.files.map((file) => ({
             ...file,
-            path: join(input.sandbox.workingDirectory, file.path),
+            path: resolve(input.sandbox.workingDirectory, file.path),
           })),
         ]
       : []),
@@ -141,14 +154,14 @@ export async function prepareAgentSandboxApiContext(
       : []),
     // Last: a file a parent handed its child from its own copy of an artifact keeps its changes.
     ...(input.attachments?.sandboxFiles.map((file) => ({
-      path: join(input.sandbox.workingDirectory, file.path),
+      path: resolve(input.sandbox.workingDirectory, file.path),
       contents: file.bytes,
     })) ?? []),
   ])
 
   return {
     env: {
-      SIXB_API_BASE_URL: input.apiBaseUrl,
+      SIXB_API_BASE_URL: apiBaseUrl,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
       SIXB_ONTOLOGY_DIR: ontologyDir,

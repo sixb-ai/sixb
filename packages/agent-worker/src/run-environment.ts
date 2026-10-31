@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import type {
   AgentToolAttachments,
   AgentToolRunInfo,
@@ -21,7 +22,7 @@ import type {
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
-import { createAgentApiGatewayBaseUrl } from "./api-url"
+import { runApiCredential, runTokenFor } from "./api-url"
 import {
   type InstalledArtifacts,
   installArtifactsPublishedBy,
@@ -142,12 +143,13 @@ export async function createConversationAgentEnvironment(
   input: CreateConversationAgentEnvironmentInput
 ): Promise<ConversationAgentExecutionEnvironment> {
   const { context, plan, run, preflight } = input
-  const apiBaseUrl = createAgentApiGatewayBaseUrl({
-    apiBaseUrl: context.apiBaseUrl,
+  const { apiBaseUrl } = context
+  const runToken = runTokenFor({
     projectId: context.id,
     runId: run.id,
     executionToken: run.execution?.token,
   })
+  const apiCredential = runApiCredential(apiBaseUrl, runToken)
   const failure = new AbortController()
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
@@ -159,9 +161,10 @@ export async function createConversationAgentEnvironment(
         thread: input.thread,
         run,
         signal: sandboxSignal,
+        apiCredential,
         onAuthFailure: (error) => failure.abort(error),
       })
-    : ephemeralRunSandbox({ context })
+    : ephemeralRunSandbox({ context, apiCredential })
   let environment: AgentExecutionEnvironment | undefined
   // The prompt shows memory as of the thread's start or its latest compaction (see
   // loadConversationMemory).
@@ -181,6 +184,7 @@ export async function createConversationAgentEnvironment(
           context,
           plan,
           ontologyIndex: ontologyDocs.index,
+          contextDirectory: sandbox.contextDirectory,
           run,
           ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
           budget: preflight.budget,
@@ -215,6 +219,7 @@ export async function createConversationAgentEnvironment(
       messages,
       blobStorage: context.blobStorage,
       apiBaseUrl,
+      contextDirectory: sandbox.contextDirectory,
       inlineImages,
       signal: sandboxSignal,
     })
@@ -281,6 +286,12 @@ export async function createSubagentEnvironment(
   if (!execution) {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
   }
+  const runToken = runTokenFor({
+    projectId: context.id,
+    runId: run.id,
+    executionToken: execution.token,
+  })
+  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
 
   const workspace = keepsSubagentWorkspace(context.sandboxes)
     ? await persistentRunSandbox({
@@ -288,11 +299,12 @@ export async function createSubagentEnvironment(
         thread: input.thread,
         run,
         signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+        apiCredential,
         // A blank workspace issues no source credentials.
         onAuthFailure: () => {},
       })
     : undefined
-  const sandbox = workspace ?? ephemeralRunSandbox({ context })
+  const sandbox = workspace ?? ephemeralRunSandbox({ context, apiCredential })
 
   try {
     return await startSubagentEnvironment({
@@ -331,6 +343,7 @@ async function startSubagentEnvironment(
           parentRunId: run.parentRunId,
           files,
           inSandbox: resumed,
+          contextDirectory: sandbox.contextDirectory,
           blobStorage: context.blobStorage,
           signal: input.signal,
         })
@@ -343,6 +356,7 @@ async function startSubagentEnvironment(
           messages: history,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
+          contextDirectory: sandbox.contextDirectory,
           inlineImages: modelSupportsInlineImages(plan.model),
           signal: input.signal,
         })
@@ -376,12 +390,7 @@ async function startSubagentEnvironment(
       files,
       blobStorage: context.blobStorage,
     }),
-    apiBaseUrl: createAgentApiGatewayBaseUrl({
-      apiBaseUrl: context.apiBaseUrl,
-      projectId: context.id,
-      runId: run.id,
-      executionToken: execution.token,
-    }),
+    apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
     ontologyDocs: renderRunOntologyDocs(context),
     ...(memory ? { memory } : {}),
@@ -402,12 +411,12 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  const attachmentContext = await prepareWorkflowInputAttachments({
-    input: input.nodeInput,
-    blobStorage: context.blobStorage,
-    signal: input.signal,
+  const runToken = runTokenFor({
+    projectId: context.id,
+    runId: run.nodeRunId,
+    executionToken: execution.token,
   })
-
+  const apiCredential = runApiCredential(context.apiBaseUrl, runToken)
   // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
   // step's lost source credentials end the node through `failure`.
   const failure = new AbortController()
@@ -422,6 +431,7 @@ export async function createWorkflowAgentNodeEnvironment(
     ? ephemeralRunSandbox({
         context,
         signal: sandboxSignal,
+        apiCredential,
         workspace: {
           runId: run.nodeRunId,
           factory: stepSandbox,
@@ -431,7 +441,13 @@ export async function createWorkflowAgentNodeEnvironment(
           onAuthFailure: (error) => failure.abort(error),
         },
       })
-    : ephemeralRunSandbox({ context, signal: input.signal })
+    : ephemeralRunSandbox({ context, signal: input.signal, apiCredential })
+  const attachmentContext = await prepareWorkflowInputAttachments({
+    input: input.nodeInput,
+    blobStorage: context.blobStorage,
+    contextDirectory: sandbox.contextDirectory,
+    signal: input.signal,
+  })
 
   try {
     return await startAgentEnvironment({
@@ -453,12 +469,7 @@ export async function createWorkflowAgentNodeEnvironment(
         input: input.nodeInput,
         blobStorage: context.blobStorage,
       }),
-      apiBaseUrl: createAgentApiGatewayBaseUrl({
-        apiBaseUrl: context.apiBaseUrl,
-        projectId: context.id,
-        runId: run.nodeRunId,
-        executionToken: execution.token,
-      }),
+      apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
       ontologyDocs: renderRunOntologyDocs(context),
       errorDetails: input.errorDetails,
@@ -544,7 +555,7 @@ async function startAgentEnvironment(
     ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
     ...(threadId ? { threadId } : {}),
   })
-  let ready: Promise<AcquiredRunSandbox>
+  let ready: Promise<ProvisionedRunSandbox>
   const fileRegistry = new AgentSandboxFileRegistry()
   const fileBudget = new AgentFileBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
@@ -601,8 +612,8 @@ async function startAgentEnvironment(
       // As the requester: the turn installs nothing they could not read themselves.
       artifacts: context.sixb.artifacts,
       blobStorage: context.blobStorage,
-      directory: AGENT_ARTIFACTS_DIRECTORY,
-      manifestPath: AGENT_ARTIFACTS_MANIFEST,
+      directory: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_DIRECTORY),
+      manifestPath: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_MANIFEST),
       signal: input.sandboxSignal,
     })
     // Surfaced where provisioning awaits it.
@@ -667,6 +678,7 @@ async function startAgentEnvironment(
 
     systemPrompt = renderAgentSystemPrompt({
       mode,
+      contextDirectory: sandbox.contextDirectory,
       instructions: plan.instructions,
       skills: plan.skills,
       // Workflow prompts are kept lean: their steps get the files without the index.
@@ -836,13 +848,18 @@ interface ProvisionSandboxInput {
   readonly memory?: PrepareAgentSandboxApiContextInput["memory"]
 }
 
-async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredRunSandbox> {
+/** A sandbox acquired for the run, with the run's files installed in its context directory. */
+type ProvisionedRunSandbox = AcquiredRunSandbox & AgentSandboxHandle
+
+async function provisionSandbox(input: ProvisionSandboxInput): Promise<ProvisionedRunSandbox> {
   const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
   const acquired = await input.sandbox.acquire()
   const { sandbox } = acquired
+  const { contextDirectory } = input.sandbox
   try {
     const apiContext = await prepareAgentSandboxApiContext({
       sandbox,
+      contextDirectory,
       apiBaseUrl,
       projectId: context.id,
       ...(actorId === undefined ? {} : { actorId }),
@@ -859,7 +876,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredR
       env: apiContext.env,
       projectId: context.id,
     })
-    return { ...acquired, env: { ...acquired.env, ...apiContext.env } }
+    return { ...acquired, contextDirectory, env: { ...acquired.env, ...apiContext.env } }
   } catch (error) {
     // Give back a half-provisioned sandbox before propagating to the awaiter.
     await input.sandbox.release?.(acquired).catch(() => {})
@@ -868,7 +885,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredR
 }
 
 function disposeEnvironment(
-  ready: Promise<AgentSandboxHandle>,
+  ready: Promise<AcquiredRunSandbox>,
   isSettled: () => boolean,
   sandbox: RunSandbox,
   onDetachedTeardown?: (teardown: Promise<void>) => void

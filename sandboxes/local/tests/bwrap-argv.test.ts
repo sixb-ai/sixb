@@ -9,6 +9,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -48,6 +49,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
+      denyReadPaths: [],
       network,
     })
 
@@ -62,6 +64,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: ["/usr", "/opt/data"],
       readWritePaths: ["/var/cache/agent"],
+      denyReadPaths: [],
       network: { mode: "none" },
     })
 
@@ -82,6 +85,52 @@ describe("buildBwrapArgv", () => {
       "--bind",
       "/var/cache/agent",
       "/var/cache/agent",
+    ])
+  })
+
+  test("denied paths are covered after every bind: a directory by an empty tmpfs, a file by /dev/null", () => {
+    const argv = buildBwrapArgv({
+      command: "cat",
+      args: [],
+      workingDirectory: "/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: ["/var/cache/agent"],
+      denyReadPaths: [
+        { path: "/home/ada/acme", kind: "directory" },
+        { path: "/tmp/wd/.env", kind: "file" },
+      ],
+      network: { mode: "none" },
+    })
+
+    expect(argv.slice(argv.indexOf("/var/cache/agent") + 2, argv.indexOf("--proc"))).toEqual([
+      "--tmpfs",
+      "/home/ada/acme",
+      "--ro-bind",
+      "/dev/null",
+      "/tmp/wd/.env",
+    ])
+  })
+
+  // Guard proof: drop the forwarder's mounts from buildBwrapArgv; every sandbox's forwarder
+  // directory shows under the root.
+  test("the forwarder root is emptied after every other mount, then this sandbox's directory bound back", () => {
+    const argv = buildBwrapArgv({
+      command: "curl",
+      args: [],
+      workingDirectory: "/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      denyReadPaths: [{ path: "/home/ada/acme", kind: "directory" }],
+      network: { mode: "restricted", allow: [] },
+      forwarder: { root: "/tmp/sixb-credentials-1000", directory: "/tmp/sixb-credentials-1000/a1" },
+    })
+
+    expect(argv.slice(argv.indexOf("/home/ada/acme") + 1, argv.indexOf("--proc"))).toEqual([
+      "--tmpfs",
+      "/tmp/sixb-credentials-1000",
+      "--ro-bind",
+      "/tmp/sixb-credentials-1000/a1",
+      "/tmp/sixb-credentials-1000/a1",
     ])
   })
 })

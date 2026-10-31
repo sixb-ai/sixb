@@ -1,4 +1,3 @@
-import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { FILE_DOWNLOAD_ROUTE_PREFIX } from "@sixb/core/internal/blob-storage"
@@ -55,11 +54,6 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   }
 
   if ((pathname === "/health" || pathname === "/ready") && normalizedMethod === "GET") {
-    return true
-  }
-
-  // The gateway authenticates each request with the run's own execution token.
-  if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
     return true
   }
 

@@ -110,7 +110,7 @@ export interface AgentTurnContext {
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
-  /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
+  /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
@@ -118,6 +118,7 @@ export interface AgentTurnContext {
   readonly systemPrompt: string
   /** Time zone of runs that captured none, used to date their user messages. */
   readonly projectTimeZone: string
+  /** Prepared by the run's environment, which materializes the files in its context directory. */
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
@@ -133,8 +134,8 @@ export interface AgentWorkerOptions {
   /** Queue visibility duration, renewed automatically while a turn executes. Defaults to 60s. */
   readonly leaseMs?: number
   /**
-   * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3001`.
-   * The sandbox receives a run-scoped gateway URL under this origin.
+   * Sixb server origin the run's commands call with their run token, for example
+   * `http://localhost:3001`.
    */
   /** Not required when the worker only processes accounting recovery. */
   readonly apiBaseUrl?: string

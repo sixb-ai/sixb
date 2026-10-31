@@ -71,11 +71,8 @@ test("factory validates unsupported persistence and network before provisioning"
     throw new Error("must not provision")
   })
   const factory = new AzureSandboxFactory(config)
-  await expect(factory.create({ requestCredentials: [] })).rejects.toThrow(
-    "secure request credentials"
-  )
   expect(() => new AzureSandboxFactory({ ...config, requestCredentials: [] })).toThrow(
-    "secure request credentials"
+    "never as a factory default"
   )
   expect("resume" in factory).toBe(false)
   await expect(factory.create({ persistence: { name: "saved" } })).rejects.toThrow("persistence")

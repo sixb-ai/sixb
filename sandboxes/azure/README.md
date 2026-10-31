@@ -129,13 +129,13 @@ credentials for local development. For an explicit production identity, see belo
 The sandbox calls your **Sixb API server** to run commands such as `sixb objects get`.
 It needs a public HTTPS URL reachable from Azure.
 
-| URL | Supported for the agent gateway? |
+| URL | Reachable by the sandbox's `sixb`? |
 | --- | --- |
 | `https://api.example.com` | Yes |
 | `https://your-tunnel.ngrok.app` | Yes, for local development |
 | `http://localhost:3002` | No — localhost is inside the remote sandbox |
 | `https://api.example.com:8443` | No — restricted mode supports port 443 only |
-| Azure AI Foundry / model-provider URL | This is not the Sixb API gateway |
+| Azure AI Foundry / model-provider URL | This is not the Sixb API |
 
 For local development, start a tunnel to the port your Sixb API will use:
 
@@ -318,6 +318,15 @@ Workloads run without capabilities and with no-new-privileges enabled. File publ
 briefly freezes workloads to prevent path-swap races; command deadlines keep running.
 Use a dedicated workspace without symlink components. System directories are rejected.
 
+### Request credentials
+
+The factory supports request credentials (`supportsRequestCredentials`), such as the run token the
+agent worker adds to every call its commands make to the Sixb API. A forwarder runs as root in the
+guest and holds them; `credentialedUrl(url)` is its socket under `/var/lib/sixb-forward`, which
+forwards only to `url` and adds the credential that matches the request. The credentials reach the
+guest through the file API, into root-only files, never in a command's text, and commands run as
+UID 65534, which cannot read them. Pass credentials to `create()`; a factory default is refused.
+
 ## Networking
 
 ```ts
@@ -450,8 +459,8 @@ SIXB_AZURE_AGENT_E2E=1 \
 bun test ./sandboxes/azure/tests/agent-runtime.e2e.ts
 ```
 
-This test uses a deterministic model, synthetic data and the real worker/CLI/gateway.
-It exposes only capability-authenticated gateway routes through a temporary tunnel.
+This test uses a deterministic model, synthetic data and the real worker, CLI and run-token API.
+It exposes only run-token requests through a temporary tunnel.
 Live tests delete their sandboxes and close their tunnels; the shared group/image remain.
 
 </details>

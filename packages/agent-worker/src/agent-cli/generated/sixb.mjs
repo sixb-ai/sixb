@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { readFile, rename, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -64,14 +65,19 @@ function reportError(error) {
 }
 
 // ../cli-core/src/api-client.ts
+var UNIX_BASE_URL_PREFIX = "unix:";
+
 class ApiClient {
   baseUrl;
+  socketPath;
   authorization;
   missingBaseUrlMessage;
   unavailableMessage;
   unavailableHint;
   constructor(options) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    const baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.socketPath = baseUrl.startsWith(UNIX_BASE_URL_PREFIX) ? baseUrl.slice(UNIX_BASE_URL_PREFIX.length) : undefined;
+    this.baseUrl = this.socketPath === undefined ? baseUrl : "http://localhost";
     this.authorization = options.authorization;
     this.missingBaseUrlMessage = options.missingBaseUrlMessage;
     this.unavailableMessage = options.unavailableMessage;
@@ -137,7 +143,7 @@ class ApiClient {
       const headers = new Headers(init.headers);
       if (this.authorization)
         headers.set("authorization", this.authorization);
-      response = await fetch(url, { ...init, headers });
+      response = await send(url, { ...init, headers }, this.socketPath);
     } catch (error) {
       if (init.signal?.aborted)
         throw error;
@@ -193,6 +199,48 @@ function asRecord(value) {
 function stringField(record, key) {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+function send(url, init, socketPath) {
+  if (socketPath === undefined)
+    return fetch(url, init);
+  if (typeof Bun !== "undefined")
+    return fetch(url, { ...init, unix: socketPath });
+  return sendOverNodeSocket(url, init, socketPath);
+}
+async function sendOverNodeSocket(url, init, socketPath) {
+  const outgoing = new Request(url, init);
+  const body = outgoing.body ? Buffer.from(await outgoing.arrayBuffer()) : undefined;
+  const headers = Object.fromEntries(outgoing.headers);
+  if (body)
+    headers["content-length"] = String(body.byteLength);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      socketPath,
+      method: outgoing.method,
+      path: `${url.pathname}${url.search}`,
+      headers: { ...headers, host: "localhost" },
+      ...init.signal ? { signal: init.signal } : {}
+    }, (response) => {
+      const responseHeaders = new Headers;
+      for (const [name, value] of Object.entries(response.headers)) {
+        for (const each of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+          responseHeaders.append(name, each);
+        }
+      }
+      const status = response.statusCode ?? 502;
+      const empty = status === 204 || status === 304 || outgoing.method === "HEAD";
+      resolve(new Response(empty ? null : nodeBody(response), {
+        status,
+        statusText: response.statusMessage ?? "",
+        headers: responseHeaders
+      }));
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+function nodeBody(response) {
+  return Readable.toWeb(response);
 }
 // ../cli-core/src/arguments.ts
 function parseCommandArgs(args, kinds, command, positionalCount = 0) {
@@ -322,12 +370,12 @@ var SANDBOX_MAIN_HELP = `Sixb agent CLI
 Usage:
   sixb <command> [options]
 
-The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
+The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.
 API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and API gateway
+  sixb doctor                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -374,7 +422,7 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
-var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and API gateway
+var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and its API access
   sixb context                        Print the current run context
 `, "").replace(`
 When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
@@ -556,7 +604,8 @@ List options:
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
-  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>`,
+  sixb files download action-run|workflow-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download url <content-url> --output <local-path>`,
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
@@ -778,6 +827,15 @@ async function files(api, args) {
   if (sub === "download") {
     const { positionals, options } = parseCommandArgs(rest, { "--path": "string", "--output": "string" }, "files download", [2, 3]);
     const context = positionals[0];
+    const output = options["--output"];
+    if (context === "url") {
+      requireExact(positionals, 2, "files download url requires exactly one content URL.");
+      const url = parseContentUrl(positionals[1] ?? "");
+      if (!output)
+        fail("files download requires --output <local-path>.");
+      await api.download(url.pathname, output, Object.fromEntries(url.searchParams));
+      return writeJson({ downloaded: true, output });
+    }
     let route;
     if (context === "object") {
       requireExact(positionals, 3, "files download object requires object type and primary id.");
@@ -791,7 +849,6 @@ async function files(api, args) {
     } else
       fail(`Unknown file download context '${context}'.`);
     const path = options["--path"];
-    const output = options["--output"];
     if (!path)
       fail("files download requires --path <json-pointer>.");
     if (!output)
@@ -800,6 +857,18 @@ async function files(api, args) {
     return writeJson({ downloaded: true, output });
   }
   fail(`Unknown files command '${sub}'.`);
+}
+function parseContentUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    fail(`'${value}' is not a URL.`);
+  }
+  if (!url.pathname.startsWith("/api/") || !url.pathname.endsWith("/files/content")) {
+    fail(`'${value}' is not a Sixb file content URL.`);
+  }
+  return url;
 }
 
 // ../cli-core/src/commands/models.ts
@@ -1979,8 +2048,8 @@ function createInstanceApiClient(mode) {
     baseUrl: mode.baseUrl,
     ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
     missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
-    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API gateway could not be reached." : "The Sixb API could not be reached.",
-    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and gateway." : "Run 'sixb status' to verify the current profile."
+    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API could not be reached from the sandbox." : "The Sixb API could not be reached.",
+    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and its API access." : "Run 'sixb status' to verify the current profile."
   });
 }
 // src/agent-cli/commands/memory.ts

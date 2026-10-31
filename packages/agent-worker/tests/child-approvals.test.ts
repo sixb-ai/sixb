@@ -120,6 +120,11 @@ class GatewaySandbox implements Sandbox {
   stopFails = false
   private listingBroken = false
 
+  /** As a firewall adds credentials: the URL itself. */
+  credentialedUrl(url: string): string {
+    return url
+  }
+
   constructor(
     readonly id: string,
     private readonly host: SixbHost,
@@ -382,6 +387,7 @@ function setup(scripts: {
   const { persistent } = scripts
   const factory: SandboxFactory = persistent
     ? {
+        supportsRequestCredentials: true,
         create,
         resume: async (name) => {
           const kept = sandboxes.find((sandbox) => sandbox.persistedAs === name)
@@ -392,7 +398,7 @@ function setup(scripts: {
           return kept
         },
       }
-    : { create }
+    : { supportsRequestCredentials: true, create }
   const host: SixbHost = new SixbHost({
     id: projectId,
     ontology: [Invoice],

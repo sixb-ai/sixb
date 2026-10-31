@@ -10,7 +10,7 @@ const MATERIALIZE_MAX_BYTES = 50 * 1024 * 1024
 const REMOVE_TIMEOUT_MS = 30_000
 
 export interface MaterializedArtifacts {
-  /** Files to write, at paths relative to the sandbox working directory. */
+  /** Files to write, at paths relative to the sandbox working directory or absolute. */
   readonly files: readonly SandboxFileRecord[]
   readonly manifestJson: string
 }
@@ -39,7 +39,7 @@ interface ManifestEntry {
     readonly pinned: string
     readonly name: string
   }[]
-  /** Where the version's files are, relative to the working directory; absent when not installed. */
+  /** Where the version's files are, as the agent names it; absent when not installed. */
   readonly directory?: string
   readonly files: readonly string[]
   /**
@@ -65,7 +65,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
 
   constructor(
     private readonly layout: {
-      /** Relative to the working directory, like the manifest. */
+      /** As the agent names it, like the manifest. */
       readonly directory: string
       readonly manifestPath: string
       readonly maxBytes: number
@@ -117,7 +117,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   ): Promise<void> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
-    const inSandbox = (path: string) => posix.join(sandbox.workingDirectory, path)
+    const inSandbox = (path: string) => posix.resolve(sandbox.workingDirectory, path)
     const sizeBytes = files.reduce((sum, file) => sum + file.bytes.byteLength, 0)
     let othersBytes = 0
     for (const [id, bytes] of this.#installed) if (id !== artifact.id) othersBytes += bytes
@@ -166,9 +166,9 @@ export async function materializeThreadArtifacts(input: {
   readonly threadId: string
   readonly artifacts: TurnArtifacts
   readonly blobStorage: BlobStorage
-  /** Relative to the working directory. */
+  /** As the agent names it: relative to the working directory, or absolute. */
   readonly directory: string
-  /** Where the manifest is written, relative to the working directory. */
+  /** Where the manifest is written, named the same way. */
   readonly manifestPath: string
   /** A cancelled run stops downloading. */
   readonly signal?: AbortSignal

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { isAllowedAgentApiRequest } from "../../src/agents/api-gateway"
+import { isAllowedAgentApiRequest } from "../../src/agents/run-token"
 import { SIXB_API_ROUTES } from "../../src/http"
 import { assertSixbApiRoutes } from "../../src/http/api-routes"
 
@@ -11,8 +11,8 @@ test("SIXB_API_ROUTES operationIds are unique", () => {
 })
 
 // Guard proof: drop the `agentEffect` check from `assertSixbApiRoutes`; the table loads with a
-// state-changing gateway route the approval gate does not know.
-test("a gateway route that can change state must say what it changes", () => {
+// state-changing run-token route the approval gate does not know.
+test("a run-token route that can change state must say what it changes", () => {
   const route = {
     operationId: "archiveInvoice",
     method: "POST",

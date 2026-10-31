@@ -32,6 +32,7 @@ import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { AgentExecutionLostError } from "../src/errors"
+import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 import { AgentFileBudget } from "../src/tools/tool-files"
 import { LocalBashSandbox } from "./helpers"
@@ -225,7 +226,10 @@ function tools(options: ToolOptions = {}) {
     owner,
     author: options.author ?? owner,
     budget: options.budget ?? new AgentFileBudget(),
-    resolveSandbox: async () => ({ sandbox: sandbox() }),
+    resolveSandbox: async () => ({
+      sandbox: sandbox(),
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+    }),
     installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
   return { create, version }
@@ -565,7 +569,10 @@ describe("publish_artifact", () => {
       author: olivia,
       budget: new AgentFileBudget(),
       installed: install({ requester: olivia }),
-      resolveSandbox: async () => ({ sandbox: sandbox() }),
+      resolveSandbox: async () => ({
+        sandbox: sandbox(),
+        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      }),
     })
     expect(await readerFor(olivia, { "observe:agentThreads": true }).access(artifactId)).toBe(
       "read"
@@ -680,7 +687,7 @@ describe("publish_artifact", () => {
           executionToken: run.executionToken,
           status: "failed",
         })
-        return { sandbox: sandbox() }
+        return { sandbox: sandbox(), contextDirectory: SANDBOX_CONTEXT_DIRECTORY }
       },
     })
     await expect(

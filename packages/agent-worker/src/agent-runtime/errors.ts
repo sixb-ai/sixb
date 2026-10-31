@@ -42,6 +42,6 @@ function remediationFor(check: AgentRuntimeProfileCheck): string {
     case "cli-execution":
       return "Ensure the worker-installed Sixb CLI artifact can execute without modifying it."
     case "gateway-connectivity":
-      return "Ensure the run-scoped Sixb API gateway is reachable from the sandbox and identifies the current project."
+      return "Ensure the Sixb API is reachable from the sandbox with the run's token and identifies the current project."
   }
 }

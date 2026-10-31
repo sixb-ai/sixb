@@ -30,6 +30,16 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
       [2, 3]
     )
     const context = positionals[0]
+    const output = options["--output"]
+    if (context === "url") {
+      // A content URL a manifest lists, such as an attachment's: fetched the way every other
+      // command reaches the API, so its credential is added wherever the CLI's address adds it.
+      requireExact(positionals, 2, "files download url requires exactly one content URL.")
+      const url = parseContentUrl(positionals[1] ?? "")
+      if (!output) fail("files download requires --output <local-path>.")
+      await api.download(url.pathname, output, Object.fromEntries(url.searchParams))
+      return writeJson({ downloaded: true, output })
+    }
     let route: string
     if (context === "object") {
       requireExact(positionals, 3, "files download object requires object type and primary id.")
@@ -42,11 +52,24 @@ export async function files(api: ApiClient, args: readonly string[]): Promise<vo
       route = `/api/${context}s/${encodeURIComponent(id)}/files/content`
     } else fail(`Unknown file download context '${context}'.`)
     const path = options["--path"]
-    const output = options["--output"]
     if (!path) fail("files download requires --path <json-pointer>.")
     if (!output) fail("files download requires --output <local-path>.")
     await api.download(route, output, { path })
     return writeJson({ downloaded: true, output })
   }
   fail(`Unknown files command '${sub}'.`)
+}
+
+/** A Sixb API file content URL: only its path and query are used, never its origin. */
+function parseContentUrl(value: string): URL {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    fail(`'${value}' is not a URL.`)
+  }
+  if (!url.pathname.startsWith("/api/") || !url.pathname.endsWith("/files/content")) {
+    fail(`'${value}' is not a Sixb file content URL.`)
+  }
+  return url
 }

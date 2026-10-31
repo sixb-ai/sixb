@@ -22,6 +22,20 @@ export {
 export type { ExecOptions } from "./exec"
 export { exec } from "./exec"
 export type {
+  GuestCommand,
+  GuestCredentialPaths,
+  GuestCredentialsCommands,
+} from "./guest-credentials"
+export {
+  GUEST_COMMAND_UID,
+  GUEST_CREDENTIAL_PATHS,
+  GUEST_CREDENTIALS_ENV,
+  GUEST_FORWARDER_NOT_RUNNING,
+  guestCredentialedUrl,
+  guestCredentialsCommands,
+  unprivilegedGuestArgv,
+} from "./guest-credentials"
+export type {
   CommandResult,
   CreateSandboxOptions,
   ResumeSandboxOptions,

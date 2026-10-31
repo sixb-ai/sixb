@@ -62,6 +62,7 @@ export interface VercelSandboxOptions extends SandboxSessionOptions {
 /** Sandbox wrapper around a Vercel Sandbox SDK instance. */
 export class VercelSandbox implements Sandbox {
   readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
+  readonly credentialedUrl?: Sandbox["credentialedUrl"]
   readonly id: string
   readonly provider = "vercel"
   readonly workingDirectory: string
@@ -86,6 +87,9 @@ export class VercelSandbox implements Sandbox {
       const updateNetworkPolicy = options.client.updateNetworkPolicy.bind(options.client)
       const network = options.network
 
+      // The firewall adds a credential to a matching request on its way out: commands call the
+      // URL itself.
+      this.credentialedUrl = (url) => url
       // Each update replaces the session policy: configured egress plus these exact targets.
       this.setRequestCredentials = async (credentials) => {
         this.assertRunning("update request credentials")

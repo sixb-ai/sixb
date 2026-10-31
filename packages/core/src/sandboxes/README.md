@@ -6,10 +6,10 @@ Factories define environments; threads retain immutable parameters; runs provide
   Dynamic recipes require an execution-resolved environment; providers never invoke resolvers.
 - Selection and validation happen before provisioning. Initial source access must be allowed by
   the session network policy. Creation runs setup once; resume never replays it.
-- One rule decides whether source access can work (`sandboxCredentialIssue` in
-  [configuration](./configuration.ts)): write access needs `auth`, and `auth` a provider with
-  `supportsRequestCredentials`, even for a recipe without a source. `SixbHost` applies it to the
-  factory's static recipe at construction. The worker applies it again to each recipe a run
+- One rule decides whether an agent can run in a factory's sandboxes (`sandboxCredentialIssue` in
+  [configuration](./configuration.ts)): the provider must have `supportsRequestCredentials`, since
+  the run's token is one of the credentials, and write access needs `auth`. `SixbHost` applies it
+  to the factory and its static recipe at construction. The worker applies it again to each recipe a run
   resolves: `resolve` results are unknown at startup, and a worker host is structural.
 - Runs without a thread binding explicitly select `{}`; shared env/network defaults remain session
   settings, not an implicit project binding. Unsupported provider capabilities fail explicitly.
@@ -49,13 +49,24 @@ Vercel requests can outlive their worker: storage fencing cannot cancel provider
 Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
 Saved files remain subject to provider retention.
 
-Source `auth` stays host-side. Providers advertising `supportsRequestCredentials` must apply
-execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
+Source `auth` stays host-side. Providers advertising `supportsRequestCredentials`, as every
+agent's provider must, apply execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
 initial credentials before setup and expose session-scoped renewal, for ephemeral and named
 sandboxes alike. Unsupported providers reject credentials before provisioning. During initial
 provisioning/setup, the worker aborts before token expiry if no session handle is available yet;
 renewal begins after acquisition. Normal teardown removes injection and revokes grants. A crash
 cannot guarantee immediate revocation.
+
+Such a provider's sandboxes also give `credentialedUrl(url)`: the address guest commands use to
+reach `url` with the session's credentials added out of its reach. A provider whose firewall adds
+them returns `url` itself; one that forwards on the host returns its own address, such as
+`unix:/tmp/…/0.sock`, which reaches only `url`. The worker adds every run's own token for the Sixb
+API this way, beside a source's credentials, so the run's commands never hold it.
+A VM guest does the same from inside: its commands run as an unprivileged user and a root forwarder
+holds the credentials (`guestCredentialsCommands`, `unprivilegedGuestArgv`), as smolvm and Apple
+Container do. `runSandboxCredentialsContractSuite` in `@sixb/core/testing` is the contract: a command reaches the
+origin with the credential added, only matching requests get it, replacing it takes effect, and
+nothing a command can read (its env, process lists, `/proc`, its files) holds it.
 
 A grant may also carry a guest-readable `env` (identities, placeholders), validated like recipe
 `env` before provisioning; an invalid one fails authentication. It applies on creation and resume

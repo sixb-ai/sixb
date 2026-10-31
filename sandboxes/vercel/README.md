@@ -90,9 +90,9 @@ Migration: the former factory option `persistent` is rejected, including `false`
 ephemeral creation; use `create({ persistence: { name } })` for confirmed preservation and explicit
 resume. Retention alone does not enable persistence.
 
-## Gateway and network policy
+## Sixb API and network policy
 
-Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository, the
+Ephemeral runs restrict egress to the Sixb API. Workspaces also allow the repository, the
 origins its source auth issues credentials for (such as `api.github.com` for `gh`) and explicitly
 configured access. This provider maps Sixb policies to Vercel's firewall:
 
@@ -111,7 +111,7 @@ Important caveats:
   allow rules; use HTTPS or an IP/CIDR target.
 - IP/CIDR rules are address-wide; the URL port is not enforced by the firewall rule.
 
-Expose the Sixb API gateway at a public HTTPS origin reachable from Vercel and set
+Expose the Sixb API at a public HTTPS origin reachable from Vercel and set
 `SIXB_API_PUBLIC_ORIGIN` to it, in production and in local development (through a tunnel).
 
 ## Runtime and dependencies
@@ -200,6 +200,8 @@ methods it lists: GET, POST, PUT, PATCH or DELETE. HEAD and OPTIONS requests are
   spaces, control characters, `?`, `#`, `%`, `\`, or `.` and `..` segments.
 - An origin names one public domain. Wildcards such as `https://*.github.com` are rejected, in
   credentials and in network targets alike.
+- Commands call the target URL itself (`credentialedUrl(url)` returns `url`): the firewall adds
+  the credential on the way out.
 - Two credentials that could match the same request are rejected: the firewall would apply only
   the first.
 - Every injected request gets its Host header set to the credential's domain, so a connection

@@ -82,7 +82,10 @@ export interface SandboxNetworkTarget {
 export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 /**
- * Host-only credentials injected outside the guest into matching HTTPS requests.
+ * Credentials injected into matching requests where guest commands can't reach them. Guest
+ * commands never hold them: not in env, files, process arguments or anything else they can read.
+ * A firewall or a host forwarder keeps them outside the guest; a VM guest may keep them in files
+ * only its root forwarder reads, while its commands run as an unprivileged user.
  *
  * A credential selects which requests receive its Authorization header. It does not decide what
  * the guest can reach, which is the network policy, nor which resources the token can act on:
@@ -90,7 +93,8 @@ export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
  *
  * Providers apply the same rules so that a credential means the same thing everywhere:
  * - `origin` is one `https://` domain: no port, path, user info, IP address, loopback host or
- *   `*` wildcard.
+ *   `*` wildcard. A provider whose credentials are added on the host it runs on, rather than at a
+ *   remote egress, may also accept an `http://` origin, such as a local development API.
  * - A path is matched case-sensitively against the raw request path. It starts with a single
  *   "/" and is printable ASCII without spaces, control characters, "?", "#", "%", "\\", or "."
  *   and ".." segments. A prefix also ends with "/", so it stops at a segment boundary.
@@ -141,7 +145,7 @@ export interface Sandbox {
   readonly workingDirectory: string
 
   /** Optional secure injection capability. Replaces all credentials on this session only.
-   * An empty list removes injection. Secrets must never enter guest files, env or snapshots.
+   * An empty list removes injection. Guest commands must never be able to read a secret.
    * Must not resume a stopped session or change defaults inherited by future sessions.
    * Renewal, ephemeral or persistent, targets the handle's session; after stop() it rejects.
    * A thrown error is reported to onError: it and its causes must never contain a credential.
@@ -149,6 +153,14 @@ export interface Sandbox {
   readonly setRequestCredentials?: (
     credentials: readonly SandboxRequestCredential[]
   ) => Promise<void>
+
+  /**
+   * The address guest commands use to reach `url` with this session's request credentials added
+   * out of their reach. It is `url` itself where a firewall adds them, or another address, such as
+   * `unix:/path/to.sock`, that forwards only to `url`. Present on every sandbox of a factory that
+   * advertises `supportsRequestCredentials`.
+   */
+  readonly credentialedUrl?: (url: string) => string
 
   runCommand(
     command: string,
@@ -188,7 +200,10 @@ export interface Sandbox {
  * Credentials and current authority must be supplied again, never inferred from saved files.
  */
 export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
-  /** Supports initial and renewable host-only credentials on ephemeral and named sessions. */
+  /**
+   * Supports initial and renewable request credentials on ephemeral and named sessions. An
+   * agent's sandboxes need it: the run's token for the Sixb API is one of the credentials.
+   */
   readonly supportsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>

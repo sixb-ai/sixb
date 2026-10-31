@@ -8,10 +8,20 @@ import {
   type SandboxFileRecord,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
-import { exec } from "@sixb/core/sandboxes"
+import {
+  exec,
+  GUEST_COMMAND_UID,
+  GUEST_CREDENTIALS_ENV,
+  GUEST_FORWARDER_NOT_RUNNING,
+  type GuestCommand,
+  guestCredentialedUrl,
+  guestCredentialsCommands,
+  unprivilegedGuestArgv,
+} from "@sixb/core/sandboxes"
 import {
   buildCreateArgv,
   buildExecArgv,
@@ -93,7 +103,7 @@ export class SmolvmSandbox implements Sandbox {
     // list. A local image archive and a bare machine both boot offline, so they
     // stay locked to the given policy (no registry egress).
     const basePolicy = options.network ?? { mode: "none" }
-    warnIfLoopbackGateway(basePolicy)
+    warnIfLoopbackApi(basePolicy)
     const needsRegistry = options.cli.image !== undefined && !isLocalImageArchive(options.cli.image)
     const policy = needsRegistry
       ? withRegistryEgress(basePolicy, options.registryHosts ?? [])
@@ -125,12 +135,18 @@ export class SmolvmSandbox implements Sandbox {
 
       // Create the working directory in-guest up front, so it is a valid `--workdir` for the first
       // runCommand even when no files are materialized first. Run from "/" since it may not exist.
+      // Commands run as an unprivileged user (see runCommand): the directory is theirs.
       const workdirReady = await exec({
         argv: buildExecArgv(options.cli, {
           id,
           cwd: "/",
-          command: "mkdir",
-          args: ["-p", workingDirectory],
+          command: "sh",
+          args: [
+            "-c",
+            `mkdir -p "$1" && chown ${GUEST_COMMAND_UID}:${GUEST_COMMAND_UID} "$1"`,
+            "sh",
+            workingDirectory,
+          ],
           env: {},
         }),
         cwd: process.cwd(),
@@ -140,6 +156,9 @@ export class SmolvmSandbox implements Sandbox {
         throw new SandboxError(
           `[Sandbox] smolvm working directory setup failed for ${id}: ${workdirReady.stderr.trim() || `exit ${workdirReady.exitCode}`}`
         )
+      }
+      if (options.requestCredentials?.length) {
+        await installGuestCredentials(options.cli, id, options.requestCredentials)
       }
     } catch (error) {
       // Best-effort cleanup of a half-created machine.
@@ -156,6 +175,25 @@ export class SmolvmSandbox implements Sandbox {
     })
   }
 
+  /** Replace the credentials the guest's forwarder adds; see {@link credentialedUrl}. */
+  readonly setRequestCredentials = async (
+    credentials: readonly SandboxRequestCredential[]
+  ): Promise<void> => {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot update request credentials`
+      )
+    }
+    await installGuestCredentials(this.cli, this.id, credentials)
+  }
+
+  /**
+   * A socket in the guest that forwards to `url` with the matching credential. A root forwarder
+   * holds the credentials; commands run unprivileged and cannot read them.
+   */
+  readonly credentialedUrl = (url: string): string => guestCredentialedUrl(url)
+
+  /** Every command runs as an unprivileged user, so it cannot read what the guest's root holds. */
   async runCommand(
     command: string,
     args: readonly string[] = [],
@@ -180,8 +218,15 @@ export class SmolvmSandbox implements Sandbox {
     this.inFlight.add(controller)
 
     try {
+      const [unprivileged = command, ...unprivilegedArgs] = unprivilegedGuestArgv(command, args)
       return await exec({
-        argv: buildExecArgv(this.cli, { id: this.id, cwd, command, args, env }),
+        argv: buildExecArgv(this.cli, {
+          id: this.id,
+          cwd,
+          command: unprivileged,
+          args: unprivilegedArgs,
+          env,
+        }),
         cwd: process.cwd(),
         env: hostEnv(),
         timeoutMs,
@@ -206,22 +251,16 @@ export class SmolvmSandbox implements Sandbox {
     // script that base64-decodes each payload into place. Run from "/" (always present) because a
     // target directory may not exist yet; the script mkdir -p's each one. That is why relative paths
     // are resolved against workingDirectory here rather than by the guest shell.
+    // As the command user, like the commands: a link a command planted can't lead a write, with
+    // root's rights, anywhere the command couldn't write itself.
+    const [command = "sh", ...args] = unprivilegedGuestArgv("sh", [
+      "-c",
+      buildWriteFilesScript(
+        files.map((file) => ({ ...file, path: posix.resolve(this.workingDirectory, file.path) }))
+      ),
+    ])
     const result = await exec({
-      argv: buildExecArgv(this.cli, {
-        id: this.id,
-        cwd: "/",
-        command: "sh",
-        args: [
-          "-c",
-          buildWriteFilesScript(
-            files.map((file) => ({
-              ...file,
-              path: posix.resolve(this.workingDirectory, file.path),
-            }))
-          ),
-        ],
-        env: {},
-      }),
+      argv: buildExecArgv(this.cli, { id: this.id, cwd: "/", command, args, env: {} }),
       cwd: process.cwd(),
       env: hostEnv(),
     })
@@ -257,19 +296,19 @@ export class SmolvmSandbox implements Sandbox {
 }
 
 /**
- * A microVM has its own network stack, so a gateway advertised on localhost is unreachable from
+ * A microVM has its own network stack, so a Sixb API advertised on localhost is unreachable from
  * inside it under restricted egress. Warn on every affected sandbox with the fix rather than letting
  * the agent fail silently with connection-refused. (Per-sandbox on purpose: a module-level once-flag
  * would silence every sandbox after the first and leak state across tests.)
  */
-function warnIfLoopbackGateway(policy: SandboxNetworkPolicy): void {
+function warnIfLoopbackApi(policy: SandboxNetworkPolicy): void {
   if (policy.mode !== "restricted") {
     return
   }
   const loopback = policy.allow.find((target) => isLoopbackOrigin(target.origin))
   if (loopback) {
     console.warn(
-      `[Sandbox] smolvm runs in a VM and cannot reach the gateway at ${loopback.origin} over localhost. ` +
+      `[Sandbox] smolvm runs in a VM and cannot reach the Sixb API at ${loopback.origin} over localhost. ` +
         "Set the API public origin to the host's LAN IP (e.g. SIXB_API_PUBLIC_ORIGIN=http://<lan-ip>:<port>)."
     )
   }
@@ -302,6 +341,57 @@ export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): stri
     }
   }
   return lines.join("\n")
+}
+
+/** Install the credentials in the guest and start its forwarder, as root. */
+async function installGuestCredentials(
+  cli: SmolvmCliConfig,
+  id: string,
+  credentials: readonly SandboxRequestCredential[]
+): Promise<void> {
+  const { install, start, ready } = guestCredentialsCommands(credentials)
+  const installed = await rootExec(cli, id, install)
+  if (installed.exitCode === 3) {
+    throw new SandboxError(
+      `[Sandbox] smolvm request credentials need Bun or Node in the image of ${id}.`
+    )
+  }
+  // Never the output: a failed step must not echo what it was given.
+  const failed = () =>
+    new SandboxError(`[Sandbox] smolvm could not install request credentials in ${id}.`)
+  if (installed.exitCode === GUEST_FORWARDER_NOT_RUNNING) {
+    if ((await rootExec(cli, id, start, { detach: true })).exitCode !== 0) throw failed()
+  } else if (installed.exitCode !== 0) {
+    throw failed()
+  }
+  if ((await rootExec(cli, id, ready)).exitCode !== 0) throw failed()
+}
+
+/**
+ * Run a guest command as root. The credentials travel in the smolvm process's own environment
+ * (`--secret-env`), never in its arguments, which other users of the host could read.
+ */
+function rootExec(
+  cli: SmolvmCliConfig,
+  id: string,
+  command: GuestCommand,
+  options: { readonly detach?: boolean } = {}
+): Promise<CommandResult> {
+  const { [GUEST_CREDENTIALS_ENV]: secret, ...env } = command.env
+  const [program = "sh", ...args] = command.argv
+  return exec({
+    argv: buildExecArgv(cli, {
+      id,
+      cwd: "/",
+      command: program,
+      args,
+      env,
+      ...(secret === undefined ? {} : { secretEnv: [GUEST_CREDENTIALS_ENV] }),
+      ...(options.detach ? { detach: true } : {}),
+    }),
+    cwd: process.cwd(),
+    env: { ...hostEnv(), ...(secret === undefined ? {} : { [GUEST_CREDENTIALS_ENV]: secret }) },
+  })
 }
 
 /** Single-quote a value for safe interpolation into a POSIX shell script. */

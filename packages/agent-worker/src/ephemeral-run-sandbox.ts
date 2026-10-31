@@ -1,6 +1,11 @@
-import type { Sandbox, SandboxEnvironment, SandboxFactory, SandboxSourceAuth } from "@sixb/core"
-import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
-import type { AgentSandboxHandle } from "./sandbox-handle"
+import type {
+  Sandbox,
+  SandboxEnvironment,
+  SandboxFactory,
+  SandboxRequestCredential,
+  SandboxSourceAuth,
+} from "@sixb/core"
+import { type AcquiredRunSandbox, type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
 import { prepareWorkspaceRunFiles } from "./workspace-files"
@@ -17,6 +22,8 @@ interface BlankRunSandboxInput {
    * booting then would be abandoned to the provider's failure cleanup instead of destroyed.
    */
   readonly signal?: AbortSignal
+  /** The run's credential for the Sixb API, added when the factory adds credentials. */
+  readonly apiCredential: SandboxRequestCredential
   readonly workspace?: undefined
 }
 
@@ -28,6 +35,7 @@ interface WorkspaceRunSandboxInput {
    * sandbox, it must never fire because the run completed.
    */
   readonly signal: AbortSignal
+  readonly apiCredential: SandboxRequestCredential
   readonly workspace: EphemeralWorkspaceInput
 }
 
@@ -61,10 +69,12 @@ export function ephemeralRunSandbox(input: EphemeralRunSandboxInput): RunSandbox
 
   return {
     waitBeforeModel: false,
+    contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
     acquire: async () => ({
       sandbox: await context.sandboxes.create({
         environment: {},
         network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
+        requestCredentials: [input.apiCredential],
         ...(signal ? { signal } : {}),
       }),
     }),
@@ -81,13 +91,14 @@ class EphemeralWorkspace implements RunSandbox {
   // The prompt describes every prepared workspace, at least its working directory and that it is
   // discarded, so the first model call waits for it, with or without a source.
   readonly waitBeforeModel = true
+  readonly contextDirectory = SANDBOX_CONTEXT_DIRECTORY
   private readonly workspace: EphemeralWorkspaceInput
   private readonly signal: AbortSignal
   private readonly access: WorkspaceAccess
   private closing: Promise<void> | undefined
 
   constructor(input: WorkspaceRunSandboxInput, apiOrigin: string) {
-    const { workspace, signal } = input
+    const { workspace, signal, apiCredential } = input
     this.workspace = workspace
     this.signal = signal
 
@@ -96,6 +107,7 @@ class EphemeralWorkspace implements RunSandbox {
       auth: workspace.auth,
       factory: workspace.factory,
       apiOrigin,
+      apiCredential,
       signal,
       assertOwner: workspace.assertOwner,
       onAuthFailure: workspace.onAuthFailure,
@@ -112,7 +124,7 @@ class EphemeralWorkspace implements RunSandbox {
       await this.assertCanContinue()
       this.access.attach(sandbox)
 
-      // Run files hold the gateway capability: exclude them from Git before any is written.
+      // Run files are the run's, not the repository's: exclude them from Git before any is written.
       await prepareWorkspaceRunFiles(sandbox, this.workspace.recipe.source !== undefined)
       await this.assertCanContinue()
     } catch (error) {
@@ -137,7 +149,7 @@ class EphemeralWorkspace implements RunSandbox {
     return this.closeCredentials()
   }
 
-  release(acquired: AgentSandboxHandle): Promise<void> {
+  release(acquired: AcquiredRunSandbox): Promise<void> {
     return this.discard(acquired.sandbox)
   }
 

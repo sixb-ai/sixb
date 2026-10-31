@@ -1,10 +1,12 @@
 import {
   type CommandResult,
+  guestCredentialedUrl,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core/sandboxes"
@@ -12,6 +14,7 @@ import type { AzureSandboxClient } from "./azure-client"
 import { AzureCommandExecution, resolveCommand } from "./command-execution"
 import { AzureFilePolicyError, materializeFiles, prepareFiles } from "./file-materialization"
 import { type AzureLifecycleOptions, deleteAzureSandbox, stopAzureSandbox } from "./lifecycle"
+import { installAzureCredentials } from "./request-credentials"
 
 /** Internal session handle. A closed handle can never attach to a later session. */
 export class AzureSandbox implements Sandbox {
@@ -40,6 +43,26 @@ export class AzureSandbox implements Sandbox {
   get status(): SandboxStatus {
     return this.currentStatus
   }
+
+  /** Replace the credentials the guest's forwarder adds; see {@link credentialedUrl}. */
+  readonly setRequestCredentials = async (
+    credentials: readonly SandboxRequestCredential[]
+  ): Promise<void> => {
+    this.assertRunning("update request credentials")
+    const pending = installAzureCredentials(this.client, this.id, credentials, this.closing.signal)
+    this.inFlight.add(pending)
+    try {
+      await pending
+    } finally {
+      this.inFlight.delete(pending)
+    }
+  }
+
+  /**
+   * A socket in the guest that forwards to `url` with the matching credential. A root forwarder
+   * holds the credentials; the supervisor runs commands as uid 65534, which cannot read them.
+   */
+  readonly credentialedUrl = (url: string): string => guestCredentialedUrl(url)
 
   async runCommand(
     command: string,
