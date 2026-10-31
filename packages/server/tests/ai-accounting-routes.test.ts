@@ -177,7 +177,6 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
       model: { provider: "openai", modelId: "gpt-5" },
       task: "Research the issue.",
       toolNames: [],
-      maxSteps: 25,
     },
     thread: { id: `thread_${childRunId}`, create: true },
     trigger: { id: `task_${childRunId}`, parts: [{ type: "text", text: "Research the issue." }] },

@@ -165,7 +165,6 @@ function subagentInput(
       reasoning: "medium",
       task: "Research the open orders.",
       toolNames: ["search_orders"],
-      maxSteps: 25,
       files: [{ path: "reports/orders.csv", fileRef: testFileRef("orders.csv") }],
     },
     thread: { id: `thread_${id}`, create: true },

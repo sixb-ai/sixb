@@ -10,6 +10,20 @@ uses the durable execution's requester-group snapshot, so redelivery cannot chan
 Language execution and the scoped embedding catalog share that recorder and its failure state.
 Object authorization happens before embedding inference; wrapping a catalog does not grant access.
 
+## Language flow
+
+```text
+recorder.wrapModel(model).stream(request)
+  → admit the call: reserve capacity before the provider sees it
+  → provider stream, handed on event by event (reportModelCalls, ../language-call.ts)
+  → at its finish: record usage and valuation, then pass the finish on
+  → cancelled, failed or unfinished: record it with its usage unknown
+```
+
+The model records each call itself, whoever reads its stream: the Agent's loop, direct generation,
+or a server that streams it to a remote runner. A call whose record cannot be written fails before
+its reader sees it finish, and the record goes to recovery.
+
 ## Embedding flow
 
 ```text

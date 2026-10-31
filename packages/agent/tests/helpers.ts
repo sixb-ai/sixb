@@ -9,12 +9,14 @@ import type {
 } from "@sixb/core"
 import { InMemoryBroker } from "@sixb/core"
 import {
+  type AgentRunPlanDefinitions,
   type AgentRunSessionHost,
   NOOP_STREAM_SINK,
   openAgentRunSession,
   type StreamSink,
 } from "@sixb/core/internal/agents"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
+import { createModelCatalog } from "@sixb/core/models"
 import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 import { agentThreadModelContext } from "../src/thread-context"
 
@@ -127,13 +129,27 @@ export async function runTurnInSession(
       recoverAiModelCall,
       events,
       security: EMPTY_SECURITY,
+      // A turn run directly has no environment, so nothing it does binds the run's SDK.
+      sdk: {
+        id: turn.context.id,
+        withScope: () => {
+          throw new Error("A turn run directly reaches no project SDK.")
+        },
+      },
+      // Its plan is the test's own; its model, the one the session hands it.
+      definitions: {
+        models: createModelCatalog({ language: [turn.plan.model] }),
+      } as unknown as AgentRunPlanDefinitions,
     },
     turn.run
   )
   try {
     const threadContext =
       turn.threadContext ?? agentThreadModelContext((await session.context()).history)
-    return await runAgentTurn({ ...turn, session, threadContext })
+    // As the session hands a runner its model: each call admitted and recorded for the run.
+    const { providerId: provider, modelId } = turn.plan.model
+    const model = await session.models.language({ provider, modelId })
+    return await runAgentTurn({ ...turn, plan: { ...turn.plan, model }, session, threadContext })
   } finally {
     session.close()
   }

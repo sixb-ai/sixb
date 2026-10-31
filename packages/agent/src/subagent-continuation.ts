@@ -1,5 +1,5 @@
 import type { AgentMessagePart } from "@sixb/core"
-import type { AgentMessageRecord, SubagentRunFile, SubagentRunRecord } from "@sixb/core/storage"
+import type { AgentMessageRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { renderCurrentTime } from "./agent-prompt"
 
 // A child that paused continues as the next run of its thread under a later turn: once its held
@@ -45,22 +45,4 @@ function sandboxRestarted(paused: SubagentRunRecord): string {
   return outputsError === undefined
     ? "Your sandbox restarted: the files you were handed and your out/ are back; nothing else is."
     : `Your sandbox restarted: the files you were handed are back, but not your out/, which could not be kept (${outputsError}). Nothing else is.`
-}
-
-/**
- * The files a child finds in its sandbox: those its parent handed over, and for a continuation
- * what the paused run left in `out/`, given back there. An output wins over a handed file at its
- * path, as the paused run's copy was the latest.
- */
-export function subagentSandboxFiles(
-  run: SubagentRunRecord,
-  paused: SubagentRunRecord | undefined
-): readonly SubagentRunFile[] {
-  const outputs = (paused?.result?.files ?? []).map((file) => ({
-    ...file,
-    path: `out/${file.path}`,
-  }))
-  const restored = new Set(outputs.map((file) => file.path))
-
-  return [...(run.spec.files ?? []).filter((file) => !restored.has(file.path)), ...outputs]
 }

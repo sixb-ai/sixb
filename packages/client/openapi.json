@@ -315,7 +315,7 @@
           },
           "code": {
             "type": "string",
-            "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+            "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
           },
           "latest": {
             "type": "object",
@@ -48090,7 +48090,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48137,7 +48137,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48176,7 +48176,7 @@
       },
       "post": {
         "summary": "Create an artifact",
-        "description": "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.",
+        "description": "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner and authored by the run's requester.",
         "tags": ["Artifacts"],
         "operationId": "createArtifact",
         "security": [
@@ -48795,7 +48795,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48842,7 +48842,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48889,7 +48889,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48936,7 +48936,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -48983,7 +48983,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49182,7 +49182,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49229,7 +49229,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49276,7 +49276,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49371,7 +49371,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49418,7 +49418,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49465,7 +49465,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49575,7 +49575,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49622,7 +49622,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49669,7 +49669,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49764,7 +49764,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49811,7 +49811,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -49858,7 +49858,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50012,7 +50012,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50059,7 +50059,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50106,7 +50106,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50153,7 +50153,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50200,7 +50200,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50304,7 +50304,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50351,7 +50351,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50398,7 +50398,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50445,7 +50445,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -50486,7 +50486,7 @@
     "/api/artifacts/{artifactId}/versions": {
       "post": {
         "summary": "Publish an artifact's next version",
-        "description": "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.",
+        "description": "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.",
         "tags": ["Artifacts"],
         "operationId": "publishArtifactVersion",
         "security": [
@@ -51134,7 +51134,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51181,7 +51181,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51228,7 +51228,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51275,7 +51275,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51322,7 +51322,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51433,7 +51433,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51480,7 +51480,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51527,7 +51527,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51574,7 +51574,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -51986,7 +51986,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -52033,7 +52033,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -52080,7 +52080,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), query_not_found, query_invalid (the ontology no longer admits the query), execution_lost (a run token's run ended or moved to another runner), or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",

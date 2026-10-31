@@ -1,21 +1,32 @@
 import {
   type AgentExecutionEnvironment,
-  AgentTurnTimeoutError,
+  type AgentToolCaller,
   createWorkflowAgentNodeEnvironment,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
-  resolveWorkflowAgentStepExecutionPlan,
+  type ResolvedAgentExecutionPlan,
   runWorkflowAgentNode,
   toAgentExecutionFailure,
   type WorkflowAgentFailurePhase,
   WorkflowAgentNodeExecutionError,
+  workflowInputToolAttachments,
 } from "@sixb/agent"
-import type { AgentMessagePart, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
+import {
+  type AgentMessagePart,
+  AgentToolPublicError,
+  type AgentToolRunInfo,
+  type Logger,
+  type SixbFailure,
+  type ValueType,
+  type WorkflowDefinition,
+} from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
+  renderAgentRunOntologyDocs,
+  resolveAgentPropertyClearance,
+  runAgentTool,
   type WorkflowAgentNodeSession,
   WorkflowResumeDispatchError,
 } from "@sixb/core/internal/agents"
@@ -25,14 +36,15 @@ import {
   isSixbError,
   summarizeErrorMessage,
   toSixbFailure,
-  withFailureMessage,
 } from "@sixb/core/internal/errors"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import {
   type AiModelCallRecorder,
   ModelUsageRecordingError,
+  resolveLanguageModel,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
-import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
+import type { WorkflowAgentNodeDefinition, WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import { createWorkflowNodeFailure, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
   AgentQueueJob,
@@ -52,8 +64,9 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
+import { resolveWorkflowAgentStepPlan } from "./run-plan"
 import { workflowStepSandbox } from "./run-sandboxes"
-import type { AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
   readonly context: AgentWorkerContext
@@ -109,11 +122,13 @@ export async function executeWorkflowAgentNode(
   let totalNodes: number | undefined
   let preparationComplete = false
   const turnSignal = AbortSignal.any([signal, session.cancelled])
-  // Fires only when the node's time budget elapses: its environment, model loop and tools stop.
-  const deadline = new AbortController()
+  // The step's project tools log here, as the step.
+  const logs = resolveLoggingService(context.id, input.host.logging).startExecution({
+    kind: "agent",
+    id: nodeRun.id,
+  })
   // Fires when the node ends, however it ends: its tools' model calls must not outlive it.
   const ended = new AbortController()
-  let deadlineTimer: ReturnType<typeof setTimeout> | undefined
   const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
     void session.renewLease(renewed.leaseExpiresAt).catch(() => {})
   })
@@ -124,14 +139,9 @@ export async function executeWorkflowAgentNode(
       await resolveWorkflowAgentNodeExecution(input, loaded, session)
     usageRecorder = await session.modelCalls()
     totalNodes = workflow.nodes.length
-    const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
+    const configuredPlan = resolveWorkflowAgentStepPlan(input.host.definitions, {
       workflowId: workflow.id,
       step: node.agentStep,
-      models: input.host.definitions.models?.language,
-      tools: input.host.definitions.tools,
-      skills: input.host.definitions.agent.skills,
-      defaultMaxSteps: context.defaultMaxSteps,
-      sandboxModels: listSandboxModels(input.host.definitions.models),
     })
     modelId = configuredPlan.model.modelId
     const resolved = await session.authorizeActor(actorId, durableExecution.authorizationRef)
@@ -148,22 +158,31 @@ export async function executeWorkflowAgentNode(
       authorization: { type: "principal", context: resolved.context },
       authorPrincipal: resolved.identity.principal,
     })
-    const prepared = await prepareAgentModel(configuredPlan)
-    const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
+    // The step runs in this process: the worker pins its model and records each call.
+    const prepared = prepareAgentModel({
+      ...configuredPlan,
+      model: usageRecorder.wrapModel(await resolveLanguageModel(configuredPlan.model)),
+    })
+    const authorization = { type: "principal" as const, context: resolved.context }
+    const propertyClearance = resolveAgentPropertyClearance(
+      input.host.definitions.ontology,
+      authorization
+    )
+    const plan = Object.freeze({
+      ...configuredPlan,
+      model: prepared.model,
+      ontologyDocs: renderAgentRunOntologyDocs({
+        sixb: executionContext.sixb,
+        catalog: input.host.definitions.agent.ontologyDocs,
+        ...(propertyClearance === undefined ? {} : { propertyClearance }),
+      }),
+    })
     preparationComplete = true
 
-    // The deadline starts before the environment: preparing it shares the node's time budget.
-    // Its reason is the node's failure, also when the abort makes provisioning fail.
-    deadlineTimer = setTimeout(
-      () => deadline.abort(nodeDeadlineExceeded(nodeRun.id, context.turnTimeoutMs)),
-      context.turnTimeoutMs
-    )
-
-    // Provisioning stops on cancellation, lost ownership, worker shutdown (the delivery `signal`)
-    // or the deadline, never because the node finished: a sandbox still booting then reaches the
-    // normal destroy once it is ready.
-    const provisioningSignal = AbortSignal.any([turnSignal, deadline.signal])
-    const nodeSignal = AbortSignal.any([provisioningSignal, ended.signal])
+    // Provisioning stops on `turnSignal` (cancellation, lost ownership or worker shutdown), never
+    // because the node finished: a sandbox still booting then reaches the normal destroy once it
+    // is ready.
+    const nodeSignal = AbortSignal.any([turnSignal, ended.signal])
     environment = await createWorkflowAgentNodeEnvironment({
       openSandbox: workflowStepSandbox({
         context,
@@ -178,7 +197,20 @@ export async function executeWorkflowAgentNode(
       stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
-      signal: provisioningSignal,
+      callTool: workflowStepTools({
+        host: input.host,
+        context: executionContext,
+        plan,
+        logger: logs.logger.child({ actorId }),
+        run: {
+          kind: "workflow",
+          id: nodeRun.id,
+          workflowId: workflow.id,
+          stepId: node.agentStep.id,
+        },
+        nodeInput: nodeRun.input,
+      }),
+      signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
     bindAgentModelExecution(executionContext.sixb, {
@@ -196,7 +228,6 @@ export async function executeWorkflowAgentNode(
       prompt: reserved.prompt,
       createdAt: reserved.createdAt,
       valueTypesById,
-      usageRecorder,
       signal: nodeSignal,
     })
 
@@ -281,10 +312,10 @@ export async function executeWorkflowAgentNode(
       })
     }
   } finally {
-    clearTimeout(deadlineTimer)
     ended.abort()
+    await logs.flush().catch(() => {})
     stopOwnershipProjection()
-    session.close()
+    await session.close()
     await environment?.dispose()
   }
 }
@@ -530,14 +561,6 @@ function isAiUsageLimitFailure(error: unknown): error is ReturnType<typeof creat
   )
 }
 
-/** The node's time budget elapsed. The recorded failure names the worker setting that sets it. */
-function nodeDeadlineExceeded(nodeRunId: string, timeoutMs: number): AgentTurnTimeoutError {
-  return withFailureMessage(
-    new AgentTurnTimeoutError(nodeRunId, timeoutMs),
-    `The task did not finish within the agent worker's turn budget (turnTimeoutMs: ${timeoutMs}).`
-  )
-}
-
 interface WorkflowAgentErrorDetails extends Readonly<Record<string, string>> {
   readonly agentStepId: string
   readonly workflowId: string
@@ -555,5 +578,44 @@ function workflowAgentErrorDetails(
     workflowRunId: nodeRun.workflowRunId,
     nodeId: nodeRun.nodeId,
     nodeRunId: nodeRun.id,
+  }
+}
+
+/**
+ * How a workflow step calls a project tool: in this process, as the step, with its execution's
+ * SDK, its input's files as attachments and its logger. Only a tool the step selects runs.
+ */
+export function workflowStepTools(input: {
+  readonly host: AgentWorkerHost
+  readonly context: AgentRunnerContext
+  readonly plan: Pick<ResolvedAgentExecutionPlan, "tools">
+  readonly logger: Logger
+  readonly run: AgentToolRunInfo
+  readonly nodeInput: WorkflowIOSnapshot
+}): AgentToolCaller {
+  const selected = new Set(input.plan.tools.map((tool) => tool.name))
+  const attachments = workflowInputToolAttachments({
+    input: input.nodeInput,
+    blobStorage: input.context.blobStorage,
+  })
+  return (call, { signal, maxFileBytes }) => {
+    const definition = selected.has(call.toolName)
+      ? input.host.definitions.tools.getByName(call.toolName)
+      : null
+    if (!definition) {
+      throw new AgentToolPublicError(`[SixbAgentWorker] Tool '${call.toolName}' is not available.`)
+    }
+    return runAgentTool({
+      definition,
+      valueTypesById: input.host.definitions.ontology.getValueTypesById(),
+      call,
+      signal,
+      run: input.run,
+      sixb: input.context.sixb,
+      logger: input.logger,
+      attachments,
+      files: input.context.blobStorage,
+      ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
+    })
   }
 }

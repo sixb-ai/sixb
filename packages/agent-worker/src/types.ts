@@ -5,6 +5,7 @@ import type {
   Queues,
   SandboxDefinition,
   SandboxFactory,
+  Sixb,
   SixbDefinitions,
   Storage,
 } from "@sixb/core"
@@ -91,15 +92,13 @@ export interface AgentWorkerOptions {
   readonly subagentConcurrencyPerRun?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
-  /** Framework model step cap per turn. Defaults to 100. */
-  readonly defaultMaxSteps?: number
-  /**
-   * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded
-   * `failed`, releasing the thread — a slow-but-alive model cannot hold a thread indefinitely.
-   * Defaults to 10 minutes.
-   */
-  readonly turnTimeoutMs?: number
 }
 
 /** A run's execution context as the cloud runner holds it: with the factory its sandboxes come from. */
-export type AgentRunnerContext = AgentExecutionContext & Pick<AgentWorkerContext, "sandboxes">
+/**
+ * A run's execution context as the cloud runner holds it: with the factory its sandboxes come from,
+ * and the run's SDK, which a workspace's recipe resolves its parameters with. The harness reaches
+ * neither.
+ */
+export type AgentRunnerContext = AgentExecutionContext &
+  Pick<AgentWorkerContext, "sandboxes"> & { readonly sixb: Sixb }

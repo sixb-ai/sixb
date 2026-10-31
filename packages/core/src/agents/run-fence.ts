@@ -1,4 +1,4 @@
-import { AgentStorageError } from "../storage/agents"
+import { type AgentStorage, AgentStorageError } from "../storage/agents"
 
 /** This session's execution token is stale, so it must make no further durable writes. */
 export class AgentExecutionLostError extends Error {
@@ -40,5 +40,24 @@ export async function fenced<T>(
         (error.code === "execution_lost" || error.code === "run_not_found")
     if (gone) throw new AgentExecutionLostError(runId)
     throw error
+  }
+}
+
+/**
+ * Throws {@link AgentExecutionLostError} unless the run still runs under this execution token,
+ * within its lease. `agents` may be a transaction's, so the check and the write it guards commit
+ * together.
+ */
+export async function assertAgentRunOwned(
+  agents: AgentStorage,
+  fence: { readonly projectId: string; readonly id: string; readonly executionToken: string }
+): Promise<void> {
+  const current = await agents.runs.getById({ projectId: fence.projectId, id: fence.id })
+  if (
+    current?.status !== "running" ||
+    current.execution?.token !== fence.executionToken ||
+    current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
+  ) {
+    throw new AgentExecutionLostError(fence.id)
   }
 }

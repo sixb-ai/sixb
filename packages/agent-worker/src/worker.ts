@@ -2,24 +2,20 @@ import {
   AgentRequesterLeftThreadError,
   type AgentRunFailure,
   type AgentTurnRuntime,
-  AgentTurnTimeoutError,
   type ConversationAgentExecutionEnvironment,
   type ConversationReaders,
   createAgentTurnRuntime,
   createConversationAgentEnvironment,
-  DEFAULT_MAX_STEPS,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
   type ResolvedAgentExecutionPlan,
-  resolveAgentExecutionPlan,
   runAgentTurn,
   SubagentCoordinator,
   stoppedByWorker,
+  type TurnDelegation,
   toAgentRunFailure,
 } from "@sixb/agent"
 import { principalsEqual } from "@sixb/core"
-import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -75,6 +71,7 @@ import {
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
+import { resolveRunPlan } from "./run-plan"
 import { conversationSandbox } from "./run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -89,8 +86,6 @@ const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
 const DEFAULT_SUBAGENT_CONCURRENCY = 4
 const DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN = 4
-const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
-const MAX_TIMER_DURATION_MS = 2_147_483_647
 /** Request paths publish their own jobs; this pass only repairs a publication or cancel they lost. */
 const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
@@ -108,6 +103,8 @@ interface PreparedConversationTurn {
   /** Others were added to the thread, even ones who cannot read it now. */
   readonly shared: boolean
   readonly plan: ResolvedAgentExecutionPlan
+  /** What the turn offers the children it spawns. */
+  readonly delegation: TurnDelegation
   readonly execution: ExecutionRecord
   readonly executionContext: AgentRunnerContext
   readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
@@ -139,7 +136,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
-    const turnTimeoutMs = normalizeTurnTimeoutMs(options.turnTimeoutMs)
     super({
       projectId: host.id,
       queue: host.queues.agents,
@@ -156,7 +152,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       host.definitions.workflows
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
-    this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
+    this.context = hasAgentWork ? buildAgentContext(host, options) : null
     this.children = this.context
       ? new ChildRunner({
           host,
@@ -265,6 +261,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       run: queuedRun,
       modelId: queuedRun.spec?.model.modelId,
       leaseExpiresAt: delivery.leaseExpiresAt,
+      stop: signal,
     })
     if (!session) return
     const run = session.run
@@ -283,29 +280,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         // Catch a renewal that completed between starting the run and attaching the observer.
         // Storage keeps this projection monotonic, so racing confirmations are safe.
         await session.renewLease(delivery.leaseExpiresAt)
-        const modelCalls = await session.modelCalls()
-        return { ...(await this.prepareConversationTurn(context, session)), modelCalls }
+        return this.prepareConversationTurn(context, session)
       })
       const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
       await session.events.publishStarted(run)
-      runtime = createAgentTurnRuntime({
-        context: prepared.executionContext,
-        run,
-        signal: turnSignal,
-        modelCalls: prepared.modelCalls,
-      })
-      bindAgentModelExecution(prepared.executionContext.sixb, {
-        signal: runtime.signal,
-        accounting: runtime.usageRecorder,
-      })
-      delegation = new SubagentCoordinator(
-        this.host,
-        context,
-        run,
-        session,
-        runtime.deadline,
-        (child) => this.requireChildren().start(child, { signal, delivery })
+      runtime = createAgentTurnRuntime({ signal: turnSignal })
+      delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
+        this.requireChildren().start(child, { signal, delivery })
       )
       const frameworkTools = await delegation.createTools()
       environment = await createConversationAgentEnvironment({
@@ -387,7 +369,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         interrupted ? new AgentTurnInterruptedError(run.id) : error
       )
       if (finalized) {
-        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
+        if (finalized.run.status === "failed") {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
         await session.events.publishRunFinished(finalized.run)
@@ -401,7 +383,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // Its children end before its delivery does: that delivery renews their lease too.
       await this.children?.stopChildrenOf(run.id)
       stopOwnershipProjection?.()
-      session.close()
+      await session.close()
       delegation?.close()
       runtime?.dispose()
       await environment?.dispose()
@@ -435,17 +417,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const { run } = session
     const turn = await session.context()
     const { thread, execution, participants } = turn
-    const plan = resolveAgentExecutionPlan({
-      spec: run.spec,
-      models: this.host.definitions.models?.language,
-      tools: this.host.definitions.tools,
-      skills: this.host.definitions.agent.skills,
-      ...(this.host.definitions.agent.instructions === undefined
-        ? {}
-        : { projectInstructions: this.host.definitions.agent.instructions }),
-      defaultMaxSteps: context.defaultMaxSteps,
-      sandboxModels: listSandboxModels(this.host.definitions.models),
-    })
+    const runPlan = await session.plan()
+    const plan = resolveRunPlan(runPlan, { model: await session.models.language(runPlan.model) })
+    // A turn's plan always carries it; only a child's goes without.
+    if (!runPlan.delegation) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${run.id}' has no models to delegate to.`
+      )
+    }
     if (!execution) {
       throw createSixbError(
         "internal.unexpected",
@@ -466,9 +446,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       runId: run.id,
       names: turn.names,
       authorization: await session.authorization(execution.authorizationRef),
+      files: session.files,
       shared: (conversation?.participants.length ?? 0) > 0,
     })
-    const model = await prepareAgentModel(plan)
+    const model = prepareAgentModel(plan)
     return {
       thread,
       ...(conversation === undefined ? {} : { conversation }),
@@ -476,6 +457,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // and read back whatever memory the thread held meanwhile.
       shared: participants.length > 0,
       plan,
+      delegation: {
+        models: runPlan.delegation,
+        toolNames: runPlan.tools.map((tool) => tool.name),
+      },
       execution,
       executionContext,
       model,
@@ -759,6 +744,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       events: context.streamSink,
       security: this.host.definitions.security,
       maxActiveChildren: context.subagentConcurrencyPerRun,
+      sdk: this.host,
+      definitions: this.host.definitions,
+      ...(this.host.logging === undefined ? {} : { logging: this.host.logging }),
       afterFinish: (run) => this.afterRunFinished(run),
     }
   }
@@ -810,11 +798,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 }
 
-function buildAgentContext(
-  host: AgentWorkerHost,
-  options: AgentWorkerOptions,
-  turnTimeoutMs: number
-): AgentWorkerContext {
+function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
@@ -835,9 +819,6 @@ function buildAgentContext(
     storage,
     sandboxes: host.sandboxes,
     keepsChildWorkspaces: keepsSubagentWorkspace(host.sandboxes),
-    logging: host.logging,
-    valueTypesById: host.definitions.ontology.getValueTypesById(),
-    ontologyDocs: host.definitions.agent.ontologyDocs,
     // Normalize the server base URL once here, at the boundary. Everything downstream (the sandbox's
     // API address and run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
@@ -848,8 +829,6 @@ function buildAgentContext(
       )
     ),
     recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
-    defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
-    turnTimeoutMs,
     subagentConcurrencyPerRun: normalizeConcurrency(
       "subagentConcurrencyPerRun",
       options.subagentConcurrencyPerRun ?? DEFAULT_SUBAGENT_CONCURRENCY_PER_RUN
@@ -933,15 +912,4 @@ function normalizeConcurrency(name: string, value: number): number {
     )
   }
   return value
-}
-
-function normalizeTurnTimeoutMs(value: number | undefined): number {
-  const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent turn timeout must be a positive integer no greater than ${MAX_TIMER_DURATION_MS}ms.`
-    )
-  }
-  return timeoutMs
 }

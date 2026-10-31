@@ -135,9 +135,8 @@ export const appRepo = new VercelSandboxFactory({
 Vercel's default runtime has neither `gh` nor `bun`, so the factory boots the Sixb agent image,
 which has both: push it to your Vercel project as shown in
 [Use with a sandbox provider](https://github.com/sixb-ai/sixb/tree/main/sandboxes/agent-image#use-with-a-sandbox-provider)
-(Vercel). `sessionTimeoutMs` must cover the task's time limit, the agent worker's turn budget:
-10 minutes unless you [change it](../cli/overview.md#worker-options). Vercel's default session
-lasts 5 minutes.
+(Vercel). The task has no time limit, so set `sessionTimeoutMs` to cover the longest task you
+expect: Vercel's default session lasts 5 minutes.
 
 File: `workflows/incident-to-pr.ts`
 
@@ -163,7 +162,7 @@ export const fixIncident = defineAgentStep("fix-incident", {
 
 Each run gets a fresh sandbox: Sixb clones the repository, runs `setup`, and destroys the sandbox
 when the run ends, including after a failure or a cancellation. Nothing carries over between runs,
-so setup runs every time. Cloning and setup count toward the task's time limit.
+so setup runs every time, inside the sandbox's session.
 
 If a worker stops mid-task, the task runs again in a fresh checkout. Write instructions that are
 safe to repeat, as above: a branch name derived from the input, and a check for an existing pull

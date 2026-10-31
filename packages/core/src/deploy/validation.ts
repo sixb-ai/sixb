@@ -83,11 +83,8 @@ function services(value: unknown): void {
         })
       }
     } else {
-      knownKeys(options, ["types", "agentTurnTimeout", "concurrency", "env", "process"], path)
+      knownKeys(options, ["types", "concurrency", "env", "process"], path)
       if (options.types !== undefined) workerTypes(options.types, `${path}.types`)
-      if (options.agentTurnTimeout !== undefined) {
-        string(options.agentTurnTimeout, `${path}.agentTurnTimeout`)
-      }
       if (options.concurrency !== undefined) {
         workerConcurrency(options.concurrency, `${path}.concurrency`)
       }

@@ -1,17 +1,13 @@
 import { posix } from "node:path"
-import type {
-  AgentToolAttachments,
-  AgentToolRunInfo,
-  OntologyDocsCatalog,
-  Principal,
-} from "@sixb/core"
+import type { Principal } from "@sixb/core"
 import {
+  type AgentRunArtifacts,
   type AgentRunSession,
   type AgentTurnHistory,
   conversationThreadId,
+  subagentSandboxFiles,
 } from "@sixb/core/internal/agents"
-import { resolveLoggingService } from "@sixb/core/internal/logging"
-import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
+import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
@@ -42,7 +38,7 @@ import { type ConversationMemory, loadConversationMemory } from "./conversation-
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
-import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
+import { type AgentErrorDetails, type AgentToolCaller, projectModelTools } from "./model-adapters"
 import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
@@ -53,17 +49,12 @@ import {
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
-import { type SubagentHistory, subagentSandboxFiles } from "./subagent-continuation"
+import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import {
-  handedToolAttachments,
-  threadToolAttachments,
-  workflowInputToolAttachments,
-} from "./tools/attachments"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
-import { AgentFileBudget, createAgentToolFiles } from "./tools/tool-files"
+import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -88,7 +79,7 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
  * closes over whatever it opens it from (a factory, the thread's recipe, the run's credentials).
  */
 export type OpenRunSandbox = (lifecycle: {
-  /** Stops provisioning: cancellation, lost ownership, shutdown, or the run's deadline. */
+  /** Stops provisioning: cancellation, lost ownership, or shutdown. */
   readonly signal: AbortSignal
   /** Ends the run when its environment can no longer serve it, such as lost source credentials. */
   readonly onFailure: (error: Error) => void
@@ -155,6 +146,8 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
   readonly stepId: string
   readonly nodeInput: WorkflowIOSnapshot
   readonly errorDetails: AgentErrorDetails
+  /** How the step calls a project tool: it runs in the cloud, so in the worker's process. */
+  readonly callTool: AgentToolCaller
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -177,12 +170,11 @@ export async function createConversationAgentEnvironment(
   const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
   const loadMemory: LoadConversationMemory = (checkpoint) =>
     loadConversationMemory({
-      sixb: context.sixb,
+      session: input.session,
       asOf: checkpoint?.createdAt ?? threadCreatedAt,
-      shared: input.shared ?? false,
     })
   try {
-    const ontologyDocs = renderRunOntologyDocs(context)
+    const { ontologyDocs } = plan
     // Resolve application access before any compaction model call. Once acquired, this
     // environment owns preservation even if history, attachments or runtime preparation fail.
     const prepared = preflight
@@ -233,22 +225,16 @@ export async function createConversationAgentEnvironment(
       plan,
       runId: run.id,
       threadId: run.threadId,
-      toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
+      callTool: (call, options) => input.session.callTool(call, options),
       ...(input.thread && run.execution
         ? {
             publishing: {
+              artifacts: input.session.artifacts,
               threadId: input.thread.id,
               owner: input.thread.ownerPrincipal,
-              author: input.requestedBy ?? input.thread.ownerPrincipal,
-              executionToken: run.execution.token,
             },
           }
         : {}),
-      toolAttachments: threadToolAttachments({
-        threads: input.session.threads,
-        threadId: run.threadId,
-        blobStorage: context.blobStorage,
-      }),
       apiBaseUrl,
       attachmentContext,
       ontologyDocs,
@@ -281,11 +267,6 @@ export async function createConversationAgentEnvironment(
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { run } = input
-  const execution = run.execution
-  if (!execution) {
-    throw new Error(`[SixbAgent] Subagent run '${run.id}' must hold an execution token.`)
-  }
   // A child's workspace is blank, so it has no source credentials to lose.
   const { sandbox, resumed = false } = await input.openSandbox({
     signal: input.signal ?? NEVER_ABORTED_SIGNAL,
@@ -293,7 +274,7 @@ export async function createSubagentEnvironment(
   })
 
   try {
-    return await startSubagentEnvironment({ ...input, execution, sandbox, resumed })
+    return await startSubagentEnvironment({ ...input, sandbox, resumed })
   } catch (error) {
     // Preparation failed before the worker got this environment: the child ends here, so its
     // workspace goes, as the worker's failure path would destroy it. A lost execution must touch
@@ -305,19 +286,18 @@ export async function createSubagentEnvironment(
 
 async function startSubagentEnvironment(
   input: CreateSubagentEnvironmentInput & {
-    readonly execution: NonNullable<SubagentRunRecord["execution"]>
     readonly sandbox: RunSandbox
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
   }
 ): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation, execution, sandbox, resumed } = input
+  const { context, plan, run, conversation, sandbox, resumed } = input
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
   const history = input.history.messages
   const [memory, handedContext, historyContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
-    loadConversationMemory({ sixb: context.sixb, asOf: input.thread.createdAt }),
+    loadConversationMemory({ session: input.session, asOf: input.thread.createdAt }),
     files.length
       ? prepareHandedFiles({
           projectId: context.id,
@@ -356,24 +336,19 @@ async function startSubagentEnvironment(
     runId: run.id,
     parentRunId: run.parentRunId,
     threadId: conversationThreadId(input.thread),
-    toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
+    callTool: (call, options) => input.session.callTool(call, options),
     ...(conversation
       ? {
           publishing: {
+            artifacts: input.session.artifacts,
             threadId: conversation.id,
             owner: conversation.ownerPrincipal,
-            author: input.requestedBy ?? conversation.ownerPrincipal,
-            executionToken: execution.token,
           },
         }
       : {}),
-    toolAttachments: handedToolAttachments({
-      files,
-      blobStorage: context.blobStorage,
-    }),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
-    ontologyDocs: renderRunOntologyDocs(context),
+    ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
     frameworkTools: input.frameworkTools,
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
@@ -392,8 +367,8 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgent] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
-  // step's lost source credentials end the node through `failure`.
+  // Cancellation, lost ownership or worker shutdown stop provisioning. A step's lost source
+  // credentials end the node through `failure`.
   const failure = new AbortController()
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
@@ -420,19 +395,10 @@ export async function createWorkflowAgentNodeEnvironment(
       actorId: run.actorId,
       plan,
       runId: run.nodeRunId,
-      toolRun: {
-        kind: "workflow",
-        id: run.nodeRunId,
-        workflowId: input.workflowId,
-        stepId: input.stepId,
-      },
-      toolAttachments: workflowInputToolAttachments({
-        input: input.nodeInput,
-        blobStorage: context.blobStorage,
-      }),
+      callTool: input.callTool,
       apiBaseUrl: context.apiBaseUrl,
       attachmentContext,
-      ontologyDocs: renderRunOntologyDocs(context),
+      ontologyDocs: plan.ontologyDocs,
       errorDetails: input.errorDetails,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -455,8 +421,8 @@ interface AgentEnvironmentSetup
   readonly sandboxSignal?: AbortSignal
   /** Environment-owned failure, such as lost source credentials. */
   readonly failureSignal?: AbortSignal
-  readonly toolRun: AgentToolRunInfo
-  readonly toolAttachments: AgentToolAttachments
+  /** How the run calls a project tool. */
+  readonly callTool: AgentToolCaller
   readonly actorId?: string
   readonly parentRunId?: string
   readonly mode: AgentExecutionMode
@@ -469,14 +435,14 @@ interface AgentEnvironmentSetup
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
   /**
-   * A conversation, or a child of one, publishes artifacts into the thread as the thread's owner
-   * and edits them from storage; other runs return text.
+   * A conversation, or a child of one, publishes artifacts into its conversation, through its
+   * session, and edits them from their installed copies; other runs return text.
    */
   readonly publishing?: {
+    readonly artifacts: AgentRunArtifacts
+    /** The conversation's thread, and its owner, who owns what the run creates. */
     readonly threadId: string
     readonly owner: Principal
-    readonly author: Principal
-    readonly executionToken: string
   }
   /** A conversation's memory, or a child's to read: installed in the sandbox and in the prompt. */
   readonly memory?: ConversationMemory
@@ -494,15 +460,6 @@ async function startAgentEnvironment(
   const { mode, sandbox, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext } =
     input
 
-  const logSession = resolveLoggingService(context.id, context.logging).startExecution({
-    kind: "agent",
-    id: runId,
-  })
-  const logger = logSession.logger.child({
-    ...(actorId === undefined ? {} : { actorId }),
-    ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
-    ...(threadId ? { threadId } : {}),
-  })
   let ready: Promise<ProvisionedRunSandbox>
   const fileRegistry = new AgentSandboxFileRegistry()
   const fileBudget = new AgentFileBudget()
@@ -523,16 +480,23 @@ async function startAgentEnvironment(
       onPublished: (file) => fileRegistry.register(file.sandboxPath, file.fileRef),
     })
   const tools = [
-    ...modelToolsFromAgentDefinitions({
-      definitions: plan.tools,
-      valueTypesById: context.valueTypesById,
-      run: input.toolRun,
-      sixb: context.sixb,
-      attachments: input.toolAttachments,
-      logger,
-      filesForToolCall,
+    ...projectModelTools({
+      specs: plan.tools,
+      runId,
+      callTool: input.callTool,
+      fileBytesLeft: () => fileBudget.maxBytes - fileBudget.reservedBytes,
+      installFiles: ({ toolName, files, signal }) =>
+        installAgentToolFiles({
+          toolName,
+          files,
+          blobStorage: context.blobStorage,
+          resolveSandbox: () => ready,
+          budget: fileBudget,
+          signal,
+          onPublished: (file) => fileRegistry.register(file.sandboxPath, file.fileRef),
+        }),
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-      errorDetails: input.errorDetails,
+      ...(input.errorDetails === undefined ? {} : { errorDetails: input.errorDetails }),
     }),
   ]
 
@@ -550,15 +514,14 @@ async function startAgentEnvironment(
   const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
-  const artifactStorage = context.artifactPublishing.artifacts
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
-  if (publishing && artifactStorage) {
+  if (publishing) {
     // Read concurrently with sandbox creation; both run while the model starts.
     installedArtifacts = materializeThreadArtifacts({
       threadId: publishing.threadId,
       // As the requester: the turn installs nothing they could not read themselves.
-      artifacts: context.sixb.artifacts,
+      artifacts: publishing.artifacts,
       blobStorage: context.blobStorage,
       directory: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_DIRECTORY),
       manifestPath: posix.join(sandbox.contextDirectory, AGENT_ARTIFACTS_MANIFEST),
@@ -567,19 +530,10 @@ async function startAgentEnvironment(
     // Surfaced where provisioning awaits it.
     installedArtifacts.catch(() => {})
     const publishTools = createPublishArtifactTools({
-      projectId: context.id,
-      storage: context.artifactPublishing,
-      artifacts: artifactStorage,
-      reader: context.sixb.artifacts,
-      blobStorage: context.blobStorage,
-      run: {
-        id: runId,
-        threadId: publishing.threadId,
-        executionToken: publishing.executionToken,
-        ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
-      },
+      artifacts: publishing.artifacts,
+      threadId: publishing.threadId,
       owner: publishing.owner,
-      author: publishing.author,
+      blobStorage: context.blobStorage,
       budget: fileBudget,
       resolveSandbox,
       installed: installedArtifacts,
@@ -611,12 +565,7 @@ async function startAgentEnvironment(
   }
   ready.then(markSettled, markSettled)
 
-  const dispose = async () => {
-    await Promise.all([
-      disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown),
-      logSession.flush(),
-    ])
-  }
+  const dispose = () => disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown)
 
   let systemPrompt: string
   try {
@@ -653,7 +602,7 @@ async function startAgentEnvironment(
     sandbox.beforeFinalize?.(options) ?? Promise.resolve()
   const artifacts =
     publishing && installedArtifacts
-      ? { threadId: publishing.threadId, installed: installedArtifacts }
+      ? { reader: publishing.artifacts, installed: installedArtifacts }
       : undefined
   const runFiles: AgentRunFiles = {
     sandbox: resolveSandbox,
@@ -664,8 +613,7 @@ async function startAgentEnvironment(
 
       await installArtifactsPublishedBy({
         installed: await artifacts.installed,
-        threadId: artifacts.threadId,
-        artifacts: context.sixb.artifacts,
+        artifacts: artifacts.reader,
         blobStorage: context.blobStorage,
         sandbox: (await ready).sandbox,
         runIds,
@@ -691,53 +639,9 @@ async function startAgentEnvironment(
       systemPrompt,
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
-      turnTimeoutMs: context.turnTimeoutMs,
     },
     dispose,
   }
-}
-
-/** Requesters with the same view share rendered docs; a project has few distinct views. */
-const renderedOntologyDocs = new WeakMap<OntologyDocsCatalog, Map<string, RenderedOntologyDocs>>()
-const MAX_RENDERED_ONTOLOGY_VIEWS = 16
-
-/** Reference docs for the object types this run's requester can see, from its own view. */
-function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntologyDocs {
-  const { sixb, propertyClearance, ontologyDocs: catalog } = context
-  const objectTypes = sixb.objects.listTypes()
-  const actionsByType = new Map(
-    objectTypes.map((objectType) => [objectType.id, sixb.actions.listForType(objectType)])
-  )
-  // Definitions are immutable, so the visible types, restricted properties, and requestable actions
-  // determine the output.
-  const key = JSON.stringify(
-    objectTypes.map((objectType) => [
-      objectType.id,
-      [...(propertyClearance?.hiddenProperties(objectType.id)?.ids ?? [])],
-      actionsByType.get(objectType.id)?.map((action) => action.id),
-    ])
-  )
-  const views = renderedOntologyDocs.get(catalog) ?? new Map<string, RenderedOntologyDocs>()
-  renderedOntologyDocs.set(catalog, views)
-  const cached = views.get(key)
-  if (cached) return cached
-
-  const rendered = renderOntologyDocs({
-    catalog,
-    objectTypes,
-    valueTypesById: sixb.objects.getValueTypesById(),
-    actionsFor: (objectType) => actionsByType.get(objectType.id) ?? [],
-    ...(propertyClearance === undefined
-      ? {}
-      : {
-          restrictedPropertyIds: (objectTypeId) =>
-            propertyClearance.hiddenProperties(objectTypeId)?.ids,
-        }),
-  })
-  views.set(key, rendered)
-  const oldest = views.keys().next().value
-  if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
-  return rendered
 }
 
 /** The handed files' context, with what a continuation's history showed its tools. */

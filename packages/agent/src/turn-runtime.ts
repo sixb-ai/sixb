@@ -1,62 +1,32 @@
-import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
-import type { AgentRunRecord } from "@sixb/core/storage"
-import { AgentTurnTimeoutError, throwIfExecutionLost } from "./errors"
-import type { AgentTurnContext } from "./types"
+import { throwIfExecutionLost } from "./errors"
 
 export interface AgentTurnRuntime {
-  /** Worker shutdown, queue-lease loss, and user cancellation before the turn deadline is added. */
+  /** Worker shutdown, queue-lease loss, and user cancellation. */
   readonly sourceSignal: AbortSignal
-  /** Complete run signal, including the one wall-clock deadline shared by preflight and generation. */
+  /** The run's signal: `sourceSignal`, and the run's end. */
   readonly signal: AbortSignal
-  /** When `signal` times out. */
-  readonly deadline: Date
-  readonly usageRecorder: AiModelCallRecorder
-  readonly timedOut: () => boolean
-  /** Surface ownership, accounting, timeout, or cancellation before another durable action. */
+  /** Surface lost ownership or cancellation before another durable action. */
   readonly assertCanContinue: () => void
   /** End the run: aborts `signal`, so a tool call that outlived it stops calling models. */
   dispose(): void
 }
 
-/** Start the run-owned accounting and wall-clock boundary before any optional compaction work. */
-export function createAgentTurnRuntime(input: {
-  readonly context: Pick<AgentTurnContext, "turnTimeoutMs">
-  readonly run: AgentRunRecord
-  readonly signal: AbortSignal
-  /** The run session's, which admits, records and recovers each call. */
-  readonly modelCalls: AiModelCallRecorder
-  /** A child's: its parent's. The run times out there if its own budget from now ends later. */
-  readonly deadline?: Date
-}): AgentTurnRuntime {
-  const usageRecorder = input.modelCalls
-  const timeout = new AbortController()
+/**
+ * The run's signal, shared by its compaction and its answer. A run has no time or step limit: it
+ * ends when the model answers, when it is cancelled, or when its runner loses it. Its model records
+ * each call itself, so a call that could not be admitted or recorded fails where it was made.
+ */
+export function createAgentTurnRuntime(input: { readonly signal: AbortSignal }): AgentTurnRuntime {
   const ended = new AbortController()
-  let timedOut = false
-
-  const remainingMs = (input.deadline?.getTime() ?? Number.POSITIVE_INFINITY) - Date.now()
-  const timeoutMs = Math.max(0, Math.min(input.context.turnTimeoutMs, remainingMs))
-  const deadline = new Date(Date.now() + timeoutMs)
-  const timer = setTimeout(() => {
-    timedOut = true
-    timeout.abort()
-  }, timeoutMs)
 
   return {
     sourceSignal: input.signal,
-    signal: AbortSignal.any([input.signal, timeout.signal, ended.signal]),
-    deadline,
-    usageRecorder,
-    timedOut: () => timedOut,
+    signal: AbortSignal.any([input.signal, ended.signal]),
     assertCanContinue() {
       throwIfExecutionLost(input.signal)
-      usageRecorder.assertHealthy()
-      if (timedOut) {
-        throw new AgentTurnTimeoutError(input.run.id, timeoutMs)
-      }
       input.signal.throwIfAborted()
     },
     dispose() {
-      clearTimeout(timer)
       ended.abort(new DOMException("The Agent run has ended.", "AbortError"))
     },
   }

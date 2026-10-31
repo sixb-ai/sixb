@@ -15,10 +15,18 @@ export interface RequestAuthState {
   readonly sixb: Sixb | null
   /** Present for a conversation run's run-token requests. */
   readonly agentRun?: ConversationAgentRunRecord
-  /** Identifies which kind of active agent execution owns a run-token request. */
+  /**
+   * Identifies which kind of active agent execution owns a run-token request. A run's carries the
+   * execution token the request was admitted under, which fences what it writes.
+   */
   readonly agentExecution?:
-    | { readonly kind: "conversation"; readonly runId: string }
-    | { readonly kind: "subagent"; readonly runId: string; readonly parentRunId: string }
+    | { readonly kind: "conversation"; readonly runId: string; readonly executionToken: string }
+    | {
+        readonly kind: "subagent"
+        readonly runId: string
+        readonly parentRunId: string
+        readonly executionToken: string
+      }
     | { readonly kind: "workflow"; readonly nodeRunId: string }
 }
 

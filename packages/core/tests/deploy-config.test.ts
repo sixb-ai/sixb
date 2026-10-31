@@ -36,7 +36,6 @@ describe("deploy config validation", () => {
         rules: { env: { RULES_DEBUG: "1" } },
         workers: {
           types: ["sync", "agent", "workflow"],
-          agentTurnTimeout: "30m",
           concurrency: { sync: 2, agent: 8 },
           process: { instances: 2, maxMemory: "1.5G" },
         },

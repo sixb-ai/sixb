@@ -42,21 +42,44 @@ Whichever write finds the run gone throws `AgentExecutionLostError` (`run-fence.
 storage error, so a runner checks for one error. Mail is sent as the session's run, which names
 its sender, and only to its own children's threads or to the turn that spawned it.
 
+## Artifacts
+
+A run's artifacts are its conversation's: a child's are its parent's. It reads them through its own
+SDK, bound to its execution as its requester, the way the API binds a request with the run's token.
+What it publishes is owned by the conversation's owner, authored by the requester, and names the
+run and the conversation as its origin. `AgentRunArtifacts.publish` checks the run still holds its
+execution, and a child's parent still runs, before it prepares the version and again in the
+transaction that stores it. The session in a worker and `POST /api/artifacts` with a run token
+both publish through it.
+
 ## Operations
 
 ```text
 renewLease · cancelled · assertOwned   ownership, and a cancel of the run or of its parent
-modelCalls()                           admission, usage and recovery; opened on first use, inside
-                                       the runner's preparation retry
+models.language(ref)                   the run's model, pinned once: each call is admitted against
+                                       the requester's AI limits and records itself, so the runner
+                                       never reports what a call used
+callTool(call)                         one call of a project tool the run offers, for the runner
+                                       that holds the run, run as the run (run-tools.ts): its input
+                                       checked against the tool's schema, its model calls billed to
+                                       the run and stopped with it, the files it puts stored within
+                                       the run's budget and returned for the runner to copy in
 events · heldCalls                     live records (best effort) and the approvals that hold a run
+plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
+                                       model, SIXB.md, skills, tool names, the requester's ontology
+                                       docs and a turn's delegation models; and the memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
 threads · children · mail              the conversation's messages, a turn's children, and mail
                                        between them; reads answer only for the run's conversation
+artifacts                              the conversation's artifacts, read as the requester, and
+                                       what the run publishes into it (run-artifacts.ts)
+files                                  where the run's files are stored and read: its attachments,
+                                       its tools' and children's files, its artifacts' files
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
-                                       host's afterFinish: stopping children, resuming a decided turn
+                                       host's afterFinish: children stopped, a decided turn resumed
 ```
 
 `tests/agent-run-session-contract.ts` is what every session does: the in-process one runs it now,
@@ -65,7 +88,5 @@ and a session over HTTP runs the same suite.
 ## Outside the session
 
 The worker's loops stay its own: dispatching queued runs, repairing approvals, recovering model-call
-records and finishing runs that never started. `publish_artifact` still writes artifact versions
-itself, through the worker context's `artifactPublishing`, until artifacts publish through the API.
-Project tools run with the run's execution-bound `sixb`, which reaches storage only through the
-run's authority.
+records and finishing runs that never started. A workflow agent step runs only in the cloud, so the
+worker runs its project tools itself, through the same `runAgentTool`.

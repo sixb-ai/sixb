@@ -1,9 +1,6 @@
 import { agentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
-import {
-  type AgentExecutionAuthorization,
-  resolveAgentPropertyClearance,
-} from "@sixb/core/internal/agents"
+import type { AgentExecutionAuthorization, AgentRunFileStore } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
 import type { AgentRunnerContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -17,6 +14,8 @@ export async function createAgentExecutionContext(input: {
   /** Display names the run read as it started (`AgentTurnContext.names`), its requester's among them. */
   readonly names: Readonly<Record<string, string>>
   readonly authorization: AgentExecutionAuthorization
+  /** Where the run's files are stored: its session's. A workflow step stores through its SDK. */
+  readonly files?: AgentRunFileStore
   readonly authorPrincipal?: AgentRunnerContext["authorPrincipal"]
   /** Others take part in the run's thread, so each user message names its author instead. */
   readonly shared?: boolean
@@ -28,24 +27,18 @@ export async function createAgentExecutionContext(input: {
     authorization: input.authorization,
   })
 
-  const propertyClearance = resolveAgentPropertyClearance(
-    input.host.definitions.ontology,
-    input.authorization
-  )
   // A shared thread's system prompt names nobody, so it stays the same whoever sends the turn.
   const requester = input.shared
     ? undefined
     : agentRequester(input.execution.requestedBy, input.names)
 
-  // The run reaches shared state through its session; only publish_artifact keeps the storage.
-  const { storage, ...worker } = input.context
+  // The run reaches shared state through its session, never through storage.
+  const { storage: _storage, ...worker } = input.context
   return {
     ...worker,
-    artifactPublishing: storage,
     sixb,
-    ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     ...(requester === undefined ? {} : { requester }),
-    blobStorage: sixb.blobs,
+    blobStorage: input.files ?? sixb.blobs,
   }
 }

@@ -1,6 +1,6 @@
 import { posix } from "node:path"
-import type { AgentFileDataProjection, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
-import { isAgentToolResult } from "@sixb/core/internal/agents"
+import type { AgentFileDataProjection, BlobInfo, FileRef } from "@sixb/core"
+import { type AgentRunFileStore, listMessageAttachments } from "@sixb/core/internal/agents"
 import type { LanguageModel } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
@@ -65,8 +65,6 @@ export interface PreparedAgentToolFileProjection {
   readonly modelFileData?: AgentFileDataProjection
 }
 
-type MessageAttachmentFile = Omit<AttachmentWorkItem, "message" | "inlineContent">
-
 interface AttachmentWorkItem {
   readonly message: AgentMessageRecord
   readonly fileRef: FileRef
@@ -82,7 +80,7 @@ export async function prepareAgentAttachments(input: {
   readonly projectId: string
   readonly threadId: string
   readonly messages: readonly AgentMessageRecord[]
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly apiBaseUrl: string
   /** Where the run's files go: attachments are materialized in it. */
   readonly contextDirectory: string
@@ -136,7 +134,7 @@ export async function prepareAgentAttachments(input: {
 /** Build the bounded, ephemeral projection of a tool-created file for the next model step. */
 export async function prepareAgentToolFileProjection(input: {
   readonly fileRef: FileRef
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly inlineImages: boolean
   readonly signal?: AbortSignal
   readonly sandboxPath?: string
@@ -268,7 +266,7 @@ async function prepareOneAttachment(input: {
   readonly projectId: string
   readonly threadId: string
   readonly item: AttachmentWorkItem
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   readonly apiBaseUrl: string
   readonly contextDirectory: string
   readonly inlineImages: boolean
@@ -446,7 +444,7 @@ async function prepareOneAttachment(input: {
 }
 
 async function safeBlobStat(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   fileRef: FileRef,
   notes: string[],
   signal: AbortSignal
@@ -476,7 +474,7 @@ function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
 }
 
 async function readBlobBytes(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   blobId: string,
   maxBytes: number,
   signal: AbortSignal,
@@ -676,72 +674,6 @@ export function modelSupportsInlineImages(model: LanguageModel): boolean {
   )
 }
 
-export function attachmentKey(messageId: string, partIndex: number): string {
-  return `${messageId}:${partIndex}`
-}
-
-export function toolResultAttachmentKey(
-  messageId: string,
-  partIndex: number,
-  contentIndex: number
-): string {
-  return `${messageId}:${partIndex}:tool-result:${contentIndex}`
-}
-
-/** The id of the message an attachment key names, or null when the key is malformed. */
-export function attachmentKeyMessageId(key: string): string | null {
-  return /^(.+?):\d+(?::tool-result:\d+)?$/.exec(key)?.[1] ?? null
-}
-
-/** The attachment with this key in a message, as `$SIXB_ATTACHMENTS` would list it, or null. */
-export function findMessageAttachment(message: AgentMessageRecord, key: string): FileRef | null {
-  return listMessageAttachments(message).find((file) => file.key === key)?.fileRef ?? null
-}
-
-/**
- * Lists the files a message exposes as attachments: the user's file parts, and the files of real
- * agent tool results, each with its key, its path in the message and its sandbox name. The
- * `$SIXB_ATTACHMENTS` manifest and `ctx.attachments.open` both use it, so a key opens only what the
- * manifest lists.
- */
-function listMessageAttachments(message: AgentMessageRecord): MessageAttachmentFile[] {
-  return message.parts.flatMap((part, partIndex): MessageAttachmentFile[] => {
-    if (part.type === "file") {
-      return [
-        {
-          fileRef: part.fileRef,
-          partIndex,
-          key: attachmentKey(message.id, partIndex),
-          contentPath: `/parts/${partIndex}/fileRef`,
-          sandboxName: String(partIndex),
-          origin: "message-file",
-        },
-      ]
-    }
-    if (
-      part.type !== "tool-call" ||
-      part.state !== "output-available" ||
-      !isAgentToolResult(part.output)
-    ) {
-      return []
-    }
-    return part.output.content.flatMap((contentPart, contentIndex) =>
-      contentPart.type === "file"
-        ? [
-            {
-              fileRef: contentPart.fileRef,
-              partIndex,
-              key: toolResultAttachmentKey(message.id, partIndex, contentIndex),
-              contentPath: `/parts/${partIndex}/output/content/${contentIndex}/fileRef`,
-              sandboxName: `tool-${partIndex}-${contentIndex}`,
-              origin: "tool-result-file",
-            },
-          ]
-        : []
-    )
-  })
-}
-
 function attachmentPromptText(
   entry: PreparedAgentAttachment,
   textExcerpt: string | undefined
@@ -909,3 +841,10 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
+
+export {
+  attachmentKey,
+  attachmentKeyMessageId,
+  findMessageAttachment,
+  toolResultAttachmentKey,
+} from "@sixb/core/internal/agents"

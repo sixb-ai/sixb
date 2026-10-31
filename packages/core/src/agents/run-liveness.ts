@@ -58,7 +58,7 @@ export async function endInterruptedAgentRun(
     leaseExpiresAt: new Date(Date.now() + leaseMs).toISOString(),
   })
   if (!session) return null
-  session.close()
+  await session.close()
 
   const completedAt = new Date()
   const error = captureSixbFailure(interruptedError(run), {

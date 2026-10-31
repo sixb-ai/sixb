@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryBroker, InMemoryStorage, type SecurityDefinitionCatalog } from "../src"
+import {
+  AgentToolPublicError,
+  ArtifactRequestError,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  type SecurityDefinitionCatalog,
+  SixbHost,
+} from "../src"
 import {
   AgentExecutionLostError,
   type AgentRunSession,
@@ -9,8 +19,11 @@ import {
   NOOP_STREAM_SINK,
   publishAgentRunCancel,
 } from "../src/agents"
+import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
+import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
+import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 // What every run session does, however its runner reaches it: in process, as the worker's does,
 // or over HTTP. An implementation runs the suite with how it claims a run; the suite seeds storage
@@ -23,6 +36,58 @@ const PROJECT_ID = "agent-run-session-contract"
 const LEASE = "2099-01-01T00:00:00.000Z"
 /** A lease already run out: what lets another runner take a run over. */
 const LAPSED = "2000-01-01T00:00:00.000Z"
+
+/** The project's one language model: each call answers at once, with its usage. */
+const answeringModel = new MockLanguageModel({
+  providerId: "test",
+  modelId: "test-model",
+  stream: async () =>
+    streamFromArray([
+      { type: "stream-start" },
+      { type: "text-start", id: "text" },
+      { type: "text-delta", id: "text", delta: "Done." },
+      { type: "text-end", id: "text" },
+      { type: "finish", finishReason: "stop", usage: { inputTokens: 12, outputTokens: 3 } },
+    ]),
+})
+
+/** A project tool that answers what run it ran in, and stores a file for the run's sandbox. */
+const chartTool = defineAgentTool("chart")
+  .description("Draw a chart.")
+  .input({ title: "string" })
+  .run(async ({ input, run, files }) => {
+    const file = await files.put({ body: new TextEncoder().encode("a,b\n"), fileName: "chart.csv" })
+    return { title: input.title, runId: run.id, kind: run.kind, sandboxPath: file.sandboxPath }
+  })
+/** A project tool that reads one of the run's attachments, by its key. */
+const readTool = defineAgentTool("read_attachment")
+  .description("Read an attachment.")
+  .input({ key: "string" })
+  .run(async ({ input, attachments }) => {
+    const opened = await attachments.open(input.key)
+    return { text: opened ? await new Response(opened.body).text() : null }
+  })
+const otherTool = defineAgentTool("other")
+  .description("Do something else.")
+  .input({})
+  .run(() => ({ ran: true }))
+
+/** The project a session binds its run's SDK in, over the storage the test seeds. */
+function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
+  const blobs = new InMemoryBlobStorage()
+  const sdk = new SixbHost({
+    id: PROJECT_ID,
+    ontology: [],
+    models: { language: [answeringModel] },
+    tools: [chartTool, readTool, otherTool],
+    storage,
+    blobStorage: blobs,
+    broker,
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+  })
+  return { session: { sdk, definitions: sdk.definitions }, blobs }
+}
 
 /** A queued turn in a fresh storage, with the host a session works against. */
 export async function seedAgentRun(id = "run-1") {
@@ -49,6 +114,7 @@ export async function seedAgentRun(id = "run-1") {
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog,
+    ...projectOver(storage, broker).session,
   }
   return { storage, broker, run, host }
 }
@@ -72,7 +138,6 @@ async function spawnChild(storage: InMemoryStorage, turn: AgentRunSession) {
       model: { provider: "test", modelId: "test-model" },
       task: "Look west.",
       toolNames: [],
-      maxSteps: 5,
     },
     thread: { id: `${id}-thread`, create: true },
     trigger: { id: `${id}-task`, parts: [{ type: "text", text: "Look west." }] },
@@ -97,13 +162,16 @@ const SECURITY = {
 /** A conversation owned by Alice, with turns to claim. */
 async function seedConversation(claim: ClaimAgentRunSession) {
   const storage = new InMemoryStorage()
+  const broker = new InMemoryBroker()
+  const { session, blobs } = projectOver(storage, broker)
   const host = {
     projectId: PROJECT_ID,
     storage,
-    broker: new InMemoryBroker(),
+    broker,
     recoverAiModelCall: async () => {},
     events: NOOP_STREAM_SINK,
     security: SECURITY,
+    ...session,
   }
   await storage.auth.users.create({
     projectId: PROJECT_ID,
@@ -144,12 +212,24 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       },
     })
   }
-  const open = async (run: Awaited<ReturnType<typeof turn>>) => {
-    const session = await claim(host, { run, leaseExpiresAt: LEASE })
+  /** Claim a run; under a lease already run out, another session may take it over. */
+  const open = async <TRun extends AgentRunRecord>(run: TRun, lease = LEASE) => {
+    const session = await claim(host, { run, leaseExpiresAt: lease })
     if (!session) throw new Error("Expected the run to be claimed.")
     return session
   }
-  return { storage, thread, say, turn, open }
+  /** A document's bytes, stored as a version's file is before it is published. */
+  const documentFile = async (markdown: string) => [
+    {
+      path: "document.md",
+      file: await blobs.put({
+        body: new TextEncoder().encode(markdown),
+        fileName: "document.md",
+        mediaType: "text/markdown",
+      }),
+    },
+  ]
+  return { storage, thread, say, turn, open, documentFile }
 }
 
 export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): void {
@@ -492,7 +572,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
           model: { provider: "test", modelId: "test-model" },
           task: `Look ${spawnKey}.`,
           toolNames: [],
-          maxSteps: 5,
         },
         thread: { create: true } as const,
         trigger: { id: `${spawnKey}-task`, parts: [{ type: "text" as const, text: "Look." }] },
@@ -519,6 +598,16 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(await turn.children.spawn(draft("east")).catch((error) => error)).toMatchObject({
         code: "active_child_limit",
       })
+      // Only the project's tools and models: a runner names no others for its child.
+      for (const spec of [
+        { model: { provider: "test", modelId: "test-model" }, toolNames: ["drop_tables"] },
+        { model: { provider: "other", modelId: "any-model" }, toolNames: [] },
+      ]) {
+        const forged = { ...draft("south"), spec: { ...draft("south").spec, ...spec } }
+        expect(await turn.children.spawn(forged).catch((error: Error) => error.message)).toMatch(
+          /cannot (hand a child tool|delegate to model)/
+        )
+      }
       turn.close()
     })
 
@@ -586,6 +675,307 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       turn.close()
       child.close()
       reclaimed?.close()
+    })
+  })
+
+  describe("a run's artifacts", () => {
+    // Guard proof: drop `origin` from what AgentRunArtifacts.publish prepares; the version names
+    // no conversation, and the conversation lists nothing.
+    test("publishes into its conversation, owned by its owner, and reads it back", async () => {
+      const { turn, open, documentFile } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const published = await session.artifacts.publish({
+        kind: "document",
+        title: "Plan",
+        files: await documentFile("# Plan\n"),
+      })
+
+      expect(published.artifact.owner).toEqual(alice)
+      expect(published.version.origin).toEqual({ threadId: "thr_1", runId: "run-a" })
+      expect((await session.artifacts.list({ limit: 10 })).map((each) => each.id)).toEqual([
+        published.artifact.id,
+      ])
+      expect(await session.artifacts.updatable(published.artifact.id)).toMatchObject({
+        id: published.artifact.id,
+      })
+      session.close()
+    })
+
+    // Guard proof: drop the ownership check from the publish transaction and the one before it;
+    // the fenced-out session's version lands.
+    test("publishes nothing once another session holds the run", async () => {
+      const { storage, turn, open, documentFile } = await seedConversation(claim)
+      const first = await open(await turn("run-a", "m1"), LAPSED)
+      const second = await open(first.run)
+
+      const refused = await first.artifacts
+        .publish({ kind: "document", title: "Late", files: await documentFile("# Late\n") })
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(AgentExecutionLostError)
+      expect((await storage.artifacts.list({ projectId: PROJECT_ID })).total).toBe(0)
+      first.close()
+      second.close()
+    })
+
+    // Guard proof: drop assertParentActive from the publish transaction, or its cancel check; the
+    // child's version lands after its turn ended, or was cancelled.
+    test("a child publishes into its parent's conversation, and nothing once its parent ended", async () => {
+      const { storage, turn, open, documentFile } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const child = await open(await spawnChild(storage, parent))
+
+      const published = await child.artifacts.publish({
+        kind: "document",
+        title: "West",
+        files: await documentFile("# West\n"),
+      })
+      expect(published.version.origin).toEqual({ threadId: "thr_1", runId: child.run.id })
+      const again = async () =>
+        child.artifacts
+          .publish({
+            artifactId: published.artifact.id,
+            title: "West again",
+            files: await documentFile("# West again\n"),
+          })
+          .catch((error: unknown) => error)
+
+      // A cancel recorded on the parent ends it already, as the run token reads it.
+      await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: parent.run.id })
+      expect(await again()).toMatchObject({ code: "not_allowed" })
+
+      await parent.finish({ status: "succeeded" })
+      const refused = await child.artifacts
+        .publish({
+          artifactId: published.artifact.id,
+          title: "West again",
+          files: await documentFile("# West again\n"),
+        })
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(ArtifactRequestError)
+      expect(refused).toMatchObject({ code: "not_allowed" })
+      parent.close()
+      child.close()
+    })
+  })
+
+  describe("a run's memory", () => {
+    // Guard proof: read the user's repo whatever the participants in AgentRunSession.memory; the
+    // shared conversation then reaches its requester's own memory.
+    test("reads the project's memory alone once others take part in the conversation", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const asOf = new Date()
+
+      expect((await session.memory({ asOf })).shared).toBe(false)
+
+      await storage.agents.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId: "thr_1",
+        principals: [{ type: "user", id: "usr_bob" }],
+        addedBy: alice,
+        maxParticipants: 50,
+        addedAt: asOf,
+      })
+      const shared = await session.memory({ asOf })
+      expect(shared.shared).toBe(true)
+      expect(shared.repos.map(({ latest }) => latest.repo)).toEqual(["project"])
+      session.close()
+    })
+  })
+
+  describe("a run's models", () => {
+    // Guard proof: return the resolved model from AgentRunSession.models unwrapped; the call then
+    // reaches the provider unrecorded.
+    test("admit and record each call they make, without the runner reporting it", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const model = await session.models.language({ provider: "test", modelId: "test-model" })
+
+      const stream = await model.stream({
+        callId: "call-1",
+        messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+      for await (const _event of stream.events) {
+        // The reader only reads.
+      }
+
+      const summary = await storage.aiUsage.summarizeExecution({
+        projectId: PROJECT_ID,
+        executionId: session.run.executionId,
+      })
+      expect(summary).toMatchObject({ modelCallCount: 1, usage: { inputTokens: 12 } })
+      session.close()
+    })
+
+    test("refuse a model the project does not configure", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const refused = await session.models
+        .language({ provider: "test", modelId: "missing" })
+        .catch((error: unknown) => error)
+
+      expect(refused).toMatchObject({ code: "agent.execution_failed" })
+      session.close()
+    })
+  })
+
+  describe("a run's project tools", () => {
+    test("run as the run, and return the files they stored for its sandbox", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const result = await session.callTool(
+        { toolName: "chart", toolCallId: "call-1", input: { title: "Sales" } },
+        { signal: new AbortController().signal }
+      )
+
+      expect(result.output).toMatchObject({
+        title: "Sales",
+        runId: "run-a",
+        kind: "conversation",
+        sandboxPath: expect.stringMatching(/^\.sixb\/agent\/tool-files\/.+-chart\.csv$/),
+      })
+      expect(result.files).toEqual([
+        {
+          fileRef: expect.objectContaining({ sizeBytes: 4 }),
+          path: expect.stringMatching(/^tool-files\//),
+        },
+      ])
+      const [file] = result.files
+      if (!file) throw new Error("Expected the tool's file.")
+      expect(await new Response(await session.files.open(file.fileRef.blobId)).text()).toBe("a,b\n")
+      session.close()
+    })
+
+    // Guard proof: drop the `offered` check from AgentRunSession.callTool; the child then runs a
+    // tool its parent did not give it.
+    test("refuse input the tool's schema refuses, and a tool a child was not given", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const signal = new AbortController().signal
+
+      const refused = await parent
+        .callTool({ toolName: "chart", toolCallId: "call-1", input: { title: 42 } }, { signal })
+        .catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(AgentToolPublicError)
+
+      const child = await open(await spawnChild(storage, parent))
+      const notGiven = await child
+        .callTool({ toolName: "other", toolCallId: "call-2", input: {} }, { signal })
+        .catch((error: unknown) => error)
+      expect(notGiven).toBeInstanceOf(AgentToolPublicError)
+      parent.close()
+      child.close()
+    })
+
+    // Removal proof: hand a child's tools run.spec.files alone in callTool; the continuation's
+    // tool cannot open out/report.txt, though its sandbox and $SIXB_ATTACHMENTS hold it.
+    test("open what a child was handed, and what the run it continues left in out/", async () => {
+      const { storage, turn, open } = await seedConversation(claim)
+      const parent = await open(await turn("run-a", "m1"))
+      const put = (text: string) =>
+        parent.files.put({ body: new TextEncoder().encode(text), fileName: "file.txt" })
+      const handed = { path: "brief.txt", fileRef: await put("The brief.") }
+      const child = (id: string, thread: { readonly id: string; readonly create: boolean }) =>
+        createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: id,
+          sourceExecutionId: parent.run.executionId,
+        }).then((executionId) =>
+          storage.agents.runs.createSubagent({
+            id,
+            projectId: PROJECT_ID,
+            executionId,
+            parentRunId: parent.run.id,
+            parentExecutionToken: parent.executionToken,
+            spawnKey: "west",
+            spec: {
+              model: { provider: "test", modelId: "test-model" },
+              task: "Look west.",
+              toolNames: ["read_attachment"],
+              files: [handed],
+            },
+            thread,
+            trigger: { id: `${id}-task`, parts: [{ type: "text", text: "Look west." }] },
+            maxActiveChildren: 4,
+          })
+        )
+      // The first run pauses on a call it holds, with out/report.txt.
+      const first = await open(await child("child-1", { id: "child-thread", create: true }))
+      await storage.agents.approvals.request({
+        id: "apr-1",
+        projectId: PROJECT_ID,
+        runId: parent.run.id,
+        callerRunId: first.run.id,
+        executionToken: first.executionToken,
+        requestedBy: alice,
+        mode: "manual",
+        call: {
+          kind: "action",
+          actionId: "mark-paid",
+          subject: { kind: "object", objectTypeId: "invoice", primaryId: "INV-1" },
+          params: {},
+          actionRunId: "act-1",
+          effect: "ontology",
+        },
+        expiresAt: new Date(Date.now() + 60_000),
+      })
+      await first.finish({
+        status: "succeeded",
+        finishReason: "awaiting_approval",
+        result: { text: "", files: [{ path: "report.txt", fileRef: await put("The report.") }] },
+      })
+      first.close()
+      const continued = await open(await child("child-2", { id: "child-thread", create: false }))
+      const read = (key: string) =>
+        continued.callTool(
+          { toolName: "read_attachment", toolCallId: key, input: { key } },
+          { signal: new AbortController().signal }
+        )
+
+      expect((await read("brief.txt")).output).toEqual({ text: "The brief." })
+      expect((await read("out/report.txt")).output).toEqual({ text: "The report." })
+      parent.close()
+      continued.close()
+    })
+
+    // Removal proof: drop assertAgentRunOwned from callTool; the runner that lost the run still
+    // runs the tool, and acts on the project.
+    test("run nothing for a runner that lost the run", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const first = await open(await turn("run-a", "m1"), LAPSED)
+      const second = await open(first.run)
+
+      const refused = await first
+        .callTool(
+          { toolName: "other", toolCallId: "call-1", input: {} },
+          { signal: new AbortController().signal }
+        )
+        .catch((error: unknown) => error)
+
+      expect(refused).toBeInstanceOf(AgentExecutionLostError)
+      first.close()
+      second.close()
+    })
+  })
+
+  describe("a run's files", () => {
+    test("stores a file and reads it back", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+      const body = new TextEncoder().encode("rows,1\n")
+
+      const file = await session.files.put({ body, fileName: "rows.csv", mediaType: "text/csv" })
+
+      expect(await session.files.stat(file.blobId)).toMatchObject({ sizeBytes: body.byteLength })
+      expect(await new Response(await session.files.open(file.blobId)).text()).toBe("rows,1\n")
+      session.close()
     })
   })
 

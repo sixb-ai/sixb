@@ -89,7 +89,7 @@ The scheduler and rules processes wait idly when the project has no schedules or
 | --- | --- |
 | `api`, `app` | `domain`, `env`, `process` |
 | `orchestrator`, `scheduler`, `rules` | `env`, `process`. Each always runs as one process. |
-| `workers` | `types` (default: every type the project registers work for), `concurrency` per type, `agentTurnTimeout` such as `"10m"`, `env`, `process` |
+| `workers` | `types` (default: every type the project registers work for), `concurrency` per type, `env`, `process` |
 
 `process` sets `maxMemory` (restart a process that grows past a size such as `"512M"`), `killTimeoutMs` (how long a stopping process may take; default 10000, and 70000 for `api` and `workers`, which first wait up to 65 seconds for the Actions they are running and their effects), and `restartDelayMs` (the wait before restarting a process that exited, growing with each restart; default 1000). For `workers` and your own processes, `instances` runs several copies.
 

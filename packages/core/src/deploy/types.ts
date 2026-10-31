@@ -67,8 +67,6 @@ export interface DeployWorkersConfig {
    * for.
    */
   readonly types?: readonly DeployWorkerType[] | "all"
-  /** Wall-clock budget for one agent turn, such as `"30s"`, `"10m"`, or `"1h"`. */
-  readonly agentTurnTimeout?: string
   /** Jobs each worker type runs at once inside one process. */
   readonly concurrency?: Readonly<Partial<Record<DeployWorkerType, number>>>
   /** Added to the deployment's `env` for the workers only. */

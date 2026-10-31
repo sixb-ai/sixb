@@ -20,8 +20,7 @@ SubagentCoordinator          spawn_agent, wait_agent, message_agent, and the chi
 
 A run reaches shared state only through its session (see
 [run sessions](../core/src/agents/README.md)): this package never reads storage, a queue or the
-broker. The one exception is `publish_artifact`, which writes artifact versions through the
-storage its runner passes as `artifactPublishing`, until artifacts publish through the API.
+broker. `publish_artifact` publishes through the session's `artifacts`, as any runner's.
 
 The environment is a `RunSandbox` ([run-sandbox.ts](./src/run-sandbox.ts)) that the runner opens
 through `openSandbox`: the cloud worker opens a sandbox from its factory, with the run's token

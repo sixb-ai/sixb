@@ -9,14 +9,13 @@ import {
   defineAgentTool,
   type LanguageModelCatalog,
   type LanguageModelEntry,
+  type SixbDefinitions,
 } from "@sixb/core"
+import { type AgentRunPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
-import {
-  resolveAgentExecutionPlan,
-  resolveWorkflowAgentStepExecutionPlan,
-} from "../src/execution-plan"
-import { BUILT_IN_SKILLS } from "../src/skills/built-in"
-import { WorkerTestModel } from "./worker-model-fixture"
+import { BUILT_IN_SKILLS } from "../../agent/src/skills/built-in"
+import { WorkerTestModel } from "../../agent/tests/worker-model-fixture"
+import { resolveRunPlan, resolveWorkflowAgentStepPlan } from "../src/run-plan"
 
 function workflowStep(config: Parameters<typeof defineAgentStep>[1]): AgentStepDefinition {
   return defineAgentStep("review", config)
@@ -43,97 +42,64 @@ function skillCatalog(skills: readonly AgentSkillDefinition[]): AgentSkillCatalo
   }
 }
 
-describe("resolveAgentExecutionPlan", () => {
-  const defaultModel = new WorkerTestModel({ modelId: "default" })
-  const selectedModel = new WorkerTestModel({ modelId: "selected" })
-  const entries = [defaultModel, selectedModel].map((model) => ({
-    model,
-    provider: model.providerId,
-    modelId: model.modelId,
-  }))
-  const models: LanguageModelCatalog = {
-    default: entries[0]!,
-    list: () => entries,
-    getByRef: (ref) =>
-      entries.find((entry) => entry.provider === ref.provider && entry.modelId === ref.modelId) ??
-      null,
-    tiers: [],
-    getByTier: () => entries[0]!,
-  }
+/** Definitions that hold these catalogs, and nothing a plan does not read. */
+function definitionsOf(input: {
+  readonly models?: LanguageModelCatalog
+  readonly tools: AgentToolCatalog
+  readonly skills?: AgentSkillCatalog
+}) {
+  return {
+    agent: { skills: input.skills ?? skillCatalog([]) },
+    ontology: { getValueTypesById: () => new Map() },
+    ...(input.models === undefined ? {} : { models: { language: input.models } }),
+    tools: input.tools,
+  } as unknown as Pick<SixbDefinitions, "agent" | "models" | "ontology" | "tools">
+}
+
+/** A workflow step's plan, from definitions holding these catalogs. */
+function stepPlan(input: {
+  readonly workflowId: string
+  readonly step: AgentStepDefinition
+  readonly models?: LanguageModelCatalog
+  readonly tools: AgentToolCatalog
+  readonly skills: AgentSkillCatalog
+}) {
+  const { workflowId, step, ...catalogs } = input
+  return resolveWorkflowAgentStepPlan(definitionsOf(catalogs), { workflowId, step })
+}
+
+describe("resolveRunPlan", () => {
+  const model = new WorkerTestModel({ modelId: "default" })
   const lookup = defineAgentTool("lookup")
     .description("Look up a value.")
     .input({ query: "string" })
     .run(({ input }) => input)
-  const tools = toolCatalog([lookup])
-  const skills = skillCatalog([skill("invoice-review")])
+  const plan: AgentRunPlan = {
+    model: { provider: model.providerId, modelId: model.modelId },
+    reasoning: "high",
+    instructions: "Answer in French.",
+    skills: [skill("invoice-review")],
+    tools: [agentToolSpec(lookup, new Map())],
+    sandboxModels: [],
+    ontologyDocs: { files: [], index: [] },
+  }
 
-  test("uses project capabilities, with instructions only from SIXB.md", () => {
-    const plan = resolveAgentExecutionPlan({ models, tools, skills, defaultMaxSteps: 25 })
-    expect(plan).toEqual({
-      model: defaultModel,
-      tools: [lookup],
+  test("takes the session's model and the plan's tool specs, and adds the harness's skills", () => {
+    const resolved = resolveRunPlan(plan, { model })
+
+    expect(resolved).toEqual({
+      model,
+      ontologyDocs: { files: [], index: [] },
+      reasoning: "high",
+      instructions: "Answer in French.",
+      tools: [agentToolSpec(lookup, new Map())],
       skills: [skill("invoice-review"), ...BUILT_IN_SKILLS],
-      maxSteps: 25,
     })
-    expect(Object.isFrozen(plan)).toBe(true)
-    expect("agentId" in plan).toBe(false)
-
-    const projectInstructions = "Answer in French."
-    expect(
-      resolveAgentExecutionPlan({ models, tools, skills, projectInstructions, defaultMaxSteps: 25 })
-        .instructions
-    ).toBe(projectInstructions)
-  })
-
-  test("uses the immutable selection captured at admission", () => {
-    const spec = {
-      model: { provider: selectedModel.providerId, modelId: selectedModel.modelId },
-      reasoning: "high" as const,
-    }
-    const plan = resolveAgentExecutionPlan({ spec, models, tools, skills, defaultMaxSteps: 7 })
-    expect(plan.model).toBe(selectedModel)
-    expect(plan.reasoning).toBe("high")
-    expect(plan.maxSteps).toBe(7)
-  })
-
-  test("keeps the reasoning frozen at admission and defaults only runs without a spec", () => {
-    // Proven by removal: read the model's `defaultReasoning` whenever the spec has none.
-    const model = new WorkerTestModel({ modelId: "default", defaultReasoning: "low" })
-    const entry: LanguageModelEntry = { provider: model.providerId, modelId: model.modelId, model }
-    const withDefault: LanguageModelCatalog = {
-      default: entry,
-      list: () => [entry],
-      getByRef: () => entry,
-      tiers: [],
-      getByTier: () => entry,
-    }
-    const spec = { model: { provider: model.providerId, modelId: model.modelId } }
-    expect(
-      resolveAgentExecutionPlan({ spec, models: withDefault, tools, skills, defaultMaxSteps: 7 })
-    ).not.toHaveProperty("reasoning")
-    expect(
-      resolveAgentExecutionPlan({ models: withDefault, tools, skills, defaultMaxSteps: 7 })
-        .reasoning
-    ).toBe("low")
-  })
-
-  test("fails closed when a selected model disappears or no models are configured", () => {
-    expect(() =>
-      resolveAgentExecutionPlan({
-        models,
-        tools,
-        skills,
-        defaultMaxSteps: 25,
-        spec: { model: { provider: selectedModel.providerId, modelId: "removed" } },
-      })
-    ).toThrow(/not available in models.language/)
-    expect(() => resolveAgentExecutionPlan({ tools, skills, defaultMaxSteps: 25 })).toThrow(
-      /not available in models.language/
-    )
+    expect(Object.isFrozen(resolved)).toBe(true)
   })
 })
 
-describe("resolveWorkflowAgentStepExecutionPlan", () => {
+describe("resolveWorkflowAgentStepPlan", () => {
   test("uses the project default model and grants no project tools or skills by default", () => {
     const model = new WorkerTestModel({ modelId: "default-model" })
     const entry: LanguageModelEntry = {
@@ -149,20 +115,18 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       getByTier: () => entry,
     }
 
-    const plan = resolveWorkflowAgentStepExecutionPlan({
+    const plan = stepPlan({
       workflowId: "triage",
       step: workflowStep({ instructions: "Review the request." }),
       models,
       tools: toolCatalog([]),
       skills: skillCatalog([skill("invoice-review")]),
-      defaultMaxSteps: 25,
     })
 
     expect(plan.model).toBe(model)
     expect(plan.instructions).toBe("Review the request.")
     expect(plan.tools).toEqual([])
     expect(plan.skills).toEqual([])
-    expect(plan.maxSteps).toBe(25)
   })
 
   test("applies the project default model's default reasoning unless the step sets one", () => {
@@ -177,13 +141,12 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       getByTier: () => entry,
     }
     const plan = (config: Parameters<typeof defineAgentStep>[1]) =>
-      resolveWorkflowAgentStepExecutionPlan({
+      stepPlan({
         workflowId: "triage",
         step: workflowStep(config),
         models,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     expect(plan({ instructions: "Review." }).reasoning).toBe("medium")
@@ -207,13 +170,12 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       getByTier: () => entry,
     }
     const plan = (model: WorkerTestModel) =>
-      resolveWorkflowAgentStepExecutionPlan({
+      stepPlan({
         workflowId: "triage",
         step: workflowStep({ instructions: "Review.", model }),
         models,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     // Same identity as the catalog entry, other options: the step's binding and its default run.
@@ -235,13 +197,12 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
     const standard = new WorkerTestModel({ modelId: "standard-model" })
     const { language } = createModelCatalog({ language: { light, standard } })
     const plan = (model: "light" | "heavy") =>
-      resolveWorkflowAgentStepExecutionPlan({
+      stepPlan({
         workflowId: "triage",
         step: workflowStep({ instructions: "Review.", model }),
         models: language,
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
 
     expect(plan("light")).toMatchObject({ model: light, reasoning: "low" })
@@ -249,12 +210,11 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
 
     // Proven by removal: name the project default whatever the step asked for.
     expect(() =>
-      resolveWorkflowAgentStepExecutionPlan({
+      stepPlan({
         workflowId: "triage",
         step: workflowStep({ instructions: "Review.", model: "light" }),
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 25,
       })
     ).toThrow("agent step 'review' cannot resolve the model of tier 'light'.")
   })
@@ -270,7 +230,7 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       .input({ value: "string" })
       .run(({ input }) => input)
 
-    const plan = resolveWorkflowAgentStepExecutionPlan({
+    const plan = stepPlan({
       workflowId: "triage",
       step: workflowStep({
         model,
@@ -281,19 +241,17 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
       }),
       tools: toolCatalog([selected, unselected]),
       skills: skillCatalog([skill("contract-review"), skill("invoice-review")]),
-      defaultMaxSteps: 9,
     })
 
     expect(plan.model).toBe(model)
     expect(plan.reasoning).toBe("high")
-    expect(plan.tools).toEqual([selected])
+    expect(plan.tools).toEqual([agentToolSpec(selected, new Map())])
     expect(plan.skills).toEqual([skill("invoice-review")])
-    expect(plan.maxSteps).toBe(9)
   })
 
   test("fails clearly when a selected skill is no longer registered", () => {
     expect(() =>
-      resolveWorkflowAgentStepExecutionPlan({
+      stepPlan({
         workflowId: "triage",
         step: workflowStep({
           model: new WorkerTestModel({ modelId: "task-model" }),
@@ -302,7 +260,6 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
         }),
         tools: toolCatalog([]),
         skills: skillCatalog([]),
-        defaultMaxSteps: 9,
       })
     ).toThrow("cannot resolve Agent Skill 'invoice-review'")
   })

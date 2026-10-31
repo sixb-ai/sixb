@@ -1,42 +1,21 @@
-import type {
-  AuthorizablePrincipal,
-  BlobStorage,
-  OntologyDocsCatalog,
-  Sixb,
-  SixbDefinitions,
-  Storage,
-  ValueType,
-} from "@sixb/core"
-import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
-import type { LoggingService } from "@sixb/core/internal/logging"
+import type { AuthorizablePrincipal } from "@sixb/core"
+import type { AgentRunFileStore, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { ModelTool } from "@sixb/core/models"
-import type { AgentStorage, ArtifactStorage } from "@sixb/core/storage"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
 import type { BeforeFinalizeOptions } from "./run-sandbox"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { AgentFileBudget } from "./tools/tool-files"
 
-/** What `publish_artifact` writes through, until artifacts publish through the API. */
-export type ArtifactPublishingStorage = Storage & {
-  readonly agents: AgentStorage
-  readonly artifacts?: ArtifactStorage
-}
-
 /**
- * What every run of a project shares, whichever runner runs it: its settings and catalogs. A run
- * reaches shared state through its session, never through storage.
+ * What every run of a project shares, whichever runner runs it: its settings. A run reaches the
+ * project through its session, never through storage, the project's SDK or its definitions.
  */
 export interface AgentRunSettings {
   /** The project id. */
   readonly id: string
-  readonly logging?: LoggingService
-  readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly ontologyDocs: OntologyDocsCatalog
   /** The Sixb API origin the run's commands call, through their environment's credentialed address. */
   readonly apiBaseUrl: string
-  readonly defaultMaxSteps: number
-  readonly turnTimeoutMs: number
   /** How many children one conversation turn may have queued or running at once. */
   readonly subagentConcurrencyPerRun: number
   /** Whether a child keeps its workspace between runs: its environment can be resumed. */
@@ -46,28 +25,15 @@ export interface AgentRunSettings {
   readonly timeZone: string
 }
 
-/** The project's catalogs a turn offers its children: their models and tools. */
-export interface AgentProjectCatalogs {
-  readonly definitions: Pick<SixbDefinitions, "models" | "tools">
-}
-
-/** Provider ports activated only after an Agent execution scope is bound. */
+/** A run's settings, with who it works for and where its files are stored. */
 export interface AgentExecutionContext extends AgentRunSettings {
-  /**
-   * Only for `publish_artifact`, which writes artifact versions itself until artifacts publish
-   * through the API. Nothing else on a run's path reads it.
-   */
-  readonly artifactPublishing: ArtifactPublishingStorage
-  readonly sixb: Sixb
-  /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
-  readonly propertyClearance?: PropertyClearance
   readonly authorPrincipal?: AuthorizablePrincipal
   /**
    * Who the run works for; absent when no principal started its chain of executions, or in a
    * shared thread, where each user message names its author instead.
    */
   readonly requester?: AgentRequester
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
 }
 
 export interface AgentTurnContext {
@@ -77,7 +43,7 @@ export interface AgentTurnContext {
   readonly beforeFinalize?: (options?: BeforeFinalizeOptions) => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
@@ -93,7 +59,6 @@ export interface AgentTurnContext {
    * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
-  readonly turnTimeoutMs: number
 }
 
 /**
@@ -102,7 +67,7 @@ export interface AgentTurnContext {
  */
 export interface AgentRunFiles {
   sandbox(): Promise<AgentSandboxHandle>
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   /**

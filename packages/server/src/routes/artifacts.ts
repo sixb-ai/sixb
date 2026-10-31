@@ -9,13 +9,18 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import {
+  AgentExecutionLostError,
+  type AgentRunArtifacts,
+  agentRunArtifacts,
+} from "@sixb/core/internal/agents"
+import {
   createArtifactFrame,
   serializeArtifactQueryResult,
 } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSixb } from "../auth/scope"
+import { requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createFileContentResponse,
   fileContentGetResponses,
@@ -107,6 +112,33 @@ function contentInput(body: {
   }
 }
 
+/**
+ * What a request with a run token publishes through: its run's conversation, by a run's rules
+ * (`AgentRunArtifacts.publish`), as the run's session does in a worker. `null` for any other
+ * caller, who publishes as themselves.
+ */
+async function runTokenArtifacts(
+  host: SixbHostView,
+  context: unknown
+): Promise<AgentRunArtifacts | null> {
+  const { agentExecution, sixb } = requestAuthState(context)
+  if (!agentExecution) return null
+  if (agentExecution.kind === "workflow") {
+    throw new ArtifactRequestError(
+      "not_allowed",
+      "[SixbServer] Workflow agent nodes publish no artifacts: they have no conversation."
+    )
+  }
+  // Fenced with the execution the request was admitted under: a run reclaimed since refuses it.
+  const { runId, executionToken } = agentExecution
+  const run = await host.storage.agents?.runs.getById({ projectId: host.id, id: runId })
+  if (!run || !sixb) throw new AgentExecutionLostError(runId)
+
+  return agentRunArtifacts({ projectId: host.id, storage: host.storage }, run, executionToken, () =>
+    Promise.resolve(sixb)
+  )
+}
+
 function versionParam(value: string): number | "latest" {
   return value === "latest" ? "latest" : Number(value)
 }
@@ -167,6 +199,13 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
       error: error.message,
       code: error.code,
       ...(error.latest ? { latest: error.latest } : {}),
+    }
+  }
+  if (error instanceof AgentExecutionLostError) {
+    set.status = 409
+    return {
+      error: "[SixbServer] The run has ended or moved to another runner, so nothing was published.",
+      code: "execution_lost",
     }
   }
   if (error instanceof ZodError) {
@@ -283,7 +322,10 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         try {
           const body = PublishArtifactBodySchema.parse(context.body)
-          const published = await requireRequestSixb(context).artifacts.create(contentInput(body))
+          const run = await runTokenArtifacts(host, context)
+          const published = run
+            ? await run.publish(contentInput(body))
+            : await requireRequestSixb(context).artifacts.create(contentInput(body))
           context.set.status = 201
           return serializePublished(published)
         } catch (error) {
@@ -296,7 +338,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Create an artifact",
           description:
-            "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.",
+            "Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner and authored by the run's requester.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "createArtifact",
           security: accessTokenSecurityRequirement("createArtifact"),
@@ -525,13 +567,15 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         try {
           const body = PublishArtifactVersionBodySchema.parse(context.body)
-          const published = await requireRequestSixb(context).artifacts.publish(
-            context.params.artifactId,
-            {
-              ...contentInput(body),
-              ...(body.baseVersion === undefined ? {} : { baseVersion: body.baseVersion }),
-            }
-          )
+          const { artifactId } = context.params
+          const content = {
+            ...contentInput(body),
+            ...(body.baseVersion === undefined ? {} : { baseVersion: body.baseVersion }),
+          }
+          const run = await runTokenArtifacts(host, context)
+          const published = run
+            ? await run.publish({ ...content, artifactId })
+            : await requireRequestSixb(context).artifacts.publish(artifactId, content)
           context.set.status = 201
           return serializePublished(published)
         } catch (error) {
@@ -545,7 +589,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Publish an artifact's next version",
           description:
-            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.",
+            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "publishArtifactVersion",
           security: accessTokenSecurityRequirement("publishArtifactVersion"),

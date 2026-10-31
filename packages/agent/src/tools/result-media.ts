@@ -1,5 +1,9 @@
-import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
-import type { PrepareModelStepInput, PrepareModelStepResult } from "@sixb/core/internal/agents"
+import type { FileRef, JsonValue } from "@sixb/core"
+import type {
+  AgentRunFileStore,
+  PrepareModelStepInput,
+  PrepareModelStepResult,
+} from "@sixb/core/internal/agents"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
 import { modelSupportsInlineImages, prepareAgentToolFileProjection } from "../attachments"
 import { fileContentKey } from "../file-ref"
@@ -20,7 +24,7 @@ export class AgentToolResultMediaBridge {
 
   constructor(
     private readonly input: {
-      readonly blobStorage: BlobStorage
+      readonly blobStorage: AgentRunFileStore
       readonly sandboxPathForFileRef?: (fileRef: FileRef) => string | undefined
       /** Test seam; production uses the bounded attachment projector. */
       readonly projectFile?: typeof prepareAgentToolFileProjection

@@ -255,7 +255,6 @@ async function childThread(
       model: { provider: "test", modelId: "small" },
       task: "Find the slipped deals.",
       toolNames: [],
-      maxSteps: 5,
     },
     thread: { id: "child-thread", create: true },
     trigger: { id: "child-task", parts: [{ type: "text", text: "Find the slipped deals." }] },

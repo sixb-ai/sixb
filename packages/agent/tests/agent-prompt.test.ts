@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { renderInstanceHelp } from "@sixb/cli-core"
+import { listSandboxModels } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
 import {
   agentRuntimeFacts,
@@ -9,7 +10,6 @@ import {
   renderWorkflowOutputFinalizerPrompt,
   withCurrentTime,
 } from "../src/agent-prompt"
-import { listSandboxModels } from "../src/execution-plan"
 import type { AgentRequester } from "../src/requester"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { WorkerTestModel } from "./worker-model-fixture"

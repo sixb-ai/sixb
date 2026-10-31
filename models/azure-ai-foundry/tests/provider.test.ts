@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import { reportModelCalls } from "@sixb/core/internal/model-execution"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -39,9 +40,14 @@ test("does not execute an incomplete Responses tool and retains its usage", asyn
       ]),
   })
   const result = await runModelLoop({
-    model: provider.responses("deployment", {
-      definition: { capabilities: { localTools: true } },
-    }),
+    model: reportModelCalls(
+      provider.responses("deployment", {
+        definition: { capabilities: { localTools: true } },
+      }),
+      (event) => {
+        accounted = event.usage
+      }
+    ),
     messages: [],
     maxSteps: 2,
     signal: new AbortController().signal,
@@ -58,9 +64,6 @@ test("does not execute an incomplete Responses tool and retains its usage", asyn
         errorText: String,
       },
     ],
-    onModelCallEnd: (event) => {
-      accounted = event.usage
-    },
   })
   expect(result).toMatchObject({ status: "completed", finishReason: "length" })
   expect(result.steps.flatMap((step) => step.content)).toEqual([])
@@ -647,7 +650,9 @@ test.each([
   })("deployment", { definition, rateCard })
   const usage: ModelUsage[] = []
   const result = runModelLoop({
-    model,
+    model: reportModelCalls(model, (event) => {
+      usage.push(event.usage)
+    }),
     messages: request().messages,
     signal: request().signal,
     maxSteps: 1,
@@ -664,9 +669,6 @@ test.each([
           throw new TypeError("invalid answer")
         return { answer: "yes" }
       },
-    },
-    onModelCallEnd: (event) => {
-      usage.push(event.usage)
     },
   })
   if (mode === "valid")

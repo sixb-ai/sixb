@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { runModelLoop } from "../src/agents/model-loop"
 import type {
   LanguageModelStreamEvent,
@@ -10,6 +10,8 @@ import type {
   ProviderData,
 } from "../src/models"
 import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
+import { ModelUsageRecordingError } from "../src/models/execution/errors"
+import { MODEL_CALL_IDLE_MS, reportModelCalls } from "../src/models/language-call"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const USAGE = {
@@ -95,7 +97,9 @@ describe("runModelLoop", () => {
     ])
     await expect(
       runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          accounting.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
@@ -108,9 +112,6 @@ describe("runModelLoop", () => {
             },
           },
         ],
-        onModelCallEnd: (event) => {
-          accounting.push(event)
-        },
       })
     ).rejects.toThrow("Cannot execute local tools")
     expect(executed).toBe(0)
@@ -378,13 +379,12 @@ describe("runModelLoop", () => {
           }),
         })
         const result = runModelLoop({
-          model,
+          model: reportModelCalls(model, (call) => {
+            calls.push(call)
+          }),
           messages: [],
           maxSteps: 1,
           signal: abort.signal,
-          onModelCallEnd: (call) => {
-            calls.push(call)
-          },
         })
         if (interrupted) {
           const partial = await result
@@ -470,15 +470,20 @@ describe("runModelLoop", () => {
     let validations = 0
     await expect(
       runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "text-start", id: "text-1" },
-            { type: "text-delta", id: "text-1", delta: '{"answer":"yes"}' },
-            { type: "text-end", id: "text-1" },
-            { type: "finish", finishReason, usage: USAGE },
-          ],
-        ]),
+        model: reportModelCalls(
+          modelFromCalls([
+            [
+              { type: "stream-start" },
+              { type: "text-start", id: "text-1" },
+              { type: "text-delta", id: "text-1", delta: '{"answer":"yes"}' },
+              { type: "text-end", id: "text-1" },
+              { type: "finish", finishReason, usage: USAGE },
+            ],
+          ]),
+          (event) => {
+            calls.push(event)
+          }
+        ),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
@@ -489,9 +494,6 @@ describe("runModelLoop", () => {
             validations += 1
             return value
           },
-        },
-        onModelCallEnd(event) {
-          calls.push(event)
         },
       })
     ).rejects.toBeInstanceOf(StructuredOutputError)
@@ -537,19 +539,21 @@ describe("runModelLoop", () => {
     const calls: ModelCallEndEvent[] = []
     for (const providerIds of [undefined, { generationId: "gen_1", requestId: "req_1" }]) {
       await runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "response-metadata", ...(providerIds ? { providerIds } : {}) },
-            finish(),
-          ],
-        ]),
+        model: reportModelCalls(
+          modelFromCalls([
+            [
+              { type: "stream-start" },
+              { type: "response-metadata", ...(providerIds ? { providerIds } : {}) },
+              finish(),
+            ],
+          ]),
+          async (event) => {
+            calls.push(event)
+          }
+        ),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
-        onModelCallEnd: async (event) => {
-          calls.push(event)
-        },
       })
     }
     expect(calls[0]?.responseId).toContain(":response")
@@ -600,13 +604,12 @@ describe("runModelLoop", () => {
       { costEstimator: { estimate } }
     )
     await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       maxSteps: 1,
       signal: new AbortController().signal,
-      onModelCallEnd: (event) => {
-        calls.push(event)
-      },
     })
     expect(calls[0]).toMatchObject({
       usage: USAGE,
@@ -636,25 +639,27 @@ describe("runModelLoop", () => {
     const events: ModelUiChunk[] = []
     const calls: ModelCallEndEvent[] = []
     const result = await runModelLoop({
-      model: modelFromCalls([
-        [
-          { type: "stream-start" },
-          { type: "response-metadata", id: "response-1", modelId: "resolved-model" },
-          { type: "text-start", id: "answer" },
-          { type: "text-delta", id: "answer", delta: "Hello" },
-          { type: "text-end", id: "answer" },
-          finish(),
-        ],
-      ]),
+      model: reportModelCalls(
+        modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "response-metadata", id: "response-1", modelId: "resolved-model" },
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "Hello" },
+            { type: "text-end", id: "answer" },
+            finish(),
+          ],
+        ]),
+        (event) => {
+          calls.push(event)
+        }
+      ),
       messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
       reasoning: "high",
       maxSteps: 4,
       signal: new AbortController().signal,
       onEvent(event) {
         events.push(event)
-      },
-      onModelCallEnd(event) {
-        calls.push(event)
       },
       generateCallId: () => "call-1",
     })
@@ -802,7 +807,9 @@ describe("runModelLoop", () => {
       },
     })
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       tools: [echo],
       maxSteps: 3,
@@ -811,9 +818,6 @@ describe("runModelLoop", () => {
         if (stepIndex !== 1) return
         abort.abort(new Error("cancelled during projection"))
         if (outcome === "throw") signal.throwIfAborted()
-      },
-      onModelCallEnd: (event) => {
-        calls.push(event)
       },
     })
 
@@ -849,44 +853,6 @@ describe("runModelLoop", () => {
       })
     ).rejects.toBe(failure)
     expect(calls).toBe(0)
-  })
-
-  test("records a final-step tool response without starting an unbounded continuation", async () => {
-    let offeredTools: readonly string[] = []
-    const model = new MockLanguageModel({
-      stream: async (request) => {
-        offeredTools = request.tools.map((tool) => tool.name)
-        return streamFromArray([
-          { type: "stream-start" },
-          {
-            type: "tool-call",
-            toolCallId: "too-late",
-            toolName: "echo",
-            input: '{"value":"late"}',
-          },
-          finish("tool-calls"),
-        ])
-      },
-    })
-
-    const result = await runModelLoop({
-      model,
-      messages: [],
-      tools: [echo],
-      maxSteps: 1,
-      finalStepInstruction: "Answer now without using tools.",
-      signal: new AbortController().signal,
-    })
-
-    expect(offeredTools).toEqual([])
-    expect(result).toMatchObject({
-      status: "completed",
-      output: "",
-      finishReason: "tool-calls",
-    })
-    expect(result.steps[0]?.content).toContainEqual(
-      expect.objectContaining({ type: "tool-call", toolCallId: "too-late" })
-    )
   })
 
   test("executes parallel tools but preserves model call order", async () => {
@@ -1127,13 +1093,12 @@ describe("runModelLoop", () => {
         }),
       })
       const result = runModelLoop({
-        model,
+        model: reportModelCalls(model, async (event) => {
+          calls.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: abort.signal,
-        onModelCallEnd: async (event) => {
-          calls.push(event)
-        },
       })
       if (end === "abort") expect((await result).status).toBe("aborted")
       else
@@ -1166,13 +1131,12 @@ describe("runModelLoop", () => {
     })
 
     const result = await runModelLoop({
-      model,
+      model: reportModelCalls(model, (event) => {
+        calls.push(event)
+      }),
       messages: [],
       maxSteps: 1,
       signal: abort.signal,
-      onModelCallEnd(event) {
-        calls.push(event)
-      },
       generateCallId: () => "call-raced-abort",
     })
 
@@ -1199,13 +1163,12 @@ describe("runModelLoop", () => {
 
     await expect(
       runModelLoop({
-        model,
+        model: reportModelCalls(model, (event) => {
+          calls.push(event)
+        }),
         messages: [],
         maxSteps: 1,
         signal: new AbortController().signal,
-        onModelCallEnd(event) {
-          calls.push(event)
-        },
         generateCallId: () => "call-post-finish-error",
       })
     ).rejects.toThrow("after stream finish")
@@ -1332,5 +1295,217 @@ describe("runModelLoop", () => {
         signal: new AbortController().signal,
       })
     ).rejects.toThrow("different identity")
+  })
+})
+
+describe("a model call that goes quiet", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  /** Settles with `gate`, or rejects as a provider's stream does once its request is aborted. */
+  function until(gate: Promise<void>, signal: AbortSignal): Promise<void> {
+    return Promise.race([
+      gate,
+      new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+      }),
+    ])
+  }
+
+  // Removal proof: race the provider without the silence in withinIdle; the call then waits forever
+  // and the test times out.
+  test("fails once the model sends nothing for MODEL_CALL_IDLE_MS, and records it", async () => {
+    jest.useFakeTimers()
+    const quiet = Promise.withResolvers<void>()
+    const model = new MockLanguageModel({
+      stream: async ({ signal }) => ({
+        events: (async function* () {
+          yield { type: "stream-start" } as const
+          quiet.resolve()
+          await until(new Promise<void>(() => {}), signal)
+        })(),
+      }),
+    })
+
+    const recorded: ModelCallEndEvent[] = []
+    const result = runModelLoop({
+      model: reportModelCalls(model, (event) => {
+        recorded.push(event)
+      }),
+      messages: [],
+      signal: new AbortController().signal,
+    }).catch((error: unknown) => error)
+    await quiet.promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS)
+
+    const error = await result
+    expect(error).toBeInstanceOf(ModelStreamError)
+    expect((error as Error).message).toBe("[SixbModels] The model sent nothing for 10 minutes.")
+    expect(recorded).toMatchObject([{ cost: { status: "unpriceable", reason: "missing-usage" } }])
+  })
+
+  // Removal proof: time the whole stream in withinIdle rather than each event; the two quiet
+  // stretches add up past the limit.
+  test("counts the quiet from the model's last event", async () => {
+    jest.useFakeTimers()
+    const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const
+    const reached = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const
+    const model = new MockLanguageModel({
+      stream: async ({ signal }) => ({
+        events: (async function* () {
+          yield { type: "stream-start" } as const
+          reached[0].resolve()
+          await until(gates[0].promise, signal)
+          yield { type: "text-start", id: "text" } as const
+          yield { type: "text-delta", id: "text", delta: "done" } as const
+          reached[1].resolve()
+          await until(gates[1].promise, signal)
+          yield { type: "text-end", id: "text" } as const
+          yield finish()
+        })(),
+      }),
+    })
+
+    const result = runModelLoop({
+      model: reportModelCalls(model, () => {}),
+      messages: [],
+      signal: new AbortController().signal,
+    }).catch((error: unknown) => error)
+    await reached[0].promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS - 1)
+    gates[0].resolve()
+    await reached[1].promise
+    jest.advanceTimersByTime(MODEL_CALL_IDLE_MS - 1)
+    gates[1].resolve()
+
+    expect(await result).toMatchObject({ status: "completed", output: "done" })
+  })
+
+  test("runs until the model answers when no step limit is given", async () => {
+    let calls = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return streamFromArray(
+          calls <= 150
+            ? [
+                { type: "stream-start" },
+                {
+                  type: "tool-call",
+                  toolCallId: `call-${calls}`,
+                  toolName: "echo",
+                  input: '{"value":"again"}',
+                },
+                finish("tool-calls"),
+              ]
+            : [
+                { type: "stream-start" },
+                { type: "text-start", id: "text" },
+                { type: "text-delta", id: "text", delta: "done" },
+                { type: "text-end", id: "text" },
+                finish(),
+              ]
+        )
+      },
+    })
+
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [echo],
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "done" })
+    expect(result.steps).toHaveLength(151)
+  })
+})
+
+describe("a model call its reader does not finish", () => {
+  /** A provider whose stream waits until its request is aborted, and says when it was. */
+  function waitingModel() {
+    const aborted = Promise.withResolvers<void>()
+    const waiting = Promise.withResolvers<void>()
+    const model = new MockLanguageModel({
+      stream: async ({ signal }) => {
+        signal.addEventListener("abort", () => aborted.resolve(), { once: true })
+        return {
+          events: (async function* () {
+            yield { type: "stream-start" } as const
+            waiting.resolve()
+            await new Promise((_, reject) => {
+              signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+            })
+          })(),
+        }
+      },
+    })
+    return { model, aborted: aborted.promise, waiting: waiting.promise }
+  }
+
+  // Removal proof: return reportedEvents as an async generator again; a reader that lets the call
+  // go before its first event never runs its `finally`, and the call is never recorded.
+  test("is recorded, and its request stopped, when let go before its first event", async () => {
+    const { model, aborted } = waitingModel()
+    const recorded: ModelCallEndEvent[] = []
+    const reporting = reportModelCalls(model, (event) => {
+      recorded.push(event)
+    })
+
+    const stream = await reporting.stream({
+      callId: "call-1",
+      messages: [],
+      tools: [],
+      signal: new AbortController().signal,
+    })
+    await stream.events[Symbol.asyncIterator]().return?.()
+
+    expect(recorded).toMatchObject([
+      { callId: "call-1", cost: { status: "unpriceable", reason: "missing-usage" } },
+    ])
+    await aborted
+  })
+
+  // Removal proof: drop the ModelUsageRecordingError check in runModelLoop's catch; the loop
+  // returns `aborted`, and the run that could not record its call ends cancelled.
+  test("fails the loop with a record that failed while it was cancelled", async () => {
+    const { model, waiting } = waitingModel()
+    const cancel = new AbortController()
+    const failed = new ModelUsageRecordingError("exec-1", "call-1", false)
+    const result = runModelLoop({
+      model: reportModelCalls(model, () => {
+        throw failed
+      }),
+      messages: [],
+      signal: cancel.signal,
+    }).catch((error: unknown) => error)
+    await waiting
+
+    cancel.abort()
+
+    expect(await result).toBe(failed)
+  })
+
+  test("says so when recording a call its reader broke off from fails", async () => {
+    const { model } = waitingModel()
+    const failure = new Error("ledger down")
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const stream = await reportModelCalls(model, () => {
+        throw failure
+      }).stream({ callId: "call-1", messages: [], tools: [], signal: new AbortController().signal })
+
+      const iterator = stream.events[Symbol.asyncIterator]()
+      await iterator.next()
+
+      expect(await iterator.return?.().catch((error: unknown) => error)).toBe(failure)
+      expect(logged).toHaveBeenCalledWith(
+        "[SixbModels] Model call 'call-1' ended early, and recording it failed.",
+        failure
+      )
+    } finally {
+      logged.mockRestore()
+    }
   })
 })

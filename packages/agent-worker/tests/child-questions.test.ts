@@ -231,7 +231,6 @@ type Script = (
 function setup(scripts: {
   readonly parent: Script
   readonly west: Script
-  readonly turnTimeoutMs?: number
   readonly onListOut?: () => Promise<void>
   /** Hold each answer's write a moment, as a remote broker would: two answers then overlap. */
   readonly slowAnswers?: boolean
@@ -283,8 +282,6 @@ function setup(scripts: {
   })
   const worker = new AgentWorker(host, {
     apiBaseUrl: "http://localhost:3002/api/",
-    defaultMaxSteps: 6,
-    ...(scripts.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: scripts.turnTimeoutMs }),
   })
   return { host, broker, agents: requireAgents(host), worker, parentRequests, westRequests }
 }
@@ -806,38 +803,6 @@ describe("a question its parent's turn ends on", () => {
       expect(finished).toMatchObject({ status: "cancelled" })
       expect(west).toMatchObject({ status: "cancelled" })
       expect(JSON.stringify(await transcriptOf(harness, west.id))).toContain(QUESTION)
-    } finally {
-      await settle(harness.worker.stop(), "worker stop")
-    }
-  })
-
-  // Removal proof: await the reply without `waitForAbort` in SubagentInbox.ask; West, whose
-  // deadline is its parent's, waits past it and stays running.
-  test("ends the child, unpaused, when the turn runs out of time", async () => {
-    const harness = setup({
-      turnTimeoutMs: 80_000,
-      parent: async (request, call) => {
-        if (call === 1) return toolCalls(["spawn", "spawn_agent", spawnWest])
-        if (call === 2) return toolCalls(["wait", "wait_agent", { runIds: [westRunId(request)] }])
-
-        // The parent's model hangs until the turn times out.
-        await new Promise<void>((resolve) => {
-          if (request.signal.aborted) resolve()
-          request.signal.addEventListener("abort", () => resolve(), { once: true })
-        })
-        return answer("Too late.")
-      },
-      west: () => toolCalls(["ask", "ask_parent", { question: QUESTION }]),
-    })
-    jest.useFakeTimers()
-    await harness.worker.start()
-    try {
-      const { run, finished } = await requestTurn(harness, "How did the west do this year?")
-      const west = await terminal(harness.agents, createSubagentRunId(run.id, WEST.key))
-
-      expect(finished).toMatchObject({ status: "failed", finishReason: "timeout" })
-      expect(west.status).not.toBe("succeeded")
-      expect(west.finishReason).not.toBe("awaiting_answer")
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }

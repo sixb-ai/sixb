@@ -143,9 +143,8 @@ simple lookup; for a second opinion it [asks another model](./configuration.md#c
   [artifacts](../artifacts/overview.md), and the agent can revise it in the same turn.
 - **Its work is a thread you can open**: its task, then what it did, read by whoever reads the
   conversation. It is never listed with your conversations and takes no messages of its own.
-- **It stops with the turn that started it**, whether the turn ends, is stopped or times out. A
-  minute before the turn's time is up, the agent stops waiting and answers with what the others
-  found. A sub-agent cut short by a worker crash is not run again unless the agent asks for it.
+- **It stops with the turn that started it**, whether the turn ends or is stopped. A sub-agent cut
+  short by a worker crash is not run again unless the agent asks for it.
   One waiting on a question is the exception, below.
 - **The agent can steer a sub-agent at work.** It sends it a message to correct its course, add
   what it lacks or narrow its task, and the sub-agent reads it before its next step. One that

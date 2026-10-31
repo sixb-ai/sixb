@@ -4,32 +4,28 @@ import {
   AgentToolPublicError,
   type ArtifactKind,
   ArtifactRequestError,
-  type ArtifactsRuntime,
   AuthorizationError,
-  type BlobStorage,
   type JsonValue,
   ObjectQueryExecutionError,
   type Principal,
   principalsEqual,
-  type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { AgentExecutionLostError } from "@sixb/core/internal/agents"
+import {
+  AgentExecutionLostError,
+  type AgentRunArtifacts,
+  type AgentRunFileStore,
+} from "@sixb/core/internal/agents"
 import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
-  artifactAccessRule,
-  artifactQueryChecker,
   artifactQueryName,
-  artifactVersionWarnings,
   isArtifactId,
-  prepareArtifactVersion,
-  storeArtifactVersion,
+  type PublishedArtifact,
 } from "@sixb/core/internal/artifacts/publish"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
-import type { ArtifactFile, ArtifactRecord, ArtifactStorage } from "@sixb/core/storage"
-import { assertRunExecutionOwned } from "../errors"
+import type { ArtifactFile, ArtifactRecord } from "@sixb/core/storage"
 import { agentToolErrorText } from "../model-adapters"
 import {
   listSandboxFiles,
@@ -49,7 +45,6 @@ import {
   type InstalledArtifacts,
   type PublishedArtifactFile,
   readArtifactVersionFiles,
-  type TurnArtifacts,
 } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
@@ -117,31 +112,14 @@ export interface PublishArtifactVersionToolInput {
   readonly title: string
 }
 
-/** The run that publishes, and the token that proves it still owns its conversation. */
-export interface PublishingRun {
-  readonly id: string
-  readonly threadId: string
-  readonly executionToken: string
-  /** A child's parent turn: once it ends, or a retry takes back what it published, nothing lands. */
-  readonly parentRunId?: string
-}
-
 interface PublishToolsInput {
-  readonly projectId: string
-  /** For the transaction that publishes. */
-  readonly storage: Storage
-  readonly artifacts: ArtifactStorage
-  /**
-   * The requester's view of artifacts: what the turn may read, revise, and refer to, and what a
-   * version's queries return when the check opens it.
-   */
-  readonly reader: TurnArtifacts & Pick<ArtifactsRuntime, "query">
-  readonly blobStorage: BlobStorage
-  readonly run: PublishingRun
-  /** The thread's owner, who owns what the Agent creates in it. */
+  /** The run's artifacts, through its session: what it reads as its requester, and publishes. */
+  readonly artifacts: AgentRunArtifacts
+  /** The conversation the run publishes into, and its owner, who owns what the Agent creates. */
+  readonly threadId: string
   readonly owner: Principal
-  /** Whoever asked for the turn, named as each version's author. */
-  readonly author: Principal
+  /** Where the version's files are stored before it is published. */
+  readonly blobStorage: AgentRunFileStore
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
@@ -151,11 +129,9 @@ interface PublishToolsInput {
 
 /**
  * `publish_artifact` and `publish_artifact_version`: each reads a file or a directory from the
- * sandbox, stores its bytes, and publishes them with the thread and run as origin: a new artifact
- * for the thread's owner, or the next version of one the requester may update, authored by the
- * requester. The version exists when the tool returns, so the conversation shows it mid-turn and a
- * cancelled run keeps it. Publishing commits only while the run still owns its execution: a run
- * reclaimed by another delivery publishes nothing.
+ * sandbox, stores its bytes, and publishes them through the run's session, which applies a run's
+ * rules (see `AgentRunArtifacts.publish`). The version exists when the tool returns, so the
+ * conversation shows it mid-turn and a cancelled run keeps it.
  */
 export function createPublishArtifactTools(
   input: PublishToolsInput
@@ -180,18 +156,6 @@ export function createPublishArtifactTools(
   ]
 }
 
-async function assertParentRunActive(
-  storage: Storage,
-  projectId: string,
-  parentRunId: string,
-  tool: PublishToolName
-): Promise<void> {
-  const parent = await storage.agents?.runs.getById({ projectId, id: parentRunId })
-  if (parent?.status === "queued" || parent?.status === "running") return
-
-  throw publishError(tool, "the parent Agent run has ended, so nothing was published")
-}
-
 /** A run that lost its conversation stores nothing, and the trace says so instead of "an error". */
 function publishErrorText(error: unknown, tool: PublishToolName): string {
   return error instanceof AgentExecutionLostError
@@ -214,10 +178,6 @@ async function publish(
   signal: AbortSignal
 ): Promise<JsonValue> {
   signal.throwIfAborted()
-  const { artifacts } = input
-  const { parentRunId, ...run } = input.run
-  const ownership = { projectId: input.projectId, ...run }
-  await assertRunExecutionOwned(input.storage, ownership)
   const kind: ArtifactKind =
     "kind" in request.target
       ? request.target.kind
@@ -240,8 +200,7 @@ async function publish(
   }
   const reservation = input.budget.reserve(0, tool)
   const contents: PublishedArtifactFile[] = []
-  let published: Awaited<ReturnType<typeof storeArtifactVersion>>
-  let prepared: Awaited<ReturnType<typeof prepareArtifactVersion>>
+  let published: PublishedArtifact
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
@@ -274,40 +233,15 @@ async function publish(
     }
     signal.throwIfAborted()
 
-    // Validation reads the files back and parses them, so it runs before the transaction, which
-    // checks the run still owns its conversation and the requester may still publish, and stores.
-    const reading = artifactAccessRule(input.reader, input.storage)
-    prepared = await prepareArtifactVersion(
-      { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
-      {
-        ...("artifactId" in request.target ? { artifactId: request.target.artifactId } : {}),
-        ...(baseVersion === undefined ? {} : { baseVersion }),
-        kind,
-        title: request.title,
-        files,
-        author: input.author,
-        owner: input.owner,
-        readable: async (artifact) => (await reading.accessTo(artifact)) !== "none",
-        // As the requester, so a query never reads what they cannot.
-        checkQuery: artifactQueryChecker(input.reader),
-        origin: { threadId: input.run.threadId, runId: input.run.id },
-      }
-    )
-    signal.throwIfAborted()
-    published = await input.storage.transaction(async (tx) => {
-      await assertRunExecutionOwned(tx, ownership)
-      if (parentRunId !== undefined)
-        await assertParentRunActive(tx, input.projectId, parentRunId, tool)
-      const stored = tx.artifacts
-      if (!stored) throw new Error("[SixbAgent] Storage transactions hold no artifacts.")
-      // Checks again what the requester may do: the owner may have deleted it since the check
-      // above, or removed the requester from the conversation.
-      return storeArtifactVersion(
-        { projectId: input.projectId, storage: stored, blobStorage: input.blobStorage },
-        prepared,
-        (artifact) =>
-          artifactAccessRule(input.reader, tx).publishAccess(artifact, input.run.threadId)
-      )
+    published = await input.artifacts.publish({
+      ...("artifactId" in request.target
+        ? {
+            artifactId: request.target.artifactId,
+            ...(baseVersion === undefined ? {} : { baseVersion }),
+          }
+        : { kind }),
+      title: request.title,
+      files,
     })
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
@@ -340,11 +274,6 @@ async function publish(
 
   // The version exists by now: nothing below may read as a failed publish, which the Agent would
   // publish again.
-  const warnings = await artifactVersionWarnings(
-    { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
-    prepared,
-    published
-  )
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this version, not the one before.
     await installed.replace(handle.sandbox, published, contents, signal)
@@ -382,7 +311,7 @@ async function publish(
   let check: LayoutCheck | undefined
   let queries: CheckedQueries = { answers: {}, warnings: [] }
   if (root && pages && (pages.layout !== "canvas" || pages.boards.length > 0)) {
-    queries = await checkedQueries(input.reader, published)
+    queries = await checkedQueries(input.artifacts, published)
     signal.throwIfAborted()
     try {
       check = await checkLayout({
@@ -407,7 +336,7 @@ async function publish(
     kind: published.artifact.kind,
     title: published.version.title,
     warnings: [
-      ...warnings,
+      ...published.warnings,
       ...queries.warnings,
       ...(check?.status === "checked" ? check.warnings : []),
     ].map(({ code, message, part }) => ({
@@ -438,8 +367,8 @@ interface CheckedQueries {
  * and running can fail where checking could not: such a query is a warning, as the version exists.
  */
 async function checkedQueries(
-  reader: Pick<ArtifactsRuntime, "query">,
-  published: Awaited<ReturnType<typeof storeArtifactVersion>>
+  reader: Pick<AgentRunArtifacts, "query">,
+  published: PublishedArtifact
 ): Promise<CheckedQueries> {
   const { artifact, version } = published
   const names = version.files.flatMap((file) => {
@@ -502,16 +431,8 @@ async function updatableArtifact(
   artifactId: string,
   tool: PublishToolName
 ): Promise<ArtifactRecord> {
-  const artifact = await input.artifacts.get({ projectId: input.projectId, id: artifactId })
-  const access = artifact
-    ? await artifactAccessRule(input.reader, input.storage).publishAccess(
-        artifact,
-        input.run.threadId
-      )
-    : "none"
-  if (!artifact || (access !== "owner" && access !== "update")) {
-    throw noArtifact(tool, artifactId)
-  }
+  const artifact = await input.artifacts.updatable(artifactId)
+  if (!artifact) throw noArtifact(tool, artifactId)
   return artifact
 }
 
@@ -538,7 +459,7 @@ async function artifactMoved(
 ): Promise<AgentToolPublicError> {
   // Read as the requester: whatever moved it, it is a version they can read.
   const artifact = await updatableArtifact(input, artifactId, VERSION_TOOL)
-  const latest = await input.reader.getVersion(artifactId, artifact.latestVersion)
+  const latest = await input.artifacts.getVersion(artifactId, artifact.latestVersion)
   if (!latest) {
     throw new Error(`[SixbAgent] Version ${artifact.latestVersion} of '${artifactId}' is missing.`)
   }
@@ -549,7 +470,7 @@ async function artifactMoved(
   const where =
     latest.origin === undefined
       ? `by ${author} outside a conversation, such as in the app`
-      : latest.origin.threadId === input.run.threadId
+      : latest.origin.threadId === input.threadId
         ? "earlier in this conversation"
         : `by ${author} in another conversation`
   const moved = `artifact '${artifactId}' moved on from version ${baseVersion}, which you started from: version ${latest.version} was published ${where}, so nothing was published`
@@ -557,7 +478,7 @@ async function artifactMoved(
   try {
     const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
     await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
-      edited: latest.origin?.threadId !== input.run.threadId,
+      edited: latest.origin?.threadId !== input.threadId,
     })
   } catch (error) {
     if (signal.aborted) throw error

@@ -9,7 +9,6 @@ import {
   type AgentReasoning,
   AgentToolPublicError,
   type AgentToolResult,
-  type LanguageModelCatalog,
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
@@ -17,6 +16,8 @@ import {
   type AgentChildApprovalAwaiting,
   type AgentChildDraft,
   AgentExecutionLostError,
+  type AgentRunDelegation,
+  type AgentRunDelegationModel,
   type AgentRunSession,
   createAgentMessageId,
   createSubagentRunId,
@@ -64,7 +65,7 @@ import { renderModelLine } from "./model-lines"
 import type { TurnChildren } from "./run-agent-turn"
 import { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import { continuationTrigger } from "./subagent-continuation"
-import type { AgentProjectCatalogs, AgentRunFiles, AgentRunSettings } from "./types"
+import type { AgentRunFiles, AgentRunSettings } from "./types"
 
 /**
  * How long a wait for children goes without reading their runs when nothing woke it. A child's
@@ -79,13 +80,6 @@ export const CHILD_WAIT_RECHECK_MS = 5_000
  * are rare and short, so a short poll costs little.
  */
 export const OTHER_INBOX_RECHECK_MS = 250
-/**
- * How long before its turn's deadline `wait_agent` stops waiting, so the Agent still answers with
- * what its children found. A last step without tools takes seconds on a light model and up to about
- * a minute on a heavy one with high reasoning; a turn has ten minutes by default.
- */
-export const WAIT_ANSWER_MARGIN_MS = 60_000
-
 const OMIT_MODEL = "Omit model to use the project default."
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
@@ -199,9 +193,17 @@ export interface WaitForSubagentsOutput {
   readonly artifactsError?: string
 }
 
+/** What a turn offers the children it spawns. */
+export interface TurnDelegation {
+  /** The project's language models, from the turn's plan. */
+  readonly models: AgentRunDelegation
+  /** The project tools each child gets. */
+  readonly toolNames: readonly string[]
+}
+
 /** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
 export class SubagentCoordinator {
-  private readonly models: LanguageModelCatalog
+  private readonly models: AgentRunDelegation
   #runFiles: AgentRunFiles | undefined
   /** Children whose files are in the parent's sandbox, and in the result that first listed them. */
   readonly #installed = new Map<string, readonly InstalledChildFile[]>()
@@ -216,13 +218,12 @@ export class SubagentCoordinator {
   readonly #answers = new Map<string, MessageSubagentOutput>()
 
   constructor(
-    private readonly host: AgentProjectCatalogs,
+    /** What the turn offers its children: the project's language models, and its tools. */
+    private readonly delegation: TurnDelegation,
     private readonly context: AgentRunSettings,
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
     private readonly session: AgentRunSession,
-    /** When the parent turn times out: no child outlives it. */
-    private readonly parentDeadline: Date,
     /**
      * Run a child this turn spawned or continues, in the turn's own runner: it claims the child's
      * run, opens its session and environment, and records its fate. Starting a run already
@@ -230,11 +231,7 @@ export class SubagentCoordinator {
      */
     private readonly startChild: (run: SubagentRunRecord) => void
   ) {
-    const models = host.definitions.models?.language
-    if (!models) {
-      throw new Error("[SixbAgent] Subagent delegation requires a language model catalog.")
-    }
-    this.models = models
+    this.models = delegation.models
     this.#questions = new ChildQuestions(session.mail, parentRun.id)
   }
 
@@ -265,8 +262,8 @@ export class SubagentCoordinator {
         const unread = await this.unreadQuestions()
         return unread.length > 0 ? renderChildQuestions(unread) : undefined
       },
-      defer: (stopAt, signal) => this.deferOpenQuestions(stopAt, signal),
-      settle: (stopAt, signal) => this.settleChildren(stopAt, signal),
+      defer: (signal) => this.deferOpenQuestions(signal),
+      settle: (signal) => this.settleChildren(signal),
     }
   }
 
@@ -278,7 +275,7 @@ export class SubagentCoordinator {
   /**
    * When this turn resumes a paused one, continue each child that paused on its held calls: the
    * next run of its thread, under this turn and the same key, with the paused child's model, task
-   * and files, and this turn's mode and deadline. The outcomes of its calls start the run. Admitting
+   * and files, and this turn's mode. The outcomes of its calls start the run. Admitting
    * it again finds it, so a retry of this turn, under its own id, admits its own.
    */
   async continuePausedChildren(signal: AbortSignal): Promise<void> {
@@ -302,12 +299,11 @@ export class SubagentCoordinator {
   /**
    * Remove from a paused child's thread what the runs after its pause did under an earlier attempt
    * of this resume, which failed: this turn continues the paused child again, as a retried turn
-   * replays from its trigger. A run still stopping is waited for, until shortly before this turn's
-   * deadline.
+   * replays from its trigger. A run still stopping is waited for: its lease ends it if nothing else
+   * does.
    */
   private async clearDeadAttempts(paused: SubagentRunRecord, signal: AbortSignal): Promise<void> {
     const { children } = this.session
-    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
 
     for (;;) {
       const runs = await children.threadRuns(paused.threadId)
@@ -323,14 +319,8 @@ export class SubagentCoordinator {
         return
       }
 
-      const remainingMs = stopAt - Date.now()
-      if (remainingMs <= 0) {
-        throw new Error(
-          `[SixbAgent] Sub-agent '${paused.spawnKey}' cannot continue: its run '${stopping[0]?.id}' from an earlier attempt of this turn is still stopping.`
-        )
-      }
       // Its finish goes to the inbox of the attempt it ran under, not this turn's: read it again.
-      await delay(Math.min(OTHER_INBOX_RECHECK_MS, remainingMs), signal)
+      await delay(OTHER_INBOX_RECHECK_MS, signal)
     }
   }
 
@@ -655,11 +645,10 @@ export class SubagentCoordinator {
 
   /**
    * Before the turn records its end, while it still runs: tell each child still waiting on its
-   * question that the turn ends without an answer, then wait, until `stopAt`, for each to pause on
-   * it. The turn's end cancels the children still at work, so a child it told and that has not
+   * question that the turn ends without an answer, then wait for each to pause on it. The turn's end cancels the children still at work, so a child it told and that has not
    * paused yet would be stopped; while the turn runs, the repair pass leaves its children alone.
    */
-  async deferOpenQuestions(stopAt: number, signal: AbortSignal): Promise<void> {
+  async deferOpenQuestions(signal: AbortSignal): Promise<void> {
     let asking: readonly WaitedQuestion[]
     let threads: ReadonlyMap<string, string>
     try {
@@ -699,11 +688,11 @@ export class SubagentCoordinator {
     }
 
     try {
-      while (deferred.length > 0 && Date.now() < stopAt) {
+      while (deferred.length > 0) {
         const paused = this.#questions.nextChange()
         const runs = await this.session.children.getMany(deferred)
         if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
-        await delay(Math.min(CHILD_WAIT_RECHECK_MS, stopAt - Date.now()), signal, paused)
+        await delay(CHILD_WAIT_RECHECK_MS, signal, paused)
       }
     } catch (error) {
       // The turn's interruption checks record why it stopped.
@@ -713,18 +702,16 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Wait until none of the turn's children is queued or running, or `stopAt`: a pausing turn's
-   * end cancels those still at work, and one that holds a call pauses by itself meanwhile.
+   * Wait until none of the turn's children is queued or running: a pausing turn's end cancels those
+   * still at work, and one that holds a call pauses by itself meanwhile.
    */
-  async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
+  async settleChildren(signal: AbortSignal): Promise<void> {
     for (;;) {
       const finished = this.#questions.nextChange()
       if ((await this.session.children.activeCount()) === 0) return
 
-      const remainingMs = stopAt - Date.now()
-      if (remainingMs <= 0) return
       try {
-        await delay(Math.min(CHILD_WAIT_RECHECK_MS, remainingMs), signal, finished)
+        await delay(CHILD_WAIT_RECHECK_MS, signal, finished)
       } catch (error) {
         // The turn's interruption checks record why it stopped, with what it wrote.
         if (signal.aborted) return
@@ -754,7 +741,7 @@ export class SubagentCoordinator {
     const key = requireNonEmpty("spawn_agent", input.key, "key", 128)
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
-    const reasoning = input.reasoning ?? model.model.defaultReasoning
+    const reasoning = input.reasoning ?? model.defaultReasoning
     const sources = input.files?.length
       ? await listHandedSources({ files: this.runFiles(), paths: input.files, signal })
       : undefined
@@ -848,7 +835,7 @@ export class SubagentCoordinator {
 
   /**
    * The run of this turn that continues `paused` in its thread: its model, task and files, this
-   * turn's mode and deadline, and a trigger of what it goes on with (the outcomes of its calls, or
+   * turn's mode, and a trigger of what it goes on with (the outcomes of its calls, or
    * its parent's answer), what came back to its sandbox and when it continues.
    */
   private continuationOf(
@@ -896,9 +883,7 @@ export class SubagentCoordinator {
     return {
       model: { provider: model.provider, modelId: model.modelId },
       task,
-      toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
-      maxSteps: this.context.defaultMaxSteps,
-      deadline: this.parentDeadline.toISOString(),
+      toolNames: this.delegation.toolNames,
       ...(tier === undefined ? {} : { tier }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
@@ -963,8 +948,6 @@ export class SubagentCoordinator {
     // as it ended.
     const runIds = await Promise.all(passedIds.map((runId) => this.continuedChildId(runId)))
     const earlierTurns = await this.earlierTurnsOf(runIds)
-    // The Agent answers before its turn times out, with or without the children still at work.
-    const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
     for (;;) {
       signal.throwIfAborted()
       // Taken before the reads, so a question or a finish that comes during them wakes the wait.
@@ -991,8 +974,7 @@ export class SubagentCoordinator {
       const asked = asking.some(
         (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
       )
-      const remainingMs = stopAt - Date.now()
-      if (children.every(isTerminalSubagent) || asked || remainingMs <= 0) {
+      if (children.every(isTerminalSubagent) || asked) {
         const awaiting = await this.session.children.awaitingApproval(runIds)
         const delivered = await this.deliverFiles(children, signal)
         const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
@@ -1029,7 +1011,7 @@ export class SubagentCoordinator {
         (run) => run.parentRunId !== this.parentRun.id && !isTerminalSubagent(run)
       )
       const recheckMs = unheard ? OTHER_INBOX_RECHECK_MS : CHILD_WAIT_RECHECK_MS
-      await delay(Math.min(recheckMs, remainingMs), signal, changed)
+      await delay(recheckMs, signal, changed)
     }
   }
 
@@ -1189,12 +1171,24 @@ export class SubagentCoordinator {
     return this.#runFiles
   }
 
-  private resolveModel(ref: LanguageModelRef | LanguageModelTier | undefined) {
-    if (ref === undefined) return this.models.default
-    if (typeof ref === "string") return this.models.getByTier(ref)
-    const model = this.models.getByRef(ref)
+  private resolveModel(
+    ref: LanguageModelRef | LanguageModelTier | undefined
+  ): AgentRunDelegationModel {
+    const { models, defaultModel } = this.models
+    const byRef = (wanted: LanguageModelRef) => models.find((model) => sameModel(model, wanted))
+    const projectDefault = () => {
+      const model = byRef(defaultModel)
+      if (!model)
+        throw new Error("[SixbAgent] The project's default model is not among its models.")
+      return model
+    }
+    if (ref === undefined) return projectDefault()
+    // A tier's first model; a tier left out, or any tier of a list, gives the default.
+    if (typeof ref === "string")
+      return models.find((model) => model.tier === ref) ?? projectDefault()
+    const model = byRef(ref)
     if (model) return model
-    const available = this.models.list().map(formatModelRef).join(", ")
+    const available = models.map(formatModelRef).join(", ")
     throw new AgentToolPublicError(
       `[SixbAgent] Language model ${formatModelRef(ref)} is not configured for this project. ` +
         `Use one of: ${available}. Omit model to use the project default.`
@@ -1206,16 +1200,16 @@ export class SubagentCoordinator {
  * Built from each model's configured definition, never from its provider catalog: the guide is in
  * every turn's tools, so it stays the same for the process and catalog I/O cannot fail a turn.
  */
-export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
-  const entries = models.list().map((entry) => {
-    const metadata = defineLanguageModel(entry.model.definition)
+export function renderSubagentModelGuide(models: AgentRunDelegation): string {
+  const entries = models.models.map((entry) => {
+    const metadata = defineLanguageModel(entry.definition)
     if (metadata.providerId !== entry.provider || metadata.modelId !== entry.modelId) {
       throw new Error(
         "[SixbAgent] Delegation model definition identity does not match its catalog entry."
       )
     }
     const details: string[] = []
-    if (sameModel(entry, models.default)) details.push("default")
+    if (sameModel(entry, models.defaultModel)) details.push("default")
     if (metadata.contextWindow !== undefined)
       details.push(`context ${formatTokenCount(metadata.contextWindow)} tokens`)
     if (metadata.maxInputTokens !== undefined)
@@ -1250,7 +1244,7 @@ export function renderSubagentModelGuide(models: LanguageModelCatalog): string {
   ].join("\n")
 }
 
-function modelChoice(models: LanguageModelCatalog): typeof LISTED_MODEL_CHOICE {
+function modelChoice(models: AgentRunDelegation): typeof LISTED_MODEL_CHOICE {
   return models.tiers.length > 0 ? TIERED_MODEL_CHOICE : LISTED_MODEL_CHOICE
 }
 
@@ -1275,7 +1269,7 @@ function formatScaled(value: number, scale: number): string {
   return (Math.round((value / scale) * 100) / 100).toString()
 }
 
-function spawnInputSchema(models: LanguageModelCatalog): JsonObject {
+function spawnInputSchema(models: AgentRunDelegation): JsonObject {
   return {
     type: "object",
     properties: {
@@ -1321,8 +1315,8 @@ function tierChoice(tiers: readonly LanguageModelTier[]): readonly JsonObject[] 
 }
 
 // Keep each pair together: independent enums would also admit unconfigured bindings.
-function modelRefChoices(models: LanguageModelCatalog): readonly JsonObject[] {
-  return models.list().map(({ provider, modelId }) => ({
+function modelRefChoices(models: AgentRunDelegation): readonly JsonObject[] {
+  return models.models.map(({ provider, modelId }) => ({
     type: "object",
     properties: {
       provider: { type: "string", enum: [provider] },

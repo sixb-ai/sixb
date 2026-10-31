@@ -1,18 +1,12 @@
-import type {
-  AgentMessagePart,
-  AgentToolAttachments,
-  AgentToolDefinition,
-  AgentToolFiles,
-  AgentToolRunInfo,
-  AgentToolRuntimeFacade,
-  JsonValue,
-  Logger,
-  ValueType,
-} from "@sixb/core"
+import type { AgentMessagePart, JsonValue } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
 import {
+  type AgentToolCall,
+  type AgentToolCallFile,
+  type AgentToolCallOptions,
+  type AgentToolCallResult,
   AgentToolResultValidationError,
-  validateAndNormalizeAgentToolInput,
+  type AgentToolSpec,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
@@ -22,7 +16,6 @@ import type {
   ModelToolResultPart,
 } from "@sixb/core/models"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
-import { agentModelToolSpecFromDefinition } from "./tools/model-spec"
 import type { AgentToolModelOutput } from "./tools/result-output"
 
 export type AgentErrorDetails =
@@ -36,18 +29,24 @@ export type AgentErrorDetails =
       readonly nodeRunId: string
     }
 
-interface ModelToolsFromAgentDefinitionsInput {
-  readonly definitions: readonly AgentToolDefinition[]
-  readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly run: AgentToolRunInfo
-  readonly sixb: AgentToolRuntimeFacade
-  readonly attachments: AgentToolAttachments
-  readonly logger: Logger
-  readonly filesForToolCall: (input: {
+/** How a run calls a project tool: through its session, or for a workflow step in the worker. */
+export type AgentToolCaller = (
+  call: AgentToolCall,
+  options: AgentToolCallOptions
+) => Promise<AgentToolCallResult>
+
+interface ProjectModelToolsInput {
+  readonly specs: readonly AgentToolSpec[]
+  readonly runId: string
+  readonly callTool: AgentToolCaller
+  /** The bytes the run's file budget has left, which a call's files may take. */
+  readonly fileBytesLeft: () => number
+  /** Copy the files a call stored into the sandbox, before the model reads its output. */
+  readonly installFiles: (input: {
     readonly toolName: string
-    readonly toolCallId: string
+    readonly files: readonly AgentToolCallFile[]
     readonly signal: AbortSignal
-  }) => AgentToolFiles
+  }) => Promise<void>
   readonly toolResultToModelOutput: (input: {
     readonly output: JsonValue
     readonly signal: AbortSignal
@@ -56,81 +55,60 @@ interface ModelToolsFromAgentDefinitionsInput {
   readonly errorDetails?: AgentErrorDetails
 }
 
-/** Adapt an agent's selected Sixb definitions to the owned model tool contract. */
-export function modelToolsFromAgentDefinitions(
-  input: ModelToolsFromAgentDefinitionsInput
-): readonly ModelTool[] {
+/**
+ * The project's tools as the model is offered them. A call runs where the project is, through
+ * `callTool`, which checks its input against the tool's schema; the files it stored are copied into
+ * the sandbox before the model reads its output.
+ */
+export function projectModelTools(input: ProjectModelToolsInput): readonly ModelTool[] {
   const names = new Set<string>()
-  return input.definitions.map((definition) => {
-    if (names.has(definition.name)) {
+  return input.specs.map((spec) => {
+    if (names.has(spec.name)) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgent] Agent run '${input.run.id}' has duplicate selected tool name '${definition.name}'.`,
-        {
-          details: input.errorDetails ?? agentToolRunErrorDetails(input.run),
-        }
+        `[SixbAgent] Agent run '${input.runId}' has duplicate selected tool name '${spec.name}'.`,
+        input.errorDetails === undefined ? undefined : { details: input.errorDetails }
       )
     }
-    names.add(definition.name)
-    return modelToolFromAgentDefinition(definition, input)
+    names.add(spec.name)
+    return projectModelTool(spec, input)
   })
 }
 
-function modelToolFromAgentDefinition(
-  definition: AgentToolDefinition,
-  context: Omit<ModelToolsFromAgentDefinitionsInput, "definitions">
+function projectModelTool(
+  spec: AgentToolSpec,
+  context: Omit<ProjectModelToolsInput, "specs">
 ): ModelTool<Readonly<Record<string, unknown>>> {
-  const spec = agentModelToolSpecFromDefinition(definition, context.valueTypesById)
-
   return {
     ...spec,
     parseInput(value) {
-      return validateAndNormalizeAgentToolInput(
-        definition.name,
-        definition.input,
-        value,
-        context.valueTypesById
-      )
+      // The tool's schema is checked where it runs; the loop hands over a JSON object.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new TypeError(`[SixbAgent] Agent tool '${spec.name}' input must be a JSON object.`)
+      }
+      return value as Readonly<Record<string, unknown>>
     },
     async execute(toolInput, { signal, toolCallId }) {
+      let result: AgentToolCallResult
       try {
-        return await definition.handler({
-          input: toolInput,
-          toolCallId,
-          signal,
-          run: context.run,
-          sixb: context.sixb,
-          logger: context.logger,
-          files: context.filesForToolCall({
-            toolName: definition.name,
-            toolCallId,
-            signal,
-          }),
-          attachments: context.attachments,
-        })
+        result = await context.callTool(
+          { toolName: spec.name, toolCallId, input: toolInput },
+          { signal, maxFileBytes: context.fileBytesLeft() }
+        )
       } catch (error) {
         if (error instanceof AgentToolResultValidationError) {
-          throw new AgentToolOutputError(definition.name, error.reason, { cause: error })
+          throw new AgentToolOutputError(spec.name, error.reason, { cause: error })
         }
         if (error instanceof AgentToolPublicError) throw error
-        throw new AgentToolExecutionError(definition.name, { cause: error })
+        throw new AgentToolExecutionError(spec.name, { cause: error })
       }
+      await context.installFiles({ toolName: spec.name, files: result.files, signal })
+      return result.output
     },
     toModelOutput(output, { signal, toolCallId }) {
       return context.toolResultToModelOutput({ output, signal, toolCallId })
     },
     errorText: agentToolErrorText,
-  }
-}
-
-function agentToolRunErrorDetails(run: AgentToolRunInfo): AgentErrorDetails {
-  switch (run.kind) {
-    case "conversation":
-      return { threadId: run.threadId, runId: run.id }
-    case "subagent":
-      return { parentRunId: run.parentRunId, runId: run.id }
-    case "workflow":
-      return { workflowId: run.workflowId, agentStepId: run.stepId, runId: run.id }
   }
 }
 

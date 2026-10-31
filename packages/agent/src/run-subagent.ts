@@ -15,7 +15,7 @@ import {
   coerceAgentRunFinishReason,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
-import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, renderCurrentTime } from "./agent-prompt"
+import { renderCurrentTime } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
@@ -74,12 +74,10 @@ export async function runSubagent(input: {
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
   const generation = await runModelLoop({
-    model: runtime.usageRecorder.wrapModel(plan.model),
+    model: plan.model,
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-    maxSteps: plan.maxSteps,
-    finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
     // A message from the parent comes after the step that was running when it arrived, and stays
     // in the history of every later step.
     prepareStep: async (step) => {
@@ -95,7 +93,6 @@ export async function runSubagent(input: {
       return mail ? toModelMessages([mail]) : undefined
     },
     signal: abortSignal,
-    onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
     onEvent: (chunk) =>
       input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
     // The approval records decide, never the prompt or the tool output: a held call stops the
@@ -295,7 +292,6 @@ function assertSubagentCanFinalize(input: {
   readonly sandboxReadiness: ReturnType<typeof monitorSandboxReadiness>
 }): void {
   throwIfExecutionLost(input.runtime.sourceSignal)
-  input.runtime.usageRecorder.assertHealthy()
   input.sandboxReadiness.throwIfFailed()
   input.runtime.assertCanContinue()
 }

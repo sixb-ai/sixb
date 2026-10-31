@@ -1,11 +1,25 @@
+import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { createSixbError } from "../errors/internal"
 import type { AuthorizationRef } from "../execution"
+import {
+  type AgentExecutionHost,
+  bindAgentModelExecution,
+  bindDurableAgentExecution,
+} from "../execution/agent"
+import type { RunLogSession } from "../logging/run-logger"
+import { type LoggingService, resolveLoggingService } from "../logging/service"
+import type { LogFields } from "../logging/types"
+import type { LanguageModelRef } from "../models/catalog"
 import {
   AiModelCallRecorder,
   createAiModelCallLimitController,
   type ModelCallAccountingStorage,
   type RecoverAiModelCall,
 } from "../models/execution/index"
+import type { LanguageModel } from "../models/language-model"
+import { resolveLanguageModel } from "../models/resolve"
+import type { Sixb } from "../runtime/sixb"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
@@ -17,18 +31,35 @@ import {
   type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
+  type SubagentRunFile,
+  type SubagentRunRecord,
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
 import type { AuthStorage, UserRecord } from "../storage/auth"
 import { turnPausesOnHeldCalls } from "./approvals"
 import {
   type AgentExecutionAuthorization,
+  resolveAgentPropertyClearance,
   resolveInheritedAgentExecutionAuthorization,
   userCanRunAgent,
 } from "./authority"
+import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
+import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
-import { AgentExecutionLostError, fenced, isTerminalOrExecutionGone } from "./run-fence"
+import {
+  AgentExecutionLostError,
+  assertAgentRunOwned,
+  fenced,
+  isTerminalOrExecutionGone,
+} from "./run-fence"
+import {
+  type AgentRunMemory,
+  type AgentRunPlan,
+  type AgentRunPlanDefinitions,
+  readAgentRunMemory,
+  readAgentRunPlan,
+} from "./run-plan"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
@@ -40,6 +71,14 @@ import {
   agentRunThreads,
 } from "./run-session-children"
 import {
+  type AgentToolCall,
+  type AgentToolCallOptions,
+  type AgentToolCallResult,
+  handedToolAttachments,
+  runAgentTool,
+  threadToolAttachments,
+} from "./run-tools"
+import {
   type AgentRunContext,
   type AgentTurnContext,
   type AgentTurnHistory,
@@ -47,6 +86,9 @@ import {
   readAgentTurnHistory,
 } from "./run-turn"
 import { subscribeAgentRunCancel } from "./streams/protocol"
+import { subagentSandboxFiles } from "./subagent-runs"
+import { conversationThreadId } from "./thread-access"
+import type { AgentToolRunInfo } from "./types"
 
 /**
  * A run's session: the one way its runner reads and writes shared state for it. Claiming the run
@@ -68,14 +110,11 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    */
   readonly cancelled: AbortSignal
   /**
-   * The run's model calls. Wrap a model with it, and each call is admitted against the AI limits
-   * of whoever the run works for, and its usage and cost recorded before the next step; a record
-   * that cannot be written is recovered later. Project tools' own model calls bill here too.
-   *
-   * The first call reads what admission needs, so it belongs in the run's preparation, where a
-   * storage blip is retried: a failed read is read again on the next call.
+   * The models the run calls. Each call is admitted against the AI limits of whoever the run works
+   * for, and records itself before its reader sees it finish (see
+   * AiModelCallRecorder.wrapModel): the runner never reports what a call used.
    */
-  modelCalls(): Promise<AiModelCallRecorder>
+  readonly models: AgentRunModels
   /**
    * Live records for whoever watches the run: its start, chunks, compaction, finalized message and
    * end. Best effort: a record that cannot be delivered never fails the run, whose finish is the
@@ -110,6 +149,16 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    */
   assertOwned(): Promise<void>
   /**
+   * What the run is set up with: its model, the project's instructions, skills and tools, and the
+   * ontology docs its requester's view gives.
+   */
+  plan(): Promise<AgentRunPlan>
+  /**
+   * The memory its requester reads, now and as of `asOf`: the start of the conversation, or its
+   * latest compaction, which the prompt shows.
+   */
+  memory(input: { readonly asOf: Date }): Promise<AgentRunMemory>
+  /**
    * What the run starts from, in one read: a turn's thread, the people it names and its history,
    * or a child's parent, threads and messages.
    */
@@ -124,13 +173,38 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   /** The messages of the run's conversation, its children's threads included. */
   readonly threads: AgentRunThreads
   /**
+   * Run one call of a project tool the run offers, as the run (see runAgentTool): with the run's
+   * SDK, its attachments and its logger, its model calls billed to the run. The files it puts are
+   * stored and returned, for the runner to copy into its sandbox.
+   */
+  callTool(call: AgentToolCall, options: AgentToolCallOptions): Promise<AgentToolCallResult>
+  /** Its conversation's artifacts: what it reads of them as its requester, and what it publishes. */
+  readonly artifacts: AgentRunArtifacts
+  /**
+   * The files it stores and reads: its attachments, what its tools and children write, its
+   * artifacts' files. Through the run's SDK, as an API request with the run's token stores them.
+   */
+  readonly files: AgentRunFileStore
+  /**
    * The authority the run's execution carries now: its requester's groups, as they are today. A
    * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
    */
   authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
-  /** Stop watching for cancellation. The run itself is unaffected. */
-  close(): void
+  /**
+   * Stop watching for cancellation, stop its tools' model calls, and flush their logs. The run
+   * itself is unaffected.
+   */
+  close(): Promise<void>
 }
+
+/** The models a run calls, by the ref its plan names. */
+export interface AgentRunModels {
+  /** A language model of the project, resolved once for the session. */
+  language(ref: LanguageModelRef): Promise<LanguageModel>
+}
+
+/** Where a run's files are stored: put one, open or stat one by its blob id. */
+export type AgentRunFileStore = Pick<BlobStorage, "put" | "open" | "stat">
 
 /** A context checkpoint a turn writes; the session adds which run, and its token. */
 export type AgentRunCheckpoint = Omit<
@@ -192,6 +266,15 @@ export interface AgentRunSessionHost extends AgentRunChildrenHost {
   readonly events: StreamSink
   /** The project's security definitions, which decide a run's authority. */
   readonly security: SecurityDefinitionCatalog
+  /** Where a project tool's logs go; the project's logging service when absent. */
+  readonly logging?: LoggingService
+  /**
+   * Binds the run's SDK as its requester, as the API binds a request with the run's token: what
+   * the run reads and publishes through its session goes through it.
+   */
+  readonly sdk: AgentExecutionHost
+  /** The definitions a run's plan is read from. */
+  readonly definitions: AgentRunPlanDefinitions
   /**
    * What follows a run's end, once `finish` recorded it: a turn's children still at work are
    * stopped, and a turn paused on calls already decided goes on. Best effort: a failure is logged,
@@ -208,6 +291,11 @@ export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
   readonly leaseExpiresAt: string
   /** Other runs whose cancellation cancels this one: a child's parent. */
   readonly cancelWith?: readonly string[]
+  /**
+   * The runner's own stop: its process shutting down, or its delivery lost. The calls its project
+   * tools make stop with it, as the run's own do.
+   */
+  readonly stop?: AbortSignal
 }
 
 /**
@@ -220,7 +308,7 @@ export async function claimAgentRun<TRun extends AgentRunRecord>(
 ): Promise<AgentRunSession<TRun> | null> {
   const run = await startOrReclaim(host.storage.agents, host.projectId, input)
   if (!run) return null
-  return openAgentRunSession(host, run, input.cancelWith)
+  return openAgentRunSession(host, run, input.cancelWith, input.stop)
 }
 
 /**
@@ -230,7 +318,8 @@ export async function claimAgentRun<TRun extends AgentRunRecord>(
 export async function openAgentRunSession<TRun extends AgentRunRecord>(
   host: AgentRunSessionHost,
   run: TRun,
-  cancelWith: readonly string[] = []
+  cancelWith: readonly string[] = [],
+  stop?: AbortSignal
 ): Promise<AgentRunSession<TRun>> {
   const executionToken = run.execution?.token
   if (!executionToken) {
@@ -238,6 +327,24 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   }
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
+  const openedModelCalls = () => {
+    modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
+      modelCalls = undefined
+      throw error
+    })
+    return modelCalls
+  }
+  // Each model is pinned once per session: a later catalog refresh does not change a run's model.
+  const languageModels = new Map<string, Promise<LanguageModel>>()
+  let bound: Promise<BoundRun> | undefined
+  const bind = () => {
+    bound ??= bindRun(host, run).catch((error: unknown) => {
+      bound = undefined
+      throw error
+    })
+    return bound
+  }
+  const runSdk = async () => (await bind()).sixb
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
   // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
   // each renewal of its lease.
@@ -248,27 +355,105 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
   readCancel(run)
   const cancelled = AbortSignal.any([cancel.signal, recordedCancel.signal])
   const scope = agentRunScope(host, run)
+  const threads = agentRunThreads(host, run, scope)
+  const files: AgentRunFileStore = {
+    put: async (input) => (await runSdk()).blobs.put(input),
+    open: async (blobId) => (await runSdk()).blobs.open(blobId),
+    stat: async (blobId) => (await runSdk()).blobs.stat(blobId),
+  }
+  // Ends with the session: a tool call that outlived its run stops calling models.
+  const ended = new AbortController()
+  let toolsBound: Promise<Sixb> | undefined
+  // A project tool's own model calls bill to the run, admitted and recorded with its own.
+  const toolSdk = () => {
+    toolsBound ??= (async () => {
+      const sixb = await runSdk()
+      bindAgentModelExecution(sixb, {
+        signal: AbortSignal.any([cancelled, ended.signal, ...(stop ? [stop] : [])]),
+        accounting: await openedModelCalls(),
+      })
+      return sixb
+    })().catch((error: unknown) => {
+      toolsBound = undefined
+      throw error
+    })
+    return toolsBound
+  }
+  let logs: RunLogSession | undefined
+  // Labeled with the conversation its run works in: a child's is its parent's.
+  let toolLabels: Promise<LogFields> | undefined
+  const toolLogger = async () => {
+    toolLabels ??= (async (): Promise<LogFields> => {
+      if (run.kind !== "subagent") return { threadId: run.threadId }
+      const thread = await host.storage.agents.threads.getById({
+        projectId: host.projectId,
+        id: run.threadId,
+      })
+      return {
+        parentRunId: run.parentRunId,
+        threadId: thread ? conversationThreadId(thread) : run.threadId,
+      }
+    })().catch((error: unknown) => {
+      toolLabels = undefined
+      throw error
+    })
+    const labels = await toolLabels
+    logs ??= resolveLoggingService(host.projectId, host.logging).startExecution({
+      kind: "agent",
+      id: run.id,
+    })
+    return logs.logger.child(labels)
+  }
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
+  // What a child's sandbox holds: what it was handed, and what a paused run it continues left in
+  // out/. Its tools open those, by the paths $SIXB_ATTACHMENTS lists.
+  let handed: Promise<readonly SubagentRunFile[]> | undefined
+  const childFiles = (child: SubagentRunRecord) => {
+    handed ??= readAgentRunContext(host, child)
+      .then((context) =>
+        subagentSandboxFiles(child, context.kind === "subagent" ? context.paused : undefined)
+      )
+      .catch((error: unknown) => {
+        handed = undefined
+        throw error
+      })
+    return handed
+  }
 
   return {
     run,
     executionToken,
     cancelled,
     events: host.events,
-    children: agentRunChildren(host, run, executionToken, scope),
+    children: agentRunChildren(host, run, executionToken, scope, () => ({
+      tools: host.definitions.tools.list().map((tool) => tool.name),
+      models: host.definitions.models?.language?.list() ?? [],
+    })),
     mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
       pausesAfterStep: () => turnPausesOnHeldCalls(host.storage.agents, run),
     },
-    modelCalls() {
-      modelCalls ??= openModelCalls(host, run).catch((error: unknown) => {
-        modelCalls = undefined
-        throw error
-      })
-      return modelCalls
+    models: {
+      async language(ref) {
+        const key = `${ref.provider}/${ref.modelId}`
+        let resolved = languageModels.get(key)
+        if (!resolved) {
+          const entry = host.definitions.models?.language?.getByRef(ref)
+          if (!entry) {
+            throw createSixbError(
+              "agent.execution_failed",
+              `[Sixb] Language model '${key}' is not available in models.language.`
+            )
+          }
+          resolved = resolveLanguageModel(entry.model)
+          languageModels.set(key, resolved)
+          resolved.catch(() => languageModels.delete(key))
+        }
+        return (await openedModelCalls()).wrapModel(await resolved)
+      },
     },
     async renewLease(leaseExpiresAt) {
       try {
@@ -301,20 +486,42 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       })
       return finished
     },
-    async assertOwned() {
-      const current = await host.storage.agents.runs.getById({
-        projectId: host.projectId,
-        id: run.id,
-      })
-      if (
-        current?.status !== "running" ||
-        current.execution?.token !== executionToken ||
-        current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
-      ) {
-        throw new AgentExecutionLostError(run.id)
+    assertOwned: () => assertAgentRunOwned(agents, fence),
+    threads,
+    artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
+    files,
+    async callTool(call, { signal, maxFileBytes }) {
+      // Only a tool the run offers: a child's are the ones its parent chose.
+      const offered = run.kind === "subagent" ? run.spec.toolNames : undefined
+      const definition =
+        offered === undefined || offered.includes(call.toolName)
+          ? host.definitions.tools.getByName(call.toolName)
+          : null
+      if (!definition) {
+        throw new AgentToolPublicError(`[Sixb] Tool '${call.toolName}' is not available.`)
       }
+      // A tool acts on the project: only for the runner that still holds the run.
+      await assertAgentRunOwned(agents, fence)
+      return runAgentTool({
+        definition,
+        valueTypesById: host.definitions.ontology.getValueTypesById(),
+        call,
+        signal,
+        run: toolRunInfo(run),
+        sixb: await toolSdk(),
+        logger: await toolLogger(),
+        attachments:
+          run.kind === "subagent"
+            ? handedToolAttachments({ files: await childFiles(run), store: files })
+            : threadToolAttachments({
+                threadId: run.threadId,
+                message: (messageId) => threads.message(messageId),
+                files,
+              }),
+        files,
+        ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
+      })
     },
-    threads: agentRunThreads(host, run, scope),
     authorization: (ref) =>
       resolveInheritedAgentExecutionAuthorization({
         auth: host.storage.auth,
@@ -322,6 +529,28 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         authorizationRef: ref,
         security: host.security,
       }),
+    async plan() {
+      const { sixb, authorization } = await bind()
+      const propertyClearance = resolveAgentPropertyClearance(
+        host.definitions.ontology,
+        authorization
+      )
+      return readAgentRunPlan(host.definitions, run, {
+        sixb,
+        ...(propertyClearance === undefined ? {} : { propertyClearance }),
+      })
+    },
+    async memory({ asOf }) {
+      // Others read a shared conversation, so its runs reach no one's own memory.
+      const participants =
+        run.kind === "conversation"
+          ? await agents.threads.listParticipants({
+              projectId: host.projectId,
+              threadIds: [run.threadId],
+            })
+          : []
+      return readAgentRunMemory(await runSdk(), { shared: participants.length > 0, asOf })
+    },
     context: async () => {
       const context = await readAgentRunContext(host, run)
       if (run.kind === "conversation" && context.kind !== "conversation") {
@@ -351,7 +580,48 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           })
         ),
     },
-    close: cancel.stop,
+    async close() {
+      cancel.stop()
+      ended.abort(new DOMException("The Agent run's session has closed.", "AbortError"))
+      await logs?.flush().catch((error: unknown) => {
+        console.error(`[Sixb] Agent run '${run.id}' could not flush its tools' logs.`, error)
+      })
+    },
+  }
+}
+
+/** The run a project tool is told it runs in. */
+function toolRunInfo(run: AgentRunRecord): AgentToolRunInfo {
+  return run.kind === "subagent"
+    ? { kind: "subagent", id: run.id, parentRunId: run.parentRunId }
+    : { kind: "conversation", id: run.id, threadId: run.threadId }
+}
+
+interface BoundRun {
+  readonly sixb: Sixb
+  readonly authorization: AgentExecutionAuthorization
+}
+
+/** The run's SDK, bound to its execution with the authority its requester holds now. */
+async function bindRun(host: AgentRunSessionHost, run: AgentRunRecord): Promise<BoundRun> {
+  const execution = await host.storage.executions.getById({
+    projectId: host.projectId,
+    id: run.executionId,
+  })
+  if (!execution) {
+    throw new Error(
+      `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+    )
+  }
+  const authorization = await resolveInheritedAgentExecutionAuthorization({
+    auth: host.storage.auth,
+    projectId: host.projectId,
+    authorizationRef: execution.authorizationRef,
+    security: host.security,
+  })
+  return {
+    sixb: bindDurableAgentExecution(host.sdk, { execution, runId: run.id, authorization }),
+    authorization,
   }
 }
 

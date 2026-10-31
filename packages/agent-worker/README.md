@@ -85,8 +85,8 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   back as files of `wait_agent`'s result, under `.sixb/agent/children/<key>/` for the turn and in
   `$SIXB_ATTACHMENTS` after, by their `logicalPath` `<key>/<path>`, and what it published is
   installed in the parent's `$SIXB_ARTIFACTS` (see
-  [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns a minute before
-  the turn's deadline (`WAIT_ANSWER_MARGIN_MS`), with the children still at work as `running`.
+  [runtime design](../agent/docs/runtime-design.md#child-runs)). It returns once they have all
+  ended, or one asks a question.
   `message_agent` writes to a queued or running child's inbox, by its key; the child reads it
   before its next step, or answers again when it came as it answered, and `wait_agent` lists in
   `unread` what a child has not read, which a paused child reads if it continues (see
@@ -222,13 +222,10 @@ The terminal run state is stored on the run record:
 - Model or tool failure: `failed`
 - Sandbox provisioning failure during a conversation or workflow agent node: `failed`, even if the
   model never invokes a sandbox tool; in-flight inference is aborted with the original failure reported
-- Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
-  assistant message before the thread is released. This controlled limit is not emitted as an
-  unhandled runtime failure. A child times out at its parent's deadline, however late it
-  started
 - User cancel during a turn: `cancelled`
-- Step limit reached before an answer: `succeeded` with `finishReason: "tool-calls"` and a
-  `step_limit_reached` diagnostic
+- A model call that sends nothing for 10 minutes (`MODEL_CALL_IDLE_MS`): `failed`. Nothing else
+  limits a run's steps or time: it runs until the model answers, the user cancels it, or its
+  runner loses it
 - Model output limit reached: a conversation turn is `succeeded` with `finishReason: "length"` and
   an `output_limit_reached` diagnostic. It keeps what the model produced; tool calls the model was
   still writing are dropped, never executed. A workflow agent node or subagent fails instead with
@@ -271,5 +268,3 @@ The terminal run state is stored on the run record:
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.
-- `turnTimeoutMs`: wall-clock turn budget; defaults to 10 minutes.
-- `defaultMaxSteps`: framework model step cap; defaults to `100`.

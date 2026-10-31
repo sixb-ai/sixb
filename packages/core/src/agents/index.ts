@@ -35,6 +35,14 @@ export {
   turnPausesOnHeldCalls,
   turnResumeReadiness,
 } from "./approvals"
+export type { MessageAttachmentFile } from "./attachment-keys"
+export {
+  attachmentKey,
+  attachmentKeyMessageId,
+  findMessageAttachment,
+  listMessageAttachments,
+  toolResultAttachmentKey,
+} from "./attachment-keys"
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,
@@ -143,6 +151,8 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export type { AgentRunArtifactPublish, AgentRunArtifacts } from "./run-artifacts"
+export { agentRunArtifacts } from "./run-artifacts"
 export type {
   CompactionCompletedInput,
   CompactionFailedInput,
@@ -164,6 +174,23 @@ export {
   interruptedError,
 } from "./run-liveness"
 export type {
+  AgentRunDelegation,
+  AgentRunDelegationModel,
+  AgentRunMemory,
+  AgentRunPlan,
+  AgentRunPlanDefinitions,
+  AgentRunView,
+  SandboxModel,
+  SandboxModelKind,
+} from "./run-plan"
+export {
+  listSandboxModels,
+  readAgentRunDelegation,
+  readAgentRunMemory,
+  readAgentRunPlan,
+  renderAgentRunOntologyDocs,
+} from "./run-plan"
+export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,
   AgentRunScopeErrorCode,
@@ -172,7 +199,9 @@ export type {
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
   AgentRunCheckpoint,
+  AgentRunFileStore,
   AgentRunHeldCalls,
+  AgentRunModels,
   AgentRunOutcome,
   AgentRunPeople,
   AgentRunSession,
@@ -205,6 +234,13 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
 } from "./run-token"
+export type {
+  AgentToolCall,
+  AgentToolCallOptions,
+  AgentToolCallResult,
+  AgentToolSpec,
+} from "./run-tools"
+export { agentToolSpec, runAgentTool, threadToolAttachments } from "./run-tools"
 export type {
   AgentChildContext,
   AgentRunContext,
@@ -251,7 +287,7 @@ export {
   subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
-export { listSubagentThreadRuns } from "./subagent-runs"
+export { listSubagentThreadRuns, subagentSandboxFiles } from "./subagent-runs"
 export { assertConversationThread, conversationThreadId } from "./thread-access"
 export type {
   AgentThreadModelContextMessage,
@@ -259,6 +295,12 @@ export type {
 } from "./thread-context-projection"
 export { projectAgentThreadModelContext } from "./thread-context-projection"
 export type { AgentToolCatalog } from "./tool-catalog"
+export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
+export {
+  AGENT_FILE_MAX_BYTES,
+  SANDBOX_CONTEXT_DIRECTORY,
+  storeAgentToolFile,
+} from "./tool-files"
 export { isAgentToolResult } from "./tool-result"
 export type {
   AgentDescriptor,

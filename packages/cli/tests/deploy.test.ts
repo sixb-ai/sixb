@@ -140,14 +140,13 @@ describe("deploy release", () => {
     })
   })
 
-  // Reproduce: rename `--no-migrate` or `--agent-turn-timeout` in command-line.ts, or drop an
+  // Reproduce: rename `--no-migrate` or `--concurrency` in command-line.ts, or drop an
   // option from a role's command, and this fails for the release that uses it.
   test("starts every Sixb service with a command the CLI accepts", () => {
     const built = release({
       services: {
         workers: {
           types: ["sync", "agent"],
-          agentTurnTimeout: "30m",
           concurrency: { sync: 2, agent: 8 },
         },
       },
@@ -175,8 +174,7 @@ describe("deploy release", () => {
       expect(parseCliArgs(step.args).kind).toBe("command")
     }
     expect(commandLine(built, "workers")).toBe(
-      "sixb worker-group sync agent --agent-turn-timeout 30m " +
-        "--concurrency sync=2 --concurrency agent=8 --no-migrate"
+      "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8 --no-migrate"
     )
   })
 
@@ -278,9 +276,6 @@ describe("deploy release", () => {
     expect(() =>
       release({ target: { ...target, listenAddress: () => ({ host: "127.0.0.1", port: 3000 }) } })
     ).toThrow("api and app both listen on port 3000")
-    expect(() => release({ services: { workers: { agentTurnTimeout: "10 minutes" } } })).toThrow(
-      "agentTurnTimeout '10 minutes' is not a duration"
-    )
   })
 })
 

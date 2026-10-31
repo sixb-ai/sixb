@@ -357,14 +357,8 @@ export interface SubagentRunSpec {
   readonly task: string
   /** Project tools available when the child was admitted. Runtime tools are injected separately. */
   readonly toolNames: readonly string[]
-  readonly maxSteps: number
   /** The parent turn's mode, copied when the child was admitted. Absent: `auto`. */
   readonly approvalMode?: AgentApprovalMode
-  /**
-   * ISO time the parent turn times out at. The child's wall clock ends there, however late it
-   * starts. Absent on children admitted before it: the worker's turn timeout.
-   */
-  readonly deadline?: string
   /** The parent turn's requester settings. Absent uses the project's. */
   readonly timeZone?: string
   readonly locale?: string
@@ -395,7 +389,7 @@ export interface SubagentRunRecord extends AgentRunRecordBase {
   readonly threadId: string
   /** The message of its thread that started the run. */
   readonly triggerMessageId: string
-  /** The conversation turn the child runs under: its deadline, mode and cancellation. */
+  /** The conversation turn the child runs under: its mode and cancellation. */
   readonly parentRunId: string
   /** Stable parent-selected key that makes repeated tool execution idempotent. */
   readonly spawnKey: string

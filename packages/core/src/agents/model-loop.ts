@@ -9,12 +9,13 @@ import {
 import { ModelProviderError, ModelStreamError, StructuredOutputError } from "../models/errors"
 import type {
   LanguageModelStreamEvent,
-  ModelCallEndEvent,
   ModelFinishReason,
   ModelStep,
   ModelUiChunk,
   ModelUsage,
 } from "../models/events"
+import { ModelUsageRecordingError } from "../models/execution/errors"
+import { LanguageModelCallMeter } from "../models/language-call"
 import type {
   LanguageModel,
   ModelReasoning,
@@ -30,16 +31,10 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models/messages"
-import {
-  estimateModelCall,
-  type ModelCallCost,
-  type ModelReportedCost,
-  rateModelCall,
-} from "../models/pricing"
+import type { ModelCallCost, ModelReportedCost } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
-
 interface ModelLoopOptions {
   readonly model: LanguageModel
   readonly messages: readonly ModelMessage[]
@@ -47,17 +42,15 @@ interface ModelLoopOptions {
   readonly reasoning?: ModelReasoning
   readonly maxOutputTokens?: number
   readonly caching?: "auto" | "off"
-  readonly maxSteps: number
+  /** At most this many provider calls. Without it, the loop runs until the model answers. */
+  readonly maxSteps?: number
   /** Direct generation cannot execute or synthesize local tool results. */
   readonly rejectLocalToolCalls?: boolean
   readonly signal: AbortSignal
-  /** Reserve the final provider call for a tool-free synthesis response. */
-  readonly finalStepInstruction?: string
   readonly prepareStep?: (
     input: PrepareModelStepInput
   ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
   readonly onEvent?: (event: ModelUiChunk) => void | Promise<void>
-  readonly onModelCallEnd?: (event: ModelCallEndEvent) => void | Promise<void>
   readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
   /**
    * Asked after each step that ran local tools, once `onStepEnd` settled: `true` ends the loop
@@ -164,8 +157,9 @@ export async function runModelLoop(
   const steps: ModelStep[] = []
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
+  const maxSteps = input.maxSteps ?? Number.POSITIVE_INFINITY
 
-  for (let stepIndex = 0; stepIndex < input.maxSteps; stepIndex += 1) {
+  for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
     if (input.signal.aborted) {
       return { status: "aborted", steps, partialContent: [] }
     }
@@ -187,14 +181,6 @@ export async function runModelLoop(
     if (input.signal.aborted) {
       return { status: "aborted", steps, partialContent: [] }
     }
-    let requestTools: readonly ModelToolSpecification[] = toolSpecifications
-    if (input.finalStepInstruction !== undefined && stepIndex === input.maxSteps - 1) {
-      requestMessages = [
-        ...requestMessages,
-        { role: "user", content: [{ type: "text", text: input.finalStepInstruction }] },
-      ]
-      requestTools = []
-    }
 
     const callId = generateCallId()
     if (!callId || callIds.has(callId)) {
@@ -209,7 +195,7 @@ export async function runModelLoop(
       const stream = await input.model.stream({
         callId,
         messages: requestMessages,
-        tools: requestTools,
+        tools: toolSpecifications,
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
         ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
         ...(input.caching === undefined ? {} : { caching: input.caching }),
@@ -225,6 +211,7 @@ export async function runModelLoop(
                 schema: input.output.schema,
               },
             }),
+        // A call the provider leaves silent fails where it is recorded (see reportModelCalls).
         signal: input.signal,
       })
       accepted = true
@@ -232,6 +219,8 @@ export async function runModelLoop(
         await accumulator.accept(event)
       }
     } catch (error) {
+      // A call that could not be recorded fails the run, even one that was being cancelled.
+      if (error instanceof ModelUsageRecordingError) throw error
       const aborted = input.signal.aborted || isAbortError(error)
       if (accumulator.isFinished()) {
         if (!aborted) terminalStreamError = { error }
@@ -245,29 +234,9 @@ export async function runModelLoop(
         }
       }
     } finally {
-      // Once a stream is accepted, cancellation or protocol failure cannot erase the call.
-      // Only a finish event establishes final meters; interrupted calls remain explicitly unknown.
-      if (accepted) {
-        const facts = accumulator.accounting()
-        const estimate = accumulator.isFinished() ? estimateModelCall(input.model, facts) : cost
-        cost = facts.reportedCost
-          ? rateModelCall({ usage: facts.usage, reported: facts.reportedCost })
-          : estimate
-        await input.onModelCallEnd?.({
-          callId,
-          modelKind: "language",
-          providerId: input.model.providerId,
-          modelId: input.model.modelId,
-          responseId: facts.responseId ?? `${callId}:response`,
-          providerIds: facts.providerIds,
-          responseModelId: facts.responseModelId,
-          usage: facts.usage,
-          cost,
-          ...(facts.reportedCost === undefined ? {} : { estimate }),
-          ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
-          ...(facts.route === undefined ? {} : { route: facts.route }),
-        })
-      }
+      // The step's cost, as the model records the call: the model is what records it (see
+      // AiModelCallRecorder.wrapModel), never the loop that reads it.
+      if (accepted) cost = accumulator.meter.end({ model: input.model, callId }).cost
     }
 
     if (input.signal.aborted && !accumulator.isFinished()) {
@@ -304,7 +273,7 @@ export async function runModelLoop(
       steps.push(step)
       await input.onStepEnd?.(step)
       messages = [...requestMessages, { role: "assistant", content: response.content }]
-      if (stepIndex + 1 === input.maxSteps) {
+      if (stepIndex + 1 === maxSteps) {
         throw new ModelStreamError(
           "[SixbModels] Model reached the step limit while a provider continuation was pending."
         )
@@ -317,7 +286,7 @@ export async function runModelLoop(
       await input.onStepEnd?.(step)
 
       // An answer cut short by the output limit ends the loop as it is.
-      const canContinue = response.finishReason !== "length" && stepIndex + 1 < input.maxSteps
+      const canContinue = response.finishReason !== "length" && stepIndex + 1 < maxSteps
       let followUp: readonly ModelMessage[] | undefined
       try {
         followUp = canContinue ? await input.beforeComplete?.(step, stepIndex) : undefined
@@ -396,7 +365,7 @@ export async function runModelLoop(
       { role: "tool", content: toolResults },
     ]
 
-    if (stepIndex + 1 === input.maxSteps) {
+    if (stepIndex + 1 === maxSteps) {
       if (input.output) {
         throw new StructuredOutputError(
           "[SixbModels] Model reached the step limit without structured output.",
@@ -418,7 +387,7 @@ function assertLoopInput(input: RunModelLoopInput<unknown>): void {
   ) {
     throw new TypeError("[SixbModels] maxOutputTokens must be a positive safe integer.")
   }
-  if (!Number.isInteger(input.maxSteps) || input.maxSteps <= 0) {
+  if (input.maxSteps !== undefined && (!Number.isInteger(input.maxSteps) || input.maxSteps <= 0)) {
     throw new TypeError("[SixbModels] maxSteps must be a positive integer.")
   }
   if (!input.model.providerId.trim() || !input.model.modelId.trim()) {
@@ -682,13 +651,9 @@ class StreamAccumulator {
   private finished = false
   private finishReason: ModelFinishReason | undefined
   private rawFinishReason: string | undefined
-  private usage: ModelUsage = {}
-  private responseId: string | undefined
-  private providerIds: import("../models/events").ModelProviderIds | undefined
-  private responseModelId: string | undefined
+  /** Who served the call, what it used and what the provider charged. */
+  readonly meter = new LanguageModelCallMeter()
   private projectionError: Error | undefined
-  private reportedCost: ModelReportedCost | undefined
-  private route: import("../models/events").ModelRoute | undefined
 
   constructor(private readonly onEvent: RunModelLoopInput["onEvent"]) {}
 
@@ -707,9 +672,7 @@ class StreamAccumulator {
         return
       case "response-metadata":
         this.requireStarted(event.type)
-        this.responseId = event.id ?? this.responseId
-        if (event.providerIds) this.providerIds = { ...this.providerIds, ...event.providerIds }
-        this.responseModelId = event.modelId ?? this.responseModelId
+        this.meter.accept(event)
         return
       case "text-start":
         await this.startText(event)
@@ -766,9 +729,7 @@ class StreamAccumulator {
         this.finished = true
         this.finishReason = event.finishReason
         this.rawFinishReason = event.rawFinishReason
-        this.usage = event.usage
-        this.reportedCost = event.reportedCost
-        this.route = event.route
+        this.meter.accept(event)
         return
       case "error":
         throw event.error instanceof Error
@@ -798,19 +759,8 @@ class StreamAccumulator {
       toolCalls: parsed.toolCalls,
       finishReason: this.finishReason,
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
-      ...this.accounting(),
+      ...this.meter.facts(),
       ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
-    }
-  }
-
-  accounting() {
-    return {
-      usage: this.usage,
-      ...(this.responseId === undefined ? {} : { responseId: this.responseId }),
-      ...(this.providerIds === undefined ? {} : { providerIds: this.providerIds }),
-      ...(this.responseModelId === undefined ? {} : { responseModelId: this.responseModelId }),
-      ...(this.reportedCost === undefined ? {} : { reportedCost: this.reportedCost }),
-      ...(this.route === undefined ? {} : { route: this.route }),
     }
   }
 

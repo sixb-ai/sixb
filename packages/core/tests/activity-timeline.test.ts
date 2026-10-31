@@ -387,7 +387,6 @@ describe("activity timeline", () => {
         model: { provider: "test", modelId: "small" },
         task: "Find the late invoices.",
         toolNames: [],
-        maxSteps: 5,
       },
       thread: { id: "thread_run_sub", create: true },
       trigger: {

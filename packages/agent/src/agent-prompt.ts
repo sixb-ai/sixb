@@ -1,23 +1,16 @@
 import { posix } from "node:path"
 import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition } from "@sixb/core"
+import type { SandboxModel } from "@sixb/core/internal/agents"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
 import type { SubagentRunFile } from "@sixb/core/storage"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import { CHILD_FILES_DIRECTORY } from "./child-files"
-import type { SandboxModel } from "./execution-plan"
 import { renderModelLine } from "./model-lines"
 import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
-
-/** Prompt appended to the final reserved model step after local tools are disabled. */
-export const DEFAULT_AGENT_FINAL_STEP_INSTRUCTION = [
-  "Provide the best possible final answer from the context available.",
-  "This is the final step, so do not call tools or defer the answer.",
-  "If the task cannot be completed from the available context, state the limitation clearly instead of inventing information.",
-].join(" ")
 
 const CHILD_FILE_LIMITS = `${SANDBOX_ATTACHMENT_LIMITS.maxFiles} files of ${formatBytes(SANDBOX_ATTACHMENT_LIMITS.fileMaxBytes)}, ${formatBytes(SANDBOX_ATTACHMENT_LIMITS.totalMaxBytes)} in all`
 

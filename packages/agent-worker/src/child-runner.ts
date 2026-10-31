@@ -2,21 +2,17 @@ import {
   type AgentExecutionEnvironment,
   type AgentRunFailure,
   type AgentTurnRuntime,
-  AgentTurnTimeoutError,
   createAgentTurnRuntime,
   createAskParentTool,
   createSubagentEnvironment,
   isLostExecution,
-  listSandboxModels,
   prepareAgentModel,
-  resolveSubagentExecutionPlan,
   runSubagent,
   SubagentInbox,
   type SubagentWork,
   stoppedByWorker,
   toAgentRunFailure,
 } from "@sixb/agent"
-import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -44,6 +40,7 @@ import {
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
+import { resolveRunPlan } from "./run-plan"
 import { childSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -182,6 +179,7 @@ export class ChildRunner {
           modelId: queuedRun.spec.model.modelId,
           leaseExpiresAt: parent.delivery.leaseExpiresAt,
           cancelWith: [queuedRun.parentRunId],
+          stop: stopped,
         })
       } catch (error) {
         if (stopped.aborted || isTerminalOrExecutionGone(error)) return null
@@ -247,18 +245,7 @@ export class ChildRunner {
       const { executionContext, durableExecution, childThread, conversation, plan, history } =
         prepared
       await session.events.publishStarted(run)
-      // The parent's deadline, not one from now: a child that started late has less left.
-      runtime = createAgentTurnRuntime({
-        context: executionContext,
-        run,
-        signal: turnSignal,
-        modelCalls: prepared.modelCalls,
-        ...(run.spec.deadline === undefined ? {} : { deadline: new Date(run.spec.deadline) }),
-      })
-      bindAgentModelExecution(executionContext.sixb, {
-        signal: runtime.signal,
-        accounting: runtime.usageRecorder,
-      })
+      runtime = createAgentTurnRuntime({ signal: turnSignal })
       // From the first message: one its parent sent while it was queued is read at its first step,
       // and a continuation's first step reads what the runs before it left unread.
       const inbox = new SubagentInbox(session.mail, run, history.messages)
@@ -318,14 +305,14 @@ export class ChildRunner {
         work.messages
       )
       if (finalized) {
-        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
+        if (finalized.run.status === "failed") {
           this.deps.reportFailure(error, finalized.run, finalized.failure)
         }
         await session.events.publishRunFinished(finalized.run)
       }
     } finally {
       stopOwnershipProjection?.()
-      session.close()
+      await session.close()
       runtime?.dispose()
       await environment?.dispose()
     }
@@ -342,15 +329,9 @@ export class ChildRunner {
     if (!currentParent || currentParent.kind !== "conversation" || isTerminalRun(currentParent)) {
       throw new DOMException("The parent Agent run is no longer active.", "AbortError")
     }
-    const configuredPlan = resolveSubagentExecutionPlan({
-      run: queuedRun,
-      models: host.definitions.models?.language,
-      tools: host.definitions.tools,
-      skills: host.definitions.agent.skills,
-      ...(host.definitions.agent.instructions === undefined
-        ? {}
-        : { projectInstructions: host.definitions.agent.instructions }),
-      sandboxModels: listSandboxModels(host.definitions.models),
+    const runPlan = await session.plan()
+    const configuredPlan = resolveRunPlan(runPlan, {
+      model: await session.models.language(runPlan.model),
     })
     if (
       !durableExecution ||
@@ -376,6 +357,7 @@ export class ChildRunner {
       runId: queuedRun.id,
       names: child.names,
       authorization: await session.authorization(durableExecution.authorizationRef),
+      files: session.files,
     })
     // The child works in its own thread, and publishes into its conversation's gallery.
     if (!childThread) {
@@ -386,18 +368,9 @@ export class ChildRunner {
       )
     }
     const { conversation } = child
-    const prepared = await prepareAgentModel(configuredPlan)
+    const prepared = prepareAgentModel(configuredPlan)
     const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
     const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
-    const modelCalls = await session.modelCalls()
-    return {
-      executionContext,
-      durableExecution,
-      childThread,
-      conversation,
-      plan,
-      history,
-      modelCalls,
-    }
+    return { executionContext, durableExecution, childThread, conversation, plan, history }
   }
 }

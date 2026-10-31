@@ -51,7 +51,10 @@ test.each([
     })
     const binding = foundry("production", { definition: { [limit]: 64000, capabilities: {} } })
     expect(calls).toEqual([])
-    const prepared = worker ? await prepareAgentModel({ model: binding }) : undefined
+    // A worker gets the model its session pinned, then budgets it.
+    const prepared = worker
+      ? prepareAgentModel({ model: await resolveLanguageModel(binding) })
+      : undefined
     const model = prepared?.model ?? (await resolveLanguageModel(binding))
     expect(model.definition).toMatchObject({
       modelId: "production",

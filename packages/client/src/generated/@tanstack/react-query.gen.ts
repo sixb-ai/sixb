@@ -5823,7 +5823,7 @@ export const listArtifactsInfiniteOptions = (options?: Options<ListArtifactsData
 /**
  * Create an artifact
  *
- * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.
+ * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first. With a run token, it is created in the run's conversation, owned by the conversation's owner and authored by the run's requester.
  */
 export const createArtifactMutation = (
   options?: Partial<Options<CreateArtifactData>>
@@ -6010,7 +6010,7 @@ export const setArtifactStateMutation = (
 /**
  * Publish an artifact's next version
  *
- * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.
+ * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since. With a run token, only an artifact the run's conversation shares or its requester owns; the version is shared in that conversation. A run that lost its execution gets 409 execution_lost.
  */
 export const publishArtifactVersionMutation = (
   options?: Partial<Options<PublishArtifactVersionData>>

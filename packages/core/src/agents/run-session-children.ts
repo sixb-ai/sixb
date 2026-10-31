@@ -15,7 +15,7 @@ import type {
 } from "../storage/agents"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
 import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
-import { AgentExecutionLostError, fenced } from "./run-fence"
+import { assertAgentRunOwned, fenced } from "./run-fence"
 import {
   type AgentInbox,
   type AgentMail,
@@ -177,11 +177,18 @@ export interface AgentRunChildrenHost {
   readonly maxActiveChildren?: number
 }
 
+/** What a turn may hand its children: the project's tools, and the models it delegates to. */
+export interface AgentRunDelegable {
+  readonly tools: readonly string[]
+  readonly models: readonly { readonly provider: string; readonly modelId: string }[]
+}
+
 export function agentRunChildren(
   host: AgentRunChildrenHost,
   run: AgentRunRecord,
   executionToken: string,
-  scope: AgentRunScope
+  scope: AgentRunScope,
+  delegable: () => AgentRunDelegable
 ): AgentRunChildren {
   const { projectId } = host
   const agents = host.storage.agents
@@ -223,6 +230,7 @@ export function agentRunChildren(
       return active.total
     },
     async spawn(child) {
+      assertDelegable(run, child, delegable())
       const id = createSubagentRunId(run.id, child.spawnKey)
       const executionId = createSubagentExecutionId(id)
       const [parentExecution, maxActiveChildren] = await Promise.all([
@@ -285,6 +293,27 @@ export function agentRunChildren(
   }
 }
 
+function assertDelegable(
+  run: AgentRunRecord,
+  child: AgentChildDraft,
+  delegable: AgentRunDelegable
+): void {
+  const { model, toolNames } = child.spec
+  const unknownTool = toolNames.find((name) => !delegable.tools.includes(name))
+  if (unknownTool !== undefined) {
+    throw new Error(`[Sixb] Agent run '${run.id}' cannot hand a child tool '${unknownTool}'.`)
+  }
+  if (
+    !delegable.models.some(
+      (each) => each.provider === model.provider && each.modelId === model.modelId
+    )
+  ) {
+    throw new Error(
+      `[Sixb] Agent run '${run.id}' cannot delegate to model '${model.provider}/${model.modelId}'.`
+    )
+  }
+}
+
 /**
  * A turn keeps at most the host's limit of children at work. One that resumes children paused on
  * calls its trigger decided starts with all of them at once: each was admitted within the limit.
@@ -317,10 +346,7 @@ export function agentRunMail(
   const agents = host.storage.agents
   return {
     async send(draft) {
-      const current = await agents.runs.getById({ projectId, id: run.id })
-      if (current?.status !== "running" || current.execution?.token !== executionToken) {
-        throw new AgentExecutionLostError(run.id)
-      }
+      await assertAgentRunOwned(agents, { projectId, id: run.id, executionToken })
       const sentAt = new Date().toISOString()
       if ("toRunId" in draft) {
         if (run.kind !== "subagent" || draft.toRunId !== run.parentRunId) {

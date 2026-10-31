@@ -2,6 +2,7 @@ import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
   estimateAgentContextMessagesTokens,
@@ -12,6 +13,7 @@ import {
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "@sixb/core/internal/agents"
+import { isModelCallAccountingFailure } from "@sixb/core/internal/model-execution"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelTool } from "@sixb/core/models"
 import type {
@@ -32,7 +34,7 @@ import {
   conversationAuthorsText,
 } from "./message-authors"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
-import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
+import { agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext } from "./types"
 
@@ -100,10 +102,7 @@ export async function prepareAgentConversationContext(input: {
     : undefined
 
   const tools = contextEstimateTools([
-    ...agentModelToolSpecs({
-      definitions: plan.tools,
-      valueTypesById: context.valueTypesById,
-    }),
+    ...agentModelToolSpecs(plan.tools),
     ...(input.frameworkTools ?? []),
   ])
   const estimateShapeWith = (memory: ConversationMemory | undefined) => ({
@@ -262,8 +261,8 @@ export async function prepareAgentConversationContext(input: {
     })
     return { threadContext, ...(compactedMemory ? { memory: compactedMemory } : {}) }
   } catch (error) {
-    // Preserve queue ownership, accounting, deadline, and cancellation failures as their original
-    // run-level outcome instead of relabeling them as a compaction implementation failure.
+    // Preserve lost ownership, cancellation and the model call's own accounting failure as their
+    // original run-level outcome instead of relabeling them as a compaction implementation failure.
     runtime.assertCanContinue()
     const compactionError = normalizeCompactionError(error, run.id)
     await session.events.publishCompactionFailed({
@@ -317,7 +316,7 @@ export function estimateAgentConversationInputTokens(input: {
 }
 
 function contextEstimateTools(
-  specs: readonly AgentModelToolSpec[]
+  specs: readonly AgentToolSpec[]
 ): readonly AgentContextEstimateTool[] {
   return specs.map((spec) => ({
     name: spec.name,
@@ -363,7 +362,7 @@ async function generateCheckpointSummary(input: {
   let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
     result = await runModelLoop({
-      model: input.runtime.usageRecorder.wrapModel(input.plan.model),
+      model: input.plan.model,
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
       messages: [
@@ -375,11 +374,12 @@ async function generateCheckpointSummary(input: {
       ],
       maxSteps: 1,
       maxOutputTokens,
-      onModelCallEnd: input.runtime.usageRecorder.onModelCallEnd,
       signal: input.runtime.signal,
     })
   } catch (error) {
     input.runtime.assertCanContinue()
+    // The summary's own model call was refused or left unrecorded: that ends the run as it is.
+    if (isModelCallAccountingFailure(error)) throw error
     throw new AgentContextCompactionError(
       "summary_failed",
       input.run.id,
@@ -492,7 +492,7 @@ function requiredHeadSeq(
 
 function normalizeCompactionError(error: unknown, runId: string): AgentContextCompactionError {
   if (error instanceof AgentContextCompactionError) return error
-  if (error instanceof AgentExecutionLostError) throw error
+  if (error instanceof AgentExecutionLostError || isModelCallAccountingFailure(error)) throw error
   return new AgentContextCompactionError(
     "checkpoint_failed",
     runId,

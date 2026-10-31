@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentToolDefinition,
   AgentToolPublicError,
   type AgentToolRunContext,
   defineAgentTool,
@@ -7,33 +8,61 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
-import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import {
+  agentToolSpec,
+  runAgentTool,
+  runModelLoop,
+  toModelMessages,
+} from "@sixb/core/internal/agents"
 import type { ModelAssistantPart, ModelStep, ProviderData } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
   agentTraceFromPartialModelLoop,
-  modelToolsFromAgentDefinitions,
+  projectModelTools,
 } from "../src/model-adapters"
 import { WorkerTestModel } from "./worker-model-fixture"
 
-const unusedSixb = {} as AgentToolRunContext["sixb"]
+const run = { kind: "conversation" as const, id: "run-1", threadId: "thread-1" }
 const toolRuntime = {
-  filesForToolCall() {
-    return {
-      async put() {
-        throw new Error("unused")
-      },
-    }
-  },
-  toolResultToModelOutput() {
-    return { type: "text" as const, value: "unused" }
-  },
   attachments: {
     async open() {
       throw new Error("unused")
     },
   },
+}
+
+/** The tools as a run offers them, each call run as a session runs it: by runAgentTool. */
+function toolsOf(
+  definitions: readonly AgentToolDefinition[],
+  options: { readonly sixb?: AgentToolRunContext["sixb"] } = {}
+) {
+  return projectModelTools({
+    specs: definitions.map((definition) => agentToolSpec(definition, new Map())),
+    runId: run.id,
+    fileBytesLeft: () => Number.MAX_SAFE_INTEGER,
+    callTool: (call, { signal }) => {
+      const definition = definitions.find((each) => each.name === call.toolName)
+      if (!definition) throw new Error(`No tool '${call.toolName}'.`)
+      return runAgentTool({
+        definition,
+        valueTypesById: new Map(),
+        call,
+        signal,
+        run,
+        sixb: options.sixb ?? ({} as AgentToolRunContext["sixb"]),
+        logger: noopLogger,
+        attachments: toolRuntime.attachments,
+        files: {
+          async put() {
+            throw new Error("unused")
+          },
+        },
+      })
+    },
+    installFiles: async () => {},
+    toolResultToModelOutput: () => ({ type: "text" as const, value: "unused" }),
+  })
 }
 
 function modelStep(content: readonly ModelAssistantPart[]): ModelStep {
@@ -92,7 +121,7 @@ describe("owned model adapters", () => {
     ])
   })
 
-  test("converts Sixb tool definitions and supplies normalized run-scoped input", async () => {
+  test("offers a tool's spec and runs its call where the project is, with the run's input", async () => {
     const connectorDefinition = defineConnector("knowledge", {
       type: "knowledge",
       connect() {
@@ -108,18 +137,13 @@ describe("owned model adapters", () => {
         results: (await sixb.connector(connectorDefinition)).search(input.query),
         limit: input.limit,
         mode: input.mode,
+        frozen: Object.isFrozen(input),
         aborted: signal.aborted,
         run,
         runAttachments: attachments === toolRuntime.attachments,
       }))
-    const run = { kind: "conversation" as const, id: "run-1", threadId: "thread-1" }
-    const [tool] = modelToolsFromAgentDefinitions({
-      definitions: [definition],
-      valueTypesById: new Map(),
-      run,
+    const [tool] = toolsOf([definition], {
       sixb: { connector: resolve } as AgentToolRunContext["sixb"],
-      logger: noopLogger,
-      ...toolRuntime,
     })
 
     expect(tool?.inputSchema).toEqual({
@@ -133,7 +157,6 @@ describe("owned model adapters", () => {
       additionalProperties: false,
     })
     const parsed = tool?.parseInput({ query: "sixb", limit: 2, mode: "quick" })
-    expect(Object.isFrozen(parsed)).toBe(true)
     await expect(
       tool?.execute(parsed, {
         signal: new AbortController().signal,
@@ -144,37 +167,36 @@ describe("owned model adapters", () => {
       results: ["found:sixb"],
       limit: 2,
       mode: "quick",
+      frozen: true,
       aborted: false,
       run,
       runAttachments: true,
     })
   })
 
-  test("rejects duplicate names and invalid tool input before execution", () => {
+  // Guard proof: drop the input check from runAgentTool; the handler then runs with `text: 42`.
+  test("rejects duplicate names, and input the tool's schema refuses, where the call runs", async () => {
+    let ran = false
     const definition = defineAgentTool("echo")
       .description("Echo text.")
       .input({ text: "string" })
-      .run(({ input }) => input)
-    expect(() =>
-      modelToolsFromAgentDefinitions({
-        definitions: [definition, definition],
-        valueTypesById: new Map(),
-        run: { kind: "conversation", id: "run-2", threadId: "thread" },
-        sixb: unusedSixb,
-        logger: noopLogger,
-        ...toolRuntime,
+      .run(({ input }) => {
+        ran = true
+        return input
       })
-    ).toThrow("duplicate selected tool name 'echo'")
+    expect(() => toolsOf([definition, definition])).toThrow("duplicate selected tool name 'echo'")
 
-    const [tool] = modelToolsFromAgentDefinitions({
-      definitions: [definition],
-      valueTypesById: new Map(),
-      run: { kind: "conversation", id: "run-2", threadId: "thread" },
-      sixb: unusedSixb,
-      logger: noopLogger,
-      ...toolRuntime,
-    })
-    expect(() => tool?.parseInput({ text: 42 })).toThrow()
+    const [tool] = toolsOf([definition])
+    expect(() => tool?.parseInput("not an object")).toThrow()
+    const refused = await tool
+      ?.execute(tool.parseInput({ text: 42 }), {
+        signal: new AbortController().signal,
+        callId: "call-1",
+        toolCallId: "tool-call-1",
+      })
+      .catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(AgentToolPublicError)
+    expect(ran).toBe(false)
   })
 
   test("keeps public tool errors safe and redacts internal failures", async () => {
@@ -188,14 +210,7 @@ describe("owned model adapters", () => {
       .run(() => {
         throw safe
       })
-    const [tool] = modelToolsFromAgentDefinitions({
-      definitions: [definition],
-      valueTypesById: new Map(),
-      run: { kind: "conversation", id: "run-3", threadId: "thread" },
-      sixb: unusedSixb,
-      logger: noopLogger,
-      ...toolRuntime,
-    })
+    const [tool] = toolsOf([definition])
     await expect(
       tool?.execute(
         {},

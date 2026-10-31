@@ -1,6 +1,7 @@
 import { posix } from "node:path"
-import type { ArtifactsRuntime, BlobStorage, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type { Sandbox, SandboxFileRecord } from "@sixb/core"
 import { formatArtifactAddress } from "@sixb/core/artifacts"
+import type { AgentRunArtifacts, AgentRunFileStore } from "@sixb/core/internal/agents"
 import type { ArtifactOutline, ArtifactRecord, ArtifactVersionRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "../abort"
 
@@ -152,8 +153,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
   }
 }
 
-/** What a turn reads of artifacts: the requester's own view of them, by the one access rule. */
-export type TurnArtifacts = Pick<ArtifactsRuntime, "access" | "get" | "getVersion" | "list">
+/** What a turn reads of its conversation's artifacts, as its requester, through its session. */
+export type TurnArtifacts = Pick<AgentRunArtifacts, "getVersion" | "list" | "listVersions">
 
 /**
  * The latest version of each artifact the conversation shares, installed under `<directory>/<id>/`
@@ -163,9 +164,10 @@ export type TurnArtifacts = Pick<ArtifactsRuntime, "access" | "get" | "getVersio
  * files.
  */
 export async function materializeThreadArtifacts(input: {
+  /** The conversation's thread, whose artifacts a copy published elsewhere is edited from. */
   readonly threadId: string
   readonly artifacts: TurnArtifacts
-  readonly blobStorage: BlobStorage
+  readonly blobStorage: AgentRunFileStore
   /** As the agent names it: relative to the working directory, or absolute. */
   readonly directory: string
   /** Where the manifest is written, named the same way. */
@@ -180,10 +182,7 @@ export async function materializeThreadArtifacts(input: {
   const entries: ManifestEntry[] = []
   const files: SandboxFileRecord[] = []
   const installed = new Map<string, number>()
-  const { artifacts } = await input.artifacts.list({
-    threadId: input.threadId,
-    limit: MATERIALIZE_MAX_ARTIFACTS,
-  })
+  const artifacts = await input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS })
   let installedBytes = 0
   for (const artifact of artifacts) {
     signal.throwIfAborted()
@@ -236,18 +235,14 @@ export async function materializeThreadArtifacts(input: {
  */
 export async function installArtifactsPublishedBy(input: {
   readonly installed: InstalledArtifacts
-  readonly threadId: string
-  readonly artifacts: Pick<ArtifactsRuntime, "list" | "getVersion" | "listVersions">
-  readonly blobStorage: BlobStorage
+  readonly artifacts: TurnArtifacts
+  readonly blobStorage: AgentRunFileStore
   readonly sandbox: Sandbox
   readonly runIds: readonly string[]
   readonly signal: AbortSignal
 }): Promise<void> {
   const runIds = new Set(input.runIds)
-  const { artifacts } = await input.artifacts.list({
-    threadId: input.threadId,
-    limit: MATERIALIZE_MAX_ARTIFACTS,
-  })
+  const artifacts = await input.artifacts.list({ limit: MATERIALIZE_MAX_ARTIFACTS })
 
   const failed: string[] = []
   // Oldest first: each install lists its artifact first, so the newest ends up first.
@@ -346,7 +341,7 @@ function partsOf(
 
 /** A version's files with the bytes each holds. Reading stops when the run is cancelled. */
 export async function readArtifactVersionFiles(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   version: ArtifactVersionRecord,
   signal: AbortSignal
 ): Promise<PublishedArtifactFile[]> {
@@ -361,7 +356,7 @@ export async function readArtifactVersionFiles(
 
 /** A blob's bytes. Reading stops when the run is cancelled. */
 export async function readBlob(
-  blobStorage: BlobStorage,
+  blobStorage: AgentRunFileStore,
   blobId: string,
   signal: AbortSignal
 ): Promise<Uint8Array> {
