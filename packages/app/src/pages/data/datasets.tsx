@@ -57,6 +57,7 @@ import {
 } from "../section-ui"
 import { useDatasetLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
+import { DatasetProducerLabel, DatasetVersionInputs } from "./producer"
 import { SchemaPanel } from "./schema"
 
 const pageSize = 100
@@ -254,15 +255,16 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
     )
   }
 
+  // A pipeline's target is the dataset it writes; a dataset it reads is one of its sources.
   const writtenBy = [
     ...dataset.syncIds.map((id) => ({ id, href: `/data/syncs/${encodeURIComponent(id)}` })),
-    ...dataset.sourcePipelineIds.map((id) => ({
+    ...dataset.targetPipelineIds.map((id) => ({
       id,
       href: `/data/pipelines/${encodeURIComponent(id)}`,
     })),
   ]
   const readBy = [
-    ...dataset.targetPipelineIds.map((id) => ({
+    ...dataset.sourcePipelineIds.map((id) => ({
       id,
       href: `/data/pipelines/${encodeURIComponent(id)}`,
     })),
@@ -296,6 +298,23 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
                 </span>
               </span>
             ),
+          },
+        ]
+      : []),
+    // What wrote the shown version and what it read, as far as this person may see them.
+    ...(shownVersion?.producer
+      ? [
+          {
+            label: messages.datasets.producedBy,
+            value: <DatasetProducerLabel producer={shownVersion.producer} />,
+          },
+        ]
+      : []),
+    ...(shownVersion?.inputs?.length
+      ? [
+          {
+            label: messages.datasets.computedFrom,
+            value: <DatasetVersionInputs inputs={shownVersion.inputs} />,
           },
         ]
       : []),

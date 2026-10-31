@@ -1,19 +1,28 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { client, type GetConnectorResponse, type GetSyncResponse } from "@sixb/client"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import {
+  client,
+  type GetConnectorResponse,
+  type GetDatasetResponse,
+  type GetSyncResponse,
+  type ListDatasetRowsResponse,
+} from "@sixb/client"
 import {
   getAuthSessionQueryKey,
   getConnectorQueryKey,
+  getDatasetQueryKey,
   getSyncQueryKey,
+  listDatasetRowsQueryKey,
+  listDatasetVersionsQueryKey,
   listSyncsQueryKey,
   listWebhookRunsQueryKey,
 } from "@sixb/client/hooks"
 import type { FileRef } from "@sixb/core/blob-storage"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react"
+import { type ReactNode, useLayoutEffect } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SyncButton } from "../src"
-import { DataConnectorPage, SectionsProvider } from "../src/pages"
+import { DataConnectorPage, DataDatasetPage, SectionsProvider } from "../src/pages"
 import { DatasetCell, datasetColumnNames } from "../src/pages/data/datasets"
 import { projectionRunsPollInterval } from "../src/pages/data/projections"
 import { installDom } from "./helpers/dom"
@@ -23,9 +32,13 @@ installDom([
   "document",
   "navigator",
   "Node",
+  "NodeFilter",
   "Element",
   "HTMLElement",
+  "HTMLInputElement",
   "Event",
+  "CustomEvent",
+  "FocusEvent",
   "EventTarget",
   "MouseEvent",
   "KeyboardEvent",
@@ -41,17 +54,33 @@ let sockets: ReturnType<typeof stubWebSockets> | undefined
 // Generated query keys carry the client's base URL, so it is set before any key is built.
 client.setConfig({ baseUrl: apiUrl })
 
+// Radix picks its layout effect when it loads, a no-op without a `document`, and a sheet then
+// never mounts. This file or another of the run loads it before the window exists, so it is given
+// React's own, and its own back after the file.
+const radix = Bun.resolveSync("radix-ui", Bun.resolveSync("@sixb/ui/components", import.meta.dir))
+const layoutEffect = Bun.resolveSync(
+  "@radix-ui/react-use-layout-effect",
+  Bun.resolveSync("@radix-ui/react-portal", Bun.resolveSync("@radix-ui/react-dialog", radix))
+)
+const loaded: typeof import("react").useLayoutEffect = (await import(layoutEffect)).useLayoutEffect
+mock.module(layoutEffect, () => ({ useLayoutEffect }))
+
 beforeAll(() => {
   sockets = stubWebSockets()
 })
 
-afterEach(() => {
+// A closed sheet's focus scope gives focus back on the next task; let it run while the window is
+// still here, or it lands in the next file.
+afterEach(async () => {
+  cleanup()
+  await new Promise((resolve) => setTimeout(resolve, 0))
   client.setConfig({ fetch: originalConfig.fetch })
 })
 
 afterAll(() => {
   client.setConfig({ baseUrl: originalConfig.baseUrl })
   sockets?.restore()
+  mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
 })
 
 function renderPage(
@@ -73,6 +102,7 @@ function renderPage(
         <MemoryRouter initialEntries={[options.path]}>
           <Routes>
             <Route path="/data/connectors/:connectorId" element={ui} />
+            <Route path="/data/datasets/:datasetId" element={ui} />
             <Route path="*" element={ui} />
           </Routes>
         </MemoryRouter>
@@ -292,5 +322,91 @@ describe("SyncButton", () => {
     expect(requests[0]).toBe("POST /api/syncs/sync-orbit/runs")
     const busy = await view.findByRole("button", { name: "Syncing…" })
     expect(busy.hasAttribute("disabled")).toBe(true)
+  })
+})
+
+describe("a dataset version's details", () => {
+  const dataset: GetDatasetResponse = {
+    id: "service-cases",
+    schema: { columns: [{ name: "status", type: "string" }] },
+    kind: "dataset",
+    materialized: true,
+    latestVersion: {
+      datasetId: "service-cases",
+      versionId: "ducklake:84",
+      mode: "snapshot",
+      createdAt: "2026-10-30T09:00:00.000Z",
+    },
+    syncIds: [],
+    sourcePipelineIds: ["reports"],
+    targetPipelineIds: ["controls"],
+    projectionIds: [],
+  }
+  const rows = (version: Partial<ListDatasetRowsResponse["version"]>): ListDatasetRowsResponse => ({
+    datasetId: "service-cases",
+    versionId: "ducklake:84",
+    version: {
+      datasetId: "service-cases",
+      versionId: "ducklake:84",
+      mode: "snapshot",
+      createdAt: "2026-10-30T09:00:00.000Z",
+      schema: dataset.schema,
+      ...version,
+    },
+    columns: ["status"],
+    rows: [],
+    count: 0,
+    limit: 100,
+    offset: 0,
+    hasMore: false,
+  })
+  const path = { datasetId: "service-cases" }
+  const openDetails = async (version: Partial<ListDatasetRowsResponse["version"]>) => {
+    const { view } = renderPage(<DataDatasetPage />, {
+      path: "/data/datasets/service-cases",
+      data: [
+        [getDatasetQueryKey({ path }), dataset],
+        [listDatasetVersionsQueryKey({ path }), { versions: [], count: 0 }],
+        [listDatasetRowsQueryKey({ path, query: { limit: "100", offset: "0" } }), rows(version)],
+      ],
+    })
+    await act(async () => fireEvent.click(view.getByRole("button", { name: "Details" })))
+    return await view.findByRole("dialog")
+  }
+
+  // Removal proof: drop the producer and inputs facts from DatasetDetail and neither shows.
+  test("say which run wrote it and the versions it was computed from", async () => {
+    const sheet = await openDetails({
+      producer: { kind: "pipeline", id: "controls", runId: "run_7", stepId: "join-cases" },
+      inputs: [{ datasetId: "raw-cases", versionId: "ducklake:80" }],
+    })
+
+    // "Written by" names the pipeline too; the version's producer opens the run that wrote it.
+    const pipelineLinks = within(sheet).getAllByRole("link", { name: "Controls" })
+    expect(pipelineLinks.map((link) => link.getAttribute("href"))).toEqual([
+      "/data/pipelines/controls",
+      "/data/pipelines/controls?run=run_7",
+    ])
+    expect(within(sheet).getByText("Join cases")).toBeDefined()
+
+    const input = within(sheet).getByRole("link", { name: /raw-cases/ })
+    expect(input.getAttribute("href")).toBe("/data/datasets/raw-cases?version=ducklake%3A80")
+  })
+
+  // Removal proof: swap `targetPipelineIds` and `sourcePipelineIds` back in DatasetDetail.
+  test("list the pipeline that writes it under written by and the one that reads it under read by", async () => {
+    const sheet = await openDetails({})
+
+    const row = (label: string) => within(within(sheet).getByText(label).parentElement!)
+    expect(row("Written by").getByRole("link", { name: "Controls" })).toBeDefined()
+    expect(row("Read by").getByRole("link", { name: "Reports" })).toBeDefined()
+    expect(row("Written by").queryByRole("link", { name: "Reports" })).toBeNull()
+  })
+
+  test("name a producer the reader may not follow by its kind alone", async () => {
+    const sheet = await openDetails({ producer: { kind: "sync" } })
+
+    expect(within(sheet).getByText("A sync")).toBeDefined()
+    expect(within(sheet).queryByText("Computed from")).toBeNull()
   })
 })

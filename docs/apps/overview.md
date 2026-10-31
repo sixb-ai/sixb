@@ -222,7 +222,7 @@ objects it fills, and what failed on the way.
 | --- | --- | --- |
 | Connectors | `/data/connectors` | Each connector's syncs, and its webhooks and deliveries |
 | Syncs | `/data/syncs` | Each sync's runs, with **Sync now** to start one |
-| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, and its schema |
+| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, its schema, and the run that wrote the version shown and the versions it was computed from |
 | Pipelines | `/data/pipelines` | Each pipeline as a canvas of datasets and steps; select a dataset to see its rows, open **Runs** for each run's step results, and **Run now** to start one |
 | Projections | `/data/projections` | Which dataset columns fill each object, link, or telemetry field, and its runs |
 
