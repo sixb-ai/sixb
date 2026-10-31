@@ -1,7 +1,10 @@
 /** @jsxImportSource @opentui/react */
-import type { SyntaxStyle } from "@opentui/core"
+import { CodeRenderable, type MarkdownOptions, type SyntaxStyle } from "@opentui/core"
+import { useRenderer } from "@opentui/react"
 import type { ListAgentThreadApprovalsResponses, ListAgentThreadRunsResponses } from "@sixb/client"
+import { useEffect, useState } from "react"
 import { duration, friendlyPath, plural, type ToolLine, toolLine } from "./format"
+import { steadyMarkdown } from "./markdown"
 import {
   type ApprovalOutcome,
   approvalOutcomes,
@@ -175,12 +178,11 @@ function AgentParts({
         switch (part.kind) {
           case "text":
             return (
-              <markdown
+              <Answer
                 key={key}
-                content={part.text.trim()}
-                syntaxStyle={syntax}
-                fg={colors.text}
-                conceal
+                colors={colors}
+                syntax={syntax}
+                text={part.text}
                 streaming={streaming && last}
               />
             )
@@ -218,6 +220,68 @@ function AgentParts({
     </box>
   )
 }
+
+/**
+ * What the agent said, as markdown drawn the moment it is set: each top-level block on its own,
+ * where OpenTUI otherwise draws runs of them as raw markdown until highlighting conceals the
+ * markers, every time the text grows. While it streams, its unfinished end is steadied.
+ */
+function Answer({
+  colors,
+  syntax,
+  text,
+  streaming,
+}: {
+  readonly colors: TuiColors
+  readonly syntax: SyntaxStyle
+  readonly text: string
+  readonly streaming: boolean
+}) {
+  // Markdown created finished draws nothing until it is highlighted, and an answer is created
+  // finished whenever its stored message replaces the streamed one. Created streaming it is drawn
+  // at once, so a finished answer is finalized after its first frame.
+  const renderer = useRenderer()
+  const [drawn, setDrawn] = useState(false)
+  useEffect(() => {
+    const mark = () => setDrawn(true)
+    renderer.once("frame", mark)
+    return () => {
+      renderer.off("frame", mark)
+    }
+  }, [renderer])
+
+  return (
+    <markdown
+      content={streaming ? steadyMarkdown(text) : text.trim()}
+      syntaxStyle={syntax}
+      fg={colors.text}
+      conceal
+      internalBlockMode="top-level"
+      tableOptions={TABLES}
+      renderNode={drawCodeAtOnce}
+      streaming={streaming || !drawn}
+    />
+  )
+}
+
+/** Tables boxed, as the transcript has always drawn them. */
+const TABLES: MarkdownOptions["tableOptions"] = { style: "grid" }
+
+type RenderNode = NonNullable<MarkdownOptions["renderNode"]>
+
+/**
+ * A code block drawn plain until it is highlighted, rather than left blank. Only code blocks: the
+ * rest keeps OpenTUI's own rendering.
+ */
+const drawCodeAtOnce = Object.assign<RenderNode, { codeBlockOnly: true }>(
+  (token, context) => {
+    if (token.type !== "code") return undefined
+    const code = context.defaultRender()
+    if (code instanceof CodeRenderable) code.drawUnstyledText = true
+    return code
+  },
+  { codeBlockOnly: true }
+)
 
 function Thought({
   colors,
