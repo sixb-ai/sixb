@@ -1,0 +1,817 @@
+import {
+  ActionRunFailedError,
+  type ListActionRunsResponse,
+  type ListActionsResponse,
+} from "@sixb/client"
+import {
+  listActionRunsOptions,
+  listActionsOptions,
+  listObjectsInfiniteOptions,
+  useActionRunMutation,
+} from "@sixb/client/hooks"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Badge,
+  Button,
+  Combobox,
+  type ComboboxOption,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from "@sixb/ui/components"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import {
+  AlertCircle,
+  GitCommitHorizontal,
+  Loader2,
+  Play,
+  Search,
+  SquareActivity,
+  X,
+} from "lucide-react"
+import { type ReactElement, type SyntheticEvent, useCallback, useMemo, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
+import { useSectionOpen } from "../../../sections/sections"
+import { actionRunHref } from "../../routes"
+import { notify, SectionPage } from "../../section-page"
+import {
+  PanelEmpty,
+  PanelSkeleton,
+  RunStatusPill,
+  ToolbarTabs,
+  useLoadFailure,
+} from "../../section-ui"
+import { ActionRuns } from "./action-runs"
+import { ActionParamNullControl } from "./components/action-param-null-control"
+import { CollectionToolbar } from "./components/collection-toolbar"
+import {
+  FileRefUploadField,
+  parseFileRefFormValue,
+  stringifyFileRefFormValue,
+} from "./components/file-ref-upload-field"
+import { UserPicker } from "./components/user-picker"
+import {
+  type ActionParamFormValue,
+  type ActionParamFormValues,
+  type ActionRequestPayload,
+  buildActionParams,
+  describeActionParamInput,
+} from "./lib/action-params"
+import { humanizeIdentifier } from "./lib/labels"
+import { formatRelativeTime } from "./lib/time"
+
+type ActionCatalogItem = ListActionsResponse[number]
+type ActionRunSummary = ListActionRunsResponse["runs"][number]
+
+/**
+ * Runs record no event, so each action's latest run is read again while the page is displayed, to
+ * show runs started elsewhere: by workflows, agents, or other users.
+ */
+const RUN_HISTORY_REFETCH_MS = 10_000
+
+/**
+ * Console › Actions: every action, each with its latest run, applied from its card; and every
+ * action run, to find one that failed and open it.
+ */
+export function ConsoleActionsPage() {
+  const count = useQuery({ ...listActionsOptions(), retry: false }).data?.length
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = searchParams.get("view") === "runs" ? "runs" : "actions"
+  // Each view has its own filters, so switching starts them clear.
+  const showView = (next: "actions" | "runs") =>
+    setSearchParams(next === "runs" ? { view: "runs" } : {})
+  const filterRuns = (changes: {
+    readonly action?: string | null
+    readonly status?: string | null
+  }) =>
+    setSearchParams(
+      (params) => {
+        for (const [name, value] of Object.entries(changes)) {
+          if (value) params.set(name, value)
+          else params.delete(name)
+        }
+        return params
+      },
+      { replace: true }
+    )
+
+  return (
+    <SectionPage
+      section="console"
+      page="actions"
+      width="wide"
+      title="Actions"
+      meta={
+        count === undefined ? undefined : <span>{`${count} action${count === 1 ? "" : "s"}`}</span>
+      }
+    >
+      <ToolbarTabs
+        className="-mt-4"
+        value={view}
+        onChange={showView}
+        tabs={[
+          { id: "actions", label: "Actions" },
+          { id: "runs", label: "Runs" },
+        ]}
+      />
+      {view === "runs" ? (
+        <ActionRuns
+          actionId={searchParams.get("action")}
+          status={searchParams.get("status")}
+          onFilter={filterRuns}
+        />
+      ) : (
+        <ActionDefinitionsTab />
+      )}
+    </SectionPage>
+  )
+}
+
+function ActionDefinitionsTab() {
+  const actionsQuery = useQuery({ ...listActionsOptions(), retry: false })
+  const runsQuery = useQuery({
+    ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
+    refetchInterval: RUN_HISTORY_REFETCH_MS,
+  })
+  const actions = actionsQuery.data ?? []
+  const [searchParams, setSearchParams] = useSearchParams()
+  const query = searchParams.get("q") ?? ""
+  const scope =
+    searchParams.get("scope") === "global"
+      ? "global"
+      : searchParams.get("scope") === "object"
+        ? "object"
+        : "all"
+  const requestedType = searchParams.get("type") ?? "all"
+
+  const objectTypes = useMemo(
+    () =>
+      Array.from(
+        new Set(actions.flatMap((action) => (action.objectTypeId ? [action.objectTypeId] : [])))
+      ).sort((left, right) => humanizeIdentifier(left).localeCompare(humanizeIdentifier(right))),
+    [actions]
+  )
+  const objectType =
+    scope !== "global" && objectTypes.includes(requestedType) ? requestedType : "all"
+  const latestRunByAction = useMemo(() => {
+    const latest = new Map<string, ActionRunSummary>()
+    for (const run of runsQuery.data?.runs ?? []) {
+      if (!latest.has(run.actionId)) latest.set(run.actionId, run)
+    }
+    return latest
+  }, [runsQuery.data])
+  const filteredActions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    return actions.filter((action) => {
+      if (scope === "global" && action.objectTypeId) return false
+      if (scope === "object" && !action.objectTypeId) return false
+      if (objectType !== "all" && action.objectTypeId !== objectType) return false
+      if (!normalizedQuery) return true
+      return [action.id, humanizeIdentifier(action.id), action.description, action.objectTypeId]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLowerCase().includes(normalizedQuery))
+    })
+  }, [actions, objectType, query, scope])
+  const filtersActive = query.trim().length > 0 || scope !== "all" || objectType !== "all"
+
+  const updateFilterParam = (key: "q" | "type", value: string) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        if (!value || value === "all") next.delete(key)
+        else next.set(key, value)
+        return next
+      },
+      { replace: key === "q" }
+    )
+  }
+
+  const updateScope = (value: string) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        if (value === "all") next.delete("scope")
+        else next.set("scope", value)
+        if (value === "global") next.delete("type")
+        return next
+      },
+      { replace: false }
+    )
+  }
+
+  if (actionsQuery.isPending) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <PanelSkeleton rows={4} />
+      </div>
+    )
+  }
+
+  if (actionsQuery.isError) {
+    return <ActionsFailure error={actionsQuery.error} />
+  }
+
+  return (
+    <section className="-mt-4 space-y-4">
+      {actions.length === 0 ? (
+        <PanelEmpty
+          icon={SquareActivity}
+          title="No actions registered"
+          description="Define actions to request changes to the project's objects."
+        />
+      ) : (
+        <>
+          <CollectionToolbar
+            search={{
+              value: query,
+              onChange: (value) => updateFilterParam("q", value),
+              placeholder: "Search actions…",
+            }}
+            actions={
+              <>
+                <Select value={scope} onValueChange={updateScope}>
+                  <SelectTrigger className="h-9 w-36 bg-card" aria-label="Action scope">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All scopes</SelectItem>
+                    <SelectItem value="object">Object actions</SelectItem>
+                    <SelectItem value="global">Global actions</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={scope === "global" ? "all" : objectType}
+                  disabled={scope === "global"}
+                  onValueChange={(value) => updateFilterParam("type", value)}
+                >
+                  <SelectTrigger className="h-9 w-48 bg-card" aria-label="Target object type">
+                    <SelectValue placeholder="All object types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All object types</SelectItem>
+                    {objectTypes.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {humanizeIdentifier(type)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {filtersActive ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    className="size-9 shrink-0 bg-card"
+                    aria-label="Clear action filters"
+                    title="Clear action filters"
+                    onClick={() => {
+                      setSearchParams((previous) => {
+                        const next = new URLSearchParams(previous)
+                        next.delete("q")
+                        next.delete("scope")
+                        next.delete("type")
+                        return next
+                      })
+                    }}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                ) : null}
+              </>
+            }
+          />
+
+          {filtersActive ? (
+            <p className="text-xs text-muted-foreground">
+              Showing <span className="font-medium text-foreground">{filteredActions.length}</span>{" "}
+              of {actions.length} actions
+            </p>
+          ) : null}
+
+          {filteredActions.length > 0 ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {filteredActions.map((action) => (
+                <ActionCard
+                  key={action.id}
+                  action={action}
+                  latestRun={latestRunByAction.get(action.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <PanelEmpty
+              icon={Search}
+              title="No matching actions"
+              description="Try another name, scope, or object type."
+            />
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+function ActionsFailure({ error }: { readonly error: unknown }) {
+  const failure = useLoadFailure(error)
+  return (
+    <PanelEmpty
+      tone="error"
+      icon={SquareActivity}
+      title={failure.title}
+      description={failure.description}
+    />
+  )
+}
+
+function ActionCard({
+  action,
+  latestRun,
+}: {
+  action: ActionCatalogItem
+  latestRun?: ActionRunSummary
+}) {
+  const paramCount = action.params.length
+  const scopeLabel = action.objectTypeId
+    ? `${humanizeIdentifier(action.objectTypeId)} action`
+    : "Global action"
+
+  return (
+    <ActionRequestDialog
+      action={action}
+      trigger={
+        <button
+          type="button"
+          className="group flex h-full w-full flex-col overflow-hidden rounded-lg border bg-card text-left text-card-foreground outline-none transition-colors hover:border-foreground/20 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <span className="flex min-w-0 items-center gap-3 p-4">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <GitCommitHorizontal className="size-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {humanizeIdentifier(action.id)}
+              </span>
+              <span className="mt-1 block text-sm text-muted-foreground">
+                {scopeLabel} · {paramCount} input {paramCount === 1 ? "field" : "fields"}
+              </span>
+            </span>
+          </span>
+
+          <span className="flex min-h-14 w-full items-center justify-between gap-3 border-t border-border px-4 py-3">
+            {latestRun ? (
+              <>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                  Latest run {formatRelativeTime(latestRun.startedAt)}
+                </span>
+                <RunStatusPill status={latestRun.status} />
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">No runs recorded</span>
+            )}
+          </span>
+        </button>
+      }
+    />
+  )
+}
+
+function ActionRequestDialog({
+  action,
+  subject,
+  trigger,
+}: {
+  action: ActionCatalogItem
+  subject?: { kind: "object"; objectTypeId: string; primaryId: string }
+  trigger?: ReactElement
+}) {
+  const navigate = useNavigate()
+  const runsOpen = useSectionOpen("console")
+  const [open, setOpen] = useState(false)
+  const [values, setValues] = useState<ActionParamFormValues>({})
+  const [subjectPrimaryId, setSubjectPrimaryId] = useState(subject?.primaryId ?? "")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
+  const requestAction = useActionRunMutation({
+    invalidateOnCommit: true,
+    onSuccess: (run) => {
+      setOpen(false)
+      // The run's page is in the Console; without it, the card's latest run shows the outcome.
+      if (runsOpen) navigate(actionRunHref(run.id))
+      else notify.success(`${humanizeIdentifier(action.id)} ran.`)
+    },
+  })
+
+  const apiErrorMessage = errorToMessage(requestAction.error)
+  const hasPendingFileUploads = pendingFileUploads.size > 0
+  const defaultSubject =
+    subject ??
+    (action.objectTypeId && subjectPrimaryId
+      ? { kind: "object" as const, objectTypeId: action.objectTypeId, primaryId: subjectPrimaryId }
+      : undefined)
+
+  function handleSubjectPrimaryIdChange(value: string) {
+    setSubjectPrimaryId(value)
+    setFieldErrors(({ __subject: _subject, ...rest }) => rest)
+    requestAction.reset()
+  }
+
+  function handleParamChange(paramId: string, value: ActionParamFormValue) {
+    setValues((current) => ({ ...current, [paramId]: value }))
+    setFieldErrors(({ [paramId]: _param, ...rest }) => rest)
+    requestAction.reset()
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && hasPendingFileUploads) return
+
+    setOpen(nextOpen)
+    setValues({})
+    setFieldErrors({})
+    setPendingFileUploads(new Set())
+    requestAction.reset()
+    setSubjectPrimaryId(subject?.primaryId ?? "")
+  }
+
+  const handleFileUploadPendingChange = useCallback((paramId: string, pending: boolean) => {
+    setPendingFileUploads((current) => {
+      const hasParam = current.has(paramId)
+      if (hasParam === pending) return current
+
+      const next = new Set(current)
+      if (pending) next.add(paramId)
+      else next.delete(paramId)
+      return next
+    })
+  }, [])
+
+  function buildRequestPayload(options: { updateErrors: boolean }): ActionRequestPayload | null {
+    const paramsResult = buildActionParams(action, values)
+    const errors = { ...paramsResult.errors }
+    if (action.objectTypeId && !defaultSubject) {
+      errors.__subject = "Target object id is required."
+    }
+    if (options.updateErrors) {
+      setFieldErrors(errors)
+    }
+    if (Object.keys(errors).length > 0) {
+      return null
+    }
+    return {
+      path: { actionId: action.id },
+      body: {
+        ...(defaultSubject ? { subject: defaultSubject } : {}),
+        params: paramsResult.params,
+      },
+    }
+  }
+
+  function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (hasPendingFileUploads) return
+    requestAction.reset()
+    const payload = buildRequestPayload({ updateErrors: true })
+    if (!payload) return
+    requestAction.mutate(payload)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button type="button" size="sm">
+            <Play className="h-4 w-4" />
+            Request
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="max-h-[min(48rem,calc(100vh-2rem))] sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Request action</DialogTitle>
+          <DialogDescription>
+            <span className="font-mono">{action.id}</span>
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          {/* p-1 insets the fields so focus rings (drawn outside the input) aren't
+              clipped by the scroll container's overflow. */}
+          <section className="max-h-[min(33rem,calc(100vh-17rem))] space-y-4 overflow-y-auto p-1">
+            {action.objectTypeId ? (
+              <div className="space-y-1.5">
+                <Label htmlFor={`action-${action.id}-subject`} className="text-xs">
+                  Target {action.objectTypeId}
+                </Label>
+                <ObjectRefField
+                  objectTypeId={action.objectTypeId}
+                  value={subjectPrimaryId}
+                  onChange={handleSubjectPrimaryIdChange}
+                  fieldId={`action-${action.id}-subject`}
+                  disabled={Boolean(subject)}
+                />
+                {fieldErrors.__subject ? (
+                  <p className="text-xs text-destructive">{fieldErrors.__subject}</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <ActionParamFields
+              action={action}
+              values={values}
+              errors={fieldErrors}
+              pendingFileUploads={pendingFileUploads}
+              onChange={handleParamChange}
+              onFileUploadPendingChange={handleFileUploadPendingChange}
+            />
+          </section>
+
+          {apiErrorMessage ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>
+                {isActionRejection(requestAction.error)
+                  ? "Action rejected"
+                  : "Action request failed"}
+              </AlertTitle>
+              <AlertDescription>{apiErrorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={requestAction.isPending || hasPendingFileUploads}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={requestAction.isPending || hasPendingFileUploads}>
+              {requestAction.isPending || hasPendingFileUploads ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {hasPendingFileUploads
+                ? "Uploading..."
+                : requestAction.isPending
+                  ? "Running action..."
+                  : "Request action"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ActionParamFields({
+  action,
+  values,
+  errors,
+  pendingFileUploads,
+  onChange,
+  onFileUploadPendingChange,
+}: {
+  action: ActionCatalogItem
+  values: ActionParamFormValues
+  errors: Record<string, string>
+  pendingFileUploads: ReadonlySet<string>
+  onChange: (paramId: string, value: ActionParamFormValue) => void
+  onFileUploadPendingChange?: (paramId: string, pending: boolean) => void
+}) {
+  if (action.params.length === 0) {
+    return <p className="text-sm text-muted-foreground">This action does not require params.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      {action.params.map((param) => {
+        const input = describeActionParamInput(param.schema)
+        const formValue = values[param.id]
+        const isNull = formValue === null
+        const value = typeof formValue === "string" ? formValue : ""
+        const fieldId = `action-${action.id}-${param.id}`
+        const fieldDisabled = isNull
+        const fieldRequired = Boolean(param.required && !isNull)
+
+        return (
+          <div key={param.id} className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor={fieldId} className="text-xs">
+                {param.id}
+              </Label>
+              {param.required ? (
+                <Badge variant="outline" className="h-4 px-1 py-0 text-[8px] uppercase">
+                  Required
+                </Badge>
+              ) : null}
+              {param.nullable ? (
+                <ActionParamNullControl
+                  paramName={param.id}
+                  isNull={isNull}
+                  disabled={pendingFileUploads.has(param.id)}
+                  onNullChange={(nextIsNull) => onChange(param.id, nextIsNull ? null : "")}
+                />
+              ) : null}
+            </div>
+            {param.description ? (
+              <p className="text-[11px] text-muted-foreground">{param.description}</p>
+            ) : null}
+
+            {input.kind === "objectRef" ? (
+              <ObjectRefField
+                objectTypeId={input.objectTypeId}
+                value={value}
+                onChange={(next) => onChange(param.id, next)}
+                fieldId={fieldId}
+                disabled={fieldDisabled}
+              />
+            ) : input.kind === "fileRef" ? (
+              <FileRefUploadField
+                key={`${param.id}:${isNull ? "null" : "value"}`}
+                id={fieldId}
+                value={parseFileRefFormValue(value)}
+                onChange={(fileRef) =>
+                  onChange(param.id, fileRef ? stringifyFileRefFormValue(fileRef) : "")
+                }
+                errorId={errors[param.id] ? `${fieldId}-error` : undefined}
+                logicalPathPrefix={`actions/${action.id}/${param.id}`}
+                disabled={fieldDisabled}
+                onPendingChange={(pending) => onFileUploadPendingChange?.(param.id, pending)}
+              />
+            ) : input.kind === "enum" ? (
+              <Select
+                value={value}
+                onValueChange={(next) => onChange(param.id, next)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+              >
+                <SelectTrigger id={fieldId} className="w-full">
+                  <SelectValue placeholder="Select..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {input.values.map((option) => (
+                    <SelectItem key={String(option)} value={String(option)}>
+                      {String(option)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : input.kind === "boolean" ? (
+              <Select
+                value={value}
+                onValueChange={(next) => onChange(param.id, next)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+              >
+                <SelectTrigger id={fieldId} className="w-full">
+                  <SelectValue placeholder="Select..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">true</SelectItem>
+                  <SelectItem value="false">false</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : input.kind === "json" ? (
+              <Textarea
+                id={fieldId}
+                value={value}
+                onChange={(event) => onChange(param.id, event.target.value)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+                placeholder='{"objectTypeId":"Customer","primaryId":"cus_1"}'
+                className="min-h-24 font-mono text-xs"
+              />
+            ) : input.kind === "userRef" ? (
+              <UserPicker
+                id={fieldId}
+                value={value}
+                onChange={(userId) => onChange(param.id, userId)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+                aria-describedby={errors[param.id] ? `${fieldId}-error` : undefined}
+              />
+            ) : (
+              <Input
+                id={fieldId}
+                type={input.kind === "number" ? "number" : "text"}
+                value={value}
+                onChange={(event) => onChange(param.id, event.target.value)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+              />
+            )}
+
+            {errors[param.id] ? (
+              <p id={`${fieldId}-error`} className="text-xs text-destructive">
+                {errors[param.id]}
+              </p>
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ObjectRefField({
+  objectTypeId,
+  value,
+  onChange,
+  fieldId,
+  disabled,
+}: {
+  objectTypeId: string
+  value: string
+  onChange: (value: string) => void
+  fieldId: string
+  disabled?: boolean
+}) {
+  const objectsQuery = useInfiniteQuery(
+    listObjectsInfiniteOptions({
+      query: { objectTypeId, limit: "50", orderBy: "primaryId", order: "asc" },
+    })
+  )
+
+  const options = useMemo<ComboboxOption[]>(
+    () =>
+      (objectsQuery.data?.pages ?? []).flatMap((page) =>
+        page.objects.map((object) => {
+          const hasName = Boolean(object.name) && object.name !== object.primaryId
+          return {
+            value: object.primaryId,
+            label: hasName ? object.name : object.primaryId,
+            description: hasName ? object.primaryId : undefined,
+          }
+        })
+      ),
+    [objectsQuery.data]
+  )
+
+  if (objectsQuery.isError) {
+    return (
+      <Input
+        id={fieldId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={`${objectTypeId} id`}
+        disabled={disabled}
+      />
+    )
+  }
+
+  const isEmpty = !objectsQuery.isLoading && options.length === 0
+
+  return (
+    <Combobox
+      id={fieldId}
+      value={value}
+      options={options}
+      onValueChange={onChange}
+      disabled={disabled || isEmpty}
+      placeholder={
+        objectsQuery.isLoading
+          ? "Loading..."
+          : isEmpty
+            ? `No ${objectTypeId} found`
+            : `Select ${objectTypeId}...`
+      }
+      searchPlaceholder={`Search ${objectTypeId}...`}
+      emptyLabel={`No matching ${objectTypeId} found.`}
+      hasMore={objectsQuery.hasNextPage}
+      loadingMore={objectsQuery.isFetchingNextPage}
+      onLoadMore={() => {
+        void objectsQuery.fetchNextPage()
+      }}
+    />
+  )
+}
+
+/** A validator declined the request, with a message written for the requester. */
+function isActionRejection(error: unknown): boolean {
+  return error instanceof ActionRunFailedError && error.error?.code === "action.rejected"
+}
+
+function errorToMessage(error: unknown): string | null {
+  if (!error) return null
+  if (isRecord(error) && typeof error.error === "string") return error.error
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  return "Could not request action."
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}

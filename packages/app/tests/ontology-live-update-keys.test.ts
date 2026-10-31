@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { workflowChangedKeys } from "../src/pages/ontology/lib/live-update-keys"
+import { workflowChangedKeys } from "../src/pages/console/ontology/lib/live-update-keys"
 
 describe("workflowChangedKeys", () => {
   test("invalidates the open workflow agent execution debugger", () => {

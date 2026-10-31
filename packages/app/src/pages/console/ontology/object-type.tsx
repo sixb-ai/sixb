@@ -1,0 +1,916 @@
+import {
+  getObjectTypeOptions,
+  listObjectTypesOptions,
+  listProjectionsOptions,
+} from "@sixb/client/hooks"
+import {
+  Badge,
+  Button,
+  Card,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
+import { useQuery } from "@tanstack/react-query"
+import { Box, ChevronRight, LayoutGrid, Network } from "lucide-react"
+import { Fragment, type ReactNode, useMemo } from "react"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { graphTypeHref, objectsOfTypeHref, objectTypeHref } from "../../routes"
+import { DetailFallback, SectionPage } from "../../section-page"
+import { LetterAvatar } from "./components/common"
+import { humanizeIdentifier } from "./lib/labels"
+
+const TAB_VALUES = ["properties", "vectors", "links", "actions", "projections"] as const
+type TabValue = (typeof TAB_VALUES)[number]
+const DEFAULT_TAB: TabValue = "properties"
+
+function isTabValue(value: string | null): value is TabValue {
+  return value !== null && (TAB_VALUES as readonly string[]).includes(value)
+}
+
+/** One object type: what it inherits and what extends it, then its schema by tab. */
+export function ConsoleObjectTypePage() {
+  const typeId = useParams().objectTypeId ?? ""
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectType = (nextTypeId: string) => navigate(objectTypeHref(nextTypeId))
+
+  const tabParam = searchParams.get("tab")
+  const activeTab: TabValue = isTabValue(tabParam) ? tabParam : DEFAULT_TAB
+
+  const setActiveTab = (next: string) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev)
+        if (next === DEFAULT_TAB) {
+          params.delete("tab")
+        } else {
+          params.set("tab", next)
+        }
+        return params
+      },
+      { replace: true }
+    )
+  }
+
+  const typeQuery = useQuery({
+    ...getObjectTypeOptions({ path: { objectTypeId: typeId } }),
+    retry: false,
+  })
+  const objectType = typeQuery.data
+
+  const { data: allTypes = [] } = useQuery(listObjectTypesOptions())
+  const { data: projections } = useQuery(listProjectionsOptions())
+
+  const { ancestors, subtypes } = useMemo(() => {
+    if (!objectType) return { ancestors: [], subtypes: [] }
+    const byId = new Map(allTypes.map((t) => [t.id, t]))
+    const ancestors: typeof allTypes = []
+    let cursor = objectType.extends
+    while (cursor) {
+      const parent = byId.get(cursor)
+      if (!parent) break
+      ancestors.unshift(parent)
+      cursor = parent.extends
+    }
+    const subtypes = allTypes.filter((t) => t.extends === objectType.id)
+    return { ancestors, subtypes }
+  }, [objectType, allTypes])
+
+  const typeProjections = useMemo(() => {
+    if (!projections || !typeId) return { object: [], link: [], telemetry: [] }
+    return {
+      object: projections.objectProjections.filter((p) => p.objectTypeId === typeId),
+      link: projections.linkProjections.filter(
+        (p) => p.sourceObjectTypeId === typeId || p.targetObjectTypeId === typeId
+      ),
+      telemetry: projections.telemetryProjections.filter((p) => p.objectTypeId === typeId),
+    }
+  }, [projections, typeId])
+
+  const projectionCount =
+    typeProjections.object.length + typeProjections.link.length + typeProjections.telemetry.length
+  const resolvedTab: TabValue =
+    activeTab === "projections" && projectionCount === 0 ? DEFAULT_TAB : activeTab
+
+  const back = { href: "/console/object-types", label: "Object types" }
+  if (!objectType) {
+    return (
+      <DetailFallback
+        section="console"
+        page="object-types"
+        back={back}
+        name={humanizeIdentifier(typeId)}
+        id={typeId}
+        icon={LayoutGrid}
+        error={typeQuery.error}
+      />
+    )
+  }
+
+  const staticProps = objectType.properties.filter((p) => p.mode !== "telemetry")
+  const telemetryProps = objectType.properties.filter((p) => p.mode === "telemetry")
+  const vectorProfiles = Object.entries(objectType.search?.vectors ?? {})
+  const displayTitle = humanizeIdentifier(objectType.name || objectType.id)
+
+  return (
+    <SectionPage
+      section="console"
+      page="object-types"
+      width="wide"
+      back={back}
+      icon={<LetterAvatar label={displayTitle} size="md" />}
+      title={displayTitle}
+      description={objectType.description}
+      actions={
+        <>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={objectsOfTypeHref(objectType.id)}>
+              <Box /> View objects
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={graphTypeHref(objectType.id)}>
+              <Network /> Show in graph
+            </Link>
+          </Button>
+        </>
+      }
+    >
+      {ancestors.length > 0 || subtypes.length > 0 ? (
+        <div className="-mt-4 space-y-2">
+          {/* Inheritance chain */}
+          {ancestors.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="font-medium uppercase tracking-wider text-[11px]">Inherits</span>
+              <div className="flex flex-wrap items-center gap-1">
+                {ancestors.map((ancestor, index) => (
+                  <Fragment key={ancestor.id}>
+                    <Button
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => selectType(ancestor.id)}
+                    >
+                      {humanizeIdentifier(ancestor.name || ancestor.id)}
+                    </Button>
+                    {index < ancestors.length - 1 ? (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground/60" />
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {/* Subtypes */}
+          {subtypes.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="font-medium uppercase tracking-wider text-[11px]">Extended by</span>
+              <div className="flex flex-wrap items-center gap-2">
+                {subtypes.map((subtype) => (
+                  <Button
+                    key={subtype.id}
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => selectType(subtype.id)}
+                  >
+                    {humanizeIdentifier(subtype.name || subtype.id)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Tabs */}
+      <Tabs value={resolvedTab} onValueChange={setActiveTab}>
+        <div className="relative">
+          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden overscroll-x-contain pr-8 sm:pr-0">
+            <TabsList variant="line" className="min-w-max">
+              <TabsTrigger value="properties">
+                Properties
+                <Count value={objectType.properties.length} />
+              </TabsTrigger>
+              <TabsTrigger value="vectors">
+                Vectors
+                <Count value={vectorProfiles.length} />
+              </TabsTrigger>
+              <TabsTrigger value="links">
+                Links
+                <Count value={objectType.links.length} />
+              </TabsTrigger>
+              <TabsTrigger value="actions">
+                Actions
+                <Count value={objectType.actions.length} />
+              </TabsTrigger>
+              {projectionCount > 0 ? (
+                <TabsTrigger value="projections">
+                  Projections
+                  <Count value={projectionCount} />
+                </TabsTrigger>
+              ) : null}
+            </TabsList>
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent sm:hidden"
+          />
+        </div>
+
+        {/* Properties */}
+        <TabsContent value="properties" className="space-y-6 pt-4">
+          {staticProps.length > 0 ? (
+            <PropertiesSection title="Static properties" properties={staticProps} />
+          ) : null}
+          {telemetryProps.length > 0 ? (
+            <PropertiesSection title="Telemetry properties" properties={telemetryProps} />
+          ) : null}
+          {objectType.properties.length === 0 ? (
+            <EmptySection text="No properties defined." />
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="vectors" className="space-y-3 pt-4">
+          {vectorProfiles.length === 0 ? (
+            <EmptySection text="No vector profiles defined." />
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Each profile combines its source properties into one embedding per object.
+              </p>
+              {vectorProfiles.map(([name, profile]) => (
+                <Card key={name} className="min-w-0 space-y-4 p-4">
+                  <h3 className="break-all font-mono text-sm font-medium text-foreground">
+                    {name}
+                  </h3>
+                  <div className="space-y-1.5">
+                    <SectionLabel>Source properties · in order</SectionLabel>
+                    <ol className="flex flex-wrap gap-2">
+                      {profile.source.map((propertyId, index) => (
+                        <li key={propertyId} className="min-w-0 max-w-full">
+                          <Badge variant="outline" className="max-w-full whitespace-normal">
+                            <span className="mr-1 text-muted-foreground">{index + 1}.</span>
+                            <span className="break-all font-mono text-xs">{propertyId}</span>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  <dl className="grid gap-4 text-xs sm:grid-cols-[1fr_2fr_auto]">
+                    <div className="min-w-0 space-y-1">
+                      <dt className="text-muted-foreground">Provider</dt>
+                      <dd className="break-all font-mono">{profile.model.providerId}</dd>
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <dt className="text-muted-foreground">Model</dt>
+                      <dd className="break-all font-mono">{profile.model.modelId}</dd>
+                    </div>
+                    <div className="space-y-1">
+                      <dt className="text-muted-foreground">Dimensions</dt>
+                      <dd className="tabular-nums">{profile.model.dimensions}</dd>
+                    </div>
+                  </dl>
+                </Card>
+              ))}
+            </>
+          )}
+        </TabsContent>
+
+        {/* Links */}
+        <TabsContent value="links" className="pt-4">
+          {objectType.links.length === 0 ? (
+            <EmptySection text="No links defined." />
+          ) : (
+            <Card className="overflow-hidden p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Target</TableHead>
+                    <TableHead>Cardinality</TableHead>
+                    <TableHead className="hidden md:table-cell">Description</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {objectType.links.map((link) => {
+                    const targets = Array.isArray(link.targetObjectTypeId)
+                      ? link.targetObjectTypeId
+                      : [link.targetObjectTypeId]
+                    return (
+                      <TableRow key={link.id}>
+                        <TableCell>
+                          <span className="font-mono text-xs text-foreground">
+                            {humanizeIdentifier(link.name || link.id)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {targets.map((targetId) =>
+                              targetId === "*" ? (
+                                <span
+                                  key={targetId}
+                                  className="text-xs italic text-muted-foreground"
+                                >
+                                  any type
+                                </span>
+                              ) : (
+                                <Button
+                                  key={targetId}
+                                  variant="link"
+                                  className="h-auto p-0 font-mono text-xs"
+                                  onClick={() => selectType(targetId)}
+                                >
+                                  {targetId}
+                                </Button>
+                              )
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {link.cardinality ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              {link.cardinality}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/50">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
+                          {link.description || <span className="text-muted-foreground/50">—</span>}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* Actions */}
+        <TabsContent value="actions" className="space-y-3 pt-4">
+          {objectType.actions.length === 0 ? (
+            <EmptySection text="No actions defined." />
+          ) : (
+            objectType.actions.map((action) => (
+              <Card key={action.id} className="space-y-3 p-4">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <h3 className="font-mono text-sm font-medium text-foreground">{action.id}</h3>
+                    {action.params.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">no parameters</span>
+                    ) : null}
+                  </div>
+                  {action.description ? (
+                    <p className="text-xs leading-5 text-muted-foreground">{action.description}</p>
+                  ) : null}
+                </div>
+
+                {action.params.length > 0 ? (
+                  <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Parameters
+                    </p>
+                    <ul className="space-y-1">
+                      {action.params.map((param) => (
+                        <li
+                          key={param.id}
+                          className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-xs"
+                        >
+                          <span className="text-foreground">{param.id}</span>
+                          <span className="text-muted-foreground/50">:</span>
+                          <SchemaType schema={param.schema} />
+                          {param.required ? (
+                            <Badge variant="outline" className="font-sans text-[9px]">
+                              required
+                            </Badge>
+                          ) : null}
+                          {param.description ? (
+                            <span className="font-sans text-[11px] text-muted-foreground">
+                              {param.description}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </Card>
+            ))
+          )}
+        </TabsContent>
+
+        {/* Projections */}
+        {projectionCount > 0 ? (
+          <TabsContent value="projections" className="space-y-6 pt-4">
+            {typeProjections.object.length > 0 ? (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Object projections
+                </h3>
+                <div className="space-y-3">
+                  {typeProjections.object.map((proj) => (
+                    <Card key={proj.id} className="space-y-4 p-4">
+                      <ProjectionHeader id={proj.id} datasetId={proj.datasetId} />
+                      <PropertyMappings entries={Object.entries(proj.properties)} />
+                      <ForeignKeys links={proj.links} onSelectType={selectType} />
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {typeProjections.link.length > 0 ? (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Link projections
+                </h3>
+                <div className="space-y-3">
+                  {typeProjections.link.map((proj) => (
+                    <Card key={proj.id} className="space-y-3 p-4">
+                      <ProjectionHeader id={proj.id} datasetId={proj.datasetId} />
+
+                      <div className="space-y-1.5">
+                        <SectionLabel>Join</SectionLabel>
+                        <div className="flex flex-wrap items-baseline gap-1.5 font-mono text-xs">
+                          <Button
+                            variant="link"
+                            className="h-auto p-0 font-mono text-xs"
+                            onClick={() => selectType(proj.sourceObjectTypeId)}
+                          >
+                            {proj.sourceObjectTypeId}
+                          </Button>
+                          <span className="text-muted-foreground/60">.{proj.sourceField}</span>
+                          <span aria-hidden="true" className="text-muted-foreground/40">
+                            →
+                          </span>
+                          <Button
+                            variant="link"
+                            className="h-auto p-0 font-mono text-xs"
+                            onClick={() => selectType(proj.targetObjectTypeId)}
+                          >
+                            {proj.targetObjectTypeId}
+                          </Button>
+                          <span className="text-muted-foreground/60">.{proj.targetField}</span>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {typeProjections.telemetry.length > 0 ? (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Telemetry projections
+                </h3>
+                <div className="space-y-3">
+                  {typeProjections.telemetry.map((proj) => (
+                    <Card key={proj.id} className="space-y-4 p-4">
+                      <ProjectionHeader id={proj.id} datasetId={proj.datasetId} />
+                      <div className="space-y-1.5">
+                        <SectionLabel>Point mapping</SectionLabel>
+                        <dl className="grid grid-cols-[max-content_max-content_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 font-mono text-xs">
+                          <TelemetryMappingRow label="object" column={proj.objectIdField} />
+                          <TelemetryMappingRow label="at" column={proj.atField} />
+                          {Object.entries(proj.properties).map(([propertyId, mapping]) => (
+                            <Fragment key={propertyId}>
+                              <TelemetryMappingRow label={propertyId} column={mapping.valueField} />
+                              {mapping.unitField ? (
+                                <TelemetryMappingRow
+                                  label={`${propertyId} unit`}
+                                  column={mapping.unitField}
+                                />
+                              ) : null}
+                            </Fragment>
+                          ))}
+                        </dl>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </TabsContent>
+        ) : null}
+      </Tabs>
+    </SectionPage>
+  )
+}
+
+function Count({ value }: { value: number }) {
+  return (
+    <span
+      className={cn(
+        "ml-1.5 inline-flex items-center justify-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums",
+        value === 0 && "opacity-50"
+      )}
+    >
+      {value}
+    </span>
+  )
+}
+
+function PropertiesSection({
+  title,
+  properties,
+}: {
+  title: string
+  properties: {
+    id: string
+    name: string
+    description?: string
+    mode?: string
+    required?: boolean
+    nullable?: boolean
+    primary?: boolean
+    unique?: boolean
+    schema?: unknown
+  }[]
+}) {
+  const anyDescriptions = properties.some((p) => p.description)
+  return (
+    <section className="space-y-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </h3>
+      <Card className="overflow-hidden p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Type</TableHead>
+              {anyDescriptions ? (
+                <TableHead className="hidden md:table-cell">Description</TableHead>
+              ) : null}
+              <TableHead className="text-right">Flags</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {properties.map((prop) => (
+              <TableRow key={prop.id}>
+                <TableCell className="align-top">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-foreground">{prop.id}</span>
+                    {prop.primary ? (
+                      <Badge variant="secondary" className="text-[9px]">
+                        primary
+                      </Badge>
+                    ) : null}
+                    {prop.unique ? (
+                      <Badge variant="secondary" className="text-[9px]">
+                        unique
+                      </Badge>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell className="align-top">
+                  <SchemaType schema={prop.schema} />
+                </TableCell>
+                {anyDescriptions ? (
+                  <TableCell className="hidden align-top text-xs text-muted-foreground md:table-cell">
+                    {prop.description || <span className="text-muted-foreground/50">—</span>}
+                  </TableCell>
+                ) : null}
+                <TableCell className="text-right align-top">
+                  <div className="inline-flex gap-1">
+                    {prop.required ? (
+                      <Badge variant="outline" className="text-[9px]">
+                        required
+                      </Badge>
+                    ) : null}
+                    {prop.nullable ? (
+                      <Badge variant="outline" className="text-[9px]">
+                        nullable
+                      </Badge>
+                    ) : null}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+    </section>
+  )
+}
+
+function EmptySection({ text }: { text: string }) {
+  return (
+    <Card className="overflow-hidden p-8 text-center">
+      <p className="text-sm text-muted-foreground">{text}</p>
+    </Card>
+  )
+}
+
+function ProjectionHeader({ id, datasetId }: { id: string; datasetId: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-2">
+      <span className="font-mono text-sm font-medium text-foreground">{id}</span>
+      <span className="text-xs text-muted-foreground">from</span>
+      <code className="font-mono text-xs text-foreground">{datasetId}</code>
+    </div>
+  )
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </p>
+  )
+}
+
+function TelemetryMappingRow({ label, column }: { label: string; column: string }) {
+  return (
+    <Fragment>
+      <dt className="text-foreground">{label}</dt>
+      <span aria-hidden="true" className="text-muted-foreground/40">
+        ←
+      </span>
+      <dd className="truncate text-muted-foreground">{column}</dd>
+    </Fragment>
+  )
+}
+
+function PropertyMappings({ entries }: { entries: [string, string][] }) {
+  if (entries.length === 0) return null
+  const twoUp = entries.length >= 5
+  return (
+    <div className="space-y-1.5">
+      <SectionLabel>Property mappings</SectionLabel>
+      <dl
+        className={cn(
+          "grid items-baseline gap-x-3 gap-y-1 font-mono text-xs",
+          "grid-cols-[max-content_max-content_minmax(0,1fr)]",
+          twoUp &&
+            "md:grid-cols-[max-content_max-content_minmax(0,1fr)_max-content_max-content_minmax(0,1fr)] md:gap-x-10"
+        )}
+      >
+        {entries.map(([propId, column]) => (
+          <Fragment key={propId}>
+            <dt className="text-foreground">{propId}</dt>
+            <span aria-hidden="true" className="text-muted-foreground/40">
+              ←
+            </span>
+            <dd className="truncate text-muted-foreground">{column}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+function ForeignKeys({
+  links,
+  onSelectType,
+}: {
+  links: Record<
+    string,
+    { sourcePropertyId?: string; sourceField?: string; targetObjectTypeId: string }
+  >
+  onSelectType: (id: string) => void
+}) {
+  const entries = Object.entries(links)
+  if (entries.length === 0) return null
+  return (
+    <div className="space-y-1.5">
+      <SectionLabel>Foreign keys</SectionLabel>
+      <dl className="grid grid-cols-[max-content_max-content_max-content_max-content_max-content] items-baseline gap-x-2 gap-y-1 font-mono text-xs">
+        {entries.map(([linkId, fk]) => (
+          <Fragment key={linkId}>
+            <dt className="text-foreground">{linkId}</dt>
+            <span aria-hidden="true" className="text-muted-foreground/40">
+              →
+            </span>
+            <dd>
+              <Button
+                variant="link"
+                className="h-auto p-0 font-mono text-xs"
+                onClick={() => onSelectType(fk.targetObjectTypeId)}
+              >
+                {fk.targetObjectTypeId}
+              </Button>
+            </dd>
+            <span aria-hidden="true" className="text-muted-foreground/40">
+              via
+            </span>
+            <dd className="text-muted-foreground">{formatForeignKeySource(fk)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+function formatForeignKeySource(fk: { sourcePropertyId?: string; sourceField?: string }): string {
+  return fk.sourcePropertyId ?? fk.sourceField ?? "unknown"
+}
+
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * A schema renders on a single (wrapping) line when it is a primitive, an
+ * enum, or a container whose element is itself inline. Objects — and any
+ * container of objects — expand into a stacked tree instead, so their fields
+ * always indent from a single, consistent left edge.
+ */
+function isInlineSchema(schema: unknown): boolean {
+  if (typeof schema === "string") return true
+  if (!isSchemaRecord(schema) || typeof schema.type !== "string") return true
+  switch (schema.type) {
+    case "object":
+      return false
+    case "array":
+      return isInlineSchema(schema.items)
+    case "map":
+      return isInlineSchema(schema.valueSchema)
+    case "valueTypeRef":
+      return schema._resolved === undefined || isInlineSchema(schema._resolved)
+    default:
+      return true
+  }
+}
+
+/**
+ * Renders an ontology property schema in a compact, readable form.
+ *
+ * Primitives render as their bare type name. Complex schemas expand:
+ * enums list their allowed values as chips, objects show their fields,
+ * arrays/maps show their element types, and value-type refs show the
+ * referenced id (plus the resolved schema when codegen populated it).
+ */
+function SchemaType({ schema }: { schema: unknown }): ReactNode {
+  if (typeof schema === "string") {
+    return <SchemaPrimitive>{schema}</SchemaPrimitive>
+  }
+  if (!isSchemaRecord(schema) || typeof schema.type !== "string") {
+    return <SchemaPrimitive>unknown</SchemaPrimitive>
+  }
+
+  switch (schema.type) {
+    case "enum":
+      return <EnumType schema={schema} />
+    case "object":
+      return <ObjectType schema={schema} />
+    case "array":
+      return (
+        <SchemaContainer
+          head={<SchemaKeyword>array</SchemaKeyword>}
+          lead="of"
+          child={schema.items}
+        />
+      )
+    case "map":
+      return (
+        <SchemaContainer
+          head={
+            <>
+              <SchemaKeyword>map</SchemaKeyword>
+              <SchemaPrimitive>string</SchemaPrimitive>
+            </>
+          }
+          lead="→"
+          child={schema.valueSchema}
+        />
+      )
+    case "valueTypeRef":
+      return (
+        <SchemaContainer
+          head={
+            <span className="font-mono text-xs text-foreground">{String(schema.valueTypeId)}</span>
+          }
+          lead={schema._resolved === undefined ? undefined : "ref →"}
+          child={schema._resolved}
+        />
+      )
+    default:
+      return <SchemaPrimitive>{schema.type}</SchemaPrimitive>
+  }
+}
+
+/**
+ * Lays out a container schema (`array`, `map`, `valueTypeRef`) as `<head> lead
+ * <child>`. When the child is inline it stays on one wrapping line; when the
+ * child is a block (an object), the head sits on its own line with the child
+ * indented beneath it — never vertically centered against a tall block.
+ */
+function SchemaContainer({
+  head,
+  lead,
+  child,
+}: {
+  head: ReactNode
+  lead?: string
+  child: unknown
+}) {
+  if (child === undefined) {
+    return <span className="inline-flex flex-wrap items-center gap-1.5">{head}</span>
+  }
+  if (isInlineSchema(child)) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {head}
+        {lead ? <SchemaLead>{lead}</SchemaLead> : null}
+        <SchemaType schema={child} />
+      </span>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {head}
+        {lead ? <SchemaLead>{lead}</SchemaLead> : null}
+      </span>
+      <SchemaNest>
+        <SchemaType schema={child} />
+      </SchemaNest>
+    </div>
+  )
+}
+
+function SchemaPrimitive({ children }: { children: ReactNode }) {
+  return <span className="font-mono text-xs text-muted-foreground">{children}</span>
+}
+
+function SchemaLead({ children }: { children: ReactNode }) {
+  return <span className="text-[10px] font-medium text-muted-foreground/70">{children}</span>
+}
+
+function SchemaNest({ children }: { children: ReactNode }) {
+  return <div className="border-l border-border pl-3">{children}</div>
+}
+
+function SchemaKeyword({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+function EnumType({ schema }: { schema: Record<string, unknown> }) {
+  const values = Array.isArray(schema.values) ? schema.values : []
+  const valueType = typeof schema.valueType === "string" ? schema.valueType : null
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <SchemaKeyword>enum</SchemaKeyword>
+      {valueType ? <SchemaLead>{valueType}</SchemaLead> : null}
+      {values.map((value, index) => (
+        <span
+          key={index}
+          className="inline-flex items-center rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground"
+        >
+          {String(value)}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function ObjectType({ schema }: { schema: Record<string, unknown> }) {
+  const properties = isSchemaRecord(schema.properties) ? schema.properties : {}
+  const entries = Object.entries(properties)
+  return (
+    <div className="space-y-1">
+      <SchemaKeyword>object</SchemaKeyword>
+      {entries.length > 0 ? (
+        <SchemaNest>
+          <div className="space-y-1.5">
+            {entries.map(([name, field]) => {
+              const fieldSchema = isSchemaRecord(field) ? field.schema : field
+              const required = isSchemaRecord(field) && field.required === true
+              const inline = isInlineSchema(fieldSchema)
+              return (
+                <div key={name} className="space-y-1">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="font-mono text-xs text-foreground">{name}</span>
+                    {required ? <SchemaLead>required</SchemaLead> : null}
+                    {inline ? <SchemaType schema={fieldSchema} /> : null}
+                  </div>
+                  {inline ? null : (
+                    <SchemaNest>
+                      <SchemaType schema={fieldSchema} />
+                    </SchemaNest>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </SchemaNest>
+      ) : null}
+    </div>
+  )
+}

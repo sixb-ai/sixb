@@ -98,12 +98,11 @@ export type {
 export type { ArtifactTarget } from "./artifacts/target"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
-export { SyncButton, type SyncButtonProps } from "./pages/data/sync-button"
+export { SyncButton, type SyncButtonProps } from "./pages/console/data/sync-button"
 export { publicEnv } from "./public-env"
 export type { AppSectionId } from "./sections/catalog"
 export {
   type AppSection,
-  type AppVisibility,
   useCurrentSection,
   useSections,
 } from "./sections/sections"

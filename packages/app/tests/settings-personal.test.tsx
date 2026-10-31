@@ -61,6 +61,14 @@ function sessionNamed(displayName: string): GetAuthSessionResponse {
   return {
     authenticated: true,
     user: { id: "user-1", email: "morgan@example.com", displayName, groupIds: [] },
+    access: {
+      console: false,
+      logs: false,
+      members: false,
+      serviceAccounts: false,
+      usage: false,
+      activity: false,
+    },
     session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
   }
 }
@@ -104,7 +112,7 @@ function renderPersonal(
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={undefined}>
+      <SectionsProvider>
         <MemoryRouter initialEntries={["/settings/personal"]}>
           <SettingsPersonalPage />
         </MemoryRouter>

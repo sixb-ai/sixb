@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { client, type GetAuthSessionResponse } from "@sixb/client"
 import {
   getAgentMemoryQueryKey,
+  getAgentThreadQueryKey,
   getAuthSessionQueryKey,
   listAgentMemoryRevisionsQueryKey,
 } from "@sixb/client/hooks"
@@ -9,7 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SectionsProvider, SettingsMemoryPage } from "../src/pages"
-import { TextEditor } from "../src/pages/settings/memory"
+import { TextEditor } from "../src/pages/settings/memory-editors"
 import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
 
@@ -23,6 +24,8 @@ installDom([
   "HTMLElement",
   "HTMLInputElement",
   "HTMLTextAreaElement",
+  "HTMLFormElement",
+  "HTMLSelectElement",
   "Event",
   "EventTarget",
   "MouseEvent",
@@ -54,6 +57,14 @@ afterAll(() => {
 const session: GetAuthSessionResponse = {
   authenticated: true,
   user: { id: "usr_priya", email: "priya@example.com", groupIds: [] },
+  access: {
+    console: false,
+    logs: false,
+    members: false,
+    serviceAccounts: false,
+    usage: false,
+    activity: false,
+  },
   session: { id: "session-1", expiresAt: "2099-10-15T00:00:00.000Z" },
 }
 
@@ -95,12 +106,38 @@ const history = {
   total: 2,
 }
 
+// The note as each save left it, so the page can tell which save wrote each memory.
+const firstVersion = {
+  ...mine,
+  revision: 1,
+  files: [
+    {
+      path: "MEMORY.md",
+      contents: "# Memory\n\n- Prefers short bullet lists (added 2025-10-04)\n",
+    },
+  ],
+}
+
+// Built per test: generated keys carry the base URL the tests set before they run.
+const userMemory = () =>
+  [
+    [getAgentMemoryQueryKey({ path: { repo: "user" } }), mine],
+    [
+      listAgentMemoryRevisionsQueryKey({ path: { repo: "user" }, query: { limit: "100" } }),
+      history,
+    ],
+    [listAgentMemoryRevisionsQueryKey({ path: { repo: "user" }, query: { limit: "20" } }), history],
+    [getAgentMemoryQueryKey({ path: { repo: "user" }, query: { revision: "1" } }), firstVersion],
+    [getAgentMemoryQueryKey({ path: { repo: "user" }, query: { revision: "2" } }), mine],
+    [
+      getAgentThreadQueryKey({ path: { threadId: "thr_8f2" } }),
+      { id: "thr_8f2", title: "Invoice review" },
+    ],
+  ] as const
+
 function renderPage(
   path: string,
-  data: readonly (readonly [readonly unknown[], unknown])[] = [
-    [getAgentMemoryQueryKey({ path: { repo: "user" } }), mine],
-    [listAgentMemoryRevisionsQueryKey({ path: { repo: "user" }, query: { limit: "20" } }), history],
-  ]
+  data: readonly (readonly [readonly unknown[], unknown])[] = userMemory()
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
@@ -109,7 +146,7 @@ function renderPage(
   for (const [key, value] of data) queryClient.setQueryData(key, value)
   return render(
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={undefined}>
+      <SectionsProvider>
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="*" element={<SettingsMemoryPage />} />
@@ -142,57 +179,59 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 describe("the Memory page", () => {
-  test("opens on the main memory, read as a document beside the files", () => {
+  test("opens on the main memory, read as a document beside its notes", () => {
     const view = renderPage("/settings/memory")
 
     expect(view.getByRole("tab", { name: /Memories/ }).textContent).toBe("Memories4")
-    const files = view.getByRole("navigation", { name: "Memory files" })
-    expect([...files.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
-      "Main memory",
-      "projects",
-      "payments",
-    ])
-    expect(files.querySelector("[aria-current=page]")?.textContent).toBe("Main memory")
-    // An entry reads apart from its date, which is in the reader's locale, its year only when past.
-    const old = view.getByTitle("2025-10-04")
-    expect(old.textContent).toBe("added Oct 4, 2025")
-    expect(old.closest("li")?.textContent).toStartWith("Prefers short bullet lists")
-    expect(view.getByTitle(`${thisYear}-03-02`).textContent).toBe("added Mar 2")
-    // A link to a file opens it here; one to a file that is gone is its plain name.
+    const notes = view.getByRole("navigation", { name: "Notes" })
+    // Each note by its title, the main memory first, then each folder's notes under its name.
+    expect(notes.textContent).toStartWith("Memory3Projects")
+    expect(notes.querySelector("[aria-current=page]")?.textContent).toBe("Memory3")
     const document = view.getByRole("article")
+    expect(view.getByRole("heading", { level: 2 }).textContent).toBe("Memory")
+    expect(document.textContent).toContain("Every conversation reads this first")
+    expect(document.textContent).toContain("From 1 conversation")
+    // A link to a note opens it here, by the note's title; one to a note that is gone is its name.
     expect(
       [...document.querySelectorAll("a")]
-        .find((link) => link.textContent === "payments")
+        .find((link) => link.textContent === "Payments")
         ?.getAttribute("href")
     ).toBe("/settings/memory?file=projects%2Fpayments.md")
-    expect(view.getByText(/Old notes: archive/)).toBeDefined()
+    expect(view.getByText(/Old notes: Archive/)).toBeDefined()
+    // Each memory says which save wrote it: a conversation of one's own opens, by its name.
+    const billing = view.getByText(/Billing:/).closest(".group\\/entry")
+    expect(billing?.textContent).toContain("Invoice review")
+    expect(
+      billing?.querySelector("a[aria-label='Open the conversation']")?.getAttribute("href")
+    ).toBe("/threads/thr_8f2")
+    const bullets = view.getByText(/Prefers short bullet lists/).closest(".group\\/entry")
+    expect(bullets?.textContent).toContain("Edited by you")
+    expect(bullets?.querySelector("a[aria-label='Open the conversation']")).toBeNull()
   })
 
-  test("opens a file from its address, named by its path", () => {
+  test("opens a note from its address, with the notes that link to it", () => {
     const view = renderPage("/settings/memory?file=projects%2Fpayments.md")
 
-    expect(view.getByRole("heading", { level: 2 }).textContent).toBe("projects/payments")
-    expect(view.getByTitle("2026-10-12").closest("li")?.textContent).toStartWith(
-      "Invoices exclude VAT"
-    )
+    expect(view.getByRole("heading", { level: 2 }).textContent).toBe("Payments")
+    const document = view.getByRole("article")
+    expect(document.textContent).toContain("projects/payments.md")
+    expect(document.textContent).toContain("Linked from Memory")
+    expect(view.getByText("Invoices exclude VAT")).toBeDefined()
   })
 
-  test("searches every file, keeping those that mention it, with how often", () => {
+  test("searches every note, keeping those that mention it, with how often", () => {
     const view = renderPage("/settings/memory")
-    const search = view.getByRole("textbox", { name: "Search memories" })
+    const search = view.getByLabelText("Search memories")
     search.focus()
     // React DOM loads before this window, so it reads typing in a focused field from key events.
     fireEvent.input(search, { target: { value: "vat" } })
     fireEvent.keyUp(search, { key: "t" })
 
-    const files = view.getByRole("navigation", { name: "Memory files" })
-    expect([...files.querySelectorAll("li")].map((item) => item.textContent)).toEqual([
-      "projects",
-      "payments1",
-    ])
+    const notes = view.getByRole("navigation", { name: "Notes" })
+    expect(notes.textContent).toStartWith("ProjectsPayments1")
   })
 
-  test("adds a memory where the agent would, as a save from the revision on the page", async () => {
+  test("adds a memory to the end of its section, as a save from the revision on the page", async () => {
     await withApi(
       (request) =>
         request.method === "POST"
@@ -202,7 +241,7 @@ describe("the Memory page", () => {
             : json(200, { ...mine, revision: 3 }),
       async (requests) => {
         const view = renderPage("/settings/memory")
-        fireEvent.click(view.getByRole("button", { name: "Add memory" }))
+        fireEvent.click(view.getByRole("button", { name: "Add a memory" }))
         const field = view.getByRole("textbox", {
           name: "Something the agent should remember about you",
         })
@@ -230,7 +269,7 @@ describe("the Memory page", () => {
     )
   })
 
-  test("shows history by day, linking only the person's own conversations", () => {
+  test("shows history by day beside the change chosen, linking only one's own conversations", () => {
     // Reproduce by giving useChangeOrigin a teammate's source as its conversation: it links too.
     const teammate = {
       revision: 3,
@@ -248,15 +287,18 @@ describe("the Memory page", () => {
       ],
     ])
 
-    expect(view.getByText("Saved in a teammate's conversation")).toBeDefined()
-    expect(view.getByText("Saved in your conversation")).toBeDefined()
-    expect(view.getByText("Edited by you")).toBeDefined()
-    expect(view.getByText("Main memory, projects/payments")).toBeDefined()
-    expect(
-      view
-        .getAllByRole("link", { name: "Open the conversation" })
-        .map((link) => link.getAttribute("href"))
-    ).toEqual(["/threads/thr_8f2"])
+    // The newest change opens first; a teammate's conversation would not open for this person.
+    expect(view.getAllByText("A dossier is a Case")).toHaveLength(2)
+    expect(view.getAllByText(/Saved in a teammate's conversation/).length).toBeGreaterThan(0)
+    expect(view.queryByRole("link", { name: "Open the conversation" })).toBeNull()
+    expect(view.getAllByText(/Saved in your conversation/).length).toBeGreaterThan(0)
+    expect(view.getAllByText(/Edited by you/).length).toBeGreaterThan(0)
+    expect(view.getAllByText(/Memory, Payments/).length).toBeGreaterThan(0)
+
+    fireEvent.click(view.getByText("Invoices exclude VAT").closest("button") as HTMLElement)
+    expect(view.getByRole("link", { name: "Open the conversation" }).getAttribute("href")).toBe(
+      "/threads/thr_8f2"
+    )
   })
 
   test("says what will be remembered when nothing is yet", () => {

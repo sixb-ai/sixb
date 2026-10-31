@@ -86,6 +86,16 @@ export class InMemoryStorage implements Storage {
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
   private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
     resolve: (input) => this.resolveAiAccountingAttribution(input),
+    requester: async (input) => {
+      const execution = await this.executionStorage.getById({
+        projectId: input.projectId,
+        id: input.executionId,
+      })
+      const by = execution?.requestedBy
+      return by?.type === "user" || by?.type === "serviceAccount"
+        ? { type: by.type, id: by.id }
+        : undefined
+    },
     resolveGroup: async (input) => {
       const attribution = await this.resolveAiAccountingAttribution(input)
       if (attribution?.kind !== "subagent") return { executionId: input.executionId, attribution }

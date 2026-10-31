@@ -70,7 +70,7 @@ Run this from your project root:
 bun sixb dev
 ```
 
-Open your app at [localhost:3000](http://localhost:3000) and choose **Ontology** from the user
+Open your app at [localhost:3000](http://localhost:3000) and choose **Console** from the user
 menu to explore your model, or the [API documentation](http://localhost:3001/docs) to see its
 endpoints.
 

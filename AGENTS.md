@@ -16,7 +16,7 @@ Repo-wide agent instructions for `sixb`.
 - `packages/cli`: CLI entrypoint for `sixb`
 - `packages/create-sixb`: zero-dependency project scaffolder and template
 - `packages/app`: the project app: shell, built-in pages (Home, the agent, object pages, and the
-  Settings, Data, Observability and Ontology sections in `src/pages/`), dev server and build
+  Console and Settings sections in `src/pages/`), dev server and build
 - `models/`: model providers such as Anthropic and Vercel AI Gateway
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects

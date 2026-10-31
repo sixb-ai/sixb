@@ -28,6 +28,7 @@ import {
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { pgAccountingFilterValues } from "./ai-accounting-filters"
 import { listAiModelCallGroups } from "./ai-cost-groups"
 import { requestedReasoningFromRow } from "./pg-ai-usage-storage"
 import type { PgStoreClient } from "./transactions"
@@ -100,6 +101,7 @@ export class PgAiCostStorage implements AiCostStorage {
     const query = normalizeAiAccountingQuery(input)
     const providerId = query.providerId ?? null
     const modelId = query.modelId ?? null
+    const filter = pgAccountingFilterValues(query)
     const rows = await this.sql<AggregateRow[]>`
       WITH filtered AS (
         SELECT usage.provider_id,
@@ -130,7 +132,9 @@ export class PgAiCostStorage implements AiCostStorage {
           ) AS attribution_workflow_id,
           cost.status AS cost_status,
           cost.currency AS cost_currency,
-          cost.amount_nanos AS cost_amount_nanos
+          cost.amount_nanos AS cost_amount_nanos,
+          execution.requested_by_user_id AS requester_user_id,
+          execution.requested_by_service_account_id AS requester_service_account_id
         FROM ai_model_call_usage AS usage
         JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
         LEFT JOIN agent_runs AS direct_agent
@@ -148,6 +152,26 @@ export class PgAiCostStorage implements AiCostStorage {
           AND usage.occurred_at >= ${query.from} AND usage.occurred_at < ${query.to}
           AND (${providerId}::text IS NULL OR usage.provider_id = ${providerId})
           AND (${modelId}::text IS NULL OR usage.requested_model_id = ${modelId})
+          AND (${filter.kind}::text IS NULL OR usage.model_kind = ${filter.kind})
+          AND (${filter.source}::text IS NULL OR (CASE
+            WHEN direct_agent.id IS NOT NULL THEN 'agent'
+            WHEN COALESCE(workflow_node.workflow_id,
+              CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+            ) IS NOT NULL THEN 'workflow'
+            WHEN execution.executor_kind = 'action' THEN 'action'
+            ELSE 'other'
+          END) = ${filter.source})
+          AND (${filter.workflow}::text IS NULL OR COALESCE(workflow_node.workflow_id,
+            CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+          ) = ${filter.workflow})
+          AND (
+            ${filter.mode}::text IS NULL
+            OR (${filter.mode} = 'none' AND execution.requested_by_user_id IS NULL
+              AND execution.requested_by_service_account_id IS NULL)
+            OR (${filter.mode} = 'user' AND execution.requested_by_user_id = ${filter.id})
+            OR (${filter.mode} = 'serviceAccount'
+              AND execution.requested_by_service_account_id = ${filter.id})
+          )
       ), classified AS (
         SELECT filtered.*,
           CASE
@@ -178,7 +202,26 @@ export class PgAiCostStorage implements AiCostStorage {
           classified.*
         FROM classified
         UNION ALL
+        SELECT 'modelSeries', provider_id, requested_model_id, NULL,
+          CASE ${input.bucket}::text
+            WHEN 'hour' THEN
+              date_trunc('hour', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+            WHEN 'day' THEN
+              date_trunc('day', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+            ELSE date_trunc('week', occurred_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+          END,
+          classified.*
+        FROM classified
+        UNION ALL
         SELECT 'model', provider_id, requested_model_id, NULL, NULL, classified.* FROM classified
+        UNION ALL
+        SELECT 'person',
+          CASE
+            WHEN requester_user_id IS NOT NULL THEN 'user'
+            WHEN requester_service_account_id IS NOT NULL THEN 'serviceAccount'
+          END,
+          COALESCE(requester_user_id, requester_service_account_id), NULL, NULL, classified.*
+        FROM classified
         UNION ALL
         SELECT 'kind', model_kind, NULL, NULL, NULL, classified.* FROM classified
         UNION ALL
@@ -243,9 +286,20 @@ export class PgAiCostStorage implements AiCostStorage {
     const modelId = query.modelId ?? null
     const executionId = query.executionId ?? null
     const valuationStatus = query.valuationStatus ?? null
+    const filter = pgAccountingFilterValues(query)
     const [count] = await this.sql<CountRow[]>`
       SELECT COUNT(*)::text AS total
       FROM ai_model_call_usage AS usage
+      JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
+      LEFT JOIN agent_runs AS direct_agent
+        ON direct_agent.project_id = usage.project_id
+        AND direct_agent.execution_id = usage.execution_id
+      LEFT JOIN workflow_agent_node_runs AS workflow_agent
+        ON workflow_agent.project_id = usage.project_id
+        AND workflow_agent.execution_id = usage.execution_id
+      LEFT JOIN workflow_node_runs AS workflow_node
+        ON workflow_node.project_id = workflow_agent.project_id
+        AND workflow_node.id = workflow_agent.node_run_id
       LEFT JOIN ai_model_call_valuations AS cost
         ON cost.project_id = usage.project_id AND cost.usage_record_id = usage.id
       WHERE usage.project_id = ${query.projectId}
@@ -259,6 +313,26 @@ export class PgAiCostStorage implements AiCostStorage {
             WHEN cost.status = 'unpriceable' THEN 'unpriceable'
             ELSE 'unvalued'
           END
+        )
+        AND (${filter.kind}::text IS NULL OR usage.model_kind = ${filter.kind})
+        AND (${filter.source}::text IS NULL OR (CASE
+          WHEN direct_agent.id IS NOT NULL THEN 'agent'
+          WHEN COALESCE(workflow_node.workflow_id,
+            CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+          ) IS NOT NULL THEN 'workflow'
+          WHEN execution.executor_kind = 'action' THEN 'action'
+          ELSE 'other'
+        END) = ${filter.source})
+        AND (${filter.workflow}::text IS NULL OR COALESCE(workflow_node.workflow_id,
+          CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+        ) = ${filter.workflow})
+        AND (
+          ${filter.mode}::text IS NULL
+          OR (${filter.mode} = 'none' AND execution.requested_by_user_id IS NULL
+            AND execution.requested_by_service_account_id IS NULL)
+          OR (${filter.mode} = 'user' AND execution.requested_by_user_id = ${filter.id})
+          OR (${filter.mode} = 'serviceAccount'
+            AND execution.requested_by_service_account_id = ${filter.id})
         )
     `
     const rows = await this.sql<JoinedRow[]>`
@@ -314,6 +388,26 @@ export class PgAiCostStorage implements AiCostStorage {
             WHEN cost.status = 'unpriceable' THEN 'unpriceable'
             ELSE 'unvalued'
           END
+        )
+        AND (${filter.kind}::text IS NULL OR usage.model_kind = ${filter.kind})
+        AND (${filter.source}::text IS NULL OR (CASE
+          WHEN direct_agent.id IS NOT NULL THEN 'agent'
+          WHEN COALESCE(workflow_node.workflow_id,
+            CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+          ) IS NOT NULL THEN 'workflow'
+          WHEN execution.executor_kind = 'action' THEN 'action'
+          ELSE 'other'
+        END) = ${filter.source})
+        AND (${filter.workflow}::text IS NULL OR COALESCE(workflow_node.workflow_id,
+          CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+        ) = ${filter.workflow})
+        AND (
+          ${filter.mode}::text IS NULL
+          OR (${filter.mode} = 'none' AND execution.requested_by_user_id IS NULL
+            AND execution.requested_by_service_account_id IS NULL)
+          OR (${filter.mode} = 'user' AND execution.requested_by_user_id = ${filter.id})
+          OR (${filter.mode} = 'serviceAccount'
+            AND execution.requested_by_service_account_id = ${filter.id})
         )
       ORDER BY usage.occurred_at DESC, usage.id ASC
       LIMIT ${query.limit} OFFSET ${query.offset}
@@ -475,20 +569,30 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
   const dimensionKeys =
     row.dimension === "model"
       ? { providerId: required(row.key_1), modelId: required(row.key_2) }
-      : row.dimension === "kind"
-        ? withModelKind(aiAccountingModelKind(row.key_1))
-        : row.dimension === "agent"
-          ? {
-              agentKind: required(row.key_1) as "agent" | "workflowAgent",
-              ...(row.key_1 === "workflowAgent"
-                ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
-                : {}),
-            }
-          : row.dimension === "workflow"
-            ? { workflowId: required(row.key_1) }
-            : row.dimension === "series"
-              ? { start: new Date(required(row.bucket_start)) }
-              : {}
+      : row.dimension === "modelSeries"
+        ? {
+            providerId: required(row.key_1),
+            modelId: required(row.key_2),
+            start: new Date(required(row.bucket_start)),
+          }
+        : row.dimension === "person"
+          ? row.key_1 && row.key_2
+            ? { requesterType: row.key_1 as "user" | "serviceAccount", requesterId: row.key_2 }
+            : {}
+          : row.dimension === "kind"
+            ? withModelKind(aiAccountingModelKind(row.key_1))
+            : row.dimension === "agent"
+              ? {
+                  agentKind: required(row.key_1) as "agent" | "workflowAgent",
+                  ...(row.key_1 === "workflowAgent"
+                    ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
+                    : {}),
+                }
+              : row.dimension === "workflow"
+                ? { workflowId: required(row.key_1) }
+                : row.dimension === "series"
+                  ? { start: new Date(required(row.bucket_start)) }
+                  : {}
   return {
     dimension: row.dimension,
     ...dimensionKeys,

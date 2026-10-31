@@ -187,8 +187,8 @@ set `SIXB_API_PUBLIC_ORIGIN` to the tunnel's URL.
 
 ## Start a workflow
 
-Run a workflow from its page in your app's [Ontology](../apps/overview.md#ontology) section, such as
-`/ontology/workflows/review-deal`, or request it from your own pages with the
+Run a workflow from its page in your app's [Console](../apps/overview.md#console), such as
+`/console/workflows/review-deal`, or request it from your own pages with the
 [Client SDK](../client/typed-queries.md#react-hooks). Use `requestWorkflowRunMutation()` from
 `@sixb/client/hooks` to submit its input from a React component.
 

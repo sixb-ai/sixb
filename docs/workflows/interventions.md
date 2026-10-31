@@ -61,9 +61,9 @@ unless your following step or action handles that value. Cancelling the interven
 
 ## Submit a response
 
-In your app, open the workflow's page under [Ontology](../apps/overview.md#ontology), select the
-run in **Runs**, and select its waiting review step to fill in the response form. The run's page in
-Observability links there. Sixb validates the response and records the authenticated reviewer.
+In your app, open the workflow's page in the [Console](../apps/overview.md#console), select the
+run in **Runs**, and select its waiting review step to fill in the response form. The run's page
+links there. Sixb validates the response and records the authenticated reviewer.
 
 For a custom app, use the [client hooks](../client/typed-queries.md#react-hooks).
 Call `listWorkflowInterventionsOptions()` with the `status` query filter set to `pending`.

@@ -6,6 +6,12 @@ import { useCallback } from "react"
 /** The signed-in person: their id, email, display name, avatar and groups. */
 export type CurrentUser = Extract<GetAuthSessionResponse, { readonly authenticated: true }>["user"]
 
+/** Which Settings pages about the project the signed-in person may open. */
+export type SessionAccess = Extract<
+  GetAuthSessionResponse,
+  { readonly authenticated: true }
+>["access"]
+
 /**
  * The signed-in person, or `null` when auth is off or nobody is signed in.
  *
@@ -15,6 +21,12 @@ export type CurrentUser = Extract<GetAuthSessionResponse, { readonly authenticat
 export function useCurrentUser(): CurrentUser | null {
   const { data } = useQuery({ ...getAuthSessionOptions(), staleTime: Number.POSITIVE_INFINITY })
   return data?.authenticated ? data.user : null
+}
+
+/** What the signed-in person may open, or `null` when nobody is signed in. */
+export function useSessionAccess(): SessionAccess | null {
+  const { data } = useQuery({ ...getAuthSessionOptions(), staleTime: Number.POSITIVE_INFINITY })
+  return data?.authenticated ? data.access : null
 }
 
 /**

@@ -44,7 +44,7 @@ assistant turns are unavailable. Customize the model catalog in [`ai/models.ts`]
 and project tools in [`ai/tools.ts`](./ai/tools.ts). Agent commands run through the local sandbox
 provider by default.
 
-To exercise an agent inside a workflow, open **Ontology → Workflows → Agent service assessment** in the app and
+To exercise an agent inside a workflow, open **Console → Workflows → Agent service assessment** in the app and
 request a run with these values:
 
 ```text
@@ -102,8 +102,8 @@ PriorityCare 24/7 contract requires a response within 90 minutes. From Northline
 5. Approve the repair quote for customer authorization.
 6. Complete field work, verify telemetry recovery, and close the case.
 
-The same objects, links and rule state remain inspectable under **Ontology** in the app, the action
-and workflow runs under **Observability**, and the datasets and projections under **Data**.
+The same objects, links and rule state, the action and workflow runs, and the datasets and
+projections remain inspectable in the app's **Console**.
 
 ## Demo commands
 
@@ -189,7 +189,7 @@ bun run demo:sync
 The second sync reads only the new source event, merges the updated quote, advances the checkpoint,
 and reevaluates the existing Quote projection against the complete dataset. Run `demo:sync` again
 without another source change and the successful no-op creates no dataset version. The app's
-**Data › Datasets** page shows the dataset's primary key and its `merge` versions.
+**Console › Datasets** page shows the dataset's primary key and its `merge` versions.
 
 ## Read the code in this order
 

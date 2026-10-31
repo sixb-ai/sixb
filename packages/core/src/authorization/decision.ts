@@ -38,6 +38,7 @@ export type AuthzRequest =
   | { readonly kind: "aiUsage.observe" }
   | { readonly kind: "activity.observe" }
   | { readonly kind: "agentThreads.observe" }
+  | { readonly kind: "console.observe" }
   | { readonly kind: "aiUsage.manage" }
   | { readonly kind: "agentMemory.manage" }
   | { readonly kind: "connector.manage"; readonly connectorId: string }
@@ -99,6 +100,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "observe:activity" }]
     case "agentThreads.observe":
       return [{ kind: "observe:agentThreads" }]
+    case "console.observe":
+      return [{ kind: "observe:console" }]
     case "aiUsage.manage":
       return [{ kind: "manage:aiUsage" }]
     case "agentMemory.manage":
@@ -341,6 +344,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to observe project activity.`
     case "agentThreads.observe":
       return `[Sixb] Principal '${principalId}' is not allowed to observe other users' Agent conversations.`
+    case "console.observe":
+      return `[Sixb] Principal '${principalId}' is not allowed to open the Console.`
     case "aiUsage.manage":
       return `[Sixb] Principal '${principalId}' is not allowed to manage project AI usage limits.`
     case "agentMemory.manage":

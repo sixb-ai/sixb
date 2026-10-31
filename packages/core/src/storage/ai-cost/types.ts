@@ -135,17 +135,40 @@ export interface AiAccountingRange {
   readonly to: Date
 }
 
-export interface QueryAiAccountingOverviewInput extends AiAccountingRange {
-  readonly projectId: string
-  readonly bucket: AiAccountingBucket
-  readonly providerId?: string
-  readonly modelId?: string
+/** Who started the work a model call was for: the requester of its execution. */
+export interface AiAccountingRequester {
+  readonly type: "user" | "serviceAccount"
+  readonly id: string
 }
 
-export interface ListAiModelCallAccountingInput extends AiAccountingRange {
-  readonly projectId: string
+/**
+ * Where a model call came from: an agent conversation with the sub-agents it started, a workflow,
+ * an action, or anything else, such as a request of the project's own code.
+ */
+export type AiAccountingSource =
+  | { readonly kind: "agent" }
+  /** As a filter, without `workflowId`: any workflow. */
+  | { readonly kind: "workflow"; readonly workflowId?: string }
+  | { readonly kind: "action" }
+  | { readonly kind: "other" }
+
+/** What every accounting read can narrow its range to. */
+export interface AiAccountingFilters {
   readonly providerId?: string
   readonly modelId?: string
+  /** `"none"` keeps the calls nobody requested, such as a schedule's. */
+  readonly requester?: AiAccountingRequester | "none"
+  readonly source?: AiAccountingSource
+  readonly modelKind?: import("../../models/definitions").ModelKind
+}
+
+export interface QueryAiAccountingOverviewInput extends AiAccountingRange, AiAccountingFilters {
+  readonly projectId: string
+  readonly bucket: AiAccountingBucket
+}
+
+export interface ListAiModelCallAccountingInput extends AiAccountingRange, AiAccountingFilters {
+  readonly projectId: string
   readonly executionId?: string
   readonly valuationStatus?: "rated" | "unpriceable" | "unvalued"
   readonly limit?: number
@@ -195,6 +218,18 @@ export interface AiAccountingModelBreakdown extends AiAccountingAggregate {
   readonly modelId: string
 }
 
+export interface AiAccountingPersonBreakdown extends AiAccountingAggregate {
+  /** Absent for the calls nobody requested, such as a schedule's. */
+  readonly requester?: AiAccountingRequester
+}
+
+/** One model's share of each period, every period of the range included. */
+export interface AiAccountingModelSeries {
+  readonly providerId: string
+  readonly modelId: string
+  readonly series: readonly AiAccountingTimeBucket[]
+}
+
 export interface AiAccountingKindBreakdown extends AiAccountingAggregate {
   /** Absent for calls recorded before their kind was captured. */
   readonly modelKind?: import("../../models/definitions").ModelKind
@@ -205,8 +240,11 @@ export interface AiAccountingOverview {
   readonly bucket: AiAccountingBucket
   readonly totals: AiAccountingAggregate
   readonly series: readonly AiAccountingTimeBucket[]
+  /** Each model's own series, for spend stacked by model. */
+  readonly modelSeries: readonly AiAccountingModelSeries[]
   readonly models: readonly AiAccountingModelBreakdown[]
   readonly kinds: readonly AiAccountingKindBreakdown[]
+  readonly people: readonly AiAccountingPersonBreakdown[]
   readonly agents: readonly AiAccountingAgentBreakdown[]
   readonly workflows: readonly AiAccountingWorkflowBreakdown[]
 }
@@ -250,7 +288,10 @@ export interface ListAiModelCallAccountingResult {
   readonly total: number
 }
 
-export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "executionId">
+export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "executionId"> & {
+  /** Most recent first, the default, or costliest first. */
+  readonly sort?: "recent" | "cost"
+}
 
 /** Filtered usage; an absent token total means at least one call did not report it. */
 export interface AiModelCallGroupSummary {
@@ -258,9 +299,17 @@ export interface AiModelCallGroupSummary {
   /** Present when every call that reports tokens did; tokenless kinds such as images don't. */
   readonly totalTokens?: number
   /** Sums over the calls that reported them. */
+  readonly inputTokens?: number
+  readonly cacheReadInputTokens?: number
   readonly outputImages?: number
   readonly inputCharacters?: number
   readonly audioDurationMs?: number
+  readonly costs: AiCostSummary
+}
+
+/** One model's calls within an execution. */
+export interface AiModelCallModelSummary extends AiBillingIdentity {
+  readonly modelCallCount: number
   readonly costs: AiCostSummary
 }
 
@@ -269,13 +318,20 @@ export interface AiModelCallExecutionSummary extends AiModelCallGroupSummary {
   readonly attribution?: AiAccountingAttribution
   readonly firstCallAt: Date
   readonly lastCallAt: Date
-  readonly models: readonly AiBillingIdentity[]
+  readonly models: readonly AiModelCallModelSummary[]
 }
 
-/** One initiating execution, including only calls matching the accounting filters. */
+/**
+ * One conversation, workflow run or other initiating execution, including only calls matching the
+ * accounting filters. A conversation's executions are its turns and their sub-agents; a workflow
+ * run's are its agent steps.
+ */
 export interface AiModelCallGroup extends AiModelCallGroupSummary {
+  /** The group's first initiating execution in the range, such as a conversation's first turn. */
   readonly executionId: string
   readonly attribution?: AiAccountingAttribution
+  /** Who started it; absent when nobody did, such as a schedule. */
+  readonly requester?: AiAccountingRequester
   readonly firstCallAt: Date
   readonly lastCallAt: Date
   readonly executions: readonly AiModelCallExecutionSummary[]

@@ -6,6 +6,7 @@ import { type AiAccountingGroupIdentity, buildAiModelCallGroups } from "./groups
 import type {
   AiAccountingAttribution,
   AiAccountingOverview,
+  AiAccountingRequester,
   AiCostStorage,
   AiCostSummary,
   AiModelCallCostRecord,
@@ -36,6 +37,11 @@ export interface InMemoryAiAccountingAttributionSource {
     readonly projectId: string
     readonly executionId: string
   }): Promise<AiAccountingAttribution | undefined>
+  /** Who requested the execution; absent when nobody did. */
+  requester?(input: {
+    readonly projectId: string
+    readonly executionId: string
+  }): Promise<AiAccountingRequester | undefined>
 }
 
 /** In-memory immutable model-call costs and accounting reads. */
@@ -141,14 +147,14 @@ export class InMemoryAiCostStorage implements AiCostStorage {
     return Promise.all(
       [...this.usage.snapshot().records.values()].map(async (usage) => {
         const cost = this.recordsByUsage.get(usageRecordKey(usage.projectId, usage.id))
-        const attribution = await this.attribution?.resolve({
-          projectId: usage.projectId,
-          executionId: usage.executionId,
-        })
+        const execution = { projectId: usage.projectId, executionId: usage.executionId }
+        const attribution = await this.attribution?.resolve(execution)
+        const requester = await this.attribution?.requester?.(execution)
         return {
           usage,
           ...(attribution ? { attribution } : {}),
           ...(cost ? { cost } : {}),
+          ...(requester ? { requester } : {}),
         }
       })
     )

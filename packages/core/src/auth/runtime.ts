@@ -1097,7 +1097,36 @@ export class AuthRuntime {
     }
 
     const page = paginate(members, { limit, offset })
-    return { members: page.page, hasMore: page.hasMore, total: page.total }
+    // Read for the page only: each is a session lookup.
+    const now = new Date()
+    const listed = await Promise.all(
+      page.page.map(async (member) => {
+        const lastActiveAt = await this.lastActiveAt(storage, member.user.id, now)
+        return lastActiveAt ? { ...member, lastActiveAt } : member
+      })
+    )
+    return { members: listed, hasMore: page.hasMore, total: page.total }
+  }
+
+  /** A member's latest activity: their most recently used session, live or ended. */
+  private async lastActiveAt(
+    storage: AuthStorage,
+    userId: string,
+    now: Date
+  ): Promise<Date | undefined> {
+    const [live] = await storage.sessions.listActiveByUserId({
+      projectId: this.projectId,
+      userId,
+      now,
+    })
+    if (live) return live.lastSeenAt ?? live.createdAt
+    const { sessions } = await storage.sessions.listByUserId({
+      projectId: this.projectId,
+      userId,
+      limit: 1,
+    })
+    const latest = sessions[0]
+    return latest ? (latest.lastSeenAt ?? latest.createdAt) : undefined
   }
 
   async updateMemberGroups(

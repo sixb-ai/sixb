@@ -799,6 +799,32 @@ export type GetAuthSessionResponses = {
           avatarUrl?: string
           groupIds: Array<string>
         }
+        access: {
+          /**
+           * Members: a membership policy lets them invite, assign groups or suspend
+           */
+          members: boolean
+          /**
+           * Service accounts: a membership policy lets them manage them
+           */
+          serviceAccounts: boolean
+          /**
+           * Usage: they hold can.observe(agent.usage)
+           */
+          usage: boolean
+          /**
+           * Activity: they hold can.observe(project.activity)
+           */
+          activity: boolean
+          /**
+           * The Console: they hold can.observe(project.console)
+           */
+          console: boolean
+          /**
+           * Console › Logs: they hold can.observe(project.logs)
+           */
+          logs: boolean
+        }
         session: {
           id: string
           expiresAt: string
@@ -2055,6 +2081,10 @@ export type ListAuthMembersResponses = {
         suspend: boolean
         reactivate: boolean
       }
+      /**
+       * Their latest session's last request, or its sign-in; absent if they never signed in
+       */
+      lastActiveAt?: string
     }>
     hasMore: boolean
     total: number
@@ -2265,6 +2295,26 @@ export type GetAiAccountingOverviewData = {
     to: string
     providerId?: string
     modelId?: string
+    /**
+     * Calls one person or service account asked for, as user:<id> or serviceAccount:<id>, or none for those nobody did, such as a schedule's
+     */
+    person?: string
+    /**
+     * Calls from agent conversations and their sub-agents, actions, workflows or one as workflow:<id>, or other
+     */
+    source?: string
+    /**
+     * Calls to one kind of model
+     */
+    kind?:
+      | "language"
+      | "image"
+      | "video"
+      | "embedding"
+      | "decision"
+      | "transcription"
+      | "speech"
+      | "reranking"
     bucket: "hour" | "day" | "week"
   }
   url: "/api/ai/accounting/overview"
@@ -2438,6 +2488,81 @@ export type GetAiAccountingOverviewResponses = {
       start: string
       end: string
     }>
+    /**
+     * Each model's own series, every period included
+     */
+    modelSeries: Array<{
+      providerId: string
+      modelId: string
+      series: Array<{
+        modelCallCount: number
+        /**
+         * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+         */
+        usage: {
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          /**
+           * Audio content duration in milliseconds; not billed duration.
+           */
+          audioDurationMs?: number
+          /**
+           * Output tokens that encode generated images, within outputTokens.
+           */
+          imageOutputTokens?: number
+          /**
+           * Output tokens that encode generated audio, within outputTokens.
+           */
+          audioOutputTokens?: number
+          /**
+           * Images the call returned.
+           */
+          outputImages?: number
+          /**
+           * Input characters, counted by the provider's own billing rule.
+           */
+          inputCharacters?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
+        }
+        usageCoverage: {
+          /**
+           * Calls reporting both inputTokens and outputTokens.
+           */
+          completeCallCount: number
+          fieldCallCounts: {
+            inputTokens: number
+            outputTokens: number
+            uncachedInputTokens: number
+            cacheReadInputTokens: number
+            cacheWriteInputTokens: number
+            textOutputTokens: number
+            reasoningOutputTokens: number
+            audioDurationMs: number
+            imageOutputTokens: number
+            audioOutputTokens: number
+            outputImages: number
+            inputCharacters: number
+          }
+        }
+        costs: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
+        }
+        start: string
+        end: string
+      }>
+    }>
     models: Array<{
       modelCallCount: number
       /**
@@ -2505,6 +2630,87 @@ export type GetAiAccountingOverviewResponses = {
       }
       providerId: string
       modelId: string
+    }>
+    /**
+     * Who asked for the calls
+     */
+    people: Array<{
+      modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+          audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
+        }
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      /**
+       * Absent for the calls nobody asked for, such as a schedule's
+       */
+      requester?: {
+        type: "user" | "serviceAccount"
+        id: string
+        /**
+         * Their name, or a service account's
+         */
+        name?: string
+        email?: string
+      }
     }>
     kinds: Array<{
       modelCallCount: number
@@ -2803,6 +3009,26 @@ export type ListAiModelCallsData = {
     to: string
     providerId?: string
     modelId?: string
+    /**
+     * Calls one person or service account asked for, as user:<id> or serviceAccount:<id>, or none for those nobody did, such as a schedule's
+     */
+    person?: string
+    /**
+     * Calls from agent conversations and their sub-agents, actions, workflows or one as workflow:<id>, or other
+     */
+    source?: string
+    /**
+     * Calls to one kind of model
+     */
+    kind?:
+      | "language"
+      | "image"
+      | "video"
+      | "embedding"
+      | "decision"
+      | "transcription"
+      | "speech"
+      | "reranking"
     executionId?: string
     valuationStatus?: "rated" | "unpriceable" | "unvalued"
     limit?: string
@@ -3710,9 +3936,33 @@ export type ListAiModelCallGroupsData = {
     to: string
     providerId?: string
     modelId?: string
+    /**
+     * Calls one person or service account asked for, as user:<id> or serviceAccount:<id>, or none for those nobody did, such as a schedule's
+     */
+    person?: string
+    /**
+     * Calls from agent conversations and their sub-agents, actions, workflows or one as workflow:<id>, or other
+     */
+    source?: string
+    /**
+     * Calls to one kind of model
+     */
+    kind?:
+      | "language"
+      | "image"
+      | "video"
+      | "embedding"
+      | "decision"
+      | "transcription"
+      | "speech"
+      | "reranking"
     valuationStatus?: "rated" | "unpriceable" | "unvalued"
     limit?: string
     offset?: string
+    /**
+     * Most recent first, the default, or costliest first
+     */
+    sort?: "recent" | "cost"
   }
   url: "/api/ai/model-call-groups"
 }
@@ -3785,6 +4035,8 @@ export type ListAiModelCallGroupsResponses = {
        * Present when every call that reports tokens did; images and speech don't.
        */
       totalTokens?: number
+      inputTokens?: number
+      cacheReadInputTokens?: number
       outputImages?: number
       inputCharacters?: number
       audioDurationMs?: number
@@ -3800,6 +4052,9 @@ export type ListAiModelCallGroupsResponses = {
       firstCallAt: string
       lastCallAt: string
       label?: string
+      /**
+       * A conversation's turns and sub-agents, or a workflow run's agent steps
+       */
       executions: Array<{
         executionId: string
         attribution?:
@@ -3839,6 +4094,8 @@ export type ListAiModelCallGroupsResponses = {
          * Present when every call that reports tokens did; images and speech don't.
          */
         totalTokens?: number
+        inputTokens?: number
+        cacheReadInputTokens?: number
         outputImages?: number
         inputCharacters?: number
         audioDurationMs?: number
@@ -3856,10 +4113,36 @@ export type ListAiModelCallGroupsResponses = {
         models: Array<{
           providerId: string
           modelId: string
+          modelCallCount: number
+          costs: {
+            amounts: Array<{
+              currency: string
+              amountNanos: string
+            }>
+            ratedCallCount: number
+            unpriceableCallCount: number
+            unvaluedCallCount: number
+          }
         }>
         label?: string
+        /**
+         * What a turn was asked, when the caller can read its conversation
+         */
+        prompt?: string
       }>
       canOpenThread: boolean
+      /**
+       * Who started it
+       */
+      requester?: {
+        type: "user" | "serviceAccount"
+        id: string
+        /**
+         * Their name, or a service account's
+         */
+        name?: string
+        email?: string
+      }
     }>
     total: number
     hasMore: boolean

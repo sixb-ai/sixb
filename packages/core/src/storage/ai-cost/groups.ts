@@ -4,11 +4,13 @@ import { aiAccountingItemMatchesQuery, normalizeAiModelCallAccountingQuery } fro
 import { directModelCallAttribution } from "./attribution"
 import type {
   AiAccountingAttribution,
+  AiAccountingRequester,
   AiBillingIdentity,
   AiCostSummary,
   AiModelCallExecutionSummary,
   AiModelCallGroup,
   AiModelCallGroupSummary,
+  AiModelCallModelSummary,
   AiMoney,
   ListAiModelCallGroupsInput,
   ListAiModelCallGroupsResult,
@@ -17,10 +19,28 @@ import type {
 export interface AiAccountingGroupIdentity {
   readonly executionId: string
   readonly attribution?: AiAccountingAttribution
+  /** Who requested it; absent when nobody did. */
+  readonly requester?: AiAccountingRequester
+}
+
+/**
+ * What a call is listed under: its conversation, its workflow run, or else the execution that
+ * started it. The SQL providers compute the same key.
+ */
+export function aiModelCallGroupKey(root: AiAccountingGroupIdentity): string {
+  switch (root.attribution?.kind) {
+    case "agent":
+      return `thread:${root.attribution.threadId}`
+    case "workflowAgent":
+      return `workflowRun:${root.attribution.workflowRunId}`
+    default:
+      return root.executionId
+  }
 }
 
 /** A compact SQL aggregate, never the raw provider response or a page of individual calls. */
 export interface AiModelCallGroupFragment {
+  readonly group: string
   readonly root: AiAccountingGroupIdentity
   readonly execution: AiAccountingGroupIdentity
   readonly model: AiBillingIdentity
@@ -31,6 +51,8 @@ export interface AiModelCallGroupFragment {
   /** Calls of a tokenless kind that reported no tokens, which leave no gap in the total. */
   readonly tokenlessCount: string
   readonly totalTokens: string | null
+  readonly inputTokens: string | null
+  readonly cacheReadInputTokens: string | null
   readonly outputImages: string | null
   readonly inputCharacters: string | null
   readonly audioDurationMs: string | null
@@ -40,6 +62,7 @@ export interface AiModelCallGroupFragment {
 
 /** Common provider projection; SQL groups meters before returning rows to the runtime. */
 export interface AiModelCallGroupRow {
+  readonly group_key: string
   readonly root_execution_id: string
   readonly execution_id: string
   readonly provider_id: string
@@ -50,6 +73,8 @@ export interface AiModelCallGroupRow {
   readonly token_count: string
   readonly tokenless_count: string
   readonly total_tokens: string | null
+  readonly input_tokens: string | null
+  readonly cache_read_input_tokens: string | null
   readonly output_images: string | null
   readonly input_characters: string | null
   readonly audio_duration_ms: string | null
@@ -70,6 +95,8 @@ export interface AiModelCallGroupRow {
   readonly executor_kind: string | null
   readonly executor_id: string | null
   readonly primitive_id: string | null
+  readonly requested_by_user_id: string | null
+  readonly requested_by_service_account_id: string | null
 }
 
 export function aiModelCallGroupFragmentFromRow(
@@ -100,8 +127,14 @@ export function aiModelCallGroupFragmentFromRow(
     row.direct_kind === "subagent" && row.direct_run_id && row.parent_run_id
       ? { kind: "subagent", subagentRunId: row.direct_run_id, parentRunId: row.parent_run_id }
       : attribution
+  const requester: AiAccountingRequester | undefined = row.requested_by_user_id
+    ? { type: "user", id: row.requested_by_user_id }
+    : row.requested_by_service_account_id
+      ? { type: "serviceAccount", id: row.requested_by_service_account_id }
+      : undefined
   return {
-    root: { executionId: row.root_execution_id, attribution },
+    group: row.group_key,
+    root: { executionId: row.root_execution_id, attribution, ...(requester ? { requester } : {}) },
     execution: { executionId: row.execution_id, attribution: executionAttribution },
     model: { providerId: row.provider_id, modelId: row.requested_model_id },
     firstCallAt: new Date(row.first_call_at),
@@ -110,6 +143,8 @@ export function aiModelCallGroupFragmentFromRow(
     tokenCount: row.token_count,
     tokenlessCount: row.tokenless_count,
     totalTokens: row.total_tokens,
+    inputTokens: row.input_tokens,
+    cacheReadInputTokens: row.cache_read_input_tokens,
     outputImages: row.output_images,
     inputCharacters: row.input_characters,
     audioDurationMs: row.audio_duration_ms,
@@ -129,46 +164,81 @@ export function aiModelCallGroupFragmentFromRow(
   }
 }
 
+export type AiModelCallGroupSort = NonNullable<ListAiModelCallGroupsInput["sort"]>
+
+export function normalizeAiModelCallGroupSort(sort: unknown): AiModelCallGroupSort {
+  if (sort === undefined || sort === "recent") return "recent"
+  if (sort === "cost") return "cost"
+  throw new TypeError("[Sixb] AI model-call groups sort by 'recent' or 'cost'.")
+}
+
 export function buildAiModelCallGroupsFromFragments(
-  fragments: readonly AiModelCallGroupFragment[]
+  fragments: readonly AiModelCallGroupFragment[],
+  sort: AiModelCallGroupSort = "recent"
 ): readonly AiModelCallGroup[] {
-  const roots = new Map<string, AiModelCallGroupFragment[]>()
-  for (const fragment of fragments) append(roots, fragment.root.executionId, fragment)
-  return [...roots.values()]
-    .map((rootFragments): AiModelCallGroup => {
-      const first = rootFragments[0]!
+  const groups = new Map<string, AiModelCallGroupFragment[]>()
+  for (const fragment of fragments) append(groups, fragment.group, fragment)
+  return [...groups.values()]
+    .map((groupFragments) => {
       const executions = new Map<string, AiModelCallGroupFragment[]>()
-      for (const fragment of rootFragments)
+      for (const fragment of groupFragments)
         append(executions, fragment.execution.executionId, fragment)
-      return {
-        ...first.root,
-        ...summarize(rootFragments),
-        ...timeRange(rootFragments),
-        executions: [...executions.values()]
-          .map(
-            (items): AiModelCallExecutionSummary => ({
-              ...items[0]!.execution,
-              ...summarize(items),
-              ...timeRange(items),
-              models: [
-                ...new Map(items.map(({ model }) => [JSON.stringify(model), model])).values(),
-              ].sort(
-                (a, b) =>
-                  compareText(a.providerId, b.providerId) || compareText(a.modelId, b.modelId)
-              ),
-            })
-          )
-          .sort(
-            (a, b) =>
-              a.firstCallAt.getTime() - b.firstCallAt.getTime() ||
-              compareText(a.executionId, b.executionId)
-          ),
+      const summaries = [...executions.values()]
+        .map(
+          (items): AiModelCallExecutionSummary => ({
+            ...items[0]!.execution,
+            ...summarize(items),
+            ...timeRange(items),
+            models: modelSummaries(items),
+          })
+        )
+        .sort(
+          (a, b) =>
+            a.firstCallAt.getTime() - b.firstCallAt.getTime() ||
+            compareText(a.executionId, b.executionId)
+        )
+      // The group reads as the turn or step its first call was in; whoever asked for any of it
+      // asked for the conversation.
+      const root = groupFragments.reduce((first, fragment) =>
+        fragment.firstCallAt < first.firstCallAt ? fragment : first
+      ).root
+      const requester = groupFragments.find((fragment) => fragment.root.requester)?.root.requester
+      const group: AiModelCallGroup = {
+        ...root,
+        ...(requester ? { requester } : {}),
+        ...summarize(groupFragments),
+        ...timeRange(groupFragments),
+        executions: summaries,
       }
+      return { group, cost: totalNanos(group.costs) }
     })
     .sort(
       (a, b) =>
-        b.lastCallAt.getTime() - a.lastCallAt.getTime() || compareText(a.executionId, b.executionId)
+        (sort === "cost" ? compareBig(b.cost, a.cost) : 0) ||
+        b.group.lastCallAt.getTime() - a.group.lastCallAt.getTime() ||
+        compareText(a.group.executionId, b.group.executionId)
     )
+    .map(({ group }) => group)
+}
+
+function modelSummaries(items: readonly AiModelCallGroupFragment[]): AiModelCallModelSummary[] {
+  const models = new Map<string, AiModelCallGroupFragment[]>()
+  for (const item of items) append(models, JSON.stringify(item.model), item)
+  return [...models.values()]
+    .map((fragments) => {
+      const { modelCallCount, costs } = summarize(fragments)
+      return { ...fragments[0]!.model, modelCallCount, costs }
+    })
+    .sort((a, b) => compareText(a.providerId, b.providerId) || compareText(a.modelId, b.modelId))
+}
+
+/** Every currency's amount added together; a sort key, never shown. */
+function totalNanos(costs: AiCostSummary): bigint {
+  return costs.amounts.reduce((total, amount) => total + BigInt(amount.amountNanos), 0n)
+}
+
+function compareBig(a: bigint, b: bigint): number {
+  return a === b ? 0 : a < b ? -1 : 1
 }
 
 export function buildAiModelCallGroups(
@@ -176,6 +246,7 @@ export function buildAiModelCallGroups(
   source: readonly (AiAccountingRecordSetItem & { readonly root: AiAccountingGroupIdentity })[]
 ): ListAiModelCallGroupsResult {
   const query = normalizeAiModelCallAccountingQuery(input)
+  const sort = normalizeAiModelCallGroupSort(input.sort)
   const fragments = source
     .filter(
       (item) =>
@@ -185,7 +256,9 @@ export function buildAiModelCallGroups(
     )
     .map(
       (item): AiModelCallGroupFragment => ({
-        root: item.root,
+        group: aiModelCallGroupKey(item.root),
+        // A conversation's sub-agents run for whoever started it.
+        root: item.requester ? { ...item.root, requester: item.requester } : item.root,
         execution: { executionId: item.usage.executionId, attribution: item.attribution },
         model: { providerId: item.usage.providerId, modelId: item.usage.requestedModelId },
         firstCallAt: item.usage.occurredAt,
@@ -199,6 +272,8 @@ export function buildAiModelCallGroups(
             ? "1"
             : "0",
         totalTokens: item.usage.usage.totalTokens?.toString() ?? null,
+        inputTokens: item.usage.usage.inputTokens?.toString() ?? null,
+        cacheReadInputTokens: item.usage.usage.cacheReadInputTokens?.toString() ?? null,
         outputImages: item.usage.usage.outputImages?.toString() ?? null,
         inputCharacters: item.usage.usage.inputCharacters?.toString() ?? null,
         audioDurationMs: item.usage.usage.audioDurationMs?.toString() ?? null,
@@ -206,7 +281,7 @@ export function buildAiModelCallGroups(
         ...(item.cost && item.cost.status !== "unpriceable" ? { money: item.cost.money } : {}),
       })
     )
-  const groups = buildAiModelCallGroupsFromFragments(fragments)
+  const groups = buildAiModelCallGroupsFromFragments(fragments, sort)
   const items = groups.slice(query.offset, query.offset + query.limit)
   return structuredClone({
     items,
@@ -221,6 +296,8 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
   let tokenless = 0n
   let tokens = 0n
   const media = {
+    inputTokens: undefined as bigint | undefined,
+    cacheReadInputTokens: undefined as bigint | undefined,
     outputImages: undefined as bigint | undefined,
     inputCharacters: undefined as bigint | undefined,
     audioDurationMs: undefined as bigint | undefined,
@@ -233,7 +310,13 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
     tokenCount += BigInt(item.tokenCount)
     tokenless += BigInt(item.tokenlessCount)
     tokens += BigInt(item.totalTokens ?? "0")
-    for (const field of ["outputImages", "inputCharacters", "audioDurationMs"] as const) {
+    for (const field of [
+      "inputTokens",
+      "cacheReadInputTokens",
+      "outputImages",
+      "inputCharacters",
+      "audioDurationMs",
+    ] as const) {
       const value = item[field]
       if (value !== null) media[field] = (media[field] ?? 0n) + BigInt(value)
     }
@@ -257,6 +340,10 @@ function summarize(items: readonly AiModelCallGroupFragment[]): AiModelCallGroup
     ...(tokenCount > 0n && calls === tokenCount + tokenless
       ? { totalTokens: safeCount(tokens) }
       : {}),
+    ...(media.inputTokens === undefined ? {} : { inputTokens: safeCount(media.inputTokens) }),
+    ...(media.cacheReadInputTokens === undefined
+      ? {}
+      : { cacheReadInputTokens: safeCount(media.cacheReadInputTokens) }),
     ...(media.outputImages === undefined ? {} : { outputImages: safeCount(media.outputImages) }),
     ...(media.inputCharacters === undefined
       ? {}

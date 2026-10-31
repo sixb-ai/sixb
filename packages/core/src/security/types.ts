@@ -158,7 +158,7 @@ export interface ModelsRunGrant {
   readonly target: "models"
 }
 
-export type ObserveGrantTarget = "logs" | "aiUsage" | "activity" | "agentThreads"
+export type ObserveGrantTarget = "logs" | "aiUsage" | "activity" | "agentThreads" | "console"
 
 /**
  * Project-wide surfaces used in security grants such as `can.observe(project.logs)`. Each member's
@@ -170,6 +170,11 @@ export interface ProjectReference {
   readonly logs: { readonly kind: "logs" }
   /** Visits and page views recorded in the project's app. */
   readonly activity: { readonly kind: "activity" }
+  /**
+   * The app's Console: its pages for the project's connectors, data, ontology, workflows and
+   * logs. Observing it shows the Console; each page's data keeps its own grants.
+   */
+  readonly console: { readonly kind: "console" }
   /** The project's member directory: names, emails, avatars and status. */
   readonly users: { readonly kind: "users" }
   /** Every model in the project's catalog, for `can.run(project.models)`. */
@@ -177,8 +182,8 @@ export interface ProjectReference {
 }
 
 /**
- * Read the project's logs, its AI usage, its app activity or every user's Agent conversations. Each
- * is one surface, so there is nothing to select.
+ * Read the project's logs, its AI usage, its app activity or every user's Agent conversations, or
+ * open the app's Console. Each is one surface, so there is nothing to select.
  */
 export interface ObserveGrant {
   readonly kind: "grant"

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GetActivityVisitTimelineResponse } from "@sixb/client"
-import { filterSteps, type VisitStep, visitSteps } from "../src/pages/observability/activity/steps"
+import { filterSteps, type VisitStep, visitSteps } from "../src/pages/settings/activity/steps"
 
 type Timeline = GetActivityVisitTimelineResponse
 type Entry = Timeline["entries"][number]

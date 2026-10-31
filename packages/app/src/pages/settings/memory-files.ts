@@ -1,3 +1,7 @@
+import type { GetAgentMemoryResponse } from "@sixb/client"
+import { getAgentMemoryQueryKey, listAgentMemoryRevisionsQueryKey } from "@sixb/client/hooks"
+import type { QueryClient } from "@tanstack/react-query"
+
 /** The memory repos a person sees on the Memory page, in tab order. */
 export const MEMORY_REPOS = ["user", "project"] as const
 
@@ -47,23 +51,6 @@ export function memoryLinkPath(link: string): string {
   return name.includes(".") ? link : `${link}.md`
 }
 
-/**
- * The Markdown with each `[[link]]` to a file of the repo written as a Markdown link to it, named
- * after the file. A link to a file the repo does not hold reads as its plain name.
- */
-export function linkMemoryFiles(
-  markdown: string,
-  paths: ReadonlySet<string>,
-  href: (path: string) => string,
-  label: (path: string) => string
-): string {
-  return markdown.replace(/\[\[([^[\]\n]+)\]\]/g, (_, link: string) => {
-    const path = memoryLinkPath(link.trim())
-    const name = label(path).replace(/[[\]]/g, "")
-    return paths.has(path) ? `[${name}](${href(path)})` : name
-  })
-}
-
 /** A file as a link names it: its own name, without its folders or `.md`. */
 export function memoryLinkName(path: string): string {
   return memoryFileName(path.slice(path.lastIndexOf("/") + 1))
@@ -72,42 +59,6 @@ export function memoryLinkName(path: string): string {
 /** A file as the page names it: its path, with `.md` left out. */
 export function memoryFileName(path: string): string {
   return path.replace(/\.md$/, "")
-}
-
-/** One row of the file tree: a folder, once, before what is in it, or a file under its folder. */
-export interface MemoryTreeRow {
-  readonly kind: "folder" | "file"
-  readonly path: string
-  readonly name: string
-  readonly depth: number
-}
-
-/** The files as a tree, in the order of `paths`, each folder shown once above its files. */
-export function memoryTree(paths: readonly string[]): MemoryTreeRow[] {
-  const rows: MemoryTreeRow[] = []
-  let previous: string[] = []
-  for (const path of paths) {
-    const segments = path.split("/")
-    const folders = segments.slice(0, -1)
-    let shared = 0
-    while (shared < folders.length && folders[shared] === previous[shared]) shared += 1
-    for (let depth = shared; depth < folders.length; depth += 1) {
-      rows.push({
-        kind: "folder",
-        path: folders.slice(0, depth + 1).join("/"),
-        name: folders[depth] ?? "",
-        depth,
-      })
-    }
-    rows.push({
-      kind: "file",
-      path,
-      name: memoryFileName(segments.at(-1) ?? path),
-      depth: folders.length,
-    })
-    previous = folders
-  }
-  return rows
 }
 
 /** Whether a file is Markdown, which the page reads as text, or another file read as code. */
@@ -192,4 +143,37 @@ function middleDiff(old: readonly string[], next: readonly string[]): MemoryDiff
 function splitLines(text: string): string[] {
   if (text === "") return []
   return text.replace(/\n$/, "").split("\n")
+}
+
+export type MemoryRepoView = GetAgentMemoryResponse
+export type MemoryFile = MemoryRepoView["files"][number]
+
+/** A note's title: its `# heading`, or its name in words; the main memory's has a name of its own. */
+export function noteTitle(
+  file: { readonly path: string; readonly contents: string },
+  messages: { readonly mainMemory: string }
+): string {
+  const heading = file.contents.match(/^\s*#[ \t]+(.+?)\s*$/m)
+  if (heading?.[1] && file.contents.trimStart().startsWith("#")) return heading[1]
+  if (file.path === MEMORY_ENTRY) return messages.mainMemory
+  return words(memoryFileName(file.path.slice(file.path.lastIndexOf("/") + 1)))
+}
+
+/** `harbor-foods` as "Harbor foods". */
+export function words(name: string): string {
+  const spaced = name.replace(/[-_]+/g, " ").trim()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+/** The date an entry ends with, which the page reads apart from the entry. */
+export const ADDED = /\s*\(added (\d{4}-\d{2}-\d{2})\)\s*$/
+
+/** Reload the repo, every revision of it read for the history, and its history. */
+export function refreshMemory(queryClient: QueryClient, repo: MemoryRepo) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: getAgentMemoryQueryKey({ path: { repo } }) }),
+    queryClient.invalidateQueries({
+      queryKey: listAgentMemoryRevisionsQueryKey({ path: { repo } }),
+    }),
+  ])
 }

@@ -2,16 +2,16 @@ import { expect, test } from "bun:test"
 import { untranslatedMessages } from "@sixb/ui/lib/i18n"
 import { browserAppMessages } from "../src/locale"
 import { en, fr } from "../src/locale-messages"
-import { en as dataEn, fr as dataFr } from "../src/pages/data/messages"
-import { en as activityEn, fr as activityFr } from "../src/pages/observability/activity/messages"
-import { en as aiUsageEn, fr as aiUsageFr } from "../src/pages/observability/ai-usage/messages"
-import { en as observabilityEn, fr as observabilityFr } from "../src/pages/observability/messages"
+import { en as dataEn, fr as dataFr } from "../src/pages/console/data/messages"
+import { en as consoleEn, fr as consoleFr } from "../src/pages/console/messages"
 import {
   en as actionButtonEn,
   fr as actionButtonFr,
-} from "../src/pages/ontology/components/action-button"
+} from "../src/pages/console/ontology/components/action-button"
 import { en as sectionUiEn, fr as sectionUiFr } from "../src/pages/section-ui"
+import { en as activityEn, fr as activityFr } from "../src/pages/settings/activity/messages"
 import { en as settingsEn, fr as settingsFr } from "../src/pages/settings/messages"
+import { en as aiUsageEn, fr as aiUsageFr } from "../src/pages/settings/usage/messages"
 import { en as valuesEn, fr as valuesFr } from "../src/pages/values"
 
 test("translates every generated screen into French", () => {
@@ -19,7 +19,7 @@ test("translates every generated screen into French", () => {
   expect(untranslatedMessages(settingsEn, settingsFr)).toEqual([])
   expect(untranslatedMessages(dataEn, dataFr)).toEqual([])
   expect(untranslatedMessages(sectionUiEn, sectionUiFr)).toEqual([])
-  expect(untranslatedMessages(observabilityEn, observabilityFr)).toEqual([])
+  expect(untranslatedMessages(consoleEn, consoleFr)).toEqual([])
   expect(untranslatedMessages(aiUsageEn, aiUsageFr)).toEqual([])
   expect(untranslatedMessages(activityEn, activityFr)).toEqual([])
   expect(untranslatedMessages(valuesEn, valuesFr)).toEqual([])

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import type { WorkflowSummary } from "../src/pages/ontology/workflows/utils"
-import { WorkflowCard } from "../src/pages/ontology/workflows/workflow-card"
+import type { WorkflowSummary } from "../src/pages/console/ontology/workflows/utils"
+import { WorkflowCard } from "../src/pages/console/ontology/workflows/workflow-card"
 
 const workflow = {
   id: "service-response",
@@ -27,7 +27,7 @@ test("workflow cards keep the catalog summary compact", () => {
   )
 
   expect(markup).toContain("Service Response")
-  expect(markup).toContain('href="/ontology/workflows/service-response"')
+  expect(markup).toContain('href="/console/workflows/service-response"')
   expect(markup).toContain("6 nodes · 1 trigger · 1 input field")
   expect(markup).toContain("No runs recorded")
   expect(markup).not.toContain("Structure")

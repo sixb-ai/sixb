@@ -97,8 +97,8 @@ module scope. Set the page title and app icons through [Customization](customiza
 ## Add a sidebar
 
 `AppShell` frames every page with a sidebar: the app's name, **Search**, your navigation, and a
-menu for the signed-in user with [Data](#data), [Observability](#observability),
-[Ontology](#ontology), [Settings](#settings), theme switching, and sign-out. Opening a section swaps
+menu for the signed-in user with the [Console](#console), [Settings](#settings), theme switching,
+and sign-out. Opening a section swaps
 the sidebar for its pages, with a link back. When the project has an agent, it waits docked beside
 every page but Home and its own pages. Sixb includes its styles, so it needs no stylesheet of yours.
 
@@ -153,7 +153,7 @@ To build your own sidebar, use the same parts with the `@sixb/ui` sidebar compon
 | `UserMenu` | The person, Artifacts, the sections they may open, theme switching, and sign-out |
 | `AgentDock` | The project's agent, collapsed beside the page until opened; nothing without an agent |
 
-Wrap your own navigation in `SectionNav` so that opening Data or Settings swaps it for the
+Wrap your own navigation in `SectionNav` so that opening the Console or Settings swaps it for the
 section's pages, and keep your header and footer around it:
 
 ```tsx
@@ -200,38 +200,71 @@ authentication is off. `useSignOut()` returns a function that signs the user out
 
 ## Settings
 
-Every app includes Settings, built from the same parts. A page of your own at the same path
-replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
+Every app includes Settings, built from the same parts, for everyone signed in. Their own pages
+are always there; a Project page appears to whoever may do what it is for, by a
+[membership policy](../auth/members.md) or a [grant](../auth/authorization.md). A page of your own
+at the same path replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
 
 | Group | Page | Path | Shows |
 | --- | --- | --- | --- |
 | Your account | Personal | `/settings/personal` | Their name (editable unless their identity provider sets it), email and groups, the theme, and where they are signed in |
 | Your account | Developers | `/settings/developers` | Their [personal access tokens](../auth/members.md#service-accounts-and-tokens) |
 | Your account | Memory | `/settings/memory` | What [the agent remembers](../models/overview.md#it-remembers) of them and of the project, with its history, to correct or delete |
-| Project | Members | `/settings/members` | Members and invitations their [membership policy](../auth/members.md) covers |
-| Project | Service accounts | `/settings/service-accounts` | Service accounts and their tokens, with the `serviceAccounts` policy operation |
+| Project | Members | `/settings/members` | **People**: members and invitations their membership policy covers, by group. **Groups**: who is in each. **Service accounts**: accounts for automation and their tokens. Each tab is for those whose policy lets them invite, assign groups or suspend, or, for Service accounts, holds `serviceAccounts` |
+| Project | Usage | `/settings/usage` | This month's [usage limits](../models/usage-and-limits.md), then cost, tokens and every model call for a date range; for those with `can.observe(agent.usage)` |
+| Project | Activity | `/settings/activity` | Who [uses the app](activity.md): visits, the pages viewed in them, and each user's active days; for those with `can.observe(project.activity)` |
+
+Changing limits on Usage needs `can.manage(agent.usage)`, and reading other users' conversations
+from Activity needs `can.observe(agent.threads)` as well.
 
 Settings needs a signed-in person, so it is absent when authentication is off.
 
-## Data
+## Console
 
-Every app includes Data, in the user menu: how data reaches the project, from each connector to the
-objects it fills, and what failed on the way.
+Every app includes the Console, in the user menu for [those granted it](#choose-who-sees-the-console):
+how data reaches the project, what the project models, and the logs its runs write. The sidebar lists Data and Ontology under their own headings,
+counting what each holds, then Logs.
 
-| Page | Path | Shows |
-| --- | --- | --- |
-| Connectors | `/data/connectors` | Each connector's syncs, and its webhooks and deliveries |
-| Syncs | `/data/syncs` | Each sync's runs, with **Sync now** to start one |
-| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, and its schema |
-| Pipelines | `/data/pipelines` | Each pipeline as a canvas of datasets and steps; select a dataset to see its rows, open **Runs** for each run's step results, and **Run now** to start one |
-| Projections | `/data/projections` | Which dataset columns fill each object, link, or telemetry field, and its runs |
+| Group | Page | Path | Shows |
+| --- | --- | --- | --- |
+| --- | --- | --- | --- |
+| Data | Connectors | `/console/connectors` | Each connector's syncs, and its webhooks and deliveries |
+| Data | Syncs | `/console/syncs` | Each sync's runs, with **Sync now** to start one |
+| Data | Datasets | `/console/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, and its schema |
+| Data | Pipelines | `/console/pipelines` | Each pipeline as a canvas of datasets and steps; select a dataset to see its rows, open **Runs** for each run's step results, and **Run now** to start one |
+| Data | Projections | `/console/projections` | Which dataset columns fill each object, link, or telemetry field, and its runs |
+| Ontology | Object types | `/console/object-types` | Each type with its properties, links and actions, searchable by any of them |
+| Ontology | Objects | `/console/objects` | The objects updated last and a card per type; one type's objects, searchable, filtered and sorted, as cards or a table |
+| Ontology | Graph | `/console/graph` | The types and the links between them; select one to inspect it |
+| Ontology | Actions | `/console/actions` | Each action with its latest run, applied from its card; **Runs** lists every action run, filtered by action and status |
+| Ontology | Workflows | `/console/workflows` | Each workflow with its latest run |
+| Ontology | Rules | `/console/rules` | Each rule, what it watches, and how many objects it holds active |
+| | Logs | `/console/logs` | Logs as runs write them, filtered by kind and level and searchable |
 
-Each item opens a page under its list, such as `/data/syncs/crm-accounts`. As with Settings, a page
-of your own at the same path replaces the built-in one.
+Each item opens a page under its list, such as `/console/syncs/crm-accounts`. As with Settings, a
+page of your own at the same path replaces the built-in one.
 
-The pages show what the API lets each person read. A connector's webhooks and their deliveries
+Each run sits with what ran: a sync's on its sync, a pipeline's on its pipeline, a projection's on
+its projection and a webhook delivery on its connector. A workflow or action run opens its own page,
+such as `/console/workflows/runs/run_123` or `/console/actions/runs/run_456`: its input and output,
+each step with what it read and wrote, and its logs. An action run opens from **Actions › Runs**. A step that waits for someone's response links
+to its workflow's page, which answers it.
+
+An object type opens its own page, such as `/console/object-types/Deal`: what it inherits and what
+extends it, then its properties, vectors, links, actions and the
+[projections](../projections/overview.md) that fill it. A rule opens its definition and the objects
+it holds active.
+
+A workflow opens as a canvas of its steps, such as `/console/workflows/review-deal`. **Run
+workflow** starts one with a form for its input. **Runs** lists its runs; selecting one draws each
+step's status on the canvas, and selecting a step shows what it read and wrote. A step waiting for
+someone's response shows the form that answers it.
+
+Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
+`can.run` on a workflow or `can.apply` on an action. A connector's webhooks and their deliveries
 need [`can.manage`](../auth/authorization.md) on the connector, and **Sync now** and **Run now**
-need `can.run` on the sync or pipeline.
+need `can.run` on the sync or pipeline, and logs need `can.observe(project.logs)`. See
+[Authorization](../auth/authorization.md).
 
 To start a sync from your own pages, use `SyncButton`. It turns into **Syncing…** until the run
 ends.
@@ -248,112 +281,40 @@ import { SyncButton } from "@sixb/app"
 | `showStatus` | `false` | Shows when it last synced, or that it failed, beside the button |
 | `variant`, `size` | `"outline"`, `"sm"` | Passed to the `@sixb/ui` button |
 
-## Observability
-
-Every app includes Observability, in the user menu: what ran, what it wrote while it worked, what
-its model calls cost, and who uses the app.
-
-| Page | Path | Shows |
-| --- | --- | --- |
-| Runs | `/observability/runs` | Every run, a tab per kind: workflows, actions, syncs, pipelines, projections and webhook deliveries, filtered by what ran and its status |
-| Logs | `/observability/logs` | Logs as runs write them, filtered by kind and level and searchable |
-| AI usage | `/observability/ai-usage` | This month's [usage limits](../models/usage-and-limits.md), then cost, tokens and every model call for a date range |
-| Activity | `/observability/activity` | Who [uses the app](activity.md): visits, the pages viewed in them, and each user's active days |
-
-A workflow or action run opens its own page, such as `/observability/runs/workflows/run_123`: its
-input and output, each step with what it read and wrote, and its logs. A step that waits for
-someone's response links to its workflow's page under [Ontology](#ontology), which answers it, for
-those who can open Ontology. A sync, pipeline, projection or webhook run opens the page under
-[Data](#data) that shows it.
-
-Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
-`can.run` on a workflow or `can.apply` on an action. Logs need `can.observe(project.logs)`, AI usage
-needs `can.observe(agent.usage)`, changing limits needs `can.manage(agent.usage)`, activity needs
-`can.observe(project.activity)`, and reading other users' conversations from it needs
-`can.observe(agent.threads)` as well. See [Authorization](../auth/authorization.md).
-
-## Ontology
-
-Every app includes Ontology, in the user menu: what your project models and the logic that acts on
-it. The sidebar counts each.
-
-| Group | Page | Path | Shows |
-| --- | --- | --- | --- |
-| Model | Object types | `/ontology/object-types` | Each type with its properties, links and actions, searchable by any of them |
-| Model | Objects | `/ontology/objects` | The objects updated last and a card per type; one type's objects, searchable, filtered and sorted, as cards or a table |
-| Model | Graph | `/ontology/graph` | The types and the links between them; select one to inspect it |
-| Logic | Actions | `/ontology/actions` | Each action with its latest run; apply one from its card |
-| Logic | Workflows | `/ontology/workflows` | Each workflow with its latest run |
-| Logic | Rules | `/ontology/rules` | Each rule, what it watches, and how many objects it holds active |
-
-An object type opens its own page, such as `/ontology/object-types/Deal`: what it inherits and
-what extends it, then its properties, vectors, links, actions and the
-[projections](../projections/overview.md) that fill it. A rule opens its definition and the objects
-it holds active.
-
-A workflow opens as a canvas of its steps, such as `/ontology/workflows/review-deal`. **Run
-workflow** starts one with a form for its input. **Runs** lists its runs; selecting one draws each
-step's status on the canvas, and selecting a step shows what it read and wrote. A step waiting for
-someone's response shows the form that answers it.
-
 ## Object pages
 
 Every object has a page at `/objects/:objectTypeId/:primaryId`, such as `/objects/Deal/D-48231`,
 whatever section a person can see: its properties, its telemetry live with a trend over time, the
 objects it links to and those that link to it, and its type's actions. References to an object
-anywhere in the app open its page. For those who can open [Ontology](#ontology), the sidebar stays
-on it, with Objects current. As with any built-in page, a page of your own at the same path
+anywhere in the app open its page. For those who can open the [Console](#console), the sidebar
+stays on it, with Objects current. As with any built-in page, a page of your own at the same path
 replaces it.
 
 What the page shows follows the person's grants: `can.view` on the type to read the object, and
 `can.apply` on an action to run it. See [Authorization](../auth/authorization.md).
 
-## Choose who sees a section
+## Choose who sees the Console
 
-Export `visibility` from `app/layout.tsx` to show a section only to some groups:
+The Console is for the people who build and run the project. Grant it with
+`can.observe(project.console)` in a [role](../auth/authorization.md):
 
-File: `app/layout.tsx`
-
-```tsx
-import type { AppVisibility } from "@sixb/app"
-import { admins } from "../security/groups/admins"
-
-export const visibility = {
-  settings: [admins],
-  data: [admins],
-  observability: [admins],
-  ontology: [admins],
-} satisfies AppVisibility
-```
-
-| Key | Hides |
-| --- | --- |
-| `settings` | Members and Service accounts |
-| `data` | Every Data page |
-| `observability` | Every Observability page |
-| `ontology` | Every Ontology page; object pages stay open |
-
-| Value | Who sees them |
-| --- | --- |
-| Not set | Everyone |
-| `[admins, staff]` | Members of those groups |
-| `[]` | Nobody |
-
-Personal, Developers and Memory stay open to everyone signed in. With authentication off nobody is signed
-in, so `visibility` does not apply and Data, Observability and Ontology are open. A hidden page
-leaves the navigation, and its URL leads to `/`. Visibility only hides screens: the API still checks each
-person's permissions.
-
-The browser loads `app/layout.tsx`, so the group files it imports must take `defineGroup` from
-`@sixb/core/security`:
-
-File: `security/groups/admins.ts`
+File: `security/roles/developers.ts`
 
 ```ts
-import { defineGroup } from "@sixb/core/security"
+import { can, defineRole, every, project } from "@sixb/core"
+import { developers } from "../groups/developers"
 
-export const admins = defineGroup("admins", { label: "Admins" })
+export const developerAccess = defineRole("developer.access", {
+  grantedTo: [developers],
+  grants: [can.observe(project.console), can.observe(project.logs), can.run(every.workflow())],
+})
 ```
+
+The grant only opens the Console. Each of its pages shows what the person's other grants allow,
+such as `can.observe(project.logs)` for Logs. Someone without it doesn't see the Console in the
+user menu, and its URLs lead to `/`. Object pages stay open either way.
+
+With authentication off nobody is signed in, and the Console is open.
 
 ## Add styles
 

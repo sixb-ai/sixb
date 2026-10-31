@@ -156,10 +156,10 @@ you configure.
 Every app comes with the pages you need to run it, before you write one of your own:
 
 - **Agent**: ask about your data and get work done, in threads you can share.
-- **Ontology**: browse your types, objects, links, actions, workflows and rules.
-- **Data**: your connectors, syncs, datasets, pipelines and projections, with every run.
-- **Observability**: workflow and action runs, logs, activity and AI usage.
-- **Settings**: your profile and tokens, project members and service accounts.
+- **Console**: your connectors, syncs, datasets, pipelines and projections, with every run; your
+  types, objects, links, actions, workflows and rules; and the logs runs write.
+- **Settings**: your profile, tokens and memory; project members, service accounts, AI usage and
+  activity.
 
 ## Example
 
