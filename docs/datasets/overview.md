@@ -188,3 +188,4 @@ Every row written to a dataset is validated against its schema:
 - [Syncs](../syncs/overview.md) — pull rows into a dataset
 - [Pipelines](../pipelines/overview.md) — transform one dataset into another
 - [Projections](../projections/overview.md) — turn rows into ontology objects
+- [Lineage](../objects/lineage.md#walk-a-dataset-version-upstream) — the versions a version is computed from
