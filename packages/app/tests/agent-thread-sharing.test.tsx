@@ -330,6 +330,12 @@ function api(scenario: Scenario, requests: string[]) {
     if (url.pathname.startsWith("/api/agent-threads/thr_1/participants/")) {
       return new Response(null, { status: 204 })
     }
+    // The thread moves to the cloud: its turns run there from now on.
+    if (url.pathname === "/api/agent-threads/thr_1/computer" && method === "DELETE") {
+      const { runsOn: _runsOn, computer: _computer, ...cloud } = scenario.thread
+      scenario.thread = { ...cloud, movedAt: "2026-10-21T10:00:00.000Z" }
+      return Response.json(scenario.thread)
+    }
     if (url.pathname === "/api/agent-threads/thr_1/fork") {
       await scenario.forkGate
       return Response.json({ thread: thread({ id: "thr_2", participants: [] }) }, { status: 201 })
@@ -761,6 +767,19 @@ describe("sharing", () => {
     expect(owner.view.queryByText(/you can follow it here/)).toBeNull()
   })
 
+  // Guard proof: drop the owner check from useAgentConversation's `computer`; a participant reads
+  // where on Alice's disk her conversation works. The API keeps it from them too.
+  test("a participant reads nothing of where on its owner's computer it runs", async () => {
+    const computer = { id: "cmp_laptop", name: "Alice's MacBook Pro", folder: "/Users/alice/q3" }
+    const { view } = renderChat("bob", {
+      thread: thread({ runsOn: "computer", computer: { ...computer, online: false } }),
+    })
+    await view.findByText("Runs on Alice Martin's computer: you can follow it here")
+    expect(view.queryByText("Alice's MacBook Pro")).toBeNull()
+    expect(view.queryByText(/sixb is (open|closed) there/)).toBeNull()
+    expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
+  })
+
   // Removal proof: render ThreadPeople for any current thread in AgentChat.
   test("nobody shares or leaves without a signed-in user", async () => {
     const { view } = renderChat(null)
@@ -768,6 +787,63 @@ describe("sharing", () => {
     expect(await view.findByText("Why did Acme slip?")).toBeDefined()
     expect(view.queryByRole("button", { name: /in this thread$|^Share thread$/ })).toBeNull()
     expect(view.queryByText("Continue in my own thread")).toBeNull()
+  })
+})
+
+describe("a conversation on its owner's computer", () => {
+  const laptop = { id: "cmp_laptop", name: "Alice's MacBook Pro", folder: "/Users/alice/q3" }
+
+  test("shows its owner the computer and folder it runs in, and that sixb is open there", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ runsOn: "computer", computer: { ...laptop, online: true } }),
+    })
+
+    expect(await view.findByText("Alice's MacBook Pro")).toBeDefined()
+    expect(view.getByText("· ~/q3")).toBeDefined()
+    expect(view.getByText("sixb is open there")).toBeDefined()
+    expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
+    expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
+  })
+
+  // Guard proof: drop the DELETE from handleContinueInCloud, or `computerOffline` from the
+  // notice; the turn waits for a computer nobody opens, and the owner has no way on.
+  test("offline, its turn waits for the computer, or the whole conversation moves to the cloud", async () => {
+    const queued = run({
+      id: "run_2",
+      status: "queued",
+      triggerMessageId: "msg_3",
+      runsOn: "computer",
+    })
+    const { view, requests } = renderChat("alice", {
+      thread: thread({
+        runsOn: "computer",
+        computer: { ...laptop, online: false },
+        activeRunId: "run_2",
+      }),
+      runs: [run(), queued],
+    })
+
+    expect(
+      await view.findByText(
+        "Alice's MacBook Pro is offline. Your message runs when you open sixb in ~/q3."
+      )
+    ).toBeDefined()
+    expect(await view.findByText("Waiting for Alice's MacBook Pro…")).toBeDefined()
+
+    fireEvent.click(view.getByRole("button", { name: "Continue in the cloud" }))
+    const dialog = within(await view.findByRole("alertdialog"))
+    expect(dialog.getByText("Continue in the cloud?")).toBeDefined()
+    fireEvent.click(dialog.getByRole("button", { name: "Continue in the cloud" }))
+
+    await waitFor(() => expect(requests).toContain("DELETE /api/agent-threads/thr_1/computer"))
+    expect(
+      await view.findByText("Moved to the cloud. Files from before stayed on the computer.")
+    ).toBeDefined()
+    await waitFor(() =>
+      expect(view.queryByRole("button", { name: "Continue in the cloud" })).toBeNull()
+    )
+    expect(view.queryByText("Alice's MacBook Pro")).toBeNull()
+    expect(view.queryByText("Waiting for Alice's MacBook Pro…")).toBeNull()
   })
 })
 

@@ -191,15 +191,37 @@ export function CompactionMarker() {
   )
 }
 
-export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolean }) {
-  const messages = useAgentMessages().transcript
+export function ThinkingMarker({
+  takingLonger = false,
+  waitingFor = null,
+}: {
+  takingLonger?: boolean
+  /** The offline computer the turn waits for. */
+  waitingFor?: string | null
+}) {
+  const messages = useAgentMessages()
+  const label = waitingFor
+    ? messages.computer.waitingFor(waitingFor)
+    : takingLonger
+      ? messages.transcript.takingLonger
+      : messages.transcript.thinking
   return (
-    <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label={messages.working}>
-      <ActivityStatusText
-        label={takingLonger ? messages.takingLonger : messages.thinking}
-        className="shimmer"
-      />
+    <div
+      className={ACTIVITY_STATUS_ROW_CLASS_NAME}
+      role="status"
+      aria-label={messages.transcript.working}
+    >
+      <ActivityStatusText label={label} className="shimmer" />
     </div>
+  )
+}
+
+/** Where the conversation moved: the files earlier turns worked on stayed behind. */
+export function MovedMarker({ label }: { readonly label: string }) {
+  return (
+    <Marker role="note">
+      <MarkerContent>{label}</MarkerContent>
+    </Marker>
   )
 }
 

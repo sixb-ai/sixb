@@ -791,6 +791,27 @@ export const fr: Translation<AgentMessages> = {
     ownerOnly: (owner) =>
       `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
   },
+  computer: {
+    online: "sixb y est ouvert",
+    offline: "sixb y est fermé",
+    offlineNotice: (computer, folder) =>
+      `${computer} est hors ligne. Votre message s’exécutera quand vous ouvrirez sixb dans ${folder}.`,
+    noFolder:
+      "Cette conversation n’a pas encore de dossier. Ouvrez sixb dans son dossier et appuyez sur ctrl+f, ou continuez dans le cloud.",
+    waitingFor: (computer) => `En attente de ${computer}`,
+    continueInCloud: "Continuer dans le cloud",
+    moving: "Déplacement…",
+    moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
+    confirmTitle: "Continuer dans le cloud ?",
+    confirmDescription:
+      "Ses tours s’exécutent désormais dans le cloud, à commencer par le message en attente, s’il y en a un. La conversation, ses pièces jointes et ses artefacts suivent ; les fichiers de son dossier restent sur l’ordinateur. Elle ne peut pas revenir : démarrez une nouvelle conversation dans sixb pour retravailler sur l’ordinateur.",
+    cancel: "Annuler",
+    movedToCloud: "Déplacée vers le cloud. Les fichiers d’avant sont restés sur l’ordinateur.",
+    movedToFolder: (folder) =>
+      `Déplacée vers ${folder}. Les fichiers d’avant sont restés où ils étaient.`,
+    movedElsewhere:
+      "Déplacée vers un autre dossier. Les fichiers d’avant sont restés où ils étaient.",
+  },
   sharing: {
     share: "Partager le fil",
     shareShort: "Partager",
