@@ -162,7 +162,7 @@ export const fixIncident = defineAgentStep("fix-incident", {
 
 Each run gets a fresh sandbox: Sixb clones the repository, runs `setup`, and destroys the sandbox
 when the run ends, including after a failure or a cancellation. Nothing carries over between runs,
-so setup runs every time. Cloning and setup count toward the task's time limit.
+so setup runs every time, inside the sandbox's session.
 
 If a worker stops mid-task, the task runs again in a fresh checkout. Write instructions that are
 safe to repeat, as above: a branch name derived from the input, and a check for an existing pull
