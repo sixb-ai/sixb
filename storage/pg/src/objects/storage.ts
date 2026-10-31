@@ -31,6 +31,7 @@ import {
 import { PgAggregateAdmission } from "./aggregate-admission"
 import { createPgConditionalReader } from "./conditional-reader"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
+import { PgSortIndexCatalog } from "./query-indexes"
 import { assertLinkQueryLimit, PgObjectReader } from "./reader"
 import {
   type LinkDatabaseRow,
@@ -118,12 +119,18 @@ export class PgObjectStorage implements ObjectStorage {
 
   constructor(
     private readonly sql: PgStoreClient,
+    private readonly sortIndexes = new PgSortIndexCatalog(),
     maxConcurrentAggregates = 1
   ) {
     this.aggregateAdmission = canStartPgTransaction(sql)
       ? new PgAggregateAdmission(maxConcurrentAggregates)
       : undefined
-    this.reader = new PgObjectReader(sql, DEFAULT_OBJECT_QUERY_SOURCE, this.aggregateAdmission)
+    this.reader = new PgObjectReader(
+      sql,
+      DEFAULT_OBJECT_QUERY_SOURCE,
+      this.aggregateAdmission,
+      sortIndexes
+    )
   }
 
   queryCapabilities(): ObjectQueryCapabilities {
@@ -151,7 +158,12 @@ export class PgObjectStorage implements ObjectStorage {
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
     if (hasVectorProfile(params.query))
       return runPgRepeatableReadTransaction(this.sql, (tx) =>
-        new PgObjectReader(tx, DEFAULT_OBJECT_QUERY_SOURCE).queryObjects(params)
+        new PgObjectReader(
+          tx,
+          DEFAULT_OBJECT_QUERY_SOURCE,
+          undefined,
+          this.sortIndexes
+        ).queryObjects(params)
       )
     return this.reader.queryObjects(params)
   }

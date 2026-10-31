@@ -32,7 +32,7 @@ import {
   type PgObjectQuerySource,
   pgObjectsOfType,
 } from "./query-compiler"
-import { findPgSortIndexBound } from "./query-indexes"
+import { findPgSortIndexBound, type PgSortIndexCatalog } from "./query-indexes"
 import type { PgSelectedObjectReadSource } from "./read-scope"
 import {
   type FacetDatabaseRow,
@@ -54,7 +54,8 @@ export class PgObjectReader {
   constructor(
     private readonly sql: SQLClient,
     private readonly source: PgObjectQuerySource | PgSelectedObjectReadSource,
-    private readonly aggregateAdmission?: PgAggregateAdmission
+    private readonly aggregateAdmission?: PgAggregateAdmission,
+    private readonly sortIndexes?: PgSortIndexCatalog
   ) {}
 
   private async assertVectorSearch(
@@ -115,8 +116,8 @@ export class PgObjectReader {
     const sql = this.sql
     const source = this.source
     const sortIndexBound =
-      source === DEFAULT_OBJECT_QUERY_SOURCE
-        ? await findPgSortIndexBound(sql, params.projectId, params.query)
+      source === DEFAULT_OBJECT_QUERY_SOURCE && this.sortIndexes
+        ? await findPgSortIndexBound(sql, this.sortIndexes, params.projectId, params.query)
         : undefined
     let compiled = compilePgObjectQuery(params.projectId, params.query, {
       sortIndexBound,

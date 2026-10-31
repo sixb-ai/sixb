@@ -2,7 +2,11 @@ import { afterAll, beforeAll, expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { compilePgObjectQuery } from "../src/objects/query-compiler"
-import { findPgSortIndexBound, type PgObjectQueryIndex } from "../src/objects/query-indexes"
+import {
+  findPgSortIndexBound,
+  type PgObjectQueryIndex,
+  PgSortIndexCatalog,
+} from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
 import { createTestStorage, disposeTestStorage } from "./helpers"
 
@@ -67,7 +71,7 @@ afterAll(async () => {
 async function explain(query: ObjectQuery) {
   const compiled = compilePgObjectQuery("bench", query, {
     includeTotal: false,
-    sortIndexBound: await findPgSortIndexBound(sql, "bench", query),
+    sortIndexBound: await findPgSortIndexBound(sql, new PgSortIndexCatalog(), "bench", query),
   })
   const rows = await sql.unsafe(
     `EXPLAIN (ANALYZE, FORMAT JSON) ${compiled.sql}`,
