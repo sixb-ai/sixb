@@ -13238,7 +13238,7 @@ describe("agent tools act as the requester", () => {
       new RecordingSandboxFactory(),
       { projectTools: [summarizeInvoice] }
     )
-    const request = await requestAgent(sixb, { text: "Summarize inv-1." })
+    const request = await requestAgent(sixb, { text: "Summarize inv-1.", runsOn: "computer" })
     const { workerHost, recorded } = recordUsage(sixb)
     const api = createSixbApi(
       new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })

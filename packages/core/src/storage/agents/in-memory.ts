@@ -28,6 +28,7 @@ import {
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertRequestAgentApprovalInput,
+  assertRunsOn,
   assertSaveAgentMemoryInput,
   assertSubagentThreadTakesRun,
   compareAgentMemoryPaths,
@@ -213,6 +214,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
+    assertRunsOn(input.runsOn, "Agent thread")
     const sandboxParams =
       input.sandboxParams === undefined
         ? undefined
@@ -233,6 +235,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       ownerPrincipal: clone(input.ownerPrincipal),
       ...(sandboxParams === undefined ? {} : { sandboxParams }),
       ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
       status: input.status ?? "active",
       activeRunId: null,
       messageCount: 0,

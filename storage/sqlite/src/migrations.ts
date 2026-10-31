@@ -312,6 +312,7 @@ export const sqliteStorageMigrations = defineMigrations({
     ),
     sqliteSql("079-subagent-questions", subagentQuestionsSql),
     sqliteSql("080-agent-run-cancel-requests", agentRunCancelRequestsSql),
+    sqliteSql("081-agent-thread-runs-on", agentThreadRunsOnSql),
   ],
 })
 
@@ -713,3 +714,4 @@ import subagentQuestionsSql from "./migrations/079-subagent-questions.sql" with 
 import agentRunCancelRequestsSql from "./migrations/080-agent-run-cancel-requests.sql" with {
   type: "text",
 }
+import agentThreadRunsOnSql from "./migrations/081-agent-thread-runs-on.sql" with { type: "text" }

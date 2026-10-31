@@ -419,6 +419,17 @@ export function assertConversationAgentRunSpec(
     }
   }
   assertApprovalModeField(spec.approvalMode, "Conversational Agent run", prefix)
+  assertRunsOn(spec.runsOn, "Conversational Agent run", prefix)
+}
+
+/** Validate where a thread or turn runs: `computer`, or absent for the cloud. */
+export function assertRunsOn(value: unknown, subject: string, prefix = "Sixb"): void {
+  if (value !== undefined && value !== "computer") {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] ${subject} 'runsOn' must be "computer", or absent for the cloud.`
+    )
+  }
 }
 
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {

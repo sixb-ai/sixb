@@ -102,6 +102,7 @@ export async function serializeThreads(
       })),
       title: thread.title,
       sandboxParams: thread.sandboxParams,
+      runsOn: thread.runsOn,
       sandboxState: thread.sandboxState && {
         name: thread.sandboxState.name,
         status: thread.sandboxState.status,
@@ -169,6 +170,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     tier: run.spec?.tier,
     reasoning: run.spec?.reasoning,
     approvalMode: run.spec?.approvalMode,
+    runsOn: run.kind === "conversation" ? run.spec?.runsOn : undefined,
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
@@ -516,6 +518,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             ...(parsed.threadId === undefined ? {} : { id: parsed.threadId }),
             ...(parsed.title === undefined ? {} : { title: parsed.title }),
             ...(parsed.sandbox === undefined ? {} : { sandbox: parsed.sandbox }),
+            ...(parsed.runsOn === undefined ? {} : { runsOn: parsed.runsOn }),
           })
 
           set.status = 201

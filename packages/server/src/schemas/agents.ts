@@ -109,6 +109,8 @@ export const CreateAgentThreadBodySchema = z
     title: z.string().trim().min(1).optional(),
     threadId: z.string().trim().min(1).optional(),
     sandbox: z.record(z.string(), JsonValueSchema).optional(),
+    /** Run its turns on your computer, which claims them, instead of in the cloud. */
+    runsOn: z.literal("computer").optional(),
   })
   .strict()
 
@@ -151,6 +153,8 @@ export const AgentThreadSchema = z.object({
   participants: z.array(AgentThreadParticipantSchema),
   title: z.string().optional(),
   sandboxParams: z.record(z.string(), JsonValueSchema).optional(),
+  /** Its turns run on its owner's computer; absent, in the cloud. */
+  runsOn: z.literal("computer").optional(),
   status: AgentThreadStatusSchema,
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),
@@ -403,6 +407,8 @@ export const AgentRunSchema = z.object({
   reasoning: ModelReasoningSchema.optional(),
   /** What the turn could change without asking. Absent on turns from before approval modes. */
   approvalMode: AgentApprovalModeSchema.optional(),
+  /** Its owner's computer claims it; absent, the cloud runs it. */
+  runsOn: z.literal("computer").optional(),
   modelId: z.string().optional(),
   /**
    * `awaiting_approval`: the turn succeeded and paused on calls waiting for its requester. It stays

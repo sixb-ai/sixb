@@ -97,6 +97,11 @@ export type CreateExecutionAgentThreadInput<
   readonly id?: string
   readonly title?: string
   readonly sandbox?: TParams
+  /**
+   * Run its turns on its owner's computer, which claims them, instead of in the cloud. It works in
+   * that computer's folder, so it takes no sandbox, and only its owner can message it.
+   */
+  readonly runsOn?: "computer"
 }
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
@@ -748,6 +753,18 @@ export function createAgentRuntime<
             "[Sixb] Agent storage is not configured."
           )
         }
+        if (input.runsOn !== undefined && input.runsOn !== "computer") {
+          throw new AgentRequestError(
+            "invalid_message",
+            `[Sixb] 'runsOn' must be "computer" or omitted.`
+          )
+        }
+        if (input.runsOn === "computer" && input.sandbox !== undefined) {
+          throw new AgentRequestError(
+            "invalid_sandbox_params",
+            "[Sixb] A thread that runs on a computer works in its folder: it takes no sandbox."
+          )
+        }
         if (input.sandbox !== undefined && !sandbox?.supportsPersistence) {
           throw new AgentRequestError(
             "sandbox_not_configured",
@@ -764,6 +781,7 @@ export function createAgentRuntime<
           projectId: runtime.projectId,
           ownerPrincipal: principal,
           ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
         })
         return { ...created, participants: [] }
       },

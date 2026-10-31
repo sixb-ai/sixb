@@ -34907,6 +34907,10 @@
                               ]
                             }
                           },
+                          "runsOn": {
+                            "type": "string",
+                            "enum": ["computer"]
+                          },
                           "status": {
                             "type": "string",
                             "enum": ["active", "archived"]
@@ -35053,6 +35057,10 @@
                         }
                       ]
                     }
+                  },
+                  "runsOn": {
+                    "type": "string",
+                    "enum": ["computer"]
                   }
                 },
                 "additionalProperties": false
@@ -35095,6 +35103,10 @@
                         }
                       ]
                     }
+                  },
+                  "runsOn": {
+                    "type": "string",
+                    "enum": ["computer"]
                   }
                 },
                 "additionalProperties": false
@@ -35137,6 +35149,10 @@
                         }
                       ]
                     }
+                  },
+                  "runsOn": {
+                    "type": "string",
+                    "enum": ["computer"]
                   }
                 },
                 "additionalProperties": false
@@ -35305,6 +35321,10 @@
                               }
                             ]
                           }
+                        },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
                         },
                         "status": {
                           "type": "string",
@@ -35602,6 +35622,10 @@
                           }
                         ]
                       }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
                     },
                     "status": {
                       "type": "string",
@@ -36024,6 +36048,10 @@
                           }
                         ]
                       }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
                     },
                     "status": {
                       "type": "string",
@@ -36495,6 +36523,10 @@
                             ]
                           }
                         },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
+                        },
                         "status": {
                           "type": "string",
                           "enum": ["active", "archived"]
@@ -36849,6 +36881,10 @@
                           }
                         ]
                       }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
                     },
                     "status": {
                       "type": "string",
@@ -38844,6 +38880,10 @@
                           "type": "string",
                           "enum": ["manual", "accept-edits", "auto"]
                         },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -39632,6 +39672,10 @@
                           "type": "string",
                           "enum": ["manual", "accept-edits", "auto"]
                         },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -40116,6 +40160,10 @@
                         "approvalMode": {
                           "type": "string",
                           "enum": ["manual", "accept-edits", "auto"]
+                        },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
                         },
                         "modelId": {
                           "type": "string"
@@ -40665,6 +40713,10 @@
                             "type": "string",
                             "enum": ["manual", "accept-edits", "auto"]
                           },
+                          "runsOn": {
+                            "type": "string",
+                            "enum": ["computer"]
+                          },
                           "modelId": {
                             "type": "string"
                           },
@@ -41094,6 +41146,10 @@
                       "type": "string",
                       "enum": ["manual", "accept-edits", "auto"]
                     },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
+                    },
                     "modelId": {
                       "type": "string"
                     },
@@ -41522,6 +41578,10 @@
                         "approvalMode": {
                           "type": "string",
                           "enum": ["manual", "accept-edits", "auto"]
+                        },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
                         },
                         "modelId": {
                           "type": "string"
@@ -42641,6 +42701,10 @@
                           }
                         ]
                       }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
                     },
                     "status": {
                       "type": "string",
@@ -44002,6 +44066,10 @@
                           "type": "string",
                           "enum": ["manual", "accept-edits", "auto"]
                         },
+                        "runsOn": {
+                          "type": "string",
+                          "enum": ["computer"]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -45099,6 +45167,10 @@
                           }
                         ]
                       }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
                     },
                     "status": {
                       "type": "string",
@@ -46634,6 +46706,10 @@
                           "approvalMode": {
                             "type": "string",
                             "enum": ["manual", "accept-edits", "auto"]
+                          },
+                          "runsOn": {
+                            "type": "string",
+                            "enum": ["computer"]
                           },
                           "modelId": {
                             "type": "string"

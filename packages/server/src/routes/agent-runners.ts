@@ -137,6 +137,19 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
             403
           )
         }
+        // A cloud turn is the agent worker's: a runner here would race it, and skip the sandbox
+        // the thread chose.
+        if (run.spec?.runsOn !== "computer") {
+          return answer(
+            {
+              error: {
+                kind: "AgentRunRefusedError",
+                message: `[SixbServer] Agent run '${runId}' runs in the cloud: only a computer's turns are claimed here.`,
+              },
+            },
+            403
+          )
+        }
         return answer({ result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt }) })
       } catch (error) {
         // A turn whose runner stopped ends interrupted rather than being claimed again.

@@ -90,6 +90,11 @@ export interface AgentThreadRecord {
   readonly title?: string
   readonly sandboxParams?: AgentThreadSandboxParams
   readonly sandboxState?: AgentThreadSandboxState
+  /**
+   * Where its turns run: on its owner's computer, which claims them, or, when absent, in the cloud.
+   * A computer's thread takes turns from its owner alone.
+   */
+  readonly runsOn?: "computer"
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -105,6 +110,7 @@ export interface CreateAgentThreadInput {
   readonly ownerPrincipal: Principal
   readonly title?: string
   readonly sandboxParams?: AgentThreadSandboxParams
+  readonly runsOn?: "computer"
   readonly status?: AgentThreadStatus
   readonly createdAt?: Date
   readonly updatedAt?: Date
@@ -345,6 +351,8 @@ export interface ConversationAgentRunSpec {
   readonly locale?: string
   /** What the turn may change without asking its requester. Absent on older runs: `auto`. */
   readonly approvalMode?: AgentApprovalMode
+  /** Its thread's `runsOn` when it was asked for: a computer's turn never reaches the agent queue. */
+  readonly runsOn?: "computer"
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import {
   assertConversationThreadRow,
+  assertRunsOn,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -64,6 +65,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
+    assertRunsOn(input.runsOn, "Agent thread", "SixbSqlite")
     const sandboxParams =
       input.sandboxParams === undefined
         ? null
@@ -82,13 +84,14 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             owner_principal_id,
             title,
             sandbox_params,
+            runs_on,
             status,
             active_run_id,
             last_message_at,
             message_count,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
         `
         )
         .run(
@@ -98,6 +101,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           input.ownerPrincipal.id,
           input.title ?? null,
           sandboxParams,
+          input.runsOn ?? null,
           input.status ?? "active",
           createdAt.toISOString(),
           updatedAt.toISOString()

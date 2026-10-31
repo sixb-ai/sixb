@@ -205,6 +205,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
+    // Its owner's computer claims it: a job published before its thread moved there is dropped.
+    if (queuedRun.spec?.runsOn === "computer") return
     // A conversation turn left running by a dead delivery already streamed to the user and billed
     // its model calls. Replaying it would repeat both behind their back, so it ends interrupted and
     // the user chooses whether to run it again. A delivery whose projected lease has not lapsed may

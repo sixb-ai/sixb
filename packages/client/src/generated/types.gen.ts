@@ -11856,6 +11856,7 @@ export type ListAgentThreadsResponses = {
             }
           | null
       }
+      runsOn?: "computer"
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -11887,6 +11888,7 @@ export type CreateAgentThreadData = {
           }
         | null
     }
+    runsOn?: "computer"
   }
   path?: never
   query?: never
@@ -11974,6 +11976,7 @@ export type CreateAgentThreadResponses = {
             }
           | null
       }
+      runsOn?: "computer"
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12071,6 +12074,7 @@ export type GetAgentThreadResponses = {
           }
         | null
     }
+    runsOn?: "computer"
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12193,6 +12197,7 @@ export type AddAgentThreadParticipantsResponses = {
           }
         | null
     }
+    runsOn?: "computer"
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12355,6 +12360,7 @@ export type ForkAgentThreadResponses = {
             }
           | null
       }
+      runsOn?: "computer"
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12463,6 +12469,7 @@ export type RecreateAgentThreadSandboxResponses = {
           }
         | null
     }
+    runsOn?: "computer"
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -13068,6 +13075,7 @@ export type PostAgentThreadMessageResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13352,6 +13360,7 @@ export type CancelAgentRunResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13553,6 +13562,7 @@ export type RetryAgentRunResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13721,6 +13731,7 @@ export type ListAgentThreadRunsResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13886,6 +13897,7 @@ export type GetAgentRunResponses = {
           budgetTokens: number
         }
     approvalMode?: "manual" | "accept-edits" | "auto"
+    runsOn?: "computer"
     modelId?: string
     finishReason?:
       | "stop"
@@ -14063,6 +14075,7 @@ export type CancelAgentRunByIdResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -14491,6 +14504,7 @@ export type SetAgentThreadApprovalModeResponses = {
           }
         | null
     }
+    runsOn?: "computer"
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -14980,6 +14994,7 @@ export type DecideAgentApprovalResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -15383,6 +15398,7 @@ export type GetObservedAgentThreadResponses = {
           }
         | null
     }
+    runsOn?: "computer"
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -15958,6 +15974,7 @@ export type ListObservedAgentThreadRunsResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
