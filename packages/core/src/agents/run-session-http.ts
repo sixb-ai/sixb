@@ -212,9 +212,10 @@ interface ClaimedRun<TRun extends AgentRunRecord> {
 }
 
 /**
- * Claim a queued conversation turn as its requester, with their own credential (`authorization`,
- * such as `Bearer <access token>`), and open its session. Null when the run ended or another
- * runner holds it; refused when its runner stopped, which ended it interrupted.
+ * Claim a queued conversation turn as its requester, with their signed-in session (`authorization`,
+ * such as `Bearer <session token>` from the CLI's sign-in: the route refuses access tokens), and
+ * open its session. Null when the run ended or another runner holds it; refused when its runner
+ * stopped, which ended it interrupted.
  */
 export async function claimAgentRunOverHttp(input: {
   readonly apiUrl: string
