@@ -49,6 +49,7 @@ import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
 import {
   AgentExecutionLostError,
+  AgentRunRefusedError,
   assertAgentRunOwned,
   fenced,
   isTerminalOrExecutionGone,
@@ -570,15 +571,22 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return readAgentTurnHistory(host, input.threadId)
     },
     workspace: {
-      transition: (input) =>
-        fenced(run.id, () =>
+      async transition(input) {
+        // A run moves its own thread's workspace, never another's.
+        if (input.id !== run.threadId) {
+          throw new AgentRunRefusedError(
+            `[Sixb] Agent run '${run.id}' moves only its own thread's workspace, not '${input.id}'.`
+          )
+        }
+        return fenced(run.id, () =>
           host.storage.agents.threads.transitionSandbox({
             ...input,
             projectId: host.projectId,
             runId: run.id,
             executionToken,
           })
-        ),
+        )
+      },
     },
     async close() {
       cancel.stop()

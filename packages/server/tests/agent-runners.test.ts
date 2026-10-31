@@ -17,8 +17,10 @@ import {
   AgentRunRefusedError,
   claimAgentRunOverHttp,
   createHttpAgentRunSession,
+  encodeWireValue,
 } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import { startLapsedRunSweeper } from "../src/routes/agent-runners"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -195,6 +197,45 @@ describe("a runner outside the worker", () => {
     await second.close()
   })
 
+  // Guard proof: serve "workspace.transition" from the HTTP session again; the request reaches the
+  // session instead of a 404. Drop the session's thread check as well, and Ava's run token
+  // recreates Bob's workspace under the name she chose.
+  test("moves no workspace, its own thread's or another's", async () => {
+    const { person, ask, claim, send, storage, runTokens } = await setup()
+    const ava = await person("ava")
+    const bobs = await workspaceToRecover(storage)
+    const runId = await ask(ava, "Summarize the open invoices.")
+    const session = await claim(ava, runId)
+    if (!session) throw new Error("Expected the turn to be claimed.")
+    await session.assertOwned()
+    const recreate = {
+      action: "recreate",
+      id: bobs,
+      expectedSandboxName: "sixb-sb-bob",
+      name: "sixb-sb-chosen-by-ava",
+    } as const
+
+    const response = await send(
+      new Request(`${API}/api/agent-runs/${runId}/session/workspace.transition`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${runTokens.get(runId)}`,
+          "content-type": "application/json",
+        },
+        body: encodeWireValue({ args: [recreate] }),
+      })
+    )
+
+    expect(response.status).toBe(404)
+    const thread = await storage.agents.threads.getById({ projectId, id: bobs })
+    expect(thread?.sandboxState).toMatchObject({ name: "sixb-sb-bob", status: "busy" })
+    // Its client refuses before sending anything.
+    expect(
+      await session.workspace.transition(recreate as never).catch((error: unknown) => error)
+    ).toMatchObject({ message: expect.stringContaining("only a runner in the worker moves") })
+    await session.close()
+  })
+
   // Removal proof: drop afterFinish from agentRunSessionHost; the child stays queued after its
   // turn ended over HTTP, with nothing to run it.
   test("stops the children of a turn it finished", async () => {
@@ -244,3 +285,42 @@ describe("a runner outside the worker", () => {
     }
   })
 })
+
+/** Bob's idle thread, whose workspace needs recovering: his last turn acquired it, then ended. */
+async function workspaceToRecover(storage: InMemoryStorage): Promise<string> {
+  const threadId = "thr_bob"
+  await storage.agents.threads.create({
+    id: threadId,
+    projectId,
+    ownerPrincipal: { type: "user", id: "bob" },
+    sandboxParams: { clientId: "acme" },
+  })
+  const executionId = await createTestAgentExecution(storage, { projectId, runId: "run_bob" })
+  await storage.agents.runs.create({
+    id: "run_bob",
+    projectId,
+    executionId,
+    threadId,
+    triggerMessageId: "msg_bob",
+    spec: { model: { provider: "test", modelId: "test-model" } },
+  })
+  const execution = { token: "bob", queueLeaseExpiresAt: new Date(Date.now() + 60_000) }
+  await storage.agents.runs.start({ projectId, id: "run_bob", execution })
+
+  await storage.agents.threads.transitionSandbox({
+    projectId,
+    id: threadId,
+    action: "acquire",
+    runId: "run_bob",
+    executionToken: "bob",
+    name: "sixb-sb-bob",
+    sourceFingerprint: "a".repeat(64),
+  })
+  await storage.agents.runs.finish({
+    projectId,
+    id: "run_bob",
+    executionToken: "bob",
+    status: "failed",
+  })
+  return threadId
+}

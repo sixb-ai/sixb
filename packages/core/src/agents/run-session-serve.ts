@@ -27,7 +27,11 @@ type Operation = (
   signal: AbortSignal
 ) => unknown
 
-/** The session's operations a runner calls, by name; nothing else is reachable. */
+/**
+ * The session's operations a runner calls, by name; nothing else is reachable. Neither
+ * `authorization` nor `workspace` is: only a runner in the worker's process binds the project or
+ * moves a persistent workspace.
+ */
 const OPERATIONS: Readonly<Record<string, Operation>> = {
   plan: (session) => session.plan(),
   memory: (session, [input]) => session.memory(input as { asOf: Date }),
@@ -65,10 +69,6 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   "threads.message": (session, [messageId]) => session.threads.message(messageId as string),
   "threads.messages": (session, [input]) =>
     session.threads.messages(input as Parameters<AgentRunSession["threads"]["messages"]>[0]),
-  "workspace.transition": (session, [input]) =>
-    session.workspace.transition(
-      input as Parameters<AgentRunSession["workspace"]["transition"]>[0]
-    ),
   "artifacts.list": (session, [input]) =>
     session.artifacts.list(input as Parameters<AgentRunSession["artifacts"]["list"]>[0]),
   "artifacts.getVersion": (session, args) =>

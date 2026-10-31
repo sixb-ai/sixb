@@ -113,8 +113,8 @@ Once a run ended, its token reaches nothing, so `finish` over HTTP also announce
 answer, then the run's end, from the server that recorded them.
 
 The server pins a runner's messages to its run's thread and drops any author they name, and caps
-the lease a runner asks for. `authorization()` is not offered: such a runner never binds the
-project.
+the lease a runner asks for. `authorization()` and `workspace` are not offered: such a runner never
+binds the project, and a persistent workspace moves only in the worker, on its run's own thread.
 
 ## Outside the session
 

@@ -145,7 +145,13 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     memory: (memory) => call("memory", [memory]),
     context: () => call("context"),
     checkpoint: (checkpoint) => call("checkpoint", [checkpoint]),
-    workspace: { transition: (transition) => call("workspace.transition", [transition]) },
+    workspace: {
+      async transition() {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' reaches its project over HTTP: only a runner in the worker moves a persistent workspace.`
+        )
+      },
+    },
     threads: {
       message: (messageId) => call("threads.message", [messageId]),
       messages: (query) => call("threads.messages", [query]),
