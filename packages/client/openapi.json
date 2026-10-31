@@ -36402,19 +36402,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -36473,19 +36473,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -36544,19 +36544,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -43824,19 +43824,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -43858,19 +43858,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -43892,19 +43892,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -44624,19 +44624,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -44658,19 +44658,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -44692,19 +44692,19 @@
                     "properties": {
                       "id": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 200
                       },
                       "name": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 120
                       },
                       "folder": {
                         "type": "string",
-                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]*$",
                         "minLength": 1,
                         "maxLength": 4096
                       }
@@ -44754,6 +44754,23 @@
                       "type": "string"
                     },
                     "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
                       "type": "string"
                     }
                   },

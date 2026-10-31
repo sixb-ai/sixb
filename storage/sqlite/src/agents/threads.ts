@@ -347,6 +347,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       args.push(input.participantPrincipal.type, input.participantPrincipal.id)
     }
 
+    if (input.activeOnComputer) {
+      whereClauses.push("computer_id = ? AND computer_folder = ? AND active_run_id IS NOT NULL")
+      args.push(input.activeOnComputer.computerId, input.activeOnComputer.folder)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = queryAgentList<AgentThreadRow>({
       db: this.db,

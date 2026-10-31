@@ -15179,6 +15179,12 @@ export type HoldAgentComputerSessionErrors = {
     code?: string
   }
   /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+  }
+  /**
    * Response for status 501
    */
   501: {

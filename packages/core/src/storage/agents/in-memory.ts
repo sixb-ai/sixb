@@ -34,7 +34,9 @@ import {
   assertMovableToCloud,
   assertRequestAgentApprovalInput,
   assertSaveAgentMemoryInput,
+  assertStartsOnComputer,
   assertSubagentThreadTakesRun,
+  assertTurnInThreadPlace,
   cloudSpec,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
@@ -366,6 +368,15 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
         input.ownerPrincipal ? principalsEqual(thread.ownerPrincipal, input.ownerPrincipal) : true
       )
       .filter((thread) => {
+        const on = input.activeOnComputer
+        if (!on) return true
+        return (
+          thread.activeRunId !== null &&
+          thread.computer?.id === on.computerId &&
+          thread.computer.folder === on.folder
+        )
+      })
+      .filter((thread) => {
         const participant = input.participantPrincipal
         if (!participant) return true
 
@@ -512,6 +523,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Agent thread '${input.threadId}' already has an active run '${thread.activeRunId}'.`
       )
     }
+    assertTurnInThreadPlace(thread.runsOn, input.spec, input.threadId)
 
     const runKey = key(input.projectId, input.id)
     if (this.state.runs.has(runKey)) {
@@ -699,6 +711,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
   async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireStatus(input.projectId, input.id, "queued")
+    if (input.onComputer) assertStartsOnComputer(run)
     const startedAt = new Date(input.startedAt ?? new Date())
     const next: AgentRunRecord = {
       ...run,

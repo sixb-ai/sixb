@@ -35,6 +35,8 @@ import { handleAgentRouteError, serializeThread } from "./agents"
 
 /** How long a session stays live without a renewal; `sixb` renews it three times as often. */
 const SESSION_MS = 60_000
+/** How many sessions one person holds at once: one per open `sixb`, a terminal each. */
+const MAX_SESSIONS = 20
 
 /**
  * Why a computer's turn is not this computer's to claim, or null when it is: its thread runs on
@@ -212,6 +214,15 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
             ownerPrincipal,
             now,
           })
+          if (
+            before.length >= MAX_SESSIONS &&
+            !before.some((session) => session.id === params.sessionId)
+          ) {
+            set.status = 429
+            return {
+              error: `[SixbServer] You have ${MAX_SESSIONS} sixb sessions open: quit one to open another.`,
+            }
+          }
           const expiresAt = new Date(now.getTime() + SESSION_MS)
           await agents.computers.hold({
             projectId: host.id,
@@ -237,6 +248,7 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         response: {
           200: HoldAgentComputerSessionResponseSchema,
           400: AgentRequestErrorResponseSchema,
+          429: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -323,32 +335,22 @@ async function waitingTurns(
   ownerPrincipal: Principal,
   computer: AgentThreadComputer
 ): Promise<string[]> {
-  const { runs } = await agents.runs.list({
+  // Their own threads there with a turn active: nobody else's turns, however many, crowd them out.
+  const { threads } = await agents.threads.list({
     projectId: host.id,
-    kinds: ["conversation"],
-    statuses: ["queued"],
-    order: "asc",
+    ownerPrincipal,
+    activeOnComputer: { computerId: computer.id, folder: computer.folder },
     limit: 100,
   })
-  const queued = runs.filter(
-    (run) => run.kind === "conversation" && run.spec?.runsOn === "computer"
-  )
-  if (queued.length === 0) return []
-  const threads = await agents.threads.getByIds({
-    projectId: host.id,
-    ids: queued.map((run) => run.threadId),
-  })
-  const here = new Set(
-    threads
-      .filter(
-        (thread) =>
-          principalsEqual(thread.ownerPrincipal, ownerPrincipal) &&
-          thread.computer !== undefined &&
-          sameFolder(thread.computer, computer)
-      )
-      .map((thread) => thread.activeRunId)
-  )
-  return queued.filter((run) => here.has(run.id)).map((run) => run.id)
+  const active = threads.flatMap((thread) => (thread.activeRunId ? [thread.activeRunId] : []))
+  if (active.length === 0) return []
+  const runs = await agents.runs.getByIds({ projectId: host.id, ids: active })
+  return runs
+    .filter(
+      (run) =>
+        run.kind === "conversation" && run.status === "queued" && run.spec?.runsOn === "computer"
+    )
+    .map((run) => run.id)
 }
 
 /** For each folder these sessions held, say it went offline when no other session holds it. */
@@ -358,22 +360,26 @@ async function announceOffline(
   ended: readonly AgentComputerSessionRecord[]
 ): Promise<void> {
   const now = new Date()
-  const announced = new Set<string>()
+  const byOwner = new Map<string, AgentComputerSessionRecord[]>()
   for (const session of ended) {
-    const key = JSON.stringify([
-      session.ownerPrincipal,
-      session.computer.id,
-      session.computer.folder,
-    ])
-    if (announced.has(key)) continue
-    announced.add(key)
-    const live = await agents.computers.listLive({
-      projectId: host.id,
-      ownerPrincipal: session.ownerPrincipal,
-      now,
-    })
-    if (!live.some((other) => sameFolder(other.computer, session.computer))) {
-      await announce(host, session.ownerPrincipal, session.computer, false)
+    const key = `${session.ownerPrincipal.type}:${session.ownerPrincipal.id}`
+    byOwner.set(key, [...(byOwner.get(key) ?? []), session])
+  }
+  for (const sessions of byOwner.values()) {
+    const ownerPrincipal = sessions[0]?.ownerPrincipal
+    if (!ownerPrincipal) continue
+    const live = await agents.computers.listLive({ projectId: host.id, ownerPrincipal, now })
+    const announced = new Set<string>()
+    for (const session of sessions) {
+      const key = `${session.computer.id}\u0000${session.computer.folder}`
+      if (
+        announced.has(key) ||
+        live.some((other) => sameFolder(other.computer, session.computer))
+      ) {
+        continue
+      }
+      announced.add(key)
+      await announce(host, ownerPrincipal, session.computer, false)
     }
   }
 }

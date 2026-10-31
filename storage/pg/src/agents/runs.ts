@@ -6,7 +6,9 @@ import {
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateSubagentRunInput,
+  assertStartsOnComputer,
   assertSubagentThreadTakesRun,
+  assertTurnInThreadPlace,
   newSubagentThreadRecord,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -59,8 +61,10 @@ export class PgAgentRunStore implements AgentRunStore {
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
-        const [thread] = await tx<Pick<AgentThreadRow, "id" | "kind" | "active_run_id">[]>`
-          SELECT id, kind, active_run_id FROM agent_threads
+        const [thread] = await tx<
+          Pick<AgentThreadRow, "id" | "kind" | "active_run_id" | "runs_on">[]
+        >`
+          SELECT id, kind, active_run_id, runs_on FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
@@ -78,6 +82,7 @@ export class PgAgentRunStore implements AgentRunStore {
             `[SixbPg] Agent thread '${input.threadId}' already has an active run '${thread.active_run_id}'.`
           )
         }
+        assertTurnInThreadPlace(thread.runs_on, input.spec, input.threadId, "SixbPg")
 
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
@@ -247,7 +252,8 @@ export class PgAgentRunStore implements AgentRunStore {
   async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
     const startedAt = input.startedAt ?? new Date()
     return runPgTransaction(this.sql, async (tx) => {
-      await this.lockStatus(tx, input.projectId, input.id, "queued")
+      const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
+      if (input.onComputer) assertStartsOnComputer(rowToRunRecord(run), "SixbPg")
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
         SET

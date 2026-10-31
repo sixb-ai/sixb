@@ -347,13 +347,15 @@ describe("a runner outside the worker", () => {
       (await call(ava, "POST", "/api/agent-threads", body)).status
     expect(await create({ runsOn: "computer" })).toBe(400)
     expect(await create({ computer: LAPTOP })).toBe(400)
-    // A name or folder shown back to Ava holds no control character, such as a terminal escape.
-    expect(
-      await create({
-        runsOn: "computer",
-        computer: { ...LAPTOP, folder: "/Users/ava/\u001b]0;pwned\u0007" },
-      })
-    ).toBe(422)
+    // A name or folder shown back to Ava holds no control character, such as a terminal escape,
+    // nor a mark that reorders how it reads.
+    for (const folder of [
+      "/Users/ava/\u001b]0;pwned\u0007",
+      "/Users/ava/\u009b2J",
+      "/Users/\u202eava",
+    ]) {
+      expect(await create({ runsOn: "computer", computer: { ...LAPTOP, folder } })).toBe(422)
+    }
   })
 
   // Guard proof: return `computer` for every reader in serializeThreads; Bob reads where on Ava's
@@ -429,6 +431,39 @@ describe("a runner outside the worker", () => {
       { ownerPrincipal: { type: "user", id: "ava" }, folder: LAPTOP.folder, online: true },
       { ownerPrincipal: { type: "user", id: "ava" }, folder: LAPTOP.folder, online: false },
     ])
+  })
+
+  // Guard proof: list the project's oldest queued runs in waitingTurns, as it first did; Bob's
+  // hundred turns waiting for his laptop leave Ava's off her session's list.
+  test("lists the turns waiting for a folder, however many of someone else's wait", async () => {
+    const { person, ask, call } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const bobs = { ...LAPTOP, id: "bobs-laptop", folder: "/Users/bob/q3" }
+    for (let index = 0; index < 101; index += 1) {
+      await ask(bob, `Waiting ${index}.`, { runsOn: "computer", computer: bobs })
+    }
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+
+    const held = await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+      computer: LAPTOP,
+    })
+    expect(await held.json()).toMatchObject({ waiting: [runId] })
+  })
+
+  // Guard proof: drop the MAX_SESSIONS check from the session route; one person holds sessions
+  // without end, each a row the sweeper reads and an event every client hears.
+  test("keeps a person to twenty open sixb sessions", async () => {
+    const { person, call } = await setup()
+    const ava = await person("ava")
+    const hold = (id: string, folder: string) =>
+      call(ava, "PUT", `/api/agent-computers/sessions/${id}`, { computer: { ...LAPTOP, folder } })
+    for (let index = 0; index < 20; index += 1) {
+      expect((await hold(`cs_${index}`, `/Users/ava/${index}`)).status).toBe(200)
+    }
+    expect((await hold("cs_20", "/Users/ava/20")).status).toBe(429)
+    // Renewing one held already still works.
+    expect((await hold("cs_3", "/Users/ava/3")).status).toBe(200)
   })
 
   // Guard proof: drop the dispatch from the route that moves a thread to the cloud; the turn that

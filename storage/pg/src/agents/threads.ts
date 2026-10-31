@@ -376,6 +376,13 @@ export class PgAgentThreadStore implements AgentThreadStore {
       params.push(input.participantPrincipal.type, input.participantPrincipal.id)
     }
 
+    if (input.activeOnComputer) {
+      whereClauses.push(
+        `computer_id = $${index++} AND computer_folder = $${index++} AND active_run_id IS NOT NULL`
+      )
+      params.push(input.activeOnComputer.computerId, input.activeOnComputer.folder)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = await queryAgentList<AgentThreadRow>({
       sql: this.sql,

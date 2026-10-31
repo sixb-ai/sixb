@@ -730,11 +730,13 @@ function ThreadView(
   // This computer runs the conversation's turns when it is the owner's, and this its folder.
   const runsHere = onComputer && mine && here
   // Only a queued turn: a running one is another sixb's, or one whose sixb closed, which the API
-  // ends interrupted rather than running its commands again.
+  // ends interrupted rather than running its commands again. One sent from elsewhere runs here
+  // only while messages from the web do; the turns this sixb asks for it claims itself.
   const queued = runs.find((run) => run.id === activeRunId)?.status === "queued"
+  const { continueFromWeb } = props.settings
   useEffect(() => {
-    if (activeRunId && runsHere && queued) void runner.claim(activeRunId)
-  }, [activeRunId, runsHere, queued, runner])
+    if (activeRunId && runsHere && queued && continueFromWeb) void runner.claim(activeRunId)
+  }, [activeRunId, runsHere, queued, continueFromWeb, runner])
   // Its turns move to this computer, which alone claims them from now on, and to this folder.
   const moveHere = async () => {
     const { error } = await moveAgentThreadToComputer({
@@ -813,12 +815,14 @@ function ThreadView(
     if (!pending || !option || deciding) return
     setDeciding(true)
     try {
-      const { error } = await decideAgentApproval({
+      const { data, error } = await decideAgentApproval({
         client,
         path: { threadId, approvalId: pending.id },
         body: { decision: option.decision, ...(option.always ? { always: true as const } : {}) },
       })
       if (error) props.say(errorText(error), "error")
+      // Its last decision resumed the turn: decided here, it runs here.
+      if (data?.run && runsHere) void runner.claim(data.run.id)
       const read = await reload()
       // "Always" raised the mode there: the thread's wins over a choice still on its way.
       if (read && option.always) onThreadRead(read, true)

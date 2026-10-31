@@ -61,13 +61,21 @@ const SWEEP_CLAIM_MS = 60_000
 export function startLapsedRunSweeper(host: SixbHostView): () => void {
   const sessions = agentRunSessionHost(host)
   if (!sessions) return () => {}
+  // One sweep of sessions at a time: a slow one is not joined by the next.
+  let sweepingSessions = false
   const sweep = () => {
     void endLapsedAgentRuns(sessions, { leaseMs: SWEEP_CLAIM_MS }).catch((error: unknown) => {
       console.error("[SixbServer] Could not end lapsed agent runs; retrying.", error)
     })
-    void endLapsedComputerSessions(host).catch((error: unknown) => {
-      console.error("[SixbServer] Could not end lapsed computer sessions; retrying.", error)
-    })
+    if (sweepingSessions) return
+    sweepingSessions = true
+    void endLapsedComputerSessions(host)
+      .catch((error: unknown) => {
+        console.error("[SixbServer] Could not end lapsed computer sessions; retrying.", error)
+      })
+      .finally(() => {
+        sweepingSessions = false
+      })
   }
   sweep()
   const timer = setInterval(sweep, SWEEP_INTERVAL_MS)
@@ -156,7 +164,9 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
         }
         const elsewhere = await refuseOtherComputer(sessions, run, context.body)
         if (elsewhere) return answer({ error: elsewhere.error }, elsewhere.status)
-        return answer({ result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt }) })
+        return answer({
+          result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt, onComputer: true }),
+        })
       } catch (error) {
         // A turn whose runner stopped ends interrupted rather than being claimed again.
         return answer(

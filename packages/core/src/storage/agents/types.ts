@@ -186,6 +186,8 @@ export interface ListAgentThreadsInput {
   readonly ownerPrincipal?: Principal
   /** Only the threads this user takes part in. */
   readonly participantPrincipal?: UserPrincipal
+  /** Only the threads that run on this computer, in this folder, with a turn active. */
+  readonly activeOnComputer?: { readonly computerId: string; readonly folder: string }
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
@@ -506,6 +508,11 @@ export interface StartAgentRunInput {
   readonly modelId?: string
   readonly execution: AgentRunExecution
   readonly startedAt?: Date
+  /**
+   * Start it only as a computer's turn: one its thread moved to the cloud meanwhile is refused
+   * with `invalid_state`, so it never starts on both.
+   */
+  readonly onComputer?: boolean
 }
 
 export interface FinishQueuedAgentRunInput {

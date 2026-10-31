@@ -495,7 +495,8 @@ export function assertAgentComputerSession(
   assertAgentThreadComputer(session.computer, prefix)
 }
 
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
+// C0 and C1 controls, DEL, and the marks that reorder text where a terminal or page shows it.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
 /** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
 export function assertAssignableComputer(
@@ -537,6 +538,34 @@ export function assertMovableToCloud(
     throw new AgentStorageError(
       "active_run_exists",
       `[${prefix}] A turn of Agent thread '${id}' is running on its computer: stop it, or let it end, first.`
+    )
+  }
+}
+
+/**
+ * A turn runs where its thread runs: one asked for before the thread moved, and created after, is
+ * refused rather than left where nothing claims it.
+ */
+export function assertTurnInThreadPlace(
+  threadRunsOn: unknown,
+  spec: ConversationAgentRunSpec,
+  threadId: string,
+  prefix = "Sixb"
+): void {
+  if ((threadRunsOn ?? undefined) !== spec.runsOn) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent thread '${threadId}' moved while this turn was asked for: send it again.`
+    )
+  }
+}
+
+/** Refuse to start a computer's turn that moved to the cloud before it started. */
+export function assertStartsOnComputer(run: AgentRunRecord, prefix = "Sixb"): void {
+  if (run.kind !== "conversation" || run.spec?.runsOn !== "computer") {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent run '${run.id}' runs in the cloud now: no computer starts it.`
     )
   }
 }

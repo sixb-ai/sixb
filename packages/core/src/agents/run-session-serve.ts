@@ -201,7 +201,12 @@ async function serveOperation(
  */
 export async function claimAgentRunForRunner(
   host: AgentRunSessionHost,
-  input: { readonly run: AgentRunRecord; readonly leaseExpiresAt: string }
+  input: {
+    readonly run: AgentRunRecord
+    readonly leaseExpiresAt: string
+    /** A computer's turn, which a move to the cloud keeps from starting. */
+    readonly onComputer?: boolean
+  }
 ): Promise<{ readonly run: AgentRunRecord; readonly runnerToken: string } | null> {
   if (input.run.status === "running") {
     const ended =
@@ -219,6 +224,7 @@ export async function claimAgentRunForRunner(
   const session = await claimAgentRun(host, {
     run: input.run,
     leaseExpiresAt: capLease(input.leaseExpiresAt),
+    ...(input.onComputer ? { onComputer: true } : {}),
     ...(input.run.kind === "subagent" ? { cancelWith: [input.run.parentRunId] } : {}),
   })
   if (!session) return null

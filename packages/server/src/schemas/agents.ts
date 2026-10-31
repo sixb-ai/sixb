@@ -105,7 +105,12 @@ export const AgentThreadListQuerySchema = z
   .strict()
 
 /** Shown back to its owner as written, so it holds no control character. */
-const PlainTextSchema = z.string().regex(/^[^\u0000-\u001f\u007f]*$/, "has a control character")
+const PlainTextSchema = z
+  .string()
+  .regex(
+    /^[^\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]*$/,
+    "has a control character"
+  )
 
 /** Where on your computer a thread runs: the computer `sixb` is open on, and its folder there. */
 export const AgentThreadComputerInputSchema = z

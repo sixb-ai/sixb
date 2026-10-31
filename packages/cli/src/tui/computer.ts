@@ -37,7 +37,11 @@ let computerName: Promise<string> | undefined
 function thisComputerName(): Promise<string> {
   computerName ??= readComputerName().then((name) =>
     // Shown back as written: no control characters, and short.
-    (name.replace(/[\u0000-\u001f\u007f]/g, "").trim() || "This computer").slice(0, 120)
+    (
+      name
+        .replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+        .trim() || "This computer"
+    ).slice(0, 120)
   )
   return computerName
 }
