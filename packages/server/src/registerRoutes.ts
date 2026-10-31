@@ -24,7 +24,6 @@ import { registerDatasetRoutes } from "./routes/datasets"
 import { registerEventRoutes } from "./routes/events"
 import { registerFileDownloadRoutes } from "./routes/file-downloads"
 import { registerFileRoutes } from "./routes/files"
-import { registerLinkRoutes } from "./routes/links"
 import { registerLogRoutes } from "./routes/logs"
 import { registerModelCallRoutes } from "./routes/model-calls"
 import { registerModelGenerationRoutes } from "./routes/model-generations"
@@ -84,7 +83,6 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerArtifactRoutes(app, host)
   registerArtifactFrameRoutes(app, host, options.browserPolicy)
   registerModelRoutes(app, host)
-  registerLinkRoutes(app, host)
   registerTelemetryRoutes(app, host)
   registerEventRoutes(app, host)
   registerLogRoutes(app, host)

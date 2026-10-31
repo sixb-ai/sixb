@@ -27,10 +27,6 @@ describe("access token auth boundary", () => {
       ["POST", "/api/objects/query/exists"],
       ["POST", "/api/objects/query/facets"],
       ["GET", "/api/objects/device/fan-1"],
-      ["PUT", "/api/objects/device/fan-1"],
-      ["PUT", "/api/objects/device/fan-1/links/located-at"],
-      ["DELETE", "/api/objects/device/fan-1/links/located-at"],
-      ["POST", "/api/objects/device/fan-1/telemetry/temperature"],
       ["POST", "/api/telemetry/history"],
       ["GET", "/api/objects/device/fan-1/telemetry/temperature/history"],
       ["GET", "/api/objects/device/fan-1/telemetry/temperature/latest"],
@@ -74,9 +70,7 @@ describe("access token auth boundary", () => {
       // Creating a token takes a signed-in session; an access token cannot mint another.
       ["POST", "/api/auth/access-tokens"],
       ["POST", "/api/auth/service-accounts/svc_1/access-tokens"],
-      // The object, link, and telemetry writes moved out of this list: they enforce `edit:object`
-      // and `append:telemetry` now, which is the precondition SIXB_API_ROUTES states for bearer
-      // eligibility. Link reads moved out too now that they enforce both source and target view.
+      // Link reads enforce both source and target view, so they take a signed-in session.
       ["GET", "/api/objects/device/fan-1/links"],
       ["GET", "/api/workflow-interventions"],
       ["POST", "/api/workflow-interventions/int_1/submit"],

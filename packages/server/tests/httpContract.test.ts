@@ -2358,25 +2358,18 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
-  test("supports documented write endpoints", async () => {
+  test("supports documented action endpoints", async () => {
     await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
-      const upsertObjectResponse = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: { id: "fan-2", label: "Fan 2" } }),
+      // Objects, links and telemetry are written in process; over HTTP they change through actions.
+      const setup = createTestSixb(sixb)
+      await setup.objects.upsert("device", { id: "fan-2", label: "Fan 2" })
+      await setup.objects.appendTelemetry("device", [
+        { id: "fan-2", properties: { rpm: 900 }, at: new Date("2026-02-18T10:05:00.000Z") },
+      ])
+      await setup.objects.upsertLink("space", "system", "contains", {
+        targetTypeId: "device",
+        targetId: "fan-2",
       })
-      expect(upsertObjectResponse.status).toBe(200)
-
-      const appendTelemetryResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-2/telemetry/rpm`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ value: 900, at: "2026-02-18T10:05:00.000Z" }),
-        }
-      )
-      expect(appendTelemetryResponse.status).toBe(200)
-      expect(await appendTelemetryResponse.json()).toEqual({ success: true })
 
       const requestActionResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
         method: "POST",
@@ -2534,14 +2527,6 @@ describe("SixbServer HTTP contract", () => {
         error: "Action 'setSpeed' requires an object subject.",
       })
 
-      const upsertLinkResponse = await fetch(`${baseUrl}/api/objects/space/system/links/contains`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ targetTypeId: "device", targetId: "fan-2" }),
-      })
-      expect(upsertLinkResponse.status).toBe(200)
-      expect(await upsertLinkResponse.json()).toEqual({ success: true })
-
       const latestTelemetryResponse = await fetch(
         `${baseUrl}/api/objects/device/fan-2/telemetry/rpm/latest`
       )
@@ -2564,13 +2549,6 @@ describe("SixbServer HTTP contract", () => {
         links: Array<{ target: { primaryId: string } }>
       }
       expect(links.links.some((linkRow) => linkRow.target.primaryId === "fan-2")).toBe(true)
-
-      const removeLinkResponse = await fetch(
-        `${baseUrl}/api/objects/space/system/links/contains?targetTypeId=device&targetId=fan-2`,
-        { method: "DELETE" }
-      )
-      expect(removeLinkResponse.status).toBe(200)
-      expect(await removeLinkResponse.json()).toEqual({ success: true })
 
       const requestSyncRunResponse = await fetch(`${baseUrl}/api/syncs/sync-github-events/runs`, {
         method: "POST",
@@ -2715,32 +2693,27 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
-  test("separates a bad write body from a name the ontology does not register", async () => {
+  test("separates a bad request from a name the ontology does not register", async () => {
     await withHttpContractServer(async ({ baseUrl }) => {
       // The status used to be picked by searching the message for "Unknown" or "not found", so
-      // every ontology validation error whose text began "Unknown property" answered 404. To see
-      // this fail, drop the OntologyValidationError branch from `handleRouteError`.
-      const unknownProperty = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
-        method: "PUT",
+      // every ontology validation error whose text began "Unknown" answered 404. To see this fail,
+      // answer 404 from `handleRouteError` for any message that includes "Unknown".
+      const unknownParam = await fetch(`${baseUrl}/api/actions/setSpeed`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: { id: "fan-2", nope: "x" } }),
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+          params: { nope: 1 },
+        }),
       })
-      expect(unknownProperty.status).toBe(400)
+      expect(unknownParam.status).toBe(400)
 
-      const unknownObjectType = await fetch(`${baseUrl}/api/objects/ghost/fan-2`, {
-        method: "PUT",
+      const unknownObjectType = await fetch(`${baseUrl}/api/objects/ghost/by/id`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: {} }),
+        body: JSON.stringify({ value: "x" }),
       })
       expect(unknownObjectType.status).toBe(404)
-
-      // A link id is named in the path, so an unregistered one is still missing, not malformed.
-      const unknownLink = await fetch(`${baseUrl}/api/objects/space/system/links/ghost`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ targetTypeId: "device", targetId: "fan-2" }),
-      })
-      expect(unknownLink.status).toBe(404)
     })
   })
 })

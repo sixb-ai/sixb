@@ -4,9 +4,8 @@ import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
-import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
+import { ErrorResponseSchema } from "../schemas/common"
 import {
-  AppendTelemetryBodySchema,
   BulkTelemetryHistoryBodySchema,
   BulkTelemetryHistoryResponseSchema,
   TelemetryHistoryQuerySchema,
@@ -29,46 +28,6 @@ function serializeTelemetryPoint(point: TimeseriesPoint) {
 
 export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
   return app
-    .post(
-      "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
-      async (context) => {
-        const { params, body, set } = context
-        try {
-          const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await requireRequestSixb(context).objects.appendTelemetry(params.objectTypeId, [
-            {
-              id: params.objectId,
-              properties: {
-                [params.propertyId]: parsedBody.unit
-                  ? { value: parsedBody.value, unit: parsedBody.unit }
-                  : parsedBody.value,
-              },
-              at: parseDate(parsedBody.at),
-            },
-          ])
-
-          return { success: true }
-        } catch (error) {
-          return handleRouteError(error, set)
-        }
-      },
-      {
-        params: TelemetryParamsSchema,
-        body: AppendTelemetryBodySchema,
-        response: {
-          200: SuccessResponseSchema,
-          400: ErrorResponseSchema,
-          403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-        },
-        detail: {
-          summary: "Append telemetry point",
-          tags: [OPENAPI_TAGS.telemetry.name],
-          operationId: "appendTelemetry",
-          security: accessTokenSecurityRequirement("appendTelemetry"),
-        },
-      }
-    )
     .post(
       "/api/telemetry/history",
       async (context) => {

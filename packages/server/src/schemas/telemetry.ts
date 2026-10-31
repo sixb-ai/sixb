@@ -31,12 +31,6 @@ export const BulkTelemetryHistoryBodySchema = z
   })
   .strict()
 
-export const AppendTelemetryBodySchema = z.object({
-  value: z.unknown(),
-  unit: z.string().optional(),
-  at: z.string().optional(),
-})
-
 export const TelemetryPointSchema = z.object({
   projectId: z.string(),
   objectTypeId: z.string(),

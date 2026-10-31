@@ -37,8 +37,6 @@ import {
   ObjectsQuerySchema,
   TwinObjectSchema,
   UniquePropertyParamsSchema,
-  UniqueViolationErrorResponseSchema,
-  UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
@@ -890,46 +888,6 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "getObjectByUniqueProperty",
           security: accessTokenSecurityRequirement("getObjectByUniqueProperty"),
-        },
-      }
-    )
-    .put(
-      "/api/objects/:objectTypeId/:objectId",
-      async (context) => {
-        const { params, body, set } = context
-        const sixb = requireRequestSixb(context)
-        try {
-          const parsedBody = UpsertObjectBodySchema.parse(body)
-          // The same bound SDK performs the primary-property lookup and the write. Otherwise an
-          // ambient host lookup could answer 404 for an unregistered type before the principal's
-          // grant is checked, distinguishing it from a registered but ungranted type (403) and
-          // leaking the type universe that `listObjectTypes` filters out.
-          const primaryPropertyId = sixb.objects.getPrimaryPropertyId(params.objectTypeId)
-          const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await sixb.objects.upsert(params.objectTypeId, properties)
-          return serializeObject(object)
-        } catch (error) {
-          // Was a local catch mapping every error to 404/400, which turned a missing grant into
-          // "bad request". `handleRouteError` answers 403 for AuthorizationError, like the link and
-          // telemetry writes already did.
-          return handleRouteError(error, set)
-        }
-      },
-      {
-        params: ObjectParamsSchema,
-        body: UpsertObjectBodySchema,
-        response: {
-          200: TwinObjectSchema,
-          400: ErrorResponseSchema,
-          403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-          409: UniqueViolationErrorResponseSchema,
-        },
-        detail: {
-          summary: "Create or update object",
-          tags: [OPENAPI_TAGS.objects.name],
-          operationId: "upsertObject",
-          security: accessTokenSecurityRequirement("upsertObject"),
         },
       }
     )
