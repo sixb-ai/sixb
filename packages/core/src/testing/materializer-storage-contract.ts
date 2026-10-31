@@ -13,7 +13,11 @@ import {
 import type { TrustedPrimitiveRef } from "../execution"
 import { restoreTrustedPrimitiveExecutionScope } from "../execution/durable"
 import { createTestingScope } from "../execution/scopes"
-import { MaterializationConflictError } from "../materialization/errors"
+import {
+  MaterializationConflictError,
+  MaterializationValidationError,
+} from "../materialization/errors"
+import { linkRefKey } from "../materialization/refs"
 import type {
   ExpectedLinkRevision,
   ExpectedObjectRevision,
@@ -673,9 +677,29 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       await replace("v1", "2026-02-01T00:00:10.000Z", "Source A", "source-open")
 
       now = new Date("2026-02-01T00:00:11.000Z")
-      await edit("conflict-name", "name", "Action B")
+      const nameEdit = await edit("conflict-name", "name", "Action B")
       now = new Date("2026-02-01T00:00:13.000Z")
-      await edit("conflict-state", "state", "action-closed")
+      const stateEdit = await edit("conflict-state", "state", "action-closed")
+
+      // Lineage finds the commit behind an edited property by its edit time, so each time is its
+      // commit's `committedAt`, exactly. Removal proof: in `applyObjectEditTimes`
+      // (`materializer/edits/apply.ts`), record `new Date().toISOString()` instead of
+      // `input.committedAt`; the edit times no longer match the commits.
+      const [state] = (
+        await storage.ontology.materializations.readState({
+          projectId: "materializer-storage-contract",
+          objects: [ref],
+          links: [],
+          linkScopes: [],
+        })
+      ).objects
+      const editedAt = state?.override?.editedAt ?? {}
+      expect(editedAt).toEqual({ name: nameEdit.committedAt, state: stateEdit.committedAt })
+      const atNameEdit = await storage.ontology.commits.list({
+        projectId: "materializer-storage-contract",
+        committedAt: editedAt.name!,
+      })
+      expect(atNameEdit.commits.map((commit) => commit.id)).toEqual([nameEdit.commitId])
 
       await replace("v2", "2026-02-01T00:00:12.000Z", "Source C", "source-changed")
       expect(
@@ -794,6 +818,186 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       await provider.cleanup?.(createdStorage)
     }
   })
+
+  test(`${name} reads committed object, link and slot state without a session`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let now = new Date("2026-03-01T00:00:00.000Z")
+    const materializer = contractMaterializer(storage, { clock: () => now })
+    const runtime = materializer.withScope(runtimeScope())
+    const parent = (targetId: string) => ({
+      source: deviceRef("one"),
+      linkId: "parent",
+      target: deviceRef(targetId),
+    })
+    const peer = (targetId: string) => ({
+      source: deviceRef("one"),
+      linkId: "peers",
+      target: deviceRef(targetId),
+    })
+
+    const publish = (version: number, parentId: string) =>
+      publishDevices(materializer, storage, version, [
+        sourceEntry("one", "One", parentId),
+        sourceEntry("two", "Two"),
+        sourceEntry("three", "Three"),
+      ])
+
+    try {
+      await publish(1, "three")
+
+      now = new Date("2026-03-01T00:00:01.000Z")
+      const rename = await renameDevice(runtime, "one", "Edited")
+
+      now = new Date("2026-03-01T00:00:02.000Z")
+      const relink = await runtime.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "relink" },
+        operations: [
+          { id: "parent", kind: "link.upsert", ref: parent("three") },
+          { id: "peer", kind: "link.upsert", ref: peer("two") },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+      // The source moves the parent; the slot override keeps it.
+      await publish(2, "two")
+
+      now = new Date("2026-03-01T00:00:03.000Z")
+      const temperature = { object: deviceRef("one"), propertyId: "temperature" }
+      const reading = await runtime.telemetry.append({
+        source: { kind: "runtime", requestId: "reading" },
+        points: [{ series: temperature, value: 21.5, at: "2026-03-01T00:00:00.500Z" }],
+      })
+
+      // Outside any transaction: no session, only committed state.
+      const state = await storage.ontology.materializations.readState({
+        projectId: CONTRACT_PROJECT,
+        objects: [deviceRef("one"), deviceRef("one")],
+        links: [peer("two"), parent("three"), parent("two")],
+        linkScopes: [{ source: deviceRef("one"), linkId: "parent" }],
+      })
+
+      expect(state.objects).toMatchObject([
+        {
+          ref: deviceRef("one"),
+          source: {
+            source: { projectionId: devices.id },
+            assertion: { kind: "object", properties: { name: "One" } },
+          },
+          override: {
+            value: { kind: "patch", set: { name: "Edited" }, unset: [] },
+            editedAt: { name: rename.committedAt },
+            lastCommitId: rename.commitId,
+          },
+          effective: { properties: { id: "one", name: "Edited", temperature: 21.5 } },
+          latestTelemetry: [
+            {
+              series: temperature,
+              value: 21.5,
+              at: "2026-03-01T00:00:00.500Z",
+              lastCommitId: reading.commitId,
+            },
+          ],
+        },
+      ])
+
+      const slotOverride = {
+        value: { kind: "set", target: deviceRef("three") },
+        lastCommitId: relink.commitId,
+      }
+      const link = (ref: OntologyLinkRef) =>
+        state.links.find((candidate) => linkRefKey(candidate.ref) === linkRefKey(ref))
+      expect(state.links).toHaveLength(3)
+      expect(link(parent("two"))).toMatchObject({
+        source: { assertion: { kind: "link", ref: parent("two") } },
+        override: null,
+        slotOverride,
+        effective: null,
+      })
+      expect(link(parent("three"))).toMatchObject({
+        source: null,
+        override: null,
+        slotOverride,
+        effective: { ref: parent("three") },
+      })
+      expect(link(peer("two"))).toMatchObject({
+        source: null,
+        override: { value: { kind: "upsert" }, lastCommitId: relink.commitId },
+        slotOverride: null,
+        effective: { ref: peer("two"), lastCommitId: relink.commitId },
+      })
+
+      expect(state.linkScopes).toMatchObject([
+        {
+          source: deviceRef("one"),
+          linkId: "parent",
+          effectiveCount: 1,
+          sourceAssertion: { assertion: { kind: "link", ref: parent("two") } },
+          override: slotOverride,
+          effective: { ref: parent("three") },
+        },
+      ])
+
+      const oversized = await storage.ontology.materializations
+        .readState({
+          projectId: CONTRACT_PROJECT,
+          objects: Array.from({ length: 1_001 }, (_, index) => deviceRef(`device-${index}`)),
+          links: [],
+          linkScopes: [],
+        })
+        .catch((error: unknown) => error)
+      expect(oversized).toBeInstanceOf(MaterializationValidationError)
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // A store whose transactions run one after another cannot read beside one in flight.
+  if (provider.concurrentTransactions) {
+    test(`${name} reads state without what a commit in flight applied`, async () => {
+      const createdStorage = await provider.createStorage()
+      const storage = requireContractStorage(createdStorage)
+      const materializer = contractMaterializer(storage)
+      const read = () =>
+        storage.ontology.materializations.readState({
+          projectId: CONTRACT_PROJECT,
+          objects: [deviceRef("one")],
+          links: [],
+          linkScopes: [],
+        })
+
+      try {
+        await publishDevices(materializer, storage, 1, [sourceEntry("one", "One")])
+
+        const paused = pauseBeforeFinalize(storage)
+        const rename = renameDevice(
+          contractMaterializer(paused.storage).withScope(runtimeScope()),
+          "one",
+          "In flight"
+        )
+        // Its override and effective row are applied, its transaction still open.
+        await paused.reached
+
+        expect((await read()).objects).toMatchObject([
+          { override: null, effective: { properties: { name: "One" } } },
+        ])
+
+        paused.release()
+        const committed = await rename
+        expect((await read()).objects).toMatchObject([
+          {
+            override: { lastCommitId: committed.commitId },
+            effective: { properties: { name: "In flight" } },
+          },
+        ])
+      } finally {
+        await provider.cleanup?.(createdStorage)
+      }
+    })
+  }
 
   test(`${name} rejects stale object and link expectations as expectation conflicts`, async () => {
     // Action runs report exactly this conflict kind as `action.read_conflict`. Throw a stale

@@ -22,6 +22,7 @@ import {
   beginMaterializationVectorChanges,
   cardinalityViolation,
   invalidCorrelation,
+  prepareMaterializationStateRead,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
 } from "@sixb/core/internal/ontology-storage-provider"
@@ -32,10 +33,12 @@ import type {
   FinalizeMaterializationInput,
   MaterializationPlanHeader,
   MaterializationSession,
+  MaterializationState,
   MaterializationStatePage,
   MaterializationVectorChangePage,
   OntologyCommitRecord,
   OntologyMaterializationStorage,
+  ReadMaterializationStateInput,
   SourceActivationWrite,
   StageMaterializationWorkInput,
   StreamMaterializationStateInput,
@@ -43,7 +46,7 @@ import type {
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
-import { lockAdvisoryKeys } from "../transactions"
+import { lockAdvisoryKeys, runPgRepeatableReadTransaction } from "../transactions"
 import {
   type PgMaterializationSessionState,
   PgMaterializationSessions,
@@ -216,6 +219,20 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         }
       }
     }
+  }
+
+  async readState(input: ReadMaterializationStateInput): Promise<MaterializationState> {
+    const request = prepareMaterializationStateRead(input)
+
+    // One snapshot for every statement, so the read never straddles a commit.
+    return runPgRepeatableReadTransaction(this.sql, async (tx) => {
+      const reader = new PgMaterializationStateReader(tx, request.projectId)
+      return {
+        objects: await reader.objectStates(request.objects),
+        links: await reader.linkStates(request.links),
+        linkScopes: await reader.linkSlotStates(request.linkScopes),
+      }
+    })
   }
 
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
