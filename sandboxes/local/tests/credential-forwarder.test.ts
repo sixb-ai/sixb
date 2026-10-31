@@ -46,6 +46,30 @@ describe("CredentialForwarder", () => {
     await second.stop()
   })
 
+  // Guard proof: drop `decompress: false` from forward(); the client fails with
+  // ZstdDecompressionError, decoding a body the forwarder already decoded.
+  test("a compressed response reaches the command still compressed", async () => {
+    const body = JSON.stringify({ objects: [{ id: "anthony@sixb.ai" }] })
+    const upstream = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(Uint8Array.from(Bun.zstdCompressSync(body)), {
+          headers: { "content-type": "application/json", "content-encoding": "zstd" },
+        }),
+    })
+    const forwarder = await CredentialForwarder.start()
+    try {
+      const socket = forwarder.urlFor(`http://127.0.0.1:${upstream.port}`).slice("unix:".length)
+      const response = await fetch("http://localhost/api/objects/query", { unix: socket })
+
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(body)
+    } finally {
+      await forwarder.stop()
+      upstream.stop(true)
+    }
+  })
+
   // Guard proof: drop the conditions from assertPrivateRoot; each root below is accepted.
   test("a root this user doesn't own alone is refused", () => {
     const directory = scratch()

@@ -81,14 +81,17 @@ export class CredentialForwarder implements ForwarderPaths {
     const credential = this.credentials.find((candidate) => matches(candidate, request, target))
     if (credential) headers.set("authorization", credential.headers.Authorization)
 
-    return fetch(target, {
+    const init: BunFetchRequestInit = {
       method: request.method,
       headers,
       body: request.body,
       redirect: "manual",
+      // The response goes on with its Content-Encoding header, so its body must stay encoded too.
+      decompress: false,
       // @ts-expect-error Bun streams a request body with duplex "half", as fetch requires.
       duplex: "half",
-    })
+    }
+    return fetch(target, init)
   }
 }
 
