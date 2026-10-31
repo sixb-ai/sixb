@@ -18534,6 +18534,9 @@
                               },
                               "runId": {
                                 "type": "string"
+                              },
+                              "stepId": {
+                                "type": "string"
                               }
                             },
                             "required": ["kind"],
@@ -18716,6 +18719,9 @@
                         },
                         "runId": {
                           "type": "string"
+                        },
+                        "stepId": {
+                          "type": "string"
                         }
                       },
                       "required": ["kind"],
@@ -18745,6 +18751,217 @@
                     }
                   },
                   "required": ["datasetId", "versionId", "mode", "createdAt", "schema"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found", "dataset.version_not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/datasets/{datasetId}/versions/{versionId}/lineage": {
+      "get": {
+        "summary": "Get the versions a dataset version is computed from",
+        "description": "Walks the version's inputs upstream, `depth` steps (1 to 20, default 5). A version whose dataset the caller cannot view is left out with everything upstream of it, and counted in `restricted`.",
+        "tags": ["Dataset Versions"],
+        "operationId": "getDatasetVersionLineage",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "datasetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "versionId": {
+                                "type": "string"
+                              },
+                              "parentVersionId": {
+                                "type": "string"
+                              },
+                              "mode": {
+                                "type": "string",
+                                "enum": ["snapshot", "append", "merge", "schema"]
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "producer": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["sync", "pipeline", "ingest"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "stepId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["datasetId", "versionId", "mode", "createdAt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "versionId": {
+                                "type": "string"
+                              },
+                              "expired": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["datasetId", "versionId", "expired"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "versionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["datasetId", "versionId"],
+                            "additionalProperties": false
+                          },
+                          "to": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "versionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["datasetId", "versionId"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["from", "to"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "restricted": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Versions left out because the caller cannot view their dataset."
+                    },
+                    "truncated": {
+                      "type": "boolean",
+                      "description": "Whether the walk stopped at `depth` or at the node cap."
+                    }
+                  },
+                  "required": ["nodes", "edges", "restricted", "truncated"],
                   "additionalProperties": false
                 }
               }
@@ -18932,6 +19149,9 @@
                               "type": "string"
                             },
                             "runId": {
+                              "type": "string"
+                            },
+                            "stepId": {
                               "type": "string"
                             }
                           },
@@ -31542,6 +31762,570 @@
                     }
                   },
                   "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/{objectTypeId}/{objectId}/lineage": {
+      "get": {
+        "summary": "Get where an object's values come from",
+        "description": "What makes the object exist and what decided each property it holds, for the current state. Steps the caller cannot view are left out and counted in `restricted`.",
+        "tags": ["Objects"],
+        "operationId": "getObjectLineage",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "objectTypeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "objectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "objectTypeId": {
+                      "type": "string"
+                    },
+                    "primaryId": {
+                      "type": "string"
+                    },
+                    "existence": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["source"],
+                      "additionalProperties": false
+                    },
+                    "sources": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["projection"]
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "projectionRunId": {
+                                "type": "string",
+                                "description": "Absent for a caller who cannot view the projection's runs."
+                              },
+                              "datasetVersion": {
+                                "type": "object",
+                                "properties": {
+                                  "datasetId": {
+                                    "type": "string"
+                                  },
+                                  "versionId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["datasetId", "versionId"],
+                                "additionalProperties": false,
+                                "description": "The dataset version applied. Absent for a caller who cannot view the dataset."
+                              },
+                              "rowOrigins": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "datasetId": {
+                                      "type": "string"
+                                    },
+                                    "column": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["datasetId", "column"],
+                                  "additionalProperties": false
+                                },
+                                "description": "Upstream columns that decide which rows the version holds, which every value depends on. Absent when the version records no lineage or the caller cannot view it."
+                              }
+                            },
+                            "required": ["kind", "projectionId"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["edit"]
+                              },
+                              "commitId": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "Null when the commits made at that instant cannot be told apart."
+                              },
+                              "committedAt": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false,
+                                "description": "Principal on whose behalf the commit ran; absent for automatic or anonymous work."
+                              },
+                              "executor": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["request"]
+                                      },
+                                      "requestId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "requestId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["primitive"]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "action",
+                                          "pipeline",
+                                          "projection",
+                                          "rule",
+                                          "sync",
+                                          "webhook",
+                                          "workflow"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "kind", "id", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["agent"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["kernel"]
+                                      },
+                                      "operation": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.recover"]
+                                              },
+                                              "recoveryId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "recoveryId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.indexVectors"]
+                                              },
+                                              "indexingId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "indexingId"],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "action": {
+                                "type": "object",
+                                "properties": {
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["actionId", "runId"],
+                                "additionalProperties": false,
+                                "description": "Absent for a direct write, and for an Action run the caller cannot view."
+                              }
+                            },
+                            "required": ["kind", "commitId", "committedAt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["telemetry"]
+                              },
+                              "commitId": {
+                                "type": "string"
+                              },
+                              "committedAt": {
+                                "type": "string"
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false,
+                                "description": "Principal on whose behalf the commit ran; absent for automatic or anonymous work."
+                              },
+                              "executor": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["request"]
+                                      },
+                                      "requestId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "requestId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["primitive"]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "action",
+                                          "pipeline",
+                                          "projection",
+                                          "rule",
+                                          "sync",
+                                          "webhook",
+                                          "workflow"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "kind", "id", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["agent"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["kernel"]
+                                      },
+                                      "operation": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.recover"]
+                                              },
+                                              "recoveryId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "recoveryId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.indexVectors"]
+                                              },
+                                              "indexingId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "indexingId"],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["kind", "commitId", "committedAt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["identity"]
+                              }
+                            },
+                            "required": ["kind"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "description": "Keyed `projection:<id>`, `commit:<id>`, `commit@<instant>` when the commit is unknown, `telemetry:<commitId>` and `identity`."
+                    },
+                    "properties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "description": "The source that decided the value: a key of `sources`."
+                          },
+                          "column": {
+                            "type": "string"
+                          },
+                          "origins": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "datasetId": {
+                                  "type": "string"
+                                },
+                                "column": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["datasetId", "column"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "removed": {
+                            "type": "boolean",
+                            "enum": [true]
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "replaced": {
+                            "type": "object",
+                            "properties": {
+                              "source": {
+                                "type": "string"
+                              },
+                              "column": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["source"],
+                            "additionalProperties": false
+                          },
+                          "resolution": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "strategy": {
+                                    "type": "string",
+                                    "enum": ["editsWin"]
+                                  }
+                                },
+                                "required": ["strategy"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "strategy": {
+                                    "type": "string",
+                                    "enum": ["mostRecent"]
+                                  },
+                                  "sourceUpdatedAt": {
+                                    "type": "string"
+                                  },
+                                  "editedAt": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["strategy", "sourceUpdatedAt"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["source"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "restricted": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Steps left out because the caller cannot view them."
+                    }
+                  },
+                  "required": [
+                    "objectTypeId",
+                    "primaryId",
+                    "existence",
+                    "sources",
+                    "properties",
+                    "restricted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
                   "additionalProperties": false
                 }
               }
@@ -55517,6 +56301,539 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/{objectTypeId}/{objectId}/links/{linkId}/lineage": {
+      "get": {
+        "summary": "Get where an object link comes from",
+        "description": "What makes the link exist, for the current state. Steps the caller cannot view are left out and counted in `restricted`.",
+        "tags": ["Links"],
+        "operationId": "getObjectLinkLineage",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "objectTypeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "objectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "linkId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "targetTypeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "targetId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sourceTypeId": {
+                      "type": "string"
+                    },
+                    "sourceId": {
+                      "type": "string"
+                    },
+                    "linkId": {
+                      "type": "string"
+                    },
+                    "targetTypeId": {
+                      "type": "string"
+                    },
+                    "targetId": {
+                      "type": "string"
+                    },
+                    "existence": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string"
+                        },
+                        "columns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "origins": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "column": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["datasetId", "column"],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": ["source"],
+                      "additionalProperties": false
+                    },
+                    "sources": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["projection"]
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "projectionRunId": {
+                                "type": "string",
+                                "description": "Absent for a caller who cannot view the projection's runs."
+                              },
+                              "datasetVersion": {
+                                "type": "object",
+                                "properties": {
+                                  "datasetId": {
+                                    "type": "string"
+                                  },
+                                  "versionId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["datasetId", "versionId"],
+                                "additionalProperties": false,
+                                "description": "The dataset version applied. Absent for a caller who cannot view the dataset."
+                              },
+                              "rowOrigins": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "datasetId": {
+                                      "type": "string"
+                                    },
+                                    "column": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["datasetId", "column"],
+                                  "additionalProperties": false
+                                },
+                                "description": "Upstream columns that decide which rows the version holds, which every value depends on. Absent when the version records no lineage or the caller cannot view it."
+                              }
+                            },
+                            "required": ["kind", "projectionId"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["edit"]
+                              },
+                              "commitId": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "Null when the commits made at that instant cannot be told apart."
+                              },
+                              "committedAt": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false,
+                                "description": "Principal on whose behalf the commit ran; absent for automatic or anonymous work."
+                              },
+                              "executor": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["request"]
+                                      },
+                                      "requestId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "requestId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["primitive"]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "action",
+                                          "pipeline",
+                                          "projection",
+                                          "rule",
+                                          "sync",
+                                          "webhook",
+                                          "workflow"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "kind", "id", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["agent"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["kernel"]
+                                      },
+                                      "operation": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.recover"]
+                                              },
+                                              "recoveryId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "recoveryId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.indexVectors"]
+                                              },
+                                              "indexingId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "indexingId"],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "action": {
+                                "type": "object",
+                                "properties": {
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["actionId", "runId"],
+                                "additionalProperties": false,
+                                "description": "Absent for a direct write, and for an Action run the caller cannot view."
+                              }
+                            },
+                            "required": ["kind", "commitId", "committedAt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["telemetry"]
+                              },
+                              "commitId": {
+                                "type": "string"
+                              },
+                              "committedAt": {
+                                "type": "string"
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false,
+                                "description": "Principal on whose behalf the commit ran; absent for automatic or anonymous work."
+                              },
+                              "executor": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["request"]
+                                      },
+                                      "requestId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "requestId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["primitive"]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "action",
+                                          "pipeline",
+                                          "projection",
+                                          "rule",
+                                          "sync",
+                                          "webhook",
+                                          "workflow"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "kind", "id", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["agent"]
+                                      },
+                                      "runId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "runId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["kernel"]
+                                      },
+                                      "operation": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.recover"]
+                                              },
+                                              "recoveryId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "recoveryId"],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "enum": ["ontology.indexVectors"]
+                                              },
+                                              "indexingId": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["type", "indexingId"],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": ["type", "operation"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["kind", "commitId", "committedAt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["identity"]
+                              }
+                            },
+                            "required": ["kind"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "description": "Keyed `projection:<id>`, `commit:<id>`, `commit@<instant>` when the commit is unknown, `telemetry:<commitId>` and `identity`."
+                    },
+                    "restricted": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Steps left out because the caller cannot view them."
+                    }
+                  },
+                  "required": [
+                    "sourceTypeId",
+                    "sourceId",
+                    "linkId",
+                    "targetTypeId",
+                    "targetId",
+                    "existence",
+                    "sources",
+                    "restricted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
             "content": {
               "application/json": {
                 "schema": {

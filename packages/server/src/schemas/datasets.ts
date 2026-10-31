@@ -13,6 +13,10 @@ export const DatasetVersionsQuerySchema = z.object({
   limit: z.string().optional(),
 })
 
+export const DatasetLineageQuerySchema = z.object({
+  depth: z.string().optional(),
+})
+
 /**
  * Elysia's query parser splits any comma-separated value into an array before validation, and
  * pushes a repeated key's value into the existing array as-is. `?columns=id`, `?columns=id,title`,
@@ -72,10 +76,16 @@ export const DatasetVersionRefSchema = z.object({
   versionId: z.string(),
 })
 
+export const DatasetColumnRefSchema = z.object({
+  datasetId: z.string(),
+  column: z.string(),
+})
+
 export const DatasetProducerSchema = z.object({
   kind: z.enum(["sync", "pipeline", "ingest"]),
   id: z.string().optional(),
   runId: z.string().optional(),
+  stepId: z.string().optional(),
 })
 
 export const DatasetVersionSchema = z.object({
@@ -107,6 +117,32 @@ export const DatasetCatalogItemSchema = DatasetDefinitionSchema.extend({
   sourcePipelineIds: z.array(z.string()),
   targetPipelineIds: z.array(z.string()),
   projectionIds: z.array(z.string()),
+})
+
+const DatasetLineageVersionSchema = DatasetVersionSchema.pick({
+  datasetId: true,
+  versionId: true,
+  parentVersionId: true,
+  mode: true,
+  createdAt: true,
+  producer: true,
+})
+
+/** An input version the lake no longer holds, for example one that expired. */
+const DatasetLineageExpiredVersionSchema = DatasetVersionRefSchema.extend({
+  expired: z.literal(true),
+})
+
+/** Mirrors the core `DatasetLineage`: the starting version first, then upstream, nearest first. */
+export const DatasetLineageResponseSchema = z.object({
+  nodes: z.array(z.union([DatasetLineageVersionSchema, DatasetLineageExpiredVersionSchema])),
+  edges: z.array(z.object({ from: DatasetVersionRefSchema, to: DatasetVersionRefSchema })),
+  restricted: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("Versions left out because the caller cannot view their dataset."),
+  truncated: z.boolean().describe("Whether the walk stopped at `depth` or at the node cap."),
 })
 
 export const DatasetVersionListResponseSchema = z.object({

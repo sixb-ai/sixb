@@ -236,6 +236,22 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentEffect: "read",
     sharedSession: true,
   },
+  // Where a value comes from. Not open to shared sessions, which see no lineage, nor yet to run
+  // tokens, which reach the API through the sandbox CLI.
+  {
+    operationId: "getObjectLineage",
+    method: "GET",
+    path: "/api/objects/:objectTypeId/:objectId/lineage",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "getObjectLinkLineage",
+    method: "GET",
+    path: "/api/objects/:objectTypeId/:objectId/links/:linkId/lineage",
+    accessToken: true,
+    agentApi: false,
+  },
   // The four write routes. Bearer-capable because their execution facade enforces authorization
   // (`edit:object` / `append:telemetry`), which is exactly the precondition this table requires.
   // NOT open to run tokens: letting an agent turn write objects on its own is a separate decision,
@@ -733,6 +749,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/datasets/:datasetId/versions",
     accessToken: true,
     agentApi: true,
+  },
+  {
+    operationId: "getDatasetVersionLineage",
+    method: "GET",
+    path: "/api/datasets/:datasetId/versions/:versionId/lineage",
+    accessToken: true,
+    agentApi: false,
   },
   {
     operationId: "listDatasetRows",

@@ -6120,6 +6120,7 @@ export type ListDatasetVersionsResponses = {
         kind: "sync" | "pipeline" | "ingest"
         id?: string
         runId?: string
+        stepId?: string
       }
       inputs?: Array<{
         datasetId: string
@@ -6196,6 +6197,7 @@ export type GetDatasetVersionResponses = {
       kind: "sync" | "pipeline" | "ingest"
       id?: string
       runId?: string
+      stepId?: string
     }
     inputs?: Array<{
       datasetId: string
@@ -6207,6 +6209,89 @@ export type GetDatasetVersionResponses = {
 }
 
 export type GetDatasetVersionResponse = GetDatasetVersionResponses[keyof GetDatasetVersionResponses]
+
+export type GetDatasetVersionLineageData = {
+  body?: never
+  path: {
+    datasetId: string
+    versionId: string
+  }
+  query?: {
+    depth?: string
+  }
+  url: "/api/datasets/{datasetId}/versions/{versionId}/lineage"
+}
+
+export type GetDatasetVersionLineageErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found" | "dataset.version_not_found"
+  }
+}
+
+export type GetDatasetVersionLineageError =
+  GetDatasetVersionLineageErrors[keyof GetDatasetVersionLineageErrors]
+
+export type GetDatasetVersionLineageResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    nodes: Array<
+      | {
+          datasetId: string
+          versionId: string
+          parentVersionId?: string
+          mode: "snapshot" | "append" | "merge" | "schema"
+          createdAt: string
+          producer?: {
+            kind: "sync" | "pipeline" | "ingest"
+            id?: string
+            runId?: string
+            stepId?: string
+          }
+        }
+      | {
+          datasetId: string
+          versionId: string
+          expired: true
+        }
+    >
+    edges: Array<{
+      from: {
+        datasetId: string
+        versionId: string
+      }
+      to: {
+        datasetId: string
+        versionId: string
+      }
+    }>
+    /**
+     * Versions left out because the caller cannot view their dataset.
+     */
+    restricted: number
+    /**
+     * Whether the walk stopped at `depth` or at the node cap.
+     */
+    truncated: boolean
+  }
+}
+
+export type GetDatasetVersionLineageResponse =
+  GetDatasetVersionLineageResponses[keyof GetDatasetVersionLineageResponses]
 
 export type ListDatasetRowsData = {
   body?: never
@@ -6276,6 +6361,7 @@ export type ListDatasetRowsResponses = {
         kind: "sync" | "pipeline" | "ingest"
         id?: string
         runId?: string
+        stepId?: string
       }
       inputs?: Array<{
         datasetId: string
@@ -10648,6 +10734,220 @@ export type UpsertObjectResponses = {
 }
 
 export type UpsertObjectResponse = UpsertObjectResponses[keyof UpsertObjectResponses]
+
+export type GetObjectLineageData = {
+  body?: never
+  path: {
+    objectTypeId: string
+    objectId: string
+  }
+  query?: never
+  url: "/api/objects/{objectTypeId}/{objectId}/lineage"
+}
+
+export type GetObjectLineageErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetObjectLineageError = GetObjectLineageErrors[keyof GetObjectLineageErrors]
+
+export type GetObjectLineageResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    objectTypeId: string
+    primaryId: string
+    existence: {
+      source: string
+    }
+    /**
+     * Keyed `projection:<id>`, `commit:<id>`, `commit@<instant>` when the commit is unknown, `telemetry:<commitId>` and `identity`.
+     */
+    sources: {
+      [key: string]:
+        | {
+            kind: "projection"
+            projectionId: string
+            /**
+             * Absent for a caller who cannot view the projection's runs.
+             */
+            projectionRunId?: string
+            /**
+             * The dataset version applied. Absent for a caller who cannot view the dataset.
+             */
+            datasetVersion?: {
+              datasetId: string
+              versionId: string
+            }
+            /**
+             * Upstream columns that decide which rows the version holds, which every value depends on. Absent when the version records no lineage or the caller cannot view it.
+             */
+            rowOrigins?: Array<{
+              datasetId: string
+              column: string
+            }>
+          }
+        | {
+            kind: "edit"
+            /**
+             * Null when the commits made at that instant cannot be told apart.
+             */
+            commitId: string | null
+            committedAt: string
+            /**
+             * Principal on whose behalf the commit ran; absent for automatic or anonymous work.
+             */
+            requestedBy?: {
+              type: "user" | "serviceAccount"
+              id: string
+            }
+            executor?:
+              | {
+                  type: "request"
+                  requestId: string
+                }
+              | {
+                  type: "primitive"
+                  kind:
+                    | "action"
+                    | "pipeline"
+                    | "projection"
+                    | "rule"
+                    | "sync"
+                    | "webhook"
+                    | "workflow"
+                  id: string
+                  runId: string
+                }
+              | {
+                  type: "agent"
+                  runId: string
+                }
+              | {
+                  type: "kernel"
+                  operation:
+                    | {
+                        type: "ontology.recover"
+                        recoveryId: string
+                      }
+                    | {
+                        type: "ontology.indexVectors"
+                        indexingId: string
+                      }
+                }
+            /**
+             * Absent for a direct write, and for an Action run the caller cannot view.
+             */
+            action?: {
+              actionId: string
+              runId: string
+            }
+          }
+        | {
+            kind: "telemetry"
+            commitId: string
+            committedAt: string
+            projectionId?: string
+            /**
+             * Principal on whose behalf the commit ran; absent for automatic or anonymous work.
+             */
+            requestedBy?: {
+              type: "user" | "serviceAccount"
+              id: string
+            }
+            executor?:
+              | {
+                  type: "request"
+                  requestId: string
+                }
+              | {
+                  type: "primitive"
+                  kind:
+                    | "action"
+                    | "pipeline"
+                    | "projection"
+                    | "rule"
+                    | "sync"
+                    | "webhook"
+                    | "workflow"
+                  id: string
+                  runId: string
+                }
+              | {
+                  type: "agent"
+                  runId: string
+                }
+              | {
+                  type: "kernel"
+                  operation:
+                    | {
+                        type: "ontology.recover"
+                        recoveryId: string
+                      }
+                    | {
+                        type: "ontology.indexVectors"
+                        indexingId: string
+                      }
+                }
+          }
+        | {
+            kind: "identity"
+          }
+    }
+    properties: {
+      [key: string]: {
+        /**
+         * The source that decided the value: a key of `sources`.
+         */
+        source: string
+        column?: string
+        origins?: Array<{
+          datasetId: string
+          column: string
+        }>
+        removed?: true
+        at?: string
+        replaced?: {
+          source: string
+          column?: string
+          /**
+           * Any JSON-compatible value.
+           */
+          value?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+        resolution?:
+          | {
+              strategy: "editsWin"
+            }
+          | {
+              strategy: "mostRecent"
+              sourceUpdatedAt: string
+              editedAt?: string
+            }
+      }
+    }
+    /**
+     * Steps left out because the caller cannot view them.
+     */
+    restricted: number
+  }
+}
+
+export type GetObjectLineageResponse = GetObjectLineageResponses[keyof GetObjectLineageResponses]
 
 export type GetObjectByUniquePropertyData = {
   body: {
@@ -19010,6 +19310,199 @@ export type UpsertObjectLinkResponses = {
 }
 
 export type UpsertObjectLinkResponse = UpsertObjectLinkResponses[keyof UpsertObjectLinkResponses]
+
+export type GetObjectLinkLineageData = {
+  body?: never
+  path: {
+    objectTypeId: string
+    objectId: string
+    linkId: string
+  }
+  query: {
+    targetTypeId: string
+    targetId: string
+  }
+  url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}/lineage"
+}
+
+export type GetObjectLinkLineageErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetObjectLinkLineageError = GetObjectLinkLineageErrors[keyof GetObjectLinkLineageErrors]
+
+export type GetObjectLinkLineageResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sourceTypeId: string
+    sourceId: string
+    linkId: string
+    targetTypeId: string
+    targetId: string
+    existence: {
+      source: string
+      columns?: Array<string>
+      origins?: Array<{
+        datasetId: string
+        column: string
+      }>
+    }
+    /**
+     * Keyed `projection:<id>`, `commit:<id>`, `commit@<instant>` when the commit is unknown, `telemetry:<commitId>` and `identity`.
+     */
+    sources: {
+      [key: string]:
+        | {
+            kind: "projection"
+            projectionId: string
+            /**
+             * Absent for a caller who cannot view the projection's runs.
+             */
+            projectionRunId?: string
+            /**
+             * The dataset version applied. Absent for a caller who cannot view the dataset.
+             */
+            datasetVersion?: {
+              datasetId: string
+              versionId: string
+            }
+            /**
+             * Upstream columns that decide which rows the version holds, which every value depends on. Absent when the version records no lineage or the caller cannot view it.
+             */
+            rowOrigins?: Array<{
+              datasetId: string
+              column: string
+            }>
+          }
+        | {
+            kind: "edit"
+            /**
+             * Null when the commits made at that instant cannot be told apart.
+             */
+            commitId: string | null
+            committedAt: string
+            /**
+             * Principal on whose behalf the commit ran; absent for automatic or anonymous work.
+             */
+            requestedBy?: {
+              type: "user" | "serviceAccount"
+              id: string
+            }
+            executor?:
+              | {
+                  type: "request"
+                  requestId: string
+                }
+              | {
+                  type: "primitive"
+                  kind:
+                    | "action"
+                    | "pipeline"
+                    | "projection"
+                    | "rule"
+                    | "sync"
+                    | "webhook"
+                    | "workflow"
+                  id: string
+                  runId: string
+                }
+              | {
+                  type: "agent"
+                  runId: string
+                }
+              | {
+                  type: "kernel"
+                  operation:
+                    | {
+                        type: "ontology.recover"
+                        recoveryId: string
+                      }
+                    | {
+                        type: "ontology.indexVectors"
+                        indexingId: string
+                      }
+                }
+            /**
+             * Absent for a direct write, and for an Action run the caller cannot view.
+             */
+            action?: {
+              actionId: string
+              runId: string
+            }
+          }
+        | {
+            kind: "telemetry"
+            commitId: string
+            committedAt: string
+            projectionId?: string
+            /**
+             * Principal on whose behalf the commit ran; absent for automatic or anonymous work.
+             */
+            requestedBy?: {
+              type: "user" | "serviceAccount"
+              id: string
+            }
+            executor?:
+              | {
+                  type: "request"
+                  requestId: string
+                }
+              | {
+                  type: "primitive"
+                  kind:
+                    | "action"
+                    | "pipeline"
+                    | "projection"
+                    | "rule"
+                    | "sync"
+                    | "webhook"
+                    | "workflow"
+                  id: string
+                  runId: string
+                }
+              | {
+                  type: "agent"
+                  runId: string
+                }
+              | {
+                  type: "kernel"
+                  operation:
+                    | {
+                        type: "ontology.recover"
+                        recoveryId: string
+                      }
+                    | {
+                        type: "ontology.indexVectors"
+                        indexingId: string
+                      }
+                }
+          }
+        | {
+            kind: "identity"
+          }
+    }
+    /**
+     * Steps left out because the caller cannot view them.
+     */
+    restricted: number
+  }
+}
+
+export type GetObjectLinkLineageResponse =
+  GetObjectLinkLineageResponses[keyof GetObjectLinkLineageResponses]
 
 export type AppendTelemetryData = {
   body: {
