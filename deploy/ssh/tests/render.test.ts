@@ -185,12 +185,7 @@ describe("deploy script", () => {
 
   test("lets dependency install scripts call node when the server has none", async () => {
     // Red check: remove the node link from renderInstallBun; the first case finds no link.
-    const { labels, script } = deployScript
-    const index = labels.indexOf("Install Bun 1.4.2")
-    const step = script
-      .split(`${STEP_MARKER} ${index} start\n`)[1]
-      ?.split(`\nprintf '%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} done`)[0]
-    if (!step) throw new Error("Missing Install Bun step")
+    const step = stepBody("Install Bun 1.4.2")
 
     const root = await mkdtemp(join(tmpdir(), "sixb-install-bun-"))
     try {
@@ -224,4 +219,56 @@ describe("deploy script", () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test("counts the quiet window after start from when the services started", async () => {
+    // Red check: put back a fixed `sleep 5` after the readiness wait; the slow boot then sleeps.
+    const step = stepBody("Check services")
+    const root = await mkdtemp(join(tmpdir(), "sixb-check-services-"))
+    try {
+      const tools = join(root, "tools")
+      await mkdir(tools)
+      // `sleep` records how long it was asked to wait instead of waiting.
+      await writeFile(join(tools, "sleep"), `#!/bin/sh\necho "$1" >> "$SLEPT"\n`, { mode: 0o755 })
+      await writeFile(join(tools, "ctl"), "#!/bin/sh\necho checked\n", { mode: 0o755 })
+
+      // The API answers at once, after the services have been up for `bootSeconds`.
+      const check = async (name: string, bootSeconds: number) => {
+        const slept = join(root, `${name}.txt`)
+        await writeFile(slept, "")
+        const child = Bun.spawn(
+          ["/bin/bash", "-euc", `started=$((SECONDS - ${bootSeconds}))\n${step}`],
+          {
+            env: {
+              BUN: Bun.which("true")!,
+              CTL: join(tools, "ctl"),
+              SLEPT: slept,
+              PATH: `${tools}:/usr/bin:/bin`,
+            },
+            stdout: "pipe",
+            stderr: "pipe",
+          }
+        )
+        expect(await child.exited).toBe(0)
+        expect(await new Response(child.stdout).text()).toBe("checked\n")
+        return (await Bun.file(slept).text()).split("\n").filter(Boolean).map(Number)
+      }
+
+      const quick = await check("quick", 0)
+      expect(quick).toHaveLength(1)
+      expect(quick[0]).toBeGreaterThan(0)
+      expect(quick[0]).toBeLessThanOrEqual(5)
+      expect(await check("slow", 10)).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
+
+function stepBody(label: string): string {
+  const index = deployScript.labels.indexOf(label)
+  const body = deployScript.script
+    .split(`${STEP_MARKER} ${index} start\n`)[1]
+    ?.split(`\nprintf '%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} done`)[0]
+  if (!body) throw new Error(`Missing ${label} step`)
+  return body
+}

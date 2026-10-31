@@ -236,6 +236,12 @@ class Supervisor {
     managed.status = "stopping"
     await this.writeState()
     await new Promise<void>((resolveStop) => {
+      // The child can exit during the state write above, and its `exit` has then already fired.
+      // systemd signals every process in the unit at once, so a deploy's stop often lands here.
+      if (managed.exited) {
+        resolveStop()
+        return
+      }
       const killTimer = setTimeout(() => {
         if (!managed.exited) managed.child.kill("SIGKILL")
       }, managed.service.killTimeoutMs)

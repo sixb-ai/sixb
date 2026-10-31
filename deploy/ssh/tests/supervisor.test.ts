@@ -161,6 +161,22 @@ describe("supervisor", () => {
     expect(unknown.stderr).toContain("No service named 'sentinel'")
   })
 
+  // Reproduce: remove the `managed.exited` check inside stopManaged()'s promise. The stop then
+  // waits for an `exit` that already fired, until its give-up timer: killTimeoutMs plus 2s.
+  test("finishes a stop at once when the process exits while it begins", async () => {
+    const { manifestPath } = await startSupervisor("exit-during-stopping-state.ts")
+    await until(
+      () => status(manifestPath),
+      (value) => value.processes[0]?.status === "running"
+    )
+
+    const started = performance.now()
+    const stopped = await ctl(manifestPath, "stop", "api")
+    expect(stopped.stdout).toContain("stopped api")
+    // The api's killTimeoutMs; a stop that waited for its timer takes at least this long.
+    expect(performance.now() - started).toBeLessThan(2_000)
+  }, 10_000)
+
   // Reproduce: remove the final awaited writeState() in stopManaged(). The stop response then
   // overtakes the held state write, leaving status at "stopping" after a successful command.
   test("publishes the stopped state before acknowledging stop", async () => {
