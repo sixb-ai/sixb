@@ -76,6 +76,43 @@ export function canViewProjectionRun(
   return canView(target.objectTypeId)
 }
 
+/**
+ * A trusted primitive's run as its visibility is decided: by the primitive's definition, or, for a
+ * projection, by the object types it targets. An Action run is decided by its subject too, which
+ * `viewableActionRuns` reads.
+ */
+export type PrimitiveRunSubject =
+  | {
+      readonly kind: "pipeline" | "sync" | "workflow" | "rule" | "webhook"
+      readonly id: string
+    }
+  | { readonly kind: "projection"; readonly target: ProjectionTarget }
+
+/**
+ * Whether a principal may view a trusted primitive's run, decided as that primitive's run facade
+ * decides. Rules and webhooks have no run facade, so a principal sees none of their runs.
+ */
+export function canViewPrimitiveRun(
+  authorization: AuthorizationContext | null | undefined,
+  run: PrimitiveRunSubject
+): boolean {
+  if (!authorization) return true
+
+  switch (run.kind) {
+    case "pipeline":
+      return canViewPipelineRun(authorization, { pipelineId: run.id })
+    case "sync":
+      return isAllowed(authorization, { kind: "sync.run", syncId: run.id })
+    case "workflow":
+      return canViewWorkflowRun(authorization, { workflowId: run.id })
+    case "projection":
+      return canViewProjectionRun(authorization, run.target)
+    case "rule":
+    case "webhook":
+      return false
+  }
+}
+
 /** Whether a principal may see a projection definition (and its run history). */
 export function canViewProjection(
   authorization: AuthorizationContext | null | undefined,

@@ -149,7 +149,10 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     dependencies.definitions.security
   )
   return {
-    objects: createObjectsRuntime(runtime, execution, dependencies.blobStorage),
+    objects: createObjectsRuntime(runtime, execution, dependencies.blobStorage, {
+      projections: dependencies.definitions.projections,
+      lakeStorage: dependencies.lakeStorage,
+    }),
     actions,
     datasets: createDatasetsRuntime(
       runtime,
