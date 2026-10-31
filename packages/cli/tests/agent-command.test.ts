@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { ServerWebSocket } from "bun"
@@ -20,15 +20,18 @@ afterEach(async () => {
 /** How the fake API answers: the thread, the turn's stream, and the turn as it ended. */
 interface Script {
   readonly thread?: Response
+  /** The person's mode in the thread, as reading it says. */
+  readonly mode?: string
   readonly stream?: (socket: ServerWebSocket<unknown>) => void
   readonly run?: Record<string, unknown>
 }
 
 async function fakeApi(script: Script) {
+  const posted: Record<string, unknown>[] = []
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch(request, server) {
+    async fetch(request, server) {
       const path = new URL(request.url).pathname
       if (path === "/ws/agents") {
         return server.upgrade(request) ? undefined : new Response("no upgrade", { status: 400 })
@@ -42,9 +45,17 @@ async function fakeApi(script: Script) {
       if (path === "/api/models") return Response.json({ language: [] })
 
       if (path === `/api/agent-threads/${THREAD}`) {
-        return script.thread ?? Response.json({ id: THREAD, runsOn: "cloud" })
+        return (
+          script.thread ??
+          Response.json({
+            id: THREAD,
+            runsOn: "cloud",
+            ...(script.mode ? { approvalMode: script.mode } : {}),
+          })
+        )
       }
       if (path === `/api/agent-threads/${THREAD}/messages` && request.method === "POST") {
+        posted.push(await request.json())
         return Response.json({ run: { id: RUN } })
       }
       if (path === `/api/agent-threads/${THREAD}/messages`) return Response.json({ messages: [] })
@@ -66,6 +77,8 @@ async function fakeApi(script: Script) {
   cleanups.push(() => rm(config, { recursive: true, force: true }))
 
   return {
+    config,
+    posted,
     env: {
       XDG_CONFIG_HOME: config,
       SIXB_API_URL: `http://127.0.0.1:${server.port}`,
@@ -157,6 +170,27 @@ describe("sixb agent", () => {
     expect(child.signalCode).toBeNull()
     expect(exitCode).toBe(1)
     expect(JSON.parse(stdout)).toMatchObject({ status: "running" })
+  })
+
+  // Guard proof: in runAgent (src/commands/agent.ts), send `approvalMode: settings.approvalMode`
+  // again: the message carries the terminal's Full access, which the thread never chose.
+  test("sends a mode only when --approval-mode names one; the thread's applies otherwise", async () => {
+    const { env, config, posted } = await fakeApi({
+      mode: "manual",
+      stream: (socket) => socket.send(snapshot("succeeded")),
+      run: { status: "succeeded", finishReason: null },
+    })
+    // The terminal app's own mode, for the conversations it starts.
+    await mkdir(join(config, "sixb"), { recursive: true })
+    await writeFile(join(config, "sixb", "tui.json"), JSON.stringify({ approvalMode: "auto" }))
+
+    const followed = await runAgent(env)
+    const chosen = await runAgent(env, "--approval-mode", "accept-edits")
+
+    expect(followed.exitCode).toBe(0)
+    expect(followed.stderr).toContain("Ask first")
+    expect(chosen.stderr).toContain("Allow edits")
+    expect(posted.map((body) => body.approvalMode)).toEqual([undefined, "accept-edits"])
   })
 
   // Guard proof: drop `agent` from wantsManagementJson (src/lib/command-line.ts), or the

@@ -22,6 +22,7 @@ import {
   listModels,
   moveAgentThreadToComputer,
   postAgentThreadMessage,
+  setAgentThreadApprovalMode,
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Logo } from "./brand"
@@ -33,6 +34,7 @@ import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } fr
 import { type LocalRunner, owns, runsOnThisComputer } from "./runner"
 import {
   APPROVAL_MODES,
+  type ApprovalMode,
   approvalLabel,
   type LanguageModel,
   messageSelection,
@@ -50,6 +52,15 @@ import { BOLD, Composer, KeyHints, type StatusItem } from "./ui"
 type Thread = GetAgentThreadResponses[200]
 type Screen = { readonly kind: "home" } | { readonly kind: "thread"; readonly threadId: string }
 type Dialog = "commands" | "threads" | "models" | "permissions" | null
+
+/** The person's mode in a conversation, as the server keeps it for them there. */
+interface ThreadApproval {
+  readonly threadId: string
+  /** Unknown until the thread is read. */
+  readonly mode?: ApprovalMode
+  /** Chosen here and not the thread's yet: the next message carries it. */
+  readonly chosen: boolean
+}
 
 export interface WorkspaceProps {
   readonly connection: Connection
@@ -129,14 +140,62 @@ export function Workspace(props: WorkspaceProps) {
     return () => socket.close()
   }, [connection, runner])
 
+  // In a conversation, the mode is the thread's, as the web reads it: "always" on a card raises it,
+  // and a mode chosen in the app applies here too. New conversations start in the settings' mode.
+  const [threadApproval, setThreadApproval] = useState<ThreadApproval | null>(null)
+  const openThreadId = screen.kind === "thread" ? screen.threadId : null
+  const approval = threadApproval?.threadId === openThreadId ? threadApproval : null
+  const approvalMode = openThreadId === null ? settings.approvalMode : approval?.mode
+
+  // A choice still on its way to the server keeps showing, except after "always", which raised
+  // the mode there.
+  const readApproval = useCallback((thread: Thread, raised: boolean) => {
+    setThreadApproval((current) =>
+      current?.threadId === thread.id && current.chosen && !raised
+        ? current
+        : {
+            threadId: thread.id,
+            ...(thread.approvalMode ? { mode: thread.approvalMode } : {}),
+            chosen: false,
+          }
+    )
+  }, [])
+
+  const chooseApproval = useCallback(
+    (mode: ApprovalMode) => {
+      say(`Permissions: ${approvalLabel(mode)}`)
+      // It is where the next new conversation starts, as the web makes it the person's default.
+      setSettings((current) => ({ ...current, approvalMode: mode }))
+      if (openThreadId === null) return
+
+      // In a conversation, it becomes the person's mode there, on every device, as in the web.
+      const threadId = openThreadId
+      setThreadApproval({ threadId, mode, chosen: true })
+      void setAgentThreadApprovalMode({
+        client: connection.client,
+        path: { threadId },
+        body: { approvalMode: mode },
+      }).then(({ data, error }) => {
+        // Not kept there, the choice stays one the next message carries.
+        if (error || !data) return say(errorText(error), "error")
+
+        setThreadApproval((current) =>
+          current?.threadId === threadId && current.chosen && current.mode === mode
+            ? { threadId, mode: data.approvalMode ?? mode, chosen: false }
+            : current
+        )
+      })
+    },
+    [connection, openThreadId, say, setSettings]
+  )
+
   const cyclePermissions = useCallback(() => {
-    setSettings((current) => {
-      const at = APPROVAL_MODES.findIndex((entry) => entry.mode === current.approvalMode)
-      const next = APPROVAL_MODES[(at + 1) % APPROVAL_MODES.length]?.mode ?? "manual"
-      say(`Permissions: ${approvalLabel(next)}`)
-      return { ...current, approvalMode: next }
-    })
-  }, [setSettings, say])
+    // A conversation not read yet has no mode to step from.
+    if (!approvalMode) return
+
+    const at = APPROVAL_MODES.findIndex((entry) => entry.mode === approvalMode)
+    chooseApproval(APPROVAL_MODES[(at + 1) % APPROVAL_MODES.length]?.mode ?? "manual")
+  }, [approvalMode, chooseApproval])
 
   // Ctrl+t steps through the effort levels of the model in effect, then back to its default.
   const cycleEffort = useCallback(() => {
@@ -176,15 +235,19 @@ export function Workspace(props: WorkspaceProps) {
       { text: model.name, color: colors.text },
       ...(model.reasoning ? [{ text: model.reasoning, color: colors.muted }] : []),
       // Amber is for what deserves your attention: here, an agent that asks before nothing.
-      {
-        text: approvalLabel(settings.approvalMode),
-        color:
-          settings.approvalMode === "auto"
-            ? colors.amber
-            : settings.approvalMode === "accept-edits"
-              ? colors.text
-              : colors.muted,
-      },
+      ...(approvalMode
+        ? [
+            {
+              text: approvalLabel(approvalMode),
+              color:
+                approvalMode === "auto"
+                  ? colors.amber
+                  : approvalMode === "accept-edits"
+                    ? colors.text
+                    : colors.muted,
+            },
+          ]
+        : []),
     ]
   }
 
@@ -247,7 +310,13 @@ export function Workspace(props: WorkspaceProps) {
           onOpen={(threadId) => setScreen({ kind: "thread", threadId })}
         />
       ) : (
-        <ThreadView key={screen.threadId} {...common} threadId={screen.threadId} />
+        <ThreadView
+          key={screen.threadId}
+          {...common}
+          threadId={screen.threadId}
+          approval={approval}
+          onThreadRead={readApproval}
+        />
       )}
       {notice || quitArmed ? (
         <box
@@ -272,6 +341,7 @@ export function Workspace(props: WorkspaceProps) {
           onClose={() => setDialog(null)}
           items={commandItems({
             settings,
+            approvalMode,
             models,
             newConversation: () => setScreen({ kind: "home" }),
             open: setDialog,
@@ -317,8 +387,8 @@ export function Workspace(props: WorkspaceProps) {
             id: entry.mode,
             label: entry.label,
             detail: entry.description,
-            current: entry.mode === settings.approvalMode,
-            run: () => setSettings((current) => ({ ...current, approvalMode: entry.mode })),
+            current: entry.mode === approvalMode,
+            run: () => chooseApproval(entry.mode),
           }))}
         />
       ) : null}
@@ -464,12 +534,21 @@ function Home(
         },
         throwOnError: true,
       })
+
+      // It starts in the mode chosen here, the person's in it from then on: its next messages
+      // carry none, as the web keeps a mode chosen before the thread existed.
+      await setAgentThreadApprovalMode({
+        client: connection.client,
+        path: { threadId: created.thread.id },
+        body: { approvalMode: settings.approvalMode },
+        throwOnError: true,
+      })
+
       const { data: posted } = await postAgentThreadMessage({
         client: connection.client,
         path: { threadId: created.thread.id },
         body: {
           text,
-          approvalMode: settings.approvalMode,
           ...requesterSettings(),
           ...messageSelection(models, settings),
         },
@@ -569,7 +648,14 @@ function effortModel(
 const APPROVAL_GRACE_MS = 700
 
 /** A conversation: its transcript, the turn at work, what waits on you, and the composer. */
-function ThreadView(props: ScreenProps & { readonly threadId: string }) {
+function ThreadView(
+  props: ScreenProps & {
+    readonly threadId: string
+    readonly approval: ThreadApproval | null
+    /** The thread as read; `raised` after "always", which raised its mode there. */
+    readonly onThreadRead: (thread: Thread, raised: boolean) => void
+  }
+) {
   const { connection, runner, colors, syntax, settings, models, threadId } = props
   const { client } = connection
   const { width } = useTerminalDimensions()
@@ -586,6 +672,7 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
   const mine = thread !== null && owns(connection, thread)
   const onComputer = thread?.runsOn === "computer"
 
+  const { onThreadRead } = props
   const reload = useCallback(async () => {
     const [threadResult, messageResult, runResult, approvalResult] = await Promise.all([
       getAgentThread({ client, path: { threadId } }),
@@ -597,14 +684,17 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
       listAgentThreadRuns({ client, path: { threadId }, query: { limit: "200", order: "asc" } }),
       listAgentThreadApprovals({ client, path: { threadId }, query: { status: "pending" } }),
     ])
-    if (threadResult.data) setThread(threadResult.data)
+    if (threadResult.data) {
+      setThread(threadResult.data)
+      onThreadRead(threadResult.data, false)
+    }
     if (messageResult.data) {
       setMessages(messageResult.data.messages.flatMap((message) => shownMessage(message) ?? []))
     }
     if (runResult.data) setRuns(runResult.data.runs)
     if (approvalResult.data) setApprovals(approvalResult.data.approvals)
     return threadResult.data
-  }, [client, threadId])
+  }, [client, threadId, onThreadRead])
 
   const activeRunId = thread?.activeRunId ?? null
 
@@ -710,7 +800,9 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
         body: { decision: option.decision, ...(option.always ? { always: true as const } : {}) },
       })
       if (error) props.say(errorText(error), "error")
-      await reload()
+      const read = await reload()
+      // "Always" raised the mode there: the thread's wins over a choice still on its way.
+      if (read && option.always) onThreadRead(read, true)
     } finally {
       setDeciding(false)
     }
@@ -757,7 +849,10 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
       path: { threadId },
       body: {
         text,
-        approvalMode: settings.approvalMode,
+        // The thread's mode applies, unless one chosen here has not reached it yet.
+        ...(props.approval?.chosen && props.approval.mode
+          ? { approvalMode: props.approval.mode }
+          : {}),
         ...requesterSettings(),
         ...messageSelection(models, settings),
       },
@@ -944,6 +1039,7 @@ function ThreadsDialog({
 
 function commandItems(input: {
   readonly settings: Settings
+  readonly approvalMode: ApprovalMode | undefined
   readonly models: readonly LanguageModel[]
   readonly newConversation: () => void
   readonly open: (dialog: Dialog) => void
@@ -987,7 +1083,7 @@ function commandItems(input: {
       id: "permissions",
       group: "Agent",
       label: "Permissions",
-      detail: approvalLabel(settings.approvalMode),
+      ...(input.approvalMode ? { detail: approvalLabel(input.approvalMode) } : {}),
       keys: "shift+tab",
       run: () => input.open("permissions"),
     },

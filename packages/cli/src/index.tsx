@@ -223,6 +223,7 @@ async function main(): Promise<void> {
         text: positionals,
         thread: getFlag("thread"),
         cloud: hasFlag("cloud"),
+        approvalMode: getFlag("approval-mode"),
         json: hasFlag("json"),
         apiUrl: getFlag("api-url"),
         profile: getFlag("profile"),

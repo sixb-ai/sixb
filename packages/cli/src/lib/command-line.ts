@@ -114,6 +114,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Run a new conversation in the cloud, not on this computer",
     kind: "boolean",
   },
+  "approval-mode": {
+    syntax: "--approval-mode <manual|accept-edits|auto>",
+    summary: "What this turn may do without asking (default: your mode in the conversation)",
+    kind: "string",
+  },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
   ref: {
     syntax: "--ref <ref>",
@@ -318,10 +323,10 @@ const commandTree: readonly CommandNode[] = [
     options: [...CONNECTION_OPTIONS, "json"],
   }),
   command("agent", "Ask the agent; it works in this folder", {
-    usage: 'sixb agent "<message>" [--thread <id>] [--cloud] [--json]',
+    usage: 'sixb agent "<message>" [--thread <id>] [--cloud] [--approval-mode <mode>] [--json]',
     // No --token: a command the agent runs could read it from this one's arguments. A token comes
     // from a profile or SIXB_API_TOKEN.
-    options: ["api-url", "profile", "thread", "cloud", "json"],
+    options: ["api-url", "profile", "thread", "cloud", "approval-mode", "json"],
     // The message, quoted or not; standard input when there is none.
     maximumPositionals: Number.POSITIVE_INFINITY,
     rootHelpLabel: 'agent "<message>"',

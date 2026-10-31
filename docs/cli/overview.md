@@ -25,7 +25,7 @@ sixb
 | --- | --- |
 | `enter` | Send. `shift+enter` starts a new line. |
 | `tab` | Where new conversations run: this computer, or the cloud. |
-| `shift+tab` | What the agent may do without asking: Ask first, Allow edits, Full access. |
+| `shift+tab` | What the agent may do without asking: Ask first, Allow edits, Full access. In a conversation, it is your mode there, as in the app. |
 | `ctrl+o` | The model, and how hard it thinks. `ctrl+t` steps through its effort levels. |
 | `ctrl+l` | Open a conversation. `ctrl+n` starts a new one. |
 | `ctrl+p` | Every command. Typing `/` in the composer lists them too. |
@@ -49,10 +49,11 @@ sixb agent --cloud --json "How many cases are open?" | jq -r .text
 ```
 
 The answer goes to standard output and the agent's steps to standard error. `--thread <id>`
-continues a conversation. When the agent waits for your approval, `sixb agent` asks in a
-terminal; with `--json` or anywhere else it exits with code `4`. A turn that fails or is stopped,
-or that `sixb agent` stops following before it ends, exits with `1`. With `--json`, an error is
-written to standard error as JSON.
+continues a conversation. The turn runs in your mode in the conversation, unless
+`--approval-mode <manual|accept-edits|auto>` names one for it. When the agent waits for your
+approval, `sixb agent` asks in a terminal; with `--json` or anywhere else it exits with code `4`.
+A turn that fails or is stopped, or that `sixb agent` stops following before it ends, exits with
+`1`. With `--json`, an error is written to standard error as JSON.
 
 ## Project commands
 

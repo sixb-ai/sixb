@@ -16,7 +16,14 @@ import { folderOf, rememberFolder } from "../tui/folders"
 import { toolLine } from "../tui/format"
 import { liveRun, reduceLive, shownMessage } from "../tui/parts"
 import { LocalRunner } from "../tui/runner"
-import { approvalLabel, loadSettings, messageSelection, placeLabel } from "../tui/settings"
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  approvalLabel,
+  loadSettings,
+  messageSelection,
+  placeLabel,
+} from "../tui/settings"
 import { glyph, paint, palette, tone } from "../ui/theme"
 
 /** Exit status when the turn stopped on calls only the person can decide, and nobody could ask. */
@@ -31,10 +38,13 @@ export async function runAgent(options: {
   readonly text: readonly string[]
   readonly thread?: string
   readonly cloud: boolean
+  /** The turn's mode; without it, the person's in the thread applies, as for a message in the web. */
+  readonly approvalMode?: string
   readonly json: boolean
   readonly apiUrl?: string
   readonly profile?: string
 }): Promise<void> {
+  const approvalMode = parseApprovalMode(options.approvalMode)
   const text = options.text.join(" ").trim() || (await readStdin())
   if (!text) throw new Error('[SixbCLI] Give the agent a message: sixb agent "<message>".')
 
@@ -50,19 +60,20 @@ export async function runAgent(options: {
   const settings = await loadSettings()
   const models = (await listModels({ client })).data?.language ?? []
 
-  const thread = options.thread
-    ? (await getAgentThread({ client, path: { threadId: options.thread }, throwOnError: true }))
-        .data
-    : (
-        await createAgentThread({
-          client,
-          body: {
-            title: text.split("\n")[0]?.slice(0, 72) ?? "Conversation",
-            ...(options.cloud ? {} : { runsOn: "computer" as const }),
-          },
-          throwOnError: true,
-        })
-      ).data.thread
+  const threadId =
+    options.thread ??
+    (
+      await createAgentThread({
+        client,
+        body: {
+          title: text.split("\n")[0]?.slice(0, 72) ?? "Conversation",
+          ...(options.cloud ? {} : { runsOn: "computer" as const }),
+        },
+        throwOnError: true,
+      })
+    ).data.thread.id
+  // Read as the person: it says the mode their turns run in there.
+  const { data: thread } = await getAgentThread({ client, path: { threadId }, throwOnError: true })
   const onComputer = thread.runsOn === "computer"
   if (onComputer) {
     const folder = await folderOf(thread.id)
@@ -79,9 +90,10 @@ export async function runAgent(options: {
     ? new LocalRunner(connection, process.cwd(), (error) => step(tone.fail(errorText(error))))
     : null
   if (!options.json) {
+    const mode = approvalMode ?? thread.approvalMode
     step(
       `${tone.blue(glyph.mark)} ${tone.strong(placeLabel(onComputer ? "computer" : "cloud"))}` +
-        tone.faint(`  ·  ${approvalLabel(settings.approvalMode)}  ·  ${thread.id}`)
+        tone.faint(`  ·  ${mode ? `${approvalLabel(mode)}  ·  ` : ""}${thread.id}`)
     )
   }
 
@@ -93,7 +105,7 @@ export async function runAgent(options: {
       path: { threadId: thread.id },
       body: {
         text,
-        approvalMode: settings.approvalMode,
+        ...(approvalMode ? { approvalMode } : {}),
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         locale: Intl.DateTimeFormat().resolvedOptions().locale,
         ...messageSelection(models, settings),
@@ -277,6 +289,18 @@ async function printAnswer(connection: Connection, threadId: string, json: boole
   if (answer) process.stdout.write(`\n${process.stdout.isTTY ? styled(answer) : answer}\n`)
   if (run?.status === "failed") step(tone.fail(run.error?.message ?? "The turn failed."))
   if (run?.status === "cancelled") step(tone.fail("The turn was stopped."))
+}
+
+function parseApprovalMode(value: string | undefined): ApprovalMode | undefined {
+  if (value === undefined) return undefined
+
+  const mode = APPROVAL_MODES.find((entry) => entry.mode === value)?.mode
+  if (!mode) {
+    throw new Error(
+      `[SixbCLI] --approval-mode takes ${APPROVAL_MODES.map((entry) => entry.mode).join(", ")}; got '${value}'.`
+    )
+  }
+  return mode
 }
 
 function describe(

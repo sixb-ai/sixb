@@ -13,6 +13,7 @@ export type ReasoningLevel = LanguageModel["reasoningLevels"][number]
 export interface Settings {
   /** Where a new conversation runs; a conversation keeps where it started. */
   readonly place: Place
+  /** The mode a new conversation starts in; in a conversation, the thread's applies. */
   readonly approvalMode: ApprovalMode
   /** A model the person picked; absent follows the project: Auto with tiers, else its default. */
   readonly model?: { readonly provider: string; readonly modelId: string }
