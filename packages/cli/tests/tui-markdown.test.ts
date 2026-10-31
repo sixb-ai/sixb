@@ -26,11 +26,12 @@ describe("an answer still being written", () => {
     }
   })
 
-  test("holds a link back until its label is complete", () => {
+  test("holds a link back until its label is complete, then shows the label alone", () => {
     expect(steadyMarkdown("See [the do")).toBe("See")
     expect(steadyMarkdown("See [the docs]")).toBe("See")
-    expect(steadyMarkdown("See [the docs](https://sixb.ai/d")).toBe(
-      "See [the docs](https://sixb.ai/d)"
+    expect(steadyMarkdown("See [the docs](https://sixb.ai/d")).toBe("See the docs")
+    expect(steadyMarkdown("See [the docs](https://sixb.ai/d) and")).toBe(
+      "See [the docs](https://sixb.ai/d) and"
     )
     expect(steadyMarkdown("Index `a[0` here")).toBe("Index `a[0` here")
   })
