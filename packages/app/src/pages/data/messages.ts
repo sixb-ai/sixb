@@ -112,6 +112,12 @@ export const en = {
     columnsShown: (shown: number, total: number) => `${shown} of ${total} columns`,
     showAllColumns: "Show all",
     rowsUnavailable: "These rows could not be loaded.",
+    producedBy: "Produced by",
+    computedFrom: "Computed from",
+    producer: {
+      ingest: "Ingested directly",
+      hidden: { sync: "A sync", pipeline: "A pipeline" },
+    },
   },
   pipelines: {
     title: "Pipelines",
@@ -282,6 +288,12 @@ export const fr: Translation<DataMessages> = {
     columnsShown: (shown: number, total: number) => `${shown} colonnes sur ${total}`,
     showAllColumns: "Tout afficher",
     rowsUnavailable: "Impossible de charger ces lignes.",
+    producedBy: "Produite par",
+    computedFrom: "Calculée à partir de",
+    producer: {
+      ingest: "Ingérée directement",
+      hidden: { sync: "Une synchronisation", pipeline: "Un pipeline" },
+    },
   },
   pipelines: {
     title: "Pipelines",

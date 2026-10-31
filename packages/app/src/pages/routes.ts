@@ -52,6 +52,23 @@ export function workflowCanvasHref(workflowId: string, runId: string, nodeId?: s
   return `${workflowHref(workflowId)}?${params}`
 }
 
+/** A sync's page in Data › Syncs, with its runs. */
+export function syncHref(syncId: string): string {
+  return `/data/syncs/${encodeURIComponent(syncId)}`
+}
+
+/** A dataset's rows in Data › Datasets, at one version when given. */
+export function datasetHref(datasetId: string, versionId?: string): string {
+  const query = versionId ? `?${new URLSearchParams({ version: versionId })}` : ""
+  return `/data/datasets/${encodeURIComponent(datasetId)}${query}`
+}
+
+/** A pipeline's canvas in Data › Pipelines, with one of its runs open when given. */
+export function pipelineHref(pipelineId: string, runId?: string): string {
+  const query = runId ? `?${new URLSearchParams({ run: runId })}` : ""
+  return `/data/pipelines/${encodeURIComponent(pipelineId)}${query}`
+}
+
 /** A workflow run's page in Observability › Runs. */
 export function workflowRunHref(runId: string): string {
   return `/observability/runs/workflows/${encodeURIComponent(runId)}`
