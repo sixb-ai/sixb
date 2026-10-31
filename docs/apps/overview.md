@@ -222,7 +222,7 @@ objects it fills, and what failed on the way.
 | --- | --- | --- |
 | Connectors | `/data/connectors` | Each connector's syncs, and its webhooks and deliveries |
 | Syncs | `/data/syncs` | Each sync's runs, with **Sync now** to start one |
-| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, and its schema |
+| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, its schema, and the run that wrote the version shown and the versions it was computed from |
 | Pipelines | `/data/pipelines` | Each pipeline as a canvas of datasets and steps; select a dataset to see its rows, open **Runs** for each run's step results, and **Run now** to start one |
 | Projections | `/data/projections` | Which dataset columns fill each object, link, or telemetry field, and its runs |
 
@@ -304,6 +304,11 @@ objects it links to and those that link to it, and its type's actions. Reference
 anywhere in the app open its page. For those who can open [Ontology](#ontology), the sidebar stays
 on it, with Objects current. As with any built-in page, a page of your own at the same path
 replaces it.
+
+Each property's name is marked with where its value comes from: imported by a projection, edited,
+or set by telemetry. Selecting it shows the trail behind the value: the edit, who asked for it and
+the imported value it replaced, or the projection, the dataset version it applied and the datasets
+upstream of it. Steps the person cannot see are only counted. See [Lineage](../objects/lineage.md).
 
 What the page shows follows the person's grants: `can.view` on the type to read the object, and
 `can.apply` on an action to run it. See [Authorization](../auth/authorization.md).

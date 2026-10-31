@@ -10,6 +10,7 @@ import {
   en as actionButtonEn,
   fr as actionButtonFr,
 } from "../src/pages/ontology/components/action-button"
+import { en as lineageEn, fr as lineageFr } from "../src/pages/ontology/lineage/messages"
 import { en as sectionUiEn, fr as sectionUiFr } from "../src/pages/section-ui"
 import { en as settingsEn, fr as settingsFr } from "../src/pages/settings/messages"
 import { en as valuesEn, fr as valuesFr } from "../src/pages/values"
@@ -24,6 +25,7 @@ test("translates every generated screen into French", () => {
   expect(untranslatedMessages(activityEn, activityFr)).toEqual([])
   expect(untranslatedMessages(valuesEn, valuesFr)).toEqual([])
   expect(untranslatedMessages(actionButtonEn, actionButtonFr)).toEqual([])
+  expect(untranslatedMessages(lineageEn, lineageFr)).toEqual([])
 })
 
 test("screens drawn before React follow the browser's languages", () => {
