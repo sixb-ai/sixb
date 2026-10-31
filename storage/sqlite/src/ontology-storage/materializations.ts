@@ -25,6 +25,7 @@ import {
   invalidCorrelation,
   materializationOutboxWrite,
   materializationPlanChunk,
+  prepareMaterializationStateRead,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
 } from "@sixb/core/internal/ontology-storage-provider"
@@ -36,16 +37,18 @@ import type {
   MaterializationPlanHeader,
   MaterializationPlanWorkRecord,
   MaterializationSession,
+  MaterializationState,
   MaterializationStatePage,
   MaterializationVectorChangePage,
   OntologyCommitRecord,
   OntologyMaterializationStorage,
+  ReadMaterializationStateInput,
   SourceActivationWrite,
   StageMaterializationWorkInput,
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
 } from "@sixb/core/storage"
-import { yieldSqliteEventLoop } from "../transactions"
+import { runDeferredReadTransaction, yieldSqliteEventLoop } from "../transactions"
 import {
   type SqliteMaterializationSessionState,
   SqliteMaterializationSessions,
@@ -241,6 +244,20 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         }
       }
     }
+  }
+
+  async readState(input: ReadMaterializationStateInput): Promise<MaterializationState> {
+    const request = prepareMaterializationStateRead(input)
+
+    // One snapshot for every statement, so the read never straddles a commit.
+    return runDeferredReadTransaction(this.db, () => {
+      const reader = new SqliteMaterializationStateReader(this.db, request.projectId)
+      return {
+        objects: reader.objectStates(request.objects),
+        links: reader.linkStates(request.links),
+        linkScopes: reader.linkSlotStates(request.linkScopes),
+      }
+    })
   }
 
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {

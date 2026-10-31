@@ -14,7 +14,15 @@ import type {
   ProjectionEntityRef,
   ProjectionSourceAssertion,
 } from "../../materialization/model"
-import { linkRefKey, objectRefKey, projectionEntityKey } from "../../materialization/refs"
+import {
+  linkRefKey,
+  linkRefSortKey,
+  linkScopeKey,
+  linkScopeSortKey,
+  objectRefKey,
+  objectRefSortKey,
+  projectionEntityKey,
+} from "../../materialization/refs"
 import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commits"
 import type {
   FinalizeMaterializationInput,
@@ -22,6 +30,7 @@ import type {
   MaterializationPlanHeader,
   MaterializationSession,
   MaterializationWorkRecord,
+  ReadMaterializationStateInput,
   SourceActivationWrite,
   StageMaterializationWorkInput,
   StoredLinkSlotOverride,
@@ -406,6 +415,37 @@ export function uniqueSorted<T>(
   return [...new Map(values.map((value) => [identity(value), value])).values()].sort(
     (left, right) => sortKey(left).localeCompare(sortKey(right))
   )
+}
+
+/** The most refs one `readState` call may name, across objects, links and link slots. */
+const MAX_MATERIALIZATION_STATE_READ_REFS = 1_000
+
+/**
+ * Validates a `readState` request and returns its distinct refs in canonical order: the order
+ * every provider reads and returns them in.
+ */
+export function prepareMaterializationStateRead(
+  input: ReadMaterializationStateInput
+): ReadMaterializationStateInput {
+  assertNonblank(input.projectId, "Materialization state project id")
+
+  const refCount = input.objects.length + input.links.length + input.linkScopes.length
+  if (refCount > MAX_MATERIALIZATION_STATE_READ_REFS) {
+    throw new MaterializationValidationError(
+      `A materialization state read names at most ${MAX_MATERIALIZATION_STATE_READ_REFS} refs; this one names ${refCount}. Split it into smaller reads.`
+    )
+  }
+
+  return {
+    projectId: input.projectId,
+    objects: uniqueSorted(input.objects, objectRefKey, objectRefSortKey),
+    links: uniqueSorted(input.links, linkRefKey, linkRefSortKey),
+    linkScopes: uniqueSorted(
+      input.linkScopes,
+      (scope) => linkScopeKey(scope.source, scope.linkId),
+      (scope) => linkScopeSortKey(scope.source, scope.linkId)
+    ),
+  }
 }
 
 export function sameNonnegativeCounts(actual: object, expected: object): boolean {

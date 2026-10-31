@@ -44,11 +44,13 @@ import type {
   MaterializationPlanHeader,
   MaterializationPlanWorkRecord,
   MaterializationSession,
+  MaterializationState,
   MaterializationStatePage,
   MaterializationVectorChange,
   MaterializationVectorChangePage,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
+  ReadMaterializationStateInput,
   StageMaterializationWorkInput,
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
@@ -64,6 +66,7 @@ import {
   beginMaterializationVectorChanges,
   duplicateMaterializationWork,
   type ProviderMaterializationTransactionLifecycle,
+  prepareMaterializationStateRead,
   prepareMaterializationWork,
   uniqueSorted,
 } from "../provider"
@@ -321,6 +324,27 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         if (points.length > 0) yield { objects: [], links: [], linkScopes: [], points }
       }
     }
+  }
+
+  async readState(input: ReadMaterializationStateInput): Promise<MaterializationState> {
+    const request = prepareMaterializationStateRead(input)
+
+    // Root operations wait on the transaction lock, so no commit lands between these reads.
+    const objects: MaterializationObjectState[] = []
+    for (const ref of request.objects) {
+      objects.push(await this.reader.objectState(request.projectId, ref))
+    }
+
+    const links: MaterializationLinkState[] = []
+    for (const ref of request.links) {
+      links.push(await this.reader.linkState(request.projectId, ref))
+    }
+
+    const linkScopes = request.linkScopes.map((scope) =>
+      this.reader.linkSlotState(request.projectId, scope.source, scope.linkId)
+    )
+
+    return { objects, links, linkScopes }
   }
 
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
