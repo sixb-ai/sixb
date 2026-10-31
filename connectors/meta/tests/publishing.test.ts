@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { type CreateInstagramContainerInput, MetaApiError, type MetaClient, meta } from "../src"
+import {
+  type CreateInstagramContainerInput,
+  MetaApiError,
+  type MetaClient,
+  type MetaConnectorOptions,
+  meta,
+} from "../src"
 
 const originalFetch = globalThis.fetch
 const context = { projectId: "test", connectorId: "meta", signal: new AbortController().signal }
@@ -13,7 +19,7 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-async function client(options: Partial<Parameters<typeof meta>[0]> = {}): Promise<MetaClient> {
+async function client(options: Partial<MetaConnectorOptions> = {}): Promise<MetaClient> {
   requests.length = 0
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))

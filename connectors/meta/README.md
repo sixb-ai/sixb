@@ -48,6 +48,68 @@ refresh tokens; supply a valid long-lived token. Instagram user, media and conta
 `facebookVideo()` also accept `{ accessToken }`. Publishing requires the appropriate write
 permissions, not just a token that can read the account.
 
+## Sign in with Facebook
+
+Pass the Meta app credentials instead of a token to let users connect their own Pages, including
+Pages that are not in a business portfolio. Sixb runs the sign-in, stores the grant encrypted and
+lists the granted Pages for the user to choose from ([OAuth connectors](../../docs/connectors/authentication.md)):
+
+```ts
+export const metaPages = defineConnector(
+  "meta-pages",
+  meta({
+    appId: process.env.META_APP_ID!,
+    appSecret: process.env.META_APP_SECRET!,
+    configId: process.env.META_LOGIN_CONFIG_ID!,
+  })
+)
+```
+
+| Option      | Description                                                                         |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `appId`     | **Required.** Meta app ID.                                                          |
+| `appSecret` | **Required.** Meta app secret, used server-side for the code and token exchanges.  |
+| `configId`  | Facebook Login for Business configuration, of the "User access token" type.         |
+| `scopes`    | Facebook Login permissions, instead of `configId`, for apps on Facebook Login.      |
+
+The transport options above (`graphVersion`, `retry`, `onResponse`, `timeoutMs`) apply too.
+Add `https://<sixb-api-origin>/auth/connectors/callback` to the app's valid OAuth redirect URIs.
+The permissions to grant are the ones the project uses, typically `pages_show_list`,
+`pages_read_engagement`, `pages_manage_posts`, `read_insights`, `instagram_basic`,
+`instagram_content_publish` and `instagram_manage_insights`.
+
+**One connection per Page.** Each connection is one Facebook Page. Connect a second Page from the
+same sign-in without signing in again, and keep the system-user connector alongside. The Page
+client is the same Graph client, without `pages` and with `account`:
+
+```ts
+const page = await sixb.connector(metaPages, { owner: { type: "project" }, slot: "bakery" })
+
+page.account // { pageId, name, instagram?: { id, username } }
+await page.facebook(page.account.pageId).posts.list()
+if (page.account.instagram) await page.instagram(page.account.instagram.id).media.list()
+```
+
+Requests use the Page access token by default, for both Facebook and its linked Instagram
+account. `{ accessToken }` overrides still apply. `pages` is not available: it needs the user
+token, which Meta expires after about 60 days. `account.instagram` is read when the client
+connects and is absent when the sign-in did not grant `instagram_basic`.
+
+**Token lifetime.** Meta issues no refresh token. The connector exchanges the sign-in for a
+long-lived user token and keeps the Page tokens derived from it, which do not expire. Connections
+keep publishing after the user token is gone.
+
+When Meta rejects the sign-in itself (password changed, app removed, token invalidated), the
+sign-in is marked `needs_reauthorization`, with every Page connected from it, and requests fail
+with `connector.authorization_required`. Signing in again restores them, as long as the new
+sign-in still grants each connected Page: disconnect a Page the user no longer manages first. A
+rejection that concerns one Page only is returned as a `MetaApiError` and leaves the others
+working.
+
+Granting a new Page needs a new sign-in. Revoking a connection revokes the app for that Facebook
+user, so other connections from the same user's sign-ins stop working too. Disconnecting a
+connection keeps the grant.
+
 ## Client API
 
 ```ts

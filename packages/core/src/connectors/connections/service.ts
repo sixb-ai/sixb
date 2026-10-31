@@ -226,7 +226,11 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
             connectorId: definition.id,
             connectionId: connection.id,
             account: connection.account,
-            tokenSource: this.authorizations.createTokenSource(definition, authorization.id),
+            tokenSource: this.authorizations.createTokenSource(
+              definition,
+              authorization.id,
+              connection.account
+            ),
             signal: clientSignal,
           })
         },

@@ -1,15 +1,22 @@
 import { describe, expect, test } from "bun:test"
-import type { ConnectorOAuthCredentials, ReadonlyJsonObject } from "../src"
+import type {
+  ConnectorAccountCandidate,
+  ConnectorOAuthCredentials,
+  ReadonlyJsonObject,
+} from "../src"
 import { ConnectorCredentialCodec } from "../src/connectors/connections/credential-codec"
 import { validateCredentials } from "../src/connectors/connections/validation"
 import { ConnectorService } from "../src/connectors/service"
 import {
   authorize,
   callbackUrl,
+  connectAccount,
   createHarness,
+  expectSixbError,
   getAuthorization,
   managementCommand,
   projectOwner,
+  rejectionOf,
   serializedSnapshot,
   startAuthorization,
 } from "./connector-connections.fixture"
@@ -229,6 +236,67 @@ describe("OAuth provider callback parameters and authorization context", () => {
     ])
   })
 
+  // Regression check: deliver `tokenView(credentials)` unconditionally in tokens.ts and this fails.
+  test("delivers a token derived per account from one grant", async () => {
+    const harness = createHarness({
+      exchange: () => ({
+        accessToken: "user-token",
+        authorizationContext: { "account-a": "token-a", "account-b": "token-b" },
+      }),
+      accountAccessToken: (credentials, account) => ({
+        accessToken: accountToken(credentials, account),
+        tokenType: "Bearer",
+      }),
+    })
+    const authorization = await authorize(harness)
+    for (const [slot, accountId] of [
+      ["social", "account-a"],
+      ["support", "account-b"],
+    ] as const) {
+      await harness.process.selectAccount(managementCommand(), harness.connector.id, {
+        owner: projectOwner,
+        slot,
+        authorizationId: authorization.authorizationId,
+        accountId,
+      })
+    }
+
+    const first = await harness.service.connectConnection(harness.connector, selector)
+    const second = await harness.service.connectConnection(harness.connector, {
+      owner: projectOwner,
+      slot: "support",
+    })
+    expect(await first.token()).toEqual({ accessToken: "token-a", tokenType: "Bearer" })
+    expect(await second.token()).toEqual({ accessToken: "token-b", tokenType: "Bearer" })
+    expect(await first.tokenHandle()).not.toHaveProperty("authorizationContext")
+
+    // Without a refresh token, a rejected account token sends the whole grant to reauthorization.
+    first.invalidate()
+    expectSixbError(await rejectionOf(first.token()), "connector.authorization_required")
+    expect(
+      (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
+    ).toBe("needs_reauthorization")
+    expect(harness.counts().refreshCount).toBe(0)
+  })
+
+  test.each([
+    ["a blank token", () => ({ accessToken: " " })],
+    [
+      "a thrown error",
+      () => {
+        throw new Error("account missing from grant")
+      },
+    ],
+  ] as const)("reports %s from the account token hook as an adapter failure", async (_case, derive) => {
+    const harness = createHarness({
+      exchange: () => ({ accessToken: "user-token" }),
+      accountAccessToken: derive,
+    })
+    await connectAccount(harness)
+    const client = await harness.service.connectConnection(harness.connector, selector)
+    expectSixbError(await rejectionOf(client.token()), "connector.adapter_invalid")
+  })
+
   test("validates JSON context without lossy coercion and detaches mutable adapter data", () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
@@ -257,6 +325,15 @@ describe("OAuth provider callback parameters and authorization context", () => {
     expect(credentials.authorizationContext).toEqual({ nested: { tenant: "original" } })
   })
 })
+
+function accountToken(
+  credentials: ConnectorOAuthCredentials,
+  account: ConnectorAccountCandidate
+): string {
+  const token = credentials.authorizationContext?.[account.id]
+  if (typeof token !== "string") throw new Error(`Missing token for ${account.id}`)
+  return token
+}
 
 async function storedCredentials(
   harness: ReturnType<typeof createHarness>,

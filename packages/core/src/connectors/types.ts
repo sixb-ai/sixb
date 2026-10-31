@@ -36,8 +36,9 @@ export interface ConnectorOAuthCredentials {
   readonly expiresAt?: Date
   /**
    * Provider-owned grant context, encrypted with the tokens and never exposed in connection views.
-   * Available to account discovery, refresh, and revoke. Refresh preserves it when omitted;
-   * returning an object replaces it (use {} to clear it). Code exchange starts fresh on reauthorization.
+   * Available to account discovery, account tokens, refresh, and revoke. Refresh preserves it when
+   * omitted; returning an object replaces it (use {} to clear it). Code exchange starts fresh on
+   * reauthorization.
    */
   readonly authorizationContext?: ReadonlyJsonObject
 }
@@ -136,6 +137,15 @@ export interface ConnectorOAuth2Authentication {
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
   ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  /**
+   * Derives the token delivered to one connection, for providers that issue a token per account
+   * from one grant (Meta Page tokens, for example). Defaults to the grant's own access token.
+   * Runs on every token delivery, so keep it local: read the credentials, do not call the provider.
+   */
+  accountAccessToken?(
+    credentials: ConnectorOAuthCredentials,
+    account: ConnectorAccountCandidate
+  ): Pick<ConnectorAccessToken, "accessToken" | "tokenType">
   /**
    * Revokes the grant idempotently. An already revoked or invalid grant must resolve successfully
    * so Sixb can converge after losing an earlier provider response.

@@ -2,6 +2,7 @@ import type { ConnectorAuthorizationRecord, ConnectorConnectionStorage } from ".
 import { createConnectorCodedError, oauthErrorKind, recoverConnectorFailure } from "../errors"
 import type {
   ConnectorAccessToken,
+  ConnectorAccountCandidate,
   ConnectorDefinition,
   ConnectorOAuthCredentials,
   ConnectorTokenSource,
@@ -14,7 +15,13 @@ import {
   connectorAuthorizationStatusError,
 } from "./credential-mutations"
 import { withConnectorStorageBoundary } from "./storage-boundary"
-import { nonNegativeDuration, shouldRefresh, tokenView, validateCredentials } from "./validation"
+import {
+  nonNegativeDuration,
+  shouldRefresh,
+  tokenView,
+  validateAccountToken,
+  validateCredentials,
+} from "./validation"
 
 type OAuthConnectorDefinition = ConnectorDefinition<string, OAuthConnectorAdapter>
 
@@ -54,10 +61,11 @@ export class ConnectorTokenAccess {
 
   createTokenSource(
     definition: OAuthConnectorDefinition,
-    authorizationId: string
+    authorizationId: string,
+    account: ConnectorAccountCandidate
   ): ConnectorTokenSource {
     return new RevisionAwareConnectorTokenSource((rejectedRevision) =>
-      this.getAccessToken(definition, authorizationId, rejectedRevision)
+      this.getAccessToken(definition, authorizationId, account, rejectedRevision)
     )
   }
 
@@ -77,6 +85,7 @@ export class ConnectorTokenAccess {
   private async getAccessToken(
     definition: OAuthConnectorDefinition,
     authorizationId: string,
+    account: ConnectorAccountCandidate,
     rejectedRevision?: number
   ): Promise<{
     readonly token: { readonly accessToken: string; readonly tokenType?: string }
@@ -92,9 +101,15 @@ export class ConnectorTokenAccess {
     if (refreshRejectedToken || shouldRefresh(authorization, this.now(), this.refreshSkewMs)) {
       authorization = await this.refreshAuthorization(definition, authorization)
       const refreshed = await this.open(definition.id, authorization)
-      return { token: tokenView(refreshed), revision: authorization.revision }
+      return {
+        token: deliveredToken(definition, refreshed, account),
+        revision: authorization.revision,
+      }
     }
-    return { token: tokenView(credentials), revision: authorization.revision }
+    return {
+      token: deliveredToken(definition, credentials, account),
+      revision: authorization.revision,
+    }
   }
 
   private async refreshAuthorization(
@@ -266,6 +281,27 @@ export class ConnectorTokenAccess {
   private adapterContext(connectorId: string, signal: AbortSignal) {
     return { projectId: this.projectId, connectorId, signal }
   }
+}
+
+function deliveredToken(
+  definition: OAuthConnectorDefinition,
+  credentials: ConnectorOAuthCredentials,
+  account: ConnectorAccountCandidate
+): { readonly accessToken: string; readonly tokenType?: string } {
+  const derive = definition.adapter.authentication.accountAccessToken
+  if (!derive) return tokenView(credentials)
+
+  let token: unknown
+  try {
+    token = derive(credentials, account)
+  } catch (error) {
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
+      "OAuth connector adapter could not derive the account access token.",
+      { cause: error }
+    )
+  }
+  return validateAccountToken(token)
 }
 
 class RevisionAwareConnectorTokenSource implements ConnectorTokenSource {

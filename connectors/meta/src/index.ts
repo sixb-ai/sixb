@@ -7,6 +7,6 @@ export {
   DEFAULT_PAGE_FIELDS,
 } from "./fields"
 export { MetaApiError } from "./http"
-export type { MetaConnector } from "./meta"
+export type { MetaConnector, MetaOAuthConnector } from "./meta"
 export { meta } from "./meta"
 export type * from "./types/index"

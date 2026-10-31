@@ -290,10 +290,11 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
 
   createTokenSource(
     definition: OAuthConnectorDefinition,
-    authorizationId: string
+    authorizationId: string,
+    account: ConnectorAccountCandidate
   ): ConnectorTokenSource {
     this.assertRegistered(definition)
-    return this.tokens.createTokenSource(definition, authorizationId)
+    return this.tokens.createTokenSource(definition, authorizationId, account)
   }
 
   async requireAuthorization(

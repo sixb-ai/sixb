@@ -1,7 +1,7 @@
 import type { MetaBatchApi } from "./batch"
 import type { FacebookPageApi } from "./facebook"
 import type { InstagramMediaApi, InstagramUserApi } from "./instagram"
-import type { PagesApi } from "./pages"
+import type { MetaInstagramAccount, PagesApi } from "./pages"
 import type { FacebookVideoApi, InstagramContainerApi, MetaResourceOptions } from "./publishing"
 
 export interface MetaClient {
@@ -27,4 +27,20 @@ export interface MetaClient {
    * connector falls back to the default user/system token.
    */
   facebook(pageId: string, options?: MetaResourceOptions): FacebookPageApi
+}
+
+/** The Facebook Page an OAuth connection was granted for. */
+export interface MetaConnectedPage {
+  readonly pageId: string
+  readonly name: string
+  /** The Instagram Business/Creator account linked to the Page, read when the client connects. */
+  readonly instagram?: MetaInstagramAccount
+}
+
+/**
+ * Client for one Page connected through Facebook Login. Every request defaults to the Page access
+ * token. `pages` is absent: it needs the user token, which Meta expires after about 60 days.
+ */
+export interface MetaPageClient extends Omit<MetaClient, "pages"> {
+  readonly account: MetaConnectedPage
 }
