@@ -583,6 +583,7 @@ export type {
   DatasetProducer,
   DatasetRow,
   DatasetVersion,
+  DatasetVersionRef,
   LakeStorage,
   LakeStorageWithSql,
 } from "./lake-storage"
@@ -995,6 +996,14 @@ export type {
   DatasetRows,
   DatasetsRuntime,
 } from "./datasets/execution"
+export type {
+  DatasetLineage,
+  DatasetLineageEdge,
+  DatasetLineageExpiredVersion,
+  DatasetLineageInput,
+  DatasetLineageNode,
+  DatasetLineageVersion,
+} from "./datasets/lineage"
 export type {
   SixbActionPhaseFailedContext,
   SixbErrorContext,
