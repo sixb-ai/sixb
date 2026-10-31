@@ -2,6 +2,7 @@
 
 import { join } from "node:path"
 import { CliError } from "@sixb/cli-core"
+import { isSixbApiError } from "@sixb/client"
 import {
   booleanOption,
   type CliOptionName,
@@ -463,7 +464,8 @@ main().catch(async (error) => {
 function cliExitCode(error: unknown): number {
   if (error instanceof CliUsageError) return error.exitCode
   if (error instanceof CliError) return error.exitCode
-  if (error instanceof SixbApiError) return 3
+  // The CLI's own, and the one `@sixb/client` throws on `throwOnError`: another class.
+  if (error instanceof SixbApiError || isSixbApiError(error)) return 3
   if (errorMessage(error).startsWith("Usage:")) return 2
   return 1
 }
@@ -479,7 +481,7 @@ function cliErrorBody(error: unknown): {
   if (error instanceof CliUsageError) {
     return { code: "invalid_arguments", message: error.message, hint: error.help.usage }
   }
-  if (error instanceof SixbApiError) {
+  if (error instanceof SixbApiError || isSixbApiError(error)) {
     return {
       code: "api_error",
       ...(error.status === undefined ? {} : { status: error.status }),

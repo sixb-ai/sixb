@@ -48,7 +48,9 @@ sixb agent --cloud --json "How many cases are open?" | jq -r .text
 
 The answer goes to standard output and the agent's steps to standard error. `--thread <id>`
 continues a conversation. When the agent waits for your approval, `sixb agent` asks in a
-terminal; anywhere else it exits with code `4`.
+terminal; with `--json` or anywhere else it exits with code `4`. A turn that fails or is stopped,
+or that `sixb agent` stops following before it ends, exits with `1`. With `--json`, an error is
+written to standard error as JSON.
 
 ## Project commands
 

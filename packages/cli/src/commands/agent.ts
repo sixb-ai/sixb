@@ -101,10 +101,11 @@ export async function runAgent(options: {
       throwOnError: true,
     })
     let runId: string | null = posted.run.id
+    let followed: Awaited<ReturnType<typeof follow>> = "finished"
     while (runId) {
       // A turn this computer could not claim would wait here for nobody.
       const unclaimed = runner?.claim(runId).then((claimed) => !claimed)
-      const followed = await follow(connection, runId, options.json, stop.signal, unclaimed)
+      followed = await follow(connection, runId, options.json, stop.signal, unclaimed)
       if (followed === "unclaimed") {
         process.exitCode = 1
         step(
@@ -115,6 +116,13 @@ export async function runAgent(options: {
       if (followed !== "finished") break
       runId = await afterTurn(connection, thread.id, runId, options.json)
     }
+
+    // A lost stream or Ctrl+C leaves a turn that may still run: its answer is not the turn's.
+    if (followed !== "finished") {
+      process.exitCode = 1
+      if (followed === "stopped") step(tone.fail(`Stopped waiting for the turn in ${thread.id}.`))
+    }
+
     await printAnswer(connection, thread.id, options.json)
   } finally {
     await runner?.stop()
@@ -256,6 +264,10 @@ async function printAnswer(connection: Connection, threadId: string, json: boole
       ? shown.parts.flatMap((part) => (part.kind === "text" ? [part.text.trim()] : [])).join("\n\n")
       : ""
   const run = runs?.runs[0]
+
+  // Set before the JSON goes out: a script reads the code, not the status in the answer.
+  if (run?.status === "failed" || run?.status === "cancelled") process.exitCode = 1
+
   if (json) {
     process.stdout.write(
       `${JSON.stringify({ threadId, runId: run?.id, status: run?.status, finishReason: run?.finishReason, text: answer })}\n`
@@ -263,10 +275,8 @@ async function printAnswer(connection: Connection, threadId: string, json: boole
     return
   }
   if (answer) process.stdout.write(`\n${process.stdout.isTTY ? styled(answer) : answer}\n`)
-  if (run?.status === "failed") {
-    process.exitCode = 1
-    step(tone.fail(run.error?.message ?? "The turn failed."))
-  }
+  if (run?.status === "failed") step(tone.fail(run.error?.message ?? "The turn failed."))
+  if (run?.status === "cancelled") step(tone.fail("The turn was stopped."))
 }
 
 function describe(

@@ -741,9 +741,17 @@ export function repeatedOption(options: ParsedCliOptions, name: CliOptionName): 
 
 export function wantsManagementJson(args: readonly string[]): boolean {
   return (
-    ["login", "logout", "status", "profile", "token", "service-account", "deploy"].includes(
-      args[0] ?? ""
-    ) && args.some((argument) => argument === "--json" || argument.startsWith("--json="))
+    [
+      "login",
+      "logout",
+      "status",
+      "profile",
+      "token",
+      "service-account",
+      "deploy",
+      "agent",
+    ].includes(args[0] ?? "") &&
+    args.some((argument) => argument === "--json" || argument.startsWith("--json="))
   )
 }
 
