@@ -33,6 +33,7 @@ export interface AgentThreadRow {
   sandbox_params: string | null
   sandbox_state: string | null
   runs_on: "computer" | null
+  computer_id: string | null
   status: AgentThreadRecord["status"]
   active_run_id: string | null
   last_message_at: string | null
@@ -136,6 +137,7 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
       ? {}
       : { sandboxParams: snapshotAgentThreadSandboxParams(JSON.parse(row.sandbox_params)) }),
     ...(row.runs_on == null ? {} : { runsOn: row.runs_on }),
+    ...(row.computer_id == null ? {} : { computerId: row.computer_id }),
     status: row.status,
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,

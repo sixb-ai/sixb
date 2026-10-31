@@ -4,6 +4,7 @@ import { ComputerRunner } from "@sixb/agent"
 import { type GetAgentThreadResponses, getAgentRun, getAgentThread } from "@sixb/client"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { resolveConfigPath } from "../lib/profiles"
+import { thisComputerId } from "./computer"
 import type { Connection } from "./connection"
 import { folderOf } from "./folders"
 
@@ -37,6 +38,7 @@ export class LocalRunner {
     this.runner = new ComputerRunner({
       apiUrl: connection.apiUrl,
       authorization: () => connection.authorization(),
+      computerId: thisComputerId,
       folder,
       runFilesRoot: join(tmpdir(), "sixb-agent"),
       onFailure,
@@ -79,15 +81,16 @@ export class LocalRunner {
   }
 
   /**
-   * Claim a conversation's turn when this computer runs it: its owner's, in this folder, and still
-   * queued. A running turn is another sixb's, or one whose sixb closed, which the API ends
-   * interrupted: claiming it again would run its commands twice.
+   * Claim a conversation's turn when this computer runs it: its owner's, on this computer and in
+   * this folder, and still queued. A running turn is another sixb's, or one whose sixb closed,
+   * which the API ends interrupted: claiming it again would run its commands twice.
    */
   async claimIfHere(threadId: string, runId?: string): Promise<void> {
     if ((await folderOf(threadId)) !== this.folder) return
     const { client } = this.connection
     const { data: thread } = await getAgentThread({ client, path: { threadId } })
     if (thread?.runsOn !== "computer" || !owns(this.connection, thread)) return
+    if (!runsOnThisComputer(thread, await thisComputerId())) return
 
     const turn = runId ?? thread.activeRunId
     if (!turn) return
@@ -123,6 +126,17 @@ export function owns(
   return connection.user
     ? owner.type === "user" && owner.id === connection.user.id
     : owner.type === "system"
+}
+
+/**
+ * Whether this computer runs a computer's thread: the one it runs on. A thread none claimed a turn
+ * of yet runs on the first that does, the one it started on.
+ */
+export function runsOnThisComputer(
+  thread: Pick<GetAgentThreadResponses[200], "computerId">,
+  computerId: string
+): boolean {
+  return thread.computerId === undefined || thread.computerId === computerId
 }
 
 /**

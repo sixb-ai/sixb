@@ -103,6 +103,7 @@ export async function serializeThreads(
       title: thread.title,
       sandboxParams: thread.sandboxParams,
       runsOn: thread.runsOn,
+      computerId: thread.computerId,
       sandboxState: thread.sandboxState && {
         name: thread.sandboxState.name,
         status: thread.sandboxState.status,

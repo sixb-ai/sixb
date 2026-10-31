@@ -460,6 +460,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  MoveAgentThreadToComputerData,
+  MoveAgentThreadToComputerErrors,
+  MoveAgentThreadToComputerResponses,
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
@@ -3207,6 +3210,31 @@ export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/agent-threads/{threadId}/child-files/content",
     ...options,
+  })
+
+/**
+ * Move a thread to another of your computers
+ *
+ * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ */
+export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
+  options: Options<MoveAgentThreadToComputerData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    MoveAgentThreadToComputerResponses,
+    MoveAgentThreadToComputerErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/computer",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

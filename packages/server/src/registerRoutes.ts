@@ -7,6 +7,7 @@ import { registerActionRoutes } from "./routes/actions"
 import { registerActivityRoutes } from "./routes/activity"
 import { registerAgentApprovalRoutes } from "./routes/agent-approvals"
 import { registerAgentChildRoutes } from "./routes/agent-children"
+import { registerAgentComputerRoutes } from "./routes/agent-computers"
 import { registerAgentMemoryRoutes } from "./routes/agent-memory"
 import { registerAgentRunnerRoutes } from "./routes/agent-runners"
 import { registerAgentRoutes } from "./routes/agents"
@@ -76,6 +77,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerAgentRoutes(app, host)
   registerAgentChildRoutes(app, host)
   registerAgentRunnerRoutes(app, host)
+  registerAgentComputerRoutes(app, host)
   registerAgentApprovalRoutes(app, host)
   registerObservedAgentThreadRoutes(app, host)
   registerAgentMemoryRoutes(app)

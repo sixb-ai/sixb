@@ -22,7 +22,9 @@ import {
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
   assertAgentRunFinishPayload,
+  assertAssignableComputer,
   assertAwaitingApprovalFinish,
+  assertComputerId,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
@@ -69,6 +71,7 @@ import type {
   AgentThreadSandboxState,
   AgentThreadStore,
   AppendAgentMessageInput,
+  AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
   CreateAgentContextCheckpointInput,
@@ -412,6 +415,18 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 
     this.state.participants.set(threadKey, kept)
     return true
+  }
+
+  async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
+    assertComputerId(input.computerId)
+    const threadKey = key(input.projectId, input.id)
+    const thread = this.state.threads.get(threadKey) ?? null
+    assertAssignableComputer(thread, input.id)
+    if (input.ifUnassigned && thread.computerId !== undefined) return clone(thread)
+
+    const assigned = { ...thread, computerId: input.computerId }
+    this.state.threads.set(threadKey, assigned)
+    return clone(assigned)
   }
 
   async listParticipants(

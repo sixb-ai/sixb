@@ -46,6 +46,7 @@ export type {
   AgentThreadStatus,
   AgentThreadStore,
   AppendAgentMessageInput,
+  AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
   ConversationAgentRunSpec,

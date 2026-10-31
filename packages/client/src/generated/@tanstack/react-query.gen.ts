@@ -157,6 +157,7 @@ import {
   listWorkflowInterventions,
   listWorkflowRuns,
   listWorkflows,
+  moveAgentThreadToComputer,
   type Options,
   postAgentThreadMessage,
   publishArtifactVersion,
@@ -630,6 +631,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  MoveAgentThreadToComputerData,
+  MoveAgentThreadToComputerError,
+  MoveAgentThreadToComputerResponse,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
@@ -5038,6 +5042,35 @@ export const getAgentChildFileContentOptions = (options: Options<GetAgentChildFi
     },
     queryKey: getAgentChildFileContentQueryKey(options),
   })
+
+/**
+ * Move a thread to another of your computers
+ *
+ * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ */
+export const moveAgentThreadToComputerMutation = (
+  options?: Partial<Options<MoveAgentThreadToComputerData>>
+): UseMutationOptions<
+  MoveAgentThreadToComputerResponse,
+  MoveAgentThreadToComputerError,
+  Options<MoveAgentThreadToComputerData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    MoveAgentThreadToComputerResponse,
+    MoveAgentThreadToComputerError,
+    Options<MoveAgentThreadToComputerData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await moveAgentThreadToComputer({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getAgentPreferencesQueryKey = (options?: Options<GetAgentPreferencesData>) =>
   createQueryKey("getAgentPreferences", options)

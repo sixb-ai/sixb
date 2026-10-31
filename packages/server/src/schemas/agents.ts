@@ -155,6 +155,8 @@ export const AgentThreadSchema = z.object({
   sandboxParams: z.record(z.string(), JsonValueSchema).optional(),
   /** Its turns run on its owner's computer; absent, in the cloud. */
   runsOn: z.literal("computer").optional(),
+  /** Which of its owner's computers runs it; absent until one claims its first turn. */
+  computerId: z.string().optional(),
   status: AgentThreadStatusSchema,
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),
@@ -179,6 +181,13 @@ export const AgentThreadListResponseSchema = z.object({
 export const CreateAgentThreadResponseSchema = z.object({
   thread: AgentThreadSchema,
 })
+
+export const MoveAgentThreadToComputerBodySchema = z
+  .object({
+    /** The id `sixb` keeps for the computer, beside its sign-in. */
+    computerId: z.string().trim().min(1).max(200),
+  })
+  .strict()
 
 export const AddAgentThreadParticipantsBodySchema = z
   .object({

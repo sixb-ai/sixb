@@ -145,14 +145,20 @@ async function setup() {
   const claimStatuses = new Map<string, number>()
 
   /**
-   * Claim as `headers`' person, with their session, as a runner they signed in would; its session's
-   * requests then carry the runner token.
+   * Claim as `headers`' person, with their session, from one of their computers, as a runner they
+   * signed in would; its session's requests then carry the runner token.
    */
-  function claim(headers: Record<string, string>, runId: string, leaseExpiresAt = LEASE()) {
+  function claim(
+    headers: Record<string, string>,
+    runId: string,
+    leaseExpiresAt = LEASE(),
+    computerId = "laptop"
+  ) {
     return claimAgentRunOverHttp({
       apiUrl: API,
       runId,
       authorization: "",
+      computerId,
       leaseExpiresAt,
       fetch: async (request) => {
         if (new URL(request.url).pathname.endsWith("/claim")) {
@@ -237,6 +243,47 @@ describe("a runner outside the worker", () => {
     expect(
       await post(bob, `/api/agent-threads/${threadId}/messages`, { text: "Me too." })
     ).toMatchObject({ error: expect.stringContaining("only its owner can message it") })
+  })
+
+  // Guard proof: drop the refuseOtherComputer call from the claim route; Ava's desktop runs a turn
+  // of the conversation her laptop runs, in another folder on another disk.
+  test("runs a conversation's turns on the one computer that runs it, until it moves", async () => {
+    const { person, ask, claim, post, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const first = await claim(ava, await ask(ava, "Tidy the notes in this folder."))
+    if (!first) throw new Error("Expected the laptop to claim the first turn.")
+    const threadId = first.run.threadId
+    await first.finish({ status: "succeeded" })
+    await first.close()
+
+    const runId = (await post(ava, `/api/agent-threads/${threadId}/messages`, { text: "Again." }))
+      .run.id as string
+    const refused = await claim(ava, runId, LEASE(), "desktop").catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(AgentRunRefusedError)
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+
+    // Only its owner moves it, and then only the computer it moved to runs it.
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    expect(
+      await post(bob, `/api/agent-threads/${threadId}/computer`, { computerId: "bobs-laptop" })
+    ).toMatchObject({ code: "not_thread_owner" })
+    expect(
+      await post(ava, `/api/agent-threads/${threadId}/computer`, { computerId: "desktop" })
+    ).toMatchObject({ id: threadId, computerId: "desktop" })
+
+    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(
+      AgentRunRefusedError
+    )
+    const moved = await claim(ava, runId, LEASE(), "desktop")
+    expect(moved?.run).toMatchObject({ id: runId, status: "running" })
+    await moved?.close()
   })
 
   // Removal proof: drop the runsOn check from the claim route; Ava's own runner takes her cloud

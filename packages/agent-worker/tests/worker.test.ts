@@ -13252,6 +13252,7 @@ describe("agent tools act as the requester", () => {
       apiUrl,
       runId: request.run.id,
       authorization: "",
+      computerId: "laptop",
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       fetch: send,
     })
@@ -13353,6 +13354,7 @@ describe("agent tools act as the requester", () => {
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
+      computerId: async () => "laptop",
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),

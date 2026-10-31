@@ -16,6 +16,7 @@ import {
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import type { Elysia } from "elysia"
 import { requestActor, requireRequestSixb } from "../auth/scope"
+import { refuseOtherComputer } from "./agent-computers"
 
 // A runner outside the worker, such as one on a person's computer, runs a turn through the API:
 // it claims the turn as the person who asked for it, then reaches the turn's session with the
@@ -150,6 +151,8 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
             403
           )
         }
+        const elsewhere = await refuseOtherComputer(sessions, run, context.body)
+        if (elsewhere) return answer({ error: elsewhere.error }, elsewhere.status)
         return answer({ result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt }) })
       } catch (error) {
         // A turn whose runner stopped ends interrupted rather than being claimed again.

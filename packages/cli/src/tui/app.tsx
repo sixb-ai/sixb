@@ -20,6 +20,7 @@ import {
   listAgentThreadRuns,
   listAgentThreads,
   listModels,
+  moveAgentThreadToComputer,
   postAgentThreadMessage,
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -29,7 +30,7 @@ import { conversationsIn, folderOf, rememberFolder } from "./folders"
 import { shortPath } from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
-import { type LocalRunner, owns } from "./runner"
+import { type LocalRunner, owns, runsOnThisComputer } from "./runner"
 import {
   APPROVAL_MODES,
   approvalLabel,
@@ -53,6 +54,8 @@ type Dialog = "commands" | "threads" | "models" | "permissions" | null
 export interface WorkspaceProps {
   readonly connection: Connection
   readonly runner: LocalRunner
+  /** This computer's id: a conversation on a computer runs on one of its owner's. */
+  readonly computerId: string
   readonly colors: TuiColors
   readonly syntax: SyntaxStyle
   readonly version: string
@@ -610,7 +613,9 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
   useEffect(() => {
     void folderOf(threadId).then(setWorkFolder)
   }, [threadId])
-  const here = workFolder === runner.folder
+  // Another of the owner's computers runs it: its folder here, if any, is where it worked before.
+  const otherComputer = thread !== null && !runsOnThisComputer(thread, props.computerId)
+  const here = workFolder === runner.folder && !otherComputer
   // This computer runs the conversation's turns when it is the owner's, and this its folder.
   const runsHere = onComputer && mine && here
   // Only a queued turn: a running one is another sixb's, or one whose sixb closed, which the API
@@ -619,9 +624,17 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
   useEffect(() => {
     if (activeRunId && runsHere && queued) void runner.claim(activeRunId)
   }, [activeRunId, runsHere, queued, runner])
+  // Its turns move to this computer, which alone claims them from now on, and to this folder.
   const moveHere = async () => {
+    const { error } = await moveAgentThreadToComputer({
+      client,
+      path: { threadId },
+      body: { computerId: props.computerId },
+    })
+    if (error) return props.say(errorText(error), "error")
     await rememberFolder(threadId, runner.folder)
     setWorkFolder(runner.folder)
+    void reload()
     props.say("Its turns now run in this folder")
   }
 
@@ -840,9 +853,11 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
         ) : onComputer && mine && workFolder !== null && !here ? (
           <text paddingBottom={1}>
             <span fg={colors.amber}>
-              {workFolder
-                ? `It works in ${shortPath(workFolder, homedir(), 48)}.`
-                : "It started on another computer."}
+              {otherComputer
+                ? "It works on another computer."
+                : workFolder
+                  ? `It works in ${shortPath(workFolder, homedir(), 48)}.`
+                  : "It started on another computer."}
             </span>
             <span fg={colors.muted}>{"  Its turns run there: "}</span>
             <span fg={colors.text}>ctrl+f</span>

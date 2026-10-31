@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSixbClient } from "@sixb/client"
+import { thisComputerId } from "../src/tui/computer"
 import type { Connection } from "../src/tui/connection"
 import { rememberFolder } from "../src/tui/folders"
 import { LocalRunner, stopOnHangUp } from "../src/tui/runner"
@@ -30,8 +31,9 @@ afterEach(async () => {
 })
 
 /** Ava's sixb, open in FOLDER, against an API that answers her thread and its turn. */
-function avasRunner(turn: { status: string }) {
+function avasRunner(turn: { status: string }, on: { computerId?: string } = {}) {
   const thread = {
+    ...on,
     id: "thr_1",
     projectId: "p",
     kind: "conversation",
@@ -85,6 +87,31 @@ describe("sixb opening in a conversation's folder", () => {
     turn.status = "queued"
     await runner.claimIfHere("thr_1")
     expect(claimed).toEqual(["run_1"])
+  })
+})
+
+describe("a conversation on another of Ava's computers", () => {
+  // Guard proof: drop the runsOnThisComputer check from LocalRunner.claimIfHere; this computer
+  // claims a turn of the conversation she moved to her desktop, in the folder it left.
+  test("is left to that computer, though it worked in this folder before", async () => {
+    await rememberFolder("thr_1", FOLDER)
+    const elsewhere = avasRunner({ status: "queued" }, { computerId: "cmp_desktop" })
+    await elsewhere.runner.claimIfHere("thr_1")
+    expect(elsewhere.claimed).toEqual([])
+
+    const here = avasRunner({ status: "queued" }, { computerId: await thisComputerId() })
+    await here.runner.claimIfHere("thr_1")
+    expect(here.claimed).toEqual(["run_1"])
+  })
+
+  // Guard proof: name the computer anew on each run of sixb, without the file; the id read back
+  // is not the one kept, and every claim would name a computer the thread never ran on.
+  test("is told apart by an id this computer keeps, readable by its user alone", async () => {
+    const id = await thisComputerId()
+    const file = join(configHome, "sixb", "computer.json")
+
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ id })
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
   })
 })
 

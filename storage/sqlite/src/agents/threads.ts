@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite"
 import {
+  assertAssignableComputer,
+  assertComputerId,
   assertConversationThreadRow,
   assertRunsOn,
   participantsToAdd,
@@ -16,6 +18,7 @@ import {
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
+  type AssignAgentThreadComputerInput,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
   type ListAgentThreadChildrenInput,
@@ -405,6 +408,25 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       .run(input.projectId, input.threadId, input.principal.type, input.principal.id)
 
     return result.changes > 0
+  }
+
+  async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
+    assertComputerId(input.computerId, "SixbSqlite")
+    this.db
+      .query(`
+        UPDATE agent_threads SET computer_id = ?
+        WHERE project_id = ? AND id = ? AND runs_on = 'computer'
+          ${input.ifUnassigned ? "AND computer_id IS NULL" : ""}
+      `)
+      .run(input.computerId, input.projectId, input.id)
+
+    // Read in the same tick: nothing else writes to the database in between.
+    const row = this.db
+      .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+      .get(input.projectId, input.id) as AgentThreadRow | null
+    const thread = row ? rowToThreadRecord(row) : null
+    assertAssignableComputer(thread, input.id, "SixbSqlite")
+    return thread
   }
 
   async listParticipants(

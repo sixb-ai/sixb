@@ -1,4 +1,6 @@
 import {
+  assertAssignableComputer,
+  assertComputerId,
   assertConversationThreadRow,
   assertRunsOn,
   participantsToAdd,
@@ -15,6 +17,7 @@ import {
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
+  type AssignAgentThreadComputerInput,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
   type ListAgentThreadChildrenInput,
@@ -439,6 +442,24 @@ export class PgAgentThreadStore implements AgentThreadStore {
     `
 
     return rows.length > 0
+  }
+
+  async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
+    assertComputerId(input.computerId, "SixbPg")
+    const [row] = await this.sql<AgentThreadRow[]>`
+      UPDATE agent_threads SET computer_id = ${input.computerId}
+      WHERE project_id = ${input.projectId}
+        AND id = ${input.id}
+        AND runs_on = 'computer'
+        ${input.ifUnassigned ? this.sql`AND computer_id IS NULL` : this.sql``}
+      RETURNING *
+    `
+    if (row) return rowToThreadRecord(row)
+
+    // Nothing changed: a cloud thread, none at all, or one a computer runs already.
+    const thread = await this.getById(input)
+    assertAssignableComputer(thread, input.id, "SixbPg")
+    return thread
   }
 
   async listParticipants(

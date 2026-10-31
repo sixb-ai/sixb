@@ -95,6 +95,11 @@ export interface AgentThreadRecord {
    * A computer's thread takes turns from its owner alone.
    */
   readonly runsOn?: "computer"
+  /**
+   * Which of its owner's computers runs a computer's thread: the one that claimed its first turn,
+   * or the one it was moved to since. Only that computer claims its turns.
+   */
+  readonly computerId?: string
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -196,6 +201,15 @@ export interface AddAgentThreadParticipantsInput {
   /** Refused with `participant_limit`, adding no one, when the thread would hold more. */
   readonly maxParticipants: number
   readonly addedAt?: Date
+}
+
+export interface AssignAgentThreadComputerInput {
+  readonly projectId: string
+  readonly id: string
+  /** The owner's computer that runs the thread's turns from now on. */
+  readonly computerId: string
+  /** Assign it only to a thread no computer runs yet: a computer assigned already stays. */
+  readonly ifUnassigned?: boolean
 }
 
 export interface RemoveAgentThreadParticipantInput {
@@ -687,6 +701,11 @@ export interface AgentThreadStore {
   ): Promise<readonly AgentThreadParticipantRecord[]>
   /** Whether the user took part until now. */
   removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
+  /**
+   * Name which of its owner's computers runs a computer's thread, and return the thread after. A
+   * cloud thread runs on none, and is refused.
+   */
+  assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord>
   /** The participants of these threads, oldest first, then by user id and thread id. */
   listParticipants(
     input: ListAgentThreadParticipantsInput

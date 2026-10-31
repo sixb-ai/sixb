@@ -35,9 +35,10 @@ sixb
 On your computer, the agent's commands run in the folder as you, with your tools and network.
 They can't read your Sixb sign-in, `~/.ssh`, or `~/.aws`, and never hold a credential: the CLI
 adds the run's own to its requests to your API. A conversation that runs on your computer takes
-messages from you alone, and works in the folder it started in: `sixb` open there runs its turns,
-including one sent from the app, and one sent while `sixb` is closed waits for it. Opened from
-another folder, it says where it works; `ctrl+f` moves it. Quitting, or closing the terminal,
+messages from you alone, and works on the computer and in the folder it started in: `sixb` open
+there runs its turns, including one sent from the app, and one sent while `sixb` is closed waits
+for it. Opened from another folder or another of your computers, it says where it works; `ctrl+f`
+moves it here, and only here runs its turns from then on. Quitting, or closing the terminal,
 stops a turn running here: it ends interrupted, and runs again only if you retry it.
 
 From a script, `sixb agent` asks once and prints the answer:

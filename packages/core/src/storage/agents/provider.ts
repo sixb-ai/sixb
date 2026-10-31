@@ -432,6 +432,33 @@ export function assertRunsOn(value: unknown, subject: string, prefix = "Sixb"): 
   }
 }
 
+/** Validate the id of the computer a thread runs on: the CLI's own, a short non-blank string. */
+export function assertComputerId(value: unknown, prefix = "Sixb"): void {
+  if (typeof value !== "string" || value.trim() === "" || value.length > 200) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] An Agent thread's 'computerId' must be a non-blank string of at most 200 characters.`
+    )
+  }
+}
+
+/** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
+export function assertAssignableComputer(
+  thread: AgentThreadRecord | null,
+  id: string,
+  prefix = "Sixb"
+): asserts thread is AgentThreadRecord {
+  if (!thread) {
+    throw new AgentStorageError("thread_not_found", `[${prefix}] Agent thread '${id}' not found.`)
+  }
+  if (thread.runsOn !== "computer") {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent thread '${id}' runs in the cloud: no computer runs its turns.`
+    )
+  }
+}
+
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {
   return (AGENT_APPROVAL_MODES as readonly unknown[]).includes(value)
 }

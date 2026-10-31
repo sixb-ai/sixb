@@ -8,6 +8,7 @@ import { createRoot, useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
 import { Workspace } from "./app"
 import { Logo } from "./brand"
+import { thisComputerId } from "./computer"
 import {
   type Connection,
   connect,
@@ -35,6 +36,8 @@ export async function runTui(options: {
   readonly apiUrl?: string
   readonly profile?: string
 }): Promise<void> {
+  // Read before the screen is taken, so that a failure reads as any command's.
+  const computerId = await thisComputerId()
   const restoreConsole = captureConsole()
   const renderer = await createCliRenderer({
     screenMode: "alternate-screen",
@@ -80,6 +83,7 @@ export async function runTui(options: {
           syntax={syntax}
           version={options.version}
           settings={settings}
+          computerId={computerId}
           connectWith={(apiUrl) => connect(apiUrl ? { ...options, apiUrl } : options)}
           runnerFor={(connection) => {
             runner ??= new LocalRunner(connection, folder, (error) => console.error(error))
@@ -112,6 +116,7 @@ function App(props: {
   readonly syntax: SyntaxStyle
   readonly version: string
   readonly settings: Settings
+  readonly computerId: string
   readonly connectWith: (apiUrl?: string) => Promise<Connection | SignedOut>
   readonly runnerFor: (connection: Connection) => LocalRunner
   readonly onExit: () => void
@@ -142,6 +147,7 @@ function App(props: {
     <Workspace
       connection={state}
       runner={props.runnerFor(state)}
+      computerId={props.computerId}
       colors={props.colors}
       syntax={props.syntax}
       version={props.version}

@@ -37,6 +37,11 @@ export interface ComputerRunnerOptions {
   readonly apiUrl: string
   /** The user's own credential, as an `Authorization` header value, read for each claim. */
   authorization(): Promise<string>
+  /**
+   * This computer's id, which each claim names: a thread runs on one of its owner's computers, and
+   * only that one claims its turns.
+   */
+  computerId(): Promise<string>
   /** The folder the user's turns work in. */
   readonly folder: string
   /** Where each run's own files go, a directory per run, removed when the run ends. */
@@ -73,6 +78,7 @@ export class ComputerRunner {
       apiUrl,
       runId,
       authorization: await this.options.authorization(),
+      computerId: await this.options.computerId(),
       leaseExpiresAt: lease(),
       ...(fetch === undefined ? {} : { fetch }),
     })
