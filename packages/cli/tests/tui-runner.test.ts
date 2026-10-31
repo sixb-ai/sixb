@@ -5,11 +5,10 @@ import { join } from "node:path"
 import { createSixbClient } from "@sixb/client"
 import { thisComputerId } from "../src/tui/computer"
 import type { Connection } from "../src/tui/connection"
-import { rememberFolder } from "../src/tui/folders"
 import { LocalRunner, stopOnHangUp } from "../src/tui/runner"
 
-// This computer as a runner: which turns `sixb` claims when it opens, and how it lets go of the
-// ones it runs when its terminal closes.
+// This computer as a runner: which turns `sixb` claims while it is open, how its session tells
+// the project so, and how it lets go of the turns it runs when its terminal closes.
 
 const API = "http://api.localhost"
 const FOLDER = "/work/q3-close"
@@ -30,26 +29,47 @@ afterEach(async () => {
   await rm(configHome, { recursive: true, force: true })
 })
 
-/** Ava's sixb, open in FOLDER, against an API that answers her thread and its turn. */
-function avasRunner(turn: { status: string }, on: { computerId?: string } = {}) {
+/**
+ * Ava's sixb, open in FOLDER, against an API that answers her thread, its turn and her session:
+ * the thread runs where `computer` says, by default on this computer in FOLDER.
+ */
+async function avasRunner(
+  turn: { status: string },
+  computer: { readonly id?: string; readonly folder?: string } = {}
+) {
   const thread = {
-    ...on,
     id: "thr_1",
     projectId: "p",
     kind: "conversation",
     ownerPrincipal: { type: "user", id: "usr_ava" },
     participants: [],
     runsOn: "computer",
+    computer: {
+      id: computer.id ?? (await thisComputerId()),
+      name: "Ava's MacBook Pro",
+      folder: computer.folder ?? FOLDER,
+      online: true,
+    },
     status: "active",
     activeRunId: "run_1",
     messageCount: 1,
     createdAt: "2026-10-31T09:00:00.000Z",
     updatedAt: "2026-10-31T09:00:00.000Z",
   }
+  const sessions: { readonly method: string; readonly body: unknown }[] = []
   const answer = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(new Request(input, init).url).pathname
+    const request = new Request(input, init)
+    const path = new URL(request.url).pathname
     if (path === "/api/agent-threads/thr_1") return Response.json(thread)
     if (path === "/api/agent-runs/run_1") return Response.json({ id: "run_1", ...turn })
+    if (path.startsWith("/api/agent-computers/sessions/")) {
+      sessions.push({
+        method: request.method,
+        body: request.method === "PUT" ? await request.json() : undefined,
+      })
+      if (request.method === "DELETE") return new Response(null, { status: 204 })
+      return Response.json({ expiresAt: "2026-10-31T09:01:00.000Z", waiting: ["run_9"] })
+    }
     return Response.json({ error: "Not found" }, { status: 404 })
   }
   const client = createSixbClient({
@@ -66,42 +86,60 @@ function avasRunner(turn: { status: string }, on: { computerId?: string } = {}) 
 
   const runner = new LocalRunner(connection, FOLDER, () => {})
   const claimed: string[] = []
+  let heard = () => {}
+  const claimedOne = new Promise<void>((resolve) => {
+    heard = resolve
+  })
   runner.claim = async (runId) => {
     claimed.push(runId)
+    heard()
     return true
   }
-  return { runner, claimed }
+  return { runner, claimed, claimedOne, sessions }
 }
 
-describe("sixb opening in a conversation's folder", () => {
+describe("sixb open in a conversation's folder", () => {
   // Guard proof: drop the `queued` check from LocalRunner.claimIfHere; the running turn is claimed
   // again, and its commands would run a second time.
   test("claims its queued turn, and leaves a running one to end where it runs", async () => {
-    await rememberFolder("thr_1", FOLDER)
     const turn = { status: "running" }
-    const { runner, claimed } = avasRunner(turn)
+    const { runner, claimed } = await avasRunner(turn)
+    runner.openSession()
+    try {
+      await runner.claimIfHere("thr_1")
+      expect(claimed).not.toContain("run_1")
 
+      turn.status = "queued"
+      await runner.claimIfHere("thr_1")
+      expect(claimed).toContain("run_1")
+    } finally {
+      await runner.closeSession()
+    }
+  })
+
+  // Guard proof: drop the session check from LocalRunner.claimIfHere; with messages from the web
+  // turned off, this sixb still runs the turn sent from there.
+  test("leaves a turn sent from elsewhere alone while its session is closed", async () => {
+    const { runner, claimed } = await avasRunner({ status: "queued" })
     await runner.claimIfHere("thr_1")
     expect(claimed).toEqual([])
-
-    turn.status = "queued"
-    await runner.claimIfHere("thr_1")
-    expect(claimed).toEqual(["run_1"])
   })
 })
 
-describe("a conversation on another of Ava's computers", () => {
-  // Guard proof: drop the runsOnThisComputer check from LocalRunner.claimIfHere; this computer
-  // claims a turn of the conversation she moved to her desktop, in the folder it left.
-  test("is left to that computer, though it worked in this folder before", async () => {
-    await rememberFolder("thr_1", FOLDER)
-    const elsewhere = avasRunner({ status: "queued" }, { computerId: "cmp_desktop" })
-    await elsewhere.runner.claimIfHere("thr_1")
-    expect(elsewhere.claimed).toEqual([])
-
-    const here = avasRunner({ status: "queued" }, { computerId: await thisComputerId() })
-    await here.runner.claimIfHere("thr_1")
-    expect(here.claimed).toEqual(["run_1"])
+describe("a conversation that runs somewhere else", () => {
+  // Guard proof: drop the folder or the computer check from LocalRunner.runsHere; this sixb claims
+  // a turn of a conversation that works in another folder, or on Ava's desktop.
+  test("is left to the folder and computer it runs in", async () => {
+    for (const elsewhere of [{ folder: "/work/other" }, { id: "cmp_desktop" }]) {
+      const { runner, claimed } = await avasRunner({ status: "queued" }, elsewhere)
+      runner.openSession()
+      try {
+        await runner.claimIfHere("thr_1")
+        expect(claimed).not.toContain("run_1")
+      } finally {
+        await runner.closeSession()
+      }
+    }
   })
 
   // Guard proof: name the computer anew on each run of sixb, without the file; the id read back
@@ -112,6 +150,27 @@ describe("a conversation on another of Ava's computers", () => {
 
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ id })
     expect((await stat(file)).mode & 0o777).toBe(0o600)
+  })
+})
+
+describe("a session", () => {
+  // Guard proof: drop the loop over `waiting` from LocalRunner.openSession; the turn that queued
+  // while sixb was closed waits until someone opens its conversation.
+  test("names this folder, claims the turns waiting for it, and ends when sixb closes", async () => {
+    const { runner, claimed, claimedOne, sessions } = await avasRunner({ status: "queued" })
+    runner.openSession()
+    await claimedOne
+    expect(claimed).toEqual(["run_9"])
+    expect(sessions[0]).toEqual({
+      method: "PUT",
+      body: {
+        computer: { id: await thisComputerId(), name: expect.any(String), folder: FOLDER },
+      },
+    })
+
+    await runner.closeSession()
+    expect(sessions.at(-1)?.method).toBe("DELETE")
+    expect(runner.sessionOpen).toBe(false)
   })
 })
 
@@ -126,7 +185,6 @@ describe("a closed terminal", () => {
     })
     const unhook = stopOnHangUp(
       () => ({
-        busy: true,
         stop: async () => {
           steps.push("stop")
         },

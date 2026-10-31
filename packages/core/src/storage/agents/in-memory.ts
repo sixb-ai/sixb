@@ -17,26 +17,30 @@ import {
   agentRunMayHoldCalls,
   assertAgentApprovalCaller,
   assertAgentApprovalModeInput,
+  assertAgentComputerSession,
   assertAgentContextCheckpointAnchors,
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
   assertAgentRunFinishPayload,
+  assertAgentThreadComputer,
   assertAssignableComputer,
   assertAwaitingApprovalFinish,
-  assertComputerId,
+  assertComputerPlace,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
+  assertMovableToCloud,
   assertRequestAgentApprovalInput,
-  assertRunsOn,
   assertSaveAgentMemoryInput,
   assertSubagentThreadTakesRun,
+  cloudSpec,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
   LIVE_AGENT_APPROVAL_STATUSES,
+  movesComputerPlace,
   newAgentApprovalRecord,
   newSubagentThreadRecord,
   participantsToAdd,
@@ -54,6 +58,8 @@ import type {
   AgentApprovalOutcome,
   AgentApprovalRecord,
   AgentApprovalStore,
+  AgentComputerSessionRecord,
+  AgentComputerSessionStore,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
   AgentMemoryChange,
@@ -98,6 +104,8 @@ import type {
   ListAgentThreadsResult,
   ListThreadSubagentsInput,
   MarkAgentApprovalsReportedInput,
+  MoveAgentThreadToCloudInput,
+  MoveAgentThreadToCloudResult,
   ReclaimAgentRunInput,
   RemoveAgentThreadParticipantInput,
   RequestAgentApprovalInput,
@@ -217,7 +225,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    assertRunsOn(input.runsOn, "Agent thread")
+    assertComputerPlace(input.runsOn, input.computer)
     const sandboxParams =
       input.sandboxParams === undefined
         ? undefined
@@ -239,6 +247,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       ...(sandboxParams === undefined ? {} : { sandboxParams }),
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
+      ...(input.computer === undefined ? {} : { computer: clone(input.computer) }),
       status: input.status ?? "active",
       activeRunId: null,
       messageCount: 0,
@@ -418,15 +427,43 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
-    assertComputerId(input.computerId)
+    assertAgentThreadComputer(input.computer)
     const threadKey = key(input.projectId, input.id)
     const thread = this.state.threads.get(threadKey) ?? null
     assertAssignableComputer(thread, input.id)
-    if (input.ifUnassigned && thread.computerId !== undefined) return clone(thread)
 
-    const assigned = { ...thread, computerId: input.computerId }
+    const assigned: AgentThreadRecord = {
+      ...thread,
+      computer: clone(input.computer),
+      ...(movesComputerPlace(thread, input.computer)
+        ? { movedAt: new Date(input.movedAt ?? new Date()) }
+        : {}),
+    }
     this.state.threads.set(threadKey, assigned)
     return clone(assigned)
+  }
+
+  async moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult> {
+    const threadKey = key(input.projectId, input.id)
+    const thread = this.state.threads.get(threadKey) ?? null
+    const active = thread?.activeRunId
+      ? (this.state.runs.get(key(input.projectId, thread.activeRunId)) ?? null)
+      : null
+    assertMovableToCloud(thread, active, input.id)
+
+    let queued: ConversationAgentRunRecord | undefined
+    if (
+      active?.kind === "conversation" &&
+      active.status === "queued" &&
+      active.spec?.runsOn === "computer"
+    ) {
+      queued = { ...active, spec: cloudSpec(active.spec) }
+      this.state.runs.set(key(input.projectId, active.id), queued)
+    }
+    const { runsOn: _runsOn, computer: _computer, ...rest } = thread
+    const moved: AgentThreadRecord = { ...rest, movedAt: new Date(input.movedAt ?? new Date()) }
+    this.state.threads.set(threadKey, moved)
+    return { thread: clone(moved), ...(queued ? { queued: clone(queued) } : {}) }
   }
 
   async listParticipants(
@@ -1529,6 +1566,64 @@ function compareApprovals(left: AgentApprovalRecord, right: AgentApprovalRecord)
   return compareByDate(left.createdAt, right.createdAt, left.id, right.id, "asc")
 }
 
+/** Leases, not history: they stay out of snapshots, which roll back transactional writes. */
+class InMemoryAgentComputerSessionStore implements AgentComputerSessionStore {
+  private readonly sessions = new Map<string, AgentComputerSessionRecord>()
+
+  async hold(input: AgentComputerSessionRecord): Promise<void> {
+    assertAgentComputerSession(input)
+    this.sessions.set(sessionKey(input), clone(input))
+  }
+
+  async release(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly ownerPrincipal: Principal
+  }): Promise<AgentComputerSessionRecord | null> {
+    const held = this.sessions.get(sessionKey(input)) ?? null
+    this.sessions.delete(sessionKey(input))
+    return held && clone(held)
+  }
+
+  async listLive(input: {
+    readonly projectId: string
+    readonly ownerPrincipal: Principal
+    readonly now: Date
+  }): Promise<readonly AgentComputerSessionRecord[]> {
+    return [...this.sessions.values()]
+      .filter(
+        (session) =>
+          session.projectId === input.projectId &&
+          principalsEqual(session.ownerPrincipal, input.ownerPrincipal) &&
+          session.expiresAt > input.now
+      )
+      .map(clone)
+  }
+
+  async removeLapsed(input: {
+    readonly projectId: string
+    readonly now: Date
+  }): Promise<readonly AgentComputerSessionRecord[]> {
+    const lapsed = [...this.sessions.values()].filter(
+      (session) => session.projectId === input.projectId && session.expiresAt <= input.now
+    )
+    for (const session of lapsed) this.sessions.delete(sessionKey(session))
+    return lapsed.map(clone)
+  }
+}
+
+function sessionKey(input: {
+  readonly projectId: string
+  readonly id: string
+  readonly ownerPrincipal: Principal
+}): string {
+  return JSON.stringify([input.projectId, principalKeyOf(input.ownerPrincipal), input.id])
+}
+
+function principalKeyOf(principal: Principal): string {
+  return `${principal.type}:${principal.id}`
+}
+
 class InMemoryAgentApprovalModeStore implements AgentApprovalModeStore {
   constructor(private readonly state: AgentStoreState) {}
 
@@ -1608,6 +1703,7 @@ export class InMemoryAgentStorage implements AgentStorage {
   readonly memory: InMemoryAgentMemoryStore
   readonly approvals: InMemoryAgentApprovalStore
   readonly approvalModes: InMemoryAgentApprovalModeStore
+  readonly computers = new InMemoryAgentComputerSessionStore()
 
   constructor(executions: ExecutionStorage) {
     this.threads = new InMemoryAgentThreadStore(this.state)

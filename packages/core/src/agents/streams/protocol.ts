@@ -94,8 +94,26 @@ export interface AgentApprovalActivityEvent {
   readonly occurredAt: string
 }
 
+/**
+ * An open `sixb` on its owner's computer came or went: the threads that run on that computer in
+ * that folder are reachable now, or not. Only its owner hears it.
+ */
+export interface AgentComputerActivityEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.computer.activity"
+  readonly projectId: string
+  readonly ownerPrincipal: { readonly type: string; readonly id: string }
+  readonly computerId: string
+  readonly folder: string
+  readonly online: boolean
+  readonly occurredAt: string
+}
+
 /** Everything the project's activity feed carries. */
-export type AgentActivityEvent = AgentRunActivityEvent | AgentApprovalActivityEvent
+export type AgentActivityEvent =
+  | AgentRunActivityEvent
+  | AgentApprovalActivityEvent
+  | AgentComputerActivityEvent
 
 export function agentApprovalActivityEvent(
   approval: AgentApprovalRecord,
@@ -129,8 +147,55 @@ export function isAgentApprovalActivityEvent(value: unknown): value is AgentAppr
   )
 }
 
+export function isAgentComputerActivityEvent(value: unknown): value is AgentComputerActivityEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.computer.activity" &&
+    typeof value.projectId === "string" &&
+    isPlainRecord(value.ownerPrincipal) &&
+    typeof value.ownerPrincipal.type === "string" &&
+    typeof value.ownerPrincipal.id === "string" &&
+    typeof value.computerId === "string" &&
+    typeof value.folder === "string" &&
+    typeof value.online === "boolean" &&
+    typeof value.occurredAt === "string"
+  )
+}
+
 export function isAgentActivityEvent(value: unknown): value is AgentActivityEvent {
-  return isAgentRunActivityEvent(value) || isAgentApprovalActivityEvent(value)
+  return (
+    isAgentRunActivityEvent(value) ||
+    isAgentApprovalActivityEvent(value) ||
+    isAgentComputerActivityEvent(value)
+  )
+}
+
+/** Announce that the owner's computer is reachable, or no longer, in a folder. */
+export async function publishAgentComputerActivity(
+  broker: Broker,
+  input: Omit<AgentComputerActivityEvent, "schemaVersion" | "type" | "occurredAt">
+): Promise<void> {
+  const event: AgentComputerActivityEvent = {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.computer.activity",
+    ...input,
+    occurredAt: new Date().toISOString(),
+  }
+  await broker.ensureStream({ projectId: input.projectId, stream: agentActivityStreamDefinition() })
+  await broker.append({
+    projectId: input.projectId,
+    streamId: AGENT_ACTIVITY_STREAM_ID,
+    records: [
+      {
+        name: event.type,
+        key: event.computerId,
+        // The event is composed only of validated JSON primitives.
+        payload: event as unknown as JsonValue,
+        idempotencyKey: `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`,
+      },
+    ],
+  })
 }
 
 /** Announce held calls that changed, in one append. Each change is announced once. */

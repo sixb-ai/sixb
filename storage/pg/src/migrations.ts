@@ -454,6 +454,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("081-subagent-questions", subagentQuestionsSql),
     pgSql("082-agent-run-cancel-requests", agentRunCancelRequestsSql),
     pgSql("083-agent-thread-runs-on", agentThreadRunsOnSql),
+    pgSql("084-agent-computer-sessions", agentComputerSessionsSql),
   ],
 })
 
@@ -521,3 +522,6 @@ import agentRunCancelRequestsSql from "./migrations/082-agent-run-cancel-request
   type: "text",
 }
 import agentThreadRunsOnSql from "./migrations/083-agent-thread-runs-on.sql" with { type: "text" }
+import agentComputerSessionsSql from "./migrations/084-agent-computer-sessions.sql" with {
+  type: "text",
+}

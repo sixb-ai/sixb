@@ -149,6 +149,7 @@ const runner = {
   claimIfHere: async () => {},
   runs: () => false,
   hearStop: () => {},
+  onElsewhere: () => () => {},
 } as unknown as LocalRunner
 
 let setup: TestRendererSetup | null = null
@@ -188,7 +189,7 @@ async function openTerminal(api: Awaited<ReturnType<typeof fakeApi>>, mode: Appr
       // Only an answer's text uses it, and these turns have none.
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: mode }}
+      initialSettings={{ place: "cloud", approvalMode: mode, continueFromWeb: false }}
       onExit={() => {}}
     />,
     { width: 100, height: 30 }

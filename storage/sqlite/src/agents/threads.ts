@@ -1,9 +1,12 @@
 import type { Database } from "bun:sqlite"
 import {
+  assertAgentThreadComputer,
   assertAssignableComputer,
-  assertComputerId,
+  assertComputerPlace,
   assertConversationThreadRow,
-  assertRunsOn,
+  assertMovableToCloud,
+  cloudSpec,
+  movesComputerPlace,
   participantsToAdd,
   planAgentThreadFork,
   remapArtifactIds,
@@ -19,12 +22,15 @@ import {
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type AssignAgentThreadComputerInput,
+  type ConversationAgentRunRecord,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
   type ListAgentThreadChildrenInput,
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type MoveAgentThreadToCloudInput,
+  type MoveAgentThreadToCloudResult,
   type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
@@ -68,7 +74,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    assertRunsOn(input.runsOn, "Agent thread", "SixbSqlite")
+    assertComputerPlace(input.runsOn, input.computer, "SixbSqlite")
     const sandboxParams =
       input.sandboxParams === undefined
         ? null
@@ -88,13 +94,16 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             title,
             sandbox_params,
             runs_on,
+            computer_id,
+            computer_name,
+            computer_folder,
             status,
             active_run_id,
             last_message_at,
             message_count,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
         `
         )
         .run(
@@ -105,6 +114,9 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           input.title ?? null,
           sandboxParams,
           input.runsOn ?? null,
+          input.computer?.id ?? null,
+          input.computer?.name ?? null,
+          input.computer?.folder ?? null,
           input.status ?? "active",
           createdAt.toISOString(),
           updatedAt.toISOString()
@@ -411,22 +423,82 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
-    assertComputerId(input.computerId, "SixbSqlite")
-    this.db
-      .query(`
-        UPDATE agent_threads SET computer_id = ?
-        WHERE project_id = ? AND id = ? AND runs_on = 'computer'
-          ${input.ifUnassigned ? "AND computer_id IS NULL" : ""}
-      `)
-      .run(input.computerId, input.projectId, input.id)
+    assertAgentThreadComputer(input.computer, "SixbSqlite")
+    return this.db
+      .transaction(() => {
+        const row = this.db
+          .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.id) as AgentThreadRow | null
+        const thread = row ? rowToThreadRecord(row) : null
+        assertAssignableComputer(thread, input.id, "SixbSqlite")
+        const movedAt = movesComputerPlace(thread, input.computer)
+          ? (input.movedAt ?? new Date()).toISOString()
+          : null
+        this.db
+          .query(`
+            UPDATE agent_threads
+            SET computer_id = ?, computer_name = ?, computer_folder = ?,
+              moved_at = COALESCE(?, moved_at)
+            WHERE project_id = ? AND id = ?
+          `)
+          .run(
+            input.computer.id,
+            input.computer.name,
+            input.computer.folder,
+            movedAt,
+            input.projectId,
+            input.id
+          )
+        return this.requireThread(input.projectId, input.id)
+      })
+      .immediate()
+  }
 
-    // Read in the same tick: nothing else writes to the database in between.
-    const row = this.db
-      .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
-      .get(input.projectId, input.id) as AgentThreadRow | null
-    const thread = row ? rowToThreadRecord(row) : null
-    assertAssignableComputer(thread, input.id, "SixbSqlite")
-    return thread
+  async moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult> {
+    return this.db
+      .transaction(() => {
+        const row = this.db
+          .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.id) as AgentThreadRow | null
+        const thread = row ? rowToThreadRecord(row) : null
+        const activeRow = thread?.activeRunId
+          ? (this.db
+              .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+              .get(input.projectId, thread.activeRunId) as AgentRunRow | null)
+          : null
+        const active = activeRow ? rowToRunRecord(activeRow) : null
+        assertMovableToCloud(thread, active, input.id, "SixbSqlite")
+
+        let queued: ConversationAgentRunRecord | undefined
+        if (
+          active?.kind === "conversation" &&
+          active.status === "queued" &&
+          active.spec?.runsOn === "computer"
+        ) {
+          this.db
+            .query(
+              "UPDATE agent_runs SET spec = ? WHERE project_id = ? AND id = ? AND status = 'queued'"
+            )
+            .run(JSON.stringify(cloudSpec(active.spec)), input.projectId, active.id)
+          const moved = rowToRunRecord(
+            this.db
+              .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+              .get(input.projectId, active.id) as AgentRunRow
+          )
+          if (moved.kind === "conversation") queued = moved
+        }
+        this.db
+          .query(`
+            UPDATE agent_threads
+            SET runs_on = NULL, computer_id = NULL, computer_name = NULL, computer_folder = NULL,
+              moved_at = ?
+            WHERE project_id = ? AND id = ?
+          `)
+          .run((input.movedAt ?? new Date()).toISOString(), input.projectId, input.id)
+        const moved = this.requireThread(input.projectId, input.id)
+        return { thread: moved, ...(queued ? { queued } : {}) }
+      })
+      .immediate()
   }
 
   async listParticipants(

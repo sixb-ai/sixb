@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { appendFileSync } from "node:fs"
+import { realpath } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { format } from "node:util"
@@ -24,6 +25,8 @@ import { BOLD, Composer, useSpinner } from "./ui"
 
 /** How long quitting waits for a turn running here to record its end. */
 const STOP_WAIT_MS = 10_000
+/** How long quitting waits to tell the project this sixb closed: it lapses on its own anyway. */
+const SESSION_CLOSE_WAIT_MS = 2_000
 
 /** Where the app writes what would otherwise draw over it: its runner's notes and errors. */
 export const TUI_LOG = join(tmpdir(), "sixb-tui.log")
@@ -70,7 +73,8 @@ export async function runTui(options: {
   const syntax = createSyntax(colors, renderer)
   const root = createRoot(renderer)
   const settings = await loadSettings()
-  const folder = process.cwd()
+  // As the project keeps it, and the local sandbox compares it: its real path.
+  const folder = await realpath(process.cwd())
   let runner: LocalRunner | null = null
   // The renderer gives its screen back on these signals; sixb then ends its turns and exits.
   const unhook = stopOnHangUp(
@@ -113,6 +117,8 @@ export async function runTui(options: {
       process.once("SIGINT", () => process.exit(130))
       await Promise.race([running.stop(), Bun.sleep(STOP_WAIT_MS)])
     }
+    // Its conversations read as offline at once, rather than once the session lapses.
+    await Promise.race([running?.closeSession(), Bun.sleep(SESSION_CLOSE_WAIT_MS)])
   }
 }
 

@@ -79,6 +79,16 @@ export interface AgentThreadParent {
   readonly key: string
 }
 
+/** The computer a thread runs on, and the folder there its turns work in. */
+export interface AgentThreadComputer {
+  /** The CLI's id for the computer: a thread's turns are claimed by that computer alone. */
+  readonly id: string
+  /** What its owner calls the computer, such as "Anthony's MacBook Pro". */
+  readonly name: string
+  /** The absolute path its turns work in, on that computer. */
+  readonly folder: string
+}
+
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
@@ -96,10 +106,16 @@ export interface AgentThreadRecord {
    */
   readonly runsOn?: "computer"
   /**
-   * Which of its owner's computers runs a computer's thread: the one that claimed its first turn,
-   * or the one it was moved to since. Only that computer claims its turns.
+   * Where on its owner's computers a computer's thread runs: set when it is created, and when its
+   * owner moves it. Only that computer, open in that folder, claims its turns. A computer's thread
+   * created before folders were kept has none until its owner moves it.
    */
-  readonly computerId?: string
+  readonly computer?: AgentThreadComputer
+  /**
+   * When its turns last moved to where they run now, from a computer to the cloud or between
+   * folders: the files earlier turns worked on are not here.
+   */
+  readonly movedAt?: Date
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -116,6 +132,8 @@ export interface CreateAgentThreadInput {
   readonly title?: string
   readonly sandboxParams?: AgentThreadSandboxParams
   readonly runsOn?: "computer"
+  /** Where a computer's thread runs: required with `runsOn: "computer"`, refused without it. */
+  readonly computer?: AgentThreadComputer
   readonly status?: AgentThreadStatus
   readonly createdAt?: Date
   readonly updatedAt?: Date
@@ -206,10 +224,35 @@ export interface AddAgentThreadParticipantsInput {
 export interface AssignAgentThreadComputerInput {
   readonly projectId: string
   readonly id: string
-  /** The owner's computer that runs the thread's turns from now on. */
-  readonly computerId: string
-  /** Assign it only to a thread no computer runs yet: a computer assigned already stays. */
-  readonly ifUnassigned?: boolean
+  /** Where the thread's turns run from now on. */
+  readonly computer: AgentThreadComputer
+  /** Its `movedAt` when this changes the computer or folder of a thread that had one. */
+  readonly movedAt?: Date
+}
+
+export interface MoveAgentThreadToCloudInput {
+  readonly projectId: string
+  readonly id: string
+  readonly movedAt?: Date
+}
+
+/** A computer's thread, now in the cloud, and its queued turn, now the cloud's to run. */
+export interface MoveAgentThreadToCloudResult {
+  readonly thread: AgentThreadRecord
+  readonly queued?: ConversationAgentRunRecord
+}
+
+/**
+ * An open `sixb` on its owner's computer: while it is live, the threads that run on that computer
+ * in its folder are reachable there. It ends when `sixb` closes, or lapses when it stops renewing.
+ */
+export interface AgentComputerSessionRecord {
+  readonly projectId: string
+  /** Chosen by the computer, once per open `sixb`; unique among its owner's sessions. */
+  readonly id: string
+  readonly ownerPrincipal: Principal
+  readonly computer: AgentThreadComputer
+  readonly expiresAt: Date
 }
 
 export interface RemoveAgentThreadParticipantInput {
@@ -702,10 +745,16 @@ export interface AgentThreadStore {
   /** Whether the user took part until now. */
   removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
   /**
-   * Name which of its owner's computers runs a computer's thread, and return the thread after. A
-   * cloud thread runs on none, and is refused.
+   * Move a computer's thread to another computer or folder, and return the thread after. A cloud
+   * thread runs on none, and is refused.
    */
   assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord>
+  /**
+   * Move a computer's thread to the cloud, in one transaction with its queued turn, which the cloud
+   * runs instead. Refused with `active_run_exists` while a turn runs on the computer, and
+   * `invalid_input` for a thread already in the cloud.
+   */
+  moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult>
   /** The participants of these threads, oldest first, then by user id and thread id. */
   listParticipants(
     input: ListAgentThreadParticipantsInput
@@ -1185,6 +1234,29 @@ export interface AgentMemoryStore {
 /** How long a file version that is not its path's latest stays in a repo's history. */
 export const AGENT_MEMORY_HISTORY_DAYS = 90
 
+/** Each open `sixb` on its owner's computers, as a lease it renews. */
+export interface AgentComputerSessionStore {
+  /** Open the session, or renew it until `expiresAt`; its computer and folder are kept as given. */
+  hold(input: AgentComputerSessionRecord): Promise<void>
+  /** End the owner's session; null when it is not open. */
+  release(input: {
+    readonly projectId: string
+    readonly id: string
+    readonly ownerPrincipal: Principal
+  }): Promise<AgentComputerSessionRecord | null>
+  /** The owner's sessions live at `now`. */
+  listLive(input: {
+    readonly projectId: string
+    readonly ownerPrincipal: Principal
+    readonly now: Date
+  }): Promise<readonly AgentComputerSessionRecord[]>
+  /** Remove every session that lapsed before `now`, and return them. */
+  removeLapsed(input: {
+    readonly projectId: string
+    readonly now: Date
+  }): Promise<readonly AgentComputerSessionRecord[]>
+}
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly runs: AgentRunStore
@@ -1193,4 +1265,5 @@ export interface AgentStorage {
   readonly memory: AgentMemoryStore
   readonly approvals: AgentApprovalStore
   readonly approvalModes: AgentApprovalModeStore
+  readonly computers: AgentComputerSessionStore
 }

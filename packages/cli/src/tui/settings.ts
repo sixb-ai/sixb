@@ -18,9 +18,18 @@ export interface Settings {
   /** A model the person picked; absent follows the project: Auto with tiers, else its default. */
   readonly model?: { readonly provider: string; readonly modelId: string }
   readonly reasoning?: ReasoningLevel
+  /**
+   * Whether your messages from the web, or another device, run here: while it is on, `sixb` tells
+   * the project it is open in this folder, and runs the turns sent to its conversations here.
+   */
+  readonly continueFromWeb: boolean
 }
 
-export const DEFAULT_SETTINGS: Settings = { place: "computer", approvalMode: "manual" }
+export const DEFAULT_SETTINGS: Settings = {
+  place: "computer",
+  approvalMode: "manual",
+  continueFromWeb: true,
+}
 
 export const APPROVAL_MODES: readonly {
   readonly mode: ApprovalMode
@@ -70,6 +79,7 @@ export async function loadSettings(): Promise<Settings> {
         : DEFAULT_SETTINGS.approvalMode,
       ...(stored.model?.provider && stored.model.modelId ? { model: stored.model } : {}),
       ...(stored.reasoning ? { reasoning: stored.reasoning } : {}),
+      continueFromWeb: stored.continueFromWeb !== false,
     }
   } catch {
     return DEFAULT_SETTINGS

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { hostname, type as osType } from "node:os"
 import { dirname, join } from "node:path"
 import { resolveConfigPath } from "../lib/profiles"
 
@@ -22,6 +23,41 @@ export function thisComputerId(): Promise<string> {
     id.catch(() => named.delete(path))
   }
   return id
+}
+
+/** This computer: its id, and what its owner calls it, as the web shows where a thread runs. */
+export async function thisComputer(): Promise<{ readonly id: string; readonly name: string }> {
+  const [id, name] = await Promise.all([thisComputerId(), thisComputerName()])
+  return { id, name }
+}
+
+let computerName: Promise<string> | undefined
+
+/** The name its owner gave the computer: its Mac name, else its host name. */
+function thisComputerName(): Promise<string> {
+  computerName ??= readComputerName().then((name) =>
+    // Shown back as written: no control characters, and short.
+    (name.replace(/[\u0000-\u001f\u007f]/g, "").trim() || "This computer").slice(0, 120)
+  )
+  return computerName
+}
+
+async function readComputerName(): Promise<string> {
+  if (osType() === "Darwin") {
+    try {
+      const scutil = Bun.spawn(["scutil", "--get", "ComputerName"], {
+        stdout: "pipe",
+        stderr: "ignore",
+      })
+      const timer = setTimeout(() => scutil.kill(), 2_000)
+      const name = await new Response(scutil.stdout).text()
+      clearTimeout(timer)
+      if ((await scutil.exited) === 0 && name.trim()) return name
+    } catch {
+      // Not every Mac answers: its host name stands in.
+    }
+  }
+  return hostname().replace(/\.local$/, "")
 }
 
 async function readOrName(path: string): Promise<string> {

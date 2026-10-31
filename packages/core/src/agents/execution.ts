@@ -13,6 +13,7 @@ import type {
   AgentApprovalRecord,
   AgentRunRecord,
   AgentStorage,
+  AgentThreadComputer,
   AgentThreadRecord,
   ConversationAgentRunRecord,
   ListAgentApprovalsInput,
@@ -60,6 +61,7 @@ import {
   removeAgentThreadParticipant,
 } from "./participants"
 import {
+  assertComputerPlaceRequest,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
@@ -102,6 +104,8 @@ export type CreateExecutionAgentThreadInput<
    * that computer's folder, so it takes no sandbox, and only its owner can message it.
    */
   readonly runsOn?: "computer"
+  /** The computer and folder its turns run in: required with `runsOn: "computer"`. */
+  readonly computer?: AgentThreadComputer
 }
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
@@ -759,6 +763,7 @@ export function createAgentRuntime<
             `[Sixb] 'runsOn' must be "computer" or omitted.`
           )
         }
+        assertComputerPlaceRequest(input.runsOn, input.computer)
         if (input.runsOn === "computer" && input.sandbox !== undefined) {
           throw new AgentRequestError(
             "invalid_sandbox_params",
@@ -782,6 +787,7 @@ export function createAgentRuntime<
           ownerPrincipal: principal,
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
+          ...(input.computer === undefined ? {} : { computer: input.computer }),
         })
         return { ...created, participants: [] }
       },

@@ -249,7 +249,7 @@ export function plural(count: number, noun: string): string {
  */
 export function friendlyPath(text: string, folder?: string): string {
   let shown = text.replace(
-    /\/(?:private\/)?(?:var|tmp)\/[^\s"']*?\/sixb-agent\/[^/\s"']+\//g,
+    /\/(?:private\/)?(?:var|tmp)\/[^\s"']*?\/sixb-agent\/[^/\s"']+\/(?:\.sixb\/agent\/)?/g,
     "run/"
   )
   if (folder) {

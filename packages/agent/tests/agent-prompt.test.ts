@@ -44,6 +44,18 @@ describe("agent system prompt", () => {
     expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain("<sandbox_state>")
   })
 
+  // Guard proof: drop workspaceMovedAt from renderAgentSystemPrompt's sandbox_state; a turn after
+  // its conversation moved to the cloud reads earlier file paths as if they were still there.
+  test("tells a turn its conversation moved, and the files earlier calls used stayed behind", () => {
+    const workspaceMovedAt = "2026-10-31T12:00:00.000Z"
+    const prompt = renderPrompt({ mode: "conversation", skills: [], workspaceMovedAt })
+    expect(prompt).toContain(
+      `<sandbox_state>\nThis conversation moved to this workspace at ${workspaceMovedAt}.`
+    )
+    expect(prompt).toContain("are not here")
+    expect(prompt).toContain("Conversation history and attachments remain available")
+  })
+
   test.each([
     undefined,
     "read",

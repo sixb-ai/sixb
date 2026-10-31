@@ -1,6 +1,7 @@
 import type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
+  AgentComputerActivityEvent,
   AgentRunActivityEvent,
   AgentRunStreamEvent,
 } from "@sixb/core/agents/streams"
@@ -20,6 +21,7 @@ import {
 export type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
+  AgentComputerActivityEvent,
   AgentRunActivityEvent,
   AgentRunFailure,
   AgentRunStreamEvent,
@@ -107,6 +109,11 @@ export interface AgentActivitySocketOptions {
   readonly onActivity: (event: AgentRunActivityEvent) => void
   /** One of a turn's held calls was held, decided, ran, or was set aside. */
   readonly onApprovalActivity?: (event: AgentApprovalActivityEvent) => void
+  /**
+   * `sixb` opened or closed on one of your computers, in a folder: your threads there are
+   * reachable, or not.
+   */
+  readonly onComputerActivity?: (event: AgentComputerActivityEvent) => void
   /** Called after each initial or reconnect subscription, so durable state can be reconciled. */
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
@@ -173,8 +180,10 @@ export function createAgentActivitySocket(options: AgentActivitySocketOptions): 
       const message = parseAgentRunStreamServerMessage(data)
       if (!message) return
       if (message.type === "activity") {
-        if (message.event.type === "agent.run.activity") options.onActivity(message.event)
-        else options.onApprovalActivity?.(message.event)
+        const { event } = message
+        if (event.type === "agent.run.activity") options.onActivity(event)
+        else if (event.type === "agent.approval.activity") options.onApprovalActivity?.(event)
+        else options.onComputerActivity?.(event)
         return
       }
       if (message.type === "subscribed.activity") {

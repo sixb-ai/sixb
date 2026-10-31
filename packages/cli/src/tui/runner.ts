@@ -1,15 +1,24 @@
+import { randomUUID } from "node:crypto"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { ComputerRunner } from "@sixb/agent"
-import { type GetAgentThreadResponses, getAgentRun, getAgentThread } from "@sixb/client"
+import {
+  type GetAgentThreadResponses,
+  getAgentRun,
+  getAgentThread,
+  holdAgentComputerSession,
+  releaseAgentComputerSession,
+} from "@sixb/client"
+import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { resolveConfigPath } from "../lib/profiles"
-import { thisComputerId } from "./computer"
+import { thisComputer, thisComputerId } from "./computer"
 import type { Connection } from "./connection"
-import { folderOf } from "./folders"
 
 /** How long a closed terminal waits for a turn running here to record its end. */
 const HANG_UP_WAIT_MS = 10_000
+/** How often an open `sixb` renews its session, which lapses a minute after its last renewal. */
+const SESSION_RENEW_MS = 20_000
 
 /**
  * What the agent's commands never read on this computer, whatever the folder: the CLI's own
@@ -21,7 +30,9 @@ export function deniedPaths(): readonly string[] {
 
 /**
  * This computer as a runner: it claims its owner's turns from the project and runs them in the
- * folder `sixb` was opened in, one at a time per turn, each until it ends or is stopped.
+ * folder `sixb` was opened in, one at a time per turn, each until it ends or is stopped. While its
+ * session is open, the project knows `sixb` is open here, and the turns sent from elsewhere to the
+ * conversations of this folder run here too.
  */
 export class LocalRunner {
   private readonly runner: ComputerRunner
@@ -29,19 +40,30 @@ export class LocalRunner {
     string,
     { readonly stop: AbortController; readonly done: Promise<boolean> }
   >()
+  /** Turns sent from elsewhere, such as the web, that this computer is claiming. */
+  private readonly sentElsewhere = new Set<string>()
+  private readonly elsewhereListeners = new Set<(run: ConversationAgentRunRecord) => void>()
+  private session: { readonly id: string; readonly timer: ReturnType<typeof setInterval> } | null =
+    null
+  private closing: Promise<void> | null = null
 
   constructor(
     private readonly connection: Connection,
+    /** The folder `sixb` was opened in: its real path, as the project keeps it. */
     readonly folder: string,
     private readonly onFailure: (error: unknown) => void
   ) {
     this.runner = new ComputerRunner({
       apiUrl: connection.apiUrl,
       authorization: () => connection.authorization(),
-      computerId: thisComputerId,
+      computer: thisComputer,
       folder,
       runFilesRoot: join(tmpdir(), "sixb-agent"),
       onFailure,
+      onClaimed: (run) => {
+        if (!this.sentElsewhere.delete(run.id)) return
+        for (const listener of this.elsewhereListeners) listener(run)
+      },
       openSandbox: ({ workingDirectory, runFiles, credential, signal }) =>
         new LocalSandboxFactory({
           readWritePaths: [runFiles],
@@ -54,6 +76,12 @@ export class LocalRunner {
           signal,
         }),
     })
+  }
+
+  /** Hear each turn sent from elsewhere as it starts to run here. Returns the unsubscribe. */
+  onElsewhere(listener: (run: ConversationAgentRunRecord) => void): () => void {
+    this.elsewhereListeners.add(listener)
+    return () => this.elsewhereListeners.delete(listener)
   }
 
   /** Whether this computer runs `runId` now. */
@@ -81,21 +109,79 @@ export class LocalRunner {
   }
 
   /**
-   * Claim a conversation's turn when this computer runs it: its owner's, on this computer and in
-   * this folder, and still queued. A running turn is another sixb's, or one whose sixb closed,
-   * which the API ends interrupted: claiming it again would run its commands twice.
+   * Hold this `sixb`'s session while it is open: the conversations of this folder read as online,
+   * and the turns waiting for them are claimed. Idempotent.
+   */
+  openSession(): void {
+    if (this.session) return
+    const id = `cs_${randomUUID()}`
+    const hold = async () => {
+      const { data, error } = await holdAgentComputerSession({
+        client: this.connection.client,
+        path: { sessionId: id },
+        body: { computer: { ...(await thisComputer()), folder: this.folder } },
+      })
+      if (error) throw error
+      for (const runId of data?.waiting ?? []) void this.claimElsewhere(runId)
+    }
+    // A missed renewal is retried at the next; the session lasts three of them.
+    const renew = () =>
+      void hold().catch((error: unknown) =>
+        console.error("[SixbCLI] Session renewal failed.", error)
+      )
+    this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS) }
+    renew()
+  }
+
+  /** Close the session: the conversations of this folder read as offline at once. */
+  async closeSession(): Promise<void> {
+    const session = this.session
+    if (session) {
+      this.session = null
+      clearInterval(session.timer)
+      // Whoever closes it next waits for this one, as quitting does after the screen let go.
+      this.closing = releaseAgentComputerSession({
+        client: this.connection.client,
+        path: { sessionId: session.id },
+      }).then(
+        () => {},
+        () => {}
+      )
+    }
+    await this.closing
+  }
+
+  /** Whether the session is open, so turns sent from elsewhere run here. */
+  get sessionOpen(): boolean {
+    return this.session !== null
+  }
+
+  /**
+   * Claim a turn sent from elsewhere when this computer runs its conversation: its owner's, on this
+   * computer and in this folder, and still queued, while the session is open. A running turn is
+   * another sixb's, or one whose sixb closed, which the API ends interrupted: claiming it again
+   * would run its commands twice.
    */
   async claimIfHere(threadId: string, runId?: string): Promise<void> {
-    if ((await folderOf(threadId)) !== this.folder) return
+    if (!this.session) return
     const { client } = this.connection
     const { data: thread } = await getAgentThread({ client, path: { threadId } })
-    if (thread?.runsOn !== "computer" || !owns(this.connection, thread)) return
-    if (!runsOnThisComputer(thread, await thisComputerId())) return
+    if (!thread || !this.runsHere(thread, await thisComputerId())) return
 
     const turn = runId ?? thread.activeRunId
     if (!turn) return
     const { data: run } = await getAgentRun({ client, path: { runId: turn } })
-    if (run?.status === "queued") void this.claim(turn)
+    if (run?.status === "queued") void this.claimElsewhere(turn)
+  }
+
+  /** Whether this `sixb` runs `thread`'s turns: its owner's, on this computer, in this folder. */
+  runsHere(thread: GetAgentThreadResponses[200], computerId: string): boolean {
+    return (
+      thread.runsOn === "computer" &&
+      owns(this.connection, thread) &&
+      thread.computer?.id === computerId &&
+      thread.computer.folder === this.folder
+    )
   }
 
   /** After a stop was asked for: the turn hears it now, not at its next lease renewal. */
@@ -108,12 +194,20 @@ export class LocalRunner {
     return this.running.size > 0
   }
 
-  /** Stop every turn this computer runs: each ends interrupted, its end recorded. */
+  /**
+   * Stop every turn this computer runs, each ending interrupted with its end recorded, and close
+   * the session.
+   */
   async stop(): Promise<void> {
     const running = [...this.running.values()]
     for (const { stop } of running) stop.abort()
-    await Promise.allSettled(running.map(({ done }) => done))
+    await Promise.allSettled([...running.map(({ done }) => done), this.closeSession()])
     await this.runner.drain()
+  }
+
+  private claimElsewhere(runId: string): Promise<boolean> {
+    this.sentElsewhere.add(runId)
+    return this.claim(runId).finally(() => this.sentElsewhere.delete(runId))
   }
 }
 
@@ -129,28 +223,18 @@ export function owns(
 }
 
 /**
- * Whether this computer runs a computer's thread: the one it runs on. A thread none claimed a turn
- * of yet runs on the first that does, the one it started on.
- */
-export function runsOnThisComputer(
-  thread: Pick<GetAgentThreadResponses[200], "computerId">,
-  computerId: string
-): boolean {
-  return thread.computerId === undefined || thread.computerId === computerId
-}
-
-/**
  * A closed terminal, or a kill, ends sixb as quitting does: the turns running here stop, each
  * ending interrupted with its end recorded, instead of renewing their lease from a process nobody
- * sees. Then `exit`, after a bounded wait. Returns the removal of the handlers.
+ * sees, and the session closes. Then `exit`, after a bounded wait. Returns the removal of the
+ * handlers.
  */
 export function stopOnHangUp(
-  runner: () => Pick<LocalRunner, "busy" | "stop"> | null,
+  runner: () => Pick<LocalRunner, "stop"> | null,
   exit: (signal: "SIGHUP" | "SIGTERM") => void
 ): () => void {
   const hangUp = (signal: "SIGHUP" | "SIGTERM") => {
     const running = runner()
-    if (!running?.busy) return exit(signal)
+    if (!running) return exit(signal)
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const waited = new Promise<void>((resolve) => {

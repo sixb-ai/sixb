@@ -16,7 +16,7 @@ import {
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import type { Elysia } from "elysia"
 import { requestActor, requireRequestSixb } from "../auth/scope"
-import { refuseOtherComputer } from "./agent-computers"
+import { endLapsedComputerSessions, refuseOtherComputer } from "./agent-computers"
 
 // A runner outside the worker, such as one on a person's computer, runs a turn through the API:
 // it claims the turn as the person who asked for it, then reaches the turn's session with the
@@ -56,7 +56,7 @@ const SWEEP_CLAIM_MS = 60_000
 /**
  * End the runs whose runner stopped renewing them, as the worker's repair pass does: a runner on
  * a computer has no worker behind it. Several API servers may sweep at once: each run is ended
- * once, by whichever takes it over. Returns the stop.
+ * once, by whichever takes it over. Computer sessions that lapsed end too. Returns the stop.
  */
 export function startLapsedRunSweeper(host: SixbHostView): () => void {
   const sessions = agentRunSessionHost(host)
@@ -64,6 +64,9 @@ export function startLapsedRunSweeper(host: SixbHostView): () => void {
   const sweep = () => {
     void endLapsedAgentRuns(sessions, { leaseMs: SWEEP_CLAIM_MS }).catch((error: unknown) => {
       console.error("[SixbServer] Could not end lapsed agent runs; retrying.", error)
+    })
+    void endLapsedComputerSessions(host).catch((error: unknown) => {
+      console.error("[SixbServer] Could not end lapsed computer sessions; retrying.", error)
     })
   }
   sweep()

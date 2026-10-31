@@ -108,6 +108,7 @@ import {
   getWorkflowNodeRunFileContent,
   getWorkflowRun,
   getWorkflowRunFileContent,
+  holdAgentComputerSession,
   issueSharedAccessGrant,
   listActionRuns,
   listActions,
@@ -159,6 +160,7 @@ import {
   listWorkflowInterventions,
   listWorkflowRuns,
   listWorkflows,
+  moveAgentThreadToCloud,
   moveAgentThreadToComputer,
   type Options,
   postAgentThreadMessage,
@@ -169,6 +171,7 @@ import {
   reauthorizeConnectorConnection,
   recreateAgentThreadSandbox,
   refreshAuthSession,
+  releaseAgentComputerSession,
   removeAgentThreadParticipant,
   requestAction,
   requestPipelineRun,
@@ -492,6 +495,9 @@ import type {
   GetWorkflowRunFileContentError,
   GetWorkflowRunFileContentResponse,
   GetWorkflowRunResponse,
+  HoldAgentComputerSessionData,
+  HoldAgentComputerSessionError,
+  HoldAgentComputerSessionResponse,
   IssueSharedAccessGrantData,
   IssueSharedAccessGrantError,
   IssueSharedAccessGrantResponse,
@@ -636,6 +642,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  MoveAgentThreadToCloudData,
+  MoveAgentThreadToCloudError,
+  MoveAgentThreadToCloudResponse,
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerError,
   MoveAgentThreadToComputerResponse,
@@ -663,6 +672,8 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionError,
   RefreshAuthSessionResponse,
+  ReleaseAgentComputerSessionData,
+  ReleaseAgentComputerSessionError,
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantError,
   RequestActionData,
@@ -5071,9 +5082,38 @@ export const getAgentChildFileContentOptions = (options: Options<GetAgentChildFi
   })
 
 /**
- * Move a thread to another of your computers
+ * Move a thread from your computer to the cloud
  *
- * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there.
+ */
+export const moveAgentThreadToCloudMutation = (
+  options?: Partial<Options<MoveAgentThreadToCloudData>>
+): UseMutationOptions<
+  MoveAgentThreadToCloudResponse,
+  MoveAgentThreadToCloudError,
+  Options<MoveAgentThreadToCloudData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    MoveAgentThreadToCloudResponse,
+    MoveAgentThreadToCloudError,
+    Options<MoveAgentThreadToCloudData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await moveAgentThreadToCloud({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Move a thread to one of your computers, in a folder there
+ *
+ * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer.
  */
 export const moveAgentThreadToComputerMutation = (
   options?: Partial<Options<MoveAgentThreadToComputerData>>
@@ -5089,6 +5129,64 @@ export const moveAgentThreadToComputerMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await moveAgentThreadToComputer({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Close a computer session
+ *
+ * `sixb` closes its session when it quits.
+ */
+export const releaseAgentComputerSessionMutation = (
+  options?: Partial<Options<ReleaseAgentComputerSessionData>>
+): UseMutationOptions<
+  unknown,
+  ReleaseAgentComputerSessionError,
+  Options<ReleaseAgentComputerSessionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    unknown,
+    ReleaseAgentComputerSessionError,
+    Options<ReleaseAgentComputerSessionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await releaseAgentComputerSession({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Open or renew a computer session
+ *
+ * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.
+ */
+export const holdAgentComputerSessionMutation = (
+  options?: Partial<Options<HoldAgentComputerSessionData>>
+): UseMutationOptions<
+  HoldAgentComputerSessionResponse,
+  HoldAgentComputerSessionError,
+  Options<HoldAgentComputerSessionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    HoldAgentComputerSessionResponse,
+    HoldAgentComputerSessionError,
+    Options<HoldAgentComputerSessionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await holdAgentComputerSession({
         ...options,
         ...fnOptions,
         throwOnError: true,

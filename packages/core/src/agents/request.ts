@@ -26,6 +26,7 @@ import {
   type AgentApprovalRecord,
   type AgentStorage,
   AgentStorageError,
+  type AgentThreadComputer,
   type AgentThreadRecord,
   type ConversationAgentRunRecord,
   type ConversationAgentRunSpec,
@@ -101,6 +102,8 @@ export interface RequestAgentRunInput {
    * omitted, in the cloud. An existing thread keeps its own.
    */
   readonly runsOn?: "computer"
+  /** The computer and folder a computer's thread this creates runs in. */
+  readonly computer?: AgentThreadComputer
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
   readonly messageId?: string
   /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
@@ -184,6 +187,7 @@ export async function requestAgentRun(
   if (input.runsOn !== undefined && input.runsOn !== "computer") {
     throw new AgentRequestError("invalid_message", `[Sixb] 'runsOn' must be "computer" or omitted.`)
   }
+  if (!existingThread) assertComputerPlaceRequest(input.runsOn, input.computer)
   const runsOn = existingThread ? existingThread.runsOn : input.runsOn
   // The message's mode, else the sender's in the thread.
   const approvalMode =
@@ -219,6 +223,7 @@ export async function requestAgentRun(
       title: input.title,
       principal,
       runsOn,
+      ...(input.computer === undefined ? {} : { computer: input.computer }),
     }))
 
   const triggerMessageId = input.messageId ?? createAgentMessageId()
@@ -938,6 +943,7 @@ function createThread(
     readonly title?: string
     readonly principal: Principal
     readonly runsOn?: "computer"
+    readonly computer?: AgentThreadComputer
   }
 ): Promise<AgentThreadRecord> {
   return agents.threads.create({
@@ -946,7 +952,18 @@ function createThread(
     ownerPrincipal: params.principal,
     ...(params.title === undefined ? {} : { title: params.title }),
     ...(params.runsOn === undefined ? {} : { runsOn: params.runsOn }),
+    ...(params.computer === undefined ? {} : { computer: params.computer }),
   })
+}
+
+/** A thread runs on a computer exactly when it names the computer and the folder there. */
+export function assertComputerPlaceRequest(runsOn: unknown, computer: unknown): void {
+  if ((runsOn === "computer") !== (computer !== undefined)) {
+    throw new AgentRequestError(
+      "invalid_message",
+      `[Sixb] A thread that runs on a computer names it and its folder: send 'runsOn: "computer"' with 'computer', or neither.`
+    )
+  }
 }
 
 function requireAgentStorage(runtime: SixbRuntimeContext): AgentStorage {

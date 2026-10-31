@@ -12370,7 +12370,13 @@ export type ListAgentThreadsResponses = {
           | null
       }
       runsOn?: "computer"
-      computerId?: string
+      computer?: {
+        id: string
+        name: string
+        folder: string
+        online: boolean
+      }
+      movedAt?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12403,6 +12409,11 @@ export type CreateAgentThreadData = {
         | null
     }
     runsOn?: "computer"
+    computer?: {
+      id: string
+      name: string
+      folder: string
+    }
   }
   path?: never
   query?: never
@@ -12491,7 +12502,13 @@ export type CreateAgentThreadResponses = {
           | null
       }
       runsOn?: "computer"
-      computerId?: string
+      computer?: {
+        id: string
+        name: string
+        folder: string
+        online: boolean
+      }
+      movedAt?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12590,7 +12607,13 @@ export type GetAgentThreadResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12714,7 +12737,13 @@ export type AddAgentThreadParticipantsResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12878,7 +12907,13 @@ export type ForkAgentThreadResponses = {
           | null
       }
       runsOn?: "computer"
-      computerId?: string
+      computer?: {
+        id: string
+        name: string
+        folder: string
+        online: boolean
+      }
+      movedAt?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12988,7 +13023,13 @@ export type RecreateAgentThreadSandboxResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -14843,9 +14884,135 @@ export type HeadAgentChildFileContentResponses = {
   206: unknown
 }
 
+export type MoveAgentThreadToCloudData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/computer"
+}
+
+export type MoveAgentThreadToCloudErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type MoveAgentThreadToCloudError =
+  MoveAgentThreadToCloudErrors[keyof MoveAgentThreadToCloudErrors]
+
+export type MoveAgentThreadToCloudResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sandboxState?: {
+      name: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    owner: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+      displayName?: string
+    }
+    participants: Array<{
+      principal: {
+        type: "user"
+        id: string
+        displayName?: string
+      }
+      addedAt: string
+      addedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+    title?: string
+    sandboxParams?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+    }
+    runsOn?: "computer"
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
+  }
+}
+
+export type MoveAgentThreadToCloudResponse =
+  MoveAgentThreadToCloudResponses[keyof MoveAgentThreadToCloudResponses]
+
 export type MoveAgentThreadToComputerData = {
   body: {
-    computerId: string
+    computer: {
+      id: string
+      name: string
+      folder: string
+    }
   }
   path: {
     threadId: string
@@ -14939,7 +15106,13 @@ export type MoveAgentThreadToComputerResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -14953,6 +15126,81 @@ export type MoveAgentThreadToComputerResponses = {
 
 export type MoveAgentThreadToComputerResponse =
   MoveAgentThreadToComputerResponses[keyof MoveAgentThreadToComputerResponses]
+
+export type ReleaseAgentComputerSessionData = {
+  body?: never
+  path: {
+    sessionId: string
+  }
+  query?: never
+  url: "/api/agent-computers/sessions/{sessionId}"
+}
+
+export type ReleaseAgentComputerSessionErrors = {
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ReleaseAgentComputerSessionError =
+  ReleaseAgentComputerSessionErrors[keyof ReleaseAgentComputerSessionErrors]
+
+export type ReleaseAgentComputerSessionResponses = {
+  /**
+   * Response for status 204
+   */
+  204: unknown
+}
+
+export type HoldAgentComputerSessionData = {
+  body: {
+    computer: {
+      id: string
+      name: string
+      folder: string
+    }
+  }
+  path: {
+    sessionId: string
+  }
+  query?: never
+  url: "/api/agent-computers/sessions/{sessionId}"
+}
+
+export type HoldAgentComputerSessionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type HoldAgentComputerSessionError =
+  HoldAgentComputerSessionErrors[keyof HoldAgentComputerSessionErrors]
+
+export type HoldAgentComputerSessionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    expiresAt: string
+    waiting: Array<string>
+  }
+}
+
+export type HoldAgentComputerSessionResponse =
+  HoldAgentComputerSessionResponses[keyof HoldAgentComputerSessionResponses]
 
 export type GetAgentPreferencesData = {
   body?: never
@@ -15136,7 +15384,13 @@ export type SetAgentThreadApprovalModeResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -16031,7 +16285,13 @@ export type GetObservedAgentThreadResponses = {
         | null
     }
     runsOn?: "computer"
-    computerId?: string
+    computer?: {
+      id: string
+      name: string
+      folder: string
+      online: boolean
+    }
+    movedAt?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string

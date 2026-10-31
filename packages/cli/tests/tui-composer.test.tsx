@@ -119,12 +119,18 @@ async function workspace(onExit: () => void): Promise<TestRendererSetup> {
         project: { id: "acme", timeZone: "UTC", locale: "en" },
         authorization: async () => "",
       }}
-      runner={{ folder: config, claimIfHere: async () => {} } as unknown as LocalRunner}
+      runner={
+        {
+          folder: config,
+          claimIfHere: async () => {},
+          onElsewhere: () => () => {},
+        } as unknown as LocalRunner
+      }
       computerId="cmp_1"
       colors={tuiColors("dark")}
       syntax={{} as SyntaxStyle}
       version="sixb v0.0.0"
-      initialSettings={{ place: "cloud", approvalMode: "manual" }}
+      initialSettings={{ place: "cloud", approvalMode: "manual", continueFromWeb: false }}
       onExit={onExit}
     />,
     // As the terminal's renderer is: the app decides what ctrl+c does.

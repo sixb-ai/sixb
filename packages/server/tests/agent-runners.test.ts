@@ -46,6 +46,9 @@ const runners = defineGroup("runners")
 const projectId = "agent-runners"
 const API = "http://api.localhost"
 const LEASE = () => new Date(Date.now() + 60_000).toISOString()
+/** Where Ava works: her laptop and her desktop share the folder's path. */
+const LAPTOP = { id: "laptop", name: "Ava's MacBook Pro", folder: "/Users/ava/q3" }
+const DESKTOP = { id: "desktop", name: "Ava's iMac", folder: "/Users/ava/q3" }
 
 async function setup() {
   /** What reached the project: its tool's runs and its model's calls. */
@@ -115,19 +118,26 @@ async function setup() {
 
   /** POST as `headers`' person, answering the response's body. */
   const post = (headers: Record<string, string>, path: string, body: unknown) =>
+    call(headers, "POST", path, body).then((response) => response.json())
+
+  /** Any request as `headers`' person. */
+  const call = (headers: Record<string, string>, method: string, path: string, body?: unknown) =>
     send(
       new Request(`${API}${path}`, {
-        method: "POST",
+        method,
         headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
-    ).then((response) => response.json())
+    )
 
   /** Ask the Agent, as `headers`' person: the turn waits queued, as no worker runs here. */
   async function ask(
     headers: Record<string, string>,
     text: string,
-    thread: { readonly runsOn?: "computer" } = { runsOn: "computer" }
+    thread: { readonly runsOn?: "computer"; readonly computer?: typeof LAPTOP } = {
+      runsOn: "computer",
+      computer: LAPTOP,
+    }
   ) {
     const created = (await post(headers, "/api/agent-threads", thread)) as {
       readonly thread: { id: string }
@@ -152,13 +162,13 @@ async function setup() {
     headers: Record<string, string>,
     runId: string,
     leaseExpiresAt = LEASE(),
-    computerId = "laptop"
+    computer = LAPTOP
   ) {
     return claimAgentRunOverHttp({
       apiUrl: API,
       runId,
       authorization: "",
-      computerId,
+      computer,
       leaseExpiresAt,
       fetch: async (request) => {
         if (new URL(request.url).pathname.endsWith("/claim")) {
@@ -176,7 +186,19 @@ async function setup() {
     })
   }
 
-  return { storage, host, send, post, person, ask, claim, runnerTokens, claimStatuses, reached }
+  return {
+    storage,
+    host,
+    send,
+    call,
+    post,
+    person,
+    ask,
+    claim,
+    runnerTokens,
+    claimStatuses,
+    reached,
+  }
 }
 
 describe("a runner outside the worker", () => {
@@ -216,7 +238,7 @@ describe("a runner outside the worker", () => {
     const { person, ask, claim, post, host, storage } = await setup()
     const ava = await person("ava")
     const bob = await person("bob")
-    const runId = await ask(ava, "Tidy the notes in this folder.", { runsOn: "computer" })
+    const runId = await ask(ava, "Tidy the notes in this folder.")
     const run = await storage.agents.runs.getById({ projectId, id: runId })
     expect(run).toMatchObject({ status: "queued", spec: { runsOn: "computer" } })
 
@@ -277,21 +299,18 @@ describe("a runner outside the worker", () => {
   })
 
   // Guard proof: drop the refuseOtherComputer call from the claim route; Ava's desktop runs a turn
-  // of the conversation her laptop runs, in another folder on another disk.
-  test("runs a conversation's turns on the one computer that runs it, until it moves", async () => {
+  // of the conversation her laptop runs, and her laptop runs it in another folder.
+  test("runs a conversation's turns on the computer and in the folder it runs in, until it moves", async () => {
     const { person, ask, claim, post, storage } = await setup()
     const ava = await person("ava")
     const bob = await person("bob")
-    const first = await claim(ava, await ask(ava, "Tidy the notes in this folder."))
-    if (!first) throw new Error("Expected the laptop to claim the first turn.")
-    const threadId = first.run.threadId
-    await first.finish({ status: "succeeded" })
-    await first.close()
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
 
-    const runId = (await post(ava, `/api/agent-threads/${threadId}/messages`, { text: "Again." }))
-      .run.id as string
-    const refused = await claim(ava, runId, LEASE(), "desktop").catch((error: unknown) => error)
-    expect(refused).toBeInstanceOf(AgentRunRefusedError)
+    for (const elsewhere of [DESKTOP, { ...LAPTOP, folder: "/Users/ava/other" }]) {
+      const refused = await claim(ava, runId, LEASE(), elsewhere).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(AgentRunRefusedError)
+    }
     expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
 
     // Only its owner moves it, and then only the computer it moved to runs it.
@@ -303,18 +322,173 @@ describe("a runner outside the worker", () => {
       maxParticipants: 50,
     })
     expect(
-      await post(bob, `/api/agent-threads/${threadId}/computer`, { computerId: "bobs-laptop" })
+      await post(bob, `/api/agent-threads/${threadId}/computer`, { computer: DESKTOP })
     ).toMatchObject({ code: "not_thread_owner" })
     expect(
-      await post(ava, `/api/agent-threads/${threadId}/computer`, { computerId: "desktop" })
-    ).toMatchObject({ id: threadId, computerId: "desktop" })
+      await post(ava, `/api/agent-threads/${threadId}/computer`, { computer: DESKTOP })
+    ).toMatchObject({
+      id: threadId,
+      computer: { ...DESKTOP, online: false },
+      movedAt: expect.any(String),
+    })
 
     expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(
       AgentRunRefusedError
     )
-    const moved = await claim(ava, runId, LEASE(), "desktop")
+    const moved = await claim(ava, runId, LEASE(), DESKTOP)
     expect(moved?.run).toMatchObject({ id: runId, status: "running" })
     await moved?.close()
+  })
+
+  test("creates a computer's thread only with its computer and folder, as written", async () => {
+    const { person, call } = await setup()
+    const ava = await person("ava")
+    const create = async (body: unknown) =>
+      (await call(ava, "POST", "/api/agent-threads", body)).status
+    expect(await create({ runsOn: "computer" })).toBe(400)
+    expect(await create({ computer: LAPTOP })).toBe(400)
+    // A name or folder shown back to Ava holds no control character, such as a terminal escape.
+    expect(
+      await create({
+        runsOn: "computer",
+        computer: { ...LAPTOP, folder: "/Users/ava/\u001b]0;pwned\u0007" },
+      })
+    ).toBe(422)
+  })
+
+  // Guard proof: return `computer` for every reader in serializeThreads; Bob reads where on Ava's
+  // disk her conversation works, and the name of her computer.
+  test("tells only its owner where a computer's thread runs", async () => {
+    const { person, ask, call, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+
+    const asBob = await (await call(bob, "GET", `/api/agent-threads/${threadId}`)).json()
+    expect(asBob).toMatchObject({ runsOn: "computer" })
+    expect(asBob).not.toHaveProperty("computer")
+    expect(await (await call(ava, "GET", `/api/agent-threads/${threadId}`)).json()).toMatchObject({
+      computer: { ...LAPTOP, online: false },
+    })
+  })
+
+  // Guard proof: drop the owner from a session's key, or from listLive's filter; Bob's sixb, open
+  // on a computer id he copied, reads as Ava's laptop being online.
+  test("reads a computer's thread as online while its owner's sixb holds a session in its folder", async () => {
+    const { person, ask, call, storage, host } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const online = async () =>
+      (
+        (await (await call(ava, "GET", `/api/agent-threads/${threadId}`)).json()) as {
+          computer?: { online: boolean }
+        }
+      ).computer?.online
+
+    await call(bob, "PUT", "/api/agent-computers/sessions/cs_bob", { computer: LAPTOP })
+    await call(ava, "PUT", "/api/agent-computers/sessions/cs_other", {
+      computer: { ...LAPTOP, folder: "/Users/ava/other" },
+    })
+    expect(await online()).toBe(false)
+
+    // Her session in its folder lists the turn waiting for it.
+    const held = await call(ava, "PUT", "/api/agent-computers/sessions/cs_ava", {
+      computer: LAPTOP,
+    })
+    expect(await held.json()).toEqual({ expiresAt: expect.any(String), waiting: [runId] })
+    expect(await online()).toBe(true)
+    // Bob's session waits for none of Ava's turns.
+    expect(
+      await (
+        await call(bob, "PUT", "/api/agent-computers/sessions/cs_bob", { computer: LAPTOP })
+      ).json()
+    ).toMatchObject({ waiting: [] })
+
+    expect((await call(ava, "DELETE", "/api/agent-computers/sessions/cs_ava")).status).toBe(204)
+    expect(await online()).toBe(false)
+
+    // Only Ava heard her laptop come and go, in that folder.
+    const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
+    const presence = records
+      .map((record) => record.payload as Record<string, unknown>)
+      .filter((event) => event.type === "agent.computer.activity")
+      .map(({ ownerPrincipal, folder, online }) => ({ ownerPrincipal, folder, online }))
+    expect(presence).toEqual([
+      { ownerPrincipal: { type: "user", id: "bob" }, folder: LAPTOP.folder, online: true },
+      { ownerPrincipal: { type: "user", id: "ava" }, folder: "/Users/ava/other", online: true },
+      { ownerPrincipal: { type: "user", id: "ava" }, folder: LAPTOP.folder, online: true },
+      { ownerPrincipal: { type: "user", id: "ava" }, folder: LAPTOP.folder, online: false },
+    ])
+  })
+
+  // Guard proof: drop the dispatch from the route that moves a thread to the cloud; the turn that
+  // waited for the computer waits for a worker that never hears of it.
+  test("moves a computer's thread to the cloud, with the turn waiting for it, which a worker runs", async () => {
+    const { person, ask, call, claim, host, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    expect((await call(bob, "DELETE", `/api/agent-threads/${threadId}/computer`)).status).toBe(403)
+
+    const moved = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    expect(moved.status).toBe(200)
+    const thread = await moved.json()
+    expect(thread).toMatchObject({ id: threadId, movedAt: expect.any(String) })
+    expect(thread).not.toHaveProperty("runsOn")
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.spec).not.toHaveProperty(
+      "runsOn"
+    )
+    const jobs = await host.queues.agents.claim({
+      projectId,
+      workerId: "probe",
+      limit: 10,
+      signal: AbortSignal.timeout(50),
+    })
+    expect(jobs.map((claimed) => claimed.job.payload)).toEqual([{ runId }])
+    // The laptop that comes back takes it no more.
+    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(
+      AgentRunRefusedError
+    )
+  })
+
+  // Guard proof: drop assertMovableToCloud's running check; the thread moves while its turn runs on
+  // the laptop, and that turn's answer lands in a cloud conversation.
+  test("keeps a computer's thread on the computer while one of its turns runs there", async () => {
+    const { person, ask, call, claim, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const session = await claim(ava, runId)
+
+    const refused = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toMatchObject({
+      code: "active_run_exists",
+      error: expect.stringContaining("running on the computer"),
+    })
+    expect(await storage.agents.threads.getById({ projectId, id: threadId })).toMatchObject({
+      runsOn: "computer",
+      computer: LAPTOP,
+    })
+    await session?.close()
   })
 
   // Removal proof: drop the runsOn check from the claim route; Ava's own runner takes her cloud
@@ -335,7 +509,7 @@ describe("a runner outside the worker", () => {
   test("runs a computer's turn again on the computer", async () => {
     const { person, ask, claim, post, host, storage } = await setup()
     const ava = await person("ava")
-    const runId = await ask(ava, "Tidy the notes in this folder.", { runsOn: "computer" })
+    const runId = await ask(ava, "Tidy the notes in this folder.")
     const session = await claim(ava, runId)
     await session?.finish({
       status: "failed",

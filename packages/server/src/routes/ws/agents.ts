@@ -1,3 +1,4 @@
+import { principalsEqual } from "@sixb/core"
 import {
   AGENT_ACTIVITY_STREAM_ID,
   type AgentActivityEvent,
@@ -10,8 +11,10 @@ import {
   agentRunStreamId,
 } from "@sixb/core/internal/agents/streams"
 import type { Sixb } from "@sixb/core/internal/request-execution"
+import type { Principal } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
+import { requestActor } from "../../auth/scope"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
 import { serializeAgentRun } from "../agents"
@@ -94,11 +97,17 @@ export async function canAccessAgentRunStream(
   return { ok: true }
 }
 
-/** A run's or an approval's activity reaches whoever reads the turn it belongs to. */
+/**
+ * A run's or an approval's activity reaches whoever reads the turn it belongs to; a computer
+ * session's, its owner alone.
+ */
 export async function canAccessAgentThreadActivity(
   sixb: Sixb,
   event: AgentActivityEvent
 ): Promise<boolean> {
+  if (event.type === "agent.computer.activity") {
+    return principalsEqual(event.ownerPrincipal as Principal, requestActor(sixb))
+  }
   const run = await sixb.agent.runs.getById(event.runId)
   return run?.projectId === event.projectId && run.threadId === event.threadId
 }
