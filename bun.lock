@@ -725,6 +725,7 @@
       "dependencies": {
         "@opentui/core": "0.6.6",
         "@opentui/react": "0.6.6",
+        "@sixb/agent": "workspace:*",
         "@sixb/agent-worker": "workspace:*",
         "@sixb/app": "workspace:^",
         "@sixb/cli-core": "workspace:^",
@@ -734,6 +735,7 @@
         "@sixb/pipeline-worker": "workspace:*",
         "@sixb/projection-worker": "workspace:*",
         "@sixb/rules-worker": "workspace:*",
+        "@sixb/sandboxes-local": "workspace:^",
         "@sixb/server": "workspace:*",
         "@sixb/sync-worker": "workspace:*",
         "@sixb/workflow-worker": "workspace:*",

@@ -87,6 +87,15 @@ async function readPackageVersion(): Promise<string> {
 }
 
 async function main(): Promise<void> {
+  // `sixb` alone, in a terminal: the full-screen app. Anywhere else it prints its help.
+  if (args.length === 0) {
+    const { canRunLive } = await import("./ui/live/can-run-live")
+    if (canRunLive()) {
+      const { runTui } = await import("./tui")
+      await runTui({ version: VERSION })
+      return
+    }
+  }
   const parsed = parseCliArgs(args)
   if (parsed.kind === "version") {
     const { renderVersion } = await import("./ui")
@@ -204,6 +213,19 @@ async function main(): Promise<void> {
     case "logout": {
       const { runLogout } = await import("./commands/logout")
       await runLogout({ profile: getFlag("profile"), json: hasFlag("json") })
+      break
+    }
+
+    case "agent": {
+      const { runAgent } = await import("./commands/agent")
+      await runAgent({
+        text: positionals,
+        thread: getFlag("thread"),
+        cloud: hasFlag("cloud"),
+        json: hasFlag("json"),
+        apiUrl: getFlag("api-url"),
+        profile: getFlag("profile"),
+      })
       break
     }
 

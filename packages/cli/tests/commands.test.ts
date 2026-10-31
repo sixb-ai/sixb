@@ -61,7 +61,10 @@ describe("sixb command line", () => {
     expect(output).not.toContain("--concurrency <value>")
     // A command added without a group would land in "More".
     expect(ROOT_HELP_GROUPS.map((group) => group.title)).not.toContain("More")
-    expect(ROOT_HELP_GROUPS.flatMap((group) => group.items)).toHaveLength(ROOT_HELP.commands.length)
+    // Every command, and `sixb` alone, which opens the app.
+    const items = ROOT_HELP_GROUPS.flatMap((group) => group.items)
+    expect(items).toHaveLength(ROOT_HELP.commands.length + 1)
+    expect(items[0]).toMatchObject({ label: "(no command)" })
 
     const worker = await runInProcess(() => renderHelp(helpFor(["worker"])))
     const workerOutput = worker.output.replace(/\s+/g, " ")
