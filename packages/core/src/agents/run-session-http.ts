@@ -48,17 +48,25 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
   // A cancel recorded before the claim: the run stops before it starts.
   if (run.cancelRequestedAt) cancelled.abort()
 
-  const request = (operation: string, init: RequestInit & { readonly query?: string } = {}) => {
+  const request = async (
+    operation: string,
+    init: RequestInit & { readonly query?: string } = {}
+  ) => {
     const url = new URL(
       `${agentRunSessionPath(run.id, operation)}${init.query ?? ""}`,
       input.apiUrl
     )
-    return send(
+    const response = await send(
       new Request(url, {
         ...init,
         headers: { authorization: `Bearer ${input.runnerToken}`, ...(init.headers ?? {}) },
       })
     )
+
+    // The server stopped the call: the run's Stop, which this runner hears now rather than at its
+    // next renewal.
+    if (response.status === 499) cancelled.abort()
+    return response
   }
   const call = async <T>(
     operation: string,
@@ -85,6 +93,8 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
         })
       )
     } catch (error) {
+      // A stopped run's live records are refused: its end is the record.
+      if (cancelled.signal.aborted) return
       console.error(`[Sixb] Live records of agent run '${run.id}' could not be sent.`, error)
     }
   })

@@ -117,6 +117,14 @@ export async function serveAgentRunSession(
 
   const admitted = await admitRunner(host, request, target.runId)
   if (admitted instanceof Response) return admitted
+
+  // Once a Stop is recorded, its runner only hears it and ends the run: nothing more runs or
+  // bills. Its lease is not renewed either, so the sweep ends a runner that ignores the Stop.
+  if (await stopRecorded(host, admitted)) {
+    if (target.operation === "renewLease") return json({ result: { cancelled: true } })
+    if (target.operation !== "finish") return stopped(admitted)
+  }
+
   // A child's session hears its parent's cancel too, as the runner's own claim does.
   const session = await openAgentRunSession(
     host,
@@ -266,9 +274,33 @@ async function admitRunner(
   return run
 }
 
+/** Whether a Stop is recorded on the run, or on the turn a child stops with. */
+async function stopRecorded(host: AgentRunSessionHost, run: AgentRunRecord): Promise<boolean> {
+  if (run.cancelRequestedAt) return true
+  if (run.kind !== "subagent") return false
+
+  const parent = await host.storage.agents.runs.getById({
+    projectId: host.projectId,
+    id: run.parentRunId,
+  })
+  return Boolean(parent?.cancelRequestedAt)
+}
+
+/**
+ * What a stopped run's runner hears for anything but its end: the aborted call a stopped run's
+ * session gives in process, which a runner already reads as the run stopping.
+ */
+function stopped(run: AgentRunRecord): Response {
+  const wire = {
+    kind: "AbortError",
+    message: `[Sixb] Agent run '${run.id}' was stopped: its runner only finishes it now.`,
+  }
+  return json({ error: wire }, wireErrorStatus(wire))
+}
+
 /**
  * Renew the lease, and say whether the run should stop: a cancel recorded on it, or on the run it
- * stops with, which a runner over HTTP hears only here.
+ * stops with, since its request was admitted. One recorded before never renews it.
  */
 async function renew(
   session: AgentRunSession,

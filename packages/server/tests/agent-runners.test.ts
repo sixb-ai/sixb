@@ -3,6 +3,7 @@ import type { LanguageModel } from "@sixb/core"
 import {
   agent,
   can,
+  defineAgentTool,
   defineGroup,
   defineRole,
   InMemoryBlobStorage,
@@ -15,6 +16,7 @@ import {
 import {
   AgentExecutionLostError,
   AgentRunRefusedError,
+  claimAgentRunChildOverHttp,
   claimAgentRunOverHttp,
   createAgentRunToken,
   createHttpAgentRunSession,
@@ -44,11 +46,31 @@ const API = "http://api.localhost"
 const LEASE = () => new Date(Date.now() + 60_000).toISOString()
 
 async function setup() {
+  /** What reached the project: its tool's runs and its model's calls. */
+  const reached = { tool: 0, model: 0 }
+  const pay = defineAgentTool("pay")
+    .description("Pay the open invoices.")
+    .input({})
+    .run(() => {
+      reached.tool += 1
+      return { paid: true }
+    })
   const storage = new InMemoryStorage()
   const host = new SixbHost({
     id: projectId,
     ontology: [],
-    models: { language: [model] },
+    models: {
+      language: [
+        {
+          ...model,
+          stream: () => {
+            reached.model += 1
+            return model.stream()
+          },
+        },
+      ],
+    },
+    tools: [pay],
     storage,
     broker: new InMemoryBroker(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -138,7 +160,7 @@ async function setup() {
     })
   }
 
-  return { storage, host, send, person, ask, claim, runnerTokens, claimStatuses }
+  return { storage, host, send, person, ask, claim, runnerTokens, claimStatuses, reached }
 }
 
 describe("a runner outside the worker", () => {
@@ -276,6 +298,106 @@ describe("a runner outside the worker", () => {
         "[SixbServer] A runner token cannot call GET /api/project: it reaches only its run's session.",
     })
     await session.close()
+  })
+
+  // Guard proof: drop the stopRecorded branch from serveAgentRunSession; after Ava's Stop, the
+  // invoices are paid, the model is called, and each renewal holds the turn a little longer.
+  test("serves a stopped turn only its end: nothing more runs, bills or holds it", async () => {
+    const { person, ask, claim, send, storage, runnerTokens, reached } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Pay the open invoices.")
+    const session = await claim(ava, runId)
+    if (!session) throw new Error("Expected the turn to be claimed.")
+    const model = await session.models.language({ provider: "test", modelId: "test-model" })
+
+    const stop = await send(
+      new Request(`${API}/api/agent-runs/${runId}/cancel`, { method: "POST", headers: ava })
+    )
+    expect(stop.status).toBe(202)
+    const leased = async () =>
+      (await storage.agents.runs.getById({ projectId, id: runId }))?.execution?.queueLeaseExpiresAt
+    const lease = await leased()
+
+    const paid = await session
+      .callTool(
+        { toolName: "pay", toolCallId: "call-1", input: {} },
+        { signal: new AbortController().signal }
+      )
+      .catch((error: unknown) => error)
+    const streamed = await model
+      .stream({
+        callId: "call-2",
+        messages: [{ role: "user", content: [{ type: "text", text: "Pay." }] }],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+      .catch((error: unknown) => error)
+
+    expect(paid).toMatchObject({
+      name: "AbortError",
+      message: `[Sixb] Agent run '${runId}' was stopped: its runner only finishes it now.`,
+    })
+    expect(streamed).toMatchObject({ name: "AbortError" })
+    expect(reached).toEqual({ tool: 0, model: 0 })
+    expect(
+      await storage.aiUsage.summarizeExecution({ projectId, executionId: session.run.executionId })
+    ).toMatchObject({ modelCallCount: 0 })
+    // Its runner hears the Stop at the first call refused, not at its next renewal.
+    expect(session.cancelled.aborted).toBe(true)
+
+    // A renewal hears it too, and holds the turn no longer.
+    const renewing = createHttpAgentRunSession({
+      apiUrl: API,
+      runnerToken: runnerTokens.get(runId) ?? "",
+      run: session.run,
+      fetch: send,
+    })
+    await renewing.renewLease(new Date(Date.now() + 90_000).toISOString())
+    expect(renewing.cancelled.aborted).toBe(true)
+    expect(await leased()).toEqual(lease)
+
+    expect(await session.finish({ status: "cancelled" })).toMatchObject({ status: "cancelled" })
+    await Promise.all([session.close(), renewing.close()])
+  })
+
+  // Guard proof: read only the child's own cancel in stopRecorded; the child of Ava's stopped turn
+  // still pays the invoices, until the turn's end stops it.
+  test("serves the child of a stopped turn only its end", async () => {
+    const { person, ask, claim, send, runnerTokens, reached } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Delegate the payments.")
+    const turn = await claim(ava, runId)
+    if (!turn) throw new Error("Expected the turn to be claimed.")
+    const spawned = await turn.children.spawn({
+      spawnKey: "payer",
+      spec: {
+        model: { provider: "test", modelId: "test-model" },
+        task: "Pay the open invoices.",
+        toolNames: ["pay"],
+      },
+      thread: { create: true },
+      trigger: { id: "payer-task", parts: [{ type: "text", text: "Pay the open invoices." }] },
+    })
+    const child = await claimAgentRunChildOverHttp(
+      { apiUrl: API, runnerToken: runnerTokens.get(runId) ?? "", run: turn.run, fetch: send },
+      { childRunId: spawned.id, leaseExpiresAt: LEASE() }
+    )
+    if (!child) throw new Error("Expected the child to be claimed.")
+
+    await send(
+      new Request(`${API}/api/agent-runs/${runId}/cancel`, { method: "POST", headers: ava })
+    )
+    const paid = await child
+      .callTool(
+        { toolName: "pay", toolCallId: "call-1", input: {} },
+        { signal: new AbortController().signal }
+      )
+      .catch((error: unknown) => error)
+
+    expect(paid).toMatchObject({ name: "AbortError" })
+    expect(reached.tool).toBe(0)
+    expect(await child.finish({ status: "cancelled" })).toMatchObject({ status: "cancelled" })
+    await Promise.all([turn.close(), child.close()])
   })
 
   // Guard proof: drop the `status === "running"` branch from claimAgentRunForRunner; Ava's second

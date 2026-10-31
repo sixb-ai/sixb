@@ -676,21 +676,23 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
           })
           .catch((error: unknown) => error)
 
+      // Refused by the publish, or over HTTP before it: a stopped run's session serves only its end.
+      const refusal = (error: unknown) => {
+        if (error instanceof ArtifactRequestError) return error.code
+        return error instanceof Error ? error.name : String(error)
+      }
+
       // A cancel recorded on the parent ends it already, as the run token reads it.
       await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: parent.run.id })
-      expect(await again()).toMatchObject({ code: "not_allowed" })
+      expect(["not_allowed", "AbortError"]).toContain(refusal(await again()))
 
       await parent.finish({ status: "succeeded" })
-      const refused = await child.artifacts
-        .publish({
-          artifactId: published.artifact.id,
-          title: "West again",
-          files: await documentFile("# West again\n"),
-        })
-        .catch((error: unknown) => error)
-
-      expect(refused).toBeInstanceOf(ArtifactRequestError)
-      expect(refused).toMatchObject({ code: "not_allowed" })
+      expect(["not_allowed", "AbortError"]).toContain(refusal(await again()))
+      const { total } = await storage.artifacts.listVersions({
+        projectId: PROJECT_ID,
+        artifactId: published.artifact.id,
+      })
+      expect(total).toBe(1)
       parent.close()
       child.close()
     })

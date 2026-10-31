@@ -115,6 +115,11 @@ renewLease       answers whether the run, or the turn a child stops with, was ca
                  signal a runner over HTTP hears, at most two minutes apart
 ```
 
+Once a Stop is recorded on the run, or on the turn a child stops with, its session serves only its
+end: `renewLease` answers `cancelled` without extending the lease, `finish` records the end, and
+anything else answers an aborted call (499), which the runner reads as the Stop. Nothing more runs
+or bills, and a runner that ignores the Stop loses its lease to the sweep.
+
 Once a run ended, its runner token reaches nothing, so `finish` over HTTP also announces the end live: its
 answer, then the run's end, from the server that recorded them.
 
