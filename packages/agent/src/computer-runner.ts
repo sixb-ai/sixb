@@ -13,7 +13,7 @@ import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { delay } from "./abort"
 import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
-import { runApiCredential, runTokenFor } from "./run-credential"
+import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
 import type { OpenRunSandbox } from "./run-environment"
 import type { RunSandbox } from "./run-sandbox"
 import type { AgentRunSettings } from "./types"
@@ -87,7 +87,7 @@ export class ComputerRunner {
     const { run } = session
     const turn: HttpAgentRunSessionInput<ConversationAgentRunRecord> = {
       apiUrl,
-      runToken: runTokenFor({
+      runnerToken: runnerTokenFor({
         projectId: run.projectId,
         runId: run.id,
         executionToken: session.executionToken,
