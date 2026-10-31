@@ -5,7 +5,8 @@
  *
  * - an emphasis or code span the last line opened is closed, so `**sum` is drawn bold now rather
  *   than as `**sum` that loses its two stars when `**` arrives;
- * - a link waits for its label, then is drawn with as much of its address as has arrived;
+ * - a link waits for its label, then shows as that label until its address is complete: a
+ *   terminal without clickable links draws the address after it, which would grow mid-line;
  * - a last line holding only a block's marker (`##`, `-`, `2`, `>`) waits for its text;
  * - a table waits until it is complete: its columns are sized to its widest cell, so every row
  *   could resize the ones above it;
@@ -40,16 +41,13 @@ export function steadyMarkdown(text: string): string {
 /** A line that is only the start of a block: a heading's, a list item's or a quote's marker. */
 const BLOCK_MARKER_ONLY = /^\s*(?:#{1,6}|[-*+]|\d{1,9}[.)]?|>|`{1,2}|~{1,2}|[-*_=]{2})\s*$/
 
-/**
- * `line` without a link whose label is not finished, and with a link whose address is not
- * closed: the label is all a link shows.
- */
+/** `line` without a link whose label is not finished, and with one whose address is not as its label. */
 function holdLink(line: string): string {
   const outsideCode = (at: number) => (line.slice(0, at).split("`").length - 1) % 2 === 0
   const label = /!?\[[^\]]*\]?$/.exec(line)
   if (label && outsideCode(label.index)) return line.slice(0, label.index).trimEnd()
-  const address = /!?\[[^\]]*\]\([^)\s]*$/.exec(line)
-  if (address && outsideCode(address.index)) return `${line})`
+  const address = /!?\[([^\]]*)\]\([^)\s]*$/.exec(line)
+  if (address && outsideCode(address.index)) return `${line.slice(0, address.index)}${address[1]}`
   return line
 }
 
