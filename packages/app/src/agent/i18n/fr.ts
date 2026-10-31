@@ -829,6 +829,7 @@ export const fr: Translation<AgentMessages> = {
     cancel: "Annuler",
     close: "Fermer",
     sharedBy: (owner) => `Fil de ${owner}`,
+    onComputer: (owner) => `Tourne sur l’ordinateur de ${owner} : vous pouvez le suivre ici`,
     answering: (name) => `L’agent répond à ${name}…`,
     continueMine: "Continuer dans mon propre fil",
     continuing: "Copie…",

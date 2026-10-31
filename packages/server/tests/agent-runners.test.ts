@@ -245,6 +245,37 @@ describe("a runner outside the worker", () => {
     ).toMatchObject({ error: expect.stringContaining("only its owner can message it") })
   })
 
+  // Guard proof: restore the bare "only its owner can message it" in assertThreadAcceptsRun; Bob's
+  // refusal no longer tells him the conversation is his to follow.
+  test("shares a computer's conversation to read: a participant follows it, and writes nothing", async () => {
+    const { person, ask, post, send, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+
+    expect(
+      await post(ava, `/api/agent-threads/${threadId}/participants`, {
+        users: [{ type: "user", id: "bob" }],
+      })
+    ).toMatchObject({ runsOn: "computer", participants: [{ principal: { id: "bob" } }] })
+    const read = await send(new Request(`${API}/api/agent-threads/${threadId}`, { headers: bob }))
+    expect(read.status).toBe(200)
+
+    const refused = await send(
+      new Request(`${API}/api/agent-threads/${threadId}/messages`, {
+        method: "POST",
+        headers: { ...bob, "content-type": "application/json" },
+        body: JSON.stringify({ text: "Why did Acme slip?" }),
+      })
+    )
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({
+      code: "not_thread_owner",
+      error: expect.stringContaining("Shared with you, it is yours to read and follow."),
+    })
+  })
+
   // Guard proof: drop the refuseOtherComputer call from the claim route; Ava's desktop runs a turn
   // of the conversation her laptop runs, in another folder on another disk.
   test("runs a conversation's turns on the one computer that runs it, until it moves", async () => {

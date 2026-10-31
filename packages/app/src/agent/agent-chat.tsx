@@ -88,6 +88,8 @@ export function AgentChat({
   // Sharing needs someone signed in: without auth, the project owns every conversation.
   const sharingThread = conversation.user ? currentThread : null
   const participant = sharingThread !== null && conversation.access === "participant"
+  // A thread on its owner's computer runs as them, in their folder: its participants follow it.
+  const readOnly = participant && currentThread?.runsOn === "computer"
 
   const conversationHeaderActions =
     threadId || hostHeaderActions ? (
@@ -168,8 +170,11 @@ export function AgentChat({
         welcomeContent={welcomeContent}
         headerActions={conversationHeaderActions}
         composerNotice={
-          participant ? <SharedThreadNotice owner={owner} sharing={sharing} /> : undefined
+          participant ? (
+            <SharedThreadNotice owner={owner} sharing={sharing} onComputer={readOnly} />
+          ) : undefined
         }
+        readOnly={readOnly}
       />
     )
   }

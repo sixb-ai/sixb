@@ -12999,6 +12999,7 @@ export type PostAgentThreadMessageErrors = {
    */
   403: {
     error: string
+    code?: string
   }
   /**
    * Response for status 404

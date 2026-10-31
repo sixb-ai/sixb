@@ -4577,7 +4577,7 @@ export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
 /**
  * Add participants to an agent thread
  *
- * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
+ * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights; a thread that runs on its owner's computer they only read. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
  */
 export const addAgentThreadParticipantsMutation = (
   options?: Partial<Options<AddAgentThreadParticipantsData>>

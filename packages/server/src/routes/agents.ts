@@ -71,7 +71,7 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
 })
 
 const SHARING =
-  "Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked."
+  "Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights; a thread that runs on its owner's computer they only read. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked."
 
 /** Threads as the API returns them, their owner and participants named by their accounts. */
 export async function serializeThreads(
@@ -859,7 +859,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         response: {
           202: PostAgentMessageResponseSchema,
           400: AgentRequestErrorResponseSchema,
-          403: ErrorResponseSchema,
+          // Coded: `not_thread_owner` when the thread runs on its owner's computer.
+          403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
           409: AgentRequestErrorResponseSchema,
           429: AiUsageLimitErrorResponseSchema,

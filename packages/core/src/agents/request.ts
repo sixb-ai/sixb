@@ -701,7 +701,7 @@ function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal)
   if (thread.runsOn === "computer" && !principalsEqual(principal, thread.ownerPrincipal)) {
     throw new AgentRequestError(
       "not_thread_owner",
-      `[Sixb] Agent thread '${thread.id}' runs on its owner's computer: only its owner can message it.`
+      `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can message it. Shared with you, it is yours to read and follow.`
     )
   }
   // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
