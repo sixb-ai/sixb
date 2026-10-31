@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { runApiCredential } from "@sixb/agent"
 import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
@@ -8,7 +9,6 @@ import { AgentRuntimeProfileError } from "../../agent/src/agent-runtime/errors"
 import { assertAgentRuntimeProfile } from "../../agent/src/agent-runtime/preflight"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
 import { prepareAgentSandboxApiContext } from "../../agent/src/sandbox-api-context"
-import { runApiCredential } from "../src/api-url"
 
 const PROJECT_ID = "runtime-test"
 const ENV = {

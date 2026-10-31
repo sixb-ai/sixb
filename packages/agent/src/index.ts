@@ -1,6 +1,11 @@
 export { waitForAbort } from "./abort"
 export type { AgentWorkspacePromptContext } from "./agent-prompt"
 export { createAskParentTool } from "./ask-parent-tool"
+export {
+  ComputerRunner,
+  type ComputerRunnerOptions,
+  type OpenComputerSandbox,
+} from "./computer-runner"
 export { prepareAgentModel } from "./context-budget"
 export {
   AgentEnvironmentSaveError,
@@ -17,6 +22,7 @@ export { agentRequester } from "./requester"
 export { runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 export { type ChildParent, ChildRunner, type ChildRunnerHost } from "./run-child"
 export { type ConversationTurnRunner, runConversationTurn } from "./run-conversation-turn"
+export { runApiCredential, runTokenFor } from "./run-credential"
 export type {
   AgentExecutionEnvironment,
   ConversationAgentExecutionEnvironment,

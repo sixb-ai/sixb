@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { mkdir, mkdtemp, open, realpath, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve, sep } from "node:path"
 import {
@@ -204,23 +205,55 @@ export class LocalSandbox implements Sandbox {
       )
     }
     // Local sandboxes write straight to the host filesystem — there is no guest boundary — so every
-    // path is confined to workingDirectory before writing. Without this an absolute path would escape
-    // onto the host. smolvm needs no such check: its writes land inside the VM.
+    // path is confined to where the sandbox's commands may write: its working directory and its
+    // read-write paths. Without this an absolute path would escape onto the host. smolvm needs no
+    // such check: its writes land inside the VM.
+    //
+    // This process runs outside the OS sandbox, so a link the sandbox's commands made would carry
+    // its writes anywhere: every directory the file goes into is checked where it really is, and
+    // the file itself is never written through a link.
     for (const file of files) {
-      const target = this.resolveWithinWorkingDirectory(file.path)
+      const target = this.resolveWithinWritableRoots(file.path)
+      await this.assertReallyWritable(dirname(target), file.path)
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, file.contents)
-      if (file.mode !== undefined) {
-        await chmod(target, file.mode)
+      await this.assertReallyWritable(dirname(target), file.path)
+      const handle = await open(
+        target,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW
+      ).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+          throw new Error(`[Sandbox] writeFiles path '${file.path}' is a symbolic link`)
+        }
+        throw error
+      })
+      try {
+        await handle.writeFile(file.contents)
+        if (file.mode !== undefined) await handle.chmod(file.mode)
+      } finally {
+        await handle.close()
       }
     }
   }
 
-  private resolveWithinWorkingDirectory(path: string): string {
-    const target = resolve(this.workingDirectory, path)
-    if (target !== this.workingDirectory && !target.startsWith(this.workingDirectory + sep)) {
+  /** Refuses a directory that, its links followed, leads outside where commands may write. */
+  private async assertReallyWritable(directory: string, requested: string): Promise<void> {
+    const real = await realPathOf(directory)
+    const roots = await Promise.all(
+      [this.workingDirectory, ...this.readWritePaths].map((root) => realPathOf(root))
+    )
+    if (!roots.some((root) => real === root || real.startsWith(root + sep))) {
       throw new Error(
-        `[Sandbox] writeFiles path '${path}' escapes the sandbox working directory ${this.workingDirectory}`
+        `[Sandbox] writeFiles path '${requested}' leads outside the sandbox working directory and its read-write paths`
+      )
+    }
+  }
+
+  private resolveWithinWritableRoots(path: string): string {
+    const target = resolve(this.workingDirectory, path)
+    const within = (root: string) => target === root || target.startsWith(root + sep)
+    if (!within(this.workingDirectory) && !this.readWritePaths.some(within)) {
+      throw new Error(
+        `[Sandbox] writeFiles path '${path}' escapes the sandbox working directory ${this.workingDirectory} and its read-write paths`
       )
     }
     return target
@@ -346,4 +379,21 @@ async function resolveWorkingDirectory(
   }
   const dir = await mkdtemp(join(tmpdir(), `sixb-sandbox-${id}-`))
   return { workingDirectory: await realpath(dir), generated: true }
+}
+
+/** Where `path` really is: its nearest existing ancestor's real path, then the rest as written. */
+async function realPathOf(path: string): Promise<string> {
+  let existing = path
+  while (
+    !(await stat(existing).then(
+      () => true,
+      () => false
+    ))
+  ) {
+    const parent = dirname(existing)
+    if (parent === existing) return path
+    existing = parent
+  }
+  const real = await realpath(existing)
+  return existing === path ? real : join(real, path.slice(existing.length))
 }

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ChildRunner } from "@sixb/agent"
+import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
 import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
@@ -157,7 +159,7 @@ import {
 import { createSixbApi, SixbServer } from "../../server/src/server"
 import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { normalizeApiBaseUrl, runApiCredential } from "../src/api-url"
+import { normalizeApiBaseUrl } from "../src/api-url"
 import { workerChildren } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
@@ -13313,6 +13315,78 @@ describe("agent tools act as the requester", () => {
     expect(recorded).toEqual(
       Array.from({ length: 3 }, () => ({ executionId: run?.executionId ?? "", attempt: 1 }))
     )
+  })
+
+  // The computer runner holds no project: it claims its owner's turn over HTTP, works in their
+  // folder, and runs the turn's child beside it over HTTP too.
+  // Removal proof: start no child from the computer runner's startChild; the child is never
+  // claimed, and stays queued.
+  test("a computer runs its owner's turn in their folder, and the turn's child beside it", async () => {
+    let childRunId = ""
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "child-model",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "The delegated fact is 42." },
+          { type: "text-end", id: "child-answer" },
+          finish("stop"),
+        ]),
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const request = await requestAgent(sixb, { text: "Delegate this.", runsOn: "computer" })
+    childRunId = createSubagentRunId(request.run.id, "research")
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const opened: { workingDirectory?: string; runFiles: string }[] = []
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async ({ workingDirectory, runFiles }) => {
+        opened.push({ ...(workingDirectory === undefined ? {} : { workingDirectory }), runFiles })
+        return new RecordingSandbox(`computer-${opened.length}`)
+      },
+    })
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      const ran = runner.runTurn(request.run.id, new AbortController().signal)
+      const parent = await underFakeTime(
+        () => terminalRun(agentStorageOf(sixb), request.run.id),
+        "the computer's turn"
+      )
+      expect(await ran).toBe(true)
+      expect(parent).toMatchObject({ status: "succeeded" })
+      expect(
+        await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
+      // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
+      // and gone once it ended.
+      expect(opened).toEqual([
+        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.id) },
+        { runFiles: join(runFilesRoot, childRunId) },
+      ])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+    } finally {
+      jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
   })
 
   test("accounts a tool's model call to the chat run like the Agent's own", async () => {

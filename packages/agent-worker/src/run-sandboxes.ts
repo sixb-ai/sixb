@@ -1,4 +1,4 @@
-import type { OpenRunSandbox } from "@sixb/agent"
+import { type OpenRunSandbox, runApiCredential, runTokenFor } from "@sixb/agent"
 import type { SandboxDefinition, SandboxFactory } from "@sixb/core"
 import type { AgentRunSession, WorkflowAgentNodeSession } from "@sixb/core/internal/agents"
 import { staticSandboxRecipe } from "@sixb/core/internal/agents"
@@ -8,7 +8,6 @@ import type {
   SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
-import { runApiCredential, runTokenFor } from "./api-url"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
 import { keepsSubagentWorkspace, persistentRunSandbox } from "./persistent-run-sandbox"
 import type { AgentRunnerContext, AgentWorkerContext } from "./types"
