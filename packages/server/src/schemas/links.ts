@@ -14,6 +14,9 @@ export const RemoveLinkQuerySchema = z.object({
   targetId: z.string().min(1),
 })
 
+/** A link is named by its target, as for its removal. */
+export const LinkLineageQuerySchema = RemoveLinkQuerySchema
+
 export const UpsertLinkBodySchema = z.object({
   targetTypeId: z.string().min(1),
   targetId: z.string().min(1),

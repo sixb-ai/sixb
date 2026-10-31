@@ -22,6 +22,7 @@ import {
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
+import { ObjectLineageSchema } from "../schemas/lineage"
 import {
   GetObjectByUniquePropertyBodySchema,
   ObjectListResponseSchema,
@@ -847,6 +848,39 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "getObject",
           security: accessTokenSecurityRequirement("getObject"),
+        },
+      }
+    )
+    .get(
+      "/api/objects/:objectTypeId/:objectId/lineage",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+
+        try {
+          const objectType = sixb.objects.getTypeById(params.objectTypeId)
+          const lineage = objectType
+            ? await sixb.objects(objectType).lineage(params.objectId)
+            : null
+          if (lineage) return ObjectLineageSchema.parse(lineage)
+        } catch (error) {
+          // Identity reads hide existence: forbidden and missing look the same.
+          if (!(error instanceof AuthorizationError)) throw error
+        }
+
+        set.status = 404
+        return { error: "Object not found" }
+      },
+      {
+        params: ObjectParamsSchema,
+        response: { 200: ObjectLineageSchema, 404: ErrorResponseSchema },
+        detail: {
+          summary: "Get where an object's values come from",
+          description:
+            "What makes the object exist and what decided each property it holds, for the current state. Steps the caller cannot view are left out and counted in `restricted`.",
+          tags: [OPENAPI_TAGS.objects.name],
+          operationId: "getObjectLineage",
+          security: accessTokenSecurityRequirement("getObjectLineage"),
         },
       }
     )

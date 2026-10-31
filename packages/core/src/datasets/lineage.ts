@@ -156,7 +156,10 @@ function lineageVersion(
 }
 
 /** The producer as the reader may see it, decided as the pipeline and sync run facades decide. */
-function visibleProducer(runtime: SixbRuntimeContext, producer: DatasetProducer): DatasetProducer {
+export function visibleProducer(
+  runtime: SixbRuntimeContext,
+  producer: DatasetProducer
+): DatasetProducer {
   const { kind, id } = producer
   if (id === undefined || kind === "ingest") return { kind }
 

@@ -157,6 +157,10 @@ for await (const row of result?.rows ?? []) {
 The caller needs a view grant on the dataset. Columns it is not cleared for are left out of
 `columns` and of every row, and listed in `redactions`. See [Markings](../auth/markings.md).
 
+`sixb.datasets.listVersions(dataset, { limit })` and `getVersion(dataset, versionId)` read version
+metadata. A version names its producer's run, and lists its inputs, only as far as the caller may
+view them.
+
 ## File location
 
 Export definitions from `datasets/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
@@ -184,3 +188,4 @@ Every row written to a dataset is validated against its schema:
 - [Syncs](../syncs/overview.md) — pull rows into a dataset
 - [Pipelines](../pipelines/overview.md) — transform one dataset into another
 - [Projections](../projections/overview.md) — turn rows into ontology objects
+- [Lineage](../objects/lineage.md#walk-a-dataset-version-upstream) — the versions a version is computed from

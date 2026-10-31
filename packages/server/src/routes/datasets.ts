@@ -1,4 +1,4 @@
-import type { DatasetDefinition, SixbHostView } from "@sixb/core"
+import type { DatasetDefinition, DatasetLineage, SixbHostView } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
@@ -12,6 +12,8 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import { codedErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import {
   DatasetCatalogItemSchema,
+  DatasetLineageQuerySchema,
+  DatasetLineageResponseSchema,
   DatasetParamsSchema,
   DatasetRowsQuerySchema,
   DatasetRowsResponseSchema,
@@ -61,6 +63,15 @@ function serializeDatasetVersion(version: DatasetVersion) {
     inputs: version.inputs,
     rowCount: version.rowCount,
     sizeBytes: version.sizeBytes,
+  })
+}
+
+function serializeDatasetLineage(lineage: DatasetLineage) {
+  return DatasetLineageResponseSchema.parse({
+    ...lineage,
+    nodes: lineage.nodes.map((node) =>
+      "expired" in node ? node : { ...node, createdAt: toIsoString(node.createdAt) }
+    ),
   })
 }
 
@@ -253,10 +264,10 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, query, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
+          const dataset = requireDataset(sixb, params.datasetId)
           const parsed = DatasetVersionsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT)
-          const versions = await host.lakeStorage.listVersions(params.datasetId, limit)
+          const versions = await sixb.datasets.listVersions(dataset, { limit })
 
           return DatasetVersionListResponseSchema.parse({
             versions: versions.map(serializeDatasetVersion),
@@ -288,8 +299,8 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
-          const version = await host.lakeStorage.getVersion(params.datasetId, params.versionId)
+          const dataset = requireDataset(sixb, params.datasetId)
+          const version = await sixb.datasets.getVersion(dataset, params.versionId)
           if (!version) {
             throw datasetVersionNotFound(params.datasetId, params.versionId)
           }
@@ -310,6 +321,45 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get dataset version",
           tags: [OPENAPI_TAGS.datasetVersions.name],
           operationId: "getDatasetVersion",
+        },
+      }
+    )
+    .get(
+      "/api/datasets/:datasetId/versions/:versionId/lineage",
+      async (context) => {
+        const { params, query, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          const dataset = requireDataset(sixb, params.datasetId)
+          const parsed = DatasetLineageQuerySchema.parse(query)
+          const lineage = await sixb.datasets.lineage(dataset, {
+            versionId: params.versionId,
+            depth: parseOptionalInt(parsed.depth),
+          })
+          if (!lineage) {
+            throw datasetVersionNotFound(params.datasetId, params.versionId)
+          }
+
+          return serializeDatasetLineage(lineage)
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        params: DatasetVersionParamsSchema,
+        query: DatasetLineageQuerySchema,
+        response: {
+          200: DatasetLineageResponseSchema,
+          400: ErrorResponseSchema,
+          404: DatasetVersionNotFoundErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get the versions a dataset version is computed from",
+          description:
+            "Walks the version's inputs upstream, `depth` steps (1 to 20, default 5). A version whose dataset the caller cannot view is left out with everything upstream of it, and counted in `restricted`.",
+          tags: [OPENAPI_TAGS.datasetVersions.name],
+          operationId: "getDatasetVersionLineage",
+          security: accessTokenSecurityRequirement("getDatasetVersionLineage"),
         },
       }
     )
