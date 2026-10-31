@@ -42,13 +42,7 @@ import { useSections } from "../../sections/sections"
 import { objectHref, objectTypeHref } from "../routes"
 import { PageFrame } from "../section-page"
 import { Panel, PanelEmpty, useLoadFailure } from "../section-ui"
-import {
-  fieldRecordSchema,
-  objectFileLinks,
-  useValueTypes,
-  ValuePanel,
-  valueSchema,
-} from "../values"
+import { fieldRecordSchema, objectFileLinks, useValueTypes, valueSchema } from "../values"
 import { ActionButton } from "./components/action-button"
 import { LetterAvatar, LoadingState, Section } from "./components/common"
 import { TelemetryGrid } from "./components/telemetry-grid"
@@ -59,6 +53,9 @@ import { useObjectTelemetryUpdates } from "./hooks/object-telemetry-updates"
 import { humanizeIdentifier } from "./lib/labels"
 import { getHistoryBounds, isSampleInBounds } from "./lib/telemetry-history"
 import { formatRelativeTime } from "./lib/time"
+import { PropertiesPanel } from "./lineage/properties-panel"
+import { useObjectLineage } from "./lineage/query"
+import { LineageSummary } from "./lineage/summary"
 
 // Loaded only when a numeric trend draws, so the charting library stays out of other pages.
 const TelemetryChart = lazy(() =>
@@ -287,6 +284,7 @@ export function ObjectPage() {
   })
   const object = objectQuery.data
   const failure = useLoadFailure(objectQuery.error, { id: params.primaryId })
+  const lineage = useObjectLineage(params.objectTypeId, params.primaryId)
   const typesOpen = useSections().some((section) => section.id === "ontology")
 
   const objectTypes = useQuery({ ...listObjectTypesOptions(), retry: false }).data
@@ -596,6 +594,7 @@ export function ObjectPage() {
               <span>Updated {formatRelativeTime(object.updatedAt)}</span>
             </>
           ) : null}
+          {lineage ? <LineageSummary lineage={lineage} /> : null}
         </>
       }
     >
@@ -783,9 +782,11 @@ export function ObjectPage() {
         <Section title="Details">
           {/* A property the type does not declare, or a type that could not be read, has no
               schema and draws as an undescribed value. */}
-          <ValuePanel
+          <PropertiesPanel
+            key={object.id}
             title="Properties"
-            value={properties}
+            objectName={displayName}
+            properties={properties}
             schema={
               objectType
                 ? valueSchema(
@@ -808,7 +809,14 @@ export function ObjectPage() {
                   )
                 : undefined
             }
+            propertySchema={(propertyId) => {
+              const property = objectType?.properties.find(
+                (candidate) => candidate.id === propertyId
+              )
+              return property ? valueSchema(property.schema, valueTypes) : undefined
+            }}
             fileLinks={objectFileLinks(object.objectTypeId, object.primaryId)}
+            lineage={lineage}
           />
         </Section>
       ) : null}

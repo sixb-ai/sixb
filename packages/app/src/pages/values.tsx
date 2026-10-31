@@ -346,6 +346,7 @@ export function ValuePanel({
   fileLinks,
   emptyLabel,
   labels,
+  renderLabel,
 }: {
   readonly title: string
   readonly value: unknown
@@ -355,6 +356,7 @@ export function ValuePanel({
   readonly emptyLabel?: string
   /** Names for the value's own fields, such as an object's property names, in place of their ids. */
   readonly labels?: Readonly<Record<string, string>>
+  readonly renderLabel?: RenderFieldLabel
 }) {
   const messages = useValueMessages()
   const [raw, setRaw] = useState(false)
@@ -393,12 +395,24 @@ export function ValuePanel({
             {JSON.stringify(value, null, 2)}
           </pre>
         ) : (
-          <ValueTree value={value} schema={schema} fileLinks={fileLinks} labels={labels} />
+          <ValueTree
+            value={value}
+            schema={schema}
+            fileLinks={fileLinks}
+            labels={labels}
+            renderLabel={renderLabel}
+          />
         )}
       </div>
     </section>
   )
 }
+
+/**
+ * Draws the label of one of the value's own fields, such as a property name that opens where its
+ * value comes from. Fields nested deeper keep their plain labels.
+ */
+export type RenderFieldLabel = (key: string, label: string) => ReactNode
 
 /** A value as a tree of labelled fields, without a panel around it. */
 export function ValueTree({
@@ -406,6 +420,7 @@ export function ValueTree({
   schema,
   fileLinks,
   labels,
+  renderLabel,
   emptyLabel,
   path = [],
 }: {
@@ -413,6 +428,7 @@ export function ValueTree({
   readonly schema?: ValueSchema
   readonly fileLinks?: FileLinksAt
   readonly labels?: Readonly<Record<string, string>>
+  readonly renderLabel?: RenderFieldLabel
   /** What an empty value reads as, such as "No input". */
   readonly emptyLabel?: string
   readonly path?: readonly string[]
@@ -438,12 +454,18 @@ export function ValueTree({
       </p>
     )
   }
+
+  const fieldLabel = (key: string) => {
+    const text = labels?.[key] ?? key
+    return renderLabel ? renderLabel(key, text) : text
+  }
+
   return (
     <dl className="divide-y divide-border/60 text-[0.8125rem]">
       {entries.map(([key, item]) => (
         <Field
           key={key}
-          label={Array.isArray(value) ? `${Number(key) + 1}` : (labels?.[key] ?? key)}
+          label={Array.isArray(value) ? `${Number(key) + 1}` : fieldLabel(key)}
           value={item}
           schema={position.child(key)}
           fileLinks={fileLinks}
@@ -461,7 +483,7 @@ function Field({
   fileLinks,
   path,
 }: {
-  readonly label: string
+  readonly label: ReactNode
   readonly value: unknown
   readonly schema: ValueSchema | undefined
   readonly fileLinks?: FileLinksAt
