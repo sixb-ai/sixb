@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   defineLanguageModel,
   defineLanguageModelLabel,
+  defineModelRateCard,
   estimateModelReservation,
   isJsonObject,
   isModelReasoning,
@@ -27,6 +28,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
+import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
 import { anthropicOutputSchema } from "./structured-output"
 
@@ -37,6 +39,7 @@ const DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 const DEFAULT_API_VERSION = "2023-06-01"
 const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
+const PRICES_RETRY_MS = 60_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
 const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
@@ -44,10 +47,13 @@ const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "im
 export interface AnthropicOptions {
   readonly baseUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
+  /** Workspace for keys that can act on several. Defaults to `ANTHROPIC_WORKSPACE_ID`. */
+  readonly workspaceId?: ValueSource<string | undefined>
   readonly apiVersion?: string
   readonly betas?: ValueSource<readonly string[]>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+  /** How long the model catalog and models.dev prices stay in memory. Defaults to one hour. */
   readonly catalogTtlMs?: number
   readonly maxRetries?: number
   readonly maxRetryDelayMs?: number
@@ -64,6 +70,8 @@ export interface AnthropicModelOptions extends LanguageModelLabel {
   /** Anthropic server tools such as web search. Local Sixb tools are appended as client tools. */
   readonly providerTools?: readonly JsonObject[]
   readonly capabilities?: ModelCapabilities
+  /** Prices for this binding, such as negotiated rates. Replaces the models.dev prices. */
+  readonly rateCard?: ModelRateCard
 }
 
 export interface AnthropicCatalog extends LanguageModelDefinitionCatalog {
@@ -89,16 +97,19 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
   const transport: AnthropicTransport = {
     ...options,
     apiKey: options.apiKey ?? (() => process.env.ANTHROPIC_API_KEY),
+    workspaceId: options.workspaceId ?? (() => process.env.ANTHROPIC_WORKSPACE_ID),
     baseUrl,
     apiVersion,
   }
   const configuredModels = configuredModelDefinitions(options.models ?? [])
   const catalog = new RemoteAnthropicCatalog(transport, configuredModels)
+  const prices = new ModelsDevPrices(transport)
   const model = (modelId: string, modelOptions: AnthropicModelOptions = {}) => {
     if (!modelId.trim()) throw new TypeError("[SixbAnthropic] Model id must not be empty.")
     return new AnthropicLanguageModel(
       transport,
       catalog,
+      prices,
       modelId,
       structuredClone(modelOptions),
       configuredModels.get(modelId)
@@ -133,11 +144,6 @@ function configuredModelDefinitions(
   }
   return configured
 }
-
-/** Shared zero-configuration Anthropic provider. */
-export const anthropic = createAnthropic({
-  apiKey: () => process.env.ANTHROPIC_API_KEY,
-})
 
 class RemoteAnthropicCatalog implements AnthropicCatalog {
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
@@ -240,6 +246,65 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
   }
 }
 
+/**
+ * models.dev prices for Anthropic models, held in memory for the catalog TTL. Anthropic publishes
+ * no machine-readable prices. A failed download keeps the last prices, or leaves models unpriced,
+ * and is retried after a minute; it never fails inference.
+ */
+class ModelsDevPrices {
+  private prices: ReadonlyMap<string, ModelRateCard> | undefined
+  private loadPromise: Promise<void> | undefined
+  private loadedAt = 0
+  private retryAt = 0
+
+  constructor(private readonly transport: AnthropicTransport) {}
+
+  /** Prices in memory, after any download already under way. Never starts I/O. */
+  async cached(modelId: string): Promise<ModelRateCard | undefined> {
+    await this.loadPromise
+    return this.prices?.get(modelId)
+  }
+
+  async get(modelId: string): Promise<ModelRateCard | undefined> {
+    const ttl = this.transport.catalogTtlMs ?? DEFAULT_CATALOG_TTL_MS
+    const stale = this.prices === undefined || Date.now() - this.loadedAt >= ttl
+    if (stale && Date.now() >= this.retryAt) {
+      this.loadPromise ??= this.load().finally(() => {
+        this.loadPromise = undefined
+      })
+    }
+    return this.cached(modelId)
+  }
+
+  private async load(): Promise<void> {
+    try {
+      const text = await downloadModelsDev({ fetch: this.transport.fetch })
+      const models = object(object(object(JSON.parse(text))?.anthropic)?.models)
+      if (!models) throw new Error("The response has no anthropic.models.")
+
+      const prices = new Map<string, ModelRateCard>()
+      for (const [modelId, value] of Object.entries(models)) {
+        const card = modelsDevRateCard(object(object(value)?.cost))
+        if (card) prices.set(modelId, card)
+      }
+      this.prices = prices
+      this.loadedAt = Date.now()
+    } catch (error) {
+      this.retryAt = Date.now() + PRICES_RETRY_MS
+      console.warn(
+        `[SixbAnthropic] models.dev prices unavailable: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }
+}
+
+// Created after the classes it constructs: bundlers keep class declarations in their temporal
+// dead zone until evaluated, so a browser bundle threw while importing the package.
+/** Shared zero-configuration Anthropic provider. */
+export const anthropic = createAnthropic({
+  apiKey: () => process.env.ANTHROPIC_API_KEY,
+})
+
 function catalogDefinition(value: unknown): LanguageModelDefinition | undefined {
   const model = object(value)
   const modelId = string(model?.id)
@@ -307,10 +372,12 @@ class AnthropicLanguageModel implements LanguageModel {
   constructor(
     private readonly transport: AnthropicTransport,
     private readonly catalog: AnthropicCatalog,
+    private readonly prices: ModelsDevPrices,
     modelId: string,
     private readonly options: AnthropicModelOptions,
     configuredDefinition: LanguageModelDefinition | undefined,
-    private readonly metadataResolved = false
+    private readonly metadataResolved = false,
+    basePrices?: ModelRateCard
   ) {
     this.modelId = modelId
     const base = configuredDefinition ?? fallbackDefinition(modelId)
@@ -345,9 +412,11 @@ class AnthropicLanguageModel implements LanguageModel {
     }
     // Server tools may add request- or duration-based charges that token rates cannot represent.
     const rateCard =
-      (options.providerTools?.length ?? 0) > 0
-        ? undefined
-        : anthropicRateCard(modelId, options.request)
+      options.rateCard !== undefined
+        ? defineModelRateCard(options.rateCard)
+        : (options.providerTools?.length ?? 0) > 0
+          ? undefined
+          : anthropicRateCard(modelId, options.request, basePrices)
     this.definition = defineLanguageModel({
       ...base,
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
@@ -362,14 +431,22 @@ class AnthropicLanguageModel implements LanguageModel {
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {
     if (this.metadataResolved) return this
-    const definition = options?.offline ? this.definition : await this.catalog.get(this.modelId)
+    const offline = options?.offline === true
+    const [definition, basePrices] = await Promise.all([
+      offline ? this.definition : this.catalog.get(this.modelId),
+      this.options.rateCard !== undefined || offline
+        ? this.prices.cached(this.modelId)
+        : this.prices.get(this.modelId),
+    ])
     return new AnthropicLanguageModel(
       this.transport,
       this.catalog,
+      this.prices,
       this.modelId,
       this.options,
       definition ?? this.definition,
-      true
+      true,
+      basePrices
     )
   }
 
@@ -482,6 +559,7 @@ class AnthropicLanguageModel implements LanguageModel {
       maxOutputTokens,
       this.modelId
     )
+    const thinking = summarizedThinking(reasoning.thinking, this.modelId)
     const outputConfig: JsonObject = {
       ...(existingOutputConfig ?? {}),
       ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
@@ -495,22 +573,26 @@ class AnthropicLanguageModel implements LanguageModel {
           }),
     }
     return {
-      body: {
-        ...extra,
-        model: this.modelId,
-        messages: mapped.messages,
-        stream: true,
-        max_tokens: maxOutputTokens,
-        ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
-        ...(tools.length === 0
-          ? {}
-          : {
-              tools,
-              tool_choice: { type: "auto" },
-            }),
-        ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-        ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),
-      },
+      body: withPromptCaching(
+        {
+          ...extra,
+          model: this.modelId,
+          messages: mapped.messages,
+          stream: true,
+          max_tokens: maxOutputTokens,
+          ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
+          ...(tools.length === 0
+            ? {}
+            : {
+                tools,
+                tool_choice: { type: "auto" },
+              }),
+          ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
+          ...(thinking === undefined ? {} : { thinking }),
+        },
+        request.caching,
+        request.tools.length
+      ),
     }
   }
 
@@ -659,6 +741,7 @@ function anthropicHeaders(
 ): Record<string, string> {
   const headers = resolve(transport.headers) ?? {}
   const apiKey = resolve(transport.apiKey)
+  const workspaceId = resolve(transport.workspaceId)?.trim()
   const betas = resolve(transport.betas)?.filter((value) => value.trim()) ?? []
   return {
     accept,
@@ -667,6 +750,7 @@ function anthropicHeaders(
     ...(contentType ? { "content-type": "application/json" } : {}),
     ...(betas.length === 0 ? {} : { "anthropic-beta": betas.join(",") }),
     ...(apiKey ? { "x-api-key": apiKey } : {}),
+    ...(workspaceId ? { "anthropic-workspace-id": workspaceId } : {}),
   }
 }
 
@@ -680,6 +764,71 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
 
 // The catalog exposes adaptive/manual support, but not whether thinking can be disabled.
 // Keep the same restriction for direct and offline bindings that have no catalog metadata.
+/**
+ * Anthropic caches only what a request marks, so the adapter marks the prefixes Sixb repeats:
+ *
+ * - the last local tool: tools render first and match across a project's threads and users;
+ * - the last system block: the system prompt holds for a thread across turns, even when replayed
+ *   history differs;
+ * - the conversation tail, through automatic caching: agent steps only append, so each step reads
+ *   what the previous one wrote.
+ *
+ * A one-shot request (no tools and no earlier answer) is left alone unless it asks for `"auto"`:
+ * nothing reads its prefix again, so a cache write would only add 25% to its input price.
+ * `caching: "off"` adds nothing, and a `cache_control` in the binding's `request` sets the TTL
+ * for every breakpoint, since longer TTLs must come first.
+ */
+function withPromptCaching(
+  body: JsonObject,
+  caching: "auto" | "off" | undefined,
+  localTools: number
+): JsonObject {
+  if (caching === "off") return body
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  const continues = messages.some((message) => object(message)?.role === "assistant")
+  if (caching !== "auto" && localTools === 0 && !continues) return body
+
+  const marker = object(body.cache_control) ?? { type: "ephemeral" }
+  const tools = Array.isArray(body.tools) ? body.tools : []
+  const system = Array.isArray(body.system) ? body.system : []
+  const lastSystem = object(system.at(-1))
+  const markSystem = lastSystem?.type === "text" && string(lastSystem.text) !== ""
+
+  return {
+    ...body,
+    cache_control: marker,
+    ...(localTools === 0
+      ? {}
+      : { tools: [...tools.slice(0, -1), { ...object(tools.at(-1)), cache_control: marker }] }),
+    ...(markSystem
+      ? { system: [...system.slice(0, -1), { ...lastSystem, cache_control: marker }] }
+      : {}),
+  }
+}
+
+/**
+ * Claude 4.7 and later return empty thinking text unless a request asks for a summary, and Claude 5
+ * and later think without a `thinking` field. Sixb shows reasoning, so wherever thinking runs on
+ * those models, the adapter asks for summaries. Billing is the same; `disabled` takes no display.
+ */
+function summarizedThinking(
+  thinking: JsonObject | undefined,
+  modelId: string
+): JsonObject | undefined {
+  if (!/^claude-(?:[a-z]+-4-[78]|[a-z]+-(?:[5-9]|\d{2,})|mythos-preview)(?:-|$)/.test(modelId)) {
+    return thinking
+  }
+  if (thinking === undefined) {
+    const thinksByDefault = /^claude-(?:[a-z]+-(?:[5-9]|\d{2,})|mythos-preview)(?:-|$)/.test(
+      modelId
+    )
+    return thinksByDefault ? { type: "adaptive", display: "summarized" } : undefined
+  }
+  return thinking.type === "adaptive" || thinking.type === "enabled"
+    ? { ...thinking, display: "summarized" }
+    : thinking
+}
+
 function anthropicThinkingAlwaysOn(modelId: string): boolean {
   return /^claude-(?:fable-5|mythos-(?:5|preview))(?:-|$)/.test(modelId)
 }

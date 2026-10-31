@@ -6,11 +6,39 @@ import {
   ModelProviderError,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
+import { MODELS_DEV_URL } from "@sixb/model-protocols/models-dev"
 import { agentTraceFromModelSteps } from "../../../packages/agent/src/model-adapters"
 import { READ_TOOL_SPEC } from "../../../packages/agent/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent/src/tools/view-file"
-import { anthropic, createAnthropic } from "../src"
+import {
+  type AnthropicOptions,
+  anthropic,
+  createAnthropic as createAnthropicProvider,
+} from "../src"
 import { anthropicOutputSchema } from "../src/structured-output"
+
+const modelsDev = {
+  anthropic: {
+    models: {
+      "claude-opus-5": {
+        id: "claude-opus-5",
+        cost: { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+      },
+    },
+  },
+}
+
+// Resolving a model also downloads models.dev prices. Serving them here keeps each test's fetch
+// mock, and its request counts, about the Anthropic API.
+function createAnthropic(options: AnthropicOptions = {}) {
+  const fetch = options.fetch
+  if (!fetch) return createAnthropicProvider(options)
+  return createAnthropicProvider({
+    ...options,
+    fetch: async (input, init) =>
+      String(input) === MODELS_DEV_URL ? Response.json(modelsDev) : fetch(input, init),
+  })
+}
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
   return {
@@ -50,25 +78,25 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
-  test("reserves ordinary Anthropic calls without a cache TTL accounting option", () => {
+  test("reserves ordinary Anthropic calls without a cache TTL accounting option", async () => {
     // Removal proof: remove estimateReservation from the provider; every estimate disappears.
     const provider = createAnthropic({
-      fetch: async () => {
-        throw new Error("No catalog I/O expected")
-      },
+      fetch: async () => Response.json({ data: [], has_more: false }),
     })
     for (const request of [undefined, { cache_control: { type: "ephemeral", ttl: "1h" } }]) {
+      const model = await provider("claude-opus-5", { request }).resolve?.()
       expect(
-        provider("claude-opus-5", { request }).costEstimator?.estimateReservation?.({
-          inputTokens: 1000,
-          outputTokens: 200,
-        })
+        model?.costEstimator?.estimateReservation?.({ inputTokens: 1000, outputTokens: 200 })
       ).toEqual({ currency: "USD", amountNanos: "15000000" })
     }
+    const serverToolModel = await provider("claude-opus-5", {
+      providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+    }).resolve?.()
     expect(
-      provider("claude-opus-5", {
-        providerTools: [{ type: "web_search_20260209", name: "web_search" }],
-      }).costEstimator?.estimateReservation?.({ inputTokens: 1000, outputTokens: 200 })
+      serverToolModel?.costEstimator?.estimateReservation?.({
+        inputTokens: 1000,
+        outputTokens: 200,
+      })
     ).toBeUndefined()
   })
 
@@ -181,7 +209,8 @@ describe("Anthropic provider", () => {
         })
         expect(result.status).toBe("completed")
         expect(bodies.at(-1)).toMatchObject({ max_tokens: 8_192 })
-        expect(bodies.at(-1)?.thinking).toBeUndefined()
+        // Thinking stays on; the adapter only asks for its summary.
+        expect(bodies.at(-1)?.thinking).toEqual({ type: "adaptive", display: "summarized" })
       }
       expect(warn).toHaveBeenCalledTimes(3)
       await resolved.stream(request({ reasoning: "high" }))
@@ -361,15 +390,76 @@ describe("Anthropic provider", () => {
       await model.stream(request({ reasoning }))
     }
     await model.stream(request())
+    // Claude 4.7 hides thinking text unless asked; 4.6 summarizes by default.
+    const adaptive =
+      modelId === "claude-opus-4-7"
+        ? { type: "adaptive", display: "summarized" }
+        : { type: "adaptive" }
     expect(
       bodies.map((body) => ({ thinking: body.thinking, output_config: body.output_config }))
     ).toEqual([
-      { thinking: { type: "adaptive" }, output_config: { effort: "low" } },
-      { thinking: { type: "adaptive" }, output_config: { effort: "medium" } },
-      { thinking: { type: "adaptive" }, output_config: { effort: "high" } },
+      { thinking: adaptive, output_config: { effort: "low" } },
+      { thinking: adaptive, output_config: { effort: "medium" } },
+      { thinking: adaptive, output_config: { effort: "high" } },
       { thinking: { type: "disabled" }, output_config: undefined },
       { thinking: undefined, output_config: undefined },
       { thinking: undefined, output_config: undefined },
+    ])
+  })
+
+  test.each([
+    ["claude-opus-5-5", undefined, { type: "adaptive", display: "summarized" }],
+    ["claude-sonnet-5-5", "high", { type: "adaptive", display: "summarized" }],
+    ["claude-haiku-5-5", "provider-default", { type: "adaptive", display: "summarized" }],
+    ["claude-opus-5", "none", { type: "disabled" }],
+    ["claude-opus-4-8", undefined, undefined],
+    ["claude-sonnet-4-6", "high", { type: "adaptive" }],
+  ] as const)("asks %s for summarized thinking wherever it would hide it (reasoning %s)", async (modelId, reasoning, thinking) => {
+    // Regression proof: send reasoning.thinking unchanged; Claude 5 thinking text comes back empty.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId,
+          capabilities: { reasoning: { canDisable: true, efforts: ["low", "medium", "high"] } },
+        },
+      ],
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = await provider(modelId).resolve!({ offline: true })
+    await model.stream(request({ reasoning }))
+    expect(bodies[0]?.thinking).toEqual(thinking)
+  })
+
+  test("selects the workspace for keys that can act on several", async () => {
+    const headers: Headers[] = []
+    const fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers))
+      return sseResponse([])
+    }
+    const previous = process.env.ANTHROPIC_WORKSPACE_ID
+    process.env.ANTHROPIC_WORKSPACE_ID = "wrkspc_env"
+    try {
+      await createAnthropic({ fetch })("claude-opus-5-5").stream(request())
+      await createAnthropic({ fetch, workspaceId: "wrkspc_option" })("claude-opus-5-5").stream(
+        request()
+      )
+      delete process.env.ANTHROPIC_WORKSPACE_ID
+      await createAnthropic({ fetch })("claude-opus-5-5").stream(request())
+    } finally {
+      if (previous === undefined) delete process.env.ANTHROPIC_WORKSPACE_ID
+      else process.env.ANTHROPIC_WORKSPACE_ID = previous
+    }
+
+    expect(headers.map((header) => header.get("anthropic-workspace-id"))).toEqual([
+      "wrkspc_env",
+      "wrkspc_option",
+      null,
     ])
   })
 
@@ -1225,8 +1315,9 @@ describe("Anthropic provider", () => {
     })
     expect(definitions[1]?.capabilities.reasoning).toBe(false)
     expect(definitions[0]).not.toHaveProperty("rateCard")
+    const resolved = await provider("claude-opus-5").resolve?.()
     expect(
-      provider("claude-opus-5").costEstimator?.estimate({
+      resolved?.costEstimator?.estimate({
         usage: {
           inputTokens: 100,
           uncachedInputTokens: 100,
@@ -1239,46 +1330,108 @@ describe("Anthropic provider", () => {
     ).toMatchObject({ status: "rated", money: { amountNanos: "750000" } })
   })
 
-  test("builds request-specific rate cards without loading the catalog", () => {
+  test("prices request options from models.dev once resolved", async () => {
     // Regression proof: ignore speed or inference_geo in anthropicRateCard.
-    let requests = 0
     const provider = createAnthropic({
-      fetch: async () => {
-        requests += 1
-        throw new Error("catalog unavailable")
-      },
+      fetch: async () => Response.json({ data: [], has_more: false }),
     })
-    const model = provider("claude-opus-5", {
+    const binding = provider("claude-opus-5", {
       request: {
         speed: "fast",
         inference_geo: "us",
         cache_control: { type: "ephemeral", ttl: "1h" },
       },
     })
+    const usage = {
+      inputTokens: 100,
+      uncachedInputTokens: 100,
+      outputTokens: 10,
+      cacheReadInputTokens: 0,
+      cacheWrite5mInputTokens: 0,
+      cacheWrite1hInputTokens: 0,
+    }
 
-    expect(model.definition).not.toHaveProperty("rateCard")
-    expect(
-      model.costEstimator?.estimate({
-        usage: {
-          inputTokens: 100,
-          uncachedInputTokens: 100,
-          outputTokens: 10,
-          cacheReadInputTokens: 0,
-          cacheWrite5mInputTokens: 0,
-          cacheWrite1hInputTokens: 0,
-        },
-      })
-    ).toMatchObject({ status: "rated", money: { amountNanos: "1650000" } })
-    const serverToolModel = provider("claude-opus-5", {
-      providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+    // An unresolved binding has no prices: models.dev is only read when the model resolves.
+    expect(binding.costEstimator?.estimate({ usage })).toMatchObject({ status: "unpriceable" })
+
+    const model = await binding.resolve?.()
+    expect(model?.definition).not.toHaveProperty("rateCard")
+    expect(model?.costEstimator?.estimate({ usage })).toMatchObject({
+      status: "rated",
+      money: { amountNanos: "1650000" },
     })
+    const serverToolModel = await provider("claude-opus-5", {
+      providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+    }).resolve?.()
     expect(
-      serverToolModel.costEstimator?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
+      serverToolModel?.costEstimator?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
     ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
-    // The binding shows the card it prices with, and none where server tools make it unknown.
-    expect(model.rateCard).toMatchObject({ currency: "USD", input: expect.any(String) })
-    expect(serverToolModel.rateCard).toBeUndefined()
-    expect(requests).toBe(0)
+    // The model shows the card it prices with, and none where server tools make it unknown.
+    expect(model?.rateCard).toMatchObject({ currency: "USD", input: expect.any(String) })
+    expect(serverToolModel?.rateCard).toBeUndefined()
+  })
+
+  test("downloads models.dev prices once per catalog TTL and shares them across models", async () => {
+    let downloads = 0
+    const provider = createAnthropicProvider({
+      fetch: async (input) => {
+        if (String(input) !== MODELS_DEV_URL) return Response.json({ data: [], has_more: false })
+        downloads += 1
+        return Response.json(modelsDev)
+      },
+    })
+
+    await Promise.all([
+      provider("claude-opus-5").resolve?.(),
+      provider("claude-opus-5", { reasoning: "high" }).resolve?.(),
+    ])
+    await provider("claude-opus-5").resolve?.({ offline: true })
+
+    expect(downloads).toBe(1)
+  })
+
+  test("leaves models unpriced when models.dev fails, and retries a minute later", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const now = spyOn(Date, "now").mockReturnValue(0)
+    let downloads = 0
+    const provider = createAnthropicProvider({
+      fetch: async (input) => {
+        if (String(input) !== MODELS_DEV_URL) return Response.json({ data: [], has_more: false })
+        downloads += 1
+        return downloads === 1
+          ? new Response("unavailable", { status: 503 })
+          : Response.json(modelsDev)
+      },
+    })
+    try {
+      expect((await provider("claude-opus-5").resolve?.())?.rateCard).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("models.dev prices unavailable"))
+      await provider("claude-opus-5").resolve?.()
+      expect(downloads).toBe(1)
+
+      now.mockReturnValue(60_000)
+      expect((await provider("claude-opus-5").resolve?.())?.rateCard).toMatchObject({ input: "5" })
+      expect(downloads).toBe(2)
+    } finally {
+      warn.mockRestore()
+      now.mockRestore()
+    }
+  })
+
+  test("prices a binding's own rate card without models.dev", async () => {
+    let downloads = 0
+    const provider = createAnthropicProvider({
+      fetch: async (input) => {
+        if (String(input) === MODELS_DEV_URL) downloads += 1
+        return Response.json({ data: [], has_more: false })
+      },
+    })
+    const rateCard = { currency: "USD", input: "1", output: "2" } as const
+
+    const binding = provider("claude-opus-5", { rateCard })
+    expect(binding.rateCard).toEqual(rateCard)
+    expect((await binding.resolve?.())?.rateCard).toEqual(rateCard)
+    expect(downloads).toBe(0)
   })
 
   test("retries retryable pre-stream responses and preserves pause_turn", async () => {
