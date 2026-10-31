@@ -1,4 +1,4 @@
-import type { Part } from "./parts"
+import type { ApprovalOutcome, Part } from "./parts"
 
 type ToolPart = Extract<Part, { readonly kind: "tool" }>
 
@@ -19,7 +19,13 @@ export interface ToolLine {
 
 const PREVIEW_LINES = 4
 
-export function toolLine(part: ToolPart): ToolLine {
+const NO_OUTCOMES: ReadonlyMap<string, ApprovalOutcome> = new Map()
+
+/** `outcomes` says how the held calls ended, by approval id: a decided call is no longer held. */
+export function toolLine(
+  part: ToolPart,
+  outcomes: ReadonlyMap<string, ApprovalOutcome> = NO_OUTCOMES
+): ToolLine {
   const input = record(part.input) ?? partialInput(part.inputText)
   const output = record(part.output)
   const failed = part.state === "error"
@@ -32,18 +38,21 @@ export function toolLine(part: ToolPart): ToolLine {
       const stdout = text(output?.stdout)
       const stderr = text(output?.stderr)
       const shown = exitCode !== undefined && exitCode !== 0 && stderr ? stderr : stdout || stderr
-      // `sixb` answers a call it held for approval with its status, and a nonzero exit.
-      const held = stdout.includes('"status":"awaiting_approval"')
+      const heldIds = heldApprovalIds(stdout)
+      const decided = heldIds.flatMap((id) => outcomes.get(id) ?? [])
+      const held = heldIds.length > decided.length
       return {
         verb: "bash",
         command: command.trim(),
         detail: firstLine(command) + (command.includes("\n") ? " …" : ""),
-        ...(shown && !held ? { preview: lines(shown) } : {}),
+        ...(shown && heldIds.length === 0 ? { preview: lines(shown) } : {}),
         ...(held
           ? { note: "held for your approval", held }
-          : exitCode !== undefined && exitCode !== 0
-            ? { note: `exit ${exitCode}`, failed: true }
-            : {}),
+          : heldIds.length > 0
+            ? decidedLine(decided)
+            : exitCode !== undefined && exitCode !== 0
+              ? { note: `exit ${exitCode}`, failed: true }
+              : {}),
         ...error,
       }
     }
@@ -103,6 +112,65 @@ export function toolLine(part: ToolPart): ToolLine {
           : {}),
         ...error,
       }
+  }
+}
+
+/**
+ * The approvals a `bash` output says it waits for. `sixb` prints the API's answer to a call it held
+ * as one JSON line naming the approval, but the output is the model's to shape: as in the web
+ * chat, only a line that names a record counts, wherever it sits.
+ */
+function heldApprovalIds(stdout: string): string[] {
+  return stdout.split("\n").flatMap((line) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith("{")) return []
+
+    const parsed = record(parseJson(trimmed))
+    if (parsed?.status !== "awaiting_approval") return []
+
+    const approval = record(parsed.approval)
+    return typeof approval?.id === "string" && approval.id ? [approval.id] : []
+  })
+}
+
+/** How decided calls ended, as the web chat's approval card names it. */
+function decidedLine(outcomes: readonly ApprovalOutcome[]): Pick<ToolLine, "note" | "failed"> {
+  const ended = outcomes.map(outcomeNote)
+  const failed = ended.some((entry) => entry.failed)
+  return {
+    note: [...new Set(ended.map((entry) => entry.note))].join(", "),
+    ...(failed ? { failed } : {}),
+  }
+}
+
+function outcomeNote(outcome: ApprovalOutcome): { readonly note: string; readonly failed?: true } {
+  switch (outcome.status) {
+    case "approved": {
+      const ran = outcome.outcome
+      if (ran?.kind === "error" && ran.error.code === "agent.approval_authority_lost") {
+        return { note: "approved, but it didn't run", failed: true }
+      }
+      if (ran?.kind === "error" || (ran?.kind === "action-run" && ran.status === "failed")) {
+        return { note: "approved, but it failed", failed: true }
+      }
+      return { note: "approved" }
+    }
+    case "denied":
+      return { note: "denied" }
+    case "superseded":
+      return { note: "set aside" }
+    case "cancelled":
+      return { note: "stopped" }
+    case "expired":
+      return { note: "expired" }
+  }
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
   }
 }
 

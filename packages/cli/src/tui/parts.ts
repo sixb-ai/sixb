@@ -27,17 +27,41 @@ export type Part =
     }
   | { readonly kind: "file"; readonly name: string; readonly mediaType?: string }
 
+type ApprovalOutcomePart = Extract<StoredMessage["parts"][number], { type: "approval-outcome" }>
+
+/** How a held call ended, as the message that resumed or followed its turn told the agent. */
+export interface ApprovalOutcome {
+  readonly approvalId: string
+  readonly status: ApprovalOutcomePart["status"]
+  readonly outcome?: ApprovalOutcomePart["outcome"]
+}
+
 export interface ShownMessage {
   readonly id: string
   readonly role: "user" | "assistant"
   readonly runId: string | null
   readonly parts: readonly Part[]
+  /** How the held calls before it ended: not shown, but the calls' own lines say it. */
+  readonly outcomes: readonly ApprovalOutcome[]
   readonly createdAt: string
 }
 
 /** A stored message as shown: what is context for the agent alone stays hidden. */
 export function shownMessage(message: StoredMessage): ShownMessage | null {
   if (message.role === "system") return null
+
+  const outcomes = message.parts.flatMap((part): ApprovalOutcome[] =>
+    part.type === "approval-outcome"
+      ? [
+          {
+            approvalId: part.approvalId,
+            status: part.status,
+            ...(part.outcome === undefined ? {} : { outcome: part.outcome }),
+          },
+        ]
+      : []
+  )
+
   const parts = message.parts.flatMap((part): Part[] => {
     switch (part.type) {
       case "text":
@@ -76,15 +100,26 @@ export function shownMessage(message: StoredMessage): ShownMessage | null {
         return []
     }
   })
-  // A turn resumed after approvals starts from a message the person never wrote.
-  if (message.role === "user" && parts.length === 0) return null
+  // A turn resumed after approvals starts from a message the person never wrote: it shows
+  // nothing, and is kept for how its held calls ended.
+  if (message.role === "user" && parts.length === 0 && outcomes.length === 0) return null
   return {
     id: message.id,
     role: message.role,
     runId: message.runId,
     parts,
+    outcomes,
     createdAt: message.createdAt,
   }
+}
+
+/** How each held call of a transcript ended, by its approval's id. */
+export function approvalOutcomes(
+  messages: readonly ShownMessage[]
+): ReadonlyMap<string, ApprovalOutcome> {
+  return new Map(
+    messages.flatMap((message) => message.outcomes.map((outcome) => [outcome.approvalId, outcome]))
+  )
 }
 
 /** A run as it streams: its parts so far, and whether it still works. */

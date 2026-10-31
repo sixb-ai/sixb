@@ -2,7 +2,13 @@
 import type { SyntaxStyle } from "@opentui/core"
 import type { ListAgentThreadApprovalsResponses, ListAgentThreadRunsResponses } from "@sixb/client"
 import { duration, friendlyPath, plural, type ToolLine, toolLine } from "./format"
-import type { LiveRun, Part, ShownMessage } from "./parts"
+import {
+  type ApprovalOutcome,
+  approvalOutcomes,
+  type LiveRun,
+  type Part,
+  type ShownMessage,
+} from "./parts"
 import { placeLabel } from "./settings"
 import type { TuiColors } from "./theme"
 import { BOLD, ITALIC, useNow, useSpinner } from "./ui"
@@ -45,16 +51,19 @@ export function Transcript({
   readonly approvalChoice: number
 }) {
   const runsById = new Map(runs.map((run) => [run.id, run]))
+  const outcomes = approvalOutcomes(messages)
+  // A resumed turn's trigger only says how its held calls ended, which their own lines show.
+  const shown = messages.filter((message) => message.role !== "user" || message.parts.length > 0)
   // The live run shows its own answer until the stored one arrives, never both.
   const liveShown =
     live &&
     !messages.some((message) => message.runId === live.runId && message.role === "assistant")
   return (
     <box flexDirection="column" gap={1}>
-      {messages.map((message, index) => {
+      {shown.map((message, index) => {
         if (message.role === "user")
           return <UserMessage key={message.id} colors={colors} message={message} />
-        const next = messages[index + 1]
+        const next = shown[index + 1]
         // A turn's meta goes under its last message: a resumed turn answers in several.
         const lastOfRun = !next || next.runId !== message.runId
         const run = message.runId ? runsById.get(message.runId) : undefined
@@ -64,6 +73,7 @@ export function Transcript({
               colors={colors}
               syntax={syntax}
               parts={message.parts}
+              outcomes={outcomes}
               streaming={false}
               width={width}
               folder={folder}
@@ -85,6 +95,7 @@ export function Transcript({
           colors={colors}
           syntax={syntax}
           parts={live.parts}
+          outcomes={outcomes}
           streaming={live.working}
           width={width}
           folder={folder}
@@ -142,6 +153,7 @@ function AgentParts({
   colors,
   syntax,
   parts,
+  outcomes,
   streaming,
   width,
   folder,
@@ -149,6 +161,8 @@ function AgentParts({
   readonly colors: TuiColors
   readonly syntax: SyntaxStyle
   readonly parts: readonly Part[]
+  /** How the transcript's held calls ended, by approval id. */
+  readonly outcomes: ReadonlyMap<string, ApprovalOutcome>
   readonly streaming: boolean
   readonly width: number
   readonly folder?: string
@@ -187,7 +201,7 @@ function AgentParts({
               <ToolRow
                 key={key}
                 colors={colors}
-                line={shownLine(toolLine(part), folder)}
+                line={shownLine(toolLine(part, outcomes), folder)}
                 state={part.state}
                 width={width}
               />

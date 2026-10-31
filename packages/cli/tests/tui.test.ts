@@ -44,16 +44,27 @@ describe("a stored message", () => {
     expect(shown?.parts.map((part) => part.kind)).toEqual(["reasoning", "tool", "text"])
   })
 
-  test("is dropped when it is a resumed turn's trigger, which nobody wrote", () => {
-    expect(
+  test("shows nothing of a resumed turn's trigger, which nobody wrote, but how its calls ended", () => {
+    const outcome = {
+      type: "approval-outcome",
+      approvalId: "apr_1",
+      status: "denied",
+      call: { kind: "action", actionId: "add-field-note", subject: { kind: "none" } },
+    }
+    const trigger = (parts: readonly unknown[]) =>
       shownMessage({
         id: "m2",
         role: "user",
         runId: null,
         createdAt: "2026-10-30T00:00:00.000Z",
-        parts: [{ type: "approval-outcome" }],
+        parts,
       } as unknown as StoredMessage)
-    ).toBeNull()
+
+    expect(trigger([outcome])).toMatchObject({
+      parts: [],
+      outcomes: [{ approvalId: "apr_1", status: "denied" }],
+    })
+    expect(trigger([])).toBeNull()
   })
 })
 
@@ -123,13 +134,29 @@ describe("a call as one line", () => {
 
   test("reads a call the API held for approval as waiting, not failed", () => {
     expect(
-      toolLine(bash({ exitCode: 4, stdout: '{"status":"awaiting_approval","approval":{}}' }))
+      toolLine(
+        bash({ exitCode: 4, stdout: '{"status":"awaiting_approval","approval":{"id":"apr_1"}}' })
+      )
     ).toMatchObject({ held: true, note: "held for your approval" })
     expect(toolLine(bash({ exitCode: 2, stderr: "unknown option" }))).toMatchObject({
       failed: true,
       note: "exit 2",
       preview: ["unknown option"],
     })
+  })
+
+  // Guard proof: in toolLine (src/tui/format.ts), read `held` back as
+  // `stdout.includes('"status":"awaiting_approval"')`: both outputs read as held, their lines hidden.
+  test("holds only a line that names the approval, as the web chat does", () => {
+    for (const stdout of [
+      'log.jsonl:{"status":"awaiting_approval","approval":{"id":"apr_1"}}',
+      '{"status":"awaiting_approval","approval":{}}',
+    ]) {
+      const line = toolLine(bash({ exitCode: 0, stdout }))
+
+      expect(line.held).toBeUndefined()
+      expect(line.preview).toEqual([stdout])
+    }
   })
 
   test("keeps a long output to a few lines, and says how many it left out", () => {
