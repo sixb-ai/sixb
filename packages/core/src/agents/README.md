@@ -116,9 +116,11 @@ renewLease       answers whether the run, or the turn a child stops with, was ca
 ```
 
 Once a Stop is recorded on the run, or on the turn a child stops with, its session serves only its
-end: `renewLease` answers `cancelled` without extending the lease, `finish` records the end, and
-anything else answers an aborted call (499), which the runner reads as the Stop. Nothing more runs
-or bills, and a runner that ignores the Stop loses its lease to the sweep.
+end: `renewLease` answers `cancelled` without extending the lease, the reads between a model step
+and the end still answer (held calls, the children's state), so the runner keeps what it wrote, and
+`finish` records the end. Anything else answers an aborted call (499). Every answer carries
+`x-sixb-agent-run-stopped`, which the runner reads as the Stop. Nothing more runs, writes or bills,
+and a runner that ignores the Stop loses its lease to the sweep.
 
 Once a run ended, its runner token reaches nothing, so `finish` over HTTP also announces the end live: its
 answer, then the run's end, from the server that recorded them.

@@ -9,6 +9,7 @@ import {
   openAgentRunSession,
 } from "./run-session"
 import {
+  AGENT_RUN_STOPPED_HEADER,
   decodeWireValue,
   encodeWireError,
   encodeWireValue,
@@ -117,14 +118,44 @@ export async function serveAgentRunSession(
 
   const admitted = await admitRunner(host, request, target.runId)
   if (admitted instanceof Response) return admitted
-
-  // Once a Stop is recorded, its runner only hears it and ends the run: nothing more runs or
-  // bills. Its lease is not renewed either, so the sweep ends a runner that ignores the Stop.
-  if (await stopRecorded(host, admitted)) {
-    if (target.operation === "renewLease") return json({ result: { cancelled: true } })
-    if (target.operation !== "finish") return stopped(admitted)
+  if (!(await stopRecorded(host, admitted))) {
+    return serveOperation(host, admitted, target.operation, request)
   }
 
+  // Once a Stop is recorded, its runner only ends the run, keeping what it wrote: nothing more
+  // runs, writes or bills. Its lease is not renewed either, so the sweep ends a runner that ignores
+  // the Stop. Every answer says so, for the runner to stop at once.
+  let response: Response
+  if (target.operation === "renewLease") {
+    response = json({ result: { cancelled: true } })
+  } else if (STOPPING_OPERATIONS.has(target.operation)) {
+    response = await serveOperation(host, admitted, target.operation, request)
+  } else {
+    response = stopped(admitted)
+  }
+  response.headers.set(AGENT_RUN_STOPPED_HEADER, "true")
+  return response
+}
+
+/**
+ * What a stopped run's runner still needs besides `renewLease`: the reads between a model step and
+ * its end, which decide whether it pauses and wait for its children, then the end itself.
+ */
+const STOPPING_OPERATIONS = new Set([
+  "heldCalls.holdsRun",
+  "heldCalls.pausesAfterStep",
+  "children.getMany",
+  "children.activeCount",
+  "finish",
+])
+
+/** One operation of the run's session, in a session opened for it. */
+async function serveOperation(
+  host: AgentRunSessionHost,
+  admitted: AgentRunRecord,
+  operation: string,
+  request: Request
+): Promise<Response> {
   // A child's session hears its parent's cancel too, as the runner's own claim does.
   const session = await openAgentRunSession(
     host,
@@ -133,7 +164,6 @@ export async function serveAgentRunSession(
   )
   let streaming = false
   try {
-    const { operation } = target
     if (operation === "models.stream") {
       streaming = true
       return await streamModelCall(session, request)
@@ -287,8 +317,8 @@ async function stopRecorded(host: AgentRunSessionHost, run: AgentRunRecord): Pro
 }
 
 /**
- * What a stopped run's runner hears for anything but its end: the aborted call a stopped run's
- * session gives in process, which a runner already reads as the run stopping.
+ * What a stopped run's runner hears for anything else: the aborted call a stopped run's session
+ * gives in process, which a runner already reads as the run stopping.
  */
 function stopped(run: AgentRunRecord): Response {
   const wire = {

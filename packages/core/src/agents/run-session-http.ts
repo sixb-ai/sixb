@@ -9,6 +9,7 @@ import type { StreamSink } from "./run-events"
 import { AgentExecutionLostError } from "./run-fence"
 import type { AgentRunSession } from "./run-session"
 import {
+  AGENT_RUN_STOPPED_HEADER,
   agentRunSessionPath,
   decodeWireError,
   decodeWireValue,
@@ -63,9 +64,8 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       })
     )
 
-    // The server stopped the call: the run's Stop, which this runner hears now rather than at its
-    // next renewal.
-    if (response.status === 499) cancelled.abort()
+    // The run was stopped: this runner hears it now rather than at its next renewal.
+    if (response.headers.has(AGENT_RUN_STOPPED_HEADER)) cancelled.abort()
     return response
   }
   const call = async <T>(

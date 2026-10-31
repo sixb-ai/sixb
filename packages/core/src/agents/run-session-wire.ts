@@ -11,6 +11,9 @@ import { AgentFinalizationError } from "./run-session"
 // answers are maps, so values are tagged JSON. Errors cross as their kind, so the runner throws
 // the same classes it would in process.
 
+/** Set on every answer of a run's session once a Stop is recorded on the run. */
+export const AGENT_RUN_STOPPED_HEADER = "x-sixb-agent-run-stopped"
+
 /** Where a runner reaches its run's session. */
 export function agentRunSessionPath(runId: string, operation: string): string {
   return `/api/agent-runs/${encodeURIComponent(runId)}/session/${operation}`
