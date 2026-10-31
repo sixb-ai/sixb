@@ -9,6 +9,7 @@ import type {
   OntologyCommitStorage,
 } from "../commits"
 import {
+  assertTimestamp,
   commitKey,
   commitOriginKey,
   type InMemoryOntologyState,
@@ -65,10 +66,16 @@ export class InMemoryOntologyCommitStorage implements OntologyCommitStorage {
           "[Sixb] Ontology commit list limit and offset must be nonnegative integers."
         )
       }
+      if (input.committedAt !== undefined) {
+        assertTimestamp(input.committedAt, "Ontology commit list committedAt")
+      }
       const direction = input.order === "desc" ? -1 : 1
       const commits = [...this.state.commitsById.values()]
         .filter((commit) => commit.projectId === input.projectId)
         .filter((commit) => (input.run ? commitMatchesRun(commit, input.run) : true))
+        .filter((commit) =>
+          input.committedAt === undefined ? true : commit.committedAt === input.committedAt
+        )
         .sort((left, right) => {
           if (input.run?.kind === "projection") {
             const byOrdinal = projectionRunOrdinal(left) - projectionRunOrdinal(right)

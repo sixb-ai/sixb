@@ -16,7 +16,10 @@ export function contractExecutor(id: string) {
   return { type: "request" as const, requestId: `contract-request:${id}` }
 }
 
-export function contractEditHeader(id: string): MaterializationPlanHeader {
+export function contractEditHeader(
+  id: string,
+  committedAt = CONTRACT_COMMITTED_AT
+): MaterializationPlanHeader {
   return {
     commit: {
       projectId: "contract-project",
@@ -27,7 +30,7 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
       origin: { kind: "runtime", requestId: id },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-      committedAt: CONTRACT_COMMITTED_AT,
+      committedAt,
     },
     expected: {
       sources: [],
@@ -41,27 +44,35 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
 
 export const CONTRACT_COMMITTED_AT = "2026-01-02T00:00:00.000Z"
 
-export function contractEditResult(commitId: string, eventCount = 0) {
+export function contractEditResult(
+  commitId: string,
+  eventCount = 0,
+  committedAt = CONTRACT_COMMITTED_AT
+) {
   return {
     kind: "edit" as const,
     commitId,
     created: true,
     eventCount,
-    committedAt: CONTRACT_COMMITTED_AT,
+    committedAt,
     outcomes: [],
     changes: { objects: [], links: [] },
   }
 }
 
-export async function commitEmptyEdit(storage: OntologyContractStorage, id: string): Promise<void> {
+export async function commitEmptyEdit(
+  storage: OntologyContractStorage,
+  id: string,
+  committedAt = CONTRACT_COMMITTED_AT
+): Promise<void> {
   await storage.transaction(async (tx) => {
-    const header = contractEditHeader(id)
+    const header = contractEditHeader(id, committedAt)
     await ensureContractExecution(tx, header)
     const session = await tx.ontology.materializations.begin(header)
     await tx.ontology.materializations.apply({ session })
     await tx.ontology.materializations.finalize({
       session,
-      finalization: { sourceActivations: [], result: contractEditResult(id) },
+      finalization: { sourceActivations: [], result: contractEditResult(id, 0, committedAt) },
     })
   })
 }

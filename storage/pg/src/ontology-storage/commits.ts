@@ -10,6 +10,7 @@ import type {
 import {
   assertNonblank,
   assertNonnegativeInteger,
+  assertTimestamp,
   commitRecord,
   originWhere,
   type PgOntologyCommitRow,
@@ -81,6 +82,9 @@ export class PgOntologyCommitStorage implements OntologyCommitStorage {
       const limit = input.limit
       assertNonnegativeInteger(offset, "Ontology commit list offset")
       if (limit !== undefined) assertNonnegativeInteger(limit, "Ontology commit list limit")
+      if (input.committedAt !== undefined) {
+        assertTimestamp(input.committedAt, "Ontology commit list committedAt")
+      }
 
       const runFilter =
         input.run?.kind === "action"
@@ -89,10 +93,15 @@ export class PgOntologyCommitStorage implements OntologyCommitStorage {
             ? sql`AND origin_run_id = ${input.run.id}
                   AND origin_kind IN ('projection', 'telemetry')`
             : sql``
+      // The (project_id, committed_at, id) index serves this exact match.
+      const committedAtFilter =
+        input.committedAt === undefined
+          ? sql``
+          : sql`AND committed_at = ${input.committedAt}::timestamptz`
       const [{ total }] = await sql<{ readonly total: number | string }[]>`
         SELECT COUNT(*) AS total
         FROM ontology_commits
-        WHERE project_id = ${input.projectId} ${runFilter}
+        WHERE project_id = ${input.projectId} ${runFilter} ${committedAtFilter}
       `
       const direction = input.order === "desc" ? sql`DESC` : sql`ASC`
       const order =
@@ -103,7 +112,7 @@ export class PgOntologyCommitStorage implements OntologyCommitStorage {
       const limitFragment = limit === undefined ? sql`` : sql`LIMIT ${limit}`
       const rows = await sql<PgOntologyCommitRow[]>`
         SELECT * FROM ontology_commits
-        WHERE project_id = ${input.projectId} ${runFilter}
+        WHERE project_id = ${input.projectId} ${runFilter} ${committedAtFilter}
         ORDER BY ${order}
         ${limitFragment} OFFSET ${offset}
       `

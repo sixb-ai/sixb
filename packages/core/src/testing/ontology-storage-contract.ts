@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { MaterializationValidationError } from "../materialization/errors"
 import type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
 import { linkRefSortKey, linkScopeSortKey } from "../materialization/refs"
 import type {
+  ListOntologyCommitsInput,
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
   MaterializationSession,
@@ -149,6 +151,46 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         expect(list).toMatchObject({ total: 1, hasMore: false })
         expect(list.commits.map((commit) => commit.id)).toEqual(["commit-one"])
+      })
+    })
+
+    // Removal proof: drop the `committedAt` condition from a provider's `list`; the first read then
+    // returns all four commits.
+    test("lists exactly the commits made at one instant", async () => {
+      await withStorage(async (storage) => {
+        const instant = "2026-01-05T10:00:00.000Z"
+        await commitEmptyEdit(storage, "at-instant-b", instant)
+        await commitEmptyEdit(storage, "just-before", "2026-01-05T09:59:59.999Z")
+        await commitEmptyEdit(storage, "at-instant-a", instant)
+        await commitEmptyEdit(storage, "just-after", "2026-01-05T10:00:00.001Z")
+        const list = (input: Omit<ListOntologyCommitsInput, "projectId">) =>
+          storage.ontology.commits.list({ projectId: "contract-project", ...input })
+
+        const atInstant = await list({ committedAt: instant })
+        expect(atInstant.commits.map((commit) => commit.id)).toEqual([
+          "at-instant-a",
+          "at-instant-b",
+        ])
+        expect(atInstant).toMatchObject({ total: 2, hasMore: false })
+
+        const firstDescending = await list({ committedAt: instant, order: "desc", limit: 1 })
+        expect(firstDescending.commits.map((commit) => commit.id)).toEqual(["at-instant-b"])
+        expect(firstDescending).toMatchObject({ total: 2, hasMore: true })
+
+        expect(await list({ committedAt: "2026-01-05T10:00:00.002Z" })).toEqual({
+          commits: [],
+          total: 0,
+          hasMore: false,
+        })
+
+        // SQLite compares commit times as text: only the canonical form can match exactly.
+        const nonCanonical = await list({ committedAt: "2026-01-05T10:00:00Z" }).catch(
+          (error: unknown) => error
+        )
+        expect(nonCanonical).toBeInstanceOf(MaterializationValidationError)
+        expect(nonCanonical).toMatchObject({
+          message: expect.stringContaining("canonical UTC timestamp"),
+        })
       })
     })
 
