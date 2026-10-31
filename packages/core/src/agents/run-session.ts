@@ -49,6 +49,7 @@ import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
 import type { StreamSink } from "./run-events"
 import {
   AgentExecutionLostError,
+  AgentRunRefusedError,
   assertAgentRunOwned,
   fenced,
   isTerminalOrExecutionGone,
@@ -63,10 +64,8 @@ import {
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
-  type AgentRunMail,
   type AgentRunThreads,
   agentRunChildren,
-  agentRunMail,
   agentRunScope,
   agentRunThreads,
 } from "./run-session-children"
@@ -125,8 +124,6 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly heldCalls: AgentRunHeldCalls
   /** A conversation turn's children: spawning them, and reading them and their threads. */
   readonly children: AgentRunChildren
-  /** Mail between a turn and its children. */
-  readonly mail: AgentRunMail
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
    * once the last lease recorded lapses, so the session renews it as the queue does. A renewal that
@@ -430,7 +427,6 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       tools: host.definitions.tools.list().map((tool) => tool.name),
       models: host.definitions.models?.language?.list() ?? [],
     })),
-    mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
@@ -468,6 +464,11 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
             { ended: true }
           )
         )
+        // A child stops with its parent: a cancel recorded on it too.
+        if (cancelWith.length > 0) {
+          const others = await agents.runs.getByIds({ projectId: host.projectId, ids: cancelWith })
+          for (const other of others) readCancel(other)
+        }
       } catch (error) {
         // A repair pass ended the run, or another runner took it over: this one stops now rather
         // than at its next write, as it does when its queue lease is lost.
@@ -570,15 +571,22 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return readAgentTurnHistory(host, input.threadId)
     },
     workspace: {
-      transition: (input) =>
-        fenced(run.id, () =>
+      async transition(input) {
+        // A run moves its own thread's workspace, never another's.
+        if (input.id !== run.threadId) {
+          throw new AgentRunRefusedError(
+            `[Sixb] Agent run '${run.id}' moves only its own thread's workspace, not '${input.id}'.`
+          )
+        }
+        return fenced(run.id, () =>
           host.storage.agents.threads.transitionSandbox({
             ...input,
             projectId: host.projectId,
             runId: run.id,
             executionToken,
           })
-        ),
+        )
+      },
     },
     async close() {
       cancel.stop()

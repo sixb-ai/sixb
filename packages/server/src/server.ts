@@ -55,6 +55,7 @@ import {
 } from "./openapi/security"
 import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
+import { agentRunSessionHandler, startLapsedRunSweeper } from "./routes/agent-runners"
 import { registerAuthRoutes } from "./routes/auth"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./routes/files"
 import { registerWebhookRoutes } from "./routes/webhooks"
@@ -100,6 +101,7 @@ export class SixbServer {
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private maintenance: OntologyMaintenanceHandle | null = null
+  private stopSweeper: (() => void) | null = null
 
   constructor(options: SixbServerOptions) {
     this.hostRuntime = options.host
@@ -199,6 +201,9 @@ export class SixbServer {
       throw new Error(`[SixbServer] Failed to listen on ${this.hostname}:${this.port}: ${message}`)
     }
 
+    // A runner on a computer has no worker behind it: the API ends the runs it stops renewing.
+    this.stopSweeper = startLapsedRunSweeper(this.hostRuntime)
+
     if (!this.quiet) {
       const base = `http://${this.hostname}:${this.getPort()}`
       console.log(`Sixb server running at ${base}`)
@@ -207,6 +212,8 @@ export class SixbServer {
   }
 
   async stop(): Promise<void> {
+    this.stopSweeper?.()
+    this.stopSweeper = null
     if (this.bunServer) {
       this.bunServer.stop(true)
       this.bunServer = null
@@ -262,6 +269,9 @@ export function createSixbApi(server: SixbServer) {
       maxAge: 600,
     })
   )
+  // A runner's session requests, before anything parses them: a runner token speaks only there.
+  const serveRunnerSession = agentRunSessionHandler(host)
+  app.onRequest(async ({ request }) => (await serveRunnerSession(request)) ?? undefined)
   app.onRequest(async ({ request }) => {
     // An Agent's commands, as their run: decided before Elysia parses the body, which the approval
     // gate reads from a copy. No session, share or cookie speaks for such a request.

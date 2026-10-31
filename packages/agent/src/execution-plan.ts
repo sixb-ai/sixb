@@ -1,7 +1,8 @@
 import type { AgentReasoning, AgentSkillDefinition } from "@sixb/core"
-import type { AgentToolSpec, SandboxModel } from "@sixb/core/internal/agents"
+import type { AgentRunPlan, AgentToolSpec, SandboxModel } from "@sixb/core/internal/agents"
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { LanguageModel } from "@sixb/core/models"
+import { withBuiltInSkills } from "./skills/built-in"
 
 /**
  * Fully resolved inputs shared by the agent execution engines.
@@ -24,4 +25,26 @@ export interface ResolvedAgentExecutionPlan {
   readonly sandboxModels?: readonly SandboxModel[]
   /** Reference docs for the object types the run's requester can see, from their own view. */
   readonly ontologyDocs: RenderedOntologyDocs
+}
+
+/**
+ * A turn's or a child's plan, with the session's model, which records each call itself, and the
+ * harness's skills added. Its project tools run through the session.
+ */
+export function resolveRunPlan(
+  plan: AgentRunPlan,
+  resolved: { readonly model: LanguageModel }
+): ResolvedAgentExecutionPlan {
+  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs, tools } = plan
+  return Object.freeze({
+    model: resolved.model,
+    ontologyDocs,
+    ...(instructions === undefined ? {} : { instructions }),
+    tools,
+    skills: withBuiltInSkills(plan.skills),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+    ...(sandboxModels.length ? { sandboxModels } : {}),
+  })
 }

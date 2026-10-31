@@ -13,7 +13,6 @@ import {
   agentRunStreamEventBase,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
-  publishAgentChildFinished,
   publishAgentRunActivity,
 } from "./streams/protocol"
 
@@ -100,9 +99,8 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
 }
 
 /**
- * Keep the lifecycle feeds platform-owned even when callers replace transcript streaming: a
- * conversation's on the project's activity feed, a child's finish on its parent's inbox, which the
- * parent's waits wake on.
+ * Keep the lifecycle feed platform-owned even when callers replace transcript streaming: a
+ * conversation's on the project's activity feed.
  */
 export function withAgentActivityStream(sink: StreamSink, broker: Broker): StreamSink {
   return {
@@ -119,9 +117,7 @@ export function withAgentActivityStream(sink: StreamSink, broker: Broker): Strea
     publishRunFinished: (run) =>
       publishLifecycle([
         sink.publishRunFinished(run),
-        run.kind === "conversation"
-          ? publishAgentRunActivity(broker, run)
-          : publishAgentChildFinished(broker, run),
+        ...(run.kind === "conversation" ? [publishAgentRunActivity(broker, run)] : []),
       ]),
   }
 }

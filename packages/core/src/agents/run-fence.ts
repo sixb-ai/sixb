@@ -9,6 +9,14 @@ export class AgentExecutionLostError extends Error {
 }
 
 /**
+ * The session refuses what its run may not do: read beyond its conversation, hand a child what the
+ * project does not offer. Its message is the runner's to read, wherever the runner is.
+ */
+export class AgentRunRefusedError extends Error {
+  readonly name = "AgentRunRefusedError"
+}
+
+/**
  * Storage outcomes that mean the run is no longer this session's: another delivery owns it, or it
  * already ended. There is nothing more to record either way.
  */

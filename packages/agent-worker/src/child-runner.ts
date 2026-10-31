@@ -2,11 +2,15 @@ import {
   type AgentExecutionEnvironment,
   type AgentRunFailure,
   type AgentTurnRuntime,
+  agentRunFailureDetails,
   createAgentTurnRuntime,
   createAskParentTool,
   createSubagentEnvironment,
+  type FamilyMailbox,
   isLostExecution,
   prepareAgentModel,
+  recordFate,
+  resolveRunPlan,
   runSubagent,
   SubagentInbox,
   type SubagentWork,
@@ -31,23 +35,24 @@ import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { isPermanentAgentPreparationError } from "./delivery-policy"
 import { createAgentExecutionContext } from "./execution-context"
 import {
-  agentRunFailureDetails,
   isTerminalRun,
   PREPARATION_RETRY_BACKOFF_MS,
   PRESTART_RETRY_BACKOFF_MS,
   projectLease,
-  recordFate,
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
-import { resolveRunPlan } from "./run-plan"
 import { childSandbox } from "./run-sandboxes"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
-/** The delivery a child runs under: its parent's, whose lease and stop signal it shares. */
+/**
+ * What a child runs under: its parent's delivery, whose lease and stop signal it shares, and its
+ * parent turn's mailbox, through which they talk.
+ */
 export interface ParentDelivery {
   readonly signal: AbortSignal
   readonly delivery: Pick<QueueDelivery<AgentQueueJob>, "leaseExpiresAt" | "onLeaseRenewed">
+  readonly family: FamilyMailbox
 }
 
 interface RunningChild {
@@ -94,7 +99,11 @@ export class ChildRunner {
       console.error(`[SixbAgentWorker] Subagent run '${run.id}' failed outside its run.`, error)
     })
     this.running.set(run.id, { parentRunId: run.parentRunId, ended, done })
-    void done.finally(() => this.running.delete(run.id))
+    void done.finally(() => {
+      this.running.delete(run.id)
+      // Ended, paused or never claimed: the turn's waits read why.
+      parent.family.finished(run.id)
+    })
   }
 
   /**
@@ -246,9 +255,9 @@ export class ChildRunner {
         prepared
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
-      // From the first message: one its parent sent while it was queued is read at its first step,
-      // and a continuation's first step reads what the runs before it left unread.
-      const inbox = new SubagentInbox(session.mail, run, history.messages)
+      // A message its parent sent while it was queued is read at its first step. What a paused run
+      // it continues never read is in its trigger already.
+      const inbox = new SubagentInbox(parent.family.child(run.id), run)
       environment = await createSubagentEnvironment({
         session,
         openSandbox: childSandbox({ context: executionContext, session, run, thread: childThread }),

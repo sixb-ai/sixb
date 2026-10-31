@@ -1645,6 +1645,17 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           }),
           "invalid_input"
         )
+        // Only a paused child keeps mail it never read, for the run that continues it.
+        await expectAgentError(
+          storage.runs.finish({
+            projectId,
+            id: "child_1",
+            executionToken: "child_token",
+            status: "succeeded",
+            result: { text: "Three open orders.", unread: [{ id: "m1", text: "Skip Globex." }] },
+          }),
+          "invalid_input"
+        )
 
         await expectAgentError(
           storage.runs.finish({

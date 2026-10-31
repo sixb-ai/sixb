@@ -63,8 +63,9 @@ export async function cancelAgentRun(
 
 /**
  * Ask a running turn or child to stop. The cancel is recorded on the run first, so its run token
- * stops working at once and a runner that never hears the broker learns of it at its next lease
- * renewal; the broker's cancel then stops a runner that hears it right away.
+ * stops working at once, its session over HTTP serves only its end, and a runner that never hears
+ * the broker learns of it at its next lease renewal; the broker's cancel then stops a runner that
+ * hears it right away.
  */
 export async function requestAgentRunCancel(
   host: { readonly projectId: string; readonly broker: Broker; readonly storage: AgentStorage },

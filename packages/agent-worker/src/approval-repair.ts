@@ -11,12 +11,7 @@ import {
   stopAgentTurn,
   turnResumeReadiness,
 } from "@sixb/core/internal/agents"
-import type {
-  AgentApprovalCursor,
-  AgentApprovalRecord,
-  AgentStorage,
-  ConversationAgentRunRecord,
-} from "@sixb/core/storage"
+import type { AgentApprovalCursor, AgentApprovalRecord, AgentStorage } from "@sixb/core/storage"
 import type { AgentWorkerHost } from "./types"
 
 const REPAIR_PAGE_SIZE = 100
@@ -75,32 +70,6 @@ export async function repairAgentApprovals(input: {
         error
       )
     }
-  }
-}
-
-/**
- * Resume a turn that just paused on calls its requester already decided while it ran: the decision
- * found it still running. The repair pass tries again if this fails.
- */
-export async function resumeIfDecided(
-  host: AgentWorkerHost,
-  run: ConversationAgentRunRecord
-): Promise<void> {
-  if (!isAwaitingApprovalRun(run)) return
-
-  try {
-    // As its requester, with the grants they have now: what a decision would have done.
-    const scope = await resolveAgentRunExecutionScope(host, {
-      runId: run.id,
-      executionId: run.executionId,
-      authority: { type: "inherited" },
-    })
-    await resumeDecidedAgentTurn(bindDurableAgentExecution(host, scope), run.id)
-  } catch (error) {
-    console.error(
-      `[SixbAgentWorker] Could not resume Agent run '${run.id}'; retrying later.`,
-      error
-    )
   }
 }
 

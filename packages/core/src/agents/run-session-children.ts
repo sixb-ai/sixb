@@ -1,4 +1,3 @@
-import type { Broker } from "../broker"
 import { createInheritedAgentExecutionRecord } from "../execution/agent"
 import { ensureExecutionRecord } from "../execution/durable"
 import type { Storage } from "../storage"
@@ -15,15 +14,7 @@ import type {
 } from "../storage/agents"
 import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
 import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
-import { assertAgentRunOwned, fenced } from "./run-fence"
-import {
-  type AgentInbox,
-  type AgentMail,
-  publishAgentMail,
-  type ReceivedAgentMail,
-  readAgentMail,
-  subscribeAgentInbox,
-} from "./streams/protocol"
+import { AgentRunRefusedError, fenced } from "./run-fence"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import { conversationThreadId } from "./thread-access"
 
@@ -133,7 +124,7 @@ export function agentRunThreads(
     },
     async messages(input) {
       if (!(await scope.includes(input.threadId))) {
-        throw new Error(
+        throw new AgentRunRefusedError(
           `[Sixb] Agent run '${run.id}' reads only its conversation's threads, not '${input.threadId}'.`
         )
       }
@@ -142,37 +133,9 @@ export function agentRunThreads(
   }
 }
 
-/** Mail as its sender writes it: the session says who sends it, and when. */
-export type AgentMailDraft = Pick<AgentMail, "id" | "kind" | "inReplyTo" | "text"> &
-  ({ readonly toThreadId: string } | { readonly toRunId: string })
-
-/** Mail between a turn and its children, through their inboxes. */
-export interface AgentRunMail {
-  /**
-   * Send as this run: a turn to the thread of one of its conversation's children, a child to the
-   * turn that spawned it. Refused with {@link AgentExecutionLostError} once the run is no longer
-   * this session's.
-   */
-  send(mail: AgentMailDraft): Promise<void>
-  /** An inbox's mail after `afterCursor`, with the cursor to read on from. */
-  read(
-    inbox: AgentInbox,
-    afterCursor?: string
-  ): Promise<{ readonly mail: readonly ReceivedAgentMail[]; readonly cursor?: string }>
-  /** Hear an inbox from its start; a turn's also hears its children finish. Returns the stop. */
-  subscribe(
-    inbox: AgentInbox,
-    on: {
-      readonly mail: (mail: readonly ReceivedAgentMail[]) => void
-      readonly childFinished?: (runIds: readonly string[]) => void
-    }
-  ): Promise<() => void>
-}
-
 export interface AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage }
-  readonly broker: Broker
   /** How many children one turn may have queued or running at once. */
   readonly maxActiveChildren?: number
 }
@@ -277,7 +240,7 @@ export function agentRunChildren(
         attempt.status === "queued" ||
         attempt.status === "running"
       ) {
-        throw new Error(
+        throw new AgentRunRefusedError(
           `[Sixb] Agent run '${run.id}' clears only an ended attempt of its conversation's children, not '${runId}'.`
         )
       }
@@ -301,14 +264,16 @@ function assertDelegable(
   const { model, toolNames } = child.spec
   const unknownTool = toolNames.find((name) => !delegable.tools.includes(name))
   if (unknownTool !== undefined) {
-    throw new Error(`[Sixb] Agent run '${run.id}' cannot hand a child tool '${unknownTool}'.`)
+    throw new AgentRunRefusedError(
+      `[Sixb] Agent run '${run.id}' cannot hand a child tool '${unknownTool}'.`
+    )
   }
   if (
     !delegable.models.some(
       (each) => each.provider === model.provider && each.modelId === model.modelId
     )
   ) {
-    throw new Error(
+    throw new AgentRunRefusedError(
       `[Sixb] Agent run '${run.id}' cannot delegate to model '${model.provider}/${model.modelId}'.`
     )
   }
@@ -335,50 +300,4 @@ async function childLimit(
     )
   )
   return Math.max(limit, continuing.size)
-}
-
-export function agentRunMail(
-  host: AgentRunChildrenHost,
-  run: AgentRunRecord,
-  executionToken: string
-): AgentRunMail {
-  const { projectId, broker } = host
-  const agents = host.storage.agents
-  return {
-    async send(draft) {
-      await assertAgentRunOwned(agents, { projectId, id: run.id, executionToken })
-      const sentAt = new Date().toISOString()
-      if ("toRunId" in draft) {
-        if (run.kind !== "subagent" || draft.toRunId !== run.parentRunId) {
-          throw new Error(`[Sixb] Agent run '${run.id}' may mail only the run that spawned it.`)
-        }
-        await publishAgentMail(broker, {
-          projectId,
-          mail: { ...draft, fromRunId: run.id, fromThreadId: run.threadId, sentAt },
-        })
-        return
-      }
-      const thread = await agents.threads.getById({ projectId, id: draft.toThreadId })
-      if (run.kind !== "conversation" || thread?.parent?.threadId !== run.threadId) {
-        throw new Error(
-          `[Sixb] Agent run '${run.id}' may mail only the threads of its conversation's children.`
-        )
-      }
-      await publishAgentMail(broker, { projectId, mail: { ...draft, fromRunId: run.id, sentAt } })
-    },
-    read: (inbox, afterCursor) =>
-      readAgentMail(broker, {
-        projectId,
-        inbox: ownInbox(run, inbox),
-        ...(afterCursor === undefined ? {} : { afterCursor }),
-      }),
-    subscribe: (inbox, on) =>
-      subscribeAgentInbox(broker, { projectId, inbox: ownInbox(run, inbox) }, on),
-  }
-}
-
-/** A run hears only its own inbox: a turn's run, a child's thread. */
-function ownInbox(run: AgentRunRecord, inbox: AgentInbox): AgentInbox {
-  if ("runId" in inbox ? inbox.runId === run.id : inbox.threadId === run.threadId) return inbox
-  throw new Error(`[Sixb] Agent run '${run.id}' reads only its own inbox.`)
 }

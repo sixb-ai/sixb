@@ -6,7 +6,7 @@ reach the same operations over HTTP, so none of them may assume they share a pro
 
 ```text
 run-session.ts             AgentRunSession: conversation turns and child agents
-run-session-children.ts    a turn's children and mail
+run-session-children.ts    a turn's children
 run-liveness.ts            ending a run whose lease lapsed
 run-fence.ts               AgentExecutionLostError, and the writes that report it
 run-turn.ts                what a turn or child starts from: AgentRunContext
@@ -25,22 +25,28 @@ fresh execution token. `openAgentRunSession` opens the session of a run already 
 A run is held by whoever renews its lease. Once the lease recorded on it lapses, its run token
 fails closed, and `endLapsedAgentRuns` (`run-liveness.ts`) may end it: it reclaims the run, which
 rotates its token, then records it `cancelled` and `interrupted`. A worker's repair pass runs it,
-so a run ends without a queue job coming back for it.
+and so does the API server every 30 seconds, for runners with no worker behind them: a run ends
+without a queue job coming back for it.
+
+What follows a turn's end, its children still at work stopped and a turn paused on calls already
+decided resumed, is `afterAgentRunFinished` (`run-after-finish.ts`): the worker's session host and
+the API's both run it.
 
 A cancel is recorded on the run (`requestAgentRunCancel`) before the broker carries it. The run
 token stops working at once, and a runner that never hears the broker reads the cancel at its next
-lease renewal, which aborts the session's `cancelled`.
+lease renewal, which aborts the session's `cancelled`. That is the only signal a run hears from
+outside its runner: a turn and its children share one, so their messages and questions, and a
+child's end, stay in it (`FamilyMailbox` in `@sixb/agent`).
 
 ## Fencing
 
 Every durable write carries the session's token, and storage refuses it once another delivery
 reclaimed the run: finishing, the context checkpoint, workspace transitions, spawning a child and
 clearing a child's dead attempt. `assertOwned` checks the same before a side effect storage cannot
-fence, such as a sandbox action, and mail checks it before it sends.
+fence, such as a sandbox action.
 
 Whichever write finds the run gone throws `AgentExecutionLostError` (`run-fence.ts`), never a
-storage error, so a runner checks for one error. Mail is sent as the session's run, which names
-its sender, and only to its own children's threads or to the turn that spawned it.
+storage error, so a runner checks for one error.
 
 ## Artifacts
 
@@ -70,8 +76,8 @@ plan() · memory                        what a run is set up with, as plain data
                                        docs and a turn's delegation models; and the memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
-threads · children · mail              the conversation's messages, a turn's children, and mail
-                                       between them; reads answer only for the run's conversation
+threads · children                     the conversation's messages and a turn's children; reads
+                                       answer only for the run's conversation
 artifacts                              the conversation's artifacts, read as the requester, and
                                        what the run publishes into it (run-artifacts.ts)
 files                                  where the run's files are stored and read: its attachments,
@@ -82,8 +88,46 @@ finish                                 messages and the run's end in one transac
                                        host's afterFinish: children stopped, a decided turn resumed
 ```
 
-`tests/agent-run-session-contract.ts` is what every session does: the in-process one runs it now,
-and a session over HTTP runs the same suite.
+`tests/agent-run-session-contract.ts` is what every session does: the in-process one and the one
+over HTTP run the same suite.
+
+## Over HTTP
+
+A runner outside the worker reaches the same session through the API (`run-session-http.ts`, served
+by `run-session-serve.ts`). Each operation is one request to `/api/agent-runs/:runId/session/<name>`
+with the runner token its claim returned, and the server answers it with the in-process session's
+own code: what it checks, fences and records is the same wherever the runner is.
+
+The runner token is not the run token. The sandbox's credential adds the run token to every call
+its commands make under `/api/`, so a command that reached the session could finish the run, write
+its messages or call its models. Both are signed under the run's execution, for different purposes:
+the session refuses a run token, and the rest of the API refuses a runner token.
+
+```text
+claim            POST /api/agent-runs/:runId/claim, as the person who asked for the turn
+                 children.claim, with the turn's runner token, for a child of that turn
+                 a queued run only: one whose runner stopped ends interrupted, never replayed
+operations       JSON in, JSON out; dates, bytes and maps tagged (run-session-wire.ts)
+models.stream    the provider's events, one JSON line each; the server admits and records the call
+events           live records in batches, best effort
+files.*          put, open and stat; a file's id is its content's digest
+renewLease       answers whether the run, or the turn a child stops with, was cancelled: the only
+                 signal a runner over HTTP hears, at most two minutes apart
+```
+
+Once a Stop is recorded on the run, or on the turn a child stops with, its session serves only its
+end: `renewLease` answers `cancelled` without extending the lease, the reads between a model step
+and the end still answer (held calls, the children's state), so the runner keeps what it wrote, and
+`finish` records the end. Anything else answers an aborted call (499). Every answer carries
+`x-sixb-agent-run-stopped`, which the runner reads as the Stop. Nothing more runs, writes or bills,
+and a runner that ignores the Stop loses its lease to the sweep.
+
+Once a run ended, its runner token reaches nothing, so `finish` over HTTP also announces the end live: its
+answer, then the run's end, from the server that recorded them.
+
+The server pins a runner's messages to its run's thread and drops any author they name, and caps
+the lease a runner asks for. `authorization()` and `workspace` are not offered: such a runner never
+binds the project, and a persistent workspace moves only in the worker, on its run's own thread.
 
 ## Outside the session
 

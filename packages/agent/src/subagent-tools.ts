@@ -54,12 +54,8 @@ import {
   listHandedSources,
   storeHandedFiles,
 } from "./child-files"
-import {
-  type ChildQuestion,
-  ChildQuestions,
-  type QuestionRef,
-  renderChildQuestions,
-} from "./child-questions"
+import { type ChildQuestion, type QuestionRef, renderChildQuestions } from "./child-questions"
+import { ChildMailClosedError, FamilyMailbox } from "./family-mailbox"
 import { agentToolErrorText } from "./model-adapters"
 import { renderModelLine } from "./model-lines"
 import type { TurnChildren } from "./run-agent-turn"
@@ -69,17 +65,18 @@ import type { AgentRunFiles, AgentRunSettings } from "./types"
 
 /**
  * How long a wait for children goes without reading their runs when nothing woke it. A child's
- * finish and a question wake it at once, through the turn's inbox; this only bounds what a lost
- * wake costs: a record the broker dropped, a subscription that failed. Five seconds keeps such a
- * loss short beside the minutes a child works, and a wait reads storage 12 times a minute.
+ * question and its end wake it at once, through the turn's mailbox; this bounds an end recorded
+ * outside the runner, which nothing here hears: an API cancel of a child still queued, or a repair
+ * pass ending one whose own end could not be recorded. Five seconds keeps such a wait short beside
+ * the minutes a child works, and a wait reads storage 12 times a minute.
  */
 export const CHILD_WAIT_RECHECK_MS = 5_000
 /**
- * How often a wait reads a run whose finish goes to another run's inbox, which nothing wakes it
- * for: a child of an earlier turn, or of an earlier attempt of this resume, still stopping. Both
- * are rare and short, so a short poll costs little.
+ * How often a wait reads a run another turn's mailbox hears, which nothing wakes it for: a child
+ * of an earlier turn, or of an earlier attempt of this resume, still stopping. Both are rare and
+ * short, so a short poll costs little.
  */
-export const OTHER_INBOX_RECHECK_MS = 250
+export const OTHER_TURN_RECHECK_MS = 250
 const OMIT_MODEL = "Omit model to use the project default."
 
 /** With tiers, the model guide says how to choose, so only a list adds advice. */
@@ -211,7 +208,8 @@ export class SubagentCoordinator {
   #admissions: Promise<unknown> = Promise.resolve()
   /** What this turn sent each child, by its run id, in order. */
   readonly #sent = new Map<string, SentMessage[]>()
-  readonly #questions: ChildQuestions
+  /** What the turn and its children say to each other, in their runner. */
+  readonly #family = new FamilyMailbox()
   /** The questions a `wait_agent` returned: one alone no longer stops a wait for other children. */
   readonly #reported = new Set<string>()
   /** What each `message_agent` that answered a question returned, by its mail id, for a replay. */
@@ -222,22 +220,21 @@ export class SubagentCoordinator {
     private readonly delegation: TurnDelegation,
     private readonly context: AgentRunSettings,
     private readonly parentRun: ConversationAgentRunRecord,
-    /** The turn's session, through which it reaches its children and their mail. */
+    /** The turn's session, through which it reaches its children's runs. */
     private readonly session: AgentRunSession,
     /**
-     * Run a child this turn spawned or continues, in the turn's own runner: it claims the child's
-     * run, opens its session and environment, and records its fate. Starting a run already
-     * running is a no-op.
+     * Run a child this turn spawned or continues, in the turn's own runner, on the turn's mailbox:
+     * it claims the child's run, opens its session and environment, and records its fate.
+     * Starting a run already running is a no-op.
      */
-    private readonly startChild: (run: SubagentRunRecord) => void
+    private readonly startChild: (run: SubagentRunRecord, family: FamilyMailbox) => void
   ) {
     this.models = delegation.models
-    this.#questions = new ChildQuestions(session.mail, parentRun.id)
   }
 
-  /** Stop listening for the children's questions, once the turn ended. */
+  /** The turn ended: it sends its children nothing more. */
   close(): void {
-    this.#questions.close()
+    this.#family.close()
   }
 
   /**
@@ -319,8 +316,8 @@ export class SubagentCoordinator {
         return
       }
 
-      // Its finish goes to the inbox of the attempt it ran under, not this turn's: read it again.
-      await delay(OTHER_INBOX_RECHECK_MS, signal)
+      // Its end goes to the mailbox of the attempt it ran under, not this turn's: read it again.
+      await delay(OTHER_TURN_RECHECK_MS, signal)
     }
   }
 
@@ -443,7 +440,7 @@ export class SubagentCoordinator {
   }
 
   /**
-   * Write a message to a child's inbox, its thread's. Its id names this turn, the model call and
+   * Send a child a message, through the turn's mailbox. Its id names this turn, the model call and
    * the tool call in it, so a replay of the call is the same message and the child reads it once,
    * while two calls never share one, whatever ids the provider gives its tool calls.
    */
@@ -488,27 +485,25 @@ export class SubagentCoordinator {
 
     // While it waits on a question the model read, the message is its answer. The question is
     // claimed before any wait, so of two answers sent at once only the first is one.
-    await this.#questions.refresh()
-    const question = this.#questions.of(child.id)
+    const question = this.#family.question(child.id)
     if (question && status === "running" && this.#reported.has(question.id)) {
-      this.#questions.answered(question)
+      this.#family.answered(question)
       try {
-        await this.session.mail.send({
-          ...sent,
-          toThreadId: child.threadId,
-          kind: "answer",
-          inReplyTo: question.id,
-        })
+        this.#family.send(child.id, { ...sent, kind: "answer", inReplyTo: question.id })
       } catch (error) {
-        this.#questions.reopen(question)
-        throw error
+        this.#family.reopen(question)
+        throw stoppedReading(error, key)
       }
       const output = { runId: child.id, status, delivery: "answer" } as const
       this.#answers.set(sent.id, output)
       return output
     }
 
-    await this.session.mail.send({ ...sent, toThreadId: child.threadId, kind: "message" })
+    try {
+      this.#family.send(child.id, { ...sent, kind: "message" })
+    } catch (error) {
+      throw stoppedReading(error, key)
+    }
     const toChild = this.#sent.get(child.id) ?? []
     if (!toChild.some((message) => message.id === sent.id)) toChild.push(sent)
     this.#sent.set(child.id, toChild)
@@ -635,7 +630,6 @@ export class SubagentCoordinator {
    * its answer would otherwise end the turn without them.
    */
   async unreadQuestions(): Promise<readonly WaitedQuestion[]> {
-    await this.#questions.refresh()
     const unread = (await this.askingChildren()).filter(
       (question) => !this.#reported.has(question.id)
     )
@@ -650,14 +644,8 @@ export class SubagentCoordinator {
    */
   async deferOpenQuestions(signal: AbortSignal): Promise<void> {
     let asking: readonly WaitedQuestion[]
-    let threads: ReadonlyMap<string, string>
     try {
-      await this.#questions.refresh()
       asking = await this.askingChildren()
-      const runs = await this.session.children.getMany(asking.map((question) => question.runId))
-      threads = new Map(
-        runs.flatMap((run) => (run.kind === "subagent" ? [[run.id, run.threadId] as const] : []))
-      )
     } catch (error) {
       console.error(
         `[SixbAgent] Could not read the questions of Agent run '${this.parentRun.id}'; its children asking one are cancelled with the turn.`,
@@ -668,12 +656,9 @@ export class SubagentCoordinator {
 
     const deferred: string[] = []
     for (const question of asking) {
-      const threadId = threads.get(question.runId)
-      if (threadId === undefined) continue
       try {
-        await this.session.mail.send({
+        this.#family.send(question.runId, {
           id: `${this.parentRun.id}:deferred:${question.id}`,
-          toThreadId: threadId,
           kind: "deferred",
           inReplyTo: question.id,
           text: "",
@@ -689,7 +674,7 @@ export class SubagentCoordinator {
 
     try {
       while (deferred.length > 0) {
-        const paused = this.#questions.nextChange()
+        const paused = this.#family.changed()
         const runs = await this.session.children.getMany(deferred)
         if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
         await delay(CHILD_WAIT_RECHECK_MS, signal, paused)
@@ -707,7 +692,7 @@ export class SubagentCoordinator {
    */
   async settleChildren(signal: AbortSignal): Promise<void> {
     for (;;) {
-      const finished = this.#questions.nextChange()
+      const finished = this.#family.changed()
       if ((await this.session.children.activeCount()) === 0) return
 
       try {
@@ -722,7 +707,7 @@ export class SubagentCoordinator {
 
   /** The open questions of the turn's children still at work, each with the child's key. */
   private async askingChildren(): Promise<readonly WaitedQuestion[]> {
-    const open = this.#questions.open()
+    const open = this.#family.questions()
     if (open.length === 0) return []
 
     const runs = await this.session.children.getMany(open.map((question) => question.runId))
@@ -904,9 +889,6 @@ export class SubagentCoordinator {
     signal: AbortSignal,
     continuation?: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
   ): Promise<SpawnSubagentOutput> {
-    // Before it exists, so none of its questions is missed.
-    await this.#questions.listen()
-
     let run: SubagentRunRecord
     try {
       run = await this.session.children.spawn({
@@ -933,7 +915,7 @@ export class SubagentCoordinator {
     }
 
     signal.throwIfAborted()
-    if (run.status === "queued") this.startChild(run)
+    if (run.status === "queued") this.startChild(run, this.#family)
 
     return {
       runId: run.id,
@@ -951,7 +933,7 @@ export class SubagentCoordinator {
     for (;;) {
       signal.throwIfAborted()
       // Taken before the reads, so a question or a finish that comes during them wakes the wait.
-      const changed = this.#questions.nextChange()
+      const changed = this.#family.changed()
       const runs = await this.session.children.getMany(runIds)
       const byId = new Map(runs.map((run) => [run.id, run]))
       const children = runIds.map((runId, index) => {
@@ -968,8 +950,7 @@ export class SubagentCoordinator {
         return run
       })
       // A child blocked on its question waits for this turn, so a new question ends any wait,
-      // and one already returned ends a wait for its own child. Without the wake, it reads them.
-      if (!this.#questions.listening) await this.#questions.refresh()
+      // and one already returned ends a wait for its own child.
       const asking = await this.askingChildren()
       const asked = asking.some(
         (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
@@ -1006,11 +987,11 @@ export class SubagentCoordinator {
             : { artifactsError: delivered.artifactsError }),
         }
       }
-      // A child of an earlier turn finishes into that turn's inbox, which this one does not hear.
+      // A child of an earlier turn ends into that turn's mailbox, which this one does not hear.
       const unheard = children.some(
         (run) => run.parentRunId !== this.parentRun.id && !isTerminalSubagent(run)
       )
-      const recheckMs = unheard ? OTHER_INBOX_RECHECK_MS : CHILD_WAIT_RECHECK_MS
+      const recheckMs = unheard ? OTHER_TURN_RECHECK_MS : CHILD_WAIT_RECHECK_MS
       await delay(recheckMs, signal, changed)
     }
   }
@@ -1617,4 +1598,12 @@ function parseWaitInput(value: unknown, maxRunIds: number): WaitForSubagentsInpu
     throw new AgentToolPublicError("[SixbAgent] wait_agent expects an array of child run ids.")
   }
   return { runIds: normalizeRunIds(value.runIds, maxRunIds) }
+}
+
+/** A child that stopped reading as the turn sent to it: it paused or ended just then. */
+function stoppedReading(error: unknown, key: string): unknown {
+  if (!(error instanceof ChildMailClosedError)) return error
+  return new AgentToolPublicError(
+    `[SixbAgent] '${key}' stopped as you sent this, so it will not read it: it paused or ended. Wait for it with wait_agent to see which.`
+  )
 }

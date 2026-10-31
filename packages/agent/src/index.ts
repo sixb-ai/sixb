@@ -3,16 +3,19 @@ export type { AgentWorkspacePromptContext } from "./agent-prompt"
 export { createAskParentTool } from "./ask-parent-tool"
 export { prepareAgentModel } from "./context-budget"
 export {
+  AgentEnvironmentSaveError,
   AgentRequesterLeftThreadError,
   isLostExecution,
 } from "./errors"
-export type { ResolvedAgentExecutionPlan } from "./execution-plan"
+export { type ResolvedAgentExecutionPlan, resolveRunPlan } from "./execution-plan"
 export type { AgentRunFailure } from "./failure"
 export { toAgentExecutionFailure, toAgentRunFailure } from "./failure"
+export type { FamilyMailbox } from "./family-mailbox"
 export type { ConversationReaders } from "./message-authors"
 export type { AgentToolCaller } from "./model-adapters"
 export { agentRequester } from "./requester"
 export { runAgentTurn, stoppedByWorker } from "./run-agent-turn"
+export { type ConversationTurnRunner, runConversationTurn } from "./run-conversation-turn"
 export type {
   AgentExecutionEnvironment,
   ConversationAgentExecutionEnvironment,
@@ -24,6 +27,7 @@ export {
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "./run-environment"
+export { agentRunFailureDetails, recordFate } from "./run-fate"
 export type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 export { SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 export type { SubagentWork } from "./run-subagent"

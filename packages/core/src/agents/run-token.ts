@@ -5,7 +5,15 @@ import { matchesPathPattern, normalizeRoutePath } from "../http/route-pattern"
 // A run token lets an Agent's commands call the API as their run: a bearer token that names the
 // run and proves it was issued under the run's current execution token. It needs no storage of
 // its own and stops working when the run's execution ends or moves to another worker.
-const AGENT_RUN_TOKEN_PREFIX = "sixb_run_v1_"
+//
+// A runner token is the runner's own: it reaches the run's session (run-session-serve.ts), which
+// finishes the run, writes its messages and calls its models. It is issued under the same
+// execution but signed for another purpose, so neither is ever accepted as the other: the run's
+// commands hold only the run token, and never reach the session that runs them.
+const RUN_TOKEN = { prefix: "sixb_run_v1_", purpose: "agent-run-token" } as const
+const RUNNER_TOKEN = { prefix: "sixb_runner_v1_", purpose: "agent-runner-token" } as const
+
+type TokenKind = typeof RUN_TOKEN | typeof RUNNER_TOKEN
 
 export interface AgentRunTokenInput {
   readonly projectId: string
@@ -33,35 +41,46 @@ export const AGENT_API_ROUTES: readonly AgentApiRoute[] = SIXB_API_ROUTES.filter
 }))
 
 export function createAgentRunToken(input: AgentRunTokenInput): string {
-  const runId = Buffer.from(input.runId, "utf8").toString("base64url")
-  return `${AGENT_RUN_TOKEN_PREFIX}${runId}.${runTokenDigest(input)}`
+  return signToken(RUN_TOKEN, input)
 }
 
 /** Whether a bearer token is a run token, whatever run it names or whether it is still valid. */
 export function isAgentRunToken(token: string): boolean {
-  return token.startsWith(AGENT_RUN_TOKEN_PREFIX)
+  return token.startsWith(RUN_TOKEN.prefix)
 }
 
 /** The run a run token names, unverified; undefined when the token is malformed. */
 export function agentRunTokenRunId(token: string): string | undefined {
-  if (!isAgentRunToken(token)) return undefined
-  const [runId, digest, ...rest] = token.slice(AGENT_RUN_TOKEN_PREFIX.length).split(".")
-  if (!runId || !digest || rest.length > 0) return undefined
-  return Buffer.from(runId, "base64url").toString("utf8") || undefined
+  return tokenRunId(RUN_TOKEN, token)
 }
 
 /** Whether the token was issued for this run under this execution token. */
 export function isValidAgentRunToken(
   input: AgentRunTokenInput & { readonly token: string }
 ): boolean {
-  const expected = createAgentRunToken(input)
-  const actual = input.token
-  const expectedBuffer = Buffer.from(expected)
-  const actualBuffer = Buffer.from(actual)
-  return (
-    expectedBuffer.byteLength === actualBuffer.byteLength &&
-    timingSafeEqual(expectedBuffer, actualBuffer)
-  )
+  return isValidToken(RUN_TOKEN, input)
+}
+
+/** The token a run's runner reaches its session with, never handed to the run's commands. */
+export function createAgentRunnerToken(input: AgentRunTokenInput): string {
+  return signToken(RUNNER_TOKEN, input)
+}
+
+/** Whether a bearer token is a runner token, whatever run it names or whether it is still valid. */
+export function isAgentRunnerToken(token: string): boolean {
+  return token.startsWith(RUNNER_TOKEN.prefix)
+}
+
+/** The run a runner token names, unverified; undefined when the token is malformed. */
+export function agentRunnerTokenRunId(token: string): string | undefined {
+  return tokenRunId(RUNNER_TOKEN, token)
+}
+
+/** Whether the runner token was issued for this run under this execution token. */
+export function isValidAgentRunnerToken(
+  input: AgentRunTokenInput & { readonly token: string }
+): boolean {
+  return isValidToken(RUNNER_TOKEN, input)
 }
 
 export function isAllowedAgentApiRequest(method: string, pathname: string): boolean {
@@ -77,8 +96,29 @@ export function findAgentApiRoute(method: string, pathname: string): AgentApiRou
   )
 }
 
-function runTokenDigest(input: AgentRunTokenInput): string {
-  return createHmac("sha256", input.executionToken)
-    .update(`agent-run-token:${input.projectId}:${input.runId}`)
+function signToken(kind: TokenKind, input: AgentRunTokenInput): string {
+  const runId = Buffer.from(input.runId, "utf8").toString("base64url")
+  const digest = createHmac("sha256", input.executionToken)
+    .update(`${kind.purpose}:${input.projectId}:${input.runId}`)
     .digest("base64url")
+  return `${kind.prefix}${runId}.${digest}`
+}
+
+function tokenRunId(kind: TokenKind, token: string): string | undefined {
+  if (!token.startsWith(kind.prefix)) return undefined
+  const [runId, digest, ...rest] = token.slice(kind.prefix.length).split(".")
+  if (!runId || !digest || rest.length > 0) return undefined
+  return Buffer.from(runId, "base64url").toString("utf8") || undefined
+}
+
+function isValidToken(
+  kind: TokenKind,
+  input: AgentRunTokenInput & { readonly token: string }
+): boolean {
+  const expectedBuffer = Buffer.from(signToken(kind, input))
+  const actualBuffer = Buffer.from(input.token)
+  return (
+    expectedBuffer.byteLength === actualBuffer.byteLength &&
+    timingSafeEqual(expectedBuffer, actualBuffer)
+  )
 }

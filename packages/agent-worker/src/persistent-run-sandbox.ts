@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import {
   type AcquiredRunSandbox,
+  AgentEnvironmentSaveError,
   type BeforeFinalizeOptions,
   type RunSandbox,
   SANDBOX_CONTEXT_DIRECTORY,
@@ -24,7 +25,6 @@ import type {
   ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import { AgentEnvironmentSaveError } from "./errors"
 import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentRunnerContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"

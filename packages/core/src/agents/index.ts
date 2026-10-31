@@ -151,6 +151,7 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export { afterAgentRunFinished, stopAgentRunChild } from "./run-after-finish"
 export type { AgentRunArtifactPublish, AgentRunArtifacts } from "./run-artifacts"
 export { agentRunArtifacts } from "./run-artifacts"
 export type {
@@ -165,7 +166,11 @@ export {
   NOOP_STREAM_SINK,
   withAgentActivityStream,
 } from "./run-events"
-export { AgentExecutionLostError, isTerminalOrExecutionGone } from "./run-fence"
+export {
+  AgentExecutionLostError,
+  AgentRunRefusedError,
+  isTerminalOrExecutionGone,
+} from "./run-fence"
 export {
   AgentTurnInterruptedError,
   agentRunLeaseLapsed,
@@ -219,17 +224,24 @@ export {
 } from "./run-session"
 export type {
   AgentChildDraft,
-  AgentMailDraft,
   AgentRunChildren,
-  AgentRunMail,
   AgentRunThreads,
 } from "./run-session-children"
+export {
+  claimAgentRunChildOverHttp,
+  claimAgentRunOverHttp,
+  createHttpAgentRunSession,
+  type HttpAgentRunSessionInput,
+} from "./run-session-http"
+export { claimAgentRunForRunner, serveAgentRunSession } from "./run-session-serve"
+export { decodeWireValue, encodeWireError, encodeWireValue } from "./run-session-wire"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
   agentRunTokenRunId,
   createAgentRunToken,
   findAgentApiRoute,
+  isAgentRunnerToken,
   isAgentRunToken,
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
@@ -256,13 +268,11 @@ export type {
 } from "./skills"
 export type {
   AgentCompactionFailureCode,
-  AgentMail,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
-  ReceivedAgentMail,
 } from "./streams/protocol"
 export {
   AGENT_COMPACTION_FAILURE_CODES,
@@ -271,20 +281,13 @@ export {
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
   agentRunFinishedEvent,
-  agentRunInboxStreamId,
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
-  agentThreadInboxStreamId,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
   isAgentRunStreamEvent,
-  isKnownAgentMailKind,
-  publishAgentMail,
   publishAgentRunCancel,
   publishAgentRunFinished,
-  readAgentMail,
-  subscribeAgentInbox,
-  subscribeAgentMail,
   subscribeAgentRunCancel,
 } from "./streams/protocol"
 export { listSubagentThreadRuns, subagentSandboxFiles } from "./subagent-runs"

@@ -1,8 +1,7 @@
 import { type AgentMailPart, type AgentMessage, AgentToolPublicError } from "@sixb/core"
-import { type AgentRunMail, isKnownAgentMailKind } from "@sixb/core/internal/agents"
 import type { SubagentRunRecord } from "@sixb/core/storage"
-import { waitForAbort } from "./abort"
 import type { QuestionRef } from "./child-questions"
+import type { ChildMailbox, UnreadChildMail } from "./family-mailbox"
 
 /** Messages the child read, and where it read them: after how many of its steps. */
 export interface SubagentDelivery {
@@ -15,40 +14,22 @@ export type ParentReply =
   | { readonly kind: "answer"; readonly text: string }
   | { readonly kind: "deferred"; readonly questionId: string }
 
-/** Replies to the child's questions: `ask`'s, never read as messages. */
-const REPLY_KINDS: ReadonlySet<string> = new Set(["answer", "deferred"])
-
 /**
- * What a child's parent sent it, read at each of its step boundaries (`take`) from its thread's
- * inbox, and the questions it asks its parent (`ask`). The broker keeps the order; the inbox keeps
- * each message once by its id, whatever the broker delivers again, and skips what its thread
- * already holds. What it read is the child's to record: its thread keeps each delivery where the
- * model read it, and each question as its tool call.
- *
- * Every run of the child reads the same inbox, so a continuation reads at its first step what was
- * sent to the paused run and never read: a message accepted just before it paused still reaches
- * the child that goes on.
+ * What a child's parent sent it, read at each of its step boundaries (`take`) from its side of the
+ * turn's mailbox, and the questions it asks its parent (`ask`). What it read is the child's to
+ * record: its thread keeps each delivery where the model read it, and each question as its tool
+ * call. What it never read when it pauses is returned by `close`, for the run that continues it.
  */
 export class SubagentInbox {
-  #cursor: string | undefined
-  readonly #read: Set<string>
   readonly #deliveries: SubagentDelivery[] = []
   /** The question waiting for its reply: one at a time. */
   #asking: string | undefined
   #deferred: QuestionRef | undefined
 
   constructor(
-    private readonly mail: AgentRunMail,
-    private readonly run: SubagentRunRecord,
-    /** The child's thread so far: what its earlier runs read is there. */
-    thread: readonly Pick<AgentMessage, "parts">[]
-  ) {
-    this.#read = new Set(
-      thread.flatMap((message) =>
-        message.parts.flatMap((part) => (part.type === "mail" ? [part.id] : []))
-      )
-    )
-  }
+    private readonly mailbox: ChildMailbox,
+    private readonly run: SubagentRunRecord
+  ) {}
 
   /** What the child read, in order. */
   get deliveries(): readonly SubagentDelivery[] {
@@ -61,9 +42,8 @@ export class SubagentInbox {
   }
 
   /**
-   * Ask the parent and wait for its reply, bounded by `signal`: the child's own cancel, its
-   * parent's, and its deadline. Its id names the child's model call and tool call, so the parent
-   * lists it once. The first reply counts, whatever the broker delivers again.
+   * Ask the parent and wait for its reply, bounded by `signal`: the child's own cancel and its
+   * parent's. Its id names the child's model call and tool call, so the parent lists it once.
    */
   async ask(question: string, callId: string, signal: AbortSignal): Promise<ParentReply> {
     if (this.#asking !== undefined) {
@@ -71,39 +51,14 @@ export class SubagentInbox {
         "[SixbAgent] Ask one question at a time: your parent has not answered the last one yet."
       )
     }
-    signal.throwIfAborted()
-
-    const { id: runId, threadId, parentRunId } = this.run
-    const id = `${runId}:${callId}`
+    const id = `${this.run.id}:${callId}`
     this.#asking = id
-    let replied!: (reply: ParentReply) => void
-    const reply = new Promise<ParentReply>((resolve) => {
-      replied = resolve
-    })
-    let unsubscribe: (() => void) | undefined
     try {
-      unsubscribe = await this.mail.subscribe(
-        { threadId },
-        {
-          mail: (mail) => {
-            const found = mail.find(
-              (item) =>
-                item.fromRunId === parentRunId &&
-                item.inReplyTo === id &&
-                REPLY_KINDS.has(item.kind)
-            )
-            if (found?.kind === "answer") replied({ kind: "answer", text: found.text })
-            if (found?.kind === "deferred") replied({ kind: "deferred", questionId: id })
-          },
-        }
-      )
-      await this.mail.send({ id, toRunId: parentRunId, kind: "question", text: question })
-
-      const settled = await waitForAbort(reply, signal)
-      if (settled.kind === "deferred") this.#deferred = { id, text: question }
-      return settled
+      const reply = await this.mailbox.ask({ id, text: question }, signal)
+      if (reply.kind === "answer") return { kind: "answer", text: reply.text }
+      this.#deferred = { id, text: question }
+      return { kind: "deferred", questionId: id }
     } finally {
-      unsubscribe?.()
       this.#asking = undefined
     }
   }
@@ -111,49 +66,36 @@ export class SubagentInbox {
   /**
    * The messages that came since the last read, as the user message the child reads after
    * `afterSteps` of its steps; none when nothing came. `afterAnswer` when the child just answered:
-   * it is told to write its result again in full. A read that fails is tried again at the next
-   * boundary, from the same place.
+   * it is told to write its result again in full.
    */
-  async take(
+  take(
     afterSteps: number,
     options: { readonly afterAnswer?: boolean } = {}
-  ): Promise<AgentMessage | undefined> {
-    const { id: runId, threadId } = this.run
-    let page: Awaited<ReturnType<AgentRunMail["read"]>>
-    try {
-      page = await this.mail.read({ threadId }, this.#cursor)
-    } catch (error) {
-      console.error(
-        `[SixbAgent] Subagent run '${runId}' could not read its inbox; it reads it again at its next step.`,
-        error
-      )
-      return undefined
-    }
-    this.#cursor = page.cursor ?? this.#cursor
-
-    const parts: AgentMailPart[] = []
-    for (const mail of page.mail) {
-      if (this.#read.has(mail.id) || REPLY_KINDS.has(mail.kind)) continue
-
-      this.#read.add(mail.id)
-      if (!isKnownAgentMailKind(mail.kind)) {
-        // A newer sender's kind: its text still reaches the model, as a message.
-        console.warn(
-          `[SixbAgent] Subagent run '${runId}' read mail '${mail.id}' of unknown kind '${mail.kind}'; its text reads as a message.`
-        )
-      }
-      parts.push({
-        type: "mail",
-        id: mail.id,
-        from: "parent",
-        kind: "message",
-        text: mail.text,
-        ...(options.afterAnswer ? { afterAnswer: true as const } : {}),
-      })
-    }
+  ): AgentMessage | undefined {
+    const parts = this.mailbox.take().map((mail) => mailPart(mail, options))
     if (parts.length === 0) return undefined
 
     this.#deliveries.push({ afterSteps, parts })
     return { role: "user", parts }
+  }
+
+  /** Stop reading, as the child stops: what it never read, for the run that continues it. */
+  close(): readonly UnreadChildMail[] {
+    return this.mailbox.close()
+  }
+}
+
+/** A message from the parent, as the child's thread keeps it where the child read it. */
+export function mailPart(
+  mail: UnreadChildMail,
+  options: { readonly afterAnswer?: boolean } = {}
+): AgentMailPart {
+  return {
+    type: "mail",
+    id: mail.id,
+    from: "parent",
+    kind: "message",
+    text: mail.text,
+    ...(options.afterAnswer ? { afterAnswer: true as const } : {}),
   }
 }

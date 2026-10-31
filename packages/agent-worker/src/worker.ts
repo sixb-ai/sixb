@@ -1,36 +1,25 @@
 import {
-  AgentRequesterLeftThreadError,
+  type AgentExecutionContext,
   type AgentRunFailure,
-  type AgentTurnRuntime,
-  type ConversationAgentExecutionEnvironment,
-  type ConversationReaders,
-  createAgentTurnRuntime,
-  createConversationAgentEnvironment,
-  isLostExecution,
-  prepareAgentModel,
-  type ResolvedAgentExecutionPlan,
-  runAgentTurn,
-  SubagentCoordinator,
-  stoppedByWorker,
-  type TurnDelegation,
+  type AgentRunSettings,
+  agentRunFailureDetails,
+  runConversationTurn,
   toAgentRunFailure,
 } from "@sixb/agent"
-import { principalsEqual } from "@sixb/core"
+import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
-  AgentExecutionLostError,
   AgentFinalizationError,
   type AgentRunSession,
   type AgentRunSessionHost,
-  type AgentTurnHistory,
-  AgentTurnInterruptedError,
+  afterAgentRunFinished,
   claimAgentRun,
   createBrokerStreamSink,
   dispatchQueuedAgentRuns,
   endInterruptedAgentRun,
   endLapsedAgentRuns,
   isolateStreamSink,
-  requestAgentRunCancel,
   sandboxCredentialIssue,
+  stopAgentRunChild,
   WorkflowResumeDispatchError,
   withAgentActivityStream,
   workflowAgentNodeQueueJobId,
@@ -40,38 +29,31 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import {
   enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
-  ModelUsageRecordingError,
   recordRecoveredAiModelCall,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { isAbortError, QueueWorker } from "@sixb/core/internal/workers"
+import { QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type {
   AgentRunRecord,
-  AgentThreadParticipantRecord,
-  AgentThreadRecord,
   ConversationAgentRunRecord,
   ExecutionRecord,
   SubagentRunRecord,
 } from "@sixb/core/storage"
-import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
-import { repairAgentApprovals, resumeIfDecided } from "./approval-repair"
+import { repairAgentApprovals } from "./approval-repair"
 import { ChildRunner } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
-import { AgentEnvironmentSaveError, AgentRunOwnedElsewhereError } from "./errors"
-import { createAgentExecutionContext } from "./execution-context"
+import { AgentRunOwnedElsewhereError } from "./errors"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import {
-  agentRunFailureDetails,
   isTerminalRun,
   PRESTART_RETRY_BACKOFF_MS,
   projectLease,
-  recordFate,
   retryPreparationInPlace,
   waitForAbort,
 } from "./run-fate"
-import { resolveRunPlan } from "./run-plan"
 import { conversationSandbox } from "./run-sandboxes"
 import type {
   AgentRunnerContext,
@@ -96,22 +78,6 @@ const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
 
 /** What a conversation turn resolves before its first model call. */
-interface PreparedConversationTurn {
-  readonly thread: AgentThreadRecord | null
-  /** The thread and who can read it now, as the model is told; absent without a thread. */
-  readonly conversation?: ConversationReaders
-  /** Others were added to the thread, even ones who cannot read it now. */
-  readonly shared: boolean
-  readonly plan: ResolvedAgentExecutionPlan
-  /** What the turn offers the children it spawns. */
-  readonly delegation: TurnDelegation
-  readonly execution: ExecutionRecord
-  readonly executionContext: AgentRunnerContext
-  readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
-  /** The conversation's history as the turn starts. */
-  readonly history: AgentTurnHistory
-}
-
 /**
  * Cohosted worker that turns durable queued agent runs into executing turns.
  *
@@ -265,206 +231,69 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
     if (!session) return
     const run = session.run
-    let environment: ConversationAgentExecutionEnvironment | null = null
-    let runtime: AgentTurnRuntime | null = null
-    let delegation: SubagentCoordinator | undefined
     let stopOwnershipProjection: (() => void) | undefined
-    // A user cancel joins the turn's abort sources, so it stops the model stream as a shutdown does.
-    const turnSignal = AbortSignal.any([signal, session.cancelled])
-
     try {
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
       // expiration so a run token can fail closed without maintaining another heartbeat.
       stopOwnershipProjection = projectLease(delivery, session, "agent")
-      const prepared = await retryPreparationInPlace(job.attempt, turnSignal, async () => {
-        // Catch a renewal that completed between starting the run and attaching the observer.
-        // Storage keeps this projection monotonic, so racing confirmations are safe.
-        await session.renewLease(delivery.leaseExpiresAt)
-        return this.prepareConversationTurn(context, session)
-      })
-      const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
-
-      await session.events.publishStarted(run)
-      runtime = createAgentTurnRuntime({ signal: turnSignal })
-      delegation = new SubagentCoordinator(prepared.delegation, context, run, session, (child) =>
-        this.requireChildren().start(child, { signal, delivery })
-      )
-      const frameworkTools = await delegation.createTools()
-      environment = await createConversationAgentEnvironment({
+      await runConversationTurn({
         session,
-        frameworkTools,
-        thread: prepared.thread,
-        ...(prepared.execution.requestedBy === undefined
-          ? {}
-          : { requestedBy: prepared.execution.requestedBy }),
-        ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
-        shared: prepared.shared,
-        openSandbox: conversationSandbox({
-          context: prepared.executionContext,
-          session,
-          run,
-          thread: prepared.thread,
-          ...(this.host.sandboxDefinition === undefined
-            ? {}
-            : { definition: this.host.sandboxDefinition }),
-        }),
-        preflight: { budget: prepared.model.budget, runtime },
-        context: prepared.executionContext,
-        plan,
-        run,
-        history: prepared.history,
-        signal: runtime.signal,
-        onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+        signal,
+        runner: {
+          settings: runSettings(context),
+          prepare: (prepare) =>
+            retryPreparationInPlace(
+              job.attempt,
+              AbortSignal.any([signal, session.cancelled]),
+              async () => {
+                // Catch a renewal that completed between starting the run and attaching the
+                // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
+                await session.renewLease(delivery.leaseExpiresAt)
+                return prepare()
+              }
+            ),
+          openSandbox: (turn) => async (lifecycle) =>
+            conversationSandbox({
+              context: await this.runnerContext(context, session, turn),
+              session,
+              run,
+              thread: turn.thread,
+              ...(this.host.sandboxDefinition === undefined
+                ? {}
+                : { definition: this.host.sandboxDefinition }),
+            })(lifecycle),
+          startChild: (child, family) =>
+            this.requireChildren().start(child, { signal, delivery, family }),
+          onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+          reportFailure: (error, failedRun, failure) =>
+            this.reportFailure(error, failedRun, job.attempt, failure),
+        },
       })
-      delegation.attach(environment.runFiles)
-      // A resumed turn's paused children go on first, as the model reads that they do.
-      await delegation.continuePausedChildren(runtime.signal)
-      runtime.assertCanContinue()
-      await runAgentTurn({
-        context: environment.turnContext,
-        plan,
-        run,
-        session,
-        ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
-        signal: turnSignal,
-        stopSignal: signal,
-        runtime,
-        threadContext: environment.threadContext,
-        children: await delegation.turnChildren(),
-      })
-    } catch (caughtError) {
-      let error = caughtError
-      let environmentSaveFailed = error instanceof AgentEnvironmentSaveError
-      // Queue ownership or the durable execution token was lost. Touch nothing; the current
-      // delivery will reconcile the run.
-      if (isLostExecution(error, signal)) return
-      // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
-      // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
-      if (error instanceof AgentFinalizationError) {
-        throw error
-      }
-      if (environment) {
-        try {
-          await environment.beforeFinalize()
-        } catch (saveError) {
-          if (saveError instanceof AgentExecutionLostError) return
-          error = saveError
-          environmentSaveFailed = true
-        }
-      }
-      // Record the run's terminal fate. `recordFate` retries transient blips; if it cannot
-      // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
-      // is redelivered rather than acked with the thread left silently locked. A user cancel is
-      // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
-      const aborted =
-        error instanceof AgentRequesterLeftThreadError ||
-        (!environmentSaveFailed &&
-          !(error instanceof ModelUsageRecordingError) &&
-          (signal.aborted || session.cancelled.aborted || isAbortError(error)))
-      // A worker stop, unlike a user cancel, leaves the user something to resume.
-      const interrupted = aborted && stoppedByWorker(turnSignal, signal)
-      const finalized = await recordFate(
-        session,
-        aborted ? "cancelled" : "failed",
-        interrupted ? new AgentTurnInterruptedError(run.id) : error
-      )
-      if (finalized) {
-        if (finalized.run.status === "failed") {
-          this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
-        }
-        await session.events.publishRunFinished(finalized.run)
-      }
-      // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
-      // or a recorded model/tool failure keeps its fate on the record, so we ack by returning.
-      if (signal.aborted) {
-        throw error
-      }
     } finally {
       // Its children end before its delivery does: that delivery renews their lease too.
       await this.children?.stopChildrenOf(run.id)
       stopOwnershipProjection?.()
       await session.close()
-      delegation?.close()
-      runtime?.dispose()
-      await environment?.dispose()
     }
   }
 
   /**
-   * A shared thread's turn waits in the queue: its requester may leave the thread, or be removed,
-   * before it starts. Such a turn never reaches the model. A turn already running when they leave
-   * finishes, as it already read the thread.
+   * A turn's context, with what the worker's sandboxes need besides: its factory, and the run's
+   * SDK, which resolves a workspace recipe's parameters.
    */
-  private assertRequesterTakesPart(
-    run: ConversationAgentRunRecord,
-    thread: AgentThreadRecord | null,
-    participants: readonly AgentThreadParticipantRecord[],
-    execution: ExecutionRecord
-  ): void {
-    const requester = execution.requestedBy
-    if (!thread || !requester || principalsEqual(requester, thread.ownerPrincipal)) return
-    if (participants.some((participant) => principalsEqual(participant.principal, requester)))
-      return
-
-    throw new AgentRequesterLeftThreadError(run.id)
-  }
-
-  /** Resolve everything a turn needs before its first model call. */
-  private async prepareConversationTurn(
+  private async runnerContext(
     context: AgentWorkerContext,
-    session: AgentRunSession<ConversationAgentRunRecord>
-  ): Promise<PreparedConversationTurn> {
-    const { run } = session
-    const turn = await session.context()
-    const { thread, execution, participants } = turn
-    const runPlan = await session.plan()
-    const plan = resolveRunPlan(runPlan, { model: await session.models.language(runPlan.model) })
-    // A turn's plan always carries it; only a child's goes without.
-    if (!runPlan.delegation) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${run.id}' has no models to delegate to.`
-      )
-    }
-    if (!execution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${run.id}' references missing execution '${run.executionId}'.`,
-        { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
-      )
-    }
-    this.assertRequesterTakesPart(run, thread, participants, execution)
-
-    const conversation = thread
-      ? { thread, participants: turn.readers, names: turn.names }
-      : undefined
-
-    const executionContext = await createAgentExecutionContext({
-      context,
-      host: this.host,
-      execution,
-      runId: run.id,
-      names: turn.names,
-      authorization: await session.authorization(execution.authorizationRef),
-      files: session.files,
-      shared: (conversation?.participants.length ?? 0) > 0,
-    })
-    const model = prepareAgentModel(plan)
+    session: AgentRunSession<ConversationAgentRunRecord>,
+    turn: { readonly context: AgentExecutionContext; readonly execution: ExecutionRecord }
+  ): Promise<AgentRunnerContext> {
     return {
-      thread,
-      ...(conversation === undefined ? {} : { conversation }),
-      // The rule run tokens apply to memory: someone who loses access may regain it,
-      // and read back whatever memory the thread held meanwhile.
-      shared: participants.length > 0,
-      plan,
-      delegation: {
-        models: runPlan.delegation,
-        toolNames: runPlan.tools.map((tool) => tool.name),
-      },
-      execution,
-      executionContext,
-      model,
-      history: turn.history,
+      ...turn.context,
+      sandboxes: context.sandboxes,
+      sixb: bindDurableAgentExecution(this.host, {
+        execution: turn.execution,
+        runId: session.run.id,
+        authorization: await session.authorization(turn.execution.authorizationRef),
+      }),
     }
   }
 
@@ -610,90 +439,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
   }
 
-  private async cancelActiveSubagents(parentRunId: string, message: string): Promise<void> {
-    const context = this.requireContext()
-    let children: readonly AgentRunRecord[]
-    try {
-      children = (
-        await context.storage.agents.runs.list({
-          projectId: context.id,
-          kinds: ["subagent"],
-          parentRunId,
-          statuses: ["queued", "running"],
-          order: "asc",
-          limit: 100,
-        })
-      ).runs
-    } catch (error) {
-      console.error(
-        `[SixbAgentWorker] Could not list active children for Agent run '${parentRunId}'; reconciliation will retry.`,
-        error
-      )
-      return
-    }
-
-    await Promise.all(
-      children.map(async (candidate) => {
-        if (candidate.kind !== "subagent") return
-        try {
-          await this.requestSubagentCancellation(candidate, message)
-        } catch (error) {
-          console.error(
-            `[SixbAgentWorker] Could not cancel subagent run '${candidate.id}'; reconciliation will retry.`,
-            error
-          )
-        }
-      })
-    )
-  }
-
-  private async requestSubagentCancellation(
-    run: SubagentRunRecord,
-    message: string
-  ): Promise<void> {
-    const context = this.requireContext()
-    // One whose lease lapsed has no runner left to obey a cancel: endLapsedAgentRuns, earlier in
-    // the same pass, ends it.
-    if (run.status === "running") {
-      await requestAgentRunCancel(
-        { projectId: context.id, broker: this.host.broker, storage: context.storage.agents },
-        run.id
-      )
-      return
-    }
-    if (run.status !== "queued") return
-
-    const completedAt = new Date()
-    const error = toAgentRunFailure(
-      createSixbError("runtime.cancelled", message, {
-        details: agentRunFailureDetails(run),
-      }),
-      { status: "cancelled", at: completedAt, details: agentRunFailureDetails(run) }
-    )
-    try {
-      const cancelled = await context.storage.agents.runs.finishQueued({
-        projectId: context.id,
-        id: run.id,
-        status: "cancelled",
-        error,
-        completedAt,
-      })
-      await context.streamSink.publishRunFinished(cancelled)
-    } catch (failure) {
-      if (!(failure instanceof AgentStorageError) || failure.code !== "invalid_state") throw failure
-      const current = await context.storage.agents.runs.getById({
-        projectId: context.id,
-        id: run.id,
-      })
-      if (current?.kind === "subagent" && current.status === "running") {
-        await requestAgentRunCancel(
-          { projectId: context.id, broker: this.host.broker, storage: context.storage.agents },
-          run.id
-        )
-      }
-    }
-  }
-
   private async reconcileInactiveParentSubagents(context: AgentWorkerContext): Promise<void> {
     let offset = 0
     for (;;) {
@@ -720,7 +465,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           const parent = parentsById.get(run.parentRunId)
           if (parent?.kind === "conversation" && !isTerminalRun(parent)) return
           try {
-            await this.requestSubagentCancellation(run, "The parent Agent run is no longer active.")
+            await stopAgentRunChild(
+              this.sessionHost(context),
+              run,
+              "The parent Agent run is no longer active."
+            )
           } catch (error) {
             console.error(
               `[SixbAgentWorker] Could not reconcile subagent run '${run.id}'; retrying later.`,
@@ -747,7 +496,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       sdk: this.host,
       definitions: this.host.definitions,
       ...(this.host.logging === undefined ? {} : { logging: this.host.logging }),
-      afterFinish: (run) => this.afterRunFinished(run),
+      afterFinish: (run) => afterAgentRunFinished(this.sessionHost(context), run),
     }
   }
 
@@ -767,18 +516,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   /** A turn's end stops its children still at work, and resumes it if its calls were decided. */
-  private async afterRunFinished(run: AgentRunRecord): Promise<void> {
-    if (run.kind !== "conversation") return
-    const ended =
-      run.finishReason === "interrupted"
-        ? "was interrupted"
-        : run.status === "succeeded"
-          ? "has finished"
-          : `was ${run.status}`
-    await this.cancelActiveSubagents(run.id, `The parent Agent run ${ended}.`)
-    await resumeIfDecided(this.host, run)
-  }
-
   private reportFailure(
     error: unknown,
     run: AgentRunRecord,
@@ -912,4 +649,11 @@ function normalizeConcurrency(name: string, value: number): number {
     )
   }
   return value
+}
+
+/** What every run the worker runs shares, without the worker's own parts. */
+function runSettings(context: AgentWorkerContext): AgentRunSettings {
+  const { id, apiBaseUrl, subagentConcurrencyPerRun, keepsChildWorkspaces, locale, timeZone } =
+    context
+  return { id, apiBaseUrl, subagentConcurrencyPerRun, keepsChildWorkspaces, locale, timeZone }
 }

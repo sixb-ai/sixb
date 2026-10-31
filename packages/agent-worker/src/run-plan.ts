@@ -1,34 +1,11 @@
-import { type ResolvedAgentExecutionPlan, withBuiltInSkills } from "@sixb/agent"
+import type { ResolvedAgentExecutionPlan } from "@sixb/agent"
 import type { AgentStepDefinition, SixbDefinitions } from "@sixb/core"
-import { type AgentRunPlan, agentToolSpec, listSandboxModels } from "@sixb/core/internal/agents"
+import { agentToolSpec, listSandboxModels } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { selectLanguageModel } from "@sixb/core/internal/model-execution"
-import type { LanguageModel } from "@sixb/core/models"
 
 // A turn's or a child's plan comes from its session, its model too. A workflow step runs only in the
 // cloud, so the worker resolves its plan from the project's definitions.
-
-/**
- * A turn's or a child's plan, with the session's model, which records each call itself, and the
- * harness's skills added. Its project tools run through the session.
- */
-export function resolveRunPlan(
-  plan: AgentRunPlan,
-  resolved: { readonly model: LanguageModel }
-): ResolvedAgentExecutionPlan {
-  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs, tools } = plan
-  return Object.freeze({
-    model: resolved.model,
-    ontologyDocs,
-    ...(instructions === undefined ? {} : { instructions }),
-    tools,
-    skills: withBuiltInSkills(plan.skills),
-    ...(reasoning === undefined ? {} : { reasoning }),
-    ...(timeZone === undefined ? {} : { timeZone }),
-    ...(locale === undefined ? {} : { locale }),
-    ...(sandboxModels.length ? { sandboxModels } : {}),
-  })
-}
 
 /**
  * Resolve a directly configured workflow task into the shared Agent execution contract: all but its

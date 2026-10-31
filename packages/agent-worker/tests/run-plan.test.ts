@@ -13,9 +13,10 @@ import {
 } from "@sixb/core"
 import { type AgentRunPlan, agentToolSpec } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
+import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { BUILT_IN_SKILLS } from "../../agent/src/skills/built-in"
 import { WorkerTestModel } from "../../agent/tests/worker-model-fixture"
-import { resolveRunPlan, resolveWorkflowAgentStepPlan } from "../src/run-plan"
+import { resolveWorkflowAgentStepPlan } from "../src/run-plan"
 
 function workflowStep(config: Parameters<typeof defineAgentStep>[1]): AgentStepDefinition {
   return defineAgentStep("review", config)

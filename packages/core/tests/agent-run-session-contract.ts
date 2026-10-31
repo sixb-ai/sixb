@@ -17,7 +17,6 @@ import {
   createSubagentRunId,
   createSubagentThreadId,
   NOOP_STREAM_SINK,
-  publishAgentRunCancel,
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -341,25 +340,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(messages.messages.map((message) => message.id)).toContain("message-answer")
       session.close()
     })
-
-    test("is cancelled with its own run, and with a run named in cancelWith", async () => {
-      const { host, broker, run } = await seedAgentRun()
-      const session = await claim(host, {
-        run,
-        leaseExpiresAt: LEASE,
-        cancelWith: ["parent-run"],
-      })
-      if (!session) throw new Error("Expected the run to be claimed.")
-      const cancelled = new Promise<void>((resolve) =>
-        session.cancelled.addEventListener("abort", () => resolve(), { once: true })
-      )
-
-      await publishAgentRunCancel(broker, { projectId: PROJECT_ID, runId: "parent-run" })
-
-      await cancelled
-      expect(session.cancelled.aborted).toBe(true)
-      session.close()
-    })
   })
 
   describe("a cancel recorded on the run", () => {
@@ -377,6 +357,27 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       session.close()
     })
 
+    // Guard proof: drop the cancelWith read from renewLease; the child of a cancelled turn runs
+    // on wherever no broker reaches it.
+    test("cancels a child's session at its next renewal once its parent's cancel is recorded", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const turn = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!turn) throw new Error("Expected the run to be claimed.")
+      const child = await claim(host, {
+        run: await spawnChild(storage, turn),
+        leaseExpiresAt: LEASE,
+        cancelWith: [run.id],
+      })
+      if (!child) throw new Error("Expected the child to be claimed.")
+
+      await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: run.id })
+      await child.renewLease(LEASE)
+
+      expect(child.cancelled.aborted).toBe(true)
+      turn.close()
+      child.close()
+    })
+
     // Guard proof: drop readCancel(run) from openAgentRunSession; the reclaimed session runs on.
     test("cancels a session claimed after it", async () => {
       const { host, storage, run } = await seedAgentRun()
@@ -392,7 +393,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
     })
   })
 
-  describe("an agent run session's children and mail", () => {
+  describe("an agent run session's children", () => {
     // Clearing a dead attempt deletes messages from a child's thread: a turn reclaimed by another
     // delivery must not. Drop the fence clearAttempt passes deleteByRunId; it deletes.
     test("clears a child's dead attempt only while the turn owns its run", async () => {
@@ -536,30 +537,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       session.close()
     })
 
-    test("sends as its run to a child's thread, and reads it back from a cursor", async () => {
-      const { host, storage, run } = await seedAgentRun()
-      const session = await claim(host, { run, leaseExpiresAt: LEASE })
-      if (!session) throw new Error("Expected the run to be claimed.")
-      const child = await claim(host, {
-        run: await spawnChild(storage, session),
-        leaseExpiresAt: LEASE,
-        cancelWith: [run.id],
-      })
-      if (!child) throw new Error("Expected the child to be claimed.")
-      const inbox = { threadId: child.run.threadId }
-      const mail = (id: string) =>
-        ({ id, toThreadId: child.run.threadId, kind: "message", text: id }) as const
-
-      await session.mail.send(mail("first"))
-      const page = await child.mail.read(inbox)
-      await session.mail.send(mail("second"))
-      const next = await child.mail.read(inbox, page.cursor)
-
-      expect(page.mail).toMatchObject([{ id: "first", fromRunId: run.id }])
-      expect(next.mail.map((item) => item.id)).toEqual(["second"])
-      session.close()
-      child.close()
-    })
     // Removal proof: store the runner's execution, id and limit as it sends them in
     // agentRunChildren.spawn; a runner could hand its child any authority, or any run's id.
     test("spawns a child as the turn: its id and thread by its key, its authority the turn's", async () => {
@@ -611,9 +588,9 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       turn.close()
     })
 
-    // Removal proof: drop ownInbox in agentRunMail, or the attempt check in clearAttempt; a runner
-    // reads another run's mail, or deletes what a live child wrote.
-    test("hears only its own inbox, and clears only a child's ended attempt", async () => {
+    // Removal proof: drop the attempt check in clearAttempt; a runner deletes what a live child
+    // wrote, or what any run of the conversation did.
+    test("clears only a child's ended attempt", async () => {
       const { host, storage, run } = await seedAgentRun()
       const turn = await claim(host, { run, leaseExpiresAt: LEASE })
       if (!turn) throw new Error("Expected the run to be claimed.")
@@ -621,11 +598,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       const child = await claim(host, { run: spawned, leaseExpiresAt: LEASE, cancelWith: [run.id] })
       if (!child) throw new Error("Expected the child to be claimed.")
 
-      expect(await turn.mail.read({ runId: run.id })).toMatchObject({ mail: [] })
-      expect(await child.mail.read({ threadId: spawned.threadId })).toMatchObject({ mail: [] })
-      expect(() => turn.mail.read({ threadId: spawned.threadId })).toThrow("its own inbox")
-      expect(() => child.mail.read({ runId: run.id })).toThrow("its own inbox")
-      expect(() => turn.mail.read({ runId: "another-run" })).toThrow("its own inbox")
       expect(
         await turn.children
           .clearAttempt({ threadId: spawned.threadId, runId: spawned.id })
@@ -638,43 +610,6 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       ).toBeInstanceOf(Error)
       turn.close()
       child.close()
-    })
-
-    // Guard proof: drop the recipient checks from agentRunMail's send; the turn mails its own thread
-    // and the child mails a run that is not its parent. Drop the ownership read; the stale turn sends.
-    test("mails only its own children or parent, and nothing once it lost its run", async () => {
-      const { host, storage, run } = await seedAgentRun()
-      const turn = await claim(host, { run, leaseExpiresAt: LAPSED })
-      if (!turn) throw new Error("Expected the run to be claimed.")
-      const spawned = await spawnChild(storage, turn)
-      const child = await claim(host, {
-        run: spawned,
-        leaseExpiresAt: LEASE,
-        cancelWith: [run.id],
-      })
-      if (!child) throw new Error("Expected the child to be claimed.")
-      const message = { id: "m", kind: "message", text: "Hi." } as const
-
-      expect(
-        await turn.mail.send({ ...message, toThreadId: run.threadId }).catch((error) => error)
-      ).toBeInstanceOf(Error)
-      expect(
-        await child.mail.send({ ...message, toRunId: "another-run" }).catch((error) => error)
-      ).toBeInstanceOf(Error)
-      await child.mail.send({ id: "q", kind: "question", text: "Which?", toRunId: run.id })
-      expect((await turn.mail.read({ runId: run.id })).mail).toMatchObject([
-        { id: "q", fromRunId: spawned.id, fromThreadId: spawned.threadId },
-      ])
-
-      const reclaimed = await claim(host, { run: turn.run, leaseExpiresAt: LEASE })
-      expect(
-        await turn.mail
-          .send({ ...message, toThreadId: spawned.threadId })
-          .catch((error: unknown) => error)
-      ).toBeInstanceOf(AgentExecutionLostError)
-      turn.close()
-      child.close()
-      reclaimed?.close()
     })
   })
 
@@ -741,21 +676,23 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
           })
           .catch((error: unknown) => error)
 
+      // Refused by the publish, or over HTTP before it: a stopped run's session serves only its end.
+      const refusal = (error: unknown) => {
+        if (error instanceof ArtifactRequestError) return error.code
+        return error instanceof Error ? error.name : String(error)
+      }
+
       // A cancel recorded on the parent ends it already, as the run token reads it.
       await storage.agents.runs.requestCancel({ projectId: PROJECT_ID, id: parent.run.id })
-      expect(await again()).toMatchObject({ code: "not_allowed" })
+      expect(["not_allowed", "AbortError"]).toContain(refusal(await again()))
 
       await parent.finish({ status: "succeeded" })
-      const refused = await child.artifacts
-        .publish({
-          artifactId: published.artifact.id,
-          title: "West again",
-          files: await documentFile("# West again\n"),
-        })
-        .catch((error: unknown) => error)
-
-      expect(refused).toBeInstanceOf(ArtifactRequestError)
-      expect(refused).toMatchObject({ code: "not_allowed" })
+      expect(["not_allowed", "AbortError"]).toContain(refusal(await again()))
+      const { total } = await storage.artifacts.listVersions({
+        projectId: PROJECT_ID,
+        artifactId: published.artifact.id,
+      })
+      expect(total).toBe(1)
       parent.close()
       child.close()
     })
