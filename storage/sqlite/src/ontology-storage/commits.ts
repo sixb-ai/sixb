@@ -11,6 +11,7 @@ import type {
 import {
   assertNonblank,
   assertNonnegativeInteger,
+  assertTimestamp,
   commitRecord,
   originWhere,
   type SqliteOntologyCommitRow,
@@ -78,6 +79,9 @@ export class SqliteOntologyCommitStorage implements OntologyCommitStorage {
       const limit = input.limit ?? -1
       assertNonnegativeInteger(offset, "Ontology commit list offset")
       if (limit !== -1) assertNonnegativeInteger(limit, "Ontology commit list limit")
+      if (input.committedAt !== undefined) {
+        assertTimestamp(input.committedAt, "Ontology commit list committedAt")
+      }
       const filters = ["project_id = ?"]
       const values: (string | number)[] = [input.projectId]
       if (input.run?.kind === "action") {
@@ -86,6 +90,11 @@ export class SqliteOntologyCommitStorage implements OntologyCommitStorage {
       } else if (input.run?.kind === "projection") {
         filters.push("origin_run_id = ? AND origin_kind IN ('projection', 'telemetry')")
         values.push(input.run.id)
+      }
+      if (input.committedAt !== undefined) {
+        // Commit times are stored canonical, so text equality is exact and the index serves it.
+        filters.push("committed_at = ?")
+        values.push(input.committedAt)
       }
       const where = filters.join(" AND ")
       const totalRow = this.db

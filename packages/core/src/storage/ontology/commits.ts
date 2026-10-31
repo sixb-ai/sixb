@@ -38,6 +38,8 @@ export type OntologyCommitRunSelector =
 export interface ListOntologyCommitsInput {
   readonly projectId: string
   readonly run?: OntologyCommitRunSelector
+  /** Only the commits committed at exactly this canonical UTC instant. */
+  readonly committedAt?: string
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
@@ -128,6 +130,9 @@ export interface OntologyCommitStorage {
   getById(input: GetOntologyCommitByIdInput): Promise<OntologyCommitRecord | null>
   /** Exact authoritative lookup used by Action/projection lifecycle coordination. */
   getByOrigin(input: GetOntologyCommitByOriginInput): Promise<OntologyCommitRecord | null>
-  /** Reads authoritative commit history, optionally correlated to an Action or projection run. */
+  /**
+   * Reads authoritative commit history, optionally correlated to an Action or projection run and
+   * narrowed to one commit instant.
+   */
   list(input: ListOntologyCommitsInput): Promise<ListOntologyCommitsResult>
 }

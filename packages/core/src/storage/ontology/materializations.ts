@@ -126,6 +126,12 @@ export interface MaterializationStatePage {
   readonly uniqueHolders?: readonly ExactUniqueValueWrite[]
 }
 
+/** The committed state of the objects, links and link slots one read names. */
+export type MaterializationState = Pick<
+  MaterializationStatePage,
+  "objects" | "links" | "linkScopes"
+>
+
 export interface SourceReplacementObjectState extends Omit<MaterializationObjectState, "source"> {
   readonly candidateSource: StoredSourceObjectAssertion | null
 }
@@ -293,6 +299,14 @@ export interface StreamMaterializationStateInput {
   readonly pageRows: number
 }
 
+export interface ReadMaterializationStateInput {
+  readonly projectId: string
+  readonly objects: readonly OntologyObjectRef[]
+  readonly links: readonly OntologyLinkRef[]
+  /** Cardinality-one link slots. */
+  readonly linkScopes: readonly OntologyLinkScopeRef[]
+}
+
 export type MaterializationWorkEntityKind = "object" | "link" | "point"
 
 export interface MaterializationClassificationWorkRecord {
@@ -450,6 +464,13 @@ export interface MaterializationObjectExistence {
 export interface OntologyMaterializationStorage {
   begin(input: MaterializationPlanHeader): Promise<MaterializationSession>
   streamState(input: StreamMaterializationStateInput): AsyncIterable<MaterializationStatePage>
+  /**
+   * Reads the committed state of these objects, links and link slots in one consistent snapshot,
+   * without a session: for callers that explain the current state instead of changing it, such as
+   * lineage. Read-only. At most 1,000 refs in all; each distinct ref is read once and returned in
+   * canonical ref order.
+   */
+  readState(input: ReadMaterializationStateInput): Promise<MaterializationState>
   /** Not on a plan-bound session: its work is the durable plan. */
   stageWork(input: StageMaterializationWorkInput): Promise<void>
   /**
