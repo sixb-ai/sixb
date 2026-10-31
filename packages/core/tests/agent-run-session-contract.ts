@@ -790,6 +790,23 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       session.close()
     })
 
+    // Removal proof: drop contextDirectory from the session's callTool (or from what the HTTP
+    // session sends); the tool is told .sixb/agent, where a computer's run keeps nothing.
+    test("name their files where the runner keeps the run's files", async () => {
+      const { turn, open } = await seedConversation(claim)
+      const session = await open(await turn("run-a", "m1"))
+
+      const result = await session.callTool(
+        { toolName: "chart", toolCallId: "call-1", input: { title: "Sales" } },
+        { signal: new AbortController().signal, contextDirectory: "/tmp/sixb-agent/run-a" }
+      )
+
+      expect(result.output).toMatchObject({
+        sandboxPath: expect.stringMatching(/^\/tmp\/sixb-agent\/run-a\/tool-files\/.+-chart\.csv$/),
+      })
+      session.close()
+    })
+
     // Guard proof: drop the `offered` check from AgentRunSession.callTool; the child then runs a
     // tool its parent did not give it.
     test("refuse input the tool's schema refuses, and a tool a child was not given", async () => {

@@ -40,6 +40,7 @@ function toolsOf(
   return projectModelTools({
     specs: definitions.map((definition) => agentToolSpec(definition, new Map())),
     runId: run.id,
+    contextDirectory: ".sixb/agent",
     fileBytesLeft: () => Number.MAX_SAFE_INTEGER,
     callTool: (call, { signal }) => {
       const definition = definitions.find((each) => each.name === call.toolName)

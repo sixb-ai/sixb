@@ -598,7 +598,7 @@ export function workflowStepTools(input: {
     input: input.nodeInput,
     blobStorage: input.context.blobStorage,
   })
-  return (call, { signal, maxFileBytes }) => {
+  return (call, { signal, maxFileBytes, contextDirectory }) => {
     const definition = selected.has(call.toolName)
       ? input.host.definitions.tools.getByName(call.toolName)
       : null
@@ -616,6 +616,7 @@ export function workflowStepTools(input: {
       attachments,
       files: input.context.blobStorage,
       ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
+      ...(contextDirectory === undefined ? {} : { contextDirectory }),
     })
   }
 }
