@@ -1,6 +1,7 @@
 import type { LanguageModelRequest } from "../models/language-model"
 import type { AgentRunRecord } from "../storage/agents"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
+import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
 import {
   type AgentRunSession,
   type AgentRunSessionHost,
@@ -152,11 +153,27 @@ export async function serveAgentRunSession(
  * Claim a queued run for a runner that reaches it over HTTP: the caller decides who may. Returns
  * the claimed run and the run token its runner sends with every session request, or null when the
  * run ended or another runner holds it.
+ *
+ * A running run is never taken over: it already streamed and billed what it did. Once its lease
+ * lapsed, it ends interrupted here, as the lapsed-run sweep would end it, and the claim is refused.
  */
 export async function claimAgentRunForRunner(
   host: AgentRunSessionHost,
   input: { readonly run: AgentRunRecord; readonly leaseExpiresAt: string }
 ): Promise<{ readonly run: AgentRunRecord; readonly runToken: string } | null> {
+  if (input.run.status === "running") {
+    const ended =
+      agentRunLeaseLapsed(input.run) &&
+      (await endInterruptedAgentRun(host, input.run, MAX_RUNNER_LEASE_MS))
+    if (!ended) return null
+
+    throw new AgentRunRefusedError(
+      input.run.kind === "subagent"
+        ? "[Sixb] This child stopped when its runner did; spawn it again with a new key."
+        : "[Sixb] This turn stopped when its runner did; send your message again."
+    )
+  }
+
   const session = await claimAgentRun(host, {
     run: input.run,
     leaseExpiresAt: capLease(input.leaseExpiresAt),

@@ -108,6 +108,8 @@ async function setup() {
 
   /** The run token each run's session sent, by run. */
   const runTokens = new Map<string, string>()
+  /** What each run's last claim answered, by run. */
+  const claimStatuses = new Map<string, number>()
 
   /**
    * Claim as `headers`' person, with their session, as a runner they signed in would; its session's
@@ -119,12 +121,14 @@ async function setup() {
       runId,
       authorization: "",
       leaseExpiresAt,
-      fetch: (request) => {
+      fetch: async (request) => {
         if (new URL(request.url).pathname.endsWith("/claim")) {
           const signed = new Headers(request.headers)
           signed.delete("authorization")
           for (const [name, value] of Object.entries(headers)) signed.set(name, value)
-          return send(new Request(request, { headers: signed }))
+          const response = await send(new Request(request, { headers: signed }))
+          claimStatuses.set(runId, response.status)
+          return response
         }
         const token = request.headers.get("authorization")?.replace(/^Bearer /, "")
         if (token) runTokens.set(runId, token)
@@ -133,7 +137,7 @@ async function setup() {
     })
   }
 
-  return { storage, host, send, person, ask, claim, runTokens }
+  return { storage, host, send, person, ask, claim, runTokens, claimStatuses }
 }
 
 describe("a runner outside the worker", () => {
@@ -195,6 +199,39 @@ describe("a runner outside the worker", () => {
     )
     await first.close()
     await second.close()
+  })
+
+  // Guard proof: drop the `status === "running"` branch from claimAgentRunForRunner; Ava's second
+  // claim takes the lapsed turn over under a new token, for her runner to run it all again.
+  test("never takes over a turn: a live one stays its runner's, a lapsed one ends interrupted", async () => {
+    const { person, ask, claim, storage, claimStatuses } = await setup()
+    const ava = await person("ava")
+    const live = await claim(ava, await ask(ava, "Hold on."))
+    if (!live) throw new Error("Expected the turn to be claimed.")
+
+    expect(await claim(ava, live.run.id)).toBeNull()
+    await live.assertOwned()
+
+    // Its runner stopped: the lease it took has lapsed, and nothing renews it.
+    const runId = await ask(ava, "Run until I stop.")
+    const stopped = await claim(ava, runId, new Date(Date.now() - 1_000).toISOString())
+    if (!stopped) throw new Error("Expected the turn to be claimed.")
+
+    const refused = await claim(ava, runId).catch((error: unknown) => error)
+
+    expect(refused).toBeInstanceOf(AgentRunRefusedError)
+    expect(refused).toMatchObject({
+      message: "[Sixb] This turn stopped when its runner did; send your message again.",
+    })
+    expect(claimStatuses.get(runId)).toBe(409)
+    expect(await storage.agents.runs.getById({ projectId, id: runId })).toMatchObject({
+      status: "cancelled",
+      finishReason: "interrupted",
+    })
+    expect(await stopped.plan().catch((error: unknown) => error)).toBeInstanceOf(
+      AgentExecutionLostError
+    )
+    await Promise.all([live.close(), stopped.close()])
   })
 
   // Guard proof: serve "workspace.transition" from the HTTP session again; the request reaches the

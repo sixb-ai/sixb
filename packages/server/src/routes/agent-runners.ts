@@ -1,5 +1,6 @@
 import { principalsEqual, type SixbHostView, SYSTEM_PRINCIPAL } from "@sixb/core"
 import {
+  AgentRunRefusedError,
   type AgentRunSessionHost,
   afterAgentRunFinished,
   claimAgentRunForRunner,
@@ -125,7 +126,11 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
         }
         return answer({ result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt }) })
       } catch (error) {
-        return answer({ error: encodeWireError(error) }, 400)
+        // A turn whose runner stopped ends interrupted rather than being claimed again.
+        return answer(
+          { error: encodeWireError(error) },
+          error instanceof AgentRunRefusedError ? 409 : 400
+        )
       }
     },
     { detail: { hide: true } }

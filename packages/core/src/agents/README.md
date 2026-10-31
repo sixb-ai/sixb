@@ -101,6 +101,7 @@ checks, fences and records is the same wherever the runner is.
 ```text
 claim            POST /api/agent-runs/:runId/claim, as the person who asked for the turn
                  children.claim, with the turn's token, for a child of that turn
+                 a queued run only: one whose runner stopped ends interrupted, never replayed
 operations       JSON in, JSON out; dates, bytes and maps tagged (run-session-wire.ts)
 models.stream    the provider's events, one JSON line each; the server admits and records the call
 events           live records in batches, best effort
