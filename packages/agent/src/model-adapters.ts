@@ -39,6 +39,8 @@ interface ProjectModelToolsInput {
   readonly specs: readonly AgentToolSpec[]
   readonly runId: string
   readonly callTool: AgentToolCaller
+  /** Where the sandbox keeps the run's files, which the paths a tool's files get start with. */
+  readonly contextDirectory: string
   /** The bytes the run's file budget has left, which a call's files may take. */
   readonly fileBytesLeft: () => number
   /** Copy the files a call stored into the sandbox, before the model reads its output. */
@@ -93,7 +95,11 @@ function projectModelTool(
       try {
         result = await context.callTool(
           { toolName: spec.name, toolCallId, input: toolInput },
-          { signal, maxFileBytes: context.fileBytesLeft() }
+          {
+            signal,
+            maxFileBytes: context.fileBytesLeft(),
+            contextDirectory: context.contextDirectory,
+          }
         )
       } catch (error) {
         if (error instanceof AgentToolResultValidationError) {

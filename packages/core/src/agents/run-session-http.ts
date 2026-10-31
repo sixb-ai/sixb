@@ -167,8 +167,7 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
       message: (messageId) => call("threads.message", [messageId]),
       messages: (query) => call("threads.messages", [query]),
     },
-    callTool: (toolCall, { signal, maxFileBytes }) =>
-      call("callTool", [toolCall, maxFileBytes === undefined ? {} : { maxFileBytes }], signal),
+    callTool: (toolCall, { signal, ...options }) => call("callTool", [toolCall, options], signal),
     artifacts: {
       list: (query) => call("artifacts.list", [query]),
       getVersion: (...args) => call("artifacts.getVersion", args),

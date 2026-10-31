@@ -92,7 +92,7 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
     session.artifacts.publish(input as Parameters<AgentRunSession["artifacts"]["publish"]>[0]),
   callTool: (session, [call, options], signal) =>
     session.callTool(call as Parameters<AgentRunSession["callTool"]>[0], {
-      ...((options ?? {}) as { maxFileBytes?: number }),
+      ...((options ?? {}) as { maxFileBytes?: number; contextDirectory?: string }),
       signal,
     }),
   "models.describe": async (session, [ref]) => {

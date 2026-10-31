@@ -6,6 +6,7 @@ import { format } from "node:util"
 import { createCliRenderer, type KeyEvent, RGBA, SyntaxStyle } from "@opentui/core"
 import { createRoot, useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useState } from "react"
+import { glyph } from "../ui/theme"
 import { Workspace } from "./app"
 import { Logo } from "./brand"
 import { thisComputerId } from "./computer"
@@ -45,6 +46,8 @@ export async function runTui(options: {
     useMouse: true,
     targetFps: 60,
   })
+  // The tab's name while sixb has it. A terminal draws its tab's icon itself: the mark stands in.
+  renderer.setTerminalTitle(`${glyph.mark} Sixb`)
   // The terminal says whether it is light or dark; SIXB_THEME decides where it can't.
   const forced = process.env.SIXB_THEME
   const mode =
@@ -96,6 +99,8 @@ export async function runTui(options: {
   } finally {
     unhook()
     root.unmount()
+    // An empty title gives the tab back its own name.
+    renderer.setTerminalTitle("")
     renderer.destroy()
     await renderer.closed
     syntax.destroy()

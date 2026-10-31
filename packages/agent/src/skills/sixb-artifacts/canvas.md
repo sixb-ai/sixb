@@ -92,7 +92,7 @@ text on a board.
 
 Once a canvas publishes, Sixb opens each board at its own size in the sandbox's browser, in light
 and dark mode or the one its `theme.json` pins, and warns as it does for a page, naming the board.
-The result names each board's screenshot, `<id>.png`, under `.sixb/agent/checks/`.
+The result names each board's screenshot, `<id>.png`, under `$SIXB_CONTEXT_DIR/checks/`.
 
 1. Open the screenshots with `view_file` and look at each board as the reader will.
 2. Fix what the warnings name and what you see, in the boards' files or `canvas.json`.

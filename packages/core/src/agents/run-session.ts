@@ -491,7 +491,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
     threads,
     artifacts: agentRunArtifacts(host, run, executionToken, runSdk),
     files,
-    async callTool(call, { signal, maxFileBytes }) {
+    async callTool(call, { signal, maxFileBytes, contextDirectory }) {
       // Only a tool the run offers: a child's are the ones its parent chose.
       const offered = run.kind === "subagent" ? run.spec.toolNames : undefined
       const definition =
@@ -521,6 +521,7 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
               }),
         files,
         ...(maxFileBytes === undefined ? {} : { maxFileBytes }),
+        ...(contextDirectory === undefined ? {} : { contextDirectory }),
       })
     },
     authorization: (ref) =>
