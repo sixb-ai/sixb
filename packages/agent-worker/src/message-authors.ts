@@ -1,17 +1,15 @@
 import { type Principal, principalsEqual, type UserPrincipal } from "@sixb/core"
-import { userCanRunAgent } from "@sixb/core/internal/agents"
+import type { AgentRunPeople } from "@sixb/core/internal/agents"
 import type {
   AgentMessageRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
-  AuthStorage,
 } from "@sixb/core/storage"
 import {
   type ConversationPerson,
   renderConversationPeople,
   renderMessageAuthor,
 } from "./agent-prompt"
-import type { AgentWorkerHost } from "./types"
 
 /** What the model reads of who writes in a conversation. Nothing of it is stored or shown. */
 export interface ConversationAuthors {
@@ -34,25 +32,17 @@ export interface ConversationReaders {
  * Agent. Someone added before losing access is not named to the model as taking part.
  */
 export async function conversationReaders(input: {
-  readonly auth?: AuthStorage
-  readonly security: AgentWorkerHost["definitions"]["security"]
+  readonly people: Pick<AgentRunPeople, "user" | "canRunAgent">
   readonly thread: AgentThreadRecord
   readonly participants: readonly AgentThreadParticipantRecord[]
 }): Promise<ConversationReaders> {
-  const { auth, thread } = input
-  if (!auth) return { thread, participants: [] }
-
+  const { people, thread } = input
   const readers = await Promise.all(
     input.participants.map(async ({ principal }) => {
-      const user = await auth.users.getById({ projectId: thread.projectId, id: principal.id })
+      const user = await people.user(principal.id)
       if (user?.status !== "active") return null
 
-      const allowed = await userCanRunAgent({
-        auth,
-        projectId: thread.projectId,
-        userId: principal.id,
-        security: input.security,
-      })
+      const allowed = await people.canRunAgent(principal.id)
       return allowed ? principal : null
     })
   )
@@ -69,7 +59,7 @@ export async function conversationReaders(input: {
  * it.
  */
 export async function loadConversationAuthors(input: {
-  readonly auth?: AuthStorage
+  readonly people: Pick<AgentRunPeople, "user">
   readonly conversation: ConversationReaders
   readonly messages: readonly AgentMessageRecord[]
 }): Promise<ConversationAuthors> {
@@ -85,7 +75,7 @@ export async function loadConversationAuthors(input: {
   )
   if (participants.length === 0 && !someoneElseWrote) return ALONE
 
-  const people = await namePeople(input.auth, thread.projectId, [
+  const people = await namePeople(input.people, [
     owner,
     ...participants,
     ...authored.map((message) => message.authorPrincipal),
@@ -113,18 +103,14 @@ export function conversationAuthorsText(authors: ConversationAuthors): string {
 
 /** Each user's display name; anyone else, or a user without one, goes by their id. */
 async function namePeople(
-  auth: AuthStorage | undefined,
-  projectId: string,
+  people: Pick<AgentRunPeople, "user">,
   principals: readonly Principal[]
 ): Promise<ReadonlyMap<string, ConversationPerson>> {
   const unique = new Map(principals.map((principal) => [key(principal), principal]))
 
   const named = await Promise.all(
     [...unique.entries()].map(async ([principalKey, principal]) => {
-      const user =
-        principal.type === "user"
-          ? await auth?.users.getById({ projectId, id: principal.id })
-          : null
+      const user = principal.type === "user" ? await people.user(principal.id) : null
 
       const person: ConversationPerson = user?.displayName
         ? { id: principal.id, name: user.displayName }

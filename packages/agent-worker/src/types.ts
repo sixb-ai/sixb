@@ -13,7 +13,7 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
-import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
+import type { PropertyClearance, RunModelLoopInput, StreamSink } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import type { ModelTool } from "@sixb/core/models"
@@ -28,7 +28,6 @@ import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentRequester } from "./requester"
 import type { BeforeFinalizeOptions } from "./run-sandbox"
 import type { AgentSandboxHandle } from "./sandbox-handle"
-import type { StreamSink } from "./stream-sink"
 import type { AgentFileBudget } from "./tools/tool-files"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
@@ -87,8 +86,16 @@ export interface AgentWorkerContext {
   readonly timeZone: string
 }
 
-/** Provider ports activated only after an Agent execution scope is bound. */
-export interface AgentExecutionContext extends AgentWorkerContext {
+/**
+ * Provider ports activated only after an Agent execution scope is bound. A run reaches shared
+ * state through its session; the worker's storage is not part of it.
+ */
+export interface AgentExecutionContext extends Omit<AgentWorkerContext, "storage"> {
+  /**
+   * Only for `publish_artifact`, which writes artifact versions itself until artifacts publish
+   * through the API. Nothing else on a run's path reads it.
+   */
+  readonly artifactPublishing: AgentWorkerStorage
   readonly sixb: Sixb
   /** Marked properties the execution cannot read; absent when it reads every property. Their docs flag them. */
   readonly propertyClearance?: PropertyClearance
@@ -108,7 +115,6 @@ export interface AgentTurnContext {
   readonly beforeFinalize?: (options?: BeforeFinalizeOptions) => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
-  readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
   /** The Sixb API the run's commands call, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
@@ -125,8 +131,6 @@ export interface AgentTurnContext {
    * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
-  readonly streamSink: StreamSink
-  readonly recoverAiModelCall: RecoverAiModelCall
   readonly turnTimeoutMs: number
 }
 

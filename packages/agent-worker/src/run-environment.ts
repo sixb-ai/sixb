@@ -7,7 +7,12 @@ import type {
   SandboxDefinition,
   SandboxFactory,
 } from "@sixb/core"
-import { conversationThreadId, staticSandboxRecipe } from "@sixb/core/internal/agents"
+import {
+  type AgentRunSession,
+  conversationThreadId,
+  staticSandboxRecipe,
+  type WorkflowAgentNodeSession,
+} from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -40,7 +45,7 @@ import type { AgentContextBudget } from "./context-budget"
 import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
-import { assertExecutionOwned, isLostExecution } from "./errors"
+import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
@@ -97,6 +102,8 @@ interface CreateAgentEnvironmentInput {
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The turn's session: its workspace, conversation and checkpoint go through it. */
+  readonly session: AgentRunSession
   readonly thread?: AgentThreadRecord | null
   /** Who asked for the turn: what it publishes is theirs, in an artifact the thread's owner owns. */
   readonly requestedBy?: Principal
@@ -115,6 +122,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 }
 
 export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The child's session: its workspace goes through it. */
+  readonly session: AgentRunSession
   readonly run: SubagentRunRecord
   /** The child's own thread: memory is read as of its creation. */
   readonly thread: AgentThreadRecord
@@ -129,6 +138,8 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
+  /** The step's session: its sandbox checks the node is still the session's before each action. */
+  readonly session: Pick<WorkflowAgentNodeSession, "assertOwned">
   readonly run: WorkflowAgentNodeRunRecord
   readonly workflowId: string
   readonly stepId: string
@@ -157,6 +168,7 @@ export async function createConversationAgentEnvironment(
   const sandbox = input.thread?.sandboxParams
     ? await persistentRunSandbox({
         context,
+        session: input.session,
         definition: input.sandboxDefinition,
         thread: input.thread,
         run,
@@ -182,6 +194,7 @@ export async function createConversationAgentEnvironment(
     const prepared = preflight
       ? await prepareAgentConversationContext({
           context,
+          session: input.session,
           plan,
           ontologyIndex: ontologyDocs.index,
           contextDirectory: sandbox.contextDirectory,
@@ -203,15 +216,13 @@ export async function createConversationAgentEnvironment(
     const [messages, inlineImages, memory] = await Promise.all([
       prepared?.threadContext.retainedMessages ??
         input.messages ??
-        context.storage.agents.messages
-          .list({ projectId: context.id, threadId: run.threadId, order: "asc" })
+        input.session.conversation
+          .messages({ threadId: run.threadId, order: "asc" })
           .then((history) => history.messages),
       modelSupportsInlineImages(plan.model),
       prepared
         ? prepared.memory
-        : context.storage.agents.checkpoints
-            .getLatest({ projectId: context.id, threadId: run.threadId })
-            .then(loadMemory),
+        : input.session.conversation.latestCheckpoint(run.threadId).then(loadMemory),
     ])
     const attachmentContext = await prepareAgentAttachments({
       projectId: context.id,
@@ -244,8 +255,7 @@ export async function createConversationAgentEnvironment(
           }
         : {}),
       toolAttachments: threadToolAttachments({
-        storage: context.storage.agents,
-        projectId: context.id,
+        conversation: input.session.conversation,
         threadId: run.threadId,
         blobStorage: context.blobStorage,
       }),
@@ -296,6 +306,7 @@ export async function createSubagentEnvironment(
   const workspace = keepsSubagentWorkspace(context.sandboxes)
     ? await persistentRunSandbox({
         context,
+        session: input.session,
         thread: input.thread,
         run,
         signal: input.signal ?? NEVER_ABORTED_SIGNAL,
@@ -437,7 +448,7 @@ export async function createWorkflowAgentNodeEnvironment(
           factory: stepSandbox,
           recipe: staticSandboxRecipe(stepSandbox.configuration ?? {}),
           auth: stepSandbox.configuration?.auth,
-          assertOwner: () => assertNodeRunOwned(context, run.nodeRunId, execution.token),
+          assertOwner: () => input.session.assertOwned(),
           onAuthFailure: (error) => failure.abort(error),
         },
       })
@@ -482,20 +493,6 @@ export async function createWorkflowAgentNodeEnvironment(
     if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
     throw error
   }
-}
-
-/** Throw unless this execution still owns the node run; read before each provider action. */
-async function assertNodeRunOwned(
-  context: AgentExecutionContext,
-  nodeRunId: string,
-  executionToken: string
-): Promise<void> {
-  const current = await context.storage.workflowRuns?.agentNodes.getByNodeRunId({
-    projectId: context.id,
-    nodeRunId,
-  })
-
-  assertExecutionOwned({ current, executionToken, runId: nodeRunId })
 }
 
 interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signal"> {
@@ -602,7 +599,7 @@ async function startAgentEnvironment(
   const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
-  const artifactStorage = context.storage.artifacts
+  const artifactStorage = context.artifactPublishing.artifacts
   let installedArtifacts: Promise<InstalledArtifacts> | undefined
   const { publishing } = input
   if (publishing && artifactStorage) {
@@ -620,7 +617,7 @@ async function startAgentEnvironment(
     installedArtifacts.catch(() => {})
     const publishTools = createPublishArtifactTools({
       projectId: context.id,
-      storage: context.storage,
+      storage: context.artifactPublishing,
       artifacts: artifactStorage,
       reader: context.sixb.artifacts,
       blobStorage: context.blobStorage,
@@ -735,7 +732,6 @@ async function startAgentEnvironment(
       ...(context.authorPrincipal === undefined
         ? {}
         : { authorPrincipal: context.authorPrincipal }),
-      storage: context.storage,
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
@@ -744,8 +740,6 @@ async function startAgentEnvironment(
       systemPrompt,
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
-      streamSink: context.streamSink,
-      recoverAiModelCall: context.recoverAiModelCall,
       turnTimeoutMs: context.turnTimeoutMs,
     },
     dispose,

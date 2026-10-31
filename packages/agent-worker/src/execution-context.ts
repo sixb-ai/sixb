@@ -1,6 +1,7 @@
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   type AgentExecutionAuthorization,
+  type AgentRunPeople,
   resolveAgentPropertyClearance,
 } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
@@ -13,6 +14,8 @@ export async function createAgentExecutionContext(input: {
   readonly execution: ExecutionRecord
   readonly actorId?: string
   readonly runId: string
+  /** Who the run's requester is, named in its prompt. */
+  readonly people: Pick<AgentRunPeople, "user">
   readonly authorization: AgentExecutionAuthorization
   readonly authorPrincipal?: AgentExecutionContext["authorPrincipal"]
   /** Others take part in the run's thread, so each user message names its author instead. */
@@ -33,13 +36,15 @@ export async function createAgentExecutionContext(input: {
   const requester = input.shared
     ? undefined
     : await resolveAgentRequester({
-        auth: input.context.storage.auth,
-        projectId: input.context.id,
+        people: input.people,
         requestedBy: input.execution.requestedBy,
       })
 
+  // The run reaches shared state through its session; only publish_artifact keeps the storage.
+  const { storage, ...worker } = input.context
   return {
-    ...input.context,
+    ...worker,
+    artifactPublishing: storage,
     sixb,
     ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),

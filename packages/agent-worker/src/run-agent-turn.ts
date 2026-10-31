@@ -1,19 +1,16 @@
-import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
+import type { AgentMessage, AgentMessagePart } from "@sixb/core"
 import {
+  type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
   toModelMessages,
-  turnPausesOnHeldCalls,
 } from "@sixb/core/internal/agents"
-import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
   type AgentRunDiagnostic,
   type AgentRunFinishReason,
   type AgentRunRecord,
-  type AgentStorage,
-  type AgentThreadRecord,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -22,7 +19,6 @@ import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
-import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { type ConversationReaders, loadConversationAuthors } from "./message-authors"
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
@@ -39,6 +35,8 @@ export interface RunAgentTurnInput {
   readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
   readonly run: ConversationAgentRunRecord
+  /** The run's session: its finish, and every other write, are fenced by its execution token. */
+  readonly session: AgentRunSession
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
   /**
@@ -80,37 +78,26 @@ export interface TurnChildren {
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
   const { context, plan, run, signal } = input
-  const { id: projectId, storage, tools, turnTimeoutMs } = context
+  const { id: projectId, tools, turnTimeoutMs } = context
   const runId = run.id
-  const executionToken = run.execution?.token
-  if (!executionToken) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent run '${runId}' has no execution token.`,
-      { details: { runId, threadId: run.threadId } }
-    )
-  }
-  const agents = storage.agents
 
   const threadContext =
     input.threadContext ??
     (await loadAgentThreadModelContext({
-      storage: agents,
-      projectId,
+      conversation: input.session.conversation,
       threadId: run.threadId,
     }))
   const { attachmentContext } = context
   const [sentTimes, authors] = await Promise.all([
     loadUserMessageTimes({
-      storage: agents,
-      projectId,
+      conversation: input.session.conversation,
       threadId: run.threadId,
       messages: threadContext.retainedMessages,
       projectTimeZone: context.projectTimeZone,
     }),
     input.conversation
       ? loadConversationAuthors({
-          auth: storage.auth,
+          people: input.session.people,
           conversation: input.conversation,
           messages: threadContext.retainedMessages,
         })
@@ -154,22 +141,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const ownsRuntime = input.runtime === undefined
   let runtime = input.runtime
   if (!runtime) {
-    const durableExecution = await storage.executions.getById({
-      projectId,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${run.executionId}'.`,
-        { details: { runId, executionId: run.executionId } }
-      )
-    }
     runtime = createAgentTurnRuntime({
       context,
       run,
       signal,
-      execution: durableExecution,
+      modelCalls: await input.session.modelCalls(),
     })
   }
   const usageRecorder = runtime.usageRecorder
@@ -192,12 +168,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (runtime.timedOut()) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({
-        storage,
-        agents,
+        session: input.session,
         context,
         run,
-        executionToken,
-        projectId,
         modelId: plan.model.modelId,
         status: "failed",
         finishReason: "timeout",
@@ -216,12 +189,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
     if (!abortSignal.aborted && (error === undefined || !isAbortError(error))) return null
     return finalizeInterruptedTurn({
-      storage,
-      agents,
+      session: input.session,
       context,
       run,
-      executionToken,
-      projectId,
       modelId: plan.model.modelId,
       status: "cancelled",
       ...stopReason(),
@@ -269,12 +239,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         signal: abortSignal,
         onModelCallEnd: usageRecorder.onModelCallEnd,
         onEvent: async (chunk) => {
-          await context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
+          await input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk })
         },
         // The approval records decide, never the tool output: the model can send a command's
         // output elsewhere, or print one of its own. A held call waits for the children still
         // at work: pausing ends the turn, and that would cancel them.
-        pauseAfterStep: () => turnPausesOnHeldCalls(agents, run),
+        pauseAfterStep: () => input.session.heldCalls.pausesAfterStep(),
       })
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
@@ -294,12 +264,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (interruptedAfterModel) return interruptedAfterModel
     if (result.status === "aborted") {
       return finalizeInterruptedTurn({
-        storage,
-        agents,
+        session: input.session,
         context,
         run,
-        executionToken,
-        projectId,
         modelId: plan.model.modelId,
         status: "cancelled",
         ...stopReason(),
@@ -315,14 +282,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     // A call held after the last step that ran tools, by a command left running in the sandbox or
     // by a child, pauses the turn too. Its end cancels the children still at work, so it first
     // waits for them: one that holds a call pauses by itself instead of being stopped.
-    if (result.status === "paused" || (await holdsApproval(agents, run))) {
+    if (result.status === "paused" || (await input.session.heldCalls.holdsRun())) {
       await input.children?.settle(stopWaitingAt, abortSignal)
     }
     const interruptedWhileWaiting = await finalizeIfInterrupted()
     if (interruptedWhileWaiting) return interruptedWhileWaiting
 
     const finishReason =
-      result.status === "paused" || (await holdsApproval(agents, run))
+      result.status === "paused" || (await input.session.heldCalls.holdsRun())
         ? "awaiting_approval"
         : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
@@ -336,8 +303,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (interruptedBeforeCommit) return interruptedBeforeCommit
 
     await context.beforeFinalize?.()
-    const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-      messages: [
+    const finalizedRun = await input.session.finish(
+      {
+        status: "succeeded",
+        modelId: plan.model.modelId,
+        finishReason,
+        ...(diagnostics.length === 0 ? {} : { diagnostics }),
+      },
+      [
         {
           id: assistantMessageId,
           projectId,
@@ -349,20 +322,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
             ? {}
             : { authorPrincipal: context.authorPrincipal }),
         },
-      ],
-      finish: {
-        projectId,
-        id: runId,
-        executionToken,
-        status: "succeeded",
-        modelId: plan.model.modelId,
-        finishReason,
-        ...(diagnostics.length === 0 ? {} : { diagnostics }),
-      },
-    })
+      ]
+    )
 
-    await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
-    await context.streamSink.publishRunFinished(finalizedRun)
+    await input.session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+    await input.session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   } finally {
     if (ownsRuntime) runtime.dispose()
@@ -373,9 +337,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
  * waiting, or decided and not reported to the model yet, its children's included.
  */
-function holdsApproval(agents: AgentStorage, run: ConversationAgentRunRecord): Promise<boolean> {
-  return agents.approvals.holdsRun({ projectId: run.projectId, runId: run.id })
-}
 
 /**
  * How long before its deadline a pausing turn stops waiting for its children: enough to record its
@@ -428,12 +389,9 @@ function hasVisibleText(parts: AgentMessage["parts"]): boolean {
 
 /** Persist an interrupted turn, retaining coherent partial content when any was produced. */
 async function finalizeInterruptedTurn(input: {
-  readonly storage: Storage
-  readonly agents: AgentStorage
+  readonly session: AgentRunSession
   readonly context: AgentTurnContext
   readonly run: ConversationAgentRunRecord
-  readonly executionToken: string
-  readonly projectId: string
   readonly modelId?: string
   readonly status: "failed" | "cancelled"
   readonly finishReason?: Exclude<AgentRunFinishReason, "awaiting_approval" | "awaiting_answer">
@@ -441,65 +399,39 @@ async function finalizeInterruptedTurn(input: {
   readonly completedAt?: Date
   readonly parts?: readonly AgentMessagePart[]
 }): Promise<AgentRunRecord> {
-  const {
-    storage,
-    agents,
-    context,
-    run,
-    executionToken,
-    projectId,
-    modelId,
-    status,
-    finishReason,
-    error,
-    completedAt,
-  } = input
+  const { session, context, run, modelId, status, finishReason, error, completedAt } = input
   const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
 
   await context.beforeFinalize?.()
 
+  const outcome = {
+    status,
+    ...(modelId === undefined ? {} : { modelId }),
+    ...(finishReason === undefined ? {} : { finishReason }),
+    ...(error === undefined ? {} : { error }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+  }
   if (!parts) {
-    const finalizedRun = await finishRunOrThrow(agents, {
-      projectId,
-      id: run.id,
-      executionToken,
-      status,
-      ...(modelId === undefined ? {} : { modelId }),
-      ...(finishReason === undefined ? {} : { finishReason }),
-      ...(error === undefined ? {} : { error }),
-      ...(completedAt === undefined ? {} : { completedAt }),
-    })
-    await context.streamSink.publishRunFinished(finalizedRun)
+    const finalizedRun = await session.finish(outcome)
+    await session.events.publishRunFinished(finalizedRun)
     return finalizedRun
   }
 
   const assistantMessageId = createAgentMessageId()
-  const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-    messages: [
-      {
-        id: assistantMessageId,
-        projectId,
-        threadId: run.threadId,
-        runId: run.id,
-        role: "assistant",
-        parts,
-        ...(context.authorPrincipal === undefined
-          ? {}
-          : { authorPrincipal: context.authorPrincipal }),
-      },
-    ],
-    finish: {
-      projectId,
-      id: run.id,
-      executionToken,
-      status,
-      ...(modelId === undefined ? {} : { modelId }),
-      ...(finishReason === undefined ? {} : { finishReason }),
-      ...(error === undefined ? {} : { error }),
-      ...(completedAt === undefined ? {} : { completedAt }),
+  const finalizedRun = await session.finish(outcome, [
+    {
+      id: assistantMessageId,
+      projectId: run.projectId,
+      threadId: run.threadId,
+      runId: run.id,
+      role: "assistant",
+      parts,
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
     },
-  })
-  await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
-  await context.streamSink.publishRunFinished(finalizedRun)
+  ])
+  await session.events.publishMessageFinalized({ run, messageId: assistantMessageId })
+  await session.events.publishRunFinished(finalizedRun)
   return finalizedRun
 }

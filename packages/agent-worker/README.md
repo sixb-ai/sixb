@@ -32,7 +32,12 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   queue job id on its next repair pass (at start, then every 30 seconds).
 - A workflow agent step's job is acknowledged only after its workflow resume is queued. A
   redelivery that finds the step already succeeded only queues the resume.
-- The worker transitions the durable run from `queued` to `running` when it claims the job.
+- The worker transitions the durable run from `queued` to `running` when it claims the job, through
+  core's run session (`claimAgentRun` in `@sixb/core/internal/agents`; see its
+  [README](../core/src/agents/README.md)). A turn, a child and a workflow step reach shared state
+  only through their session: preparation reads, model calls, live records, children and mail,
+  the checkpoint, the workspace and the finish. A runner outside the worker will reach the same
+  operations over HTTP.
 - Before each conversation turn, the worker estimates the next model request and checkpoints older
   complete turns when it crosses the model's input budget. Context limits come from the model
   definition, or its provider-backed `resolve()` when the selected execution is prepared. Worker

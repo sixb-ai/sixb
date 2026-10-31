@@ -6,7 +6,11 @@ import type {
   SandboxFactory,
   SandboxRequestCredential,
 } from "@sixb/core"
-import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
+import {
+  AgentExecutionLostError,
+  type AgentRunSession,
+  createAgentThreadSandboxName,
+} from "@sixb/core/internal/agents"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type {
   AgentThreadRecord,
@@ -14,11 +18,7 @@ import type {
   SubagentRunRecord,
 } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
-import {
-  AgentEnvironmentSaveError,
-  AgentExecutionLostError,
-  assertRunExecutionOwned,
-} from "./errors"
+import { AgentEnvironmentSaveError } from "./errors"
 import {
   type AcquiredRunSandbox,
   type BeforeFinalizeOptions,
@@ -32,6 +32,8 @@ import { prepareWorkspaceRunFiles, WorkspaceRunFilesConflictError } from "./work
 
 interface PersistentRunSandboxInput {
   readonly context: AgentExecutionContext
+  /** The run's session: the thread's workspace state moves only through it. */
+  readonly session: AgentRunSession
   /** A conversation's recipe. A sub-agent's thread has none: its workspace is blank. */
   readonly definition?: SandboxDefinition
   readonly thread: AgentThreadRecord
@@ -102,7 +104,6 @@ async function resolveRecipe(input: PersistentRunSandboxInput): Promise<SandboxE
 class PersistentSandboxSession {
   private readonly access: WorkspaceAccess
   private readonly sourceFingerprint: string
-  private readonly executionToken: string
   private name: string
   private initialized = false
   private resumed = false
@@ -117,7 +118,7 @@ class PersistentSandboxSession {
     private readonly recipe: SandboxEnvironment,
     private readonly resume: NonNullable<SandboxFactory["resume"]>
   ) {
-    const { context, definition, thread, run, signal, onAuthFailure } = input
+    const { context, definition, thread, signal, onAuthFailure } = input
     this.access = new WorkspaceAccess({
       recipe,
       auth: definition?.auth,
@@ -137,8 +138,6 @@ class PersistentSandboxSession {
         })
       )
       .digest("hex")
-    if (!run.execution?.token) throw new AgentExecutionLostError(run.id)
-    this.executionToken = run.execution.token
     // A sub-agent's workspace that its last run left unsaved, destroyed or in doubt starts again
     // under a new name, from its handed files and out/: nobody could recreate it.
     const state = thread.sandboxState
@@ -200,14 +199,11 @@ class PersistentSandboxSession {
   }
 
   private async acquireOwnership(): Promise<void> {
-    const { context, thread, run } = this.input
+    const { session, thread } = this.input
     try {
-      const state = await context.storage.agents.threads.transitionSandbox({
-        projectId: context.id,
+      const state = await session.workspace.transition({
         id: thread.id,
         action: "acquire",
-        runId: run.id,
-        executionToken: this.executionToken,
         name: this.name,
         sourceFingerprint: this.sourceFingerprint,
       })
@@ -254,13 +250,10 @@ class PersistentSandboxSession {
 
   private async replaceLostState(): Promise<void> {
     await this.assertCanContinue()
-    const { context, thread, run } = this.input
-    const state = await context.storage.agents.threads.transitionSandbox({
-      projectId: context.id,
+    const { context, session, thread } = this.input
+    const state = await session.workspace.transition({
       id: thread.id,
       action: "replace",
-      runId: run.id,
-      executionToken: this.executionToken,
       name: this.name,
       nextName: createAgentThreadSandboxName(context.id, thread.id),
     })
@@ -451,13 +444,10 @@ class PersistentSandboxSession {
   }
 
   private settle(status: "ready" | "blocked" | "unavailable") {
-    const { context, thread, run } = this.input
-    return context.storage.agents.threads.transitionSandbox({
-      projectId: context.id,
+    const { session, thread } = this.input
+    return session.workspace.transition({
       id: thread.id,
       action: "settle",
-      runId: run.id,
-      executionToken: this.executionToken,
       name: this.name,
       status,
       initialized: this.initialized,
@@ -465,12 +455,7 @@ class PersistentSandboxSession {
   }
 
   private assertOwner(): Promise<void> {
-    const { context, run } = this.input
-    return assertRunExecutionOwned(context.storage, {
-      projectId: context.id,
-      id: run.id,
-      executionToken: this.executionToken,
-    })
+    return this.input.session.assertOwned()
   }
 
   private async assertCanContinue(): Promise<void> {

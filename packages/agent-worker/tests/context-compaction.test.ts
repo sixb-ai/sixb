@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type Storage } from "@sixb/core"
+import { InMemoryStorage } from "@sixb/core"
 import {
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -8,17 +8,18 @@ import {
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { estimateAgentConversationInputTokens } from "../src/context-compaction"
-import type { AgentWorkerStorage } from "../src/types"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "context-compaction-tests"
 const threadId = "thread"
 
-function requireWorkerStorage(storage: Storage): AgentWorkerStorage {
-  if (!storage.agents || !storage.auth || !storage.aiUsage) {
-    throw new Error("Expected complete Agent worker storage.")
+/** The two reads compaction's estimate makes of a conversation, as a run's session answers them. */
+function anchorReads(storage: InMemoryStorage) {
+  return {
+    run: (runId: string) => storage.agents.runs.getById({ projectId, id: runId }),
+    latestModelCall: (executionId: string) =>
+      storage.aiUsage.getLatestForExecution({ projectId, executionId }),
   }
-  return storage as AgentWorkerStorage
 }
 
 describe("agent conversation context estimation", () => {
@@ -105,7 +106,7 @@ describe("agent conversation context estimation", () => {
 
     const messages: readonly AgentMessageRecord[] = [user, assistant, trailing]
     const estimate = await estimateAgentConversationInputTokens({
-      context: { id: projectId, storage: requireWorkerStorage(storage) },
+      conversation: anchorReads(storage),
       plan,
       threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
       systemPrompt: "This full fallback prompt should not be counted.",
@@ -125,7 +126,7 @@ describe("agent conversation context estimation", () => {
     expect(expandedFullEstimate).toBeGreaterThan(estimate)
     await expect(
       estimateAgentConversationInputTokens({
-        context: { id: projectId, storage: requireWorkerStorage(storage) },
+        conversation: anchorReads(storage),
         plan,
         threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
         systemPrompt: expandedSystemPrompt,
@@ -164,7 +165,7 @@ describe("agent conversation context estimation", () => {
     }).tokens
     await expect(
       estimateAgentConversationInputTokens({
-        context: { id: projectId, storage: requireWorkerStorage(storage) },
+        conversation: anchorReads(storage),
         plan,
         threadContext: {
           checkpoint,
@@ -199,7 +200,7 @@ describe("agent conversation context estimation", () => {
       })
       await expect(
         estimateAgentConversationInputTokens({
-          context: { id: projectId, storage: requireWorkerStorage(storage) },
+          conversation: anchorReads(storage),
           plan,
           threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
           systemPrompt: "System",

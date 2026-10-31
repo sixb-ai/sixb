@@ -13,25 +13,18 @@ import {
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
-import {
-  createInheritedAgentExecutionRecord,
-  ensureExecutionRecord,
-} from "@sixb/core/internal/agent-execution"
+import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   type AgentChildApprovalAwaiting,
+  type AgentRunSession,
   createAgentMessageId,
   createSubagentExecutionId,
   createSubagentRunId,
   createSubagentThreadId,
   deferredChildQuestion,
-  dispatchQueuedSubagentRuns,
-  hasActiveChildren,
   isAgentToolResult,
   isAwaitingAnswerRun,
   isPausedSubagentRun,
-  listChildApprovalsAwaiting,
-  listSubagentThreadRuns,
-  publishAgentMail,
 } from "@sixb/core/internal/agents"
 import { formatLanguageModelTiers, isLanguageModelTier } from "@sixb/core/internal/model-execution"
 import {
@@ -229,6 +222,8 @@ export class SubagentCoordinator {
     private readonly host: AgentWorkerHost,
     private readonly context: AgentWorkerContext,
     private readonly parentRun: ConversationAgentRunRecord,
+    /** The turn's session, through which it reaches its children and their mail. */
+    private readonly session: AgentRunSession,
     private readonly parentExecution: ExecutionRecord,
     /** When the parent turn times out: no child outlives it. */
     private readonly parentDeadline: Date
@@ -238,7 +233,7 @@ export class SubagentCoordinator {
       throw new Error("[SixbAgentWorker] Subagent delegation requires a language model catalog.")
     }
     this.models = models
-    this.#questions = new ChildQuestions(host.broker, context.id, parentRun.id)
+    this.#questions = new ChildQuestions(session.mail, parentRun.id)
   }
 
   /** Stop listening for the children's questions, once the turn ended. */
@@ -313,12 +308,11 @@ export class SubagentCoordinator {
    * deadline.
    */
   private async clearDeadAttempts(paused: SubagentRunRecord, signal: AbortSignal): Promise<void> {
-    const { agents } = this.context.storage
-    const projectId = this.context.id
+    const { children } = this.session
     const stopAt = this.parentDeadline.getTime() - WAIT_ANSWER_MARGIN_MS
 
     for (;;) {
-      const runs = await listSubagentThreadRuns(agents, { projectId, threadId: paused.threadId })
+      const runs = await children.threadRuns(paused.threadId)
       const pausedAt = runs.findIndex((run) => run.id === paused.id)
       const dead = (pausedAt < 0 ? [] : runs.slice(pausedAt + 1)).filter(
         (run) => run.parentRunId !== this.parentRun.id
@@ -326,11 +320,7 @@ export class SubagentCoordinator {
       const stopping = dead.filter((run) => !isTerminalSubagent(run))
       if (stopping.length === 0) {
         for (const run of dead) {
-          await agents.messages.deleteByRunId({
-            projectId,
-            threadId: paused.threadId,
-            runId: run.id,
-          })
+          await children.clearAttempt({ threadId: paused.threadId, runId: run.id })
         }
         return
       }
@@ -357,12 +347,8 @@ export class SubagentCoordinator {
       readonly outcomes: readonly AgentApprovalOutcomePart[]
     }[]
   > {
-    const { agents } = this.context.storage
-    const projectId = this.context.id
-    const trigger = await agents.messages.getById({
-      projectId,
-      id: this.parentRun.triggerMessageId,
-    })
+    const { children } = this.session
+    const trigger = await children.message(this.parentRun.triggerMessageId)
     if (!trigger) return []
 
     const parts = trigger.parts.filter(
@@ -374,10 +360,10 @@ export class SubagentCoordinator {
     if (callerIds.length === 0) return []
 
     const continuing = []
-    for (const child of await agents.runs.getByIds({ projectId, ids: callerIds })) {
+    for (const child of await children.getMany(callerIds)) {
       if (child.kind !== "subagent" || !isPausedSubagentRun(child)) continue
 
-      const { approvals } = await agents.approvals.list({ projectId, runId: child.parentRunId })
+      const approvals = await children.approvals(child.parentRunId)
       const reported = new Set(
         approvals
           .filter(
@@ -486,12 +472,8 @@ export class SubagentCoordinator {
     const answered = this.#answers.get(sent.id)
     if (answered) return answered
 
-    const { agents } = this.context.storage
-    const projectId = this.context.id
-    const child = await agents.runs.getById({
-      projectId,
-      id: createSubagentRunId(this.parentRun.id, key),
-    })
+    const { children } = this.session
+    const child = await children.get(createSubagentRunId(this.parentRun.id, key))
     if (!child) {
       const paused = await this.pausedOnQuestion(key)
       if (paused) return this.answerPaused(paused, key, sent, signal)
@@ -504,10 +486,7 @@ export class SubagentCoordinator {
       )
     }
     // Once its call is filed it pauses at the end of its step, before it would read a message.
-    if (
-      isPausedSubagentRun(child) ||
-      (await agents.approvals.holdsRun({ projectId, runId: child.id }))
-    ) {
+    if (isPausedSubagentRun(child) || (await children.holdsRun(child.id))) {
       throw new AgentToolPublicError(
         `[SixbAgentWorker] '${key}' is paused for the user's approval and reads no message until it continues, in the turn after the user decides. Message it then, or tell the user what to change.`
       )
@@ -526,16 +505,13 @@ export class SubagentCoordinator {
     if (question && status === "running" && this.#reported.has(question.id)) {
       this.#questions.answered(question)
       try {
-        await publishAgentMail(this.host.broker, {
-          projectId,
-          mail: {
-            ...sent,
-            fromRunId: this.parentRun.id,
-            toThreadId: child.threadId,
-            kind: "answer",
-            inReplyTo: question.id,
-            sentAt: new Date().toISOString(),
-          },
+        await this.session.mail.send({
+          ...sent,
+          fromRunId: this.parentRun.id,
+          toThreadId: child.threadId,
+          kind: "answer",
+          inReplyTo: question.id,
+          sentAt: new Date().toISOString(),
         })
       } catch (error) {
         this.#questions.reopen(question)
@@ -546,15 +522,12 @@ export class SubagentCoordinator {
       return output
     }
 
-    await publishAgentMail(this.host.broker, {
-      projectId: this.context.id,
-      mail: {
-        ...sent,
-        fromRunId: this.parentRun.id,
-        toThreadId: child.threadId,
-        kind: "message",
-        sentAt: new Date().toISOString(),
-      },
+    await this.session.mail.send({
+      ...sent,
+      fromRunId: this.parentRun.id,
+      toThreadId: child.threadId,
+      kind: "message",
+      sentAt: new Date().toISOString(),
     })
     const toChild = this.#sent.get(child.id) ?? []
     if (!toChild.some((message) => message.id === sent.id)) toChild.push(sent)
@@ -565,12 +538,7 @@ export class SubagentCoordinator {
 
   /** The latest child under `key` of this conversation's turns, this one's included. */
   private async latestChildUnder(key: string): Promise<SubagentRunRecord | undefined> {
-    const [latest] = await this.context.storage.agents.runs.listThreadSubagents({
-      projectId: this.context.id,
-      threadId: this.parentRun.threadId,
-      spawnKey: key,
-      limit: 1,
-    })
+    const [latest] = await this.session.children.inConversation({ spawnKey: key, limit: 1 })
     return latest
   }
 
@@ -584,10 +552,7 @@ export class SubagentCoordinator {
     const latest = await this.latestChildUnder(key)
     if (!latest) return undefined
 
-    const runs = await listSubagentThreadRuns(this.context.storage.agents, {
-      projectId: this.context.id,
-      threadId: latest.threadId,
-    })
+    const runs = await this.session.children.threadRuns(latest.threadId)
     const live = [...runs]
       .reverse()
       .find((run) => run.status !== "failed" && run.status !== "cancelled")
@@ -596,15 +561,12 @@ export class SubagentCoordinator {
 
   /** Whether a continuation went on with its parent's answer, as its trigger says. */
   private async continuesAfterAnswer(run: SubagentRunRecord): Promise<boolean> {
-    const trigger = await this.context.storage.agents.messages.getById({
-      projectId: this.context.id,
-      id: run.triggerMessageId,
-    })
+    const trigger = await this.session.children.message(run.triggerMessageId)
     return trigger?.parts.some((part) => part.type === "mail" && part.kind === "answer") ?? false
   }
 
   private async subagentRun(id: string): Promise<SubagentRunRecord | undefined> {
-    const run = await this.context.storage.agents.runs.getById({ projectId: this.context.id, id })
+    const run = await this.session.children.get(id)
     return run?.kind === "subagent" ? run : undefined
   }
 
@@ -613,11 +575,7 @@ export class SubagentCoordinator {
    * read, which finds none in a conversation that has none, then one per key that has some.
    */
   async waitingQuestions(): Promise<readonly WaitedQuestion[]> {
-    const paused = await this.context.storage.agents.runs.listThreadSubagents({
-      projectId: this.context.id,
-      threadId: this.parentRun.threadId,
-      finishReason: "awaiting_answer",
-    })
+    const paused = await this.session.children.inConversation({ finishReason: "awaiting_answer" })
     const waiting: WaitedQuestion[] = []
     for (const key of new Set(paused.map((run) => run.spawnKey))) {
       const child = await this.pausedOnQuestion(key)
@@ -684,8 +642,7 @@ export class SubagentCoordinator {
   private async deferredQuestionOf(run: SubagentRunRecord): Promise<QuestionRef | undefined> {
     if (!isAwaitingAnswerRun(run)) return undefined
 
-    const { messages } = await this.context.storage.agents.messages.list({
-      projectId: this.context.id,
+    const { messages } = await this.session.children.messages({
       threadId: run.threadId,
       order: "desc",
       limit: 2,
@@ -721,10 +678,7 @@ export class SubagentCoordinator {
     try {
       await this.#questions.refresh()
       asking = await this.askingChildren()
-      const runs = await this.context.storage.agents.runs.getByIds({
-        projectId: this.context.id,
-        ids: asking.map((question) => question.runId),
-      })
+      const runs = await this.session.children.getMany(asking.map((question) => question.runId))
       threads = new Map(
         runs.flatMap((run) => (run.kind === "subagent" ? [[run.id, run.threadId] as const] : []))
       )
@@ -741,17 +695,14 @@ export class SubagentCoordinator {
       const threadId = threads.get(question.runId)
       if (threadId === undefined) continue
       try {
-        await publishAgentMail(this.host.broker, {
-          projectId: this.context.id,
-          mail: {
-            id: `${this.parentRun.id}:deferred:${question.id}`,
-            fromRunId: this.parentRun.id,
-            toThreadId: threadId,
-            kind: "deferred",
-            inReplyTo: question.id,
-            text: "",
-            sentAt: new Date().toISOString(),
-          },
+        await this.session.mail.send({
+          id: `${this.parentRun.id}:deferred:${question.id}`,
+          fromRunId: this.parentRun.id,
+          toThreadId: threadId,
+          kind: "deferred",
+          inReplyTo: question.id,
+          text: "",
+          sentAt: new Date().toISOString(),
         })
         deferred.push(question.runId)
       } catch (error) {
@@ -765,10 +716,7 @@ export class SubagentCoordinator {
     try {
       while (deferred.length > 0 && Date.now() < stopAt) {
         const paused = this.#questions.nextChange()
-        const runs = await this.context.storage.agents.runs.getByIds({
-          projectId: this.context.id,
-          ids: deferred,
-        })
+        const runs = await this.session.children.getMany(deferred)
         if (runs.every((run) => run.status !== "queued" && run.status !== "running")) return
         await delay(Math.min(CHILD_WAIT_RECHECK_MS, stopAt - Date.now()), signal, paused)
       }
@@ -784,10 +732,9 @@ export class SubagentCoordinator {
    * end cancels those still at work, and one that holds a call pauses by itself meanwhile.
    */
   async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
-    const { agents } = this.context.storage
     for (;;) {
       const finished = this.#questions.nextChange()
-      if (!(await hasActiveChildren(agents, this.parentRun))) return
+      if (!(await this.session.children.hasActive())) return
 
       const remainingMs = stopAt - Date.now()
       if (remainingMs <= 0) return
@@ -806,10 +753,7 @@ export class SubagentCoordinator {
     const open = this.#questions.open()
     if (open.length === 0) return []
 
-    const runs = await this.context.storage.agents.runs.getByIds({
-      projectId: this.context.id,
-      ids: open.map((question) => question.runId),
-    })
+    const runs = await this.session.children.getMany(open.map((question) => question.runId))
     const byId = new Map(runs.map((run) => [run.id, run]))
     return open.flatMap((question: ChildQuestion) => {
       const run = byId.get(question.runId)
@@ -872,11 +816,11 @@ export class SubagentCoordinator {
    * spawned with this key, else nothing once checked that the turn may spawn another.
    */
   private async admissionOf(runId: string, key: string): Promise<SubagentRunRecord | null> {
-    const { runs } = this.context.storage.agents
+    const { children } = this.session
     const maxActive = this.context.subagentConcurrencyPerRun
     const [existing, parent] = await Promise.all([
-      runs.getById({ projectId: this.context.id, id: runId }),
-      runs.getById({ projectId: this.context.id, id: this.parentRun.id }),
+      children.get(runId),
+      children.get(this.parentRun.id),
     ])
     if (existing) {
       // A continuation works in the thread of the turn that spawned it, never this turn's.
@@ -910,14 +854,7 @@ export class SubagentCoordinator {
         `[SixbAgentWorker] Parent Agent run '${parent.id}' is no longer owned by this execution.`
       )
     }
-    const active = await runs.list({
-      projectId: this.context.id,
-      kinds: ["subagent"],
-      parentRunId: this.parentRun.id,
-      statuses: ["queued", "running"],
-      limit: 1,
-    })
-    if (active.total >= maxActive) {
+    if ((await children.activeCount()) >= maxActive) {
       throw publicSpawnError(
         new AgentStorageError("active_child_limit", "Active child limit."),
         key,
@@ -1013,18 +950,11 @@ export class SubagentCoordinator {
 
     let run: SubagentRunRecord
     try {
-      run = await this.context.storage.transaction(async (storage) => {
-        const agents = storage.agents
-        if (!agents) {
-          throw new Error("[SixbAgentWorker] Agent storage disappeared during child admission.")
-        }
-        await ensureExecutionRecord(storage.executions, execution)
-        return agents.runs.createSubagent({
+      run = await this.session.children.spawn({
+        execution,
+        run: {
           id: runId,
-          projectId: this.context.id,
           executionId,
-          parentRunId: this.parentRun.id,
-          parentExecutionToken: requiredExecutionToken(this.parentRun),
           spawnKey: key,
           spec,
           ...(continuation ?? {
@@ -1040,7 +970,7 @@ export class SubagentCoordinator {
             },
             maxActiveChildren: this.context.subagentConcurrencyPerRun,
           }),
-        })
+        },
       })
     } catch (error) {
       throw publicSpawnError(error, key, this.context.subagentConcurrencyPerRun)
@@ -1048,16 +978,11 @@ export class SubagentCoordinator {
 
     signal.throwIfAborted()
     if (run.status === "queued") {
-      const dispatched = await dispatchQueuedSubagentRuns({
-        projectId: this.context.id,
-        storage: this.context.storage.agents,
-        queue: this.host.queues.agentChildren,
-        runIds: [run.id],
-      })
-      if (dispatched.failures.length > 0) {
+      const { failed } = await this.session.children.dispatch(run.id)
+      if (failed !== undefined) {
         console.error(
           `[SixbAgentWorker] Could not dispatch subagent run '${run.id}'; reconciliation will retry.`,
-          dispatched.failures[0]?.error
+          failed
         )
       }
     }
@@ -1081,10 +1006,7 @@ export class SubagentCoordinator {
       signal.throwIfAborted()
       // Taken before the reads, so a question or a finish that comes during them wakes the wait.
       const changed = this.#questions.nextChange()
-      const runs = await this.context.storage.agents.runs.getByIds({
-        projectId: this.context.id,
-        ids: runIds,
-      })
+      const runs = await this.session.children.getMany(runIds)
       const byId = new Map(runs.map((run) => [run.id, run]))
       const children = runIds.map((runId, index) => {
         const run = byId.get(runId)
@@ -1108,11 +1030,7 @@ export class SubagentCoordinator {
       )
       const remainingMs = stopAt - Date.now()
       if (children.every(isTerminalSubagent) || asked || remainingMs <= 0) {
-        const awaiting = await listChildApprovalsAwaiting(this.context.storage.agents, {
-          projectId: this.context.id,
-          parentRunId: this.parentRun.id,
-          childRunIds: runIds,
-        })
+        const awaiting = await this.session.children.awaitingApproval(runIds)
         const delivered = await this.deliverFiles(children, signal)
         const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
         // It lists the questions it returns first, and those its children wait on.
@@ -1161,8 +1079,7 @@ export class SubagentCoordinator {
     const sent = this.#sent.get(run.id)
     if (!sent || !isTerminalSubagent(run) || run.status === "failed") return {}
 
-    const { messages } = await this.context.storage.agents.messages.list({
-      projectId: this.context.id,
+    const { messages } = await this.session.children.messages({
       threadId: run.threadId,
       order: "asc",
     })
@@ -1186,29 +1103,23 @@ export class SubagentCoordinator {
    * it when this turn resumes its pause; else `runId` itself.
    */
   private async continuedChildId(runId: string): Promise<string> {
-    const { runs } = this.context.storage.agents
-    const projectId = this.context.id
-    const waited = await runs.getById({ projectId, id: runId })
+    const { children } = this.session
+    const waited = await children.get(runId)
     if (waited?.kind !== "subagent" || waited.parentRunId === this.parentRun.id) return runId
 
-    const latest = await listSubagentThreadRuns(this.context.storage.agents, {
-      projectId,
-      threadId: waited.threadId,
-    })
+    const latest = await children.threadRuns(waited.threadId)
     return latest.at(-1)?.id ?? runId
   }
 
   /** Which parents of these children are earlier turns of this turn's conversation. */
   private async earlierTurnsOf(runIds: readonly string[]): Promise<ReadonlySet<string>> {
-    const { runs } = this.context.storage.agents
-    const projectId = this.context.id
-    const children = await runs.getByIds({ projectId, ids: runIds })
+    const children = await this.session.children.getMany(runIds)
     const parentIds = children.flatMap((run) =>
       run.kind === "subagent" && run.parentRunId !== this.parentRun.id ? [run.parentRunId] : []
     )
     if (parentIds.length === 0) return new Set()
 
-    const parents = await runs.getByIds({ projectId, ids: parentIds })
+    const parents = await this.session.children.getMany(parentIds)
     return new Set(
       parents
         .filter(

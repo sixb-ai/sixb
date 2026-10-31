@@ -1,6 +1,21 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
-import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type {
+  CommandResult,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFileRecord,
+  SecurityDefinitionCatalog,
+} from "@sixb/core"
+import { InMemoryBroker } from "@sixb/core"
+import {
+  type AgentRunSessionHost,
+  NOOP_STREAM_SINK,
+  openAgentRunSession,
+  type StreamSink,
+} from "@sixb/core/internal/agents"
+import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
+import { type RunAgentTurnInput, runAgentTurn } from "../src/run-agent-turn"
 
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
@@ -81,4 +96,40 @@ export class LocalBashSandbox implements Sandbox {
   async stop(): Promise<void> {}
 
   async destroy(): Promise<void> {}
+}
+
+/** No groups or roles: a direct turn's tests read members, never grants. */
+const EMPTY_SECURITY = { groups: [], roles: [] } as unknown as SecurityDefinitionCatalog
+
+/**
+ * Run a turn as the worker does, in the session of its run, which the test started already. The
+ * session's broker is its own: these tests cancel through their signal, not a published cancel.
+ */
+export async function runTurnInSession(
+  input: Omit<RunAgentTurnInput, "session"> & {
+    /** Where a model call's record goes when storage cannot take it; dropped when omitted. */
+    readonly recoverAiModelCall?: RecoverAiModelCall
+    /** Where the turn's live records go; nowhere when omitted. */
+    readonly events?: StreamSink
+    /** The storage the test seeded, which the turn's session reads and writes. */
+    readonly storage: AgentRunSessionHost["storage"]
+  }
+) {
+  const { recoverAiModelCall = async () => {}, events = NOOP_STREAM_SINK, storage, ...turn } = input
+  const session = await openAgentRunSession(
+    {
+      projectId: turn.context.id,
+      storage,
+      broker: new InMemoryBroker(),
+      recoverAiModelCall,
+      events,
+      security: EMPTY_SECURITY,
+    },
+    turn.run
+  )
+  try {
+    return await runAgentTurn({ ...turn, session })
+  } finally {
+    session.close()
+  }
 }

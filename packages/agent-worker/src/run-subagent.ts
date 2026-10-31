@@ -1,5 +1,6 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
+  type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
@@ -20,7 +21,6 @@ import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { appendMessageAndFinishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { SubagentHistory } from "./subagent-continuation"
@@ -46,6 +46,8 @@ export async function runSubagent(input: {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly run: SubagentRunRecord
+  /** The child's session: its finish is fenced by the run's execution token. */
+  readonly session: AgentRunSession
   /** The child's own thread, and what its runs before this one left there. */
   readonly thread: AgentThreadRecord
   readonly history: SubagentHistory
@@ -62,15 +64,6 @@ export async function runSubagent(input: {
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime, inbox } = input
-  const executionToken = run.execution?.token
-  if (!executionToken) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Subagent run '${run.id}' has no execution token.`,
-      { details: { parentRunId: run.parentRunId, runId: run.id } }
-    )
-  }
-
   const messages = subagentModelMessages({
     context,
     thread,
@@ -103,29 +96,25 @@ export async function runSubagent(input: {
     },
     signal: abortSignal,
     onModelCallEnd: runtime.usageRecorder.onModelCallEnd,
-    onEvent: (chunk) => context.streamSink.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
+    onEvent: (chunk) =>
+      input.session.events.publishUiChunk({ run, chunkIndex: chunkIndex++, chunk }),
     // The approval records decide, never the prompt or the tool output: a held call stops the
     // child after that step, whatever its model would do next. So does a question its parent's
     // turn ended without answering.
     pauseAfterStep: async () =>
-      inbox.deferred !== undefined || (await holdsSubagentCalls(context, run)),
+      inbox.deferred !== undefined || (await input.session.heldCalls.holdsRun()),
   })
   const work = subagentWorkMessages(generation, run, inbox.deliveries)
   if (input.work) input.work.messages = work
 
   return settleSubagent({
     ...input,
-    executionToken,
     generation,
     work,
     abortSignal,
     sandboxReadiness,
     lastMessageAt: inbox.deliveries.at(-1)?.afterSteps ?? 0,
   })
-}
-
-function holdsSubagentCalls(context: AgentTurnContext, run: SubagentRunRecord): Promise<boolean> {
-  return context.storage.agents.approvals.holdsRun({ projectId: context.id, runId: run.id })
 }
 
 /** End a child whose model loop returned: paused on its held calls, answered, or failed. */
@@ -148,7 +137,7 @@ async function settleSubagent(
   // held call wins over a question: only a decision continues it, and it can ask again then.
   const asked = input.inbox.deferred !== undefined
   const held =
-    (generation.status === "paused" && !asked) || (await holdsSubagentCalls(input.context, run))
+    (generation.status === "paused" && !asked) || (await input.session.heldCalls.holdsRun())
   if (held) {
     // Its question then goes unanswered: the decision continues it.
     const work = asked ? unansweredQuestion(input.work) : input.work
@@ -189,7 +178,7 @@ async function finishSubagent(input: {
   readonly run: SubagentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly runFiles: AgentRunFiles
-  readonly executionToken: string
+  readonly session: AgentRunSession
   readonly abortSignal: AbortSignal
   readonly finishReason: AgentRunFinishReason
   readonly work: readonly AppendAgentMessageInput[]
@@ -211,12 +200,8 @@ async function finishSubagent(input: {
   await context.beforeFinalize?.({ discard: !paused })
   input.runtime.assertCanContinue()
 
-  const finalized = await appendMessageAndFinishRunOrThrow(context.storage, {
-    messages: input.work,
-    finish: {
-      projectId: context.id,
-      id: run.id,
-      executionToken: input.executionToken,
+  const finalized = await input.session.finish(
+    {
       status: "succeeded",
       modelId: input.plan.model.modelId,
       finishReason: input.finishReason,
@@ -226,11 +211,12 @@ async function finishSubagent(input: {
         ...(outputs.error === undefined ? {} : { filesError: outputs.error }),
       },
     },
-  })
+    input.work
+  )
   if (finalized.kind !== "subagent") {
     throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' changed kind during finalization.`)
   }
-  await context.streamSink.publishRunFinished(finalized)
+  await input.session.events.publishRunFinished(finalized)
   return finalized
 }
 

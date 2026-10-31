@@ -14,6 +14,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
+import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { frameLayout, serializeArtifactQueryResult } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
@@ -28,7 +29,7 @@ import {
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactRecord, ArtifactStorage } from "@sixb/core/storage"
-import { AgentExecutionLostError, assertRunExecutionOwned } from "../errors"
+import { assertRunExecutionOwned } from "../errors"
 import { agentToolErrorText } from "../model-adapters"
 import {
   listSandboxFiles,

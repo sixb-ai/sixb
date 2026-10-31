@@ -145,12 +145,46 @@ export {
   retryAgentRun,
 } from "./request"
 export type {
+  CompactionCompletedInput,
+  CompactionFailedInput,
+  CompactionStartedInput,
+  StreamSink,
+} from "./run-events"
+export {
+  createBrokerStreamSink,
+  isolateStreamSink,
+  NOOP_STREAM_SINK,
+  withAgentActivityStream,
+} from "./run-events"
+export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,
   AgentRunScopeErrorCode,
   AgentRunScopeHost,
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
+export type {
+  AgentRunConversation,
+  AgentRunHeldCalls,
+  AgentRunOutcome,
+  AgentRunPeople,
+  AgentRunSession,
+  AgentRunSessionHost,
+  AgentRunWorkspace,
+  AgentRunWorkspaceTransition,
+  ClaimAgentRunInput,
+} from "./run-session"
+export {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  agentRunPeople,
+  claimAgentRun,
+  isTerminalOrExecutionGone,
+  openAgentRunSession,
+  watchAgentRunCancel,
+} from "./run-session"
+export type { AgentRunChildren, AgentRunMail } from "./run-session-children"
+export { agentRunMail } from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
@@ -245,3 +279,12 @@ export {
   isAgentToolDefinition,
   validateAndNormalizeAgentToolInput,
 } from "./validation"
+export type {
+  WorkflowAgentNodeSession,
+  WorkflowAgentNodeSessionHost,
+} from "./workflow-node-session"
+export {
+  claimWorkflowAgentNode,
+  enqueueWorkflowAgentNodeResume,
+  WorkflowResumeDispatchError,
+} from "./workflow-node-session"

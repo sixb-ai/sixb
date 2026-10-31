@@ -1,4 +1,5 @@
-import type { AgentMessageRecord, AgentStorage } from "@sixb/core/storage"
+import type { AgentRunConversation } from "@sixb/core/internal/agents"
+import type { AgentMessageRecord } from "@sixb/core/storage"
 import { renderCurrentTime } from "./agent-prompt"
 
 /**
@@ -7,8 +8,7 @@ import { renderCurrentTime } from "./agent-prompt"
  * every later run replays the same bytes and the history stays a cacheable prefix.
  */
 export async function loadUserMessageTimes(input: {
-  readonly storage: AgentStorage
-  readonly projectId: string
+  readonly conversation: Pick<AgentRunConversation, "runs">
   readonly threadId: string
   readonly messages: readonly AgentMessageRecord[]
   readonly projectTimeZone: string
@@ -18,8 +18,7 @@ export async function loadUserMessageTimes(input: {
   if (!oldest) return new Map()
 
   // A run starts after its trigger message, so this window holds every run that answered one.
-  const { runs } = await input.storage.runs.list({
-    projectId: input.projectId,
+  const { runs } = await input.conversation.runs({
     threadId: input.threadId,
     kinds: ["conversation"],
     startedAfter: new Date(oldest.createdAt.getTime() - 1),

@@ -26,12 +26,12 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { AgentExecutionLostError } from "@sixb/core/internal/agents"
 import { emptyGrantIndex, type GrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
-import { AgentExecutionLostError } from "../src/errors"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 import { AgentFileBudget } from "../src/tools/tool-files"

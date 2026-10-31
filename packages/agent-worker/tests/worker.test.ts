@@ -51,15 +51,21 @@ import {
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
   agentRunQueueJobId,
   agentRunTokenRunId,
+  claimWorkflowAgentNode,
   createAgentRunExecutionToken,
   createAgentRunId,
+  createBrokerStreamSink,
   createSubagentRunId,
   createSubagentThreadId,
   ensureManagedAgentExecutionIdentity,
   holdAgentApprovalCall,
   isAgentToolResult,
+  NOOP_STREAM_SINK,
+  openAgentRunSession,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
@@ -99,6 +105,7 @@ import {
   type ArtifactStorage,
   type ArtifactVersionRecord,
   type ConversationAgentRunRecord,
+  type ExecutionRecord,
   type RecordAiModelCallInput,
   type SubagentRunRecord,
   type WorkflowRunStorage,
@@ -117,15 +124,9 @@ import { prepareAgentAttachments } from "../src/attachments"
 import { storeChildOutputs } from "../src/child-files"
 import * as conversationPreparation from "../src/context-compaction"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentRunOwnedElsewhereError,
-  AgentTurnTimeoutError,
-} from "../src/errors"
+import { AgentRunOwnedElsewhereError, AgentTurnTimeoutError } from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
-import { finishRunOrThrow } from "../src/finalize"
-import { runAgentTurn, stoppedByWorker } from "../src/run-agent-turn"
+import { stoppedByWorker } from "../src/run-agent-turn"
 import * as agentEnvironment from "../src/run-environment"
 import {
   createConversationAgentEnvironment,
@@ -133,7 +134,6 @@ import {
   createWorkflowAgentNodeEnvironment,
 } from "../src/run-environment"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
-import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator, WAIT_ANSWER_MARGIN_MS } from "../src/subagent-tools"
 import { AgentFileBudget } from "../src/tools/tool-files"
 import { createAgentTurnRuntime } from "../src/turn-runtime"
@@ -146,7 +146,7 @@ import type {
 } from "../src/types"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
-import { waitFor as pollFor } from "./helpers"
+import { waitFor as pollFor, runTurnInSession } from "./helpers"
 import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -1898,6 +1898,34 @@ function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   return storage
 }
 
+/** The session of a run the test started, as the worker opens it once it claims the run. */
+function runSessionOf<TRun extends AgentRunRecord>(sixb: TestSixb, run: TRun) {
+  return openAgentRunSession(
+    {
+      projectId: PROJECT_ID,
+      storage: workerStorageOf(sixb.storage),
+      broker: sixb.broker,
+      recoverAiModelCall: recoverAiModelCall(sixb),
+      events: NOOP_STREAM_SINK,
+      childQueue: sixb.queues.agentChildren,
+      security: sixb.definitions.security,
+    },
+    run
+  )
+}
+
+/** A turn's coordinator as the worker builds it, in a session for its run, which the test started. */
+async function coordinatorFor(
+  sixb: TestSixb,
+  parent: ConversationAgentRunRecord,
+  execution: ExecutionRecord,
+  deadline: Date
+): Promise<SubagentCoordinator> {
+  const context = await buildAgentWorkerContext(sixb)
+  const session = await runSessionOf(sixb, parent)
+  return new SubagentCoordinator(sixb, context, parent, session, execution, deadline)
+}
+
 function recoverAiModelCall(sixb: TestSixb) {
   return (record: Parameters<typeof enqueueAiModelCallRecovery>[1]) =>
     enqueueAiModelCallRecovery(sixb.queues.agents, record)
@@ -1928,10 +1956,11 @@ function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
   })
 }
 
+/** A run's execution context, which also keeps the worker's storage for the test to seed and read. */
 async function buildAgentWorkerContext(
   sixb: TestSixb,
   input: { readonly apiBaseUrl?: string } = {}
-): Promise<AgentExecutionContext> {
+): Promise<AgentExecutionContext & Pick<AgentWorkerContext, "storage">> {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
   }
@@ -1969,6 +1998,7 @@ async function buildAgentWorkerContext(
   })
   return {
     ...context,
+    artifactPublishing: context.storage,
     sixb: agentSixb,
     blobStorage: agentSixb.blobs,
   }
@@ -2045,9 +2075,8 @@ async function spawnChildOfRunningTurn(
   })
   if (!execution) throw new Error("Expected the turn's execution.")
 
-  const coordinator = new SubagentCoordinator(
+  const coordinator = await coordinatorFor(
     sixb,
-    await buildAgentWorkerContext(sixb),
     parent,
     execution,
     input.deadline ?? new Date(Date.now() + 60_000)
@@ -2614,6 +2643,7 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(host, requested)
     try {
       const error = await createConversationAgentEnvironment({
+        session: await runSessionOf(host, run),
         context: await buildAgentWorkerContext(host),
         plan: executionPlanFor(host),
         thread,
@@ -5634,6 +5664,96 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Guard proof: finish the node without retryFinish in WorkflowAgentNodeSession.finishSucceeded;
+  // the lost answer fails the step, and the workflow with it.
+  test("a workflow step whose finish storage answered with an error still succeeds", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-finish-blip",
+    })
+    const storage = sixb.storage
+    const transaction = storage.transaction.bind(storage)
+    let blipped = false
+    storage.transaction = (async (write: Parameters<typeof transaction>[0]) => {
+      const result = await transaction(write)
+      const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      if (!blipped && node?.status === "succeeded") {
+        blipped = true
+        throw new Error("connection reset")
+      }
+      return result
+    }) as typeof storage.transaction
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const [resume] = await waitFor(
+        async () => {
+          const claimed = await sixb.queues.workflows.claim({
+            projectId: PROJECT_ID,
+            workerId: "workflow-test-worker",
+          })
+          return claimed.length > 0 ? claimed : null
+        },
+        { label: "resume queued" }
+      )
+      expect(blipped).toBe(true)
+      expect(resume?.job.type).toBe("workflow.run.resume.requested")
+      expect(
+        await runs.getById({ projectId: PROJECT_ID, id: "workflow-finish-blip" })
+      ).not.toMatchObject({ status: "failed" })
+    } finally {
+      storage.transaction = transaction
+      await worker.stop()
+    }
+  })
+
+  // Guard proof: drop the attempt check from finishSucceeded's committed read; the stale session
+  // takes the other runner's success as its own and emits node.finished a second time.
+  test("a workflow step that lost its node never reports another runner's success", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-stale-finish",
+    })
+    const emitted: string[] = []
+    const emit = sixb.events.emit.bind(sixb.events)
+    sixb.events.emit = async (input, options) => {
+      emitted.push(...input.events.map((event) => event.type))
+      return emit(input, options)
+    }
+    const host = {
+      projectId: PROJECT_ID,
+      storage: workerStorageOf(sixb.storage),
+      broker: sixb.broker,
+      recoverAiModelCall: async () => {},
+      events: sixb.events,
+      workflowQueue: sixb.queues.workflows,
+      security: sixb.definitions.security,
+    }
+    const claim = async (leaseExpiresAt: string) => {
+      const node = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      const nodeRun = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      if (!node || !nodeRun) throw new Error("Expected the agent node.")
+      return claimWorkflowAgentNode(host, { node, nodeRun, leaseExpiresAt })
+    }
+    const result = {
+      modelId: "test-model",
+      finishReason: "stop" as const,
+      trace: [],
+      output: { answer: "alpha", confidence: 1 },
+      totalNodes: 1,
+    }
+
+    // A's lease lapses; B reclaims the node and finishes it.
+    const stale = await claim(new Date(Date.now() - 1_000).toISOString())
+    const current = await claim(new Date(Date.now() + 60_000).toISOString())
+    await current.finishSucceeded(result)
+
+    const error = await stale.finishSucceeded(result).catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(AgentExecutionLostError)
+    expect(emitted.filter((type) => type === "workflow.run.node.finished")).toHaveLength(1)
+  })
+
   test("a redelivery after the node succeeded only queues the resume", async () => {
     let modelCalls = 0
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
@@ -6243,7 +6363,9 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("keeps workflow usage outside a failed node-finalization transaction", async () => {
+  // The usage is recorded outside the finalization transaction, so the attempt that failed keeps it;
+  // the retry then finishes the step.
+  test("keeps workflow usage when a node finalization fails once, and finishes the step", async () => {
     const storage = withOneFailingWorkflowAgentFinalization(new InMemoryStorage())
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: structuredAnswerModel(),
@@ -6255,22 +6377,10 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
-        label: "workflow node finalization failure",
+        label: "workflow node finalization",
       })
 
-      expect(execution.status).toBe("failed")
-      expect(execution.error).toMatchObject({
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        details: {
-          agentStepId: "workflow-usage-step",
-          workflowId: "workflow-usage-test",
-          workflowRunId: "workflow-finalization-failure",
-          nodeId: "workflow-usage-step",
-          nodeRunId,
-        },
-      })
+      expect(execution.status).toBe("succeeded")
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -6693,11 +6803,13 @@ describe("AgentWorker", () => {
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
       createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, firstRun),
         context,
         plan: plan,
         run: firstRun,
       }),
       createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, secondRun),
         context,
         plan: plan,
         run: secondRun,
@@ -6783,6 +6895,7 @@ describe("AgentWorker", () => {
     })
 
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -6864,12 +6977,14 @@ describe("AgentWorker", () => {
     )
     const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context: await buildAgentWorkerContext(sixb),
       plan,
       run,
     })
     try {
-      await runAgentTurn({
+      await runTurnInSession({
+        storage: workerStorageOf(sixb.storage),
         context: environment.turnContext,
         plan,
         run,
@@ -6952,6 +7067,7 @@ describe("AgentWorker", () => {
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -6988,7 +7104,12 @@ describe("AgentWorker", () => {
     })
 
     await expect(
-      createConversationAgentEnvironment({ context: failing, plan: executionPlanFor(sixb), run })
+      createConversationAgentEnvironment({
+        session: await runSessionOf(sixb, run),
+        context: failing,
+        plan: executionPlanFor(sixb),
+        run,
+      })
     ).rejects.toThrow("locale unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
@@ -7018,6 +7139,7 @@ describe("AgentWorker", () => {
 
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment({
+      session: await runSessionOf(sixb, run),
       context,
       plan: plan,
       run,
@@ -7721,7 +7843,7 @@ describe("AgentWorker", () => {
   })
 
   test("keeps a child's task and its work in a thread of its own, under the conversation", async () => {
-    // Removal proof: finish the child with `finishRunOrThrow` again, without its work message;
+    // Removal proof: finish the child with `session.finish` without its work message;
     // its thread then holds the task alone.
     let childRunId = ""
     const childCalls: LanguageModelRequest[] = []
@@ -7894,13 +8016,7 @@ describe("AgentWorker", () => {
     })
     if (!execution) throw new Error("Expected the turn's execution.")
 
-    const coordinator = new SubagentCoordinator(
-      sixb,
-      await buildAgentWorkerContext(sixb),
-      parent,
-      execution,
-      new Date(Date.now() + 60_000)
-    )
+    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -9251,13 +9367,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = new SubagentCoordinator(
-      sixb,
-      await buildAgentWorkerContext(sixb),
-      parent,
-      execution,
-      new Date(Date.now() + 60_000)
-    )
+    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -9399,13 +9509,7 @@ describe("AgentWorker", () => {
       execution.authorizationRef.credential?.type !== "session"
     )
       throw new Error("Expected inherited session")
-    const coordinator = new SubagentCoordinator(
-      sixb,
-      await buildAgentWorkerContext(sixb),
-      parent,
-      execution,
-      new Date(Date.now() + 60_000)
-    )
+    const coordinator = await coordinatorFor(sixb, parent, execution, new Date(Date.now() + 60_000))
     const child = await coordinator.spawn(
       { key: "review", task: "Review the result." },
       new AbortController().signal
@@ -10869,20 +10973,27 @@ describe("AgentWorker", () => {
       })
       const run = await reserveRequestedRun(host, await requestAgent(host, { text: "Work" }))
       const context = await buildAgentWorkerContext(host)
-      const execution = await context.storage.executions.getById({
-        projectId: PROJECT_ID,
-        id: run.executionId,
-      })
-      if (!execution) throw new Error("Expected the run's execution.")
+      const session = await openAgentRunSession(
+        {
+          projectId: PROJECT_ID,
+          storage: context.storage,
+          broker: host.broker,
+          recoverAiModelCall: context.recoverAiModelCall,
+          events: context.streamSink,
+          security: host.definitions.security,
+        },
+        run
+      )
       const runtime = createAgentTurnRuntime({
         context,
         run,
         signal: new AbortController().signal,
-        execution,
+        modelCalls: await session.modelCalls(),
       })
       try {
         return await conversationPreparation.prepareAgentConversationContext({
           context,
+          session,
           plan: executionPlanFor(host),
           contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
           ontologyIndex: renderOntologyDocs({
@@ -10902,6 +11013,7 @@ describe("AgentWorker", () => {
           runtime,
         })
       } finally {
+        session.close()
         runtime.dispose()
       }
     }
@@ -11635,17 +11747,16 @@ describe("AgentWorker", () => {
       execution: freshTestExecution(),
     })
     const abort = new AbortController()
-    const result = await runAgentTurn({
+    const result = await runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
@@ -12194,17 +12305,16 @@ describe("AgentWorker", () => {
       execution: freshTestExecution(),
     })
 
-    const promise = runAgentTurn({
+    const promise = runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
@@ -12452,20 +12562,20 @@ describe("AgentWorker", () => {
     jest.useFakeTimers()
     const start = Date.now()
     try {
-      const turn = runAgentTurn({
+      const turn = runTurnInSession({
+        storage: workerStorageOf(failingStorage),
+        events: createBrokerStreamSink({
+          broker: sixb.broker,
+          projectId: PROJECT_ID,
+        }),
+        recoverAiModelCall: recoverAiModelCall(sixb),
         context: {
           id: PROJECT_ID,
           authorPrincipal: AGENT_PRINCIPAL,
-          storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
-          streamSink: createBrokerStreamSink({
-            broker: sixb.broker,
-            projectId: PROJECT_ID,
-          }),
-          recoverAiModelCall: recoverAiModelCall(sixb),
           turnTimeoutMs: 60_000,
         },
         plan: executionPlanFor(sixb),
@@ -12501,20 +12611,20 @@ describe("AgentWorker", () => {
         execution: freshTestExecution(),
       })
     )
-    await runAgentTurn({
+    await runTurnInSession({
+      storage: workerStorageOf(sixb.storage),
+      events: createBrokerStreamSink({
+        broker: sixb.broker,
+        projectId: PROJECT_ID,
+      }),
+      recoverAiModelCall: recoverAiModelCall(sixb),
       context: {
         id: PROJECT_ID,
         authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
-        streamSink: createBrokerStreamSink({
-          broker: sixb.broker,
-          projectId: PROJECT_ID,
-        }),
-        recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
       plan: executionPlanFor(sixb),
@@ -13178,6 +13288,8 @@ describe("agent tools act as the requester", () => {
     const plan = executionPlanFor(sixb)
     const execution = freshTestExecution()
     const task = await createWorkflowAgentNodeEnvironment({
+      // The test's node is not stored, and nothing here acts on its sandbox.
+      session: { assertOwned: async () => {} },
       context,
       plan,
       run: {
@@ -13210,6 +13322,7 @@ describe("agent tools act as the requester", () => {
       createdAt: new Date(),
     } as unknown as AgentThreadRecord
     const child = await createSubagentEnvironment({
+      session: await runSessionOf(sixb, childRun),
       context,
       plan,
       run: childRun,
@@ -13423,50 +13536,5 @@ describe("agent tools act as the requester", () => {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
     }
-  })
-})
-
-describe("finishRunOrThrow", () => {
-  function finishingStorage(finish: AgentStorage["runs"]["finish"]): AgentStorage {
-    return { runs: { finish } } as unknown as AgentStorage
-  }
-
-  const succeededInput = {
-    projectId: PROJECT_ID,
-    id: "agt_run_x",
-    executionToken: "agt_exec_x",
-    status: "succeeded",
-  } as const
-
-  test("raises AgentFinalizationError when an infra error persists across retries", async () => {
-    let attempts = 0
-    const storage = finishingStorage(() => {
-      attempts += 1
-      return Promise.reject(new Error("db down"))
-    })
-    // Fake timers stand in for the in-place backoff between attempts.
-    jest.useFakeTimers()
-    const start = Date.now()
-    try {
-      const error = await settleUnderFakeTime(
-        finishRunOrThrow(storage, succeededInput),
-        "finalization retries"
-      ).catch((caught: unknown) => caught)
-      expect(error).toBeInstanceOf(AgentFinalizationError)
-      // Every finalization retry: 50 + 200 + 600ms.
-      expectBackoffSpent(start, 850)
-    } finally {
-      jest.useRealTimers()
-    }
-    expect(attempts).toBe(4)
-  })
-
-  test("raises AgentExecutionLostError when the run is no longer ours", async () => {
-    const storage = finishingStorage(() =>
-      Promise.reject(new AgentStorageError("execution_lost", "gone"))
-    )
-    expect(
-      await finishRunOrThrow(storage, succeededInput).catch((error: unknown) => error)
-    ).toBeInstanceOf(AgentExecutionLostError)
   })
 })

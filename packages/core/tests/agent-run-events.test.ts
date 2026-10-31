@@ -3,7 +3,7 @@ import { InMemoryBroker } from "@sixb/core"
 import { AGENT_ACTIVITY_STREAM_ID } from "@sixb/core/agents/streams"
 import { agentRunInboxStreamId } from "@sixb/core/internal/agents"
 import type { ConversationAgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
-import { NOOP_STREAM_SINK, withAgentActivityStream } from "../src/stream-sink"
+import { NOOP_STREAM_SINK, withAgentActivityStream } from "../src/agents/run-events"
 
 function runRecord(status: ConversationAgentRunRecord["status"]): ConversationAgentRunRecord {
   return {

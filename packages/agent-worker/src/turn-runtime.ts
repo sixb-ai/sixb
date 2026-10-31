@@ -1,9 +1,6 @@
-import {
-  AiModelCallRecorder,
-  createAiModelCallLimitController,
-} from "@sixb/core/internal/model-execution"
+import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
-import type { AgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
+import type { AgentRunRecord } from "@sixb/core/storage"
 import { AgentTurnTimeoutError } from "./errors"
 import type { AgentTurnContext } from "./types"
 
@@ -24,31 +21,15 @@ export interface AgentTurnRuntime {
 
 /** Start the run-owned accounting and wall-clock boundary before any optional compaction work. */
 export function createAgentTurnRuntime(input: {
-  readonly context: Pick<
-    AgentTurnContext,
-    "id" | "storage" | "recoverAiModelCall" | "turnTimeoutMs"
-  >
+  readonly context: Pick<AgentTurnContext, "turnTimeoutMs">
   readonly run: AgentRunRecord
   readonly signal: AbortSignal
-  readonly execution: ExecutionRecord
+  /** The run session's, which admits, records and recovers each call. */
+  readonly modelCalls: AiModelCallRecorder
   /** A child's: its parent's. The run times out there if its own budget from now ends later. */
   readonly deadline?: Date
 }): AgentTurnRuntime {
-  const modelCallLimits = createAiModelCallLimitController({
-    storage: input.context.storage,
-    projectId: input.context.id,
-    requestedBy: input.execution.requestedBy,
-    requesterGroupIds: input.execution.requesterGroupIds,
-  })
-  const usageRecorder = new AiModelCallRecorder({
-    storage: input.context.storage,
-    projectId: input.context.id,
-    executionId: input.run.executionId,
-    attempt: input.run.attempt,
-    requesterGroupIds: input.execution.requesterGroupIds,
-    limits: modelCallLimits,
-    recoverAiModelCall: input.context.recoverAiModelCall,
-  })
+  const usageRecorder = input.modelCalls
   const timeout = new AbortController()
   const ended = new AbortController()
   let timedOut = false

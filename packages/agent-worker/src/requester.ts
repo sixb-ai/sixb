@@ -1,5 +1,5 @@
 import type { AuthorizablePrincipal } from "@sixb/core"
-import type { AuthStorage } from "@sixb/core/storage"
+import type { AgentRunPeople } from "@sixb/core/internal/agents"
 
 /** Who an Agent run works for, as its prompt names them. */
 export type AgentRequester =
@@ -11,15 +11,14 @@ export type AgentRequester =
  * service account. Read when the run starts, so a renamed user is named correctly from the next run.
  */
 export async function resolveAgentRequester(input: {
-  readonly auth: AuthStorage
-  readonly projectId: string
+  readonly people: Pick<AgentRunPeople, "user">
   readonly requestedBy: AuthorizablePrincipal | undefined
 }): Promise<AgentRequester | undefined> {
   const { requestedBy } = input
   if (requestedBy === undefined) return undefined
   if (requestedBy.type === "serviceAccount") return { type: "serviceAccount" }
 
-  const user = await input.auth.users.getById({ projectId: input.projectId, id: requestedBy.id })
+  const user = await input.people.user(requestedBy.id)
   const displayName = user?.displayName?.trim()
 
   return { type: "user", id: requestedBy.id, ...(displayName ? { displayName } : {}) }
