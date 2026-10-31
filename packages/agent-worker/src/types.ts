@@ -80,13 +80,13 @@ export interface AgentWorkerOptions {
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
   /**
-   * Maximum number of child agents this worker executes at once, on a lane of their own so
-   * waiting parents never hold their slots. Defaults to 4.
+   * Maximum number of child agents this worker runs at once, across its turns. A child over it
+   * waits queued for a slot. Defaults to 4.
    */
   readonly subagentConcurrency?: number
   /**
-   * Maximum number of child agents one conversation turn may have queued or running at once,
-   * across every worker. Defaults to 4.
+   * Maximum number of child agents one conversation turn may have queued or running at once. They
+   * run in its worker, under its delivery. Defaults to 4.
    */
   readonly subagentConcurrencyPerRun?: number
   /** Stream routing seam. Defaults to broker backed. */

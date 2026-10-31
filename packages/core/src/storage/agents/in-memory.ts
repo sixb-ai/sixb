@@ -98,6 +98,7 @@ import type {
   RemoveAgentThreadParticipantInput,
   RequestAgentApprovalInput,
   RequestAgentApprovalResult,
+  RequestAgentRunCancelInput,
   SaveAgentMemoryInput,
   SaveAgentMemoryResult,
   SettleAgentApprovalsInput,
@@ -672,6 +673,13 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
+    if (
+      input.ifLapsedBy &&
+      run.execution &&
+      run.execution.queueLeaseExpiresAt.getTime() > input.ifLapsedBy.getTime()
+    ) {
+      throw leaseStillHeld(input.id)
+    }
     const next: AgentRunRecord = {
       ...run,
       attempt: run.attempt + 1,
@@ -701,6 +709,17 @@ class InMemoryAgentRunStore implements AgentRunStore {
         ),
       },
     }
+    this.state.runs.set(key(input.projectId, input.id), clone(next))
+    return clone(next)
+  }
+
+  async requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord> {
+    const run = this.state.runs.get(key(input.projectId, input.id))
+    if (!run) {
+      throw new AgentStorageError("run_not_found", `[Sixb] Agent run '${input.id}' was not found.`)
+    }
+    if (run.status !== "running" || run.cancelRequestedAt) return clone(run)
+    const next: AgentRunRecord = { ...run, cancelRequestedAt: input.at ?? new Date() }
     this.state.runs.set(key(input.projectId, input.id), clone(next))
     return clone(next)
   }
@@ -950,6 +969,15 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
   }
 
   async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    if (input.fence) {
+      const owner = this.state.runs.get(key(input.projectId, input.fence.runId))
+      if (owner?.status !== "running" || owner.execution?.token !== input.fence.executionToken) {
+        throw new AgentStorageError(
+          "execution_lost",
+          `[Sixb] Execution token is no longer current on agent run '${input.fence.runId}'.`
+        )
+      }
+    }
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {
@@ -1603,4 +1631,11 @@ function replace<T>(target: Map<string, T>, source: Map<string, T>): void {
   for (const [k, value] of structuredClone(source)) {
     target.set(k, value)
   }
+}
+
+function leaseStillHeld(id: string): AgentStorageError {
+  return new AgentStorageError(
+    "invalid_state",
+    `[Sixb] Agent run '${id}' is still held by its runner, whose lease has not lapsed.`
+  )
 }

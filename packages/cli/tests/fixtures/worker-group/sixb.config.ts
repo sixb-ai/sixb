@@ -129,7 +129,6 @@ class SharedQueues implements Queues {
   readonly projections = claimLoggingQueue(this.inner.projections, "projection")
   readonly workflows = claimLoggingQueue(this.inner.workflows, "workflow")
   readonly agents = claimLoggingQueue(this.inner.agents, "agent")
-  readonly agentChildren = claimLoggingQueue(this.inner.agentChildren, "agent-child")
 
   async close(): Promise<void> {
     logFixtureEvent({ type: "queues:close" })

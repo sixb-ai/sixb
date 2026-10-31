@@ -36,11 +36,19 @@ export class AgentRequesterLeftThreadError extends Error {
  * delivery's) may carry. The current owner records the run's fate; this delivery touches nothing.
  */
 export function isLostExecution(error: unknown, signal?: AbortSignal): boolean {
-  return (
-    error instanceof AgentExecutionLostError ||
-    error instanceof QueueDeliveryLeaseLostError ||
-    signal?.reason instanceof QueueDeliveryLeaseLostError
-  )
+  return isLostExecutionReason(error) || isLostExecutionReason(signal?.reason)
+}
+
+/**
+ * Throw why a runner lost its run, if that is why `signal` aborted: its execution token went to
+ * another runner, or a queue took back its delivery.
+ */
+export function throwIfExecutionLost(signal: AbortSignal): void {
+  if (isLostExecutionReason(signal.reason)) throw signal.reason
+}
+
+function isLostExecutionReason(reason: unknown): boolean {
+  return reason instanceof AgentExecutionLostError || reason instanceof QueueDeliveryLeaseLostError
 }
 
 /** A durable run, or workflow node run, as an ownership fence reads it. */
@@ -96,18 +104,6 @@ export class AgentTurnTimeoutError extends Error {
     readonly timeoutMs: number
   ) {
     super(`[SixbAgent] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
-  }
-}
-
-/**
- * The worker running a conversation turn stopped, or died, before finishing it. The turn is
- * recorded `cancelled` with `finishReason: "interrupted"` rather than replayed: the user already saw
- * it stream and its model calls were billed, so resuming it is their call.
- */
-export class AgentTurnInterruptedError extends Error {
-  readonly name = "AgentTurnInterruptedError"
-  constructor(readonly runId: string) {
-    super(`[SixbAgent] Agent run '${runId}' was interrupted when the worker running it stopped.`)
   }
 }
 

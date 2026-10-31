@@ -45,6 +45,7 @@ export {
   userCanRunAgent,
 } from "./authority"
 export { defineAgentTool } from "./builders"
+export { requestAgentRunCancel } from "./cancel"
 export type { AgentChildQuestion } from "./child-question"
 export { deferredChildQuestion, isAwaitingAnswerRun } from "./child-question"
 export type {
@@ -87,8 +88,6 @@ export type {
 export {
   agentRunQueueJobId,
   dispatchQueuedAgentRuns,
-  dispatchQueuedSubagentRuns,
-  subagentRunQueueJobId,
   workflowAgentNodeQueueJobId,
 } from "./dispatch"
 export {
@@ -156,6 +155,14 @@ export {
   NOOP_STREAM_SINK,
   withAgentActivityStream,
 } from "./run-events"
+export { AgentExecutionLostError, isTerminalOrExecutionGone } from "./run-fence"
+export {
+  AgentTurnInterruptedError,
+  agentRunLeaseLapsed,
+  endInterruptedAgentRun,
+  endLapsedAgentRuns,
+  interruptedError,
+} from "./run-liveness"
 export type {
   AgentRunExecutionScope,
   AgentRunScopeAuthority,
@@ -164,7 +171,7 @@ export type {
 } from "./run-scope"
 export { AgentRunScopeError, resolveAgentRunExecutionScope } from "./run-scope"
 export type {
-  AgentRunConversation,
+  AgentRunCheckpoint,
   AgentRunHeldCalls,
   AgentRunOutcome,
   AgentRunPeople,
@@ -175,16 +182,19 @@ export type {
   ClaimAgentRunInput,
 } from "./run-session"
 export {
-  AgentExecutionLostError,
   AgentFinalizationError,
   agentRunPeople,
   claimAgentRun,
-  isTerminalOrExecutionGone,
   openAgentRunSession,
   watchAgentRunCancel,
 } from "./run-session"
-export type { AgentRunChildren, AgentRunMail } from "./run-session-children"
-export { agentRunMail } from "./run-session-children"
+export type {
+  AgentChildDraft,
+  AgentMailDraft,
+  AgentRunChildren,
+  AgentRunMail,
+  AgentRunThreads,
+} from "./run-session-children"
 export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
@@ -195,6 +205,12 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentRunToken,
 } from "./run-token"
+export type {
+  AgentChildContext,
+  AgentRunContext,
+  AgentTurnContext,
+  AgentTurnHistory,
+} from "./run-turn"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,

@@ -4,7 +4,6 @@ export { createAskParentTool } from "./ask-parent-tool"
 export { prepareAgentModel } from "./context-budget"
 export {
   AgentRequesterLeftThreadError,
-  AgentTurnInterruptedError,
   AgentTurnTimeoutError,
   isLostExecution,
 } from "./errors"
@@ -18,8 +17,7 @@ export {
 export type { AgentRunFailure } from "./failure"
 export { toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 export type { ConversationReaders } from "./message-authors"
-export { conversationReaders } from "./message-authors"
-export { resolveAgentRequester } from "./requester"
+export { agentRequester } from "./requester"
 export { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 export type {
   AgentExecutionEnvironment,
@@ -38,7 +36,6 @@ export type { SubagentWork } from "./run-subagent"
 export { runSubagent } from "./run-subagent"
 export type { WorkflowAgentFailurePhase } from "./run-workflow-agent-node"
 export { runWorkflowAgentNode, WorkflowAgentNodeExecutionError } from "./run-workflow-agent-node"
-export { loadSubagentHistory } from "./subagent-continuation"
 export { SubagentInbox } from "./subagent-inbox"
 export { SubagentCoordinator } from "./subagent-tools"
 export type { AgentTurnRuntime } from "./turn-runtime"

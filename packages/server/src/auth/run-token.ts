@@ -123,7 +123,7 @@ async function runPolicyRefusal(
     return deny(403, "Workflow agent nodes have no Agent memory.")
   }
   if ("kind" in run && run.kind === "subagent" && !(await parentRunActive(host, run))) {
-    return deny(409, "The child agent's parent run has ended.")
+    return deny(409, "The child agent's parent run has ended or been stopped.")
   }
   if (kind === "subagent" && method !== "GET" && matchesAgentMemory(path)) {
     return deny(403, "Child agents cannot save Agent memory.")
@@ -175,6 +175,7 @@ async function resolveRunState(
     !runId ||
     !runState ||
     runState.run.status !== "running" ||
+    ("cancelRequestedAt" in runState.run && runState.run.cancelRequestedAt) ||
     !runState.run.execution ||
     runState.run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentRunToken({
@@ -184,7 +185,7 @@ async function resolveRunState(
       token,
     })
   ) {
-    return deny(403, "The run token is not valid: its run has ended or moved.")
+    return deny(403, "The run token is not valid: its run has ended, moved or been stopped.")
   }
 
   let scope: AgentRunExecutionScope
@@ -283,7 +284,7 @@ async function parentRunActive(host: SixbHostView, run: SubagentRunRecord): Prom
     projectId: host.id,
     id: run.parentRunId,
   })
-  return parent?.status === "queued" || parent?.status === "running"
+  return (parent?.status === "queued" || parent?.status === "running") && !parent.cancelRequestedAt
 }
 
 function matchesAgentMemory(pathname: string): boolean {

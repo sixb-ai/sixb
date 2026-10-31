@@ -1,8 +1,7 @@
-import { resolveAgentRequester } from "@sixb/agent"
+import { agentRequester } from "@sixb/agent"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   type AgentExecutionAuthorization,
-  type AgentRunPeople,
   resolveAgentPropertyClearance,
 } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
@@ -15,7 +14,8 @@ export async function createAgentExecutionContext(input: {
   readonly actorId?: string
   readonly runId: string
   /** Who the run's requester is, named in its prompt. */
-  readonly people: Pick<AgentRunPeople, "user">
+  /** Display names the run read as it started (`AgentTurnContext.names`), its requester's among them. */
+  readonly names: Readonly<Record<string, string>>
   readonly authorization: AgentExecutionAuthorization
   readonly authorPrincipal?: AgentRunnerContext["authorPrincipal"]
   /** Others take part in the run's thread, so each user message names its author instead. */
@@ -35,10 +35,7 @@ export async function createAgentExecutionContext(input: {
   // A shared thread's system prompt names nobody, so it stays the same whoever sends the turn.
   const requester = input.shared
     ? undefined
-    : await resolveAgentRequester({
-        people: input.people,
-        requestedBy: input.execution.requestedBy,
-      })
+    : agentRequester(input.execution.requestedBy, input.names)
 
   // The run reaches shared state through its session; only publish_artifact keeps the storage.
   const { storage, ...worker } = input.context

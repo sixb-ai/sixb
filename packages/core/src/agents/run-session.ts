@@ -9,26 +9,17 @@ import {
 import type { SecurityDefinitionCatalog } from "../security"
 import type { Storage } from "../storage"
 import {
-  type AgentContextCheckpointRecord,
-  type AgentMessageRecord,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
-  type AgentThreadParticipantRecord,
-  type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AppendAgentMessageInput,
+  type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
-  type ListAgentMessagesInput,
-  type ListAgentMessagesResult,
-  type ListAgentRunsInput,
-  type ListAgentRunsResult,
   type TransitionAgentThreadSandboxInput,
 } from "../storage/agents"
-import type { AiModelCallUsageRecord } from "../storage/ai-usage"
 import type { AuthStorage, UserRecord } from "../storage/auth"
-import type { ExecutionRecord } from "../storage/executions/types"
 import { turnPausesOnHeldCalls } from "./approvals"
 import {
   type AgentExecutionAuthorization,
@@ -37,13 +28,24 @@ import {
 } from "./authority"
 import { createAgentRunExecutionToken } from "./ids"
 import type { StreamSink } from "./run-events"
+import { AgentExecutionLostError, fenced, isTerminalOrExecutionGone } from "./run-fence"
 import {
   type AgentRunChildren,
   type AgentRunChildrenHost,
   type AgentRunMail,
+  type AgentRunThreads,
   agentRunChildren,
   agentRunMail,
+  agentRunScope,
+  agentRunThreads,
 } from "./run-session-children"
+import {
+  type AgentRunContext,
+  type AgentTurnContext,
+  type AgentTurnHistory,
+  readAgentRunContext,
+  readAgentTurnHistory,
+} from "./run-turn"
 import { subscribeAgentRunCancel } from "./streams/protocol"
 
 /**
@@ -59,7 +61,11 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   /** The run as the claim left it: `running`, with this session's execution. */
   readonly run: TRun
   readonly executionToken: string
-  /** Aborts once the run, or any run named in `cancelWith`, is cancelled. */
+  /**
+   * Aborts once the run, or any run named in `cancelWith`, is cancelled: when the broker's cancel
+   * arrives, or at the claim or a lease renewal that reads a cancel recorded on the run. Also aborts,
+   * with an {@link AgentExecutionLostError}, once a renewal finds the run ended or taken over.
+   */
   readonly cancelled: AbortSignal
   /**
    * The run's model calls. Wrap a model with it, and each call is admitted against the AI limits
@@ -84,7 +90,8 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
   readonly mail: AgentRunMail
   /**
    * Record that the runner still holds the run until `leaseExpiresAt`. A run token fails closed
-   * once the last lease recorded lapses, so the session renews it as the queue does.
+   * once the last lease recorded lapses, so the session renews it as the queue does. A renewal that
+   * reads a recorded cancel aborts `cancelled`.
    */
   renewLease(leaseExpiresAt: string): Promise<void>
   /**
@@ -102,42 +109,36 @@ export interface AgentRunSession<TRun extends AgentRunRecord = AgentRunRecord> {
    * it.
    */
   assertOwned(): Promise<void>
+  /**
+   * What the run starts from, in one read: a turn's thread, the people it names and its history,
+   * or a child's parent, threads and messages.
+   */
+  context(): Promise<TRun extends ConversationAgentRunRecord ? AgentTurnContext : AgentRunContext>
+  /**
+   * Summarize the conversation up to a point, and answer its history from the new checkpoint on.
+   * Refused with {@link AgentExecutionLostError} once the run is no longer this session's.
+   */
+  checkpoint(input: AgentRunCheckpoint): Promise<AgentTurnHistory>
   /** A conversation's persistent workspace, as this run holds it. */
   readonly workspace: AgentRunWorkspace
-  /** The run's conversation: its threads, history and context checkpoints. */
-  readonly conversation: AgentRunConversation
-  /** Who the run works for and with: members, and the authority the run carries. */
-  readonly people: AgentRunPeople
-  /** The run's execution: who asked for it, with which groups, and the authority it refers to. */
-  execution(): Promise<ExecutionRecord | null>
+  /** The messages of the run's conversation, its children's threads included. */
+  readonly threads: AgentRunThreads
+  /**
+   * The authority the run's execution carries now: its requester's groups, as they are today. A
+   * runner that binds the project in its own process needs it; a runner over HTTP never holds it.
+   */
+  authorization(ref: AuthorizationRef): Promise<AgentExecutionAuthorization>
   /** Stop watching for cancellation. The run itself is unaffected. */
   close(): void
 }
 
-/**
- * What a run reads of its conversation, and the one write it makes there besides finishing: a
- * context checkpoint, fenced by the run's token.
- */
-export interface AgentRunConversation {
-  thread(threadId: string): Promise<AgentThreadRecord | null>
-  participants(threadIds: readonly string[]): Promise<readonly AgentThreadParticipantRecord[]>
-  latestCheckpoint(threadId: string): Promise<AgentContextCheckpointRecord | null>
-  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
-  message(messageId: string): Promise<AgentMessageRecord | null>
-  run(runId: string): Promise<AgentRunRecord | null>
-  runs(input: Omit<ListAgentRunsInput, "projectId">): Promise<ListAgentRunsResult>
-  /** The latest completed model call of an execution: what compaction's estimate anchors on. */
-  latestModelCall(executionId: string): Promise<AiModelCallUsageRecord | null>
-  /** Summarize the thread up to a point; refused once the run lost its execution. */
-  createCheckpoint(
-    input: Omit<
-      CreateAgentContextCheckpointInput,
-      "projectId" | "createdByRunId" | "executionToken"
-    >
-  ): Promise<AgentContextCheckpointRecord>
-}
+/** A context checkpoint a turn writes; the session adds which run, and its token. */
+export type AgentRunCheckpoint = Omit<
+  CreateAgentContextCheckpointInput,
+  "projectId" | "createdByRunId" | "executionToken"
+>
 
-/** The project's members as a run needs them, and the authority its execution carries. */
+/** The project's members as a workflow step needs them, and the authority its execution carries. */
 export interface AgentRunPeople {
   /** A member: a message's author, or whoever the run works for. */
   user(userId: string): Promise<UserRecord | null>
@@ -238,16 +239,25 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
 
   let modelCalls: Promise<AiModelCallRecorder> | undefined
   const cancel = await watchAgentRunCancel(host, [run.id, ...cancelWith])
+  // A cancel recorded on the run reaches a runner the broker's cancel did not: at the claim, and at
+  // each renewal of its lease.
+  const recordedCancel = new AbortController()
+  const readCancel = (current: AgentRunRecord) => {
+    if (current.cancelRequestedAt) recordedCancel.abort()
+  }
+  readCancel(run)
+  const cancelled = AbortSignal.any([cancel.signal, recordedCancel.signal])
+  const scope = agentRunScope(host, run)
   const fence = { projectId: host.projectId, id: run.id, executionToken }
   const agents = host.storage.agents
 
   return {
     run,
     executionToken,
-    cancelled: cancel.signal,
+    cancelled,
     events: host.events,
-    children: agentRunChildren(host, run, executionToken),
-    mail: agentRunMail(host),
+    children: agentRunChildren(host, run, executionToken, scope),
+    mail: agentRunMail(host, run, executionToken),
     heldCalls: {
       holdsRun: () =>
         host.storage.agents.approvals.holdsRun({ projectId: host.projectId, runId: run.id }),
@@ -261,10 +271,24 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
       return modelCalls
     },
     async renewLease(leaseExpiresAt) {
-      await host.storage.agents.runs.confirmExecutionOwnership({
-        ...fence,
-        queueLeaseExpiresAt: new Date(leaseExpiresAt),
-      })
+      try {
+        readCancel(
+          await fenced(
+            run.id,
+            () =>
+              host.storage.agents.runs.confirmExecutionOwnership({
+                ...fence,
+                queueLeaseExpiresAt: new Date(leaseExpiresAt),
+              }),
+            { ended: true }
+          )
+        )
+      } catch (error) {
+        // A repair pass ended the run, or another runner took it over: this one stops now rather
+        // than at its next write, as it does when its queue lease is lost.
+        if (error instanceof AgentExecutionLostError) cancel.abort(error)
+        throw error
+      }
     },
     async finish(outcome, messages) {
       const finished = await finishWithRetries(
@@ -290,37 +314,42 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         throw new AgentExecutionLostError(run.id)
       }
     },
-    conversation: {
-      thread: (threadId) => agents.threads.getById({ projectId: host.projectId, id: threadId }),
-      participants: (threadIds) =>
-        agents.threads.listParticipants({ projectId: host.projectId, threadIds }),
-      latestCheckpoint: (threadId) =>
-        agents.checkpoints.getLatest({ projectId: host.projectId, threadId }),
-      messages: (input) => agents.messages.list({ ...input, projectId: host.projectId }),
-      message: (messageId) => agents.messages.getById({ projectId: host.projectId, id: messageId }),
-      run: (runId) => agents.runs.getById({ projectId: host.projectId, id: runId }),
-      runs: (input) => agents.runs.list({ ...input, projectId: host.projectId }),
-      latestModelCall: (executionId) =>
-        host.storage.aiUsage.getLatestForExecution({ projectId: host.projectId, executionId }),
-      createCheckpoint: (input) =>
+    threads: agentRunThreads(host, run, scope),
+    authorization: (ref) =>
+      resolveInheritedAgentExecutionAuthorization({
+        auth: host.storage.auth,
+        projectId: host.projectId,
+        authorizationRef: ref,
+        security: host.security,
+      }),
+    context: async () => {
+      const context = await readAgentRunContext(host, run)
+      if (run.kind === "conversation" && context.kind !== "conversation") {
+        throw new Error(`[Sixb] Agent run '${run.id}' changed kind.`)
+      }
+      return context as Awaited<ReturnType<AgentRunSession<TRun>["context"]>>
+    },
+    async checkpoint(input) {
+      await fenced(run.id, () =>
         agents.checkpoints.create({
           ...input,
           projectId: host.projectId,
           createdByRunId: run.id,
           executionToken,
-        }),
+        })
+      )
+      return readAgentTurnHistory(host, input.threadId)
     },
-    people: agentRunPeople(host),
-    execution: () =>
-      host.storage.executions.getById({ projectId: host.projectId, id: run.executionId }),
     workspace: {
       transition: (input) =>
-        host.storage.agents.threads.transitionSandbox({
-          ...input,
-          projectId: host.projectId,
-          runId: run.id,
-          executionToken,
-        }),
+        fenced(run.id, () =>
+          host.storage.agents.threads.transitionSandbox({
+            ...input,
+            projectId: host.projectId,
+            runId: run.id,
+            executionToken,
+          })
+        ),
     },
     close: cancel.stop,
   }
@@ -387,7 +416,11 @@ export function agentRunPeople(
 export async function watchAgentRunCancel(
   host: Pick<AgentRunSessionHost, "projectId" | "broker">,
   runIds: readonly string[]
-): Promise<{ readonly signal: AbortSignal; readonly stop: () => void }> {
+): Promise<{
+  readonly signal: AbortSignal
+  abort(reason: unknown): void
+  readonly stop: () => void
+}> {
   const controller = new AbortController()
   const unsubscribes = await Promise.all(
     runIds.map((runId) =>
@@ -401,17 +434,10 @@ export async function watchAgentRunCancel(
   )
   return {
     signal: controller.signal,
+    abort: (reason) => controller.abort(reason),
     stop: () => {
       for (const unsubscribe of unsubscribes) unsubscribe?.()
     },
-  }
-}
-
-/** This session's execution token is stale, so it must make no further durable writes. */
-export class AgentExecutionLostError extends Error {
-  readonly name = "AgentExecutionLostError"
-  constructor(readonly runId: string) {
-    super(`[Sixb] Lost execution ownership of agent run '${runId}'.`)
   }
 }
 
@@ -427,19 +453,6 @@ export class AgentFinalizationError extends Error {
   ) {
     super(`[Sixb] Could not finalize agent execution '${runId}'; storage is unavailable.`, options)
   }
-}
-
-/**
- * Storage outcomes that mean the run is no longer this session's: another delivery owns it, or it
- * already ended. There is nothing more to record either way.
- */
-export function isTerminalOrExecutionGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.code === "execution_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
-  )
 }
 
 async function startOrReclaim<TRun extends AgentRunRecord>(
@@ -462,7 +475,11 @@ async function startOrReclaim<TRun extends AgentRunRecord>(
           await agents.runs.start({ projectId, id: run.id, modelId: input.modelId, execution }),
           "starting"
         )
-      : sameKind(run, await agents.runs.reclaim({ projectId, id: run.id, execution }), "reclaiming")
+      : sameKind(
+          run,
+          await agents.runs.reclaim({ projectId, id: run.id, execution, ifLapsedBy: new Date() }),
+          "reclaiming"
+        )
   } catch (error) {
     if (error instanceof AgentStorageError && error.code === "invalid_state") return null
     throw error

@@ -20,13 +20,15 @@ import {
   SixbHost,
 } from "@sixb/core"
 import {
+  type AgentRunMail,
   agentRunInboxStreamId,
-  agentRunMail,
   agentThreadInboxStreamId,
   createSubagentRunId,
   createSubagentThreadId,
   holdAgentApprovalCall,
   publishAgentMail,
+  readAgentMail,
+  subscribeAgentInbox,
   subscribeAgentMail,
 } from "@sixb/core/internal/agents"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
@@ -847,7 +849,18 @@ describe("ChildQuestions", () => {
   // its answer opens again.
   test("counts a question once, and an answered one stays answered when delivered again", async () => {
     const broker = new InMemoryBroker()
-    const questions = new ChildQuestions(agentRunMail({ projectId, broker }), "run_parent")
+    // ChildQuestions only reads the turn's inbox.
+    const inbox: AgentRunMail = {
+      send: () => Promise.reject(new Error("ChildQuestions sends nothing.")),
+      read: (from, afterCursor) =>
+        readAgentMail(broker, {
+          projectId,
+          inbox: from,
+          ...(afterCursor === undefined ? {} : { afterCursor }),
+        }),
+      subscribe: (from, on) => subscribeAgentInbox(broker, { projectId, inbox: from }, on),
+    }
+    const questions = new ChildQuestions(inbox, "run_parent")
     const mail = {
       id: "run_west:ask",
       fromRunId: "run_west",

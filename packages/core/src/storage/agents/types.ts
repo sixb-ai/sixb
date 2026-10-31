@@ -310,6 +310,11 @@ interface AgentRunRecordBase {
   /** Execution attempts: `0` while queued, `1` on first start, incremented on redelivery. */
   readonly attempt: number
   readonly execution?: AgentRunExecution
+  /**
+   * When someone asked a running run to stop. Its run token stops working at once, and its runner
+   * learns of it at its next lease renewal if the broker's cancel never reached it.
+   */
+  readonly cancelRequestedAt?: Date
   readonly createdAt: Date
   readonly startedAt?: Date
   readonly completedAt?: Date
@@ -356,8 +361,8 @@ export interface SubagentRunSpec {
   /** The parent turn's mode, copied when the child was admitted. Absent: `auto`. */
   readonly approvalMode?: AgentApprovalMode
   /**
-   * ISO time the parent turn times out at. The child's wall clock ends there, so its wait in the
-   * queue counts against it. Absent on children admitted before it: the worker's turn timeout.
+   * ISO time the parent turn times out at. The child's wall clock ends there, however late it
+   * starts. Absent on children admitted before it: the worker's turn timeout.
    */
   readonly deadline?: string
   /** The parent turn's requester settings. Absent uses the project's. */
@@ -451,6 +456,11 @@ export interface ReclaimAgentRunInput {
   readonly id: string
   readonly projectId: string
   readonly execution: AgentRunExecution
+  /**
+   * Take the run over only if the lease last recorded on it ran out by then, checked in the same
+   * write: a renewal that lands first keeps it its runner's. Otherwise `invalid_state`.
+   */
+  readonly ifLapsedBy?: Date
 }
 
 export interface ConfirmAgentRunExecutionOwnershipInput {
@@ -459,6 +469,12 @@ export interface ConfirmAgentRunExecutionOwnershipInput {
   readonly executionToken: string
   /** Exact expiration returned by the queue claim or its latest successful renewal. */
   readonly queueLeaseExpiresAt: Date
+}
+
+export interface RequestAgentRunCancelInput {
+  readonly id: string
+  readonly projectId: string
+  readonly at?: Date
 }
 
 export type FinishAgentRunInput =
@@ -561,6 +577,11 @@ export interface DeleteAgentMessagesByRunInput {
   readonly projectId: string
   readonly threadId: string
   readonly runId: string
+  /**
+   * The run that deletes them, when one does: refused with `execution_lost` unless it still runs
+   * under this token, checked in the same transaction as the delete.
+   */
+  readonly fence?: { readonly runId: string; readonly executionToken: string }
 }
 
 export interface ListAgentMessagesInput {
@@ -688,6 +709,11 @@ export interface AgentRunStore {
    * Implementations must fence by token and must never move the expiration backwards.
    */
   confirmExecutionOwnership(input: ConfirmAgentRunExecutionOwnershipInput): Promise<AgentRunRecord>
+  /**
+   * Record that a running run was asked to stop, keeping the first time it was. A run in any other
+   * state is returned as it is: a queued one is cancelled with `finishQueued`.
+   */
+  requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord>
   /**
    * Finalize a run and release the thread's `activeRunId`. `finishReason: "awaiting_approval"`
    * needs a call the run holds (see `approvals.holdsRun`). A turn that ends any other way cancels

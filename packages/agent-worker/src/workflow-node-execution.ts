@@ -135,13 +135,16 @@ export async function executeWorkflowAgentNode(
     })
     modelId = configuredPlan.model.modelId
     const resolved = await session.authorizeActor(actorId, durableExecution.authorizationRef)
+    const { requestedBy } = durableExecution
+    const requester =
+      requestedBy?.type === "user" ? await session.people.user(requestedBy.id) : null
     const executionContext = await createAgentExecutionContext({
       context,
       host: input.host,
       execution: durableExecution,
       actorId,
       runId: nodeRun.id,
-      people: session.people,
+      names: requester?.displayName ? { [`user:${requester.id}`]: requester.displayName } : {},
       authorization: { type: "principal", context: resolved.context },
       authorPrincipal: resolved.identity.principal,
     })

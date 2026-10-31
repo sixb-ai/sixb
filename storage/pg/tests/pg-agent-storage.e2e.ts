@@ -307,8 +307,9 @@ describe("PostgresStorage agents", () => {
       if (checkpointResult.status === "fulfilled") {
         throw new Error("Checkpoint unexpectedly won the finalization race.")
       }
+      // The run ended first: the checkpoint finds it no longer held, as a reclaimed run is not.
       expect(checkpointResult.reason).toBeInstanceOf(AgentStorageError)
-      expect(checkpointResult.reason).toMatchObject({ code: "invalid_state" })
+      expect(checkpointResult.reason).toMatchObject({ code: "execution_lost" })
     } finally {
       await disposeTestStorage(storage)
     }

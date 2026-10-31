@@ -8,19 +8,11 @@ import {
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { estimateAgentConversationInputTokens } from "../src/context-compaction"
+import { agentThreadModelContext } from "../src/thread-context"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "context-compaction-tests"
 const threadId = "thread"
-
-/** The two reads compaction's estimate makes of a conversation, as a run's session answers them. */
-function anchorReads(storage: InMemoryStorage) {
-  return {
-    run: (runId: string) => storage.agents.runs.getById({ projectId, id: runId }),
-    latestModelCall: (executionId: string) =>
-      storage.aiUsage.getLatestForExecution({ projectId, executionId }),
-  }
-}
 
 describe("agent conversation context estimation", () => {
   test("anchors to the latest provider call with usage and estimates only trailing messages", async () => {
@@ -105,10 +97,20 @@ describe("agent conversation context estimation", () => {
     })
 
     const messages: readonly AgentMessageRecord[] = [user, assistant, trailing]
-    const estimate = await estimateAgentConversationInputTokens({
-      conversation: anchorReads(storage),
+    // The model call the session finds for the latest answer, as `AgentTurnHistory.usageAnchor`.
+    const anchored = async () => {
+      const modelCall = await storage.aiUsage.getLatestForExecution({ projectId, executionId })
+      if (!modelCall) throw new Error("Expected the answer's model call.")
+      return agentThreadModelContext({
+        checkpoint: null,
+        messages,
+        sentTimeZones: {},
+        usageAnchor: { messageId: assistant.id, modelCall },
+      })
+    }
+    const estimate = estimateAgentConversationInputTokens({
       plan,
-      threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
+      threadContext: await anchored(),
       systemPrompt: "This full fallback prompt should not be counted.",
       tools: [],
     })
@@ -124,15 +126,14 @@ describe("agent conversation context estimation", () => {
       messages,
     }).tokens
     expect(expandedFullEstimate).toBeGreaterThan(estimate)
-    await expect(
+    expect(
       estimateAgentConversationInputTokens({
-        conversation: anchorReads(storage),
         plan,
-        threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
+        threadContext: await anchored(),
         systemPrompt: expandedSystemPrompt,
         tools: [],
       })
-    ).resolves.toBe(expandedFullEstimate)
+    ).toBe(expandedFullEstimate)
 
     const retainedAfterCheckpoint: readonly AgentMessageRecord[] = [
       { ...user, id: "retained_user", seq: 3 },
@@ -163,19 +164,19 @@ describe("agent conversation context estimation", () => {
       tools: [],
       messages: modelMessages,
     }).tokens
-    await expect(
+    expect(
       estimateAgentConversationInputTokens({
-        conversation: anchorReads(storage),
         plan,
-        threadContext: {
+        // The session found no anchor after the checkpoint's head.
+        threadContext: agentThreadModelContext({
           checkpoint,
-          retainedMessages: retainedAfterCheckpoint,
-          modelMessages,
-        },
+          messages: retainedAfterCheckpoint,
+          sentTimeZones: {},
+        }),
         systemPrompt: "System",
         tools: [],
       })
-    ).resolves.toBe(fallback)
+    ).toBe(fallback)
 
     // A provider call that reports no output or no input tokens is no anchor, however large the
     // other count: the full request is estimated. Regression proof: drop `outputTokens > 0` or
@@ -198,15 +199,14 @@ describe("agent conversation context estimation", () => {
         usage,
         occurredAt: new Date(`2026-08-27T12:0${3 + index}:00.000Z`),
       })
-      await expect(
+      expect(
         estimateAgentConversationInputTokens({
-          conversation: anchorReads(storage),
           plan,
-          threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
+          threadContext: await anchored(),
           systemPrompt: "System",
           tools: [],
         })
-      ).resolves.toBe(
+      ).toBe(
         estimateAgentContextRequestTokens({ systemPrompt: "System", tools: [], messages }).tokens
       )
     }

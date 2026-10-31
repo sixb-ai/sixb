@@ -1,11 +1,5 @@
 import type { AgentMessagePart } from "@sixb/core"
-import { type AgentRunSession, isPausedSubagentRun } from "@sixb/core/internal/agents"
-import type {
-  AgentMessageRecord,
-  AgentThreadRecord,
-  SubagentRunFile,
-  SubagentRunRecord,
-} from "@sixb/core/storage"
+import type { AgentMessageRecord, SubagentRunFile, SubagentRunRecord } from "@sixb/core/storage"
 import { renderCurrentTime } from "./agent-prompt"
 
 // A child that paused continues as the next run of its thread under a later turn: once its held
@@ -13,37 +7,11 @@ import { renderCurrentTime } from "./agent-prompt"
 // on, in the turn the parent answers it. The same key, model and task. Its history is its thread,
 // and what it goes on with is the message that starts the run.
 
-/** What a child run reads of its thread: its messages, and the paused run it continues. */
+/** What a child run reads of its thread: its messages, and the paused run it continues (`AgentChildContext`). */
 export interface SubagentHistory {
   readonly messages: readonly AgentMessageRecord[]
   /** The run of the thread that paused on its held calls, when this run continues it. */
   readonly paused?: SubagentRunRecord
-}
-
-/** The child's thread as its run starts: its messages, and the paused run before it, if any. */
-export async function loadSubagentHistory(
-  session: Pick<AgentRunSession<SubagentRunRecord>, "run" | "conversation" | "children">,
-  thread: AgentThreadRecord
-): Promise<SubagentHistory> {
-  const [{ messages }, paused] = await Promise.all([
-    session.conversation.messages({ threadId: thread.id, order: "asc" }),
-    latestPausedRun(session),
-  ])
-
-  return { messages, ...(paused ? { paused } : {}) }
-}
-
-/**
- * The run of the thread a continuation goes on from: the latest that succeeded, as only a child
- * paused on its calls succeeds without ending its thread.
- */
-async function latestPausedRun(
-  session: Pick<AgentRunSession<SubagentRunRecord>, "run" | "children">
-): Promise<SubagentRunRecord | undefined> {
-  const { run } = session
-  const runs = await session.children.threadRuns(run.threadId)
-  const previous = runs.filter((each) => each.status === "succeeded").at(-1)
-  return previous && isPausedSubagentRun(previous) ? previous : undefined
 }
 
 /**

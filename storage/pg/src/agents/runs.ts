@@ -28,6 +28,7 @@ import {
   type ListAgentRunsResult,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
+  type RequestAgentRunCancelInput,
   type StartAgentRunInput,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
@@ -283,7 +284,17 @@ export class PgAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      await this.lockRunning(tx, input.projectId, input.id)
+      const run = await this.lockRunning(tx, input.projectId, input.id)
+      if (
+        input.ifLapsedBy &&
+        run.execution_queue_lease_expires_at !== null &&
+        new Date(run.execution_queue_lease_expires_at).getTime() > input.ifLapsedBy.getTime()
+      ) {
+        throw new AgentStorageError(
+          "invalid_state",
+          `[SixbPg] Agent run '${input.id}' is still held by its runner, whose lease has not lapsed.`
+        )
+      }
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
         SET
@@ -321,6 +332,25 @@ export class PgAgentRunStore implements AgentRunStore {
       `
       return rowToRunRecord(row)
     })
+  }
+
+  async requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord> {
+    const [updated] = await this.sql<AgentRunRow[]>`
+      UPDATE agent_runs
+      SET cancel_requested_at = ${input.at ?? new Date()}
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
+        AND status = 'running' AND cancel_requested_at IS NULL
+      RETURNING *
+    `
+    if (updated) return rowToRunRecord(updated)
+    const current = await this.getById(input)
+    if (!current) {
+      throw new AgentStorageError(
+        "run_not_found",
+        `[SixbPg] Agent run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    return current
   }
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {

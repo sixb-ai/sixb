@@ -13,12 +13,12 @@ import {
   type LanguageModelRef,
   type LanguageModelTier,
 } from "@sixb/core"
-import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   type AgentChildApprovalAwaiting,
+  type AgentChildDraft,
+  AgentExecutionLostError,
   type AgentRunSession,
   createAgentMessageId,
-  createSubagentExecutionId,
   createSubagentRunId,
   createSubagentThreadId,
   deferredChildQuestion,
@@ -37,8 +37,6 @@ import {
 } from "@sixb/core/models"
 import type {
   ConversationAgentRunRecord,
-  CreateSubagentRunInput,
-  ExecutionRecord,
   SubagentRunFile,
   SubagentRunRecord,
   SubagentRunSpec,
@@ -223,9 +221,14 @@ export class SubagentCoordinator {
     private readonly parentRun: ConversationAgentRunRecord,
     /** The turn's session, through which it reaches its children and their mail. */
     private readonly session: AgentRunSession,
-    private readonly parentExecution: ExecutionRecord,
     /** When the parent turn times out: no child outlives it. */
-    private readonly parentDeadline: Date
+    private readonly parentDeadline: Date,
+    /**
+     * Run a child this turn spawned or continues, in the turn's own runner: it claims the child's
+     * run, opens its session and environment, and records its fate. Starting a run already
+     * running is a no-op.
+     */
+    private readonly startChild: (run: SubagentRunRecord) => void
   ) {
     const models = host.definitions.models?.language
     if (!models) {
@@ -290,11 +293,7 @@ export class SubagentCoordinator {
           child.spawnKey,
           spec,
           signal,
-          {
-            ...continuation,
-            // Each was admitted within the limit; the turn starts with all of them at once.
-            maxActiveChildren: Math.max(this.context.subagentConcurrencyPerRun, paused.length),
-          }
+          continuation
         )
       )
     }
@@ -347,7 +346,7 @@ export class SubagentCoordinator {
     }[]
   > {
     const { children } = this.session
-    const trigger = await children.message(this.parentRun.triggerMessageId)
+    const trigger = await this.session.threads.message(this.parentRun.triggerMessageId)
     if (!trigger) return []
 
     const parts = trigger.parts.filter(
@@ -506,11 +505,9 @@ export class SubagentCoordinator {
       try {
         await this.session.mail.send({
           ...sent,
-          fromRunId: this.parentRun.id,
           toThreadId: child.threadId,
           kind: "answer",
           inReplyTo: question.id,
-          sentAt: new Date().toISOString(),
         })
       } catch (error) {
         this.#questions.reopen(question)
@@ -521,13 +518,7 @@ export class SubagentCoordinator {
       return output
     }
 
-    await this.session.mail.send({
-      ...sent,
-      fromRunId: this.parentRun.id,
-      toThreadId: child.threadId,
-      kind: "message",
-      sentAt: new Date().toISOString(),
-    })
+    await this.session.mail.send({ ...sent, toThreadId: child.threadId, kind: "message" })
     const toChild = this.#sent.get(child.id) ?? []
     if (!toChild.some((message) => message.id === sent.id)) toChild.push(sent)
     this.#sent.set(child.id, toChild)
@@ -560,7 +551,7 @@ export class SubagentCoordinator {
 
   /** Whether a continuation went on with its parent's answer, as its trigger says. */
   private async continuesAfterAnswer(run: SubagentRunRecord): Promise<boolean> {
-    const trigger = await this.session.children.message(run.triggerMessageId)
+    const trigger = await this.session.threads.message(run.triggerMessageId)
     return trigger?.parts.some((part) => part.type === "mail" && part.kind === "answer") ?? false
   }
 
@@ -618,10 +609,7 @@ export class SubagentCoordinator {
       }
       await this.clearDeadAttempts(paused, signal)
       const { spec, continuation } = this.continuationOf(paused, [answer])
-      return this.admit(runId, key, spec, signal, {
-        ...continuation,
-        maxActiveChildren: this.context.subagentConcurrencyPerRun,
-      })
+      return this.admit(runId, key, spec, signal, continuation)
     })
 
     const output: MessageSubagentOutput = {
@@ -641,7 +629,7 @@ export class SubagentCoordinator {
   private async deferredQuestionOf(run: SubagentRunRecord): Promise<QuestionRef | undefined> {
     if (!isAwaitingAnswerRun(run)) return undefined
 
-    const { messages } = await this.session.children.messages({
+    const { messages } = await this.session.threads.messages({
       threadId: run.threadId,
       order: "desc",
       limit: 2,
@@ -696,12 +684,10 @@ export class SubagentCoordinator {
       try {
         await this.session.mail.send({
           id: `${this.parentRun.id}:deferred:${question.id}`,
-          fromRunId: this.parentRun.id,
           toThreadId: threadId,
           kind: "deferred",
           inReplyTo: question.id,
           text: "",
-          sentAt: new Date().toISOString(),
         })
         deferred.push(question.runId)
       } catch (error) {
@@ -733,7 +719,7 @@ export class SubagentCoordinator {
   async settleChildren(stopAt: number, signal: AbortSignal): Promise<void> {
     for (;;) {
       const finished = this.#questions.nextChange()
-      if (!(await this.session.children.hasActive())) return
+      if ((await this.session.children.activeCount()) === 0) return
 
       const remainingMs = stopAt - Date.now()
       if (remainingMs <= 0) return
@@ -848,10 +834,7 @@ export class SubagentCoordinator {
       )
     }
     if (parent.execution?.token !== requiredExecutionToken(this.parentRun)) {
-      throw new AgentStorageError(
-        "execution_lost",
-        `[SixbAgent] Parent Agent run '${parent.id}' is no longer owned by this execution.`
-      )
+      throw new AgentExecutionLostError(parent.id)
     }
     if ((await children.activeCount()) >= maxActive) {
       throw publicSpawnError(
@@ -873,7 +856,7 @@ export class SubagentCoordinator {
     goesOnWith: readonly AgentMessagePart[]
   ): {
     readonly spec: SubagentRunSpec
-    readonly continuation: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt">
+    readonly continuation: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
   } {
     const spec = this.childSpec({
       task: paused.spec.task,
@@ -934,57 +917,38 @@ export class SubagentCoordinator {
     key: string,
     spec: SubagentRunSpec,
     signal: AbortSignal,
-    continuation?: Pick<CreateSubagentRunInput, "thread" | "trigger" | "createdAt"> & {
-      readonly maxActiveChildren: number
-    }
+    continuation?: Pick<AgentChildDraft, "thread" | "trigger" | "createdAt">
   ): Promise<SpawnSubagentOutput> {
     // Before it exists, so none of its questions is missed.
     await this.#questions.listen()
-    const executionId = createSubagentExecutionId(runId)
-    const execution = createInheritedAgentExecutionRecord({
-      id: executionId,
-      parent: this.parentExecution,
-      runId,
-    })
 
     let run: SubagentRunRecord
     try {
       run = await this.session.children.spawn({
-        execution,
-        run: {
-          id: runId,
-          executionId,
-          spawnKey: key,
-          spec,
-          ...(continuation ?? {
-            thread: { id: createSubagentThreadId(this.parentRun.id, key), create: true },
-            trigger: {
-              id: createAgentMessageId(),
-              parts: [
-                { type: "text", text: spec.task },
-                ...(spec.files === undefined
-                  ? []
-                  : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
-              ],
-            },
-            maxActiveChildren: this.context.subagentConcurrencyPerRun,
-          }),
-        },
+        spawnKey: key,
+        spec,
+        ...(continuation ?? {
+          thread: { create: true },
+          trigger: {
+            id: createAgentMessageId(),
+            parts: [
+              { type: "text", text: spec.task },
+              ...(spec.files === undefined
+                ? []
+                : [{ type: "text" as const, text: renderHandedFiles(spec.files) }]),
+            ],
+          },
+        }),
       })
+      if (run.id !== runId) {
+        throw new Error(`[SixbAgent] Child '${key}' was admitted as '${run.id}', not '${runId}'.`)
+      }
     } catch (error) {
       throw publicSpawnError(error, key, this.context.subagentConcurrencyPerRun)
     }
 
     signal.throwIfAborted()
-    if (run.status === "queued") {
-      const { failed } = await this.session.children.dispatch(run.id)
-      if (failed !== undefined) {
-        console.error(
-          `[SixbAgent] Could not dispatch subagent run '${run.id}'; reconciliation will retry.`,
-          failed
-        )
-      }
-    }
+    if (run.status === "queued") this.startChild(run)
 
     return {
       runId: run.id,
@@ -1078,7 +1042,7 @@ export class SubagentCoordinator {
     const sent = this.#sent.get(run.id)
     if (!sent || !isTerminalSubagent(run) || run.status === "failed") return {}
 
-    const { messages } = await this.session.children.messages({
+    const { messages } = await this.session.threads.messages({
       threadId: run.threadId,
       order: "asc",
     })

@@ -1,26 +1,21 @@
 import type { Broker } from "../broker"
+import { createInheritedAgentExecutionRecord } from "../execution/agent"
 import { ensureExecutionRecord } from "../execution/durable"
-import type { Queue, SubagentQueueJob } from "../queues"
 import type { Storage } from "../storage"
-import {
-  type AgentApprovalRecord,
-  type AgentMessageRecord,
-  type AgentRunRecord,
-  type AgentStorage,
-  AgentStorageError,
-  type CreateSubagentRunInput,
-  type ListAgentMessagesInput,
-  type ListAgentMessagesResult,
-  type ListThreadSubagentsInput,
-  type SubagentRunRecord,
+import type {
+  AgentApprovalRecord,
+  AgentMessageRecord,
+  AgentRunRecord,
+  AgentStorage,
+  CreateSubagentRunInput,
+  ListAgentMessagesInput,
+  ListAgentMessagesResult,
+  ListThreadSubagentsInput,
+  SubagentRunRecord,
 } from "../storage/agents"
-import type { CreateExecutionInput } from "../storage/executions/types"
-import {
-  type AgentChildApprovalAwaiting,
-  hasActiveChildren,
-  listChildApprovalsAwaiting,
-} from "./approvals"
-import { dispatchQueuedSubagentRuns } from "./dispatch"
+import { type AgentChildApprovalAwaiting, listChildApprovalsAwaiting } from "./approvals"
+import { createSubagentExecutionId, createSubagentRunId, createSubagentThreadId } from "./ids"
+import { AgentExecutionLostError, fenced } from "./run-fence"
 import {
   type AgentInbox,
   type AgentMail,
@@ -30,13 +25,16 @@ import {
   subscribeAgentInbox,
 } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
+import { conversationThreadId } from "./thread-access"
 
 /**
  * A conversation turn's children, as its session reaches them: the runs it spawned, and those of
  * earlier turns of its conversation, with their threads and the approvals that hold them. Every
- * write is fenced by the turn's execution token.
+ * read answers only for runs of the run's own conversation, and every write is fenced by the
+ * turn's execution token.
  */
 export interface AgentRunChildren {
+  /** A run of this conversation: one of its turns, or a child of one; null for any other. */
   get(runId: string): Promise<AgentRunRecord | null>
   getMany(runIds: readonly string[]): Promise<readonly AgentRunRecord[]>
   /** The children of this conversation's turns, by spawn key or by how they paused. */
@@ -45,8 +43,6 @@ export interface AgentRunChildren {
   ): Promise<readonly SubagentRunRecord[]>
   /** One child thread's runs, oldest first: a child and its continuations. */
   threadRuns(threadId: string): Promise<readonly SubagentRunRecord[]>
-  message(messageId: string): Promise<AgentMessageRecord | null>
-  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
   /** The approvals a run's calls asked for, its children's included. */
   approvals(runId: string): Promise<readonly AgentApprovalRecord[]>
   holdsRun(runId: string): Promise<boolean>
@@ -56,17 +52,12 @@ export interface AgentRunChildren {
   ): Promise<ReadonlyMap<string, readonly AgentChildApprovalAwaiting[]>>
   /** How many of this turn's children are queued or running. */
   activeCount(): Promise<number>
-  hasActive(): Promise<boolean>
   /**
    * Create a child run of this turn, with its execution, in one transaction that refuses once the
-   * turn no longer owns its run.
+   * turn no longer owns its run. The session decides what the runner may not: the child's id and
+   * thread from its key, its authority from the turn's, and how many children may be at work.
    */
-  spawn(input: {
-    readonly execution: CreateExecutionInput
-    readonly run: Omit<CreateSubagentRunInput, "projectId" | "parentRunId" | "parentExecutionToken">
-  }): Promise<SubagentRunRecord>
-  /** Queue a spawned child for a worker; a failure is retried by the worker's reconciliation. */
-  dispatch(runId: string): Promise<{ readonly failed?: unknown }>
+  spawn(child: AgentChildDraft): Promise<SubagentRunRecord>
   /**
    * Remove what a run left in a child thread under an earlier attempt of this turn, which failed,
    * so the turn can continue the child again. Refused once the turn no longer owns its run.
@@ -74,9 +65,95 @@ export interface AgentRunChildren {
   clearAttempt(input: { readonly threadId: string; readonly runId: string }): Promise<void>
 }
 
+/**
+ * A child as the turn asks for it: under its key, with its task, either in a thread of its own or
+ * continuing one of the conversation's child threads.
+ */
+export type AgentChildDraft = Pick<CreateSubagentRunInput, "spawnKey" | "spec" | "trigger"> & {
+  readonly thread: { readonly create: true } | { readonly id: string; readonly create: false }
+  readonly createdAt?: Date
+}
+
+/** How many children one turn may have queued or running at once, unless its host says. */
+export const DEFAULT_MAX_ACTIVE_CHILDREN = 4
+
+/** The messages of the run's conversation: its threads, and its children's. */
+export interface AgentRunThreads {
+  /** A message of the conversation; null for one anywhere else. */
+  message(messageId: string): Promise<AgentMessageRecord | null>
+  /** A thread of the conversation's messages; any other thread is refused. */
+  messages(input: Omit<ListAgentMessagesInput, "projectId">): Promise<ListAgentMessagesResult>
+}
+
+/**
+ * Which threads a run may read: its conversation's own, and the threads of its children. A runner
+ * over HTTP can name any id, so the session answers for these alone. A thread's place never
+ * changes, so each is looked up once.
+ */
+export interface AgentRunScope {
+  includes(threadId: string): Promise<boolean>
+}
+
+export function agentRunScope(host: AgentRunChildrenHost, run: AgentRunRecord): AgentRunScope {
+  const conversations = new Map<string, Promise<string | null>>()
+  const conversationOf = (threadId: string) => {
+    let conversation = conversations.get(threadId)
+    if (!conversation) {
+      conversation = host.storage.agents.threads
+        .getById({ projectId: host.projectId, id: threadId })
+        .then((thread) => (thread ? conversationThreadId(thread) : null))
+      // A failed read is read again next time.
+      conversation.catch(() => conversations.delete(threadId))
+      conversations.set(threadId, conversation)
+    }
+    return conversation
+  }
+  return {
+    async includes(threadId) {
+      const [own, theirs] = await Promise.all([
+        conversationOf(run.threadId),
+        conversationOf(threadId),
+      ])
+      return own !== null && own === theirs
+    },
+  }
+}
+
+export function agentRunThreads(
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  scope: AgentRunScope
+): AgentRunThreads {
+  const { projectId } = host
+  const agents = host.storage.agents
+  return {
+    async message(messageId) {
+      const message = await agents.messages.getById({ projectId, id: messageId })
+      return message && (await scope.includes(message.threadId)) ? message : null
+    },
+    async messages(input) {
+      if (!(await scope.includes(input.threadId))) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' reads only its conversation's threads, not '${input.threadId}'.`
+        )
+      }
+      return agents.messages.list({ ...input, projectId })
+    },
+  }
+}
+
+/** Mail as its sender writes it: the session says who sends it, and when. */
+export type AgentMailDraft = Pick<AgentMail, "id" | "kind" | "inReplyTo" | "text"> &
+  ({ readonly toThreadId: string } | { readonly toRunId: string })
+
 /** Mail between a turn and its children, through their inboxes. */
 export interface AgentRunMail {
-  send(mail: AgentMail): Promise<void>
+  /**
+   * Send as this run: a turn to the thread of one of its conversation's children, a child to the
+   * turn that spawned it. Refused with {@link AgentExecutionLostError} once the run is no longer
+   * this session's.
+   */
+  send(mail: AgentMailDraft): Promise<void>
   /** An inbox's mail after `afterCursor`, with the cursor to read on from. */
   read(
     inbox: AgentInbox,
@@ -96,41 +173,43 @@ export interface AgentRunChildrenHost {
   readonly projectId: string
   readonly storage: Storage & { readonly agents: AgentStorage }
   readonly broker: Broker
-  /** Where spawned children wait for a worker. */
-  readonly childQueue?: Queue<SubagentQueueJob>
+  /** How many children one turn may have queued or running at once. */
+  readonly maxActiveChildren?: number
 }
 
 export function agentRunChildren(
   host: AgentRunChildrenHost,
   run: AgentRunRecord,
-  executionToken: string
+  executionToken: string,
+  scope: AgentRunScope
 ): AgentRunChildren {
   const { projectId } = host
   const agents = host.storage.agents
-
-  /** The turn still owns its run: a reclaim, or its end, fences it out of its children's writes. */
-  const assertOwned = async () => {
-    const current = await agents.runs.getById({ projectId, id: run.id })
-    if (current?.status !== "running" || current.execution?.token !== executionToken) {
-      throw new AgentStorageError(
-        "execution_lost",
-        `[Sixb] Agent run '${run.id}' is no longer owned by this session.`
-      )
-    }
+  const get = async (runId: string) => {
+    const found = await agents.runs.getById({ projectId, id: runId })
+    return found && (await scope.includes(found.threadId)) ? found : null
   }
 
   return {
-    get: (runId) => agents.runs.getById({ projectId, id: runId }),
-    getMany: (runIds) => agents.runs.getByIds({ projectId, ids: runIds }),
+    get,
+    async getMany(runIds) {
+      const found = await agents.runs.getByIds({ projectId, ids: runIds })
+      const included = await Promise.all(found.map((each) => scope.includes(each.threadId)))
+      return found.filter((_, index) => included[index])
+    },
     inConversation: (input) =>
       agents.runs.listThreadSubagents({ ...input, projectId, threadId: run.threadId }),
-    threadRuns: (threadId) => listSubagentThreadRuns(agents, { projectId, threadId }),
-    message: (messageId) => agents.messages.getById({ projectId, id: messageId }),
-    messages: (input) => agents.messages.list({ ...input, projectId }),
+    async threadRuns(threadId) {
+      if (!(await scope.includes(threadId))) return []
+      return listSubagentThreadRuns(agents, { projectId, threadId })
+    },
     async approvals(runId) {
+      if (!(await get(runId))) return []
       return (await agents.approvals.list({ projectId, runId })).approvals
     },
-    holdsRun: (runId) => agents.approvals.holdsRun({ projectId, runId }),
+    async holdsRun(runId) {
+      return (await get(runId)) !== null && agents.approvals.holdsRun({ projectId, runId })
+    },
     awaitingApproval: (childRunIds) =>
       listChildApprovalsAwaiting(agents, { projectId, parentRunId: run.id, childRunIds }),
     async activeCount() {
@@ -143,48 +222,137 @@ export function agentRunChildren(
       })
       return active.total
     },
-    hasActive: () => hasActiveChildren(agents, run),
-    spawn: (input) =>
-      host.storage.transaction(async (tx) => {
-        if (!tx.agents) throw new Error("[Sixb] Agent storage disappeared during child admission.")
-        await ensureExecutionRecord(tx.executions, input.execution)
-        return tx.agents.runs.createSubagent({
-          ...input.run,
-          projectId,
-          parentRunId: run.id,
-          parentExecutionToken: executionToken,
-        })
-      }),
-    async dispatch(runId) {
-      if (!host.childQueue) return { failed: new Error("[Sixb] No queue takes child runs.") }
-      const dispatched = await dispatchQueuedSubagentRuns({
-        projectId,
-        storage: agents,
-        queue: host.childQueue,
-        runIds: [runId],
+    async spawn(child) {
+      const id = createSubagentRunId(run.id, child.spawnKey)
+      const executionId = createSubagentExecutionId(id)
+      const [parentExecution, maxActiveChildren] = await Promise.all([
+        host.storage.executions.getById({ projectId, id: run.executionId }),
+        childLimit(host, run, child),
+      ])
+      if (!parentExecution) {
+        throw new Error(`[Sixb] Agent run '${run.id}' has no execution to hand its children.`)
+      }
+      const execution = createInheritedAgentExecutionRecord({
+        id: executionId,
+        parent: parentExecution,
+        runId: id,
       })
-      const failure = dispatched.failures[0]
-      return failure === undefined ? {} : { failed: failure.error }
+      return fenced(run.id, () =>
+        host.storage.transaction(async (tx) => {
+          if (!tx.agents)
+            throw new Error("[Sixb] Agent storage disappeared during child admission.")
+          await ensureExecutionRecord(tx.executions, execution)
+          return tx.agents.runs.createSubagent({
+            id,
+            projectId,
+            executionId,
+            parentRunId: run.id,
+            parentExecutionToken: executionToken,
+            spawnKey: child.spawnKey,
+            spec: child.spec,
+            thread: child.thread.create
+              ? { id: createSubagentThreadId(run.id, child.spawnKey), create: true }
+              : child.thread,
+            trigger: child.trigger,
+            maxActiveChildren,
+            ...(child.createdAt === undefined ? {} : { createdAt: child.createdAt }),
+          })
+        })
+      )
     },
     async clearAttempt({ threadId, runId }) {
-      await assertOwned()
-      await agents.messages.deleteByRunId({ projectId, threadId, runId })
+      // Only an attempt that ended, of a child of this conversation, in that child's thread.
+      const attempt = await get(runId)
+      if (
+        attempt?.kind !== "subagent" ||
+        attempt.threadId !== threadId ||
+        attempt.status === "queued" ||
+        attempt.status === "running"
+      ) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' clears only an ended attempt of its conversation's children, not '${runId}'.`
+        )
+      }
+      await fenced(run.id, () =>
+        agents.messages.deleteByRunId({
+          projectId,
+          threadId,
+          runId,
+          fence: { runId: run.id, executionToken },
+        })
+      )
     },
   }
 }
 
+/**
+ * A turn keeps at most the host's limit of children at work. One that resumes children paused on
+ * calls its trigger decided starts with all of them at once: each was admitted within the limit.
+ */
+async function childLimit(
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  child: AgentChildDraft
+): Promise<number> {
+  const limit = host.maxActiveChildren ?? DEFAULT_MAX_ACTIVE_CHILDREN
+  if (child.thread.create) return limit
+  const trigger = await host.storage.agents.messages.getById({
+    projectId: host.projectId,
+    id: run.triggerMessageId,
+  })
+  const continuing = new Set(
+    (trigger?.parts ?? []).flatMap((part) =>
+      part.type === "approval-outcome" && part.caller?.continues ? [part.caller.runId] : []
+    )
+  )
+  return Math.max(limit, continuing.size)
+}
+
 export function agentRunMail(
-  host: Pick<AgentRunChildrenHost, "projectId" | "broker">
+  host: AgentRunChildrenHost,
+  run: AgentRunRecord,
+  executionToken: string
 ): AgentRunMail {
   const { projectId, broker } = host
+  const agents = host.storage.agents
   return {
-    send: (mail) => publishAgentMail(broker, { projectId, mail }),
+    async send(draft) {
+      const current = await agents.runs.getById({ projectId, id: run.id })
+      if (current?.status !== "running" || current.execution?.token !== executionToken) {
+        throw new AgentExecutionLostError(run.id)
+      }
+      const sentAt = new Date().toISOString()
+      if ("toRunId" in draft) {
+        if (run.kind !== "subagent" || draft.toRunId !== run.parentRunId) {
+          throw new Error(`[Sixb] Agent run '${run.id}' may mail only the run that spawned it.`)
+        }
+        await publishAgentMail(broker, {
+          projectId,
+          mail: { ...draft, fromRunId: run.id, fromThreadId: run.threadId, sentAt },
+        })
+        return
+      }
+      const thread = await agents.threads.getById({ projectId, id: draft.toThreadId })
+      if (run.kind !== "conversation" || thread?.parent?.threadId !== run.threadId) {
+        throw new Error(
+          `[Sixb] Agent run '${run.id}' may mail only the threads of its conversation's children.`
+        )
+      }
+      await publishAgentMail(broker, { projectId, mail: { ...draft, fromRunId: run.id, sentAt } })
+    },
     read: (inbox, afterCursor) =>
       readAgentMail(broker, {
         projectId,
-        inbox,
+        inbox: ownInbox(run, inbox),
         ...(afterCursor === undefined ? {} : { afterCursor }),
       }),
-    subscribe: (inbox, on) => subscribeAgentInbox(broker, { projectId, inbox }, on),
+    subscribe: (inbox, on) =>
+      subscribeAgentInbox(broker, { projectId, inbox: ownInbox(run, inbox) }, on),
   }
+}
+
+/** A run hears only its own inbox: a turn's run, a child's thread. */
+function ownInbox(run: AgentRunRecord, inbox: AgentInbox): AgentInbox {
+  if ("runId" in inbox ? inbox.runId === run.id : inbox.threadId === run.threadId) return inbox
+  throw new Error(`[Sixb] Agent run '${run.id}' reads only its own inbox.`)
 }

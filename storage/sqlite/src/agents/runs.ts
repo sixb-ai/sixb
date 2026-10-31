@@ -29,6 +29,7 @@ import {
   type ListAgentRunsResult,
   type ListThreadSubagentsInput,
   type ReclaimAgentRunInput,
+  type RequestAgentRunCancelInput,
   type StartAgentRunInput,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
@@ -326,7 +327,17 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     return this.db.transaction(() => {
-      this.requireRunning(input.projectId, input.id)
+      const run = this.requireRunning(input.projectId, input.id)
+      if (
+        input.ifLapsedBy &&
+        run.execution_queue_lease_expires_at !== null &&
+        new Date(run.execution_queue_lease_expires_at).getTime() > input.ifLapsedBy.getTime()
+      ) {
+        throw new AgentStorageError(
+          "invalid_state",
+          `[SixbSqlite] Agent run '${input.id}' is still held by its runner, whose lease has not lapsed.`
+        )
+      }
       this.db
         .query(
           `
@@ -369,6 +380,21 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         )
         .run(input.queueLeaseExpiresAt.toISOString(), input.projectId, input.id)
+      return this.requireRun(input.projectId, input.id)
+    })()
+  }
+
+  async requestCancel(input: RequestAgentRunCancelInput): Promise<AgentRunRecord> {
+    return this.db.transaction(() => {
+      this.db
+        .query(
+          `
+          UPDATE agent_runs
+          SET cancel_requested_at = ?
+          WHERE project_id = ? AND id = ? AND status = 'running' AND cancel_requested_at IS NULL
+        `
+        )
+        .run((input.at ?? new Date()).toISOString(), input.projectId, input.id)
       return this.requireRun(input.projectId, input.id)
     })()
   }
