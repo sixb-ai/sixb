@@ -253,10 +253,10 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, query, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
+          const dataset = requireDataset(sixb, params.datasetId)
           const parsed = DatasetVersionsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT)
-          const versions = await host.lakeStorage.listVersions(params.datasetId, limit)
+          const versions = await sixb.datasets.listVersions(dataset, { limit })
 
           return DatasetVersionListResponseSchema.parse({
             versions: versions.map(serializeDatasetVersion),
@@ -288,8 +288,8 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
-          const version = await host.lakeStorage.getVersion(params.datasetId, params.versionId)
+          const dataset = requireDataset(sixb, params.datasetId)
+          const version = await sixb.datasets.getVersion(dataset, params.versionId)
           if (!version) {
             throw datasetVersionNotFound(params.datasetId, params.versionId)
           }

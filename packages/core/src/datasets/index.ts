@@ -8,6 +8,7 @@ export type {
   DatasetReadRowsInput,
   DatasetRows,
   DatasetsRuntime,
+  VisibleDatasetVersion,
 } from "./execution"
 export type {
   DatasetColumnDefinition,

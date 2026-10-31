@@ -19,6 +19,7 @@ import {
   type DatasetLineage,
   type DatasetLineageInput,
   datasetLineageDepth,
+  visibleProducer,
   walkDatasetLineage,
 } from "./lineage"
 import type { DatasetDefinition } from "./types"
@@ -44,8 +45,15 @@ export interface DatasetReadRowsInput {
   readonly signal?: AbortSignal
 }
 
+/**
+ * A dataset version as {@link DatasetsRuntime} returns it: without its column lineage, which names
+ * upstream datasets, and with its producer and inputs reduced to what the reader may see.
+ */
+export type VisibleDatasetVersion = Omit<DatasetVersion, "lineage">
+
 export interface DatasetRows {
-  readonly version: DatasetVersion
+  /** The version read, as {@link DatasetsRuntime.getVersion} returns it. */
+  readonly version: VisibleDatasetVersion
   /** Columns each row holds. Redacted columns are left out. */
   readonly columns: readonly string[]
   /**
@@ -59,6 +67,20 @@ export interface DatasetRows {
 export interface DatasetsRuntime {
   list(): readonly DatasetDefinition[]
   getById(datasetId: string): DatasetDefinition | null
+  /**
+   * The dataset's versions, newest first, as {@link getVersion} returns each. Returns at most
+   * `limit` versions.
+   */
+  listVersions(
+    dataset: DatasetDefinition,
+    input?: { readonly limit?: number }
+  ): Promise<readonly VisibleDatasetVersion[]>
+  /**
+   * One version, as the reader may see it: its producer names its definition and run only to a
+   * reader who may view those runs, it lists only the inputs whose dataset the reader may view,
+   * and it leaves out its column lineage. Returns null when the version does not exist.
+   */
+  getVersion(dataset: DatasetDefinition, versionId: string): Promise<VisibleDatasetVersion | null>
   /**
    * Read rows of one version. Returns null when the dataset has no version yet or the requested
    * version does not exist.
@@ -93,6 +115,22 @@ export function createDatasetsRuntime(
       if (authority.type === "denied" || authority.type === "delegated") return null
       const dataset = source.getById(datasetId)
       return dataset && allowed(datasetId) ? dataset : null
+    },
+    async listVersions(dataset, input = {}) {
+      assertAuthorized(runtime, { kind: "dataset.view", datasetId: dataset.id })
+      const registered = source.getById(dataset.id)
+      if (!registered) throw new Error(`[Sixb] Dataset '${dataset.id}' is not registered.`)
+
+      const versions = await lakeStorage.listVersions(registered.id, input.limit)
+      return versions.map((version) => readerVersion(runtime, version))
+    },
+    async getVersion(dataset, versionId) {
+      assertAuthorized(runtime, { kind: "dataset.view", datasetId: dataset.id })
+      const registered = source.getById(dataset.id)
+      if (!registered) throw new Error(`[Sixb] Dataset '${dataset.id}' is not registered.`)
+
+      const version = await lakeStorage.getVersion(registered.id, versionId)
+      return version && readerVersion(runtime, version)
     },
     async readRows(dataset, input = {}) {
       assertAuthorized(runtime, { kind: "dataset.view", datasetId: dataset.id })
@@ -130,7 +168,7 @@ export function createDatasetsRuntime(
             ? read(columns)
             : emptyRows(read(selected.slice(0, 1)))
       return {
-        version,
+        version: readerVersion(runtime, version),
         columns,
         ...(redacted.size > 0 ? { redactions: missingClearanceRedactions(redacted) } : {}),
         rows,
@@ -194,6 +232,30 @@ export function createDatasetsRuntime(
       }
       return result
     },
+  }
+}
+
+/**
+ * A version as the reader may see it, by the rules dataset lineage applies: a producer whose runs
+ * the reader may not view gives only its kind, and an input whose dataset it may not view is left
+ * out. Its column lineage, which names upstream datasets, is left out too.
+ */
+function readerVersion(
+  runtime: SixbRuntimeContext,
+  version: DatasetVersion
+): VisibleDatasetVersion {
+  const { lineage: _lineage, producer, inputs, ...rest } = version
+
+  return {
+    ...rest,
+    ...(producer === undefined ? {} : { producer: visibleProducer(runtime, producer) }),
+    ...(inputs === undefined
+      ? {}
+      : {
+          inputs: inputs.filter((input) =>
+            isRuntimeAllowed(runtime, { kind: "dataset.view", datasetId: input.datasetId })
+          ),
+        }),
   }
 }
 

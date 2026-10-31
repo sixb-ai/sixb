@@ -996,6 +996,7 @@ export type {
   DatasetReadRowsInput,
   DatasetRows,
   DatasetsRuntime,
+  VisibleDatasetVersion,
 } from "./datasets/execution"
 export type {
   DatasetLineage,

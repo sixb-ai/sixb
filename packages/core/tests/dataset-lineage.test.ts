@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  AuthorizationError,
   can,
   col,
   type DatasetDefinition,
@@ -298,5 +299,59 @@ describe("dataset lineage", () => {
     expect(await createTestSixb(createHost()).datasets.lineage(rawOrders)).toBeNull()
     expect(await readerIn(host, []).datasets.lineage(ordersReport, latest)).toBeNull()
     expect(await delegated.datasets.lineage(ordersReport, latest)).toBeNull()
+  })
+})
+
+describe("dataset versions", () => {
+  // Guard proof: return `version` unchanged from `readerVersion` in `datasets/execution.ts`; the
+  // reporter then sees the pipeline run, the staged version and the column lineage.
+  test("show their producer and inputs as far as the reader may see them", async () => {
+    const { host, raw, staged, report } = await seedChain()
+    const stored = await host.lakeStorage.getVersion(ordersReport.id, report.versionId)
+    const storedRaw = await host.lakeStorage.getVersion(rawOrders.id, raw.versionId)
+    const reporter = readerIn(host, [reporters.id])
+
+    const analystVersion = await readerIn(host, [analysts.id]).datasets.getVersion(
+      ordersReport,
+      report.versionId
+    )
+    const reporterVersion = await reporter.datasets.getVersion(ordersReport, report.versionId)
+
+    expect(stored).toMatchObject({ producer: reportProducer, inputs: [ref(staged)] })
+    expect(analystVersion).toMatchObject({ producer: { kind: "pipeline" }, inputs: [ref(staged)] })
+    const reporterView = {
+      ...ref(report),
+      mode: report.mode,
+      createdAt: report.createdAt,
+      schema: report.schema,
+      producer: { kind: "pipeline" },
+      inputs: [],
+      rowCount: report.rowCount,
+      ...(report.sizeBytes === undefined ? {} : { sizeBytes: report.sizeBytes }),
+    } satisfies DatasetVersion
+    expect(reporterVersion).toEqual(reporterView)
+    expect(await reporter.datasets.listVersions(ordersReport)).toEqual([reporterView])
+    expect((await reporter.datasets.readRows(ordersReport))?.version).toEqual(reporterView)
+
+    // A sync's version records its own columns as their lineage; the reader is not given it.
+    expect(storedRaw?.lineage).toBeDefined()
+    expect(await reporter.datasets.getVersion(rawOrders, raw.versionId)).not.toHaveProperty(
+      "lineage"
+    )
+  })
+
+  test("return null for a missing version and refuse a reader who cannot view the dataset", async () => {
+    const { host, trusted, report } = await seedChain()
+    const outsider = readerIn(host, [])
+
+    const refused = await outsider.datasets
+      .getVersion(ordersReport, report.versionId)
+      .catch((error) => error)
+
+    expect(await trusted.datasets.getVersion(ordersReport, "ver_missing")).toBeNull()
+    expect(refused).toBeInstanceOf(AuthorizationError)
+    expect(
+      await outsider.datasets.listVersions(ordersReport).catch((error) => error)
+    ).toBeInstanceOf(AuthorizationError)
   })
 })
