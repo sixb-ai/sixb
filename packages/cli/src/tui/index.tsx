@@ -15,7 +15,7 @@ import {
   type SignedOut,
   startSignIn,
 } from "./connection"
-import { LocalRunner } from "./runner"
+import { LocalRunner, stopOnHangUp } from "./runner"
 import { loadSettings, type Settings } from "./settings"
 import { type TuiColors, tuiColors } from "./theme"
 import { BOLD, Composer, useSpinner } from "./ui"
@@ -66,6 +66,11 @@ export async function runTui(options: {
   const settings = await loadSettings()
   const folder = process.cwd()
   let runner: LocalRunner | null = null
+  // The renderer gives its screen back on these signals; sixb then ends its turns and exits.
+  const unhook = stopOnHangUp(
+    () => runner,
+    (signal) => process.exit(signal === "SIGHUP" ? 129 : 143)
+  )
 
   try {
     await new Promise<void>((resolve) => {
@@ -85,6 +90,7 @@ export async function runTui(options: {
       )
     })
   } finally {
+    unhook()
     root.unmount()
     renderer.destroy()
     await renderer.closed

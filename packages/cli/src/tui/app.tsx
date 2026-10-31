@@ -29,7 +29,7 @@ import { conversationsIn, folderOf, rememberFolder } from "./folders"
 import { shortPath } from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
-import type { LocalRunner } from "./runner"
+import { type LocalRunner, owns } from "./runner"
 import {
   APPROVAL_MODES,
   approvalLabel,
@@ -112,26 +112,19 @@ export function Workspace(props: WorkspaceProps) {
 
   // This folder's conversations run here whatever screen is open: a message sent from the web app,
   // or a turn going on after approvals decided there, and those that queued while sixb was closed.
+  const { runner } = props
   useEffect(() => {
-    const { client } = connection
-    const claimIfHere = async (threadId: string, runId?: string) => {
-      if ((await folderOf(threadId)) !== props.runner.folder) return
-      const { data: thread } = await getAgentThread({ client, path: { threadId } })
-      if (thread?.runsOn !== "computer" || !owns(connection, thread)) return
-      const queued = runId ?? thread.activeRunId
-      if (queued) void props.runner.claim(queued)
-    }
-    void conversationsIn(props.runner.folder).then((threadIds) => {
-      for (const threadId of threadIds) void claimIfHere(threadId)
+    void conversationsIn(runner.folder).then((threadIds) => {
+      for (const threadId of threadIds) void runner.claimIfHere(threadId)
     })
     const socket = createAgentActivitySocket({
-      client,
+      client: connection.client,
       onActivity: (event) => {
-        if (event.status === "queued") void claimIfHere(event.threadId, event.runId)
+        if (event.status === "queued") void runner.claimIfHere(event.threadId, event.runId)
       },
     })
     return () => socket.close()
-  }, [connection, props.runner])
+  }, [connection, runner])
 
   const cyclePermissions = useCallback(() => {
     setSettings((current) => {
@@ -569,14 +562,6 @@ function effortModel(
       : (models.find((model) => model.isDefault) ?? models[0])
 }
 
-/** Whether the person signed in owns `thread`: with sign-in off, the system owns what it starts. */
-function owns(connection: Connection, thread: Pick<Thread, "ownerPrincipal">): boolean {
-  const owner = thread.ownerPrincipal
-  return connection.user
-    ? owner.type === "user" && owner.id === connection.user.id
-    : owner.type === "system"
-}
-
 /** How long a card that just appeared ignores its keys, so typing that was under way doesn't decide it. */
 const APPROVAL_GRACE_MS = 700
 
@@ -628,9 +613,12 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
   const here = workFolder === runner.folder
   // This computer runs the conversation's turns when it is the owner's, and this its folder.
   const runsHere = onComputer && mine && here
+  // Only a queued turn: a running one is another sixb's, or one whose sixb closed, which the API
+  // ends interrupted rather than running its commands again.
+  const queued = runs.find((run) => run.id === activeRunId)?.status === "queued"
   useEffect(() => {
-    if (activeRunId && runsHere) void runner.claim(activeRunId)
-  }, [activeRunId, runsHere, runner])
+    if (activeRunId && runsHere && queued) void runner.claim(activeRunId)
+  }, [activeRunId, runsHere, queued, runner])
   const moveHere = async () => {
     await rememberFolder(threadId, runner.folder)
     setWorkFolder(runner.folder)
@@ -833,7 +821,11 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
                   ? "Press esc again to stop"
                   : live?.compacting
                     ? "Condensing earlier turns"
-                    : queuedLabel(runs, activeRunId, onComputer, mine)
+                    : queuedLabel(runs, activeRunId, {
+                        onComputer,
+                        mine,
+                        runsHere: activeRunId !== null && runner.runs(activeRunId),
+                      })
               }
             />
           </box>
@@ -884,13 +876,15 @@ function ThreadView(props: ScreenProps & { readonly threadId: string }) {
 function queuedLabel(
   runs: readonly Run[],
   runId: string | null,
-  onComputer: boolean,
-  mine: boolean
+  where: { readonly onComputer: boolean; readonly mine: boolean; readonly runsHere: boolean }
 ): string {
   const run = runs.find((entry) => entry.id === runId)
   if (run?.status === "queued") {
-    return onComputer && !mine ? "Waiting for its owner's computer" : "Starting"
+    return where.onComputer && !where.mine ? "Waiting for its owner's computer" : "Starting"
   }
+  // Yours, running, and not here: another sixb runs it, or one that closed, whose turn ends
+  // interrupted once its lease lapses.
+  if (where.onComputer && where.mine && !where.runsHere) return "Working in another sixb"
   return "Working"
 }
 
