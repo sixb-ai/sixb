@@ -1,4 +1,13 @@
 import { join, resolve } from "node:path"
+import {
+  AGENT_MEMORY_ENTRY,
+  AGENT_MEMORY_MANIFEST,
+  AGENT_MEMORY_STARTER,
+  AGENT_RUNTIME_PROFILE,
+  type AgentMemoryManifest,
+  agentMemoryFileHash,
+  loadSandboxCliAssets,
+} from "@sixb/cli-core"
 import type {
   AgentMemoryRepoView,
   AgentProjectFile,
@@ -7,15 +16,6 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import { loadAgentCliAssets } from "./agent-cli-assets"
-import {
-  AGENT_MEMORY_ENTRY,
-  AGENT_MEMORY_MANIFEST,
-  AGENT_MEMORY_STARTER,
-  type AgentMemoryManifest,
-  agentMemoryFileHash,
-} from "./agent-runtime/memory"
-import { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 
@@ -68,7 +68,7 @@ export async function prepareAgentSandboxApiContext(
   const artifactsDir = join(contextDir, AGENT_ARTIFACTS_DIRECTORY)
   const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
-  const cli = await loadAgentCliAssets()
+  const cli = await loadSandboxCliAssets()
   // The run's commands reach the API through the sandbox's credentialed address, which adds the
   // run token on the way out: no command holds it.
   if (!input.sandbox.credentialedUrl) {

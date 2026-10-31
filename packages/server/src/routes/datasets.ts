@@ -6,6 +6,7 @@ import type {
   DatasetVersion,
 } from "@sixb/core/lake-storage"
 import type { Elysia } from "elysia"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { codedErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
@@ -213,6 +214,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered datasets",
           tags: [OPENAPI_TAGS.datasets.name],
           operationId: "listDatasets",
+          security: accessTokenSecurityRequirement("listDatasets"),
         },
       }
     )
@@ -241,6 +243,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get dataset metadata",
           tags: [OPENAPI_TAGS.datasets.name],
           operationId: "getDataset",
+          security: accessTokenSecurityRequirement("getDataset"),
         },
       }
     )
@@ -275,6 +278,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           summary: "List dataset versions",
           tags: [OPENAPI_TAGS.datasetVersions.name],
           operationId: "listDatasetVersions",
+          security: accessTokenSecurityRequirement("listDatasetVersions"),
         },
       }
     )
@@ -366,6 +370,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
           summary: "Preview dataset rows",
           tags: [OPENAPI_TAGS.datasetRows.name],
           operationId: "listDatasetRows",
+          security: accessTokenSecurityRequirement("listDatasetRows"),
         },
       }
     )

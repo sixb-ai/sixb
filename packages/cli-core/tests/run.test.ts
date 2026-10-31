@@ -9,10 +9,9 @@ afterEach(() => {
 })
 
 describe("instance CLI modes", () => {
-  test("renders mode-specific help", () => {
-    expect(renderInstanceHelp("sandbox")).toContain("sixb doctor")
-    expect(renderInstanceHelp("local")).not.toContain("sixb doctor")
-    expect(renderInstanceHelp("local")).toContain("selected local profile")
+  test("the sandbox help names the sandbox's own commands", () => {
+    expect(renderInstanceHelp()).toContain("sixb context")
+    expect(renderInstanceHelp()).toContain("Check the sandbox and its API access")
   })
 
   test("local mode sends the configured bearer token", async () => {

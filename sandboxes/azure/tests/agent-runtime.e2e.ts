@@ -150,7 +150,7 @@ test.skipIf(!enabled)(
       expect(calls).toBe(2)
       expect(replay).toContain("Synthetic healthy fan")
       expect(replay).toContain("exitCode")
-      expect(runTokenRequests).toBeGreaterThanOrEqual(2) // doctor + object read
+      expect(runTokenRequests).toBeGreaterThanOrEqual(2) // status + object read
       expect(sessions).toHaveLength(1)
       console.log("[AzureE2E] Runtime preflight, CLI read and agent completion passed")
     } finally {

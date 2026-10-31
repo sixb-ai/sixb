@@ -24,8 +24,8 @@ export interface SmolvmSandboxFactoryOptions<in out TParams extends ParamsConfig
   /**
    * Image the VM boots from: a local `docker save` archive (`.tar`, boots offline), a registry
    * reference (pulled at boot; add its hosts to `registryHosts`), or `null` for a bare machine
-   * (built-in busybox rootfs, which cannot run the agent CLI). Agents need Bash, standard file
-   * utilities, CA certificates, and Bun 1.3+ or Node 22+ — the Sixb agent image has all of them.
+   * (built-in busybox rootfs, which cannot run the sandbox's `sixb`). Agents need Bash, standard
+   * file utilities, CA certificates, and Bun 1.3+ or Node 22+ — the Sixb agent image has all of them.
    */
   readonly image: string | null
   /** smolvm binary name or absolute path. Defaults to "smolvm" (resolved on PATH). */

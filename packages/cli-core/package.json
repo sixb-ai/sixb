@@ -29,9 +29,23 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
+    "generate:sandbox-cli": "bun ./scripts/generate-sandbox-cli.ts",
+    "check:sandbox-cli": "bun ./scripts/generate-sandbox-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build"
+  },
+  "sixbBuild": {
+    "assets": [
+      {
+        "from": "./src/bin",
+        "to": "./dist/bin"
+      },
+      {
+        "from": "./src/generated",
+        "to": "./dist/generated"
+      }
+    ]
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test"
+import { AGENT_RUNTIME_PROFILE } from "@sixb/cli-core"
 import {
   type AgentApprovalCall,
   type AgentMessage,
@@ -30,7 +31,6 @@ import type { LanguageModelRequest, LanguageModelStream } from "@sixb/core/model
 import type { AgentRunRecord, AgentStorage, SubagentRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { AgentWorker } from "../src"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 // The parent steers a child at work with message_agent: the child reads the message before its
@@ -116,8 +116,8 @@ class TestSandbox implements Sandbox {
     const script = args.at(-1) ?? ""
     if (command !== "bash") return ok("")
 
-    if (script.includes("SIXB_BASH_ENV_READY")) return ok("node\t22.0.0\tsixb agent CLI 1\n")
-    if (script === "sixb doctor") {
+    if (script.includes("SIXB_BASH_ENV_READY")) return ok("node\t22.0.0\tsixb CLI 1\n")
+    if (script === "sixb status") {
       return ok(
         JSON.stringify({
           ok: true,

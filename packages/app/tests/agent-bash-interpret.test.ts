@@ -22,7 +22,8 @@ function output(stdout: string, exitCode = 0) {
 describe("classifyCommand", () => {
   test("classifies every supported CLI operation from its fixed command path", () => {
     const cases = {
-      "sixb doctor": "doctor",
+      "sixb status": "status",
+      "sixb doctor": "status",
       "sixb context": "context",
       "sixb project show": "project.show",
       "sixb ontology list": "ontology.list",
@@ -51,6 +52,9 @@ describe("classifyCommand", () => {
       "sixb workflows start renewCustomer": "workflows.start",
       "sixb workflow-runs list": "workflow-runs.list",
       "sixb workflow-runs get run-2": "workflow-runs.get",
+      "sixb datasets rows orders --limit 50": "datasets.rows",
+      "sixb sync-runs list --sync crm": "sync-runs.list",
+      "sixb pipeline-runs get run-3": "pipeline-runs.get",
       "sixb models list --kind image": "models.list",
       "sixb models get bfl/flux-3-image-klein": "models.get",
       'sixb models text "Status?"': "models.text",
@@ -241,6 +245,39 @@ describe("describeBash", () => {
     ["(bun test || true)", "Running a command"],
   ])("describes `%s` as %s", (command, runningTitle) => {
     expect(describeBash(classifyCommand(command), null).runningTitle).toBe(runningTitle)
+  })
+
+  // Guard proof: drop the data groups from CLI_COMMANDS; these read "Ran a Sixb command".
+  test("names what the agent read from datasets, syncs and pipelines", () => {
+    const title = (command: string) => describeBash(classifyCommand(command), null).title
+    expect(title("sixb datasets rows customer_orders --limit 50")).toBe(
+      "Read rows of the customer orders dataset"
+    )
+    expect(title("sixb syncs get crm")).toBe("Inspected the crm sync")
+    expect(title("sixb pipeline-runs list --pipeline daily")).toBe("Listed pipeline runs")
+  })
+
+  // Guard proof: name the dataset from intent.args[0] again; it reads "the limit dataset".
+  test("names the dataset when an option comes before its id", () => {
+    const { title } = describeBash(
+      classifyCommand("sixb datasets rows --limit 2 customer_orders"),
+      null
+    )
+    expect(title).toBe("Read rows of the customer orders dataset")
+  })
+
+  // Guard proof: read the status from the output's root again; neither run shows one.
+  test("shows the status of a pipeline or workflow run from its detail", () => {
+    const pipelineRun = describeBash(
+      classifyCommand("sixb pipeline-runs get run-3"),
+      output('{"run":{"id":"run-3","status":"succeeded"},"steps":[]}')
+    )
+    const workflowRun = describeBash(
+      classifyCommand("sixb workflow-runs get run-2"),
+      output('{"run":{"id":"run-2","status":"failed"},"nodes":[]}')
+    )
+    expect(pipelineRun.detail).toBe("succeeded")
+    expect(workflowRun.detail).toBe("failed")
   })
 
   test("says what a memory save remembered, and when it saved nothing", () => {

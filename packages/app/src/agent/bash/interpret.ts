@@ -24,6 +24,11 @@ const CLI_COMMANDS = {
   files: ["upload", "download"],
   workflows: ["list", "get", "start"],
   "workflow-runs": ["list", "get"],
+  datasets: ["list", "get", "versions", "rows"],
+  syncs: ["list", "get"],
+  "sync-runs": ["list"],
+  pipelines: ["list", "get"],
+  "pipeline-runs": ["list", "get"],
   models: ["list", "get", "text", "image", "speech", "transcribe", "calls"],
   api: ["get", "post"],
   memory: ["save", "pull"],
@@ -37,7 +42,7 @@ type CliCommandName = {
 type SixbCommandName =
   | "help"
   | "version"
-  | "doctor"
+  | "status"
   | "context"
   | "objects.query-example"
   | CliCommandName
@@ -211,8 +216,12 @@ function classifySixbCommand(
   if (cliArgs[0] === "version" || cliArgs[0] === "--version") {
     return { kind: "sixb", command: "version", args: cliArgs.slice(1) }
   }
-  if (cliArgs[0] === "doctor" || cliArgs[0] === "context") {
-    return { kind: "sixb", command: cliArgs[0], args: cliArgs.slice(1) }
+  // `doctor` is what `status` was called before; older threads still show it.
+  if (cliArgs[0] === "status" || cliArgs[0] === "doctor") {
+    return { kind: "sixb", command: "status", args: cliArgs.slice(1) }
+  }
+  if (cliArgs[0] === "context") {
+    return { kind: "sixb", command: "context", args: cliArgs.slice(1) }
   }
 
   const [group, operation, ...args] = cliArgs
@@ -497,7 +506,7 @@ function describeSixb(
       return icon("skill", m.help, m.helpSubjects[helpSubject(intent.args)])
     case "version":
       return icon("terminal", m.version)
-    case "doctor":
+    case "status":
       return icon("terminal", m.doctor)
     case "context":
       return icon("project", m.runContext)
@@ -612,7 +621,29 @@ function describeSixb(
         count(arrayLength(parsed?.json), counts.runs)
       )
     case "workflow-runs.get":
-      return withDetail(icon("actions", m.workflowRun), runStatus(parsed?.json, m))
+      return withDetail(icon("actions", m.workflowRun), runStatus(detailRun(parsed?.json), m))
+    case "datasets.list":
+      return icon("objects", m.listDatasets)
+    case "datasets.get":
+      return icon("objects", m.inspectDataset, humanize(positionals(intent.args)[0]))
+    case "datasets.versions":
+      return icon("objects", m.datasetVersions, humanize(positionals(intent.args)[0]))
+    case "datasets.rows":
+      return icon("objects", m.datasetRows, humanize(positionals(intent.args)[0]))
+    case "syncs.list":
+      return icon("actions", m.listSyncs)
+    case "syncs.get":
+      return icon("actions", m.inspectSync, humanize(positionals(intent.args)[0]))
+    case "sync-runs.list":
+      return icon("actions", m.listSyncRuns)
+    case "pipelines.list":
+      return icon("actions", m.listPipelines)
+    case "pipelines.get":
+      return icon("actions", m.inspectPipeline, humanize(positionals(intent.args)[0]))
+    case "pipeline-runs.list":
+      return icon("actions", m.listPipelineRuns)
+    case "pipeline-runs.get":
+      return withDetail(icon("actions", m.pipelineRun), runStatus(detailRun(parsed?.json), m))
     case "files.upload":
       return withDetail(icon("object", m.upload), filePath(parsed?.json))
     case "files.download":
@@ -920,6 +951,11 @@ function runOutcome(value: unknown, m: AgentMessages["bash"]): string | undefine
 }
 
 /** A run status in words; statuses Sixb does not know yet are shown as they are. */
+/** A run's detail answers `{ run, steps }` or `{ run, nodes }`: its status is the run's. */
+function detailRun(value: unknown): unknown {
+  return isRecord(value) && isRecord(value.run) ? value.run : value
+}
+
 export function runStatus(value: unknown, m: AgentMessages["bash"] = en.bash): string | undefined {
   if (!isRecord(value) || typeof value.status !== "string") return undefined
   return Object.hasOwn(m.statuses, value.status)

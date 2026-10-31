@@ -1,16 +1,15 @@
 # `@sixb/cli-core`
 
-Shared command runtime for working with a running Sixb instance.
-
-It powers both:
+The commands for working with a running Sixb instance: the API half of `sixb`, for people and
+agents alike.
 
 ```text
-@sixb/cli          local profile + Bearer token
-@sixb/agent-worker sandbox capability URL
+@sixb/cli          your sixb: these commands, signed in with your profile, plus the framework's
+the sandbox's sixb these commands plus status, context and memory, built from src/main.ts
+                   into one file the agent worker installs in every sandbox
 ```
 
-This package has no executable and does not load profiles or environment variables. If you want
-the `sixb` command, install [`@sixb/cli`](https://www.npmjs.com/package/@sixb/cli):
+If you want the `sixb` command, install [`@sixb/cli`](https://www.npmjs.com/package/@sixb/cli):
 
 ```bash
 bun add --global @sixb/cli
@@ -35,6 +34,9 @@ sixb action-runs get run-123
 sixb workflows list
 sixb workflows start onboarding --file input.json
 sixb workflow-runs get run-456
+sixb datasets rows orders --columns id,total --limit 10
+sixb sync-runs list --sync crm --status failed
+sixb pipeline-runs get run-789
 sixb files upload ./report.pdf
 ```
 
@@ -45,8 +47,9 @@ runs a semantic search through that type's vector profile and ranks results by `
 
 Run `sixb <group> --help` for exact arguments and limits.
 
-Profile management, authentication, and server lifecycle commands belong to `@sixb/cli`.
-Sandbox-only commands such as `doctor` and `context` belong to `@sixb/agent-worker`.
+Profile management, authentication, and server lifecycle commands belong to `@sixb/cli`. Both
+have `sixb status`: yours checks your profile, a sandbox's checks the sandbox and reports what the
+worker's preflight expects. `sixb context` and `sixb memory` work inside an agent run only.
 
 ## Usage
 
@@ -79,7 +82,7 @@ auth-disabled instance.
 
 ### Sandbox mode
 
-The Agent worker passes a run-scoped capability URL:
+`src/main.ts` runs it with the run's API address:
 
 ```ts
 import { reportError, runInstanceCli } from "@sixb/cli-core"
@@ -98,8 +101,8 @@ try {
 }
 ```
 
-Sandbox mode never adds a Bearer token. Authentication is carried by the capability URL supplied
-by the worker.
+Sandbox mode never adds a Bearer token: the sandbox adds the run's token on the way out of
+`SIXB_API_BASE_URL`, so no command holds it.
 
 ## Contract
 
@@ -140,10 +143,11 @@ import {
 | `createInstanceApiClient` | Create the mode-aware HTTP client |
 | `INSTANCE_COMMANDS` | Frozen top-level command names |
 | `isInstanceCommand` | Narrow a string to an instance command |
-| `renderInstanceHelp` | Render local or sandbox help text |
+| `renderInstanceHelp` | The sandbox CLI's help text, which the agent's prompt includes |
 | `requestsHelp` | Detect help before resolving a local connection |
 | `CliError` | Structured CLI failure with an exit code |
 | `reportError` | Write the stable error envelope and return its exit code |
+| `loadSandboxCliAssets` | The launcher and bundle the agent worker installs as a sandbox's `sixb` |
 
 ## Development
 
@@ -153,9 +157,10 @@ bun --filter @sixb/cli-core test
 bun --filter @sixb/cli-core build
 ```
 
-Changes to shared commands must also preserve the generated Agent CLI contract on both Bun and
-Node:
+The sandbox's `sixb` is committed as `src/generated/sixb.mjs`, and CI fails when it is stale.
+Regenerate it after changing any command, then run its contract on Bun and Node:
 
 ```bash
-bun test packages/agent-worker/tests/agent-cli.test.ts
+bun run generate:sandbox-cli
+bun test packages/cli-core/tests/sandbox-cli.test.ts
 ```

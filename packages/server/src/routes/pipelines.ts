@@ -1,6 +1,7 @@
 import type { PipelineDefinition, PipelineStepExecutor, SixbHostView } from "@sixb/core"
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -143,6 +144,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered pipelines",
           tags: [OPENAPI_TAGS.pipelines.name],
           operationId: "listPipelines",
+          security: accessTokenSecurityRequirement("listPipelines"),
         },
       }
     )
@@ -166,6 +168,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get pipeline metadata",
           tags: [OPENAPI_TAGS.pipelines.name],
           operationId: "getPipeline",
+          security: accessTokenSecurityRequirement("getPipeline"),
         },
       }
     )
@@ -211,6 +214,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
           summary: "List pipeline run history",
           tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "listPipelineRuns",
+          security: accessTokenSecurityRequirement("listPipelineRuns"),
         },
       }
     )
@@ -257,6 +261,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get pipeline run detail",
           tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "getPipelineRun",
+          security: accessTokenSecurityRequirement("getPipelineRun"),
         },
       }
     )

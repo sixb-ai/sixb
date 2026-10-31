@@ -3,7 +3,7 @@ import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeRequestResult, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { readJson } from "./shared"
+import { idSegment, readJson } from "./shared"
 
 export async function workflows(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -16,7 +16,7 @@ export async function workflows(api: ApiClient, args: readonly string[]): Promis
     const {
       positionals: [workflowId],
     } = parseCommandArgs(rest, {}, "workflows get", 1)
-    return writeJson(await api.get(`/api/workflows/${encodeURIComponent(workflowId ?? "")}`))
+    return writeJson(await api.get(`/api/workflows/${idSegment(workflowId)}`))
   }
   if (sub === "start") {
     const {
@@ -30,7 +30,7 @@ export async function workflows(api: ApiClient, args: readonly string[]): Promis
     // Every start names its run, so a repeated request returns the same run instead of another.
     const runId = options["--run-id"] ?? `run_${randomUUID()}`
     return writeRequestResult(
-      await api.post(`/api/workflows/${encodeURIComponent(workflowId ?? "")}/runs`, {
+      await api.post(`/api/workflows/${idSegment(workflowId)}/runs`, {
         input,
         runId,
       })

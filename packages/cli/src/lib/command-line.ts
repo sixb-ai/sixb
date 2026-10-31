@@ -250,6 +250,11 @@ const INSTANCE_SUMMARIES = {
   "workflow-runs": "Inspect workflow execution history",
   users: "List and search project members",
   models: "List the project's models and their prices",
+  datasets: "Read datasets, their versions and rows",
+  syncs: "List the syncs you may run",
+  "sync-runs": "Inspect sync run history",
+  pipelines: "List the pipelines you may run",
+  "pipeline-runs": "Inspect pipeline runs and their steps",
 } as const satisfies Record<InstanceCommand, string>
 
 const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({

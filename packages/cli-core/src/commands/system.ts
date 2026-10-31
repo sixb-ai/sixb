@@ -1,22 +1,28 @@
 import { readFile } from "node:fs/promises"
-import {
-  asRecord,
-  CliError,
-  createInstanceApiClient,
-  EXIT_API,
-  fail,
-  INSTANCE_CLI_VERSION,
-  isFileError,
-  isHelp,
-  type SandboxInstanceCliMode,
-  writeJson,
-  writeText,
-} from "@sixb/cli-core"
-import { AGENT_RUNTIME_PROFILE, type AgentDoctorReport } from "../../agent-runtime/profile"
+import { isHelp } from "../arguments"
+import { CliError, EXIT_API, fail, INSTANCE_CLI_VERSION, writeJson, writeText } from "../output"
+import { createInstanceApiClient, type SandboxInstanceCliMode } from "../run"
+import { asRecord, isFileError } from "./shared"
 
-export async function doctor(args: readonly string[], mode: SandboxInstanceCliMode): Promise<void> {
-  if (isHelp(args[0])) return writeText("Usage: sixb doctor")
-  if (args.length !== 0) fail("doctor accepts no arguments.")
+/** The sandbox runtime `sixb status` reports and the agent worker's preflight expects. */
+export const AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1" as const
+
+/** Stable JSON emitted by `sixb status` in a sandbox and consumed by worker preflight. */
+export interface SandboxStatusReport {
+  readonly ok: true
+  readonly profile: typeof AGENT_RUNTIME_PROFILE
+  readonly cli: { readonly version: string }
+  readonly javascript: {
+    readonly name: "bun" | "node"
+    readonly version: string
+  }
+  readonly project: { readonly id: string }
+}
+
+export async function status(args: readonly string[], mode: SandboxInstanceCliMode): Promise<void> {
+  if (isHelp(args[0])) return writeText("Usage: sixb status")
+  // Its output is JSON either way: --json, which people's `sixb status` takes, changes nothing.
+  if (args.some((arg) => arg !== "--json")) fail("status accepts no arguments but --json.")
   const project = asRecord(await createInstanceApiClient(mode).get("/api/project"))
   if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError(
@@ -24,7 +30,7 @@ export async function doctor(args: readonly string[], mode: SandboxInstanceCliMo
       EXIT_API
     )
   }
-  const report: AgentDoctorReport = {
+  const report: SandboxStatusReport = {
     ok: true,
     profile: AGENT_RUNTIME_PROFILE,
     cli: { version: INSTANCE_CLI_VERSION },
@@ -53,7 +59,7 @@ export async function context(args: readonly string[]): Promise<void> {
   }
 }
 
-function javascriptRuntime(): AgentDoctorReport["javascript"] {
+function javascriptRuntime(): SandboxStatusReport["javascript"] {
   if (typeof globalThis.Bun === "object") {
     return { name: "bun", version: globalThis.Bun.version }
   }

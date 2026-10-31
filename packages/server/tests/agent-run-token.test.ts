@@ -6,7 +6,10 @@ import {
   type AuthorizablePrincipal,
   type AuthorizationContext,
   can,
+  change,
+  col,
   defineAction,
+  defineDataset,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -50,10 +53,7 @@ import { createTestBrowserPolicy } from "./helpers"
 
 const PROJECT_ID = "agent-run-token-tests"
 const NOW = new Date("2026-06-28T12:00:00.000Z")
-const AGENT_CLI_ARTIFACT = resolve(
-  import.meta.dir,
-  "../../agent-worker/src/agent-cli/generated/sixb.mjs"
-)
+const SANDBOX_CLI_ARTIFACT = resolve(import.meta.dir, "../../cli-core/src/generated/sixb.mjs")
 
 function fileRefJson(fileRef: FileRef): Record<string, string | number> {
   return Object.fromEntries(
@@ -174,12 +174,23 @@ const routeLanguageModel = {
   },
 } satisfies LanguageModel
 
+const deviceReadings = defineDataset("device_readings", {
+  schema: [col("id", "string"), col("celsius", "float64")],
+  primaryKey: "id",
+})
+// The run's requester may not view this one, so the run may not either.
+const payroll = defineDataset("payroll", {
+  schema: [col("id", "string"), col("salary", "float64")],
+  primaryKey: "id",
+})
+
 const agentRuntime = defineGroup("agent-runtime")
 const agentRole = defineRole("agent.runtime", {
   grantedTo: [agentRuntime],
   grants: [
     can.view(Device),
     can.view(Contract),
+    can.view(deviceReadings),
     can.apply(labelDevice),
     can.apply(syncDevice),
     can.apply(notifyDevice),
@@ -750,7 +761,7 @@ describe("run tokens", () => {
 
   test("saves and pulls memory from two sandboxes, merging a conflicting save", async () => {
     const { app, apiBaseUrl } = await createRunTokenRuntime()
-    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-memory-"))
+    const directory = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-memory-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -768,7 +779,7 @@ describe("run tokens", () => {
       const file = (path: string) => join(env.SIXB_MEMORY_DIR, "user", path)
       return {
         run: async (...args: string[]) => {
-          const result = await runAgentCli(baseUrl.href, ["memory", ...args], env)
+          const result = await runSandboxCli(baseUrl.href, ["memory", ...args], env)
           return { ...result, json: result.stdout ? JSON.parse(result.stdout) : null }
         },
         read: (path: string) => readFile(file(path), "utf8"),
@@ -852,9 +863,9 @@ describe("run tokens", () => {
     }
   })
 
-  test("keeps the generated agent CLI compatible with the real API", async () => {
+  // Remove the dataset, sync or pipeline reads from SIXB_API_ROUTES; that command gets a 403.
+  test("reads datasets, syncs and pipelines with the run's grants", async () => {
     const { app, apiBaseUrl } = await createRunTokenRuntime()
-    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-api-"))
     const listener = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -865,7 +876,46 @@ describe("run tokens", () => {
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const cli = (...args: string[]) => runSandboxCli(baseUrl.href, args)
+      const [datasets, rows, hidden, syncs, syncRuns, pipelines, pipelineRuns] = await Promise.all([
+        cli("datasets", "list"),
+        cli("datasets", "rows", "device_readings"),
+        cli("datasets", "get", "payroll"),
+        cli("syncs", "list"),
+        cli("sync-runs", "list"),
+        cli("pipelines", "list"),
+        cli("pipeline-runs", "list"),
+      ])
+
+      expect(datasets.exitCode).toBe(0)
+      expect(JSON.parse(datasets.stdout).map((dataset: { id: string }) => dataset.id)).toEqual([
+        "device_readings",
+      ])
+      expect(JSON.parse(rows.stdout)).toMatchObject({ rows: [{ id: "fan-1", celsius: 21.5 }] })
+      expect(hidden.exitCode).toBe(3)
+      expect(JSON.parse(hidden.stderr).error.status).toBe(404)
+      for (const result of [syncs, syncRuns, pipelines, pipelineRuns]) {
+        expect(result).toMatchObject({ exitCode: 0, stderr: "" })
+      }
+    } finally {
+      listener.stop(true)
+    }
+  })
+
+  test("keeps the sandbox CLI compatible with the real API", async () => {
+    const { app, apiBaseUrl } = await createRunTokenRuntime()
+    const directory = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-api-"))
+    const listener = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => app.fetch(request),
+    })
+    const baseUrl = new URL(apiBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+
+    try {
+      const cli = (args: readonly string[]) => runSandboxCli(baseUrl.href, args)
       const invalidQueryPath = join(directory, "invalid-query.json")
       const actionParamsPath = join(directory, "action-params.json")
       const uploadPath = join(directory, "upload.txt")
@@ -1629,7 +1679,7 @@ describe("agent approval gate", () => {
     ).toMatchObject({ status: "pending" })
   })
 
-  test("the generated agent CLI prints a held call and exits with code 4", async () => {
+  test("the sandbox CLI prints a held call and exits with code 4", async () => {
     const { app, apiBaseUrl } = await createRunTokenRuntime({
       approvalMode: "manual",
     })
@@ -1639,7 +1689,7 @@ describe("agent approval gate", () => {
     baseUrl.port = String(listener.port)
 
     try {
-      const held = await runAgentCli(baseUrl.href, [
+      const held = await runSandboxCli(baseUrl.href, [
         "actions",
         "request",
         "label-device",
@@ -1828,8 +1878,8 @@ function jsonRequest(method: string, path: string, body?: unknown): Request {
   })
 }
 
-describe("agent CLI models", () => {
-  test("the generated agent CLI lists models and writes an image with its run token", async () => {
+describe("sandbox CLI models", () => {
+  test("the sandbox CLI lists models and writes an image with its run token", async () => {
     const png = new Uint8Array([137, 80, 78, 71])
     const painter: ImageModel = {
       providerId: "test",
@@ -1840,14 +1890,14 @@ describe("agent CLI models", () => {
     const { app, apiBaseUrl } = await createRunTokenRuntime({
       models: { image: [painter] },
     })
-    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-models-"))
+    const directory = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-models-"))
     const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
     const baseUrl = new URL(apiBaseUrl)
     baseUrl.hostname = "127.0.0.1"
     baseUrl.port = String(listener.port)
 
     try {
-      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const cli = (args: readonly string[]) => runSandboxCli(baseUrl.href, args)
       const listed = await cli(["models", "list", "--kind", "image"])
       expect(listed.exitCode).toBe(0)
       expect(JSON.parse(listed.stdout)).toEqual([
@@ -1876,15 +1926,15 @@ interface AgentApi {
   fetch(request: Request): Promise<Response>
 }
 
-/** The agent CLI against `baseUrl`, a forwarder that adds the run token, as in a sandbox. */
-async function runAgentCli(
+/** The sandbox CLI against `baseUrl`, a forwarder that adds the run token, as in a sandbox. */
+async function runSandboxCli(
   baseUrl: string,
   args: readonly string[],
   env: Readonly<Record<string, string>> = {}
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
   // This path-level dependency is intentional: it verifies the exact artifact copied into agent
-  // sandboxes without making @sixb/agent-worker a runtime dependency of @sixb/server.
-  const child = Bun.spawn([process.execPath, AGENT_CLI_ARTIFACT, ...args], {
+  // sandboxes without making @sixb/cli-core a runtime dependency of @sixb/server.
+  const child = Bun.spawn([process.execPath, SANDBOX_CLI_ARTIFACT, ...args], {
     env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl },
     stdout: "pipe",
     stderr: "pipe",
@@ -1935,6 +1985,7 @@ async function createRunTokenRuntime(
     ontology: [Contract, Device, PrivateNote],
     actions: [labelDevice, syncDevice, notifyDevice],
     workflows: [inspectDevices, pingDevices, relabelDevices],
+    datasets: [deviceReadings, payroll],
     groups: [agentRuntime, noteReaders],
     roles: [agentRole, noteReaderRole],
     models: {
@@ -1951,6 +2002,9 @@ async function createRunTokenRuntime(
 
   const setup = createTestSixb(sixb)
   await setup.objects.upsert("device", { id: "fan-1", label: "Fan 1" })
+  await setup.datasets.ingest(deviceReadings, {
+    changes: [change.upsert({ id: "fan-1", celsius: 21.5 })],
+  })
   await setup.objects.upsert("contract", { id: "contract-1" })
   await setup.objects.upsertLink("device", "fan-1", "contract", {
     targetTypeId: "contract",

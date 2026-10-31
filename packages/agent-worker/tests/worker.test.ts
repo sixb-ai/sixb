@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
 import { join } from "node:path"
+import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   type AgentMessagePart,
   type AgentRuntime,
@@ -110,8 +111,6 @@ import {
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { renderAgentSystemPrompt, renderCurrentTime } from "../src/agent-prompt"
-import { agentMemoryFileHash } from "../src/agent-runtime/memory"
-import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { InstalledArtifacts, installArtifactsPublishedBy } from "../src/artifacts/materialize"
 import { prepareAgentAttachments } from "../src/attachments"
@@ -1163,12 +1162,12 @@ class RecordingSandbox implements Sandbox {
     ) {
       return {
         exitCode: 0,
-        stdout: "node\t22.0.0\tsixb agent CLI 1\n",
+        stdout: "node\t22.0.0\tsixb CLI 1\n",
         stderr: "",
         durationMs: 1,
       }
     }
-    if (command === "bash" && script === "sixb doctor") {
+    if (command === "bash" && script === "sixb status") {
       return {
         exitCode: 0,
         stdout: JSON.stringify({
@@ -11342,7 +11341,7 @@ describe("AgentWorker", () => {
         "Use the `sixb` CLI only for the live project data or capability needed by the task"
       )
       expect(capturedSystem).toContain("Do not run `sixb --help`")
-      expect(capturedSystem).toContain("Sixb agent CLI")
+      expect(capturedSystem).toContain("Sixb CLI")
       expect(capturedSystem).not.toContain("<agent_instructions>")
       expect(capturedSystem).toContain("Available Agent Skills:\n- sixb-artifacts: ")
       const createOptions = sandboxes.createOptions[0]

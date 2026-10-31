@@ -41,7 +41,7 @@ export function createInstanceApiClient(mode: InstanceCliMode): ApiClient {
         : "The Sixb API could not be reached.",
     unavailableHint:
       mode.kind === "sandbox"
-        ? "Run 'sixb doctor' to verify the sandbox runtime and its API access."
+        ? "Run 'sixb status' to verify the sandbox runtime and its API access."
         : "Run 'sixb status' to verify the current profile.",
   })
 }

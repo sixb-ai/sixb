@@ -2,9 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 
 const packageRoot = resolve(import.meta.dir, "..")
-const entrypoint = resolve(packageRoot, "src", "agent-cli", "index.ts")
-const outputPath = resolve(packageRoot, "src", "agent-cli", "generated", "sixb.mjs")
+const entrypoint = resolve(packageRoot, "src", "main.ts")
+const outputPath = resolve(packageRoot, "src", "generated", "sixb.mjs")
 const check = process.argv.includes("--check")
+// The bundle's path comments are relative to the working directory: build from the package's, so
+// the bundle is the same wherever the script is run from.
+process.chdir(packageRoot)
 
 const result = await Bun.build({
   entrypoints: [entrypoint],
@@ -16,11 +19,11 @@ const result = await Bun.build({
 
 if (!result.success) {
   for (const log of result.logs) console.error(log)
-  throw new Error("[SixbAgentCli] Failed to generate the portable CLI artifact.")
+  throw new Error("[SixbCli] Failed to generate the sandbox CLI.")
 }
 
 const artifact = result.outputs.find((output) => output.kind === "entry-point")
-if (!artifact) throw new Error("[SixbAgentCli] The build produced no CLI entry point.")
+if (!artifact) throw new Error("[SixbCli] The build produced no CLI entry point.")
 const generated = await artifact.text()
 
 if (check) {
@@ -29,11 +32,11 @@ if (check) {
     committed = await readFile(outputPath, "utf8")
   } catch {}
   if (committed !== generated) {
-    throw new Error("[SixbAgentCli] The generated CLI is stale. Run `bun run generate:agent-cli`.")
+    throw new Error("[SixbCli] The generated CLI is stale. Run `bun run generate:sandbox-cli`.")
   }
-  console.log("[SixbAgentCli] Generated CLI is current.")
+  console.log("[SixbCli] Generated CLI is current.")
 } else {
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, generated)
-  console.log(`[SixbAgentCli] Generated ${outputPath}`)
+  console.log(`[SixbCli] Generated ${outputPath}`)
 }

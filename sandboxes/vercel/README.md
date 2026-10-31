@@ -148,7 +148,7 @@ new VercelSandboxFactory({
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone cannot execute the portable agent CLI. |
+| `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone cannot run the sandbox's `sixb`. |
 | `image` | — | Vercel Container Registry image reference. |
 | `snapshotId` | — | Boot from a Vercel Sandbox snapshot; mutually exclusive with `runtime` and `image`. |
 | `source` | — | Common Sixb HTTPS Git source; credentials and provider-specific clone options are not accepted. |

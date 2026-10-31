@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-export interface AgentCliContractImplementation {
+export interface SandboxCliContractImplementation {
   readonly name: string
   readonly version: string
   readonly runtime: "bun" | "node"
@@ -12,7 +12,7 @@ export interface AgentCliContractImplementation {
 }
 
 /** A runtime that runs the CLI as a child process: `[...command, ...args]`. */
-export interface AgentCliProcess {
+export interface SandboxCliProcess {
   readonly runtime: "bun" | "node"
   readonly command: readonly string[]
   readonly version: string
@@ -153,12 +153,12 @@ const links = [
   edge("WorkOrder", "wo-1040", "case", "ServiceCase", "case-1"),
 ] as const
 
-export function runAgentCliContractSuite(implementation: AgentCliContractImplementation): void {
-  describe.serial(`Sixb agent CLI contract (${implementation.name})`, () => {
+export function runSandboxCliContractSuite(implementation: SandboxCliContractImplementation): void {
+  describe.serial(`Sixb sandbox CLI contract (${implementation.name})`, () => {
     test("exposes the frozen command hierarchy and help without an API runtime", async () => {
       const commands = [
         ["--help"],
-        ["doctor", "--help"],
+        ["status", "--help"],
         ["context", "--help"],
         ["project", "--help"],
         ["project", "show", "--help"],
@@ -240,10 +240,10 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       expect(version).toEqual({ exitCode: 0, stdout: `${implementation.version}\n`, stderr: "" })
     })
 
-    test("reports one compact, stable doctor contract", async () => {
+    test("reports one compact, stable status contract", async () => {
       const api = startGraphApi()
       try {
-        const result = await runCli(implementation, ["doctor"], apiEnv(api))
+        const result = await runCli(implementation, ["status"], apiEnv(api))
         expect(result.exitCode).toBe(0)
         expect(result.stderr).toBe("")
         const report = JSON.parse(result.stdout)
@@ -259,6 +259,13 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         })
         expect(report.project.name).toBeUndefined()
         expect(api.requests.map((request) => request.url.pathname)).toEqual(["/api/project"])
+
+        // --json, which people's `sixb status` takes, is accepted and changes nothing.
+        const json = await runCli(implementation, ["status", "--json"], apiEnv(api))
+        expect({ exitCode: json.exitCode, report: JSON.parse(json.stdout) }).toEqual({
+          exitCode: 0,
+          report,
+        })
       } finally {
         api.close()
       }
@@ -367,7 +374,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         }
         expect(api.requests).toHaveLength(0)
 
-        const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-json-"))
+        const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-json-"))
         try {
           const invalidJsonPath = join(tempDir, "invalid.json")
           await writeFile(invalidJsonPath, "{not-json")
@@ -847,7 +854,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         }
         return json({ ok: true })
       })
-      const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-surface-"))
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-surface-"))
       try {
         const queryPath = join(tempDir, "query.json")
         const facetsPath = join(tempDir, "facets.json")
@@ -1067,7 +1074,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           })
         )
       })
-      const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-stream-"))
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-stream-"))
       const outputPath = join(tempDir, "download.bin")
       const resultPromise = runCli(
         implementation,
@@ -1141,7 +1148,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
 }
 
 async function runCli(
-  implementation: AgentCliContractImplementation,
+  implementation: SandboxCliContractImplementation,
   args: readonly string[],
   env: Readonly<Record<string, string>> = {}
 ): Promise<CliResult> {
@@ -1156,7 +1163,7 @@ const PROCESS_TIMEOUT_MS = 10_000
  * upload, and stream pipeline, from a child process of that runtime, and that each command family
  * runs on it and exits.
  */
-export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
+export function runSandboxCliProcessSmoke(runtime: SandboxCliProcess): void {
   test(
     `keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}${
       runtime.overUnixSocket ? " over a Unix socket" : ""
@@ -1183,7 +1190,7 @@ export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
         },
         { overUnixSocket: runtime.overUnixSocket ?? false }
       )
-      const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-process-"))
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-sandbox-cli-process-"))
       try {
         const uploadPath = join(tempDir, "upload.txt")
         const downloadPath = join(tempDir, "download.txt")
@@ -1201,7 +1208,7 @@ export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
 
         const [
           version,
-          doctor,
+          status,
           invalid,
           missing,
           get,
@@ -1215,7 +1222,7 @@ export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
           workflow,
         ] = await Promise.all([
           run("--version"),
-          run("doctor"),
+          run("status"),
           run("objects", "inspect", "Customer", "customer-1", "--depth", "9"),
           run("workflows", "get", "missing"),
           run("objects", "get", "Customer", "customer-1"),
@@ -1249,8 +1256,8 @@ export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
         ])
 
         expect(version).toEqual({ exitCode: 0, stdout: `${runtime.version}\n`, stderr: "" })
-        expect(doctor).toMatchObject({ exitCode: 0, stderr: "" })
-        expect(JSON.parse(doctor.stdout).javascript.name).toBe(runtime.runtime)
+        expect(status).toMatchObject({ exitCode: 0, stderr: "" })
+        expect(JSON.parse(status.stdout).javascript.name).toBe(runtime.runtime)
         expect(invalid).toMatchObject({ exitCode: 2, stdout: "" })
         expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
         expect(missing).toMatchObject({ exitCode: 3, stdout: "" })
@@ -1438,7 +1445,7 @@ function startTestApi(
   }
   if (options.overUnixSocket) {
     // Under /tmp: a socket's path must fit in about 100 bytes.
-    const directory = mkdtempSync("/tmp/sixb-agent-cli-")
+    const directory = mkdtempSync("/tmp/sixb-sandbox-cli-")
     const socket = join(directory, "api.sock")
     const server = Bun.serve({ unix: socket, fetch })
     return {

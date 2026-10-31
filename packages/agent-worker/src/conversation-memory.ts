@@ -1,10 +1,6 @@
+import { AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER, type AgentMemoryRepo } from "@sixb/cli-core"
 import { AgentMemoryError, type AgentMemoryRepoView, type Sixb } from "@sixb/core"
 import type { AgentMemoryPromptContext } from "./agent-prompt"
-import {
-  AGENT_MEMORY_ENTRY,
-  AGENT_MEMORY_STARTER,
-  type AgentMemoryRepo,
-} from "./agent-runtime/memory"
 
 /** The repos a conversation installs and shows, in the order the prompt lists them. */
 const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user", "project"]

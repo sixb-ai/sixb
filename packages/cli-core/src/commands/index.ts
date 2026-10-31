@@ -1,6 +1,7 @@
 import type { ApiClient } from "../api-client"
 import { fail } from "../output"
 import { actions } from "./actions"
+import { datasets, runnables } from "./data"
 import { files } from "./files"
 import { models } from "./models"
 import { objects } from "./objects"
@@ -23,6 +24,11 @@ export const INSTANCE_COMMANDS = [
   "workflow-runs",
   "users",
   "models",
+  "datasets",
+  "syncs",
+  "sync-runs",
+  "pipelines",
+  "pipeline-runs",
 ] as const
 
 export type InstanceCommand = (typeof INSTANCE_COMMANDS)[number]
@@ -59,6 +65,16 @@ export async function dispatch(
       return users(api, args)
     case "models":
       return models(api, args)
+    case "datasets":
+      return datasets(api, args)
+    case "syncs":
+      return runnables(api, "syncs", args)
+    case "sync-runs":
+      return runs(api, "sync", args)
+    case "pipelines":
+      return runnables(api, "pipelines", args)
+    case "pipeline-runs":
+      return runs(api, "pipeline", args)
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`)
   }

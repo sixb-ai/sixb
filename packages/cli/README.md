@@ -39,6 +39,9 @@ bun add @sixb/cli
 | `sixb workflows ...` | Discover and start workflows |
 | `sixb workflow-runs ...` | Inspect workflow execution history |
 | `sixb files ...` | Upload and download files |
+| `sixb datasets ...` | Read datasets, their versions and rows |
+| `sixb syncs ...`, `sixb sync-runs ...` | List the syncs you may run and their history |
+| `sixb pipelines ...`, `sixb pipeline-runs ...` | List the pipelines you may run and their runs |
 | `sixb token list` | List personal access tokens |
 | `sixb token create` | Create a personal access token |
 | `sixb token revoke <id>` | Revoke a personal access token |

@@ -5,7 +5,7 @@ import {
   DEFAULT_TELEMETRY_ORDER,
 } from "../policies"
 
-const SANDBOX_MAIN_HELP = `Sixb agent CLI
+const SANDBOX_MAIN_HELP = `Sixb CLI
 
 Usage:
   sixb <command> [options]
@@ -15,7 +15,7 @@ API commands emit JSON. Help, version, and examples emit text. Downloads write t
 emit a JSON receipt.
 
 Discovery:
-  sixb doctor                         Check the sandbox and its API access
+  sixb status                         Check the sandbox and its API access
   sixb context                        Print the current run context
   sixb project show                   Show project metadata
   sixb ontology list                  Compact visible type and relationship catalog
@@ -50,6 +50,13 @@ Actions and workflows:
   sixb workflows list|get|start ...
   sixb workflow-runs list|get ...
 
+Data:
+  sixb datasets list|get|versions|rows ...
+  sixb syncs list|get ...             Syncs you may run, each with its latest run
+  sixb sync-runs list ...
+  sixb pipelines list|get ...         Pipelines you may run, each with its latest run
+  sixb pipeline-runs list|get ...
+
 Files:
   sixb files upload|download ...
 
@@ -63,28 +70,9 @@ A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id wi
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
 
-const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI")
-  .replace(
-    "The CLI uses the run's SIXB_API_BASE_URL, which adds its credentials. Do not configure authentication or another origin.",
-    "The CLI uses the selected local profile and its API credentials."
-  )
-  .replace(
-    "  sixb doctor                         Check the sandbox and its API access\n  sixb context                        Print the current run context\n",
-    ""
-  )
-  .replace(
-    "\nWhen you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use\n`sixb ontology get` for a type that has no file there.\n",
-    ""
-  )
-
-  // The agent reaches models with its run token once the model routes allow it.
-  .replace(
-    "Files:\n  sixb files upload|download ...\n",
-    "Files:\n  sixb files upload|download ...\n\nModels:\n  sixb models list [--kind <kind>]    Configured models of every kind, with prices\n  sixb models get <model>             One model's options and rate card\n  sixb models text|image|speech|transcribe ...   Call a model; see sixb models --help\n"
-  )
-
-export function renderInstanceHelp(mode: "local" | "sandbox"): string {
-  return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP
+/** The sandbox CLI's help, which the agent's prompt includes. People's comes from @sixb/cli. */
+export function renderInstanceHelp(): string {
+  return SANDBOX_MAIN_HELP
 }
 
 const SEARCH_DETAILS = `Without --type, search matches primary-id prefixes and full-text fields across visible types.
@@ -214,7 +202,7 @@ Vector profile names are the keys of the type's search.vectors. Vector input is 
 optionally under filters; k bounds the ranked matches and results carry a score.`
 
 export const GROUP_HELP = {
-  doctor: "Usage: sixb doctor",
+  status: "Usage: sixb status",
   context: "Usage: sixb context",
   project: "Usage: sixb project show",
   ontology: `Usage:
@@ -315,6 +303,56 @@ List options:
   --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
   --offset <n>                  Non-negative; defaults to 0
   --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  datasets: `Usage:
+  sixb datasets list
+  sixb datasets get <dataset-id>
+  sixb datasets versions <dataset-id> [--limit <1-${CLI_LIMITS.datasetVersions.maximum}>]
+  sixb datasets rows <dataset-id> [options]
+
+Rows options:
+  --version <version-id>        Defaults to the latest version
+  --columns <a,b,...>           Defaults to every column
+  --limit <1-${CLI_LIMITS.datasetRows.maximum}>              Defaults to ${CLI_LIMITS.datasetRows.default}
+  --offset <n>                  Non-negative; defaults to 0
+
+\`list\` and \`get\` show a dataset's schema, its latest version, and the syncs and pipelines you
+may run that read or write it. \`versions\` lists the newest first. \`rows\` leaves out the
+columns your clearances do not cover and names them under redactions.`,
+  syncs: `Usage:
+  sixb syncs list
+  sixb syncs get <sync-id>
+
+Lists the syncs you may run, each with its latest run. \`sixb sync-runs list\` shows the history.`,
+  "sync-runs": `Usage:
+  sixb sync-runs list [options]
+
+List options:
+  --sync <sync-id>
+  --dataset <dataset-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
+  pipelines: `Usage:
+  sixb pipelines list
+  sixb pipelines get <pipeline-id>
+
+Lists the pipelines you may run, each with its latest run. \`sixb pipeline-runs\` shows the
+history and each run's steps.`,
+  "pipeline-runs": `Usage:
+  sixb pipeline-runs list [options]
+  sixb pipeline-runs get <run-id>
+
+List options:
+  --pipeline <pipeline-id>
+  --status queued|running|succeeded|failed|cancelled
+  --started-after|--started-before <RFC3339>
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}
+
+\`get\` includes the run's steps.`,
 } as const
 
 export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
