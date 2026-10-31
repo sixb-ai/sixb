@@ -41,12 +41,13 @@ const Device = defineObjectType({
   ],
 })
 
-// The origin tests below drive `PUT /api/objects/device/:id` because it is a mutation, not because
-// they care about authorization. It enforces `edit:object` now, so they seed the grant to keep
-// asserting the status the guard produces rather than the one the write grant would.
-const deviceWriter = defineRole("device.writer", {
+// The tests below send `POST /api/objects/query` where they need a JSON request the guard sees as
+// a mutation, not because they care about authorization: it is a read, and the viewer role lets it
+// answer 200, so the status they assert is the one the guard produces.
+const QUERY = { query: { kind: "refs", refs: [{ objectTypeId: "device", primaryId: "fan-1" }] } }
+const deviceViewer = defineRole("device.viewer", {
   grantedTo: [securityAdmins],
-  grants: [can.view(Device), can.edit(Device)],
+  grants: [can.view(Device)],
 })
 
 function createRuntime(
@@ -244,13 +245,12 @@ describe("server auth guard", () => {
   })
 
   // The guard owns both denials for every API mutation, before any route runs. The rows are the
-  // object write and the auth-management mutations a forged cross-site request would aim at.
+  // auth-management mutations a forged cross-site request would aim at.
   test("requires authentication, then CSRF, for mutations", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
     const app = createApp(sixb)
     const mutations = [
-      ["PUT", "/api/objects/device/fan-1", { properties: { name: "Fan" } }],
       ["POST", "/api/auth/invitations", { email: "ben@acme.com", groupIds: [] }],
       ["PATCH", "/api/auth/members/usr_2/groups", { groupIds: [] }],
       ["POST", "/api/auth/members/usr_2/suspend", undefined],
@@ -283,7 +283,7 @@ describe("server auth guard", () => {
 
     // With the token, the invitation passes the guard and reaches the route, whose own 403 is for
     // the caller's missing membership policy.
-    const withCsrf = await send(mutations[1], {
+    const withCsrf = await send(mutations[0], {
       cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
       ...seeded.csrfHeader,
     })
@@ -797,21 +797,21 @@ describe("server auth guard", () => {
 
   // The API's own origin is where its docs page sends mutations from.
   test("accepts CSRF-protected API mutations from the app origin and the API's own", async () => {
-    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceViewer] })
     const seeded = await seedSession(storage)
     const app = createApp(sixb)
 
     for (const origin of ["http://app.localhost", "http://api.localhost"]) {
       const response = await app.fetch(
-        new Request("http://api.localhost/api/objects/device/fan-1", {
-          method: "PUT",
+        new Request("http://api.localhost/api/objects/query", {
+          method: "POST",
           headers: {
             origin,
             "content-type": "application/json",
             cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
             ...seeded.csrfHeader,
           },
-          body: JSON.stringify({ properties: { name: "Fan" } }),
+          body: JSON.stringify(QUERY),
         })
       )
 
@@ -1087,14 +1087,14 @@ describe("session renewal", () => {
     const { app, seeded, storage } = await createExpiringSession()
 
     const response = await app.fetch(
-      new Request("http://localhost/api/objects/device/fan-1", {
-        method: "PUT",
+      new Request("http://localhost/api/objects/query", {
+        method: "POST",
         headers: {
           "content-type": "application/json",
           cookie: seeded.cookie,
           "x-sixb-session-activity": "1",
         },
-        body: JSON.stringify({ properties: { name: "Fan" } }),
+        body: JSON.stringify(QUERY),
       })
     )
 
@@ -1114,17 +1114,22 @@ describe("request body limits", () => {
   test("caps an anonymous JSON body before the auth guard runs", async () => {
     const { sixb } = createRuntime({ auth: true })
     await withServer(sixb, async ({ baseUrl }) => {
-      const url = `${baseUrl}/api/objects/device/fan-1`
+      const url = `${baseUrl}/api/objects/query`
       const headers = { "content-type": "application/json" }
       const tooLarge = {
         error: `Request body exceeds the ${DEFAULT_REQUEST_BODY_LIMIT_BYTES} byte limit.`,
       }
 
       const declared = await fetch(url, {
-        method: "PUT",
+        method: "POST",
         headers,
         body: JSON.stringify({
-          properties: { name: "x".repeat(DEFAULT_REQUEST_BODY_LIMIT_BYTES) },
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "device", primaryId: "x".repeat(DEFAULT_REQUEST_BODY_LIMIT_BYTES) },
+            ],
+          },
         }),
       })
       expect(declared.status).toBe(413)
@@ -1133,7 +1138,7 @@ describe("request body limits", () => {
       // This body never ends, so the server can only answer by stopping at the limit.
       const chunk = new Uint8Array(64 * 1024)
       const chunked = await fetch(url, {
-        method: "PUT",
+        method: "POST",
         headers,
         body: new ReadableStream<Uint8Array>({ pull: (controller) => controller.enqueue(chunk) }),
         duplex: "half",
@@ -1142,9 +1147,9 @@ describe("request body limits", () => {
       expect(await chunked.json()).toEqual(tooLarge)
 
       const normal = await fetch(url, {
-        method: "PUT",
+        method: "POST",
         headers,
-        body: JSON.stringify({ properties: { name: "Fan" } }),
+        body: JSON.stringify(QUERY),
       })
       expect(normal.status).toBe(401)
     })

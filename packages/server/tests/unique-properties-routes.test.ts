@@ -38,11 +38,14 @@ function createApp() {
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
   })
-  return createSixbApi(new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() }))
+  const app = createSixbApi(
+    new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
+  )
+  return { app, host }
 }
 
 test("the ontology API reports unique properties", async () => {
-  const app = createApp()
+  const { app } = createApp()
 
   const response = await app.fetch(new Request(`http://localhost/api/object-types/${Person.id}`))
 
@@ -57,36 +60,11 @@ test("the ontology API reports unique properties", async () => {
   ])
 })
 
-test("a write that takes another object's unique value answers 409", async () => {
-  const app = createApp()
-  const put = (id: string, email: string) =>
-    app.fetch(
-      new Request(`http://localhost/api/objects/${Person.id}/${id}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: { email } }),
-      })
-    )
-
-  expect((await put("ada", "ada@example.com")).status).toBe(200)
-  const refused = await put("bob", "ada@example.com")
-
-  expect(refused.status).toBe(409)
-  expect(await refused.json()).toEqual({
-    error: `[Sixb] Another '${Person.id}' object already has this 'email'.`,
-    code: "object.unique_violation",
-  })
-})
-
 test("an object is found by a unique property", async () => {
-  const app = createApp()
-  await app.fetch(
-    new Request(`http://localhost/api/objects/${Person.id}/ada`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ properties: { email: "ada@example.com", name: "Ada" } }),
-    })
-  )
+  const { app, host } = createApp()
+  await createTestSixb(host)
+    .objects(Person)
+    .upsert({ properties: { id: "ada", email: "ada@example.com", name: "Ada" } })
   const getBy = (propertyId: string, value: unknown) =>
     app.fetch(
       new Request(`http://localhost/api/objects/${Person.id}/by/${propertyId}`, {

@@ -6,7 +6,6 @@ import { ArtifactErrorResponseSchema } from "./artifacts"
 import { UserProfileSchema } from "./auth"
 import {
   AiUsageLimitErrorResponseSchema,
-  codedErrorResponseSchema,
   ErrorResponseSchema,
   JsonValueSchema,
   jsonValueOpenApiOverride,
@@ -120,10 +119,6 @@ export const ObjectsQuerySchema = z
       })
     }
   })
-
-export const UpsertObjectBodySchema = z.object({
-  properties: z.record(z.unknown()),
-})
 
 export const UniquePropertyParamsSchema = z.object({
   objectTypeId: z.string().min(1),
@@ -1094,8 +1089,3 @@ export const ObjectLookupNotFoundResponseSchema = ErrorResponseSchema.extend({
       "`object.not_found` when no object visible to the caller holds the value. Other 404s, such as an unknown type, have no code."
     ),
 })
-
-/** A write would give a unique property's value to a second object of the type. */
-export const UniqueViolationErrorResponseSchema = codedErrorResponseSchema([
-  "object.unique_violation",
-])

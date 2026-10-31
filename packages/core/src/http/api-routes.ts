@@ -252,39 +252,6 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
-  // The four write routes. Bearer-capable because their execution facade enforces authorization
-  // (`edit:object` / `append:telemetry`), which is exactly the precondition this table requires.
-  // NOT open to run tokens: letting an agent turn write objects on its own is a separate decision,
-  // and a run token's request already runs as its run, so flipping `agentApi` later needs no
-  // authorization work — only that decision.
-  {
-    operationId: "upsertObject",
-    method: "PUT",
-    path: "/api/objects/:objectTypeId/:objectId",
-    accessToken: true,
-    agentApi: false,
-  },
-  {
-    operationId: "upsertObjectLink",
-    method: "PUT",
-    path: "/api/objects/:objectTypeId/:objectId/links/:linkId",
-    accessToken: true,
-    agentApi: false,
-  },
-  {
-    operationId: "removeObjectLink",
-    method: "DELETE",
-    path: "/api/objects/:objectTypeId/:objectId/links/:linkId",
-    accessToken: true,
-    agentApi: false,
-  },
-  {
-    operationId: "appendTelemetry",
-    method: "POST",
-    path: "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
-    accessToken: true,
-    agentApi: false,
-  },
   {
     operationId: "getBulkTelemetryHistory",
     method: "POST",
