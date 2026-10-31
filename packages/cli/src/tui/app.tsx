@@ -47,7 +47,7 @@ import {
 import { pickSlash, type SlashCommand, slashMatches } from "./slash"
 import type { TuiColors } from "./theme"
 import { APPROVAL_CHOICES, type Approval, type Run, Transcript, Working } from "./transcript"
-import { BOLD, Composer, KeyHints, type StatusItem } from "./ui"
+import { BOLD, Composer, ComposerDraft, KeyHints, type StatusItem } from "./ui"
 
 type Thread = GetAgentThreadResponses[200]
 type Screen = { readonly kind: "home" } | { readonly kind: "thread"; readonly threadId: string }
@@ -86,6 +86,7 @@ export function Workspace(props: WorkspaceProps) {
     readonly tone: "info" | "error"
   } | null>(null)
   const [quitArmed, setQuitArmed] = useState(false)
+  const draft = useRef<(() => boolean) | null>(null)
 
   const setSettings = useCallback((change: (current: Settings) => Settings) => {
     setSettingsState((current) => {
@@ -214,6 +215,8 @@ export function Workspace(props: WorkspaceProps) {
 
   useKeyboard((key: KeyEvent) => {
     if (key.ctrl && key.name === "c") {
+      // A draft goes first; ctrl+c on an empty composer quits.
+      if (draft.current?.()) return setQuitArmed(false)
       if (quitArmed) return props.onExit()
       setQuitArmed(true)
       setTimeout(() => setQuitArmed(false), 2_000)
@@ -292,107 +295,111 @@ export function Workspace(props: WorkspaceProps) {
   }
 
   return (
-    <box flexDirection="column" flexGrow={1} backgroundColor={colors.background}>
-      {screen.kind === "home" ? (
-        <Home
-          {...common}
-          onPlace={() =>
-            setSettings((current) => {
-              const place = current.place === "computer" ? "cloud" : "computer"
-              say(
-                place === "cloud"
-                  ? "New conversations run in the cloud"
-                  : `New conversations run on ${placeLabel(place)}`
-              )
-              return { ...current, place }
-            })
-          }
-          onOpen={(threadId) => setScreen({ kind: "thread", threadId })}
-        />
-      ) : (
-        <ThreadView
-          key={screen.threadId}
-          {...common}
-          threadId={screen.threadId}
-          approval={approval}
-          onThreadRead={readApproval}
-        />
-      )}
-      {notice || quitArmed ? (
-        <box
-          position="absolute"
-          right={2}
-          top={1}
-          backgroundColor={colors.surface}
-          paddingLeft={2}
-          paddingRight={2}
-          zIndex={5}
-        >
-          <text fg={quitArmed ? colors.text : notice?.tone === "error" ? colors.red : colors.text}>
-            {quitArmed ? "Press ctrl+c again to quit" : notice?.text}
-          </text>
-        </box>
-      ) : null}
-      {dialog === "commands" ? (
-        <Palette
-          colors={colors}
-          title="Commands"
-          placeholder="Search"
-          onClose={() => setDialog(null)}
-          items={commandItems({
-            settings,
-            approvalMode,
-            models,
-            newConversation: () => setScreen({ kind: "home" }),
-            open: setDialog,
-            setPlace: (place) => setSettings((current) => ({ ...current, place })),
-            cycleEffort,
-            quit: props.onExit,
-          })}
-        />
-      ) : null}
-      {dialog === "threads" ? (
-        <ThreadsDialog
-          connection={connection}
-          colors={colors}
-          onClose={() => setDialog(null)}
-          onOpen={(threadId) => setScreen({ kind: "thread", threadId })}
-        />
-      ) : null}
-      {dialog === "models" ? (
-        <Palette
-          colors={colors}
-          title="Model"
-          placeholder="Search models"
-          onClose={() => setDialog(null)}
-          items={modelItems(models, settings, (model, reasoning) =>
-            setSettings((current) => {
-              const { model: _model, reasoning: _reasoning, ...rest } = current
-              return {
-                ...rest,
-                ...(model ? { model: { provider: model.provider, modelId: model.modelId } } : {}),
-                ...(reasoning ? { reasoning } : {}),
-              }
-            })
-          )}
-        />
-      ) : null}
-      {dialog === "permissions" ? (
-        <Palette
-          colors={colors}
-          title="What can the agent do without asking?"
-          placeholder="Search"
-          onClose={() => setDialog(null)}
-          items={APPROVAL_MODES.map((entry) => ({
-            id: entry.mode,
-            label: entry.label,
-            detail: entry.description,
-            current: entry.mode === approvalMode,
-            run: () => chooseApproval(entry.mode),
-          }))}
-        />
-      ) : null}
-    </box>
+    <ComposerDraft.Provider value={draft}>
+      <box flexDirection="column" flexGrow={1} backgroundColor={colors.background}>
+        {screen.kind === "home" ? (
+          <Home
+            {...common}
+            onPlace={() =>
+              setSettings((current) => {
+                const place = current.place === "computer" ? "cloud" : "computer"
+                say(
+                  place === "cloud"
+                    ? "New conversations run in the cloud"
+                    : `New conversations run on ${placeLabel(place)}`
+                )
+                return { ...current, place }
+              })
+            }
+            onOpen={(threadId) => setScreen({ kind: "thread", threadId })}
+          />
+        ) : (
+          <ThreadView
+            key={screen.threadId}
+            {...common}
+            threadId={screen.threadId}
+            approval={approval}
+            onThreadRead={readApproval}
+          />
+        )}
+        {notice || quitArmed ? (
+          <box
+            position="absolute"
+            right={2}
+            top={1}
+            backgroundColor={colors.surface}
+            paddingLeft={2}
+            paddingRight={2}
+            zIndex={5}
+          >
+            <text
+              fg={quitArmed ? colors.text : notice?.tone === "error" ? colors.red : colors.text}
+            >
+              {quitArmed ? "Press ctrl+c again to quit" : notice?.text}
+            </text>
+          </box>
+        ) : null}
+        {dialog === "commands" ? (
+          <Palette
+            colors={colors}
+            title="Commands"
+            placeholder="Search"
+            onClose={() => setDialog(null)}
+            items={commandItems({
+              settings,
+              approvalMode,
+              models,
+              newConversation: () => setScreen({ kind: "home" }),
+              open: setDialog,
+              setPlace: (place) => setSettings((current) => ({ ...current, place })),
+              cycleEffort,
+              quit: props.onExit,
+            })}
+          />
+        ) : null}
+        {dialog === "threads" ? (
+          <ThreadsDialog
+            connection={connection}
+            colors={colors}
+            onClose={() => setDialog(null)}
+            onOpen={(threadId) => setScreen({ kind: "thread", threadId })}
+          />
+        ) : null}
+        {dialog === "models" ? (
+          <Palette
+            colors={colors}
+            title="Model"
+            placeholder="Search models"
+            onClose={() => setDialog(null)}
+            items={modelItems(models, settings, (model, reasoning) =>
+              setSettings((current) => {
+                const { model: _model, reasoning: _reasoning, ...rest } = current
+                return {
+                  ...rest,
+                  ...(model ? { model: { provider: model.provider, modelId: model.modelId } } : {}),
+                  ...(reasoning ? { reasoning } : {}),
+                }
+              })
+            )}
+          />
+        ) : null}
+        {dialog === "permissions" ? (
+          <Palette
+            colors={colors}
+            title="What can the agent do without asking?"
+            placeholder="Search"
+            onClose={() => setDialog(null)}
+            items={APPROVAL_MODES.map((entry) => ({
+              id: entry.mode,
+              label: entry.label,
+              detail: entry.description,
+              current: entry.mode === approvalMode,
+              run: () => chooseApproval(entry.mode),
+            }))}
+          />
+        ) : null}
+      </box>
+    </ComposerDraft.Provider>
   )
 }
 
@@ -427,8 +434,6 @@ function SlashMenu({
       bottom={above}
       zIndex={5}
       backgroundColor={colors.surface}
-      paddingTop={1}
-      paddingBottom={1}
       flexDirection="column"
     >
       {matches.map((command, index) => {
@@ -507,12 +512,22 @@ function Home(
           ["ctrl+p", "commands"],
         ]
   const hintsWidth = hints.reduce((sum, [key, label]) => sum + key.length + label.length + 3, 0)
+  // Where it runs, beside the hints, in the room they leave.
+  const room = composerWidth - hintsWidth - 2
+  const where =
+    settings.place === "computer" ? shortPath(runner.folder, homedir(), room) : "Runs in the cloud"
   const [sending, setSending] = useState(false)
   const [typed, setTyped] = useState("")
   const slash = useSlashMenu(props.slashCommands, typed)
-  // Which instance this is matters most when it isn't this computer's.
+  // Which instance this is matters most when it isn't this computer's: it reads brighter then.
   const host = new URL(connection.apiUrl).host
   const remote = !/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host)
+  const shownVersion = version.replace(/^sixb v/, "")
+  const instance = fitted(
+    [connection.project.id, host, ...(connection.user ? [connection.user.name] : [])],
+    width - shownVersion.length - 6
+  )
+  const instanceTones = remote ? [colors.text, colors.muted] : [colors.muted]
 
   useKeyboard((key: KeyEvent) => {
     if (props.dialogOpen) return
@@ -584,18 +599,9 @@ function Home(
             onSubmit={send}
           />
           <box flexDirection="row" justifyContent="space-between">
-            {remote ? (
-              <text wrapMode="none">
-                <span fg={colors.text}>{connection.project.id}</span>
-                <span fg={colors.muted}>{` · ${host}`}</span>
-              </text>
-            ) : (
-              <text fg={colors.faint} wrapMode="none">
-                {settings.place === "computer"
-                  ? shortPath(runner.folder, homedir(), composerWidth - hintsWidth - 2)
-                  : "Runs in the cloud"}
-              </text>
-            )}
+            <text fg={colors.faint} wrapMode="none">
+              {where.length <= room ? where : ""}
+            </text>
             <KeyHints colors={colors} items={hints} />
           </box>
         </box>
@@ -608,24 +614,23 @@ function Home(
         paddingBottom={1}
       >
         <text wrapMode="none">
-          {remote ? (
-            <span fg={colors.muted}>
-              {settings.place === "computer"
-                ? shortPath(runner.folder, homedir(), 48)
-                : "Runs in the cloud"}
+          {instance.map((item, index) => (
+            <span key={item} fg={instanceTones[index] ?? colors.faint}>
+              {index > 0 ? ` · ${item}` : item}
             </span>
-          ) : (
-            <>
-              <span fg={colors.muted}>{connection.project.id}</span>
-              <span fg={colors.faint}>{` · ${host}`}</span>
-            </>
-          )}
-          {connection.user ? <span fg={colors.faint}>{` · ${connection.user.name}`}</span> : null}
+          ))}
         </text>
-        <text fg={colors.faint}>{version.replace(/^sixb v/, "")}</text>
+        <text fg={colors.faint}>{shownVersion}</text>
       </box>
     </box>
   )
+}
+
+/** The first of `items` that fit in `room` columns joined by ` · `, the rest dropped. */
+function fitted(items: readonly string[], room: number): string[] {
+  const kept = [...items]
+  while (kept.length > 1 && kept.join(" · ").length > room) kept.pop()
+  return kept
 }
 
 /** The model whose effort the person sets: the one chosen, else the project's default without tiers. */
