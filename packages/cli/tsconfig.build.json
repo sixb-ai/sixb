@@ -50,6 +50,12 @@
     },
     {
       "path": "../workflow-worker/tsconfig.build.json"
+    },
+    {
+      "path": "../agent/tsconfig.build.json"
+    },
+    {
+      "path": "../../sandboxes/local/tsconfig.build.json"
     }
   ]
 }

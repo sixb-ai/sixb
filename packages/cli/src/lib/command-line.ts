@@ -104,6 +104,21 @@ export const CLI_OPTION_DEFINITIONS = {
   },
   group: { syntax: "--group <id>", summary: "Assignable token group; may repeat", kind: "string" },
   json: { syntax: "--json", summary: "Print JSON instead of formatted output", kind: "boolean" },
+  thread: {
+    syntax: "--thread <id>",
+    summary: "Continue this conversation instead of starting one",
+    kind: "string",
+  },
+  cloud: {
+    syntax: "--cloud",
+    summary: "Run a new conversation in the cloud, not on this computer",
+    kind: "boolean",
+  },
+  "approval-mode": {
+    syntax: "--approval-mode <manual|accept-edits|auto>",
+    summary: "What this turn may do without asking (default: your mode in the conversation)",
+    kind: "string",
+  },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
   ref: {
     syntax: "--ref <ref>",
@@ -150,6 +165,7 @@ export const CLI_OPTION_DEFINITIONS = {
 
 export type CliOptionName = keyof typeof CLI_OPTION_DEFINITIONS
 export type LocalCommandId =
+  | "agent"
   | "dev"
   | "api"
   | "app"
@@ -305,6 +321,15 @@ const commandTree: readonly CommandNode[] = [
   command("logout", "Remove a saved profile", { options: ["profile", "json"] }),
   command("status", "Check the current profile's connection", {
     options: [...CONNECTION_OPTIONS, "json"],
+  }),
+  command("agent", "Ask the agent; it works in this folder", {
+    usage: 'sixb agent "<message>" [--thread <id>] [--cloud] [--approval-mode <mode>] [--json]',
+    // No --token: a command the agent runs could read it from this one's arguments. A token comes
+    // from a profile or SIXB_API_TOKEN.
+    options: ["api-url", "profile", "thread", "cloud", "approval-mode", "json"],
+    // The message, quoted or not; standard input when there is none.
+    maximumPositionals: Number.POSITIVE_INFINITY,
+    rootHelpLabel: 'agent "<message>"',
   }),
   {
     name: "profile",
@@ -619,7 +644,7 @@ export class CliUsageError extends Error {
 
 export const ROOT_HELP: CliHelp = {
   path: [],
-  usage: "sixb <command> [options]",
+  usage: "sixb [command] [options]",
   summary: "Real-time digital twin framework",
   commands: rootHelpItems(commandTree),
   // Each command lists its own options; the root names the ones most commands share. Its last
@@ -637,6 +662,7 @@ const ROOT_HELP_GROUP_COMMANDS: readonly {
   /** Listed by name only: each has its own help. */
   readonly compact?: boolean
 }[] = [
+  { title: "Agent", names: ["agent"] },
   { title: "Develop", names: ["init", "dev", "check", "typegen", "build"] },
   { title: "Deploy", names: ["deploy", "desktop"] },
   {
@@ -661,9 +687,15 @@ export const ROOT_HELP_GROUPS: readonly {
   const groups = ROOT_HELP_GROUP_COMMANDS.map((group) => ({
     title: group.title,
     ...(group.compact ? { compact: true } : {}),
-    items: rootHelpItems(
-      group.names.flatMap((name) => commandTree.filter((node) => node.name === name))
-    ),
+    items: [
+      // `sixb` alone is no command, but it is how most people meet the agent.
+      ...(group.title === "Agent"
+        ? [{ label: "(no command)", value: "Open Sixb here: talk to the agent in this folder" }]
+        : []),
+      ...rootHelpItems(
+        group.names.flatMap((name) => commandTree.filter((node) => node.name === name))
+      ),
+    ],
   }))
   // A command added without a group still shows up.
   return ungrouped.length > 0
@@ -714,9 +746,17 @@ export function repeatedOption(options: ParsedCliOptions, name: CliOptionName): 
 
 export function wantsManagementJson(args: readonly string[]): boolean {
   return (
-    ["login", "logout", "status", "profile", "token", "service-account", "deploy"].includes(
-      args[0] ?? ""
-    ) && args.some((argument) => argument === "--json" || argument.startsWith("--json="))
+    [
+      "login",
+      "logout",
+      "status",
+      "profile",
+      "token",
+      "service-account",
+      "deploy",
+      "agent",
+    ].includes(args[0] ?? "") &&
+    args.some((argument) => argument === "--json" || argument.startsWith("--json="))
   )
 }
 

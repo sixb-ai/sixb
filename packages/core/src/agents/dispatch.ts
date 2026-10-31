@@ -62,7 +62,11 @@ export async function dispatchQueuedAgentRuns(
         })
       ).runs
 
-  const queued = runs.filter((run) => run.kind === "conversation" && run.status === "queued")
+  // A computer's turn waits for its owner's computer to claim it: no worker may take it.
+  const queued = runs.filter(
+    (run) =>
+      run.kind === "conversation" && run.status === "queued" && run.spec?.runsOn !== "computer"
+  )
   if (queued.length === 0) {
     return { scanned: 0, dispatched: [], failures: [] }
   }

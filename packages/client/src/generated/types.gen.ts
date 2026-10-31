@@ -11856,6 +11856,8 @@ export type ListAgentThreadsResponses = {
             }
           | null
       }
+      runsOn?: "computer"
+      computerId?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -11887,6 +11889,7 @@ export type CreateAgentThreadData = {
           }
         | null
     }
+    runsOn?: "computer"
   }
   path?: never
   query?: never
@@ -11974,6 +11977,8 @@ export type CreateAgentThreadResponses = {
             }
           | null
       }
+      runsOn?: "computer"
+      computerId?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12071,6 +12076,8 @@ export type GetAgentThreadResponses = {
           }
         | null
     }
+    runsOn?: "computer"
+    computerId?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12193,6 +12200,8 @@ export type AddAgentThreadParticipantsResponses = {
           }
         | null
     }
+    runsOn?: "computer"
+    computerId?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12355,6 +12364,8 @@ export type ForkAgentThreadResponses = {
             }
           | null
       }
+      runsOn?: "computer"
+      computerId?: string
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -12463,6 +12474,8 @@ export type RecreateAgentThreadSandboxResponses = {
           }
         | null
     }
+    runsOn?: "computer"
+    computerId?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -12986,6 +12999,7 @@ export type PostAgentThreadMessageErrors = {
    */
   403: {
     error: string
+    code?: string
   }
   /**
    * Response for status 404
@@ -13068,6 +13082,7 @@ export type PostAgentThreadMessageResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13352,6 +13367,7 @@ export type CancelAgentRunResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13553,6 +13569,7 @@ export type RetryAgentRunResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13721,6 +13738,7 @@ export type ListAgentThreadRunsResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -13886,6 +13904,7 @@ export type GetAgentRunResponses = {
           budgetTokens: number
         }
     approvalMode?: "manual" | "accept-edits" | "auto"
+    runsOn?: "computer"
     modelId?: string
     finishReason?:
       | "stop"
@@ -14063,6 +14082,7 @@ export type CancelAgentRunByIdResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -14310,6 +14330,117 @@ export type HeadAgentChildFileContentResponses = {
   206: unknown
 }
 
+export type MoveAgentThreadToComputerData = {
+  body: {
+    computerId: string
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/computer"
+}
+
+export type MoveAgentThreadToComputerErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type MoveAgentThreadToComputerError =
+  MoveAgentThreadToComputerErrors[keyof MoveAgentThreadToComputerErrors]
+
+export type MoveAgentThreadToComputerResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sandboxState?: {
+      name: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    kind: "conversation" | "subagent"
+    parent?: {
+      threadId: string
+      spawnedBy: string
+      key: string
+    }
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    owner: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+      displayName?: string
+    }
+    participants: Array<{
+      principal: {
+        type: "user"
+        id: string
+        displayName?: string
+      }
+      addedAt: string
+      addedBy: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+    title?: string
+    sandboxParams?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+    }
+    runsOn?: "computer"
+    computerId?: string
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+    approvalMode?: "manual" | "accept-edits" | "auto"
+    approvalModeSource?: "thread" | "default" | "fallback" | "run"
+  }
+}
+
+export type MoveAgentThreadToComputerResponse =
+  MoveAgentThreadToComputerResponses[keyof MoveAgentThreadToComputerResponses]
+
 export type GetAgentPreferencesData = {
   body?: never
   path?: never
@@ -14491,6 +14622,8 @@ export type SetAgentThreadApprovalModeResponses = {
           }
         | null
     }
+    runsOn?: "computer"
+    computerId?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -14980,6 +15113,7 @@ export type DecideAgentApprovalResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"
@@ -15383,6 +15517,8 @@ export type GetObservedAgentThreadResponses = {
           }
         | null
     }
+    runsOn?: "computer"
+    computerId?: string
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string
@@ -15958,6 +16094,7 @@ export type ListObservedAgentThreadRunsResponses = {
             budgetTokens: number
           }
       approvalMode?: "manual" | "accept-edits" | "auto"
+      runsOn?: "computer"
       modelId?: string
       finishReason?:
         | "stop"

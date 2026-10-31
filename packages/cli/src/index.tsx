@@ -87,6 +87,15 @@ async function readPackageVersion(): Promise<string> {
 }
 
 async function main(): Promise<void> {
+  // `sixb` alone, in a terminal: the full-screen app. Anywhere else it prints its help.
+  if (args.length === 0) {
+    const { canRunLive } = await import("./ui/live/can-run-live")
+    if (canRunLive()) {
+      const { runTui } = await import("./tui")
+      await runTui({ version: VERSION })
+      return
+    }
+  }
   const parsed = parseCliArgs(args)
   if (parsed.kind === "version") {
     const { renderVersion } = await import("./ui")
@@ -204,6 +213,20 @@ async function main(): Promise<void> {
     case "logout": {
       const { runLogout } = await import("./commands/logout")
       await runLogout({ profile: getFlag("profile"), json: hasFlag("json") })
+      break
+    }
+
+    case "agent": {
+      const { runAgent } = await import("./commands/agent")
+      await runAgent({
+        text: positionals,
+        thread: getFlag("thread"),
+        cloud: hasFlag("cloud"),
+        approvalMode: getFlag("approval-mode"),
+        json: hasFlag("json"),
+        apiUrl: getFlag("api-url"),
+        profile: getFlag("profile"),
+      })
       break
     }
 
@@ -441,7 +464,7 @@ main().catch(async (error) => {
 function cliExitCode(error: unknown): number {
   if (error instanceof CliUsageError) return error.exitCode
   if (error instanceof CliError) return error.exitCode
-  if (error instanceof SixbApiError) return 3
+  if (isApiError(error)) return 3
   if (errorMessage(error).startsWith("Usage:")) return 2
   return 1
 }
@@ -457,7 +480,7 @@ function cliErrorBody(error: unknown): {
   if (error instanceof CliUsageError) {
     return { code: "invalid_arguments", message: error.message, hint: error.help.usage }
   }
-  if (error instanceof SixbApiError) {
+  if (isApiError(error)) {
     return {
       code: "api_error",
       ...(error.status === undefined ? {} : { status: error.status }),
@@ -468,6 +491,21 @@ function cliErrorBody(error: unknown): {
     code: errorMessage(error).startsWith("Usage:") ? "invalid_arguments" : "command_failed",
     message: errorMessage(error),
   }
+}
+
+/**
+ * The CLI's own API error, or the one `@sixb/client` throws on `throwOnError`: another class, known
+ * by its shape. The client is not imported here, so a command that never calls the API never loads it.
+ */
+function isApiError(
+  error: unknown
+): error is { readonly status?: number; readonly message: string } {
+  if (error instanceof SixbApiError) return true
+  return (
+    error instanceof Error &&
+    error.name === "SixbApiError" &&
+    typeof (error as { status?: unknown }).status === "number"
+  )
 }
 
 function assertNever(value: never): never {

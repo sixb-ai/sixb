@@ -1,15 +1,13 @@
 import {
-  type AgentExecutionContext,
   type AgentRunFailure,
   type AgentRunSettings,
   agentRunFailureDetails,
+  type ChildRunner,
   runConversationTurn,
   toAgentRunFailure,
 } from "@sixb/agent"
-import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   AgentFinalizationError,
-  type AgentRunSession,
   type AgentRunSessionHost,
   afterAgentRunFinished,
   claimAgentRun,
@@ -34,18 +32,14 @@ import {
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import type {
-  AgentRunRecord,
-  ConversationAgentRunRecord,
-  ExecutionRecord,
-  SubagentRunRecord,
-} from "@sixb/core/storage"
+import type { AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { normalizeApiBaseUrl } from "./api-url"
 import { repairAgentApprovals } from "./approval-repair"
-import { ChildRunner } from "./child-runner"
+import { workerChildren } from "./child-runner"
 import { isPermanentAgentPreparationError, MAX_AGENT_DELIVERY_ATTEMPTS } from "./delivery-policy"
 import { AgentRunOwnedElsewhereError } from "./errors"
+import { runnerContext } from "./execution-context"
 import { keepsSubagentWorkspace } from "./persistent-run-sandbox"
 import {
   isTerminalRun,
@@ -56,7 +50,6 @@ import {
 } from "./run-fate"
 import { conversationSandbox } from "./run-sandboxes"
 import type {
-  AgentRunnerContext,
   AgentWorkerContext,
   AgentWorkerHost,
   AgentWorkerOptions,
@@ -119,15 +112,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options) : null
-    this.children = this.context
-      ? new ChildRunner({
-          host,
-          context: this.context,
-          sessions: this.sessionHost(this.context),
+    const context = this.context
+    this.children = context
+      ? workerChildren({
+          context,
+          sessions: this.sessionHost(context),
+          settings: runSettings(context),
           capacity: normalizeConcurrency(
             "subagentConcurrency",
             options.subagentConcurrency ?? DEFAULT_SUBAGENT_CONCURRENCY
           ),
+          runnerContext: (child) => runnerContext(host, context, child),
           trackTeardown: (teardown) => this.trackTeardown(teardown),
           reportFailure: (error, run, failure) => this.reportFailure(error, run, 1, failure),
         })
@@ -210,6 +205,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
+    // Its owner's computer claims it: a job published before its thread moved there is dropped.
+    if (queuedRun.spec?.runsOn === "computer") return
     // A conversation turn left running by a dead delivery already streamed to the user and billed
     // its model calls. Replaying it would repeat both behind their back, so it ends interrupted and
     // the user chooses whether to run it again. A delivery whose projected lease has not lapsed may
@@ -254,7 +251,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             ),
           openSandbox: (turn) => async (lifecycle) =>
             conversationSandbox({
-              context: await this.runnerContext(context, session, turn),
+              context: await runnerContext(this.host, context, turn),
               session,
               run,
               thread: turn.thread,
@@ -263,7 +260,23 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
                 : { definition: this.host.sandboxDefinition }),
             })(lifecycle),
           startChild: (child, family) =>
-            this.requireChildren().start(child, { signal, delivery, family }),
+            this.requireChildren().start(child, {
+              signal,
+              family,
+              leaseExpiresAt: () => delivery.leaseExpiresAt,
+              // The turn's delivery holds the child's lease too: its renewals renew both. One that
+              // landed while the child was claimed is recorded now.
+              holdLease: async (childSession) => {
+                const release = projectLease(delivery, childSession, "subagent")
+                try {
+                  await childSession.renewLease(delivery.leaseExpiresAt)
+                } catch (error) {
+                  release()
+                  throw error
+                }
+                return release
+              },
+            }),
           onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
           reportFailure: (error, failedRun, failure) =>
             this.reportFailure(error, failedRun, job.attempt, failure),
@@ -274,26 +287,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await this.children?.stopChildrenOf(run.id)
       stopOwnershipProjection?.()
       await session.close()
-    }
-  }
-
-  /**
-   * A turn's context, with what the worker's sandboxes need besides: its factory, and the run's
-   * SDK, which resolves a workspace recipe's parameters.
-   */
-  private async runnerContext(
-    context: AgentWorkerContext,
-    session: AgentRunSession<ConversationAgentRunRecord>,
-    turn: { readonly context: AgentExecutionContext; readonly execution: ExecutionRecord }
-  ): Promise<AgentRunnerContext> {
-    return {
-      ...turn.context,
-      sandboxes: context.sandboxes,
-      sixb: bindDurableAgentExecution(this.host, {
-        execution: turn.execution,
-        runId: session.run.id,
-        authorization: await session.authorization(turn.execution.authorizationRef),
-      }),
     }
   }
 

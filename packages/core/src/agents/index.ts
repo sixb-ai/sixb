@@ -239,6 +239,7 @@ export type { AgentApiRoute, AgentRunTokenInput } from "./run-token"
 export {
   AGENT_API_ROUTES,
   agentRunTokenRunId,
+  createAgentRunnerToken,
   createAgentRunToken,
   findAgentApiRoute,
   isAgentRunnerToken,

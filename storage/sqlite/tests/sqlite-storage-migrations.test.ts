@@ -199,6 +199,7 @@ const shippedMigrationIds = [
   "078-subagent-threads",
   "079-subagent-questions",
   "080-agent-run-cancel-requests",
+  "081-agent-thread-runs-on",
 ]
 
 afterEach(async () => {

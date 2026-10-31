@@ -13,6 +13,8 @@ export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
   /** A line above the composer, such as whose shared conversation this is. */
   readonly composerNotice?: ReactNode
+  /** The reader follows the conversation without writing in it: no composer, the notice alone. */
+  readonly readOnly?: boolean
   readonly agent: Agent | undefined
   readonly transcript: TranscriptProps
   readonly composer: ConversationComposerProps
@@ -53,6 +55,7 @@ export function ConversationPanel({
   headerActions,
   sandboxRecovery,
   composerNotice,
+  readOnly = false,
 }: ConversationPanelProps) {
   const labels = useAgentMessages()
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -62,15 +65,19 @@ export function ConversationPanel({
     transcript.messages.some((message) => message.id === null)
   const showWelcome =
     !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
-  const renderComposer = (wideClassName?: string) => (
-    <Composer
-      {...composer}
-      placeholder={composerPlaceholder}
-      className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-      ambientContext={ambientContext}
-      compact={compact}
-    />
-  )
+  const renderComposer = (wideClassName?: string) =>
+    readOnly ? (
+      // Where the composer would end, so the notice keeps its place at the foot of the pane.
+      <div aria-hidden className={compact ? "pb-4" : "pb-3"} />
+    ) : (
+      <Composer
+        {...composer}
+        placeholder={composerPlaceholder}
+        className={compact ? "px-4 pt-2 pb-4" : wideClassName}
+        ambientContext={ambientContext}
+        compact={compact}
+      />
+    )
 
   const threadsButton = onOpenThreads ? (
     <ThreadsButton

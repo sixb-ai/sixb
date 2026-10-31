@@ -233,6 +233,8 @@ export async function claimAgentRunOverHttp(input: {
   readonly runId: string
   readonly authorization: string
   readonly leaseExpiresAt: string
+  /** The computer claiming it: a computer's turn runs only on the one that runs its thread. */
+  readonly computerId?: string
   readonly fetch?: (request: Request) => Promise<Response>
 }): Promise<AgentRunSession<ConversationAgentRunRecord> | null> {
   const send = input.fetch ?? ((request: Request) => fetch(request))
@@ -240,7 +242,10 @@ export async function claimAgentRunOverHttp(input: {
     new Request(new URL(`/api/agent-runs/${encodeURIComponent(input.runId)}/claim`, input.apiUrl), {
       method: "POST",
       headers: { authorization: input.authorization, "content-type": "application/json" },
-      body: encodeWireValue({ leaseExpiresAt: input.leaseExpiresAt }),
+      body: encodeWireValue({
+        leaseExpiresAt: input.leaseExpiresAt,
+        ...(input.computerId === undefined ? {} : { computerId: input.computerId }),
+      }),
     })
   )
   const claimed = await result<ClaimedRun<ConversationAgentRunRecord> | null>(response)

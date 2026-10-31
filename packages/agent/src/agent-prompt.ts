@@ -136,9 +136,10 @@ export interface AgentWorkspacePromptContext {
   readonly workingDirectory: string
   /**
    * How long files outlive the run: a persistent workspace (a thread's) is kept for its next
-   * runs, an ephemeral one is discarded when the run ends.
+   * runs, an ephemeral one is discarded when the run ends, and a computer's is the user's own
+   * folder, whose files were there before the run and stay after it.
    */
-  readonly retention: "persistent" | "ephemeral"
+  readonly retention: "persistent" | "ephemeral" | "computer"
   readonly source?: {
     readonly type: "git"
     readonly url: string
@@ -703,6 +704,14 @@ function promptSection(tag: string, body: string | undefined): string {
 }
 
 function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string {
+  if (workspace.retention === "computer") {
+    return [
+      `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
+      "This is the user's own folder, on their computer. Your commands run there as the user, with their tools and network: what you change is real and stays, with no copy to fall back on.",
+      "Work as a careful engineer in someone else's project: look before you change, keep changes to what the task needs, follow the conventions you find, and ask before deleting, moving or overwriting what you did not create in this conversation.",
+      "Do not commit or push unless the user asks.",
+    ].join("\n")
+  }
   return [
     `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
     workspace.retention === "persistent"

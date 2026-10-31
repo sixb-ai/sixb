@@ -10,6 +10,51 @@ bun add --global @sixb/cli
 
 Use `sixb <command> --help` for command-specific arguments and options.
 
+## Work with the agent
+
+Run `sixb` alone to open Sixb in your terminal. Once connected to an instance, ask the agent
+anything: it works in the folder you opened it in, as you, with the `sixb` commands and the data
+you can see.
+
+```bash
+cd ~/work/q3-close
+sixb
+```
+
+| Key | Does |
+| --- | --- |
+| `enter` | Send. `shift+enter` starts a new line. |
+| `tab` | Where new conversations run: this computer, or the cloud. |
+| `shift+tab` | What the agent may do without asking: Ask first, Allow edits, Full access. In a conversation, it is your mode there, as in the app. |
+| `ctrl+o` | The model, and how hard it thinks. `ctrl+t` steps through its effort levels. |
+| `ctrl+l` | Open a conversation. `ctrl+n` starts a new one. |
+| `ctrl+p` | Every command. Typing `/` in the composer lists them too. |
+| `esc` twice | Stop the agent. |
+| `ctrl+c` twice | Quit. |
+
+On your computer, the agent's commands run in the folder as you, with your tools and network.
+They can't read your Sixb sign-in, `~/.ssh`, or `~/.aws`, and never hold a credential: the CLI
+adds the run's own to its requests to your API. A conversation that runs on your computer takes
+messages from you alone, and works on the computer and in the folder it started in: `sixb` open
+there runs its turns, including one sent from the app, and one sent while `sixb` is closed waits
+for it. Opened from another folder or another of your computers, it says where it works; `ctrl+f`
+moves it here, and only here runs its turns from then on. Quitting, or closing the terminal,
+stops a turn running here: it ends interrupted, and runs again only if you retry it.
+
+From a script, `sixb agent` asks once and prints the answer:
+
+```bash
+sixb agent "Which service cases are past their response window?"
+sixb agent --cloud --json "How many cases are open?" | jq -r .text
+```
+
+The answer goes to standard output and the agent's steps to standard error. `--thread <id>`
+continues a conversation. The turn runs in your mode in the conversation, unless
+`--approval-mode <manual|accept-edits|auto>` names one for it. When the agent waits for your
+approval, `sixb agent` asks in a terminal; with `--json` or anywhere else it exits with code `4`.
+A turn that fails or is stopped, or that `sixb agent` stops following before it ends, exits with
+`1`. With `--json`, an error is written to standard error as JSON.
+
 ## Project commands
 
 Run these from your project root:
@@ -174,4 +219,4 @@ Use `--json` for machine-readable output from profile and credential commands. S
 | `1` | Command or runtime failure. |
 | `2` | Invalid arguments. |
 | `3` | API failure. |
-| `4` | The request waits for the user's approval and did not run (Agent sandbox). |
+| `4` | The request waits for the user's approval and did not run (Agent sandbox, or `sixb agent` outside a terminal). |

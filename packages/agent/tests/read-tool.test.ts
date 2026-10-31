@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
@@ -137,15 +137,25 @@ describe("read tool", () => {
     await symlink(join(outside, "outside.txt"), join(root, "escape.txt"))
 
     expect((await read({ path: "inside-link.txt" })).content).toBe("inside")
-    await expect(read({ path: "escape.txt" })).rejects.toThrow(
-      "resolves outside the sandbox working directory"
-    )
-    await expect(read({ path: "../outside.txt" })).rejects.toThrow(
-      "path must stay within the sandbox working directory"
-    )
-    await expect(read({ path: join(root, "inside.txt") })).rejects.toThrow(
-      "path must be a non-empty relative path"
-    )
+    expect((await read({ path: join(root, "inside.txt") })).content).toBe("inside")
+    const sibling = join("..", basename(outside), "outside.txt")
+    for (const path of ["escape.txt", sibling, join(outside, "outside.txt")]) {
+      await expect(read({ path })).rejects.toThrow(
+        "resolves outside the working directory and the run's context directory"
+      )
+    }
+  })
+
+  test("reads the run's context directory where it lies outside the working directory", async () => {
+    const context = await tempRoot()
+    const other = await tempRoot()
+    await writeFile(join(context, "notes.md"), "run file")
+    await writeFile(join(other, "notes.md"), "not the run's")
+    const { read } = await createHarness(undefined, undefined, context)
+
+    expect((await read({ path: join(context, "notes.md") })).content).toBe("run file")
+    // Removal proof: drop "$context"/* from the read script's check; this read succeeds.
+    await expect(read({ path: join(other, "notes.md") })).rejects.toThrow("resolves outside")
   })
 
   test("passes unusual paths as command arguments and reports file errors clearly", async () => {
@@ -240,7 +250,8 @@ class TestSandbox implements Sandbox {
 
 async function createHarness(
   env?: Readonly<Record<string, string>>,
-  result?: CommandResult
+  result?: CommandResult,
+  contextDirectory = SANDBOX_CONTEXT_DIRECTORY
 ): Promise<{
   readonly root: string
   readonly sandbox: TestSandbox
@@ -248,9 +259,7 @@ async function createHarness(
 }> {
   const root = await tempRoot()
   const sandbox = new TestSandbox(root, result)
-  const definition = createReadTool(() =>
-    Promise.resolve({ sandbox, contextDirectory: SANDBOX_CONTEXT_DIRECTORY, env })
-  )
+  const definition = createReadTool(() => Promise.resolve({ sandbox, contextDirectory, env }))
   const execute = executableTool(definition)
   return {
     root,

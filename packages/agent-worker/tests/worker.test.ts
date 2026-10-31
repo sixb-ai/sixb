@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
 import { AGENT_RUNTIME_PROFILE, agentMemoryFileHash } from "@sixb/cli-core"
 import {
   AgentDefinitionError,
@@ -156,11 +159,12 @@ import {
 import { createSixbApi, SixbServer } from "../../server/src/server"
 import { createTestBrowserPolicy } from "../../server/tests/helpers"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { normalizeApiBaseUrl, runApiCredential } from "../src/api-url"
-import { ChildRunner } from "../src/child-runner"
+import { normalizeApiBaseUrl } from "../src/api-url"
+import { workerChildren } from "../src/child-runner"
 import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
 import { ephemeralRunSandbox } from "../src/ephemeral-run-sandbox"
 import { AgentRunOwnedElsewhereError } from "../src/errors"
+import { runnerContext } from "../src/execution-context"
 import { isTerminalRun } from "../src/run-fate"
 import { childSandbox, conversationSandbox, workflowStepSandbox } from "../src/run-sandboxes"
 import type {
@@ -2004,10 +2008,10 @@ async function runChildren(
 /** The worker's child runner, for this project. */
 function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
   const context = workerContextOf(sixb)
-  return new ChildRunner({
+  return workerChildren({
     capacity,
-    host: sixb,
     context,
+    settings: context,
     sessions: {
       projectId: PROJECT_ID,
       storage: context.storage,
@@ -2018,6 +2022,7 @@ function childRunnerOf(sixb: TestSixb, capacity = 4): ChildRunner {
       sdk: sixb,
       definitions: sixb.definitions,
     },
+    runnerContext: (child) => runnerContext(sixb, context, child),
     trackTeardown: () => {},
     reportFailure: () => {},
   })
@@ -2030,14 +2035,19 @@ async function startChildren(
   runIds: readonly string[],
   signal = new AbortController().signal
 ): Promise<void> {
-  const delivery = {
-    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-    onLeaseRenewed: () => () => {},
-  }
+  const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString()
   for (const runId of runIds) {
     const run = await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: runId })
     if (run?.kind !== "subagent") throw new Error(`Expected subagent run '${runId}'.`)
-    runner.start(run, { signal, delivery, family: new FamilyMailbox() })
+    runner.start(run, {
+      signal,
+      family: new FamilyMailbox(),
+      leaseExpiresAt: () => leaseExpiresAt,
+      holdLease: async (session) => {
+        await session.renewLease(leaseExpiresAt)
+        return () => {}
+      },
+    })
   }
 }
 
@@ -9099,7 +9109,7 @@ describe("AgentWorker", () => {
   })
 
   test("retries a child's claim that storage refused for a moment", async () => {
-    // Removal proof: claim without retryPreparationInPlace in ChildRunner.run; the child stays
+    // Removal proof: claim without retryPreparationInPlace in claimChild; the child stays
     // queued, and nothing would ever start it.
     const sixb = buildSixb(answerModel())
     const storage = agentStorageOf(sixb)
@@ -9135,13 +9145,12 @@ describe("AgentWorker", () => {
     // Each retry waits up to five seconds: drive them with fake time.
     jest.useFakeTimers()
     try {
+      const leaseExpiresAt = new Date(Date.now() + 3_600_000).toISOString()
       runner.start(queued, {
         signal: new AbortController().signal,
-        delivery: {
-          leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-          onLeaseRenewed: () => () => {},
-        },
         family: new FamilyMailbox(),
+        leaseExpiresAt: () => leaseExpiresAt,
+        holdLease: async () => () => {},
       })
       const child = await underFakeTime(
         async () => {
@@ -13231,7 +13240,7 @@ describe("agent tools act as the requester", () => {
       new RecordingSandboxFactory(),
       { projectTools: [summarizeInvoice] }
     )
-    const request = await requestAgent(sixb, { text: "Summarize inv-1." })
+    const request = await requestAgent(sixb, { text: "Summarize inv-1.", runsOn: "computer" })
     const { workerHost, recorded } = recordUsage(sixb)
     const api = createSixbApi(
       new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })
@@ -13243,6 +13252,7 @@ describe("agent tools act as the requester", () => {
       apiUrl,
       runId: request.run.id,
       authorization: "",
+      computerId: "laptop",
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       fetch: send,
     })
@@ -13306,6 +13316,79 @@ describe("agent tools act as the requester", () => {
     expect(recorded).toEqual(
       Array.from({ length: 3 }, () => ({ executionId: run?.executionId ?? "", attempt: 1 }))
     )
+  })
+
+  // The computer runner holds no project: it claims its owner's turn over HTTP, works in their
+  // folder, and runs the turn's child beside it over HTTP too.
+  // Removal proof: start no child from the computer runner's startChild; the child is never
+  // claimed, and stays queued.
+  test("a computer runs its owner's turn in their folder, and the turn's child beside it", async () => {
+    let childRunId = ""
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "child-model",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "The delegated fact is 42." },
+          { type: "text-end", id: "child-answer" },
+          finish("stop"),
+        ]),
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const request = await requestAgent(sixb, { text: "Delegate this.", runsOn: "computer" })
+    childRunId = createSubagentRunId(request.run.id, "research")
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const opened: { workingDirectory?: string; runFiles: string }[] = []
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computerId: async () => "laptop",
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async ({ workingDirectory, runFiles }) => {
+        opened.push({ ...(workingDirectory === undefined ? {} : { workingDirectory }), runFiles })
+        return new RecordingSandbox(`computer-${opened.length}`)
+      },
+    })
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      const ran = runner.runTurn(request.run.id, new AbortController().signal)
+      const parent = await underFakeTime(
+        () => terminalRun(agentStorageOf(sixb), request.run.id),
+        "the computer's turn"
+      )
+      expect(await ran).toBe(true)
+      expect(parent).toMatchObject({ status: "succeeded" })
+      expect(
+        await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
+      ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
+      // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
+      // and gone once it ended.
+      expect(opened).toEqual([
+        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.id) },
+        { runFiles: join(runFilesRoot, childRunId) },
+      ])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+    } finally {
+      jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
   })
 
   test("accounts a tool's model call to the chat run like the Agent's own", async () => {

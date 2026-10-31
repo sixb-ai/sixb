@@ -1,4 +1,15 @@
 import { describe, expect, test } from "bun:test"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { LocalSandbox } from "../src/local-sandbox"
 import { LocalSandboxFactory } from "../src/local-sandbox-factory"
@@ -38,6 +49,53 @@ describe("LocalSandbox shell-injection regression", () => {
       expect(result).toMatchObject({ exitCode: 0, stdout: "ok\n" })
     } finally {
       await sandbox.destroy()
+    }
+  })
+
+  // Guard proof: confine writeFiles to the working directory again; the run file is refused.
+  test("writes files where its commands may write, and nowhere else", async () => {
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "sixb-local-rw-")))
+    const runFiles = join(elsewhere, "run")
+    const sandbox = await new LocalSandboxFactory({ readWritePaths: [runFiles] }).create()
+    try {
+      await sandbox.writeFiles([{ path: join(runFiles, "skills", "a.md"), contents: "# a" }])
+      expect(readFileSync(join(runFiles, "skills", "a.md"), "utf8")).toBe("# a")
+      expect(
+        await sandbox
+          .writeFiles([{ path: join(elsewhere, "other.md"), contents: "no" }])
+          .catch((error: unknown) => error)
+      ).toBeInstanceOf(Error)
+      expect(existsSync(join(elsewhere, "other.md"))).toBe(false)
+    } finally {
+      await sandbox.destroy()
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
+  })
+
+  // Guard proof: write through mkdir/writeFile without assertReallyWritable and O_NOFOLLOW; both
+  // writes land outside, in the directory the links lead to.
+  test("writes no file through a link a command made, though it lies where commands may write", async () => {
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "sixb-local-links-")))
+    const runFiles = join(elsewhere, "run")
+    const outside = join(elsewhere, "outside")
+    mkdirSync(runFiles)
+    mkdirSync(outside)
+    const sandbox = await new LocalSandboxFactory({ readWritePaths: [runFiles] }).create()
+    try {
+      await sandbox.runCommand("/bin/sh", [
+        "-c",
+        `ln -s ${outside} ${join(runFiles, "dir")} && ln -s ${join(outside, "f")} ${join(runFiles, "f")}`,
+      ])
+      for (const path of [join(runFiles, "dir", "x.txt"), join(runFiles, "f")]) {
+        expect(
+          await sandbox.writeFiles([{ path, contents: "no" }]).catch((error: unknown) => error),
+          path
+        ).toBeInstanceOf(Error)
+      }
+      expect(readdirSync(outside)).toEqual([])
+    } finally {
+      await sandbox.destroy()
+      rmSync(elsewhere, { recursive: true, force: true })
     }
   })
 

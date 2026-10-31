@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { listHandedSources } from "../src/child-files"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import {
   listSandboxFiles,
@@ -9,6 +10,7 @@ import {
   resolveSandboxPath,
   SandboxFileError,
 } from "../src/sandbox-files"
+import { AgentFileBudget } from "../src/tools/tool-files"
 import { LocalBashSandbox } from "./helpers"
 
 // The scripts run in a real local bash against a temporary directory, so the symlink, escape, and
@@ -36,9 +38,14 @@ const handle = () => ({
 })
 
 describe("resolveSandboxPath", () => {
+  const at = (workingDirectory: string, contextDirectory = SANDBOX_CONTEXT_DIRECTORY) => ({
+    sandbox: new LocalBashSandbox(workingDirectory),
+    contextDirectory,
+  })
+
   test("resolves relative and absolute paths inside the working directory", () => {
-    expect(resolveSandboxPath("/workspace", "out/report.md")).toBe("/workspace/out/report.md")
-    expect(resolveSandboxPath("/workspace/", "/workspace/a/../b.txt")).toBe("/workspace/b.txt")
+    expect(resolveSandboxPath(at("/workspace"), "out/report.md")).toBe("/workspace/out/report.md")
+    expect(resolveSandboxPath(at("/workspace/"), "/workspace/a/../b.txt")).toBe("/workspace/b.txt")
   })
 
   test("rejects empty paths, the directory itself, and paths that leave it", () => {
@@ -50,8 +57,20 @@ describe("resolveSandboxPath", () => {
       ["/etc/passwd", "outside_root"],
       ["/workspace-other/file", "outside_root"],
     ] as const) {
-      expect(() => resolveSandboxPath("/workspace", path), path).toThrow(
+      expect(() => resolveSandboxPath(at("/workspace"), path), path).toThrow(
         expect.objectContaining({ reason })
+      )
+    }
+  })
+
+  test("also resolves paths in a context directory outside the working directory", () => {
+    const handle = at("/home/me/project", "/home/me/.sixb/runs/run-1")
+    expect(resolveSandboxPath(handle, "/home/me/.sixb/runs/run-1/attachments/a.pdf")).toBe(
+      "/home/me/.sixb/runs/run-1/attachments/a.pdf"
+    )
+    for (const path of ["/home/me/.sixb/runs/run-2/x", "../.sixb/runs/run-1", "/home/me/.ssh/id"]) {
+      expect(() => resolveSandboxPath(handle, path), path).toThrow(
+        expect.objectContaining({ reason: "outside_root" })
       )
     }
   })
@@ -139,6 +158,24 @@ describe("readSandboxFile", () => {
     })
   })
 
+  test("reads a file in a context directory outside the working directory, and no other", async () => {
+    const context = join(outside, "context")
+    mkdirSync(join(context, "attachments"), { recursive: true })
+    writeFileSync(join(context, "attachments", "a.txt"), "attached")
+    writeFileSync(join(outside, "secret.txt"), "secret")
+    const elsewhere = { sandbox: new LocalBashSandbox(root), contextDirectory: context }
+    const readThere = (path: string) =>
+      readSandboxFile(elsewhere, { path, maxBytes: 1024, signal, timeoutMs: 10_000 })
+
+    expect(new TextDecoder().decode(await readThere(join(context, "attachments", "a.txt")))).toBe(
+      "attached"
+    )
+    // Removal proof: check only the working directory in the read script; this read fails.
+    await expect(readThere(join(outside, "secret.txt"))).rejects.toMatchObject({
+      reason: "outside_root",
+    })
+  })
+
   test("refuses a file over the byte limit", async () => {
     writeFileSync(join(root, "large.txt"), "12345")
     const error = await read(join(root, "large.txt"), 4).catch((caught: unknown) => caught)
@@ -151,3 +188,42 @@ describe("readSandboxFile", () => {
 })
 
 /** Runs each command in a local bash, without a login shell, in the given working directory. */
+
+describe("listHandedSources", () => {
+  const sources = (contextDirectory: string, paths: readonly string[]) =>
+    listHandedSources({
+      files: {
+        sandbox: async () => ({ sandbox: new LocalBashSandbox(root), contextDirectory }),
+        blobStorage: { put: unused, open: unused, stat: unused },
+        budget: new AgentFileBudget(),
+        installArtifactsFrom: unused,
+      },
+      paths,
+      signal,
+    })
+
+  test("hands over the run's files from a context directory outside the working directory", async () => {
+    const context = join(outside, "context")
+    mkdirSync(join(context, "attachments"), { recursive: true })
+    mkdirSync(join(context, "memory"), { recursive: true })
+    writeFileSync(join(context, "attachments", "a.txt"), "attached")
+    writeFileSync(join(context, "memory", "notes.md"), "memory")
+    writeFileSync(join(root, "data.csv"), "a,b")
+
+    expect(
+      await sources(context, ["data.csv", join(context, "attachments", "a.txt")])
+    ).toMatchObject([
+      { path: "data.csv", absolutePath: join(root, "data.csv") },
+      { path: "attachments/a.txt", absolutePath: join(context, "attachments", "a.txt") },
+    ])
+    // Only what the run was given or made: never the rest of its context.
+    const refused = await sources(context, [join(context, "memory", "notes.md")]).catch(
+      (error: unknown) => error
+    )
+    expect(refused).toMatchObject({ message: expect.stringContaining("part of the run context") })
+  })
+})
+
+function unused(): never {
+  throw new Error("Not used by this test.")
+}

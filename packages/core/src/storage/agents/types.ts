@@ -90,6 +90,16 @@ export interface AgentThreadRecord {
   readonly title?: string
   readonly sandboxParams?: AgentThreadSandboxParams
   readonly sandboxState?: AgentThreadSandboxState
+  /**
+   * Where its turns run: on its owner's computer, which claims them, or, when absent, in the cloud.
+   * A computer's thread takes turns from its owner alone.
+   */
+  readonly runsOn?: "computer"
+  /**
+   * Which of its owner's computers runs a computer's thread: the one that claimed its first turn,
+   * or the one it was moved to since. Only that computer claims its turns.
+   */
+  readonly computerId?: string
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -105,6 +115,7 @@ export interface CreateAgentThreadInput {
   readonly ownerPrincipal: Principal
   readonly title?: string
   readonly sandboxParams?: AgentThreadSandboxParams
+  readonly runsOn?: "computer"
   readonly status?: AgentThreadStatus
   readonly createdAt?: Date
   readonly updatedAt?: Date
@@ -190,6 +201,15 @@ export interface AddAgentThreadParticipantsInput {
   /** Refused with `participant_limit`, adding no one, when the thread would hold more. */
   readonly maxParticipants: number
   readonly addedAt?: Date
+}
+
+export interface AssignAgentThreadComputerInput {
+  readonly projectId: string
+  readonly id: string
+  /** The owner's computer that runs the thread's turns from now on. */
+  readonly computerId: string
+  /** Assign it only to a thread no computer runs yet: a computer assigned already stays. */
+  readonly ifUnassigned?: boolean
 }
 
 export interface RemoveAgentThreadParticipantInput {
@@ -345,6 +365,8 @@ export interface ConversationAgentRunSpec {
   readonly locale?: string
   /** What the turn may change without asking its requester. Absent on older runs: `auto`. */
   readonly approvalMode?: AgentApprovalMode
+  /** Its thread's `runsOn` when it was asked for: a computer's turn never reaches the agent queue. */
+  readonly runsOn?: "computer"
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
@@ -679,6 +701,11 @@ export interface AgentThreadStore {
   ): Promise<readonly AgentThreadParticipantRecord[]>
   /** Whether the user took part until now. */
   removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
+  /**
+   * Name which of its owner's computers runs a computer's thread, and return the thread after. A
+   * cloud thread runs on none, and is refused.
+   */
+  assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord>
   /** The participants of these threads, oldest first, then by user id and thread id. */
   listParticipants(
     input: ListAgentThreadParticipantsInput

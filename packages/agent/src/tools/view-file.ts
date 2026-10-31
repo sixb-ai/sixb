@@ -16,7 +16,7 @@ const VIEW_FILE_TIMEOUT_MS = 30_000
 export const VIEW_FILE_TOOL_SPEC = {
   name: "view_file",
   description:
-    "Inspect a file in the current run sandbox. Use this for historical attachments and files created by bash. Paths must stay inside the sandbox working directory. Images are prepared for visual input when supported; other formats return bounded text or metadata.",
+    "Inspect a file in the current run sandbox. Use this for historical attachments and files created by bash. Paths must stay inside the working directory or the run's context directory. Images are prepared for visual input when supported; other formats return bounded text or metadata.",
   inputSchema: {
     type: "object",
     properties: { path: { type: "string", minLength: 1 } },
@@ -51,7 +51,7 @@ export function createViewFileTool(input: {
       const handle = await input.resolveSandbox()
       let absolutePath: string
       try {
-        absolutePath = resolveSandboxPath(handle.sandbox.workingDirectory, path)
+        absolutePath = resolveSandboxPath(handle, path)
       } catch (error) {
         throw toViewFileError(error)
       }

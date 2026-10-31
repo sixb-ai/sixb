@@ -23,6 +23,8 @@ import {
   encodeWireValue,
 } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { startLapsedRunSweeper } from "../src/routes/agent-runners"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -111,20 +113,28 @@ async function setup() {
     }
   }
 
+  /** POST as `headers`' person, answering the response's body. */
+  const post = (headers: Record<string, string>, path: string, body: unknown) =>
+    send(
+      new Request(`${API}${path}`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    ).then((response) => response.json())
+
   /** Ask the Agent, as `headers`' person: the turn waits queued, as no worker runs here. */
-  async function ask(headers: Record<string, string>, text: string) {
-    const post = (path: string, body: unknown) =>
-      send(
-        new Request(`${API}${path}`, {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify(body),
-        })
-      ).then((response) => response.json())
-    const { thread } = (await post("/api/agent-threads", {})) as { readonly thread: { id: string } }
-    const body = (await post(`/api/agent-threads/${thread.id}/messages`, { text })) as {
-      readonly run?: { readonly id: string }
+  async function ask(
+    headers: Record<string, string>,
+    text: string,
+    thread: { readonly runsOn?: "computer" } = { runsOn: "computer" }
+  ) {
+    const created = (await post(headers, "/api/agent-threads", thread)) as {
+      readonly thread: { id: string }
     }
+    const body = (await post(headers, `/api/agent-threads/${created.thread.id}/messages`, {
+      text,
+    })) as { readonly run?: { readonly id: string } }
     if (!body.run) throw new Error(`Expected a queued turn, got ${JSON.stringify(body)}.`)
     return body.run.id
   }
@@ -135,14 +145,20 @@ async function setup() {
   const claimStatuses = new Map<string, number>()
 
   /**
-   * Claim as `headers`' person, with their session, as a runner they signed in would; its session's
-   * requests then carry the runner token.
+   * Claim as `headers`' person, with their session, from one of their computers, as a runner they
+   * signed in would; its session's requests then carry the runner token.
    */
-  function claim(headers: Record<string, string>, runId: string, leaseExpiresAt = LEASE()) {
+  function claim(
+    headers: Record<string, string>,
+    runId: string,
+    leaseExpiresAt = LEASE(),
+    computerId = "laptop"
+  ) {
     return claimAgentRunOverHttp({
       apiUrl: API,
       runId,
       authorization: "",
+      computerId,
       leaseExpiresAt,
       fetch: async (request) => {
         if (new URL(request.url).pathname.endsWith("/claim")) {
@@ -160,7 +176,7 @@ async function setup() {
     })
   }
 
-  return { storage, host, send, person, ask, claim, runnerTokens, claimStatuses, reached }
+  return { storage, host, send, post, person, ask, claim, runnerTokens, claimStatuses, reached }
 }
 
 describe("a runner outside the worker", () => {
@@ -193,6 +209,158 @@ describe("a runner outside the worker", () => {
       modelId: "test-model",
     })
     await session?.close()
+  })
+
+  // Removal proof: dispatch a computer's turn as any other; the worker's queue holds its job.
+  test("leaves a turn on a computer's thread to its owner's computer", async () => {
+    const { person, ask, claim, post, host, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.", { runsOn: "computer" })
+    const run = await storage.agents.runs.getById({ projectId, id: runId })
+    expect(run).toMatchObject({ status: "queued", spec: { runsOn: "computer" } })
+
+    const jobs = await host.queues.agents.claim({
+      projectId,
+      workerId: "probe",
+      limit: 10,
+      signal: AbortSignal.timeout(50),
+    })
+    expect(jobs).toEqual([])
+
+    // It runs as its owner, so nobody else may message it, even someone it was shared with.
+    const threadId = run?.threadId ?? ""
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    const session = await claim(ava, runId)
+    await session?.finish({ status: "succeeded" })
+    await session?.close()
+    expect(
+      await post(bob, `/api/agent-threads/${threadId}/messages`, { text: "Me too." })
+    ).toMatchObject({ error: expect.stringContaining("only its owner can message it") })
+  })
+
+  // Guard proof: restore the bare "only its owner can message it" in assertThreadAcceptsRun; Bob's
+  // refusal no longer tells him the conversation is his to follow.
+  test("shares a computer's conversation to read: a participant follows it, and writes nothing", async () => {
+    const { person, ask, post, send, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+
+    expect(
+      await post(ava, `/api/agent-threads/${threadId}/participants`, {
+        users: [{ type: "user", id: "bob" }],
+      })
+    ).toMatchObject({ runsOn: "computer", participants: [{ principal: { id: "bob" } }] })
+    const read = await send(new Request(`${API}/api/agent-threads/${threadId}`, { headers: bob }))
+    expect(read.status).toBe(200)
+
+    const refused = await send(
+      new Request(`${API}/api/agent-threads/${threadId}/messages`, {
+        method: "POST",
+        headers: { ...bob, "content-type": "application/json" },
+        body: JSON.stringify({ text: "Why did Acme slip?" }),
+      })
+    )
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({
+      code: "not_thread_owner",
+      error: expect.stringContaining("Shared with you, it is yours to read and follow."),
+    })
+  })
+
+  // Guard proof: drop the refuseOtherComputer call from the claim route; Ava's desktop runs a turn
+  // of the conversation her laptop runs, in another folder on another disk.
+  test("runs a conversation's turns on the one computer that runs it, until it moves", async () => {
+    const { person, ask, claim, post, storage } = await setup()
+    const ava = await person("ava")
+    const bob = await person("bob")
+    const first = await claim(ava, await ask(ava, "Tidy the notes in this folder."))
+    if (!first) throw new Error("Expected the laptop to claim the first turn.")
+    const threadId = first.run.threadId
+    await first.finish({ status: "succeeded" })
+    await first.close()
+
+    const runId = (await post(ava, `/api/agent-threads/${threadId}/messages`, { text: "Again." }))
+      .run.id as string
+    const refused = await claim(ava, runId, LEASE(), "desktop").catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(AgentRunRefusedError)
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+
+    // Only its owner moves it, and then only the computer it moved to runs it.
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [{ type: "user", id: "bob" }],
+      addedBy: { type: "user", id: "ava" },
+      maxParticipants: 50,
+    })
+    expect(
+      await post(bob, `/api/agent-threads/${threadId}/computer`, { computerId: "bobs-laptop" })
+    ).toMatchObject({ code: "not_thread_owner" })
+    expect(
+      await post(ava, `/api/agent-threads/${threadId}/computer`, { computerId: "desktop" })
+    ).toMatchObject({ id: threadId, computerId: "desktop" })
+
+    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(
+      AgentRunRefusedError
+    )
+    const moved = await claim(ava, runId, LEASE(), "desktop")
+    expect(moved?.run).toMatchObject({ id: runId, status: "running" })
+    await moved?.close()
+  })
+
+  // Removal proof: drop the runsOn check from the claim route; Ava's own runner takes her cloud
+  // turn from the worker.
+  test("claims no cloud turn: the worker runs it", async () => {
+    const { person, ask, claim, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Summarize the open invoices.", {})
+
+    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(
+      AgentRunRefusedError
+    )
+    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+  })
+
+  // Removal proof: retry from a fresh spec without inPlace, as a model that left the catalog makes
+  // a resumed turn do; the retry goes to the agent queue.
+  test("runs a computer's turn again on the computer", async () => {
+    const { person, ask, claim, post, host, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.", { runsOn: "computer" })
+    const session = await claim(ava, runId)
+    await session?.finish({
+      status: "failed",
+      error: captureSixbFailure(new Error("The model stopped answering."), {
+        allowedCodes: AGENT_RUN_FAILURE_CODES,
+        defaultCode: "internal.unexpected",
+        details: { runId },
+        at: new Date(),
+      }),
+    })
+    await session?.close()
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+
+    const retried = (await post(ava, `/api/agent-threads/${threadId}/runs/${runId}/retry`, {})) as {
+      readonly run?: { readonly id: string; readonly runsOn?: string }
+    }
+    expect(retried.run).toMatchObject({ runsOn: "computer" })
+    expect(
+      await host.queues.agents.claim({
+        projectId,
+        workerId: "probe",
+        limit: 10,
+        signal: AbortSignal.timeout(50),
+      })
+    ).toEqual([])
   })
 
   // Removal proof: compare the path's run with the token's in admitRunner no more; a runner token

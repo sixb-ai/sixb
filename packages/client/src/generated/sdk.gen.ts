@@ -460,6 +460,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  MoveAgentThreadToComputerData,
+  MoveAgentThreadToComputerErrors,
+  MoveAgentThreadToComputerResponses,
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
@@ -2904,7 +2907,7 @@ export const getAgentThread = <ThrowOnError extends boolean = false>(
 /**
  * Add participants to an agent thread
  *
- * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
+ * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights; a thread that runs on its owner's computer they only read. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
  */
 export const addAgentThreadParticipants = <ThrowOnError extends boolean = false>(
   options: Options<AddAgentThreadParticipantsData, ThrowOnError>
@@ -3207,6 +3210,31 @@ export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/agent-threads/{threadId}/child-files/content",
     ...options,
+  })
+
+/**
+ * Move a thread to another of your computers
+ *
+ * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ */
+export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
+  options: Options<MoveAgentThreadToComputerData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    MoveAgentThreadToComputerResponses,
+    MoveAgentThreadToComputerErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/computer",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

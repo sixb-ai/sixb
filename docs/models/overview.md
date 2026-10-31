@@ -498,6 +498,9 @@ await sixb.agent.runs.request({ threadId: thread.id, text: "Why did Acme slip?" 
 
 - **Each message runs with its sender's permissions**, as every conversation does. The agent
   knows who wrote each message.
+- **A conversation that [runs on its owner's computer](../cli/overview.md#work-with-the-agent) is
+  read-only for the others.** Its turns run as the owner, in their folder: a participant's message
+  is refused with a 403, and the app shows them no composer.
 - **Everyone sees everything.** Participants see the messages already there and the ones that
   follow, including data the agent read with someone else's access that they could not open
   themselves. Nothing checks it when you share: warn the person sharing.

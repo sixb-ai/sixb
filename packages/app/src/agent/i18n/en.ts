@@ -774,6 +774,8 @@ export const en = {
     cancel: "Cancel",
     close: "Close",
     sharedBy: (owner: string) => `${owner}'s thread`,
+    /** A thread on its owner's computer: its other readers follow it, and write nothing in it. */
+    onComputer: (owner: string) => `Runs on ${owner}'s computer: you can follow it here`,
     answering: (name: string) => `${name} is getting an answer…`,
     continueMine: "Continue in my own thread",
     continuing: "Copying…",

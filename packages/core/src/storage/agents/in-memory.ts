@@ -22,12 +22,15 @@ import {
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
   assertAgentRunFinishPayload,
+  assertAssignableComputer,
   assertAwaitingApprovalFinish,
+  assertComputerId,
   assertConversationAgentRunSpec,
   assertConversationThreadRow,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertRequestAgentApprovalInput,
+  assertRunsOn,
   assertSaveAgentMemoryInput,
   assertSubagentThreadTakesRun,
   compareAgentMemoryPaths,
@@ -68,6 +71,7 @@ import type {
   AgentThreadSandboxState,
   AgentThreadStore,
   AppendAgentMessageInput,
+  AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
   CreateAgentContextCheckpointInput,
@@ -213,6 +217,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
+    assertRunsOn(input.runsOn, "Agent thread")
     const sandboxParams =
       input.sandboxParams === undefined
         ? undefined
@@ -233,6 +238,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       ownerPrincipal: clone(input.ownerPrincipal),
       ...(sandboxParams === undefined ? {} : { sandboxParams }),
       ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
       status: input.status ?? "active",
       activeRunId: null,
       messageCount: 0,
@@ -409,6 +415,18 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 
     this.state.participants.set(threadKey, kept)
     return true
+  }
+
+  async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
+    assertComputerId(input.computerId)
+    const threadKey = key(input.projectId, input.id)
+    const thread = this.state.threads.get(threadKey) ?? null
+    assertAssignableComputer(thread, input.id)
+    if (input.ifUnassigned && thread.computerId !== undefined) return clone(thread)
+
+    const assigned = { ...thread, computerId: input.computerId }
+    this.state.threads.set(threadKey, assigned)
+    return clone(assigned)
   }
 
   async listParticipants(

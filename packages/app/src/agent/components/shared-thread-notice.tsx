@@ -5,21 +5,26 @@ import { ContinueButton } from "./thread-people"
 
 /**
  * Above a participant's composer: whose conversation this is, and the way to continue alone. One
- * line wherever it fits; a long name gives way, never the action.
+ * line wherever it fits; a long name gives way, never the action. On its owner's computer, the
+ * conversation has no composer for them: the line says they follow it.
  */
 export function SharedThreadNotice({
   owner,
   sharing,
+  onComputer = false,
 }: {
   readonly owner: string
   readonly sharing: ThreadSharing
+  readonly onComputer?: boolean
 }) {
   const messages = useAgentMessages().sharing
 
   return (
     <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pt-1 text-xs text-muted-foreground">
       <PersonAvatar name={owner} size="xs" />
-      <span className="min-w-0 truncate">{messages.sharedBy(owner)}</span>
+      <span className="min-w-0 truncate">
+        {onComputer ? messages.onComputer(owner) : messages.sharedBy(owner)}
+      </span>
       <span aria-hidden className="shrink-0">
         ·
       </span>

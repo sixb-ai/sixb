@@ -1,6 +1,6 @@
 import { posix } from "node:path"
 import type { CommandResult } from "@sixb/core"
-import type { AgentSandboxHandle } from "./sandbox-handle"
+import { type AgentSandboxHandle, contextPath } from "./sandbox-handle"
 
 // Every read of sandbox files the worker makes goes through these two scripts. A sandbox has no
 // file-read API, so a file comes back as base64 on stdout; the scripts refuse symbolic links and
@@ -47,10 +47,21 @@ interface SandboxCommandOptions {
 }
 
 /**
- * Resolve `requestedPath` against the sandbox working directory. Throws when the path is empty or
- * leaves the directory; symbolic links are checked when the file is read.
+ * Where a run reads files: its working directory, and its context directory when that lies
+ * elsewhere, as it does in a folder on a computer. Absolute, the working directory first.
  */
-export function resolveSandboxPath(workingDirectory: string, requestedPath: string): string {
+export function sandboxRoots(handle: AgentSandboxHandle): readonly string[] {
+  const root = posix.resolve(handle.sandbox.workingDirectory)
+  const context = contextPath(handle)
+  return context === root || context.startsWith(`${root}/`) ? [root] : [root, context]
+}
+
+/**
+ * Resolve `requestedPath` against the sandbox working directory. Throws when the path is empty or
+ * leaves both the working directory and the run's context directory; symbolic links are checked
+ * when the file is read.
+ */
+export function resolveSandboxPath(handle: AgentSandboxHandle, requestedPath: string): string {
   if (
     typeof requestedPath !== "string" ||
     requestedPath.length === 0 ||
@@ -59,12 +70,14 @@ export function resolveSandboxPath(workingDirectory: string, requestedPath: stri
     throw new SandboxFileError("invalid_path", "path must be a non-empty sandbox file path")
   }
   // `resolve`, not `normalize`: it drops a trailing slash, which would break the prefix check.
-  const root = posix.resolve(workingDirectory)
-  const absolutePath = posix.resolve(root, requestedPath)
-  if (absolutePath === root || !absolutePath.startsWith(`${root}/`)) {
+  const roots = sandboxRoots(handle)
+  const absolutePath = posix.resolve(roots[0] ?? "/", requestedPath)
+  if (!roots.some((root) => absolutePath.startsWith(`${root}/`))) {
     throw new SandboxFileError(
       "outside_root",
-      "path must stay inside the sandbox working directory"
+      roots.length > 1
+        ? "path must stay inside the working directory or the run's context directory"
+        : "path must stay inside the sandbox working directory"
     )
   }
   return absolutePath
@@ -134,7 +147,7 @@ export async function readSandboxFile(
 ): Promise<Uint8Array> {
   const result = await runScript(handle, READ_SANDBOX_FILE_SCRIPT, input, {
     SIXB_READ_PATH_B64: Buffer.from(input.path, "utf-8").toString("base64"),
-    SIXB_READ_ROOT: handle.sandbox.workingDirectory,
+    SIXB_READ_ROOTS: sandboxRoots(handle).join("\n"),
     SIXB_READ_MAX_BYTES: String(input.maxBytes),
   })
 
@@ -150,7 +163,7 @@ export async function readSandboxFile(
   if (result.exitCode === 4) {
     throw new SandboxFileError(
       "outside_root",
-      "resolved path escapes the sandbox working directory"
+      "resolved path escapes the sandbox working directory and the run's context directory"
     )
   }
   if (result.exitCode !== 0) {
@@ -292,17 +305,19 @@ printf '%s\\n%s\\n' "$kind" "$(printf '%s' "$real" | base64 | tr -d '\\n')"`
 const READ_SANDBOX_FILE_SCRIPT = `# sixb-read-sandbox-file
 set -euo pipefail
 requested="$(printf '%s' "\${SIXB_READ_PATH_B64:?}" | base64 -d)"
-root="\${SIXB_READ_ROOT:?}"
+roots="\${SIXB_READ_ROOTS:?}"
 max_bytes="\${SIXB_READ_MAX_BYTES:?}"
 if [ ! -f "$requested" ] || [ -L "$requested" ]; then
   exit 2
 fi
 parent="$(cd -P -- "$(dirname -- "$requested")" && pwd)"
 resolved="$parent/$(basename -- "$requested")"
-case "$resolved" in
-  "$root"/*) ;;
-  *) exit 4 ;;
-esac
+inside=0
+while IFS= read -r root; do
+  real_root="$(cd -P -- "$root" 2>/dev/null && pwd)" || continue
+  case "$resolved" in "$real_root"/*) inside=1 ;; esac
+done <<< "$roots"
+[ "$inside" = 1 ] || exit 4
 size="$(wc -c < "$resolved" | tr -d ' ')"
 if [ "$size" -gt "$max_bytes" ]; then
   exit 3

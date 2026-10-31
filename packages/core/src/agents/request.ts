@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
-import { SYSTEM_PRINCIPAL } from "../auth"
+import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import { isValidFileRef } from "../blob-storage/validation"
@@ -96,6 +96,11 @@ export interface RequestAgentRunInput {
   readonly approvalMode?: AgentApprovalMode
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
+  /**
+   * Where a thread this creates runs: on its owner's computer, which claims its turns, or, when
+   * omitted, in the cloud. An existing thread keeps its own.
+   */
+  readonly runsOn?: "computer"
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
   readonly messageId?: string
   /** Caller principal for privileged integrations; scoped runtimes use their authorization principal. */
@@ -175,7 +180,11 @@ export async function requestAgentRun(
   const existingThread = input.threadId
     ? await agents.threads.getById({ projectId, id: input.threadId })
     : null
-  if (existingThread) assertThreadAcceptsRun(existingThread)
+  if (existingThread) assertThreadAcceptsRun(existingThread, principal)
+  if (input.runsOn !== undefined && input.runsOn !== "computer") {
+    throw new AgentRequestError("invalid_message", `[Sixb] 'runsOn' must be "computer" or omitted.`)
+  }
+  const runsOn = existingThread ? existingThread.runsOn : input.runsOn
   // The message's mode, else the sender's in the thread.
   const approvalMode =
     input.approvalMode ??
@@ -195,7 +204,11 @@ export async function requestAgentRun(
           language: models.language,
         })
       : requested
-  const spec: ConversationAgentRunSpec = Object.freeze({ ...selected, approvalMode })
+  const spec: ConversationAgentRunSpec = Object.freeze({
+    ...selected,
+    approvalMode,
+    ...(runsOn === undefined ? {} : { runsOn }),
+  })
 
   const createdThread = existingThread === null
   const thread =
@@ -205,6 +218,7 @@ export async function requestAgentRun(
       threadId: input.threadId,
       title: input.title,
       principal,
+      runsOn,
     }))
 
   const triggerMessageId = input.messageId ?? createAgentMessageId()
@@ -340,9 +354,11 @@ export async function retryAgentRun(
       executionId: durableExecution.id,
       threadId: failedRun.threadId,
       triggerMessageId: failedRun.triggerMessageId,
-      spec:
+      spec: inPlace(
+        thread,
         failedRun.spec ??
-        (await resolveConversationRunSpec({ models, selection: {}, settings: {} })),
+          (await resolveConversationRunSpec({ models, selection: {}, settings: {} }))
+      ),
     })
   })
   await publishRunActivity(runtime, run)
@@ -399,7 +415,10 @@ export async function resumeAgentTurn(
   const runId = createAgentRunId()
   const durableExecution = await prepareResumedExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
-  const spec = await resumedConversationRunSpec(models, pausedRun.spec, input.approvalMode)
+  const spec = inPlace(
+    thread,
+    await resumedConversationRunSpec(models, pausedRun.spec, input.approvalMode)
+  )
   const principal =
     authority.type === "principal"
       ? authority.context.principal
@@ -499,6 +518,18 @@ async function prepareResumedExecution(
     )
   }
   return createInheritedAgentExecutionRecord({ id: `exec_${randomUUID()}`, parent, runId })
+}
+
+/**
+ * A turn's spec where its thread runs: a turn that runs again or goes on after approvals runs
+ * where its first did, whatever spec it starts from.
+ */
+function inPlace(
+  thread: AgentThreadRecord,
+  spec: ConversationAgentRunSpec
+): ConversationAgentRunSpec {
+  const { runsOn: _runsOn, ...rest } = spec
+  return Object.freeze(thread.runsOn === undefined ? rest : { ...rest, runsOn: thread.runsOn })
 }
 
 /** The paused turn's spec, with defaults for a model that has since left the catalog. */
@@ -663,9 +694,16 @@ function assertAttachments(attachments: readonly FileRef[] | undefined): void {
   }
 }
 
-function assertThreadAcceptsRun(thread: AgentThreadRecord): void {
+function assertThreadAcceptsRun(thread: AgentThreadRecord, principal: Principal): void {
   assertConversationThread(thread)
   assertSandboxExecutionAvailable(thread)
+  // Its owner's computer runs its turns as its owner: nobody else may send it one.
+  if (thread.runsOn === "computer" && !principalsEqual(principal, thread.ownerPrincipal)) {
+    throw new AgentRequestError(
+      "not_thread_owner",
+      `[Sixb] Agent thread '${thread.id}' runs on its owner's computer, as them: only its owner can message it. Shared with you, it is yours to read and follow.`
+    )
+  }
   // Fast single-flight check for a clear error. `runs.create` is the atomic authority.
   if (thread.activeRunId !== null) {
     throw new AgentRequestError(
@@ -899,6 +937,7 @@ function createThread(
     readonly threadId?: string
     readonly title?: string
     readonly principal: Principal
+    readonly runsOn?: "computer"
   }
 ): Promise<AgentThreadRecord> {
   return agents.threads.create({
@@ -906,6 +945,7 @@ function createThread(
     projectId: params.projectId,
     ownerPrincipal: params.principal,
     ...(params.title === undefined ? {} : { title: params.title }),
+    ...(params.runsOn === undefined ? {} : { runsOn: params.runsOn }),
   })
 }
 

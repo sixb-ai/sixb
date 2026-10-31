@@ -157,6 +157,7 @@ import {
   listWorkflowInterventions,
   listWorkflowRuns,
   listWorkflows,
+  moveAgentThreadToComputer,
   type Options,
   postAgentThreadMessage,
   publishArtifactVersion,
@@ -630,6 +631,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  MoveAgentThreadToComputerData,
+  MoveAgentThreadToComputerError,
+  MoveAgentThreadToComputerResponse,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
@@ -4573,7 +4577,7 @@ export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
 /**
  * Add participants to an agent thread
  *
- * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
+ * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights; a thread that runs on its owner's computer they only read. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
  */
 export const addAgentThreadParticipantsMutation = (
   options?: Partial<Options<AddAgentThreadParticipantsData>>
@@ -5038,6 +5042,35 @@ export const getAgentChildFileContentOptions = (options: Options<GetAgentChildFi
     },
     queryKey: getAgentChildFileContentQueryKey(options),
   })
+
+/**
+ * Move a thread to another of your computers
+ *
+ * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ */
+export const moveAgentThreadToComputerMutation = (
+  options?: Partial<Options<MoveAgentThreadToComputerData>>
+): UseMutationOptions<
+  MoveAgentThreadToComputerResponse,
+  MoveAgentThreadToComputerError,
+  Options<MoveAgentThreadToComputerData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    MoveAgentThreadToComputerResponse,
+    MoveAgentThreadToComputerError,
+    Options<MoveAgentThreadToComputerData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await moveAgentThreadToComputer({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getAgentPreferencesQueryKey = (options?: Options<GetAgentPreferencesData>) =>
   createQueryKey("getAgentPreferences", options)

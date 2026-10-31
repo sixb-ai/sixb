@@ -749,6 +749,74 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("keeps a thread that runs on its owner's computer, and its turns' place", async () => {
+      await withStorage(async (storage, fixture) => {
+        const thread = await storage.threads.create(threadInput({ runsOn: "computer" }))
+        expect(thread.runsOn).toBe("computer")
+        await expect(storage.threads.getById({ projectId, id: thread.id })).resolves.toMatchObject({
+          runsOn: "computer",
+        })
+        const cloud = await storage.threads.create(threadInput({ id: "thr_cloud" }))
+        expect(cloud).not.toHaveProperty("runsOn")
+
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        expect((await storage.runs.getById({ projectId, id: "run_1" }))?.spec).toEqual(spec)
+        await expectAgentError(
+          createRun(
+            storage,
+            fixture,
+            runInput({
+              id: "run_2",
+              threadId: "thr_cloud",
+              spec: { ...spec, runsOn: "laptop" } as unknown as ConversationAgentRunSpec,
+            })
+          ),
+          "invalid_input"
+        )
+      })
+    })
+
+    // Guard proof: drop `ifUnassigned` from a store's assignComputer; the second claim takes the
+    // thread from the laptop that runs it.
+    test("names the computer a computer's thread runs on, which only a move changes", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ runsOn: "computer" }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+        const thread = { projectId, id: "thr_1" }
+
+        // The first claim names the computer; a later one from elsewhere keeps it.
+        await expect(
+          storage.threads.assignComputer({ ...thread, computerId: "laptop", ifUnassigned: true })
+        ).resolves.toMatchObject({ computerId: "laptop" })
+        await expect(
+          storage.threads.assignComputer({ ...thread, computerId: "desktop", ifUnassigned: true })
+        ).resolves.toMatchObject({ computerId: "laptop" })
+
+        // A move names another.
+        await storage.threads.assignComputer({ ...thread, computerId: "desktop" })
+        await expect(storage.threads.getById(thread)).resolves.toMatchObject({
+          computerId: "desktop",
+        })
+
+        await expectAgentError(
+          storage.threads.assignComputer({ projectId, id: "thr_cloud", computerId: "laptop" }),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.assignComputer({ projectId, id: "thr_none", computerId: "laptop" }),
+          "thread_not_found"
+        )
+        await expectAgentError(
+          storage.threads.assignComputer({ ...thread, computerId: " " }),
+          "invalid_input"
+        )
+        expect(await storage.threads.getById({ projectId, id: "thr_cloud" })).not.toHaveProperty(
+          "computerId"
+        )
+      })
+    })
+
     test("reads several threads at once, in the order asked", async () => {
       await withStorage(async (storage) => {
         const first = await storage.threads.create(threadInput())

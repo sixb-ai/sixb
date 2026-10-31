@@ -743,6 +743,24 @@ describe("sharing", () => {
     expect(onNavigateThread).not.toHaveBeenCalled()
   })
 
+  // Guard proof: drop `readOnly` from AgentChat's ConversationPanel; Bob gets a composer whose every
+  // message the API refuses, since the turns run on Alice's computer as her.
+  test("a participant follows a conversation on its owner's computer, with no composer", async () => {
+    const { view } = renderChat("bob", { thread: thread({ runsOn: "computer" }) })
+
+    expect(
+      await view.findByText("Runs on Alice Martin's computer: you can follow it here")
+    ).toBeDefined()
+    expect(view.queryByRole("textbox", { name: "Message" })).toBeNull()
+    expect(view.getByRole("button", { name: "Continue in my own thread" })).toBeDefined()
+
+    // Its owner still writes in it from the app.
+    view.unmount()
+    const owner = renderChat("alice", { thread: thread({ runsOn: "computer" }) })
+    expect(await owner.view.findByRole("textbox", { name: "Message" })).toBeDefined()
+    expect(owner.view.queryByText(/you can follow it here/)).toBeNull()
+  })
+
   // Removal proof: render ThreadPeople for any current thread in AgentChat.
   test("nobody shares or leaves without a signed-in user", async () => {
     const { view } = renderChat(null)
