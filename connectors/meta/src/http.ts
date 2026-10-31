@@ -21,6 +21,11 @@ import type {
 } from "./types/common"
 
 const THROTTLING_ERROR_CODES = new Set([4, 17, 32, 613])
+// Graph reports an expired, revoked or otherwise invalid token as 190 (102 on older paths), usually
+// with HTTP 400 rather than 401. These subcodes, or none, mean the whole sign-in is gone: app
+// removed, checkpoint, password changed, expired, unconfirmed user, invalid token. Others, such as
+// 492 for a Page the user no longer manages, leave the grant's other Pages working.
+const GRANT_WIDE_TOKEN_SUBCODES = new Set([458, 459, 460, 463, 464, 467])
 
 export interface MetaHttpContext {
   readonly http: RestClient
@@ -85,9 +90,7 @@ export function createMetaRetryController(
       if (policy?.shouldRetry) return policy.shouldRetry(context)
       if (isAbortError(context.error)) return false
       if (context.error) return true
-      if (context.graphError?.code && THROTTLING_ERROR_CODES.has(context.graphError.code)) {
-        return true
-      }
+      if (isThrottlingError(context.graphError)) return true
       const status = context.response?.status
       return status === 429 || (status !== undefined && status >= 500)
     },
@@ -204,6 +207,17 @@ export async function readJson<T>(response: Response): Promise<T> {
     throw new MetaApiError(response.status, body, response.headers, rawBody)
   }
   return body as T
+}
+
+export function isThrottlingError(error: MetaGraphError | undefined): boolean {
+  return error?.code !== undefined && THROTTLING_ERROR_CODES.has(error.code)
+}
+
+/** Whether Meta rejected every token of the sign-in, so only a new sign-in can help. */
+export function isInvalidGrantError(error: MetaGraphError | undefined): boolean {
+  if (error?.code === 102) return true
+  if (error?.code !== 190) return false
+  return error.error_subcode === undefined || GRANT_WIDE_TOKEN_SUBCODES.has(error.error_subcode)
 }
 
 /** Read a Graph list envelope into a `MetaPage`, mapping each raw item to a domain type. */

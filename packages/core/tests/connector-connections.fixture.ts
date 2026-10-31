@@ -63,6 +63,7 @@ export type HarnessOptions = Pick<
   readonly discover?: (
     credentials: ConnectorOAuthCredentials
   ) => readonly ConnectorAccountCandidate[] | Promise<readonly ConnectorAccountCandidate[]>
+  readonly accountAccessToken?: ConnectorOAuth2Authentication["accountAccessToken"]
 }
 
 export function createHarness(options: HarnessOptions = {}) {
@@ -91,6 +92,7 @@ export function createHarness(options: HarnessOptions = {}) {
       type: "oauth2",
       pkce: options.pkce,
       callbackParameters: options.callbackParameters,
+      accountAccessToken: options.accountAccessToken,
       async authorizationUrl(_context, input) {
         await authorizationUrlGate
         const url = new URL("https://provider.test/oauth/authorize")

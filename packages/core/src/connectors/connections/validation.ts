@@ -215,6 +215,27 @@ export function shouldRefresh(
   )
 }
 
+/** Validate the token an adapter derives for one connected account. */
+export function validateAccountToken(token: unknown): {
+  readonly accessToken: string
+  readonly tokenType?: string
+} {
+  if (!isRecord(token)) {
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
+      "OAuth connector adapter returned an invalid account access token."
+    )
+  }
+  return {
+    accessToken: nonblank(token.accessToken, "account access token", "connector.adapter_invalid"),
+    ...(token.tokenType === undefined
+      ? {}
+      : {
+          tokenType: nonblank(token.tokenType, "account token type", "connector.adapter_invalid"),
+        }),
+  }
+}
+
 export function tokenView(credentials: ConnectorOAuthCredentials) {
   return {
     accessToken: credentials.accessToken,

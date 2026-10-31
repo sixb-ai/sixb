@@ -6,7 +6,7 @@ export type {
   MetaBatchResults,
   MetaBatchSuccess,
 } from "./batch"
-export type { MetaClient } from "./client"
+export type { MetaClient, MetaConnectedPage, MetaPageClient } from "./client"
 export type {
   InsightsQuery,
   MetaAppUsage,
@@ -39,7 +39,11 @@ export type {
   MetaInstagramUser,
   StoriesListOptions,
 } from "./instagram"
-export type { MetaConnectorOptions } from "./options"
+export type {
+  MetaConnectorOptions,
+  MetaOAuthConnectorOptions,
+  MetaTransportOptions,
+} from "./options"
 export type {
   MetaFacebookPage,
   MetaInstagramAccount,
