@@ -13,13 +13,19 @@ export interface LoadedAgentThreadModelContext {
   readonly history: AgentTurnHistory
 }
 
-/** The retained tail with its checkpoint, projected for the model. */
-export function agentThreadModelContext(history: AgentTurnHistory): LoadedAgentThreadModelContext {
+/**
+ * The retained tail with its checkpoint, projected for the model. A child's run reads its thread
+ * without `historyReadable`: `sixb history` prints only a conversation's.
+ */
+export function agentThreadModelContext(
+  history: AgentTurnHistory,
+  options: { readonly historyReadable?: boolean } = {}
+): LoadedAgentThreadModelContext {
   const { checkpoint, messages } = history
   return {
     checkpoint,
     retainedMessages: messages,
-    modelMessages: projectAgentThreadModelContext({ checkpoint, messages }),
+    modelMessages: projectAgentThreadModelContext({ checkpoint, messages, ...options }),
     history,
   }
 }

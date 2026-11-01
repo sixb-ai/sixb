@@ -15459,6 +15459,8 @@ function scriptedWindowModel(input: {
   readonly script: (request: LanguageModelRequest) => readonly WorkerTestStreamEvent[]
   readonly reject?: (request: LanguageModelRequest) => Error | undefined
   readonly contextWindow?: number
+  /** What it answers a summary request with. */
+  readonly summary?: string
   /**
    * Each call a second after the one before it: under fake time, calls would share a timestamp,
    * and the latest of a run, which a later run's estimate anchors on, would be any of them.
@@ -15487,7 +15489,7 @@ function scriptedWindowModel(input: {
 
       const usage = { inputTokens: estimateAgentRequestTokens(request, 3), outputTokens: 20 }
       const events = isSummaryRequest(request)
-        ? textEvents("## Goal\nRead the book.")
+        ? textEvents(input.summary ?? "## Goal\nRead the book.")
         : input.script(request)
       const finishReason = events.some((event) => event.type === "tool-call")
         ? "tool-calls"
@@ -15843,6 +15845,9 @@ describe("context of a child and of a workflow step", () => {
       const [replayed] = childRequests.splice(0)
       expect(replayed && isSummaryRequest(replayed)).toBe(false)
       expectReplayedPrefix(secondRun.at(-1), replayed, CHILD.provider)
+      // Its summary sends it to no `sixb history`, which does not answer a child.
+      // Reproduce: read the child's thread as a conversation's in subagentThreadContext.
+      expect(JSON.stringify(replayed?.messages)).not.toContain("sixb history")
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()
@@ -15850,9 +15855,22 @@ describe("context of a child and of a workflow step", () => {
     }
   })
 
-  test("a child that comes back idle and large compacts its thread first", async () => {
-    // Reproduce: leave `idle` out of preflightSubagentContext; the continuation then replays the
-    // whole earlier run, about 225,000 tokens its cache no longer holds, and writes no checkpoint.
+  // Reproduce: leave `idle` out of preflightSubagentContext; the continuation then replays the
+  // whole earlier run, about 225,000 tokens its cache no longer holds, and writes no checkpoint.
+  // Write its summary as a conversation's (historyReadable in compactAgentConversation), and the
+  // child is told to run `sixb history`, which does not answer a child.
+  test.each([
+    {
+      summary: "longer than its room",
+      text: `## Goal\n${"Read the book.\n".repeat(3_000)}`,
+      kept: "[The summary was cut short here.]",
+    },
+    {
+      summary: "left empty",
+      text: "",
+      kept: "The summary could not be written.",
+    },
+  ])("a child that comes back idle and large compacts its thread first, its summary $summary", async (input) => {
     const ANSWER = "The second edition."
     const parentCalls: LanguageModelRequest[] = []
     const childRequests: LanguageModelRequest[] = []
@@ -15860,6 +15878,7 @@ describe("context of a child and of a workflow step", () => {
     const childModel = scriptedWindowModel({
       ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
       contextWindow: 400_000,
+      summary: input.text,
       requests: childRequests,
       script: (request) =>
         JSON.stringify(request.messages).includes(ANSWER)
@@ -15900,6 +15919,11 @@ describe("context of a child and of a workflow step", () => {
       expect(checkpoint).toMatchObject({ createdByRunId: second.child.id, reason: "threshold" })
       expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
       expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
+
+      // It goes on from what its summary kept, which sends it nowhere it cannot read.
+      const resumed = JSON.stringify(childRequests[1]?.messages)
+      expect(resumed).toContain(input.kept)
+      expect(resumed).not.toContain("sixb history")
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()
