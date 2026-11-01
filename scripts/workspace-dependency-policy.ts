@@ -50,6 +50,7 @@ const extensionRoots = new Set([
   "broker",
   "connectors",
   "deploy",
+  "env",
   "loggers",
   "queues",
   "sandboxes",

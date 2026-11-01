@@ -476,6 +476,18 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "env/doppler": {
+      "name": "@sixb/env-doppler",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "examples/auth": {
       "name": "@sixb/example-auth",
       "dependencies": {
@@ -1741,6 +1753,8 @@
     "@sixb/docs": ["@sixb/docs@workspace:apps/docs"],
 
     "@sixb/ducklake": ["@sixb/ducklake@workspace:storage/ducklake"],
+
+    "@sixb/env-doppler": ["@sixb/env-doppler@workspace:env/doppler"],
 
     "@sixb/example-auth": ["@sixb/example-auth@workspace:examples/auth"],
 

@@ -1,11 +1,17 @@
 # Environment variables
 
-List the variables your project needs in `sixb.env.ts`, so a missing one is named before anything runs. The file holds names only, so commit it.
+Keep your project's values in [Doppler](https://www.doppler.com) instead of sending `.env` files around. The repository lists the names, `sixb env pull` writes your `.env`, and your app reads `process.env` as it always has.
+
+## List what the project needs
+
+`sixb.env.ts` holds names only, so commit it:
 
 ```ts
 import { defineEnv } from "@sixb/core/env"
+import { doppler } from "@sixb/env-doppler"
 
 export default defineEnv({
+  source: doppler({ project: "client-a" }),
   vars: {
     DATABASE_URL: "required",
     LINKEDIN_CLIENT_SECRET: "prod",
@@ -17,14 +23,61 @@ export default defineEnv({
 | Rule | The variable must have a value |
 | --- | --- |
 | `required` | Everywhere |
-| `prod` | When `NODE_ENV` is `production` |
+| `prod` | In `prod`, and when `NODE_ENV` is `production` |
 | `optional` | Never. The name is only recorded |
 
-`sixb dev` and `sixb check` stop before starting when a variable has no value, and an empty value counts as none:
+`sixb dev` and `sixb check` stop before starting when a variable has no value, and an empty value counts as none. In a terminal, `sixb dev` offers to pull:
 
 ```text
-Missing DATABASE_URL, which sixb.env.ts requires.
-Add what's missing to the project's .env.
+Missing RESEND_API_KEY, which sixb.env.ts requires.
+Pull from dev now? (Y/n)
 ```
 
-A project without `sixb.env.ts` runs without these checks.
+`source` is optional. Without it you keep your own `.env`, and still get these checks. A project without `sixb.env.ts` runs without them.
+
+## Move a project over
+
+Create the project in Doppler, install the package and the [Doppler CLI](https://docs.doppler.com/docs/install-cli), then upload your current files:
+
+```bash
+bun add @sixb/env-doppler
+bun sixb env init client-a --dev .env --prod .env.prod
+```
+
+This uploads the values and writes `sixb.env.ts` with a first guess at each rule. Check the rules, commit the file, and delete `.env.prod`. It stops without changing anything if Doppler already has a different value for a name.
+
+## Work with the values
+
+| Task | How |
+| --- | --- |
+| Start on a project | `bun sixb env pull`. The first time, it signs you in to Doppler |
+| Get a teammate's change | `bun sixb env pull` |
+| Add or change a value | `bun sixb env set <NAME> --env <dev\|prod>`, or Doppler's dashboard |
+| See what's set | `bun sixb env status`, which never shows values |
+| Add or remove a teammate | Doppler's dashboard. When someone leaves, rotate what they could read |
+
+`sixb env set` asks for the value with a hidden prompt, or reads it from standard input, so it never lands in your shell's history.
+
+`sixb env status` reads names only, so it shows a value that was blanked in Doppler as set. A pull and a deploy still stop on it.
+
+Doppler accepts uppercase names only, and reads `${NAME}` in a value as a reference to another variable, which it resolves before `.env` is written. It refuses a reference it can't resolve, along with any other name or value it won't take, and says why.
+
+### Your `.env`
+
+`sixb env pull` replaces `.env`, so put your own overrides in `.env.local`, which takes priority. If you wrote the current `.env` by hand and it has values Doppler doesn't, the pull stops and names them rather than losing them. Pass `--force` to replace it anyway.
+
+A pull stops, leaving `.env` as it was, when a variable `sixb.env.ts` requires isn't in Doppler. It also stops, naming the variable, for a value a `.env` file can't hold: one with a carriage return, one ending in a backslash, or one using all of `'`, `"` and `` ` ``.
+
+### Production values
+
+`sixb env pull` writes `dev`, and refuses `prod` on your computer so production values stay on your servers. To read one, use Doppler's dashboard.
+
+## Tests in CI
+
+Give a test job that needs values a read-only token for `dev`, created in Doppler:
+
+```yaml
+- env:
+    DOPPLER_TOKEN: ${{ secrets.DOPPLER_DEV_TOKEN }}
+  run: bun sixb env pull
+```

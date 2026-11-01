@@ -137,6 +137,17 @@ Agent turns have no time or step limit: a turn runs until the agent answers or s
 
 When the agent [delegates](../models/overview.md#it-delegates), its sub-agents run in the same worker as its turn. Each agent worker runs up to 4 sub-agents at once, and one turn keeps up to 4 at work. Change them with `--subagent-concurrency` and `--subagent-concurrency-per-run`, or `SIXB_SUBAGENT_CONCURRENCY` and `SIXB_SUBAGENT_CONCURRENCY_PER_RUN`, on the same commands.
 
+## Environment variables
+
+Keep a project's values in one place. See [Environment variables](../deployment/environment-variables.md).
+
+| Command | Purpose |
+| --- | --- |
+| `sixb env init <project>` | Upload `--dev <file>` and `--prod <file>` to the source, and write `sixb.env.ts`. |
+| `sixb env pull` | Write `.env` from the source. |
+| `sixb env set <name> --env <dev\|prod>` | Set one value, from a hidden prompt or standard input. |
+| `sixb env status` | Show which variables have values, without showing them. |
+
 ## Deploy commands
 
 Run these from a project with a `sixb.deploy.ts`. See [Deploy to a server](../deployment/servers.md).
