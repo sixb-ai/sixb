@@ -56,12 +56,13 @@ configuration:
 | Last system block | Later turns of a thread, even when replayed history differs |
 | Conversation tail (automatic caching) | The next agent step, which only appends |
 
-One-shot requests, with no tools and no earlier answer, such as compaction summaries and
-`generate()`, stay uncached: nothing reads their prefix again, and a cache write costs 1.25x input.
-Pass `caching: "auto"` to cache one anyway, or `caching: "off"` to send no breakpoints. Agent
-steps keep the five-minute TTL, except a chat turn's: the user's next message can come after a
-pause, so its breakpoints ask for an hour (a one-hour write costs 2x input, and only what the step
-adds is written). A `cache_control` in the binding's `request`, as above, sets the TTL for every
+One-shot requests, with no tools and no earlier answer, such as `generate()`, stay uncached:
+nothing reads their prefix again, and a cache write costs 1.25x input. A compaction summary
+continues its conversation's cached request, so it reads that cache and keeps its lifetime. Pass
+`caching: "auto"` to cache a one-shot request anyway, or `caching: "off"` to send no breakpoints.
+Agent steps keep the five-minute TTL, except a chat turn's, and a sub-agent's that can wait on an
+approval: their next read can come after a human pause, so their breakpoints ask for an hour (a
+one-hour write costs 2x input, and only what the step adds is written). A `cache_control` in the binding's `request`, as above, sets the TTL for every
 breakpoint, since Anthropic requires longer TTLs first.
 
 `reasoning` is the level Sixb applies when the model runs without an explicit choice; Sixb checks
