@@ -254,6 +254,11 @@ const AgentToolCallBaseSchema = z.object({
 const AgentToolCallOutputSchema = AgentToolCallBaseSchema.extend({
   state: z.literal("output-available"),
   output: JsonValueSchema,
+  /**
+   * The whole output, when it was too large for the model's context: `output` is then a bounded
+   * copy. Its content is served at `/parts/<index>/outputFile/fileRef` of the message.
+   */
+  outputFile: z.object({ fileRef: FileRefSchema, path: z.string() }).optional(),
 })
 
 const AgentToolCallErrorSchema = AgentToolCallBaseSchema.extend({

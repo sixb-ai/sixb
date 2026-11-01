@@ -4,12 +4,7 @@ import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000
-/**
- * What each stream keeps, in UTF-16 code units. The model reads an output past
- * `TOOL_OUTPUT_FILE_MIN_BYTES` as a preview and the whole of it in a file (see tool-outputs.ts), so
- * this bounds only what one call stores and streams to the app: as much as the Azure guest returns.
- */
-const DEFAULT_MAX_OUTPUT_CHARS = 1_048_576
+const DEFAULT_MAX_OUTPUT_CHARS = 20_000
 
 export const BASH_TOOL_SPEC = {
   name: "bash",
@@ -46,6 +41,9 @@ export interface BashToolOutput extends CommandResult {
  * resolver is awaited on the first command, not at tool-construction time, so
  * sandbox creation can run concurrently with the model's first response instead
  * of blocking the turn. A resolver rejection surfaces as a failed command.
+ *
+ * Its output holds the command's streams whole: the run's tools save an output too large for the
+ * context to a file and keep {@link keptCommandOutput} of it (see tool-outputs.ts).
  */
 export function createBashTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>
@@ -61,7 +59,12 @@ export function createBashTool(
         timeout: normalizeTimeout(input.timeoutMs),
         signal,
       })
-      return truncateCommandResult(result) as unknown as JsonValue
+      const output: BashToolOutput = {
+        ...result,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }
+      return output as unknown as JsonValue
     },
     errorText: () => "The command failed.",
   }
@@ -98,6 +101,14 @@ function normalizeTimeout(timeoutMs: number | undefined): number {
     return DEFAULT_COMMAND_TIMEOUT_MS
   }
   return Math.min(Math.floor(timeoutMs), MAX_COMMAND_TIMEOUT_MS)
+}
+
+/**
+ * What a command's message part keeps of an output saved to a file: each stream within
+ * 20,000 characters, as the app, the TUI and `sixb history` show it.
+ */
+export function keptCommandOutput(output: CommandResult): BashToolOutput {
+  return truncateCommandResult(output)
 }
 
 function truncateCommandResult(result: CommandResult): BashToolOutput {

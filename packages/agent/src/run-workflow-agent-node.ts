@@ -294,14 +294,14 @@ export async function runWorkflowAgentNode(
       }),
       modelId: input.plan.model.modelId,
       finishReason,
-      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails, input.context.outputFileOf),
     }
   } catch (cause) {
     throwIfEnvironmentFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,
-      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails, input.context.outputFileOf),
       cause,
     })
   }

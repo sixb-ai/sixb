@@ -153,6 +153,12 @@ export type AgentToolCallPart = AgentToolCallBase &
         readonly modelOutput?:
           | { readonly type: "text"; readonly value: string }
           | { readonly type: "json"; readonly value: JsonValue }
+        /**
+         * The whole output, when it was too large for the model's context: a stored file, and
+         * where the run's sandbox holds it, relative to its context directory. `output` then keeps
+         * a bounded copy, and the model read a preview with that path.
+         */
+        readonly outputFile?: { readonly fileRef: FileRef; readonly path: string }
       }
     | { readonly state: "output-error"; readonly errorText: string }
   )

@@ -195,7 +195,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       runId,
       role: "assistant",
       parts: markReducedSteps(
-        agentTraceFromModelSteps(finishedSteps, { threadId: run.threadId, runId }),
+        agentTraceFromModelSteps(
+          finishedSteps,
+          { threadId: run.threadId, runId },
+          context.outputFileOf
+        ),
         guard?.reducedFromStep()
       ),
       ...(context.authorPrincipal === undefined
@@ -258,11 +262,17 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     interruptedParts = markReducedSteps(
       result.status === "aborted"
-        ? agentTraceFromPartialModelLoop(result.steps, result.partialContent, {
-            threadId: run.threadId,
-            runId,
-          })
-        : agentTraceFromModelSteps(result.steps, { threadId: run.threadId, runId }),
+        ? agentTraceFromPartialModelLoop(
+            result.steps,
+            result.partialContent,
+            { threadId: run.threadId, runId },
+            context.outputFileOf
+          )
+        : agentTraceFromModelSteps(
+            result.steps,
+            { threadId: run.threadId, runId },
+            context.outputFileOf
+          ),
       guard?.reducedFromStep()
     )
 
