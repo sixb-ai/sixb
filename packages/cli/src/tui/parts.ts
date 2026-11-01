@@ -43,6 +43,8 @@ export interface ShownMessage {
   readonly parts: readonly Part[]
   /** How the held calls before it ended: not shown, but the calls' own lines say it. */
   readonly outcomes: readonly ApprovalOutcome[]
+  /** Its run condensed the conversation first; `contextFull` when the provider refused it whole. */
+  readonly compaction?: { readonly contextFull: boolean }
   readonly createdAt: string
 }
 
@@ -109,6 +111,9 @@ export function shownMessage(message: StoredMessage): ShownMessage | null {
     runId: message.runId,
     parts,
     outcomes,
+    ...(message.compaction
+      ? { compaction: { contextFull: message.compaction.reason === "overflow" } }
+      : {}),
     createdAt: message.createdAt,
   }
 }
@@ -132,6 +137,8 @@ export interface LiveRun {
   readonly stepStart: number
   readonly working: boolean
   readonly compacting: boolean
+  /** The condensing follows a request the provider refused as too long: the turn goes on after. */
+  readonly contextFull: boolean
   /** Set once the run's answer is stored: the transcript then shows it. */
   readonly finalized: boolean
   readonly finished?: { readonly status: string; readonly error?: string }
@@ -146,6 +153,7 @@ export function liveRun(runId: string): LiveRun {
     stepStart: 0,
     working: true,
     compacting: false,
+    contextFull: false,
     finalized: false,
   }
 }
@@ -155,10 +163,10 @@ export function reduceLive(state: LiveRun, event: AgentRunStreamEvent): LiveRun 
     case "agent.run.started":
       return { ...state, working: true }
     case "agent.compaction.started":
-      return { ...state, compacting: true }
+      return { ...state, compacting: true, contextFull: event.reason === "overflow" }
     case "agent.compaction.completed":
     case "agent.compaction.failed":
-      return { ...state, compacting: false }
+      return { ...state, compacting: false, contextFull: false }
     case "agent.ui.chunk":
       return reduceChunk(state, event.chunk)
     case "agent.message.finalized":
@@ -168,6 +176,7 @@ export function reduceLive(state: LiveRun, event: AgentRunStreamEvent): LiveRun 
         ...state,
         working: false,
         compacting: false,
+        contextFull: false,
         finished: {
           status: event.status,
           ...(event.error ? { error: event.error.message } : {}),
