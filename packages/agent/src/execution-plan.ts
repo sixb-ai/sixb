@@ -32,6 +32,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly ontologyDocs: RenderedOntologyDocs
   /** What the project's runs measured of the model's tokenizer lately, newest first. */
   readonly tokenRates?: readonly AgentContextTokenRateSample[]
+  /** At most this many model calls. Absent: it runs until its model answers. */
+  readonly maxSteps?: number
 }
 
 /**
@@ -42,7 +44,16 @@ export function resolveRunPlan(
   plan: AgentRunPlan,
   resolved: { readonly model: LanguageModel }
 ): ResolvedAgentExecutionPlan {
-  const { reasoning, instructions, timeZone, locale, sandboxModels, ontologyDocs, tools } = plan
+  const {
+    reasoning,
+    instructions,
+    timeZone,
+    locale,
+    sandboxModels,
+    ontologyDocs,
+    tools,
+    maxSteps,
+  } = plan
   return Object.freeze({
     model: resolved.model,
     ontologyDocs,
@@ -54,5 +65,6 @@ export function resolveRunPlan(
     ...(timeZone === undefined ? {} : { timeZone }),
     ...(locale === undefined ? {} : { locale }),
     ...(sandboxModels.length ? { sandboxModels } : {}),
+    ...(maxSteps === undefined ? {} : { maxSteps }),
   })
 }

@@ -1322,6 +1322,7 @@
                   "runtime.cancelled",
                   "agent.context_limit_exceeded",
                   "agent.execution_failed",
+                  "agent.step_limit_reached",
                   "ai.usage_limit_exceeded",
                   "ai.usage_limit_unavailable"
                 ]
@@ -1560,6 +1561,7 @@
                   "runtime.cancelled",
                   "agent.context_limit_exceeded",
                   "agent.execution_failed",
+                  "agent.step_limit_reached",
                   "ai.usage_limit_exceeded",
                   "ai.usage_limit_unavailable"
                 ]
@@ -26029,6 +26031,7 @@
                                               "agent.approval_authority_lost",
                                               "agent.context_limit_exceeded",
                                               "agent.execution_failed",
+                                              "agent.step_limit_reached",
                                               "ai.usage_limit_exceeded",
                                               "ai.usage_limit_unavailable",
                                               "connector.adapter_invalid",
@@ -26689,6 +26692,7 @@
                             "runtime.cancelled",
                             "agent.context_limit_exceeded",
                             "agent.execution_failed",
+                            "agent.step_limit_reached",
                             "ai.usage_limit_exceeded",
                             "ai.usage_limit_unavailable"
                           ]
@@ -33945,6 +33949,7 @@
                         "agent.approval_authority_lost",
                         "agent.context_limit_exceeded",
                         "agent.execution_failed",
+                        "agent.step_limit_reached",
                         "ai.usage_limit_exceeded",
                         "ai.usage_limit_unavailable",
                         "connector.adapter_invalid",
@@ -38757,6 +38762,7 @@
                                                     "agent.approval_authority_lost",
                                                     "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
+                                                    "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
                                                     "connector.adapter_invalid",
@@ -40472,6 +40478,7 @@
                                 "runtime.cancelled",
                                 "agent.context_limit_exceeded",
                                 "agent.execution_failed",
+                                "agent.step_limit_reached",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
                               ]
@@ -41268,6 +41275,7 @@
                                 "runtime.cancelled",
                                 "agent.context_limit_exceeded",
                                 "agent.execution_failed",
+                                "agent.step_limit_reached",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
                               ]
@@ -41758,6 +41766,7 @@
                                 "runtime.cancelled",
                                 "agent.context_limit_exceeded",
                                 "agent.execution_failed",
+                                "agent.step_limit_reached",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
                               ]
@@ -42545,6 +42554,7 @@
                                   "runtime.cancelled",
                                   "agent.context_limit_exceeded",
                                   "agent.execution_failed",
+                                  "agent.step_limit_reached",
                                   "ai.usage_limit_exceeded",
                                   "ai.usage_limit_unavailable"
                                 ]
@@ -42979,6 +42989,7 @@
                             "runtime.cancelled",
                             "agent.context_limit_exceeded",
                             "agent.execution_failed",
+                            "agent.step_limit_reached",
                             "ai.usage_limit_exceeded",
                             "ai.usage_limit_unavailable"
                           ]
@@ -43413,6 +43424,7 @@
                                 "runtime.cancelled",
                                 "agent.context_limit_exceeded",
                                 "agent.execution_failed",
+                                "agent.step_limit_reached",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
                               ]
@@ -45270,6 +45282,7 @@
                                           "agent.approval_authority_lost",
                                           "agent.context_limit_exceeded",
                                           "agent.execution_failed",
+                                          "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
                                           "connector.adapter_invalid",
@@ -45894,6 +45907,7 @@
                                         "agent.approval_authority_lost",
                                         "agent.context_limit_exceeded",
                                         "agent.execution_failed",
+                                        "agent.step_limit_reached",
                                         "ai.usage_limit_exceeded",
                                         "ai.usage_limit_unavailable",
                                         "connector.adapter_invalid",
@@ -46271,6 +46285,7 @@
                                 "runtime.cancelled",
                                 "agent.context_limit_exceeded",
                                 "agent.execution_failed",
+                                "agent.step_limit_reached",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
                               ]
@@ -46863,6 +46878,7 @@
                                           "agent.approval_authority_lost",
                                           "agent.context_limit_exceeded",
                                           "agent.execution_failed",
+                                          "agent.step_limit_reached",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
                                           "connector.adapter_invalid",
@@ -47699,6 +47715,7 @@
                                                     "agent.approval_authority_lost",
                                                     "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
+                                                    "agent.step_limit_reached",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
                                                     "connector.adapter_invalid",
@@ -48960,6 +48977,7 @@
                                   "runtime.cancelled",
                                   "agent.context_limit_exceeded",
                                   "agent.execution_failed",
+                                  "agent.step_limit_reached",
                                   "ai.usage_limit_exceeded",
                                   "ai.usage_limit_unavailable"
                                 ]

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { type AgentRunPlanDefinitions, type AgentRunView, readAgentRunPlan } from "../src/agents"
+import {
+  type AgentRunPlanDefinitions,
+  type AgentRunView,
+  readAgentRunPlan,
+  UNATTENDED_AGENT_MAX_STEPS,
+} from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import type { AgentSkillDefinition } from "../src/agents/skills"
 import type { AgentToolDefinition } from "../src/agents/types"
@@ -45,7 +50,13 @@ const tools = new Map<string, AgentToolDefinition>([
   ["export", exporter],
 ])
 
-function definitions(input: { readonly instructions?: string } = {}): AgentRunPlanDefinitions {
+function definitions(
+  input: {
+    readonly instructions?: string
+    readonly maxSteps?: number
+    readonly subagentMaxSteps?: number
+  } = {}
+): AgentRunPlanDefinitions {
   const models = createModelCatalog({
     language: [model("default", "low"), model("selected")],
   })
@@ -54,6 +65,8 @@ function definitions(input: { readonly instructions?: string } = {}): AgentRunPl
       skills: { list: () => [invoiceReview], getByName: () => invoiceReview },
       ontologyDocs: createOntologyDocsCatalog({ objectTypes: [] }),
       ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+      ...(input.maxSteps === undefined ? {} : { maxSteps: input.maxSteps }),
+      ...(input.subagentMaxSteps === undefined ? {} : { subagentMaxSteps: input.subagentMaxSteps }),
     },
     models,
     tools: { list: () => [lookup, exporter], getByName: (name: string) => tools.get(name) ?? null },
@@ -117,6 +130,20 @@ describe("a turn's plan", () => {
     expect(readAgentRunPlan(definitions(), turn(noReasoning), VIEW)).not.toHaveProperty("reasoning")
   })
 
+  // Proven by removal: drop `maxSteps` from the turn's plan, or default it like a child's.
+  test("runs until its model answers unless the project sets maxSteps", () => {
+    expect(readAgentRunPlan(definitions(), turn(), VIEW)).not.toHaveProperty("maxSteps")
+    expect(readAgentRunPlan(definitions({ maxSteps: 40 }), turn(), VIEW).maxSteps).toBe(40)
+
+    // What it may hand a child: the project's limit, else the default.
+    expect(readAgentRunPlan(definitions(), turn(), VIEW).delegation?.maxSteps).toBe(
+      UNATTENDED_AGENT_MAX_STEPS
+    )
+    expect(
+      readAgentRunPlan(definitions({ subagentMaxSteps: 80 }), turn(), VIEW).delegation?.maxSteps
+    ).toBe(80)
+  })
+
   test("fails closed when its model is gone", () => {
     expect(() =>
       readAgentRunPlan(
@@ -150,5 +177,29 @@ describe("a child's plan", () => {
       tools: [{ name: "lookup" }],
       timeZone: "Europe/Paris",
     })
+  })
+
+  // Proven by removal: drop the `Math.min` and a spawn's maxSteps outlives a lower project limit;
+  // drop the default and an unconfigured child runs without one.
+  test("stops at what its spawn asked for, within the project's limit", () => {
+    const child = (maxSteps?: number) =>
+      ({
+        id: "run_1-child",
+        kind: "subagent",
+        parentRunId: "run_1",
+        spec: {
+          model: { provider: "test", modelId: "selected" },
+          task: "Look west.",
+          toolNames: [],
+          ...(maxSteps === undefined ? {} : { maxSteps }),
+        },
+      }) as unknown as AgentRunRecord
+
+    expect(readAgentRunPlan(definitions(), child(), VIEW).maxSteps).toBe(UNATTENDED_AGENT_MAX_STEPS)
+    expect(readAgentRunPlan(definitions({ subagentMaxSteps: 80 }), child(), VIEW).maxSteps).toBe(80)
+    expect(readAgentRunPlan(definitions(), child(20), VIEW).maxSteps).toBe(20)
+    expect(readAgentRunPlan(definitions({ subagentMaxSteps: 10 }), child(20), VIEW).maxSteps).toBe(
+      10
+    )
   })
 })

@@ -472,6 +472,7 @@ export type AgentChild = {
       | "runtime.cancelled"
       | "agent.context_limit_exceeded"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
     message: string
@@ -563,6 +564,7 @@ export type AgentChildRun = {
       | "runtime.cancelled"
       | "agent.context_limit_exceeded"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
     message: string
@@ -8793,6 +8795,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "agent.approval_authority_lost"
                     | "agent.context_limit_exceeded"
                     | "agent.execution_failed"
+                    | "agent.step_limit_reached"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
                     | "connector.adapter_invalid"
@@ -9065,6 +9068,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
         | "runtime.cancelled"
         | "agent.context_limit_exceeded"
         | "agent.execution_failed"
+        | "agent.step_limit_reached"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
       message: string
@@ -11401,6 +11405,7 @@ export type RequestActionErrors = {
       | "agent.approval_authority_lost"
       | "agent.context_limit_exceeded"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
       | "connector.adapter_invalid"
@@ -13159,6 +13164,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
                       | "connector.adapter_invalid"
@@ -13693,6 +13699,7 @@ export type PostAgentThreadMessageResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -13979,6 +13986,7 @@ export type CancelAgentRunResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14182,6 +14190,7 @@ export type RetryAgentRunResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14445,6 +14454,7 @@ export type ListAgentThreadRunsResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14612,6 +14622,7 @@ export type GetAgentRunResponses = {
         | "runtime.cancelled"
         | "agent.context_limit_exceeded"
         | "agent.execution_failed"
+        | "agent.step_limit_reached"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
       message: string
@@ -14791,6 +14802,7 @@ export type CancelAgentRunByIdResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -15434,6 +15446,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -15668,6 +15681,7 @@ export type DecideAgentApprovalResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -15825,6 +15839,7 @@ export type DecideAgentApprovalResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -16006,6 +16021,7 @@ export type ListAgentApprovalsResponses = {
                 | "agent.approval_authority_lost"
                 | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -16327,6 +16343,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "agent.approval_authority_lost"
                       | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
+                      | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
                       | "connector.adapter_invalid"
@@ -16824,6 +16841,7 @@ export type ListObservedAgentThreadRunsResponses = {
           | "runtime.cancelled"
           | "agent.context_limit_exceeded"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string

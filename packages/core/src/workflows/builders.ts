@@ -141,7 +141,13 @@ export function defineAgentStep<const TId extends string>(
       `Agent step "${id}" reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
-  const { model, reasoning, instructions } = config
+  if (
+    config.maxSteps !== undefined &&
+    (!Number.isSafeInteger(config.maxSteps) || config.maxSteps <= 0)
+  ) {
+    throw new WorkflowDefinitionError(`Agent step "${id}" maxSteps must be a positive integer.`)
+  }
+  const { model, reasoning, maxSteps, instructions } = config
   const groupIds = groupIdsFromAgentStepConfig(id, config)
   const toolNames = toolNamesFromAgentStepConfig(id, config)
   const skillNames = skillNamesFromAgentStepConfig(id, config)
@@ -161,6 +167,7 @@ export function defineAgentStep<const TId extends string>(
                 id,
                 ...(model === undefined ? {} : { model }),
                 ...(reasoning === undefined ? {} : { reasoning }),
+                ...(maxSteps === undefined ? {} : { maxSteps }),
                 instructions,
                 groupIds,
                 toolNames,

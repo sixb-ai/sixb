@@ -1193,6 +1193,7 @@ export type {
   AgentMessagePart,
   AgentMessagePartType,
   AgentMessageRole,
+  AgentOptions,
   AgentProjectFile,
   AgentProviderStatePart,
   AgentReasoning,
