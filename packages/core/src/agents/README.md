@@ -98,6 +98,11 @@ by `run-session-serve.ts`). Each operation is one request to `/api/agent-runs/:r
 with the runner token its claim returned, and the server answers it with the in-process session's
 own code: what it checks, fences and records is the same wherever the runner is.
 
+The session reads each body itself, up to `AGENT_RUN_SESSION_BODY_MAX_BYTES` (40 MiB: a model call
+with its inline images and a window of text), once the runner is admitted; the server lifts its
+1 MiB default for it then. A request past that fails the run with a reason, as the runner could not
+record that end itself.
+
 The runner token is not the run token. The sandbox's credential adds the run token to every call
 its commands make under `/api/`, so a command that reached the session could finish the run, write
 its messages or call its models. Both are signed under the run's execution, for different purposes:
