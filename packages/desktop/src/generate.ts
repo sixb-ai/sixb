@@ -5,7 +5,6 @@ import { readAppIdentity } from "./identity"
 import { drawMacIcon } from "./mac-icon"
 import { run } from "./run"
 import type { ShellConfig } from "./shell/navigation"
-import { HIDDEN_TITLE_BAR_PRELOAD } from "./shell/window"
 
 export interface DesktopAppOptions {
   /** The Sixb project. The desktop app is generated under its `.sixb/desktop`. */
@@ -62,7 +61,6 @@ export async function writeDesktopApp(options: DesktopAppOptions): Promise<Gener
   await Promise.all([
     writeFile(join(dir, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`),
     writeFile(join(dir, "shell.json"), `${JSON.stringify(config, null, 2)}\n`),
-    writeFile(join(dir, "preload.js"), HIDDEN_TITLE_BAR_PRELOAD),
     writeFile(join(dir, "index.html"), renderShellPage(template, { ...config, icon: !!icon })),
   ])
 
@@ -73,10 +71,11 @@ export async function writeDesktopApp(options: DesktopAppOptions): Promise<Gener
       process.execPath,
       "build",
       join(SHELL_SOURCE_DIR, "main.ts"),
+      join(SHELL_SOURCE_DIR, "preload.ts"),
       "--target=node",
       "--format=cjs",
       "--external=electron",
-      `--outfile=${join(dir, "main.js")}`,
+      `--outdir=${dir}`,
     ],
     "Could not compile the desktop shell."
   )

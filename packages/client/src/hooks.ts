@@ -36,6 +36,7 @@ export {
   type UseAgentRunStreamResult,
   useAgentRunStream,
 } from "./useAgentRunStream"
+export { type DesktopPlatform, type SixbDesktop, useDesktop } from "./useDesktop"
 export {
   type UserLookupInput,
   type UseUserOptions,
