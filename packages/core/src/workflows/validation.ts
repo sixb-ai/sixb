@@ -64,6 +64,7 @@ export function isAgentStepDefinition(value: unknown): value is AgentStepDefinit
       isLanguageModelTier(value.model) ||
       isLanguageModel(value.model)) &&
     (value.reasoning === undefined || isModelReasoning(value.reasoning)) &&
+    (value.maxSteps === undefined || Number.isSafeInteger(value.maxSteps)) &&
     typeof value.instructions === "string" &&
     isStringArray(value.groupIds) &&
     isStringArray(value.toolNames) &&

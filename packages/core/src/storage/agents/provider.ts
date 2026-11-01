@@ -567,6 +567,15 @@ export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, pref
       `[${prefix}] Subagent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
+  if (
+    input.spec.maxSteps !== undefined &&
+    (!Number.isSafeInteger(input.spec.maxSteps) || input.spec.maxSteps < 1)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run 'maxSteps' must be a positive safe integer.`
+    )
+  }
   assertApprovalModeField(input.spec.approvalMode, "Subagent run", prefix)
 
   assertSubagentRunFiles(input.spec.files, "spec.files", prefix)

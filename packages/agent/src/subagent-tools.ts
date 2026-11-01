@@ -94,6 +94,8 @@ export interface SpawnSubagentInput {
   readonly task: string
   readonly model?: LanguageModelRef | LanguageModelTier
   readonly reasoning?: AgentReasoning
+  /** At most this many steps, fewer than the project's limit. */
+  readonly maxSteps?: number
   /** Files and directories in the parent's sandbox, copied into the child's at the same paths. */
   readonly files?: readonly string[]
 }
@@ -143,6 +145,8 @@ export interface WaitedSubagentResult {
   /** The question it waits on: answer it with `message_agent` and its key. */
   readonly question?: QuestionRef
   readonly error?: { readonly code: string; readonly message: string }
+  /** The last text a child its step limit stopped wrote: what it found so far, or where it was. */
+  readonly partialAnswer?: string
   /** Calls it made that wait for the user's approval. */
   readonly awaitingApproval?: readonly AgentChildApprovalAwaiting[]
   /**
@@ -372,6 +376,7 @@ export class SubagentCoordinator {
         ...modelChoice(this.models).advice,
         OMIT_MODEL,
         `Pass files to copy files or directories of your sandbox into the child's, at the same paths, before it starts. What the child writes to out/ comes back with wait_agent's result when it finishes, which lists where each file is.`,
+        `A child that has not answered after ${this.models.maxSteps} steps (model calls) stops and fails with agent.step_limit_reached; pass maxSteps to stop it sooner.`,
         `At most ${this.context.subagentConcurrencyPerRun} child agents may be active for this run.`,
       ].join("\n"),
       inputSchema: spawnInputSchema(this.models),
@@ -390,6 +395,7 @@ export class SubagentCoordinator {
         "Shortly before this run must end, it returns children still at work as queued or running, so you can answer with what the others found.",
         "A child paused on calls that wait for the user's approval returns as awaiting_approval, with those calls: it continues once the user decides, unless the user sends a new message or stops instead.",
         "A message you sent a child that it has not read is listed in its unread. When one came as it answered, earlierAnswer holds what it answered before, and text what it wrote after.",
+        "A child that failed with agent.step_limit_reached did not finish: partialAnswer holds the last text it wrote.",
         "It returns as soon as a child of this turn asks you a question, listed in questions with its key, whichever children you wait for: the child waits for your answer, which you give with message_agent.",
       ].join("\n"),
       inputSchema: waitInputSchema(this.context.subagentConcurrencyPerRun),
@@ -724,12 +730,13 @@ export class SubagentCoordinator {
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
     const reasoning = input.reasoning ?? model.defaultReasoning
+    const maxSteps = this.resolveMaxSteps(input.maxSteps)
     const sources = input.files?.length
       ? await listHandedSources({ files: this.runFiles(), paths: input.files, signal })
       : undefined
     const runId = createSubagentRunId(this.parentRun.id, key)
     const specWith = (files: readonly SubagentRunFile[] | undefined) =>
-      this.childSpec({ task, model, tier: model.tier, reasoning, files })
+      this.childSpec({ task, model, tier: model.tier, reasoning, maxSteps, files })
 
     // One admission at a time: only this turn adds children to it, so admission's answer is known
     // before any file is read, and a refused spawn reads and stores none.
@@ -832,6 +839,7 @@ export class SubagentCoordinator {
       model: paused.spec.model,
       tier: paused.spec.tier,
       reasoning: paused.spec.reasoning,
+      maxSteps: paused.spec.maxSteps,
       files: paused.spec.files,
     })
     const createdAt = new Date()
@@ -858,9 +866,10 @@ export class SubagentCoordinator {
     readonly model: LanguageModelRef
     readonly tier: LanguageModelTier | undefined
     readonly reasoning: AgentReasoning | undefined
+    readonly maxSteps: number | undefined
     readonly files: readonly SubagentRunFile[] | undefined
   }): SubagentRunSpec {
-    const { task, model, tier, reasoning, files } = input
+    const { task, model, tier, reasoning, maxSteps, files } = input
     const { approvalMode, timeZone, locale } = this.parentRun.spec ?? {}
     return {
       model: { provider: model.provider, modelId: model.modelId },
@@ -868,6 +877,7 @@ export class SubagentCoordinator {
       toolNames: this.delegation.toolNames,
       ...(tier === undefined ? {} : { tier }),
       ...(reasoning === undefined ? {} : { reasoning }),
+      ...(maxSteps === undefined ? {} : { maxSteps }),
       ...(approvalMode === undefined ? {} : { approvalMode }),
       ...(timeZone === undefined ? {} : { timeZone }),
       ...(locale === undefined ? {} : { locale }),
@@ -955,7 +965,12 @@ export class SubagentCoordinator {
       if (children.every(isTerminalSubagent) || asked) {
         const awaiting = await this.session.children.awaitingApproval(runIds)
         const delivered = await this.deliverFiles(children, signal)
-        const messages = await Promise.all(children.map((run) => this.messagesTo(run)))
+        const messages = await Promise.all(
+          children.map(async (run) => ({
+            ...(await this.messagesTo(run)),
+            ...(await this.partialAnswerOf(run)),
+          }))
+        )
         // It lists the questions it returns first, and those its children wait on.
         const listed = asking.filter(
           (question) => !this.#reported.has(question.id) || runIds.includes(question.runId)
@@ -1019,6 +1034,27 @@ export class SubagentCoordinator {
         run.result?.text ?? ""
       ),
     }
+  }
+
+  /**
+   * What a child its step limit stopped wrote last, from its thread: its failure says it did not
+   * finish, and its parent decides whether this is enough.
+   */
+  private async partialAnswerOf(
+    run: SubagentRunRecord
+  ): Promise<Pick<WaitedSubagentResult, "partialAnswer">> {
+    if (run.status !== "failed" || run.error?.code !== "agent.step_limit_reached") return {}
+
+    const { messages } = await this.session.threads.messages({
+      threadId: run.threadId,
+      order: "asc",
+    })
+    const written = messages
+      .filter((message) => message.runId === run.id && message.role === "assistant")
+      .flatMap((message) => message.parts)
+      .flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+    const partialAnswer = written.at(-1)
+    return partialAnswer ? { partialAnswer } : {}
   }
 
   /**
@@ -1149,6 +1185,17 @@ export class SubagentCoordinator {
     return this.#runFiles
   }
 
+  /** A spawn may ask for fewer steps than the project allows, never more. */
+  private resolveMaxSteps(maxSteps: number | undefined): number | undefined {
+    const limit = this.models.maxSteps
+    if (maxSteps !== undefined && maxSteps > limit) {
+      throw new AgentToolPublicError(
+        `[SixbAgent] spawn_agent maxSteps must be at most ${limit}, the project's limit. Omit it to use that limit.`
+      )
+    }
+    return maxSteps
+  }
+
   private resolveModel(
     ref: LanguageModelRef | LanguageModelTier | undefined
   ): AgentRunDelegationModel {
@@ -1272,6 +1319,13 @@ function spawnInputSchema(models: AgentRunDelegation): JsonObject {
             additionalProperties: false,
           },
         ],
+      },
+      maxSteps: {
+        type: "integer",
+        minimum: 1,
+        maximum: models.maxSteps,
+        description:
+          "At most this many steps (model calls) for the child. Omit it to use the limit.",
       },
       files: {
         type: "array",
@@ -1518,10 +1572,12 @@ function errorMessage(error: unknown): string {
 function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (
     !isJsonObject(value) ||
-    Object.keys(value).some((key) => !["key", "task", "model", "reasoning", "files"].includes(key))
+    Object.keys(value).some(
+      (key) => !["key", "task", "model", "reasoning", "maxSteps", "files"].includes(key)
+    )
   ) {
     throw new AgentToolPublicError(
-      "[SixbAgent] spawn_agent expects key, task, and optional model/reasoning/files."
+      "[SixbAgent] spawn_agent expects key, task, and optional model/reasoning/maxSteps/files."
     )
   }
   const key = requireNonEmpty("spawn_agent", value.key, "key", 128)
@@ -1549,12 +1605,21 @@ function parseSpawnInput(value: unknown): SpawnSubagentInput {
   if (value.reasoning !== undefined && !isModelReasoning(value.reasoning)) {
     throw new AgentToolPublicError("[SixbAgent] spawn_agent reasoning is invalid.")
   }
+  if (
+    value.maxSteps !== undefined &&
+    (typeof value.maxSteps !== "number" ||
+      !Number.isSafeInteger(value.maxSteps) ||
+      value.maxSteps < 1)
+  ) {
+    throw new AgentToolPublicError("[SixbAgent] spawn_agent maxSteps must be a positive integer.")
+  }
   const files = parseSpawnFiles(value.files)
   return {
     key,
     task,
     ...(model === undefined ? {} : { model }),
     ...(value.reasoning === undefined ? {} : { reasoning: value.reasoning }),
+    ...(value.maxSteps === undefined ? {} : { maxSteps: value.maxSteps }),
     ...(files === undefined ? {} : { files }),
   }
 }

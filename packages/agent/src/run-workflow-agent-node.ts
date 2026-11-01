@@ -134,6 +134,7 @@ export async function runWorkflowAgentNode(
       ],
       tools: input.context.tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
+      ...(input.plan.maxSteps === undefined ? {} : { maxSteps: input.plan.maxSteps }),
       ...(input.context.prepareStep === undefined
         ? {}
         : { prepareStep: input.context.prepareStep }),
@@ -149,6 +150,18 @@ export async function runWorkflowAgentNode(
 
     const researchText = research.output
     finishReason = coerceAgentRunFinishReason(research.finishReason) ?? "unknown"
+    // Its last step ran tools, so its text is no answer to structure.
+    if (research.stepLimitReached) {
+      const remedy = "Narrow the step's prompt, or raise its maxSteps."
+      throw withFailureMessage(
+        createSixbError(
+          "agent.step_limit_reached",
+          `[SixbAgent] Workflow agent step '${input.agentStepId}' stopped after ${research.steps.length} steps before finishing its answer. ${remedy}`,
+          { details: traceDetails }
+        ),
+        `The agent stopped after ${research.steps.length} steps before finishing its answer. ${remedy}`
+      )
+    }
     // A cut-short answer would be structured as if it were complete; its text is never passed on.
     if (finishReason === "length") {
       const remedy =

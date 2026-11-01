@@ -471,6 +471,7 @@ export type AgentChild = {
       | "internal.unexpected"
       | "runtime.cancelled"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
     message: string
@@ -561,6 +562,7 @@ export type AgentChildRun = {
       | "internal.unexpected"
       | "runtime.cancelled"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
     message: string
@@ -8790,6 +8792,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "action.timeout"
                     | "agent.approval_authority_lost"
                     | "agent.execution_failed"
+                    | "agent.step_limit_reached"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
                     | "connector.adapter_invalid"
@@ -9050,6 +9053,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
         | "internal.unexpected"
         | "runtime.cancelled"
         | "agent.execution_failed"
+        | "agent.step_limit_reached"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
       message: string
@@ -11385,6 +11389,7 @@ export type RequestActionErrors = {
       | "action.timeout"
       | "agent.approval_authority_lost"
       | "agent.execution_failed"
+      | "agent.step_limit_reached"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
       | "connector.adapter_invalid"
@@ -13142,6 +13147,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "action.timeout"
                       | "agent.approval_authority_lost"
                       | "agent.execution_failed"
+                      | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
                       | "connector.adapter_invalid"
@@ -13660,6 +13666,7 @@ export type PostAgentThreadMessageResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -13945,6 +13952,7 @@ export type CancelAgentRunResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14147,6 +14155,7 @@ export type RetryAgentRunResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14316,6 +14325,7 @@ export type ListAgentThreadRunsResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -14482,6 +14492,7 @@ export type GetAgentRunResponses = {
         | "internal.unexpected"
         | "runtime.cancelled"
         | "agent.execution_failed"
+        | "agent.step_limit_reached"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
       message: string
@@ -14660,6 +14671,7 @@ export type CancelAgentRunByIdResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -15302,6 +15314,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "action.timeout"
                 | "agent.approval_authority_lost"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -15535,6 +15548,7 @@ export type DecideAgentApprovalResponses = {
                 | "action.timeout"
                 | "agent.approval_authority_lost"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -15691,6 +15705,7 @@ export type DecideAgentApprovalResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string
@@ -15871,6 +15886,7 @@ export type ListAgentApprovalsResponses = {
                 | "action.timeout"
                 | "agent.approval_authority_lost"
                 | "agent.execution_failed"
+                | "agent.step_limit_reached"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
                 | "connector.adapter_invalid"
@@ -16191,6 +16207,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "action.timeout"
                       | "agent.approval_authority_lost"
                       | "agent.execution_failed"
+                      | "agent.step_limit_reached"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
                       | "connector.adapter_invalid"
@@ -16672,6 +16689,7 @@ export type ListObservedAgentThreadRunsResponses = {
           | "internal.unexpected"
           | "runtime.cancelled"
           | "agent.execution_failed"
+          | "agent.step_limit_reached"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
         message: string

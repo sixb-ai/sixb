@@ -1,5 +1,6 @@
 import type { OntologyDocsCatalog, OntologyDocsInput } from "../ontology/docs"
 import { RuntimeError } from "../runtime/errors"
+import type { AgentOptions } from "./step-limits"
 
 /** A project file the Agent receives byte-for-byte in its sandbox. */
 export interface AgentProjectFile {
@@ -24,8 +25,11 @@ export interface AgentSkillCatalog {
   getByName(name: string): AgentSkillDefinition | null
 }
 
-/** The project files the Agent reads. createSixb() discovers them; tests may pass them directly. */
-export interface AgentDefinitionsInput {
+/**
+ * The project files the Agent reads, and how it runs. createSixb() discovers the files; tests may
+ * pass them directly.
+ */
+export interface AgentDefinitionsInput extends AgentOptions {
   /** Agent Skills, from `skills/`. */
   readonly skills?: readonly AgentSkillDefinition[]
   /** The conversational Agent's instructions, from `SIXB.md`. */
@@ -41,6 +45,9 @@ export interface AgentDefinitions {
   readonly instructions?: string
   /** Where each object type's reference doc lives, with the docs and scripts of `ontology/`. */
   readonly ontologyDocs: OntologyDocsCatalog
+  /** As the project set them, checked. Absent: a turn has no limit, a sub-agent the default. */
+  readonly maxSteps?: number
+  readonly subagentMaxSteps?: number
 }
 
 /** Index skills by name. Discovery validates each skill; names must also be unique. */
