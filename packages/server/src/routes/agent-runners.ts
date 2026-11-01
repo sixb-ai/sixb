@@ -16,6 +16,7 @@ import {
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import type { Elysia } from "elysia"
 import { requestActor, requireRequestSixb } from "../auth/scope"
+import { liftRequestBodyCap } from "../utils/request-body"
 import { refuseOtherComputer } from "./agent-computers"
 
 // A runner outside the worker, such as one on a person's computer, runs a turn through the API:
@@ -81,7 +82,12 @@ export function agentRunSessionHandler(
   let sessions: AgentRunSessionHost | null | undefined
   return async (request) => {
     sessions ??= agentRunSessionHost(host)
-    const served = sessions ? await serveAgentRunSession(sessions, request) : null
+    // The session reads its runner's body within its own limit, past the server's default cap.
+    const served = sessions
+      ? await serveAgentRunSession(sessions, request, {
+          admitted: () => liftRequestBodyCap(request),
+        })
+      : null
     if (served) return served
 
     // It carries the runner's authority over its run, not anyone's over the project.

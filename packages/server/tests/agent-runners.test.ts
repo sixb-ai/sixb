@@ -26,8 +26,10 @@ import { createSessionCredential } from "@sixb/core/internal/auth"
 import { captureSixbFailure } from "@sixb/core/internal/errors"
 import { AGENT_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
+import { AGENT_RUN_SESSION_BODY_MAX_BYTES } from "../../core/src/agents/run-session-serve"
 import { startLapsedRunSweeper } from "../src/routes/agent-runners"
 import { createSixbApi, SixbServer } from "../src/server"
+import { limitRequestBody } from "../src/utils/request-body"
 import { createTestBrowserPolicy } from "./helpers"
 
 // A runner outside the worker claims a turn as the person who asked for it, then reaches the
@@ -85,7 +87,8 @@ async function setup() {
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
-  const send = async (request: Request): Promise<Response> => app.fetch(request)
+  // As the server receives it: its body capped, as Bun's fetch handler caps every request's.
+  const send = async (request: Request): Promise<Response> => app.fetch(limitRequestBody(request))
 
   /** A signed-in person who may use the Agent: their session cookie and CSRF pair. */
   async function person(userId: string) {
@@ -209,6 +212,60 @@ describe("a runner outside the worker", () => {
       modelId: "test-model",
     })
     await session?.close()
+  })
+
+  /** One model call from a claimed turn's runner, with a user message of `bytes`. */
+  async function callModel(
+    session: NonNullable<Awaited<ReturnType<Awaited<ReturnType<typeof setup>>["claim"]>>>,
+    bytes: number
+  ) {
+    const language = await session.models.language({ provider: "test", modelId: "test-model" })
+    const opened = await language.stream({
+      callId: "call",
+      tools: [],
+      messages: [{ role: "user", content: [{ type: "text", text: "a".repeat(bytes) }] }],
+      signal: new AbortController().signal,
+    })
+    for await (const _event of opened.events) {
+      // Read to the end, as the model loop does.
+    }
+  }
+
+  // Removal proof: leave the server's cap on run session requests (drop `admitted` in
+  // agentRunSessionHandler); a model call past 1 MiB is refused before it reaches the model.
+  test("sends its session a model call past the server's 1 MiB body cap", async () => {
+    const { person, ask, claim, reached } = await setup()
+    const ava = await person("ava")
+    const session = await claim(ava, await ask(ava, "Read every report in this folder."))
+    if (!session) throw new Error("Expected the claimed turn's session.")
+
+    // The model refuses every call here: reaching it is what counts.
+    await callModel(session, 2 * 1024 * 1024).catch(() => undefined)
+
+    expect(reached.model).toBe(1)
+    await session.close()
+  })
+
+  // Removal proof: answer a body past AGENT_RUN_SESSION_BODY_MAX_BYTES as any session error
+  // (drop failTooLarge in serveOperation); the turn then stays running until the sweep cancels it,
+  // with no reason given.
+  test("fails its turn, saying why, when it sends its session more than the session reads", async () => {
+    const { person, ask, claim, reached, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Read every report in this folder.")
+    const session = await claim(ava, runId)
+    if (!session) throw new Error("Expected the claimed turn's session.")
+
+    const refused = await callModel(session, AGENT_RUN_SESSION_BODY_MAX_BYTES + 1).catch(
+      (error: unknown) => error
+    )
+
+    expect(refused).toBeInstanceOf(AgentExecutionLostError)
+    expect(reached.model).toBe(0)
+    const run = await storage.agents.runs.getById({ projectId, id: runId })
+    expect(run).toMatchObject({ status: "failed", error: { code: "agent.execution_failed" } })
+    expect(run?.error?.message).toContain("Start a new conversation")
+    await session.close()
   })
 
   // Removal proof: dispatch a computer's turn as any other; the worker's queue holds its job.
