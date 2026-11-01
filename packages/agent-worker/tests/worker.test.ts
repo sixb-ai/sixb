@@ -171,6 +171,7 @@ import { AgentFileBudget } from "../../agent/src/tools/tool-files"
 import { TOOL_OUTPUTS_DIRECTORY } from "../../agent/src/tools/tool-outputs"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
 import type { AgentRunFiles } from "../../agent/src/types"
+import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "../../core/src/agents/context-token-rate"
 import { waitFor as pollFor, runTurnInSession } from "../../agent/tests/helpers"
 import {
   testStream,

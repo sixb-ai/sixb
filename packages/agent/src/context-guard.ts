@@ -1,5 +1,7 @@
 import {
+  AGENT_CONTEXT_COMPACTED_SHARE,
   AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
+  type AgentContextBudget,
   measureAgentContextTokenRate,
   measureAgentModelRequest,
   type PrepareModelStepInput,
@@ -19,8 +21,6 @@ import {
 import type { AgentContextCheckpointReason } from "@sixb/core/storage"
 import { stableJsonStringify } from "@sixb/core/storage"
 import {
-  AGENT_CONTEXT_COMPACTED_SHARE,
-  type AgentContextBudget,
   agentMinimumAnswerTokens,
   agentOutputRoomTokens,
   estimateAgentRequestTokens,

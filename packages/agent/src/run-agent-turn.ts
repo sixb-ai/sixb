@@ -1,5 +1,6 @@
 import type { AgentMessage, AgentMessagePart } from "@sixb/core"
 import {
+  type AgentContextBudget,
   type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
@@ -15,7 +16,6 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
-import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
 import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"

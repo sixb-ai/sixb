@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { PrepareModelStepInput } from "@sixb/core/internal/agents"
+import type { AgentContextBudget, PrepareModelStepInput } from "@sixb/core/internal/agents"
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
@@ -8,11 +8,7 @@ import {
   ModelProviderError,
   type ModelStep,
 } from "@sixb/core/models"
-import {
-  type AgentContextBudget,
-  estimateAgentRequestTokens,
-  prepareAgentModel,
-} from "../src/context-budget"
+import { estimateAgentRequestTokens, prepareAgentModel } from "../src/context-budget"
 import {
   type CompactConversationBeforeTurn,
   clearedToolResultText,
