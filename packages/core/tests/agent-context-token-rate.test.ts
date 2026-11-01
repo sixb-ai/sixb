@@ -1,14 +1,23 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import {
-  agentContextBytesPerToken,
+  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
   estimateAgentContextRequestTokens,
   measureAgentContextRequest,
   measureModelRequest,
+  readAgentContextBytesPerToken,
+  recordAgentContextTokenRate,
 } from "../src/agents"
+import {
+  type AgentContextTokenRateSample,
+  learnedAgentContextBytesPerToken,
+} from "../src/agents/context-token-rate"
 import type { AgentMessage } from "../src/agents/message"
 import type { ModelMessage, ModelToolSpecification } from "../src/models"
+import { type AgentTokenRateStore, InMemoryAgentStorage } from "../src/storage/agents"
+import { InMemoryAuthStorage } from "../src/storage/auth"
+import { InMemoryExecutionStorage } from "../src/storage/executions/in-memory"
 
 const text = (bytes: number) => "a".repeat(bytes)
 
@@ -19,27 +28,10 @@ const estimateModelRequestTokens = (
 ) => agentContextSizeTokens(measureModelRequest(request), bytesPerToken)
 
 describe("agent context token rate", () => {
-  // Removal proof: return DEFAULT_BYTES_PER_TOKEN from agentContextBytesPerToken; Anthropic requests
-  // are then counted at 3 bytes per token and GPT ones at half their real size. Drop the DeepSeek
-  // family and its calls calibrate to 3.75 at most, under the 3.88 they measure.
-  test.each([
-    ["anthropic/claude-haiku-5.5", 2.1],
-    ["claude-opus-5-5", 2.1],
-    ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", 2.1],
-    ["openai/gpt-6.1-terra", 4],
-    ["gpt-4o-mini", 4],
-    ["openai/o4-mini", 4],
-    ["deepseek/deepseek-v4.1-flash-1017", 3.1],
-    ["google/gemini-3-flash", 3],
-    ["mock-model", 3],
-  ])("prices %s at its tokenizer family's rate", (modelId, bytesPerToken) => {
-    expect(agentContextBytesPerToken({ modelId })).toBe(bytesPerToken)
-  })
-
   test("prices the same text alike in a stored conversation and an outgoing request", () => {
     // Removal proof: estimate outgoing requests by their serialized JSON again; the two counts of
     // the same 300,000 bytes drift apart by the JSON around them.
-    const bytesPerToken = agentContextBytesPerToken({ modelId: "anthropic/claude-haiku-5.5" })
+    const bytesPerToken = 2.1
     const body = text(300_000)
     const stored = estimateAgentContextRequestTokens({
       systemPrompt: "System",
@@ -116,15 +108,15 @@ describe("agent context rate calibration", () => {
 
   // Removal proof: drop the clamp; one call carrying an unreplayed image measures 0.5 bytes per
   // token and the next estimate quadruples, or one whose stored bytes bill for less measures 15.
-  test("lets a measured rate fall to half the family's, and rise only a quarter", () => {
+  test("lets a measured rate fall to half the run's, and rise only a quarter", () => {
     expect(calibrate(60_008)).toBe(1)
     expect(calibrate(2_008)).toBe(2.5)
-    // Reproduce: clamp upward at twice the family rate again; 3 bytes per token pass through.
+    // Reproduce: clamp upward at twice the run's rate again; 3 bytes per token pass through.
     expect(calibrate(10_008)).toBe(2.5)
   })
 
   // Removal proof: drop CALIBRATION_MIN_TEXT_TOKENS; a 600-byte call's overheads set the rate.
-  test("keeps the family rate when the call is too small to measure", () => {
+  test("keeps the run's rate when the call is too small to measure", () => {
     expect(
       calibrateAgentContextBytesPerToken({
         bytesPerToken: 2,
@@ -132,5 +124,106 @@ describe("agent context rate calibration", () => {
         inputTokens: 300,
       })
     ).toBe(2)
+  })
+})
+
+describe("a model's learned rate", () => {
+  const model = { providerId: "anthropic", modelId: "claude-haiku-5.5" }
+  const t0 = Date.parse("2026-11-01T10:00:00.000Z")
+  let runs = 0
+
+  afterEach(() => {
+    runs = 0
+  })
+
+  const project = () => {
+    const agents = new InMemoryAgentStorage(new InMemoryExecutionStorage(new InMemoryAuthStorage()))
+    return agents.tokenRates
+  }
+
+  /** One run's measurement at `rate` bytes per token, each run a minute after the one before. */
+  const recordRun = async (tokenRates: AgentTokenRateStore, rate: number) => {
+    runs += 1
+    await recordAgentContextTokenRate({
+      tokenRates,
+      projectId: "project",
+      runId: `run_${String(runs).padStart(3, "0")}`,
+      sample: { ...model, bytes: Math.round(rate * 10_000), tokens: 10_000 },
+      measuredAt: new Date(t0 + runs * 60_000),
+    })
+  }
+
+  const learned = (tokenRates: AgentTokenRateStore) =>
+    readAgentContextBytesPerToken({ tokenRates, projectId: "project", model })
+
+  const samples = (...rates: number[]): AgentContextTokenRateSample[] =>
+    rates.map((rate) => ({ bytes: Math.round(rate * 10_000), tokens: 10_000 }))
+
+  test("starts a model no run measured at a rate denser than any tokenizer's", async () => {
+    // Removal proof: return the median from learnedAgentContextBytesPerToken for an empty window;
+    // NaN reaches every estimate.
+    expect(AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN).toBe(2)
+    expect(await learned(project())).toBe(2)
+  })
+
+  test("is what the model's previous runs measured, for its next one", async () => {
+    // Removal proof: return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN from readAgentContextBytesPerToken;
+    // the next run starts at 2 again.
+    const tokenRates = project()
+    await recordRun(tokenRates, 4.5)
+
+    expect(await learned(tokenRates)).toBe(4.5)
+    expect(
+      await readAgentContextBytesPerToken({
+        tokenRates,
+        projectId: "project",
+        model: { ...model, modelId: "claude-sonnet-5" },
+      })
+    ).toBe(2)
+  })
+
+  test("follows a denser tokenizer from its second run, a sparser one within the window", async () => {
+    // Reproduce: set LEARNED_RATE_QUANTILE to 0.5; the denser tokenizer takes ten runs to show.
+    const denser = project()
+    for (let index = 0; index < 20; index++) await recordRun(denser, 4.4)
+    await recordRun(denser, 2.2)
+    expect(await learned(denser)).toBe(4.4)
+    await recordRun(denser, 2.2)
+    expect(await learned(denser)).toBe(2.2)
+
+    const sparser = project()
+    for (let index = 0; index < 20; index++) await recordRun(sparser, 2.2)
+    for (let index = 0; index < 18; index++) await recordRun(sparser, 4.4)
+    expect(await learned(sparser)).toBe(2.2)
+    await recordRun(sparser, 4.4)
+    expect(await learned(sparser)).toBe(4.4)
+  })
+
+  test("is moved by no single odd run, dense or sparse", () => {
+    // Reproduce: take the lowest measurement (quantile 0); the dense outlier sets the rate.
+    const usual = Array.from({ length: 19 }, () => 2.4)
+
+    expect(learnedAgentContextBytesPerToken(samples(...usual, 1.1))).toBe(2.4)
+    expect(learnedAgentContextBytesPerToken(samples(...usual, 9))).toBe(2.4)
+    // Fewer than ten measurements: the densest stands, the safe side.
+    expect(learnedAgentContextBytesPerToken(samples(2.6, 2.4, 3))).toBe(2.4)
+  })
+
+  test("falls back to the default when storage cannot read, and never fails a run on a write", async () => {
+    // Removal proof: drop the try in readAgentContextBytesPerToken or recordAgentContextTokenRate;
+    // the storage failure reaches the run.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    const broken: AgentTokenRateStore = {
+      record: () => Promise.reject(new Error("storage down")),
+      listLatest: () => Promise.reject(new Error("storage down")),
+    }
+
+    try {
+      expect(await learned(broken)).toBe(2)
+      await recordRun(broken, 2.4)
+      expect(warn).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

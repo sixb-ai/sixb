@@ -1,10 +1,12 @@
 import { AgentDefinitionError } from "@sixb/core"
 import {
+  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   AGENT_IMAGE_INPUT_TOKENS,
   type AgentContextSize,
-  agentContextBytesPerToken,
+  type AgentModelTokenRateSample,
   agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
+  measureAgentContextTokenRate,
   measureModelRequest,
 } from "@sixb/core/internal/agents"
 import {
@@ -29,20 +31,29 @@ export interface AgentContextBudget {
   /** The recent work compaction keeps verbatim. */
   readonly keepRecentTokens: number
   readonly source: "model" | "fallback"
-  /** UTF-8 bytes per token of the model's tokenizer family, before a thread calibrates it. */
+  /** UTF-8 bytes per token the run starts from, before a thread calibrates it. */
   readonly bytesPerToken: number
 }
 
 interface AgentModelSelection {
   readonly model: LanguageModel
   readonly reasoning?: ModelReasoning
+  /**
+   * What the project's runs measured on the model lately (see readAgentContextBytesPerToken);
+   * absent, the default, which errs high.
+   */
+  readonly bytesPerToken?: number
 }
 
 /**
  * Derive the model's input and output budgets from its definition, and cap each call's output to
- * them. The model comes pinned: whoever hands it over resolved it once for the run.
+ * them. The model comes pinned: whoever hands it over resolved it once for the run. `measured`
+ * hears what each call measured of the model's tokenizer, for the run to record.
  */
-export function prepareAgentModel(selection: AgentModelSelection): {
+export function prepareAgentModel(
+  selection: AgentModelSelection,
+  measured?: (sample: AgentModelTokenRateSample) => void
+): {
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
 } {
@@ -62,7 +73,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
     throw invalidBudget("output allowance must exceed the reasoning token budget.")
   }
 
-  // The rate the run's calls measured: the latest one the provider counted, else the family's.
+  // The rate the run's calls measured: the latest one the provider counted, else the run's own.
   let measuredBytesPerToken = budget.bytesPerToken
 
   return {
@@ -96,6 +107,11 @@ export function prepareAgentModel(selection: AgentModelSelection): {
               size,
               inputTokens,
             })
+
+            const sample = measureAgentContextTokenRate({ size, inputTokens })
+            if (sample) {
+              measured?.({ providerId: model.providerId, modelId: model.modelId, ...sample })
+            }
           }),
         }
       },
@@ -105,7 +121,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
 
 /**
  * A call may write whatever its input leaves of the window, up to the cap, and the reserve at
- * least. The input is weighed at the denser of the family's rate and the one the run's calls
+ * least. The input is weighed at the denser of the run's starting rate and the one its calls
  * measured, so it errs high whichever way this request's content tokenizes: a call right after a
  * large tool result can read denser than the calls it was calibrated on, and with no turn to ask
  * it again, an allowance past the window's room is a refused call.
@@ -191,6 +207,10 @@ export function resolveAgentContextBudget(
     windowTokens - reserveTokens
   )
   assertPositiveSafeInteger(inputBudgetTokens, "inputBudgetTokens")
+  const bytesPerToken = selection.bytesPerToken ?? AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
+  if (!Number.isFinite(bytesPerToken) || bytesPerToken <= 0) {
+    throw invalidBudget("bytesPerToken must be a positive number.")
+  }
   const keepRecentTokens = Math.min(20_000, Math.floor(inputBudgetTokens * 0.5))
   assertPositiveSafeInteger(keepRecentTokens, "keepRecentTokens")
   if (keepRecentTokens >= inputBudgetTokens) {
@@ -203,7 +223,7 @@ export function resolveAgentContextBudget(
     reserveTokens,
     keepRecentTokens,
     source: modelWindow === undefined ? "fallback" : "model",
-    bytesPerToken: agentContextBytesPerToken(selection.model),
+    bytesPerToken,
   })
 }
 

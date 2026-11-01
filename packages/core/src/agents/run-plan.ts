@@ -44,6 +44,11 @@ export interface AgentRunPlan {
   readonly ontologyDocs: RenderedOntologyDocs
   /** The models a turn can hand a child; a child spawns none. */
   readonly delegation?: AgentRunDelegation
+  /**
+   * The UTF-8 bytes per token its context estimate starts from: what the project's runs measured
+   * on its model lately, or a default that errs high (see readAgentContextBytesPerToken).
+   */
+  readonly bytesPerToken: number
 }
 
 /** The project's language models, as a turn chooses one for a child it spawns. */
@@ -99,7 +104,7 @@ export function readAgentRunPlan(
   definitions: AgentRunPlanDefinitions,
   run: AgentRunRecord,
   view: AgentRunView
-): AgentRunPlan {
+): Omit<AgentRunPlan, "bytesPerToken"> {
   const { agent, models, tools } = definitions
   const shared = {
     ...(agent.instructions === undefined ? {} : { instructions: agent.instructions }),

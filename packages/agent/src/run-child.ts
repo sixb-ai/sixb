@@ -302,7 +302,8 @@ export class ChildRunner {
     const configured = resolveRunPlan(runPlan, {
       model: await session.models.language(runPlan.model),
     })
-    const plan = Object.freeze({ ...configured, model: prepareAgentModel(configured).model })
+    const prepared = prepareAgentModel(configured, (sample) => session.noteTokenRate(sample))
+    const plan = Object.freeze({ ...configured, model: prepared.model })
     const requester = agentRequester(execution.requestedBy, child.names)
     const context: AgentExecutionContext = {
       ...this.host.settings,
