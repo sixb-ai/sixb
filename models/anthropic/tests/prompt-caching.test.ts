@@ -213,6 +213,37 @@ describe("Anthropic prompt caching", () => {
     expect(markers(bodies[0]!)).toEqual([ttl, ttl, ttl])
   })
 
+  test("keeps a long-lived prompt an hour on every breakpoint", async () => {
+    // Regression proof: build the marker without the intent's lifetime; a conversation's reply
+    // after 5 minutes rewrites its whole history.
+    const ttl = { type: "ephemeral", ttl: "1h" }
+    const { model, bodies } = agent()
+    await model.stream(
+      request([system, user("Find it.")], { tools, caching: { lifetime: "long", key: "k" } })
+    )
+    await model.stream(request([system, user("Find it.")], { tools, caching: { key: "k" } }))
+    await model.stream(request([system, user("One shot.")], { caching: { lifetime: "long" } }))
+
+    expect(markers(bodies[0]!)).toEqual([ttl, ttl, ttl])
+    expect(markers(bodies[1]!)).toEqual([
+      { type: "ephemeral" },
+      { type: "ephemeral" },
+      { type: "ephemeral" },
+    ])
+    // An intent caches what an absent choice would: a one-shot request is left alone.
+    expect(markers(bodies[2]!)).toEqual([])
+  })
+
+  test("keeps the binding's TTL over a long-lived intent", async () => {
+    const ttl = { type: "ephemeral", ttl: "5m" }
+    const { model, bodies } = agent({ request: { cache_control: ttl } })
+    await model.stream(
+      request([system, user("Find it.")], { tools, caching: { lifetime: "long" } })
+    )
+
+    expect(markers(bodies[0]!)).toEqual([ttl, ttl, ttl])
+  })
+
   test("keeps the system and tail breakpoints when a step sends no tools", async () => {
     // The model loop's reserved last step sends no tools; server tools take no local marker.
     const { model, bodies } = agent({

@@ -1104,7 +1104,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     const prepared = await this.prepareRequest(request)
     const init: RequestInit = {
       method: "POST",
-      headers: this.headers(),
+      headers: prepared.headers,
       body: JSON.stringify(prepared.body),
       signal: request.signal,
     }
@@ -1162,6 +1162,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
 
   private async prepareRequest(request: LanguageModelRequest): Promise<{
     readonly body: JsonObject
+    readonly headers: Readonly<Record<string, string>>
   }> {
     const extra = this.options.request ?? {}
     if (
@@ -1204,15 +1205,22 @@ class VercelGatewayLanguageModel implements LanguageModel {
         strict: isStrictGatewaySchema(tool.inputSchema),
       })),
     ]
-    const { body: caching, providerOptions } = gatewayPromptCaching({
+    const headers = this.headers()
+    const {
+      body: caching,
+      providerOptions,
+      headers: affinity,
+    } = gatewayPromptCaching({
       modelId: this.modelId,
       providerOptions: this.options.providerOptions,
       request: extra,
       caching: request.caching,
       messages: request.messages,
       localTools: request.tools.length,
+      headers,
     })
     return {
+      headers: { ...headers, ...affinity },
       body: {
         ...extra,
         ...caching,
