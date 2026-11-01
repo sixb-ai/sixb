@@ -14705,6 +14705,24 @@ function chapterResults(request: LanguageModelRequest) {
  * 3 bytes per token, keeps every request, and calls `reject` before answering one: what it
  * throws, the provider rejected.
  */
+/**
+ * What the project's earlier runs measured of the mock model: `bytesPerToken`, as
+ * chapterReadingModel counts.
+ */
+async function seedMeasuredTokenRate(storage: AgentStorage, bytesPerToken: number): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await storage.tokenRates.record({
+      projectId: PROJECT_ID,
+      providerId: "mock",
+      modelId: "mock-model",
+      runId: `earlier_run_${index}`,
+      bytes: Math.round(bytesPerToken * 10_000),
+      tokens: 10_000,
+      measuredAt: new Date(Date.parse("2026-10-01T00:00:00.000Z") + index * 60_000),
+    })
+  }
+}
+
 function chapterReadingModel(input: {
   readonly chapters: number
   readonly requests: LanguageModelRequest[]
@@ -14779,6 +14797,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(30_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -14832,6 +14851,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(45_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -14870,6 +14890,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(42_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -14908,6 +14929,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(105_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const threadId = "in_turn_compaction_thread"
     await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
     // About 48,000 tokens of earlier turns: under the limit when the turn starts. With its first
@@ -14986,6 +15008,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(3_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const threadId = "overflow_resume_thread"
     await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
     for (let index = 0; index < 3; index += 1) {
@@ -15132,6 +15155,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(3_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -15185,6 +15209,7 @@ describe("context within a turn", () => {
       projectTools: [chapterTool(105_000)],
     })
     const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
     const threadId = "failed_after_compaction_thread"
     await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
     // As in the turn that compacts before its second call: about 48,000 tokens before it.
