@@ -282,7 +282,7 @@ export async function prepareAgentConversationContext(input: {
  * counted at. The session found the model call that ended the latest assistant message after the
  * checkpoint: when it is this model's, its real tokens anchor the estimate, and the input it
  * carried (everything before that answer's last step) measures the thread's own rate. Otherwise
- * the whole request is estimated at the tokenizer family's rate. The full estimate still wins
+ * the whole request is estimated at the rate the run started from. The full estimate still wins
  * when larger, as a new system prompt or tool catalog is not in the anchor.
  */
 export function estimateAgentConversation(input: {
