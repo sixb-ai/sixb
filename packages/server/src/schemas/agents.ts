@@ -492,6 +492,33 @@ export const AgentThreadContextSchema = z.object({
   limitTokens: z.number().int().positive(),
   /** What the next request weighs, as the worker estimates it. Absent before the first answer. */
   usedTokens: z.number().int().nonnegative().optional(),
+  /**
+   * `usedTokens` by part, in a fixed order: the prompt's parts, the tools, then the history's.
+   * They add up to `usedTokens`, which is counted; the split is an estimate by each part's size.
+   */
+  parts: z
+    .array(
+      z.object({
+        part: z
+          .enum([
+            "system",
+            "instructions",
+            "memory",
+            "skills",
+            "ontology",
+            "tools",
+            "summary",
+            "messages",
+            "toolResults",
+            "files",
+          ])
+          .describe(
+            "`system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images."
+          ),
+        tokens: z.number().int().positive(),
+      })
+    )
+    .optional(),
   /** The call the conversation's history ends with, as the provider counted it. */
   lastCall: z
     .object({

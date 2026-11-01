@@ -146,32 +146,58 @@ export function measureAgentStepRequest(input: {
 }
 
 /**
- * Split a request's tokens by part. The total is what the meter counts; the split is an estimate:
- * each part's bytes at the request's bytes per token, each image at what a provider charges at
- * most for one, then scaled so the parts add up to the total exactly.
+ * Split a request's tokens by part. The total is what the meter counts; the split is an estimate.
+ * The prompt's parts and the tools weigh their bytes at the model's typical rate, so they stay put
+ * from one turn to the next; the history shares what is left by its bytes, each image at what a
+ * provider charges at most for one. A prompt that alone outweighs the total is scaled down to it.
+ * Rounded so the parts add up to the total exactly.
  */
 export function apportionAgentContextTokens(input: {
   readonly totalTokens: number
-  readonly bytes: AgentContextPartBytes<AgentContextPartName>
+  /** The system prompt's sections and the tool definitions. */
+  readonly prompt: AgentContextPartBytes<AgentContextPartName>
+  readonly promptBytesPerToken: number
+  readonly history: AgentContextPartBytes<AgentContextPartName>
   readonly images?: number
   readonly bytesPerToken: number
 }): readonly { readonly part: AgentContextPartName; readonly tokens: number }[] {
-  const weights = AGENT_CONTEXT_PARTS.map((part) => ({
-    part,
-    weight:
-      (input.bytes[part] ?? 0) / input.bytesPerToken +
-      (part === "files" ? (input.images ?? 0) * AGENT_IMAGE_INPUT_TOKENS : 0),
-  })).filter(({ weight }) => weight > 0)
-  const sum = weights.reduce((total, { weight }) => total + weight, 0)
   const total = Math.max(0, Math.round(input.totalTokens))
-  if (sum === 0 || total === 0) return []
+  const weigh = (bytes: AgentContextPartBytes<AgentContextPartName>, rate: number, images = 0) =>
+    AGENT_CONTEXT_PARTS.map((part) => ({
+      part,
+      weight:
+        (bytes[part] ?? 0) / rate + (part === "files" ? images * AGENT_IMAGE_INPUT_TOKENS : 0),
+    }))
+  const sum = (weights: readonly { readonly weight: number }[]) =>
+    weights.reduce((tokens, { weight }) => tokens + weight, 0)
+
+  let prompt = weigh(input.prompt, input.promptBytesPerToken)
+  let history = weigh(input.history, input.bytesPerToken, input.images)
+  const promptTokens = sum(prompt)
+  const historyTokens = sum(history)
+  if (total === 0 || promptTokens + historyTokens === 0) return []
+
+  // The prompt keeps its weight while the total holds it, and the history gets the rest.
+  const scale = (weights: typeof prompt, to: number, from: number) =>
+    weights.map(({ part, weight }) => ({ part, weight: from > 0 ? (weight / from) * to : 0 }))
+  if (promptTokens >= total || historyTokens === 0) {
+    prompt = scale(prompt, total, promptTokens)
+    history = scale(history, 0, historyTokens)
+  } else {
+    history = scale(history, total - promptTokens, historyTokens)
+  }
+  const exact = AGENT_CONTEXT_PARTS.map((part, index) => ({
+    part,
+    exact: (prompt[index]?.weight ?? 0) + (history[index]?.weight ?? 0),
+  }))
 
   // Largest remainder: each part rounded down, then the tokens left to the largest fractions.
-  const shares = weights.map(({ part, weight }) => {
-    const exact = (weight / sum) * total
-    return { part, tokens: Math.floor(exact), remainder: exact - Math.floor(exact) }
-  })
-  let left = total - shares.reduce((sum, share) => sum + share.tokens, 0)
+  const shares = exact.map(({ part, exact }) => ({
+    part,
+    tokens: Math.floor(exact),
+    remainder: exact - Math.floor(exact),
+  }))
+  let left = total - shares.reduce((tokens, share) => tokens + share.tokens, 0)
   for (const share of [...shares].sort((a, b) => b.remainder - a.remainder)) {
     if (left === 0) break
     share.tokens += 1
