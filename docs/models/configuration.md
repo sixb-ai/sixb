@@ -209,12 +209,26 @@ Subagents and AI workflow steps keep each call under their own model's limit the
 One still too long for its model fails with what to do: a narrower task or prompt, or a model with
 a larger window.
 
-Chat shows how much of its model's limit a conversation uses in a ring beside the model; it takes
-a color from 80%, and opens on what is used of the limit, the share of the last call read from
-cache, and the last summary. `sixb agent` shows the same at the end of its status line, as
-`ctx 38k/184k · 92% cached`.
+Chat shows how much of its model's limit a conversation uses in a disc beside the model; it turns
+amber from 80% and red past the limit. It opens on what the conversation uses, part by part, then
+the free space and the room kept for the answer, which add up to the model's window:
+
+| Part | What it counts |
+|---|---|
+| Sixb instructions | Sixb's own prompt |
+| Project instructions | `SIXB.md` |
+| Memory, Skills, Ontology | their index in the prompt, and the files the agent read with `read` or `view_file` |
+| Tools | the tool definitions |
+| Summary | what a condensed conversation keeps of its earlier messages |
+| Messages, Tool results, Files and images | the conversation itself |
+
+The total is the provider's count of the latest call plus an estimate of what came after it; the
+split by part is an estimate by size. `sixb agent` shows the total at the end of its status line,
+as `ctx 38k/184k · 92% cached`, and the parts with `/context`.
+
 A custom chat reads it from `GET /api/agent-threads/:threadId/context`, against the model the next
-message goes to with `?provider=…&modelId=…`, else the latest turn's.
+message goes to with `?provider=…&modelId=…`, else the latest turn's. A tool result saved as a file
+shows a **Full output** link under its call.
 
 ## Generate a response
 
