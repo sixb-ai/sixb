@@ -125,7 +125,7 @@ describe("agent context budget resolution", () => {
   })
 
   test("starts a model no run measured at the default rate", async () => {
-    // Removal proof: default resolveAgentContextBudget to 2.1 again, the Claude family rate; this
+    // Removal proof: default resolveAgentContextBudget to 2.1 again, the old Anthropic family rate; this
     // model then starts there.
     const { budget } = await pinAndPrepare(selection({ modelId: "claude-haiku-5-5" }))
 
