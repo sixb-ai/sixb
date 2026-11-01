@@ -962,13 +962,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   // Where the conversation moved, after the last message saved before then: the files earlier
   // turns worked on stayed behind.
   const movedAt = thread?.movedAt
-  const savedBefore = new Set(
-    movedAt
-      ? savedMessages.filter((message) => message.createdAt <= movedAt).map(({ id }) => id)
-      : []
-  )
+  const savedBefore = movedAt
+    ? new Set(savedMessages.filter((saved) => saved.createdAt <= movedAt).map(({ id }) => id))
+    : null
   // The last one the transcript shows: not every saved message is drawn.
-  const movedAfterId = messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
+  const movedAfterId =
+    savedBefore && messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
   const moved =
     thread && movedAfterId
       ? {
@@ -1045,7 +1044,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         error:
           !movingThisThread || !moveToCloud.isError
             ? null
-            : (moveToCloud.error as { readonly code?: string }).code === "active_run_exists"
+            : isSixbApiError(moveToCloud.error) && moveToCloud.error.code === "active_run_exists"
               ? "busy"
               : "failed",
         onContinueInCloud: handleContinueInCloud,

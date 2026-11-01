@@ -1,5 +1,5 @@
 import type { LanguageModelRequest } from "../models/language-model"
-import type { AgentRunRecord, AgentThreadComputer } from "../storage/agents"
+import type { AgentRunRecord, AgentThreadPlace } from "../storage/agents"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
 import {
@@ -205,7 +205,7 @@ export async function claimAgentRunForRunner(
     readonly run: AgentRunRecord
     readonly leaseExpiresAt: string
     /** A computer's turn, which a move keeps from starting: the place it claims to run in. */
-    readonly onComputer?: Pick<AgentThreadComputer, "id" | "folder">
+    readonly onComputer?: AgentThreadPlace
   }
 ): Promise<{ readonly run: AgentRunRecord; readonly runnerToken: string } | null> {
   if (input.run.status === "running") {

@@ -40,14 +40,11 @@ export class LocalRunner {
     string,
     { readonly stop: AbortController; readonly done: Promise<boolean> }
   >()
-  /** Turns sent from elsewhere, such as the web, that this computer is claiming. */
-  private readonly sentElsewhere = new Set<string>()
   private readonly elsewhereListeners = new Set<(run: ConversationAgentRunRecord) => void>()
   private session: { readonly id: string; readonly timer: ReturnType<typeof setInterval> } | null =
     null
-  private closing: Promise<void> | null = null
-  /** The renewal on its way: the session's release follows it, or it would open the session again. */
-  private renewal: Promise<void> = Promise.resolve()
+  /** The session's last call: its release follows a renewal, which would open it again. */
+  private lastCall: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly connection: Connection,
@@ -62,10 +59,6 @@ export class LocalRunner {
       folder,
       runFilesRoot: join(tmpdir(), "sixb-agent"),
       onFailure,
-      onClaimed: (run) => {
-        if (!this.sentElsewhere.delete(run.id)) return
-        for (const listener of this.elsewhereListeners) listener(run)
-      },
       openSandbox: ({ workingDirectory, runFiles, credential, signal }) =>
         new LocalSandboxFactory({
           readWritePaths: [runFiles],
@@ -95,12 +88,12 @@ export class LocalRunner {
    * Claim a queued turn and run it, unless this computer runs it already. Resolves once the turn
    * ended here: false when it was not this computer's to run, or could not be claimed.
    */
-  claim(runId: string): Promise<boolean> {
+  claim(runId: string, onClaimed?: (run: ConversationAgentRunRecord) => void): Promise<boolean> {
     const running = this.running.get(runId)
     if (running) return running.done
     const stop = new AbortController()
     const done = this.runner
-      .runTurn(runId, stop.signal)
+      .runTurn(runId, stop.signal, onClaimed)
       .catch((error: unknown) => {
         this.onFailure(error)
         return false
@@ -130,7 +123,7 @@ export class LocalRunner {
     }
     // A missed renewal is retried at the next; the session lasts three of them.
     const renew = () => {
-      this.renewal = hold().catch((error: unknown) =>
+      this.lastCall = hold().catch((error: unknown) =>
         console.error("[SixbCLI] Session renewal failed.", error)
       )
     }
@@ -145,7 +138,7 @@ export class LocalRunner {
       this.session = null
       clearInterval(session.timer)
       // Whoever closes it next waits for this one, as quitting does after the screen let go.
-      this.closing = this.renewal
+      this.lastCall = this.lastCall
         .then(() =>
           releaseAgentComputerSession({
             client: this.connection.client,
@@ -157,7 +150,7 @@ export class LocalRunner {
           () => {}
         )
     }
-    await this.closing
+    await this.lastCall
   }
 
   /**
@@ -167,7 +160,7 @@ export class LocalRunner {
    * would run its commands twice.
    */
   async claimIfHere(threadId: string, runId?: string): Promise<void> {
-    if (!this.session) return
+    if (!this.session || (runId && this.running.has(runId))) return
     const { client } = this.connection
     const { data: thread } = await getAgentThread({ client, path: { threadId } })
     if (!thread || !this.runsHere(thread, await thisComputerId())) return
@@ -209,11 +202,11 @@ export class LocalRunner {
     await this.runner.drain()
   }
 
+  /** A turn this computer already runs joins that run, and is no news. */
   private claimElsewhere(runId: string): Promise<boolean> {
-    // Claimed here already: typed here, it heard of itself on its way.
-    if (this.running.has(runId)) return this.claim(runId)
-    this.sentElsewhere.add(runId)
-    return this.claim(runId).finally(() => this.sentElsewhere.delete(runId))
+    return this.claim(runId, (run) => {
+      for (const listener of this.elsewhereListeners) listener(run)
+    })
   }
 }
 

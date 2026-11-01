@@ -895,7 +895,7 @@ function assertRequestAuthorityCanRunAgent(runtime: SixbRuntimeContext): void {
   }
 }
 
-async function dispatchAgentRun(
+export async function dispatchAgentRun(
   runtime: SixbRuntimeContext,
   agents: AgentStorage,
   runId: string

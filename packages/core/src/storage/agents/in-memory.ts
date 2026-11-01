@@ -37,7 +37,6 @@ import {
   assertStartsOnComputer,
   assertSubagentThreadTakesRun,
   assertTurnInThreadPlace,
-  cloudSpec,
   compareAgentMemoryPaths,
   compareAgentThreadParticipants,
   countsAsThreadMessage,
@@ -47,6 +46,7 @@ import {
   newSubagentThreadRecord,
   participantsToAdd,
   planAgentThreadFork,
+  queuedTurnInCloud,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
@@ -373,7 +373,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
         if (!on) return true
         return (
           thread.activeRunId !== null &&
-          thread.computer?.id === on.computerId &&
+          thread.computer?.id === on.id &&
           thread.computer.folder === on.folder
         )
       })
@@ -466,15 +466,8 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       : null
     assertMovableToCloud(thread, active, input.id)
 
-    let queued: ConversationAgentRunRecord | undefined
-    if (
-      active?.kind === "conversation" &&
-      active.status === "queued" &&
-      active.spec?.runsOn === "computer"
-    ) {
-      queued = { ...active, spec: cloudSpec(active.spec) }
-      this.state.runs.set(key(input.projectId, active.id), queued)
-    }
+    const queued = queuedTurnInCloud(active)
+    if (queued) this.state.runs.set(key(input.projectId, queued.id), queued)
     const { runsOn: _runsOn, computer: _computer, ...rest } = thread
     const moved: AgentThreadRecord = { ...rest, movedAt: new Date(input.movedAt ?? new Date()) }
     this.state.threads.set(threadKey, moved)

@@ -22,9 +22,11 @@ import type {
   AgentRunRecord,
   AgentThreadComputer,
   AgentThreadParticipantRecord,
+  AgentThreadPlace,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
+  ConversationAgentRunRecord,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
@@ -236,7 +238,10 @@ export function remapArtifactIds(
 /** What a fork reads from its source thread, inside the provider's transaction. */
 export interface AgentThreadForkSource {
   /** Where the source runs: a fork starts in the cloud, without the files its turns worked on. */
-  readonly workspace: Pick<AgentThreadRecord, "runsOn" | "movedAt">
+  readonly workspace: {
+    readonly runsOn?: string | null
+    readonly movedAt?: Date | string | null
+  }
   /** The active run's trigger message, when a turn is running. */
   readonly triggerMessageId?: string
   /**
@@ -296,8 +301,8 @@ export function planAgentThreadFork(
     (candidate) => candidate.observedHeadSeq <= lastCopiedSeq
   )
 
-  const movedAt =
-    source.workspace.movedAt ?? (source.workspace.runsOn === "computer" ? createdAt : undefined)
+  const { runsOn, movedAt: moved } = source.workspace
+  const movedAt = moved ? new Date(moved) : runsOn === "computer" ? createdAt : undefined
   const thread: AgentThreadRecord = {
     id: input.id,
     projectId: input.projectId,
@@ -504,7 +509,10 @@ export function assertAgentComputerSession(
 export const CONTROL_CHARACTER =
   /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
-/** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
+/**
+ * Refuse to assign a computer to a thread that runs in the cloud, or does not exist, or to move one
+ * while a turn runs in its folder.
+ */
 export function assertAssignableComputer(
   thread: AgentThreadRecord | null,
   activeRun: AgentRunRecord | null,
@@ -577,8 +585,8 @@ export function assertTurnInThreadPlace(
 /** Refuse to start a computer's turn that moved to the cloud before it started. */
 export function assertStartsOnComputer(
   run: AgentRunRecord,
-  threadComputer: Pick<AgentThreadComputer, "id" | "folder"> | undefined,
-  place: Pick<AgentThreadComputer, "id" | "folder">,
+  threadPlace: AgentThreadPlace | undefined,
+  place: AgentThreadPlace,
   prefix = "Sixb"
 ): void {
   if (run.kind !== "conversation" || run.spec?.runsOn !== "computer") {
@@ -587,7 +595,7 @@ export function assertStartsOnComputer(
       `[${prefix}] Agent run '${run.id}' runs in the cloud now: no computer starts it.`
     )
   }
-  if (threadComputer?.id !== place.id || threadComputer.folder !== place.folder) {
+  if (!threadPlace || !sameComputerPlace(threadPlace, place)) {
     throw new AgentStorageError(
       "invalid_state",
       `[${prefix}] Agent run '${run.id}' moved to another folder or computer: it starts there.`
@@ -601,13 +609,22 @@ export function movesComputerPlace(
   computer: AgentThreadComputer
 ): boolean {
   // One from before folders were kept ran somewhere unknown: its first folder is a move too.
-  return thread.computer?.id !== computer.id || thread.computer.folder !== computer.folder
+  return !thread.computer || !sameComputerPlace(thread.computer, computer)
 }
 
-/** A computer's queued turn as the cloud runs it. */
-export function cloudSpec(spec: ConversationAgentRunSpec): ConversationAgentRunSpec {
-  const { runsOn: _runsOn, ...cloud } = spec
-  return cloud
+/** The queued turn of a thread that moves to the cloud, as the cloud runs it. */
+export function queuedTurnInCloud(
+  active: AgentRunRecord | null
+): ConversationAgentRunRecord | undefined {
+  if (active?.kind !== "conversation" || active.status !== "queued") return undefined
+  if (active.spec?.runsOn !== "computer") return undefined
+  const { runsOn: _runsOn, ...cloud } = active.spec
+  return { ...active, spec: cloud }
+}
+
+/** Whether two places are the same folder of the same computer, whatever they call it. */
+export function sameComputerPlace(a: AgentThreadPlace, b: AgentThreadPlace): boolean {
+  return a.id === b.id && a.folder === b.folder
 }
 
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {

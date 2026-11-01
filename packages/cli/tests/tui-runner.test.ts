@@ -215,24 +215,64 @@ describe("a session closing while its renewal is on its way", () => {
   })
 })
 
-describe("a turn claimed here already", () => {
-  // Guard proof: drop the running check from claimElsewhere; a message typed here is announced as
-  // sent from elsewhere, when its own activity event arrives while its claim is on its way.
-  test("is not taken for one sent from elsewhere", async () => {
-    const { runner, claimed } = await avasRunner({ status: "queued" })
+describe("a turn sent from elsewhere", () => {
+  /** A runner whose claims go through for real, up to the turn they run. */
+  async function claimingRunner() {
+    const { runner, sessions } = await avasRunner({ status: "queued" })
+    runner.claim = LocalRunner.prototype.claim
+    const heard: string[] = []
+    runner.onElsewhere((run) => heard.push(run.id))
+    const started: string[] = []
+    const turns = new Map<string, () => void>()
     const inner = runner as unknown as {
-      running: Map<string, { stop: AbortController; done: Promise<boolean> }>
-      sentElsewhere: Set<string>
+      runner: {
+        runTurn(
+          id: string,
+          signal: AbortSignal,
+          onClaimed?: (run: { id: string }) => void
+        ): Promise<boolean>
+      }
     }
+    inner.runner.runTurn = (id, _signal, onClaimed) => {
+      started.push(id)
+      return new Promise((resolve) => {
+        turns.set(id, () => {
+          onClaimed?.({ id })
+          resolve(true)
+        })
+      })
+    }
+    const claimedBy = (id: string) => turns.get(id)?.()
+    return { runner, heard, started, claimedBy, sessions }
+  }
+
+  // Guard proof: announce from claim instead of from claimElsewhere's callback; each message typed
+  // here reads as sent from elsewhere.
+  test("is announced as it is claimed", async () => {
+    const { runner, heard, started, claimedBy, sessions } = await claimingRunner()
     runner.openSession()
-    inner.running.set("run_1", { stop: new AbortController(), done: Promise.resolve(true) })
+    while (started.length === 0) await Bun.sleep(0)
+    expect(started).toEqual(["run_9"])
 
-    await runner.claimIfHere("thr_1", "run_1")
-
-    expect(claimed).toContain("run_1")
-    expect(inner.sentElsewhere.has("run_1")).toBe(false)
-    inner.running.clear()
+    claimedBy("run_9")
+    expect(heard).toEqual(["run_9"])
+    expect(sessions[0]?.method).toBe("PUT")
     await runner.closeSession()
+  })
+
+  // Guard proof: let a joining claim replace the first one's callback; the message typed here, heard
+  // of again on its way through the session, reads as sent from elsewhere.
+  test("is not what a message typed here becomes, heard of on its way", async () => {
+    const { runner, heard, started, claimedBy, sessions } = await claimingRunner()
+    const typed = runner.claim("run_9")
+    runner.openSession()
+    while (sessions.length === 0) await Bun.sleep(0)
+    await runner.closeSession()
+
+    expect(started).toEqual(["run_9"])
+    claimedBy("run_9")
+    await typed
+    expect(heard).toEqual([])
   })
 })
 

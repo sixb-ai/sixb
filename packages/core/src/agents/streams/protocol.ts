@@ -35,6 +35,8 @@ export interface AgentRunActivityEvent {
   readonly threadId: string
   readonly status: AgentRunRecord["status"]
   readonly attempt: number
+  /** Set on a computer's turn: a `sixb` hearing of any other has nothing to read about it. */
+  readonly runsOn?: "computer"
   readonly occurredAt: string
 }
 
@@ -57,6 +59,7 @@ export function agentRunActivityEvent(
     threadId: run.threadId,
     status: run.status,
     attempt: run.attempt,
+    ...(run.spec?.runsOn === "computer" ? { runsOn: "computer" as const } : {}),
     occurredAt: occurredAt.toISOString(),
   }
 }
@@ -72,6 +75,7 @@ export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivi
     isAgentRunStatus(value.status) &&
     typeof value.attempt === "number" &&
     Number.isFinite(value.attempt) &&
+    (value.runsOn === undefined || value.runsOn === "computer") &&
     typeof value.occurredAt === "string"
   )
 }
@@ -158,7 +162,7 @@ export function isAgentApprovalActivityEvent(value: unknown): value is AgentAppr
   )
 }
 
-export function isAgentComputerActivityEvent(value: unknown): value is AgentComputerActivityEvent {
+function isAgentComputerActivityEvent(value: unknown): value is AgentComputerActivityEvent {
   return (
     isPlainRecord(value) &&
     value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
@@ -174,7 +178,7 @@ export function isAgentComputerActivityEvent(value: unknown): value is AgentComp
   )
 }
 
-export function isAgentThreadMovedEvent(value: unknown): value is AgentThreadMovedEvent {
+function isAgentThreadMovedEvent(value: unknown): value is AgentThreadMovedEvent {
   return (
     isPlainRecord(value) &&
     value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
@@ -208,20 +212,12 @@ export async function publishAgentComputerActivity(
     ...input,
     occurredAt: new Date().toISOString(),
   }
-  await broker.ensureStream({ projectId: input.projectId, stream: agentActivityStreamDefinition() })
-  await broker.append({
-    projectId: input.projectId,
-    streamId: AGENT_ACTIVITY_STREAM_ID,
-    records: [
-      {
-        name: event.type,
-        key: event.computerId,
-        // The event is composed only of validated JSON primitives.
-        payload: event as unknown as JsonValue,
-        idempotencyKey: `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`,
-      },
-    ],
-  })
+  await appendActivity(
+    broker,
+    event,
+    event.computerId,
+    `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`
+  )
 }
 
 /** Announce that a thread moved, so whatever has it open follows. */
@@ -235,17 +231,26 @@ export async function publishAgentThreadMoved(
     ...input,
     occurredAt: new Date().toISOString(),
   }
-  await broker.ensureStream({ projectId: input.projectId, stream: agentActivityStreamDefinition() })
+  await appendActivity(broker, event, event.threadId, `${event.threadId}:moved:${event.occurredAt}`)
+}
+
+async function appendActivity(
+  broker: Broker,
+  event: AgentComputerActivityEvent | AgentThreadMovedEvent,
+  key: string,
+  idempotencyKey: string
+): Promise<void> {
+  await broker.ensureStream({ projectId: event.projectId, stream: agentActivityStreamDefinition() })
   await broker.append({
-    projectId: input.projectId,
+    projectId: event.projectId,
     streamId: AGENT_ACTIVITY_STREAM_ID,
     records: [
       {
         name: event.type,
-        key: event.threadId,
+        key,
         // The event is composed only of validated JSON primitives.
         payload: event as unknown as JsonValue,
-        idempotencyKey: `${event.threadId}:moved:${event.occurredAt}`,
+        idempotencyKey,
       },
     ],
   })

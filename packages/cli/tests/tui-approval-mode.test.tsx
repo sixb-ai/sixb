@@ -150,6 +150,7 @@ const runner = {
   runs: () => false,
   hearStop: () => {},
   onElsewhere: () => () => {},
+  runsHere: () => false,
 } as unknown as LocalRunner
 
 let setup: TestRendererSetup | null = null

@@ -143,7 +143,9 @@ export function Workspace(props: WorkspaceProps) {
     const socket = createAgentActivitySocket({
       client: connection.client,
       onActivity: (event) => {
-        if (event.status === "queued") void runner.claimIfHere(event.threadId, event.runId)
+        if (event.status === "queued" && event.runsOn === "computer") {
+          void runner.claimIfHere(event.threadId, event.runId)
+        }
       },
     })
     return () => socket.close()
@@ -732,7 +734,7 @@ function ThreadView(
   const otherComputer = place !== undefined && place.id !== props.computerId
   const here = place?.id === props.computerId && place.folder === runner.folder
   // This computer runs the conversation's turns when it is the owner's, and this its folder.
-  const runsHere = onComputer && mine && here
+  const runsHere = thread !== null && runner.runsHere(thread, props.computerId)
   // Only a queued turn: a running one is another sixb's, or one whose sixb closed, which the API
   // ends interrupted rather than running its commands again. One sent from elsewhere runs here
   // only while messages from the web do; the turns this sixb asks for it claims itself.
@@ -959,12 +961,12 @@ function ThreadView(
                   ? "Press esc again to stop"
                   : live?.compacting
                     ? "Condensing earlier turns"
-                    : queuedLabel(runs, activeRunId, {
+                    : activityLabel(runs, activeRunId, {
                         onComputer,
                         mine,
                         here,
                         continueFromWeb,
-                        runsHere: activeRunId !== null && runner.runs(activeRunId),
+                        runningHere: activeRunId !== null && runner.runs(activeRunId),
                       })
               }
             />
@@ -1015,7 +1017,7 @@ function ThreadView(
   )
 }
 
-export function queuedLabel(
+export function activityLabel(
   runs: readonly Run[],
   runId: string | null,
   where: {
@@ -1023,7 +1025,7 @@ export function queuedLabel(
     readonly mine: boolean
     readonly here: boolean
     readonly continueFromWeb: boolean
-    readonly runsHere: boolean
+    readonly runningHere: boolean
   }
 ): string {
   const run = runs.find((entry) => entry.id === runId)
@@ -1031,13 +1033,13 @@ export function queuedLabel(
     if (!where.onComputer) return "Starting"
     if (!where.mine) return "Waiting for its owner's computer"
     if (!where.here) return "Waiting for sixb in its folder"
-    return where.continueFromWeb || where.runsHere
+    return where.continueFromWeb || where.runningHere
       ? "Starting"
       : "Waiting: messages from the web are off"
   }
   // Yours, running, and not here: another sixb runs it, or one that closed, whose turn ends
   // interrupted once its lease lapses.
-  if (where.onComputer && where.mine && !where.runsHere) return "Working in another sixb"
+  if (where.onComputer && where.mine && !where.runningHere) return "Working in another sixb"
   return "Working"
 }
 

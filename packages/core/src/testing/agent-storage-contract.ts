@@ -1093,7 +1093,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         const { threads } = await storage.threads.list({
           projectId,
           ownerPrincipal: owner,
-          activeOnComputer: { computerId: laptop.id, folder: laptop.folder },
+          activeOnComputer: { id: laptop.id, folder: laptop.folder },
         })
         expect(threads.map((thread) => thread.id)).toEqual(["thr_1"])
       })

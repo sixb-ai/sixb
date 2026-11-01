@@ -7,6 +7,7 @@ import {
   principalsEqual,
   type SixbHostView,
 } from "@sixb/core"
+import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
 import { assertConversationThread, isRetryableAgentRun } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
@@ -89,14 +90,16 @@ export async function serializeThreads(
   threads: readonly AgentThreadView[],
   viewer: Principal
 ): Promise<ReturnType<typeof AgentThreadSchema.parse>[]> {
-  const placeOf = await computerPlaces(host, threads, viewer)
-  const people = await namePrincipals(
-    host,
-    threads.flatMap((thread) => [
-      thread.ownerPrincipal,
-      ...thread.participants.map((participant) => participant.principal),
-    ])
-  )
+  const [placeOf, people] = await Promise.all([
+    computerPlaces(host, threads, viewer),
+    namePrincipals(
+      host,
+      threads.flatMap((thread) => [
+        thread.ownerPrincipal,
+        ...thread.participants.map((participant) => participant.principal),
+      ])
+    ),
+  ])
   const named = (principal: Principal) => people.get(principalKey(principal)) ?? principal
 
   return threads.map((thread) =>
@@ -161,10 +164,7 @@ async function computerPlaces(
   return (thread) => {
     const computer = thread.computer
     if (!computer || !owned(thread)) return undefined
-    const online = live.some(
-      (session) =>
-        session.computer.id === computer.id && session.computer.folder === computer.folder
-    )
+    const online = live.some((session) => sameComputerPlace(session.computer, computer))
     return { ...computer, online }
   }
 }
@@ -475,8 +475,18 @@ async function namePrincipals(
   return new Map(named)
 }
 
-function principalKey(principal: Principal): string {
+export function principalKey(principal: Principal): string {
   return `${principal.type}:${principal.id}`
+}
+
+/** A thread as reading it answers: with the permission mode its reader shows. */
+export async function serializeThreadRead(
+  host: SixbHostView,
+  sixb: ReturnType<typeof requireRequestSixb>,
+  thread: AgentThreadView
+) {
+  const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
+  return { ...(await serializeThread(host, thread, requestActor(sixb))), ...approvalMode }
 }
 
 export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
@@ -607,8 +617,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
-          const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
-          return { ...(await serializeThread(host, thread, requestActor(sixb))), ...approvalMode }
+          return await serializeThreadRead(host, sixb, thread)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

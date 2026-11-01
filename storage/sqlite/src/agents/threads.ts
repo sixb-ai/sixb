@@ -5,10 +5,10 @@ import {
   assertComputerPlace,
   assertConversationThreadRow,
   assertMovableToCloud,
-  cloudSpec,
   movesComputerPlace,
   participantsToAdd,
   planAgentThreadFork,
+  queuedTurnInCloud,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -23,7 +23,6 @@ import {
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type AssignAgentThreadComputerInput,
-  type ConversationAgentRunRecord,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
   type ListAgentThreadChildrenInput,
@@ -201,10 +200,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
-            workspace: {
-              ...(source.runs_on === "computer" ? { runsOn: "computer" as const } : {}),
-              ...(source.moved_at ? { movedAt: new Date(source.moved_at) } : {}),
-            },
+            workspace: { runsOn: source.runs_on, movedAt: source.moved_at },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -363,7 +359,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
 
     if (input.activeOnComputer) {
       whereClauses.push("computer_id = ? AND computer_folder = ? AND active_run_id IS NOT NULL")
-      args.push(input.activeOnComputer.computerId, input.activeOnComputer.folder)
+      args.push(input.activeOnComputer.id, input.activeOnComputer.folder)
     }
 
     const dir = input.order === "asc" ? "ASC" : "DESC"
@@ -489,23 +485,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         const active = this.activeRunOf(input.projectId, thread)
         assertMovableToCloud(thread, active, input.id, "SixbSqlite")
 
-        let queued: ConversationAgentRunRecord | undefined
-        if (
-          active?.kind === "conversation" &&
-          active.status === "queued" &&
-          active.spec?.runsOn === "computer"
-        ) {
+        const queued = queuedTurnInCloud(active)
+        if (queued) {
           this.db
-            .query(
-              "UPDATE agent_runs SET spec = ? WHERE project_id = ? AND id = ? AND status = 'queued'"
-            )
-            .run(JSON.stringify(cloudSpec(active.spec)), input.projectId, active.id)
-          const moved = rowToRunRecord(
-            this.db
-              .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
-              .get(input.projectId, active.id) as AgentRunRow
-          )
-          if (moved.kind === "conversation") queued = moved
+            .query("UPDATE agent_runs SET spec = ? WHERE project_id = ? AND id = ?")
+            .run(JSON.stringify(queued.spec), input.projectId, queued.id)
         }
         this.db
           .query(`

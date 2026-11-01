@@ -1,20 +1,13 @@
-import { AgentRequestError, principalsEqual, type SixbHostView } from "@sixb/core"
-import {
-  type AgentRunSessionHost,
-  dispatchQueuedAgentRuns,
-  threadHoldsPausedTurn,
-} from "@sixb/core/internal/agents"
-import {
-  publishAgentComputerActivity,
-  publishAgentThreadMoved,
-} from "@sixb/core/internal/agents/streams"
-import {
-  type AgentComputerSessionRecord,
-  type AgentStorage,
-  AgentStorageError,
-  type AgentThreadComputer,
-  type ConversationAgentRunRecord,
-  type Principal,
+import type { SixbHostView } from "@sixb/core"
+import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
+import type { AgentRunSessionHost } from "@sixb/core/internal/agents"
+import { publishAgentComputerActivity } from "@sixb/core/internal/agents/streams"
+import type {
+  AgentComputerSessionRecord,
+  AgentStorage,
+  AgentThreadComputer,
+  ConversationAgentRunRecord,
+  Principal,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
@@ -33,7 +26,7 @@ import {
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { unconfiguredStorageResponse } from "../utils/http"
-import { handleAgentRouteError, serializeThread } from "./agents"
+import { handleAgentRouteError, principalKey, serializeThreadRead } from "./agents"
 
 // A computer's thread runs on one of its owner's computers, in one folder there: only `sixb` open
 // in that folder claims its turns. Each open `sixb` holds a session, a lease it renews, so the
@@ -85,7 +78,7 @@ export async function computerClaiming(
     id: run.threadId,
   })
   const place = thread?.computer
-  if (place && sameFolder(place, claimed.data)) return { computer: claimed.data }
+  if (place && sameComputerPlace(place, claimed.data)) return { computer: claimed.data }
   return {
     refused: {
       status: 403,
@@ -117,22 +110,11 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         const { params, body, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          const agents = host.storage.agents
-          if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
+          if (!host.storage.agents) return unconfiguredStorageResponse(set, "Agent storage")
 
           const { computer } = MoveAgentThreadToComputerBodySchema.parse(body)
-          const actor = requestActor(sixb)
-          const thread = await ownedComputerThread(sixb, params.threadId, actor)
-          const stays = thread.computer && sameFolder(thread.computer, computer)
-          const moved = await host.storage.transaction(async (tx) => {
-            const assigned = await requireAgents(tx)
-              .threads.assignComputer({ projectId: host.id, id: thread.id, computer })
-              .catch(refuseRunningTurn)
-            if (!stays) await refuseHeldTurn(requireAgents(tx), thread)
-            return assigned
-          })
-          if (!stays) await announceMove(host, thread)
-          return movedThread(host, sixb, { ...moved, participants: thread.participants }, actor)
+          const moved = await sixb.agent.threads.moveToComputer(params.threadId, computer)
+          return await serializeThreadRead(host, sixb, moved)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -164,26 +146,10 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
         const { params, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          const agents = host.storage.agents
-          if (!agents) return unconfiguredStorageResponse(set, "Agent storage")
+          if (!host.storage.agents) return unconfiguredStorageResponse(set, "Agent storage")
 
-          const actor = requestActor(sixb)
-          const thread = await ownedComputerThread(sixb, params.threadId, actor)
-          const moved = await host.storage.transaction(async (tx) => {
-            const inCloud = await requireAgents(tx)
-              .threads.moveToCloud({ projectId: host.id, id: thread.id })
-              .catch(refuseRunningTurn)
-            await refuseHeldTurn(requireAgents(tx), thread)
-            return inCloud
-          })
-          if (moved.queued) await dispatchMovedTurn(host, agents, moved.queued.id)
-          await announceMove(host, thread)
-          return movedThread(
-            host,
-            sixb,
-            { ...moved.thread, participants: thread.participants },
-            actor
-          )
+          const moved = await sixb.agent.threads.moveToCloud(params.threadId)
+          return await serializeThreadRead(host, sixb, moved)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -242,7 +208,7 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
             computer,
             expiresAt,
           })
-          if (!before.some((session) => sameFolder(session.computer, computer))) {
+          if (!before.some((session) => sameComputerPlace(session.computer, computer))) {
             await announce(host, ownerPrincipal, computer, true)
           }
           return HoldAgentComputerSessionResponseSchema.parse({
@@ -310,112 +276,6 @@ export function registerAgentComputerRoutes(app: Elysia, host: SixbHostView) {
     )
 }
 
-function requireAgents(tx: { readonly agents?: AgentStorage }): AgentStorage {
-  if (!tx.agents) throw new Error("[SixbServer] Agent storage is not configured.")
-  return tx.agents
-}
-
-/**
- * A turn's held calls were reviewed for where it runs: it moves once they are answered. Asked after
- * the move, in its transaction: with the thread locked, a turn that was running has either paused
- * by now, which this sees, or still runs, which refused the move.
- */
-async function refuseHeldTurn(
-  agents: AgentStorage,
-  thread: { readonly projectId: string; readonly id: string }
-): Promise<void> {
-  if (await threadHoldsPausedTurn(agents, thread)) {
-    throw new AgentRequestError(
-      "active_run_exists",
-      "[SixbServer] A turn is waiting for your approval: answer or stop it first."
-    )
-  }
-}
-
-function refuseRunningTurn(error: unknown): never {
-  throw error instanceof AgentStorageError && error.code === "active_run_exists"
-    ? new AgentRequestError(
-        "active_run_exists",
-        "[SixbServer] A turn is running on the computer: stop it, or let it end, first."
-      )
-    : error
-}
-
-/** What a read of the thread answers, so its reader keeps the permission mode it shows. */
-async function movedThread(
-  host: SixbHostView,
-  sixb: ReturnType<typeof requireRequestSixb>,
-  thread: Parameters<typeof serializeThread>[1],
-  actor: Principal
-) {
-  const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
-  return { ...(await serializeThread(host, thread, actor)), ...approvalMode }
-}
-
-/** A hint whatever has the thread open follows: a lost one is corrected by its next read. */
-async function announceMove(
-  host: SixbHostView,
-  thread: { readonly id: string; readonly ownerPrincipal: Principal }
-): Promise<void> {
-  await publishAgentThreadMoved(host.broker, {
-    projectId: host.id,
-    ownerPrincipal: thread.ownerPrincipal,
-    threadId: thread.id,
-  }).catch((error: unknown) => {
-    console.error("[SixbServer] Could not announce a thread's move.", error)
-  })
-}
-
-/** The move is committed: a queued turn that fails to publish is one the worker reconciles. */
-async function dispatchMovedTurn(
-  host: SixbHostView,
-  agents: AgentStorage,
-  runId: string
-): Promise<void> {
-  try {
-    const { failures } = await dispatchQueuedAgentRuns({
-      projectId: host.id,
-      storage: agents,
-      queue: host.queues.agents,
-      runIds: [runId],
-    })
-    for (const failure of failures) throw failure.error
-  } catch (error) {
-    console.error(
-      `[SixbServer] Could not dispatch agent run '${runId}' after its thread moved to the cloud; it is retried.`,
-      error
-    )
-  }
-}
-
-/** A computer's thread the actor owns: refused for anyone else, and for a cloud thread. */
-async function ownedComputerThread(
-  sixb: ReturnType<typeof requireRequestSixb>,
-  threadId: string,
-  actor: Principal
-) {
-  const thread = await sixb.agent.threads.getById(threadId)
-  if (!thread) {
-    throw new AgentRequestError(
-      "thread_not_found",
-      `[SixbServer] Agent thread '${threadId}' not found.`
-    )
-  }
-  if (!principalsEqual(thread.ownerPrincipal, actor)) {
-    throw new AgentRequestError(
-      "not_thread_owner",
-      `[SixbServer] Only the owner of Agent thread '${threadId}' moves it.`
-    )
-  }
-  if (thread.runsOn !== "computer") {
-    throw new AgentRequestError(
-      "invalid_message",
-      `[SixbServer] Agent thread '${threadId}' runs in the cloud, on no computer.`
-    )
-  }
-  return thread
-}
-
 /** The owner's queued turns that wait for this computer, in this folder. */
 async function waitingTurns(
   host: SixbHostView,
@@ -427,7 +287,7 @@ async function waitingTurns(
   const { threads } = await agents.threads.list({
     projectId: host.id,
     ownerPrincipal,
-    activeOnComputer: { computerId: computer.id, folder: computer.folder },
+    activeOnComputer: computer,
     limit: 100,
   })
   const active = threads.flatMap((thread) => (thread.activeRunId ? [thread.activeRunId] : []))
@@ -450,24 +310,21 @@ async function announceOffline(
   const now = new Date()
   const byOwner = new Map<string, AgentComputerSessionRecord[]>()
   for (const session of ended) {
-    const key = `${session.ownerPrincipal.type}:${session.ownerPrincipal.id}`
-    byOwner.set(key, [...(byOwner.get(key) ?? []), session])
+    const key = principalKey(session.ownerPrincipal)
+    const sessions = byOwner.get(key)
+    if (sessions) sessions.push(session)
+    else byOwner.set(key, [session])
   }
-  for (const sessions of byOwner.values()) {
-    const ownerPrincipal = sessions[0]?.ownerPrincipal
-    if (!ownerPrincipal) continue
+  for (const [first, ...rest] of byOwner.values()) {
+    if (!first) continue
+    const { ownerPrincipal } = first
     const live = await agents.computers.listLive({ projectId: host.id, ownerPrincipal, now })
-    const announced = new Set<string>()
-    for (const session of sessions) {
-      const key = `${session.computer.id}\u0000${session.computer.folder}`
-      if (
-        announced.has(key) ||
-        live.some((other) => sameFolder(other.computer, session.computer))
-      ) {
-        continue
-      }
-      announced.add(key)
-      await announce(host, ownerPrincipal, session.computer, false)
+    const announced: AgentThreadComputer[] = []
+    for (const { computer } of [first, ...rest]) {
+      const stillHeld = [...live.map((other) => other.computer), ...announced]
+      if (stillHeld.some((other) => sameComputerPlace(other, computer))) continue
+      announced.push(computer)
+      await announce(host, ownerPrincipal, computer, false)
     }
   }
 }
@@ -488,8 +345,4 @@ async function announce(
   }).catch((error: unknown) => {
     console.error("[SixbServer] Could not announce a computer session.", error)
   })
-}
-
-function sameFolder(a: AgentThreadComputer, b: AgentThreadComputer): boolean {
-  return a.id === b.id && a.folder === b.folder
 }

@@ -89,6 +89,9 @@ export interface AgentThreadComputer {
   readonly folder: string
 }
 
+/** Where a thread runs: which of its owner's computers, and the folder there. */
+export type AgentThreadPlace = Pick<AgentThreadComputer, "id" | "folder">
+
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
@@ -187,7 +190,7 @@ export interface ListAgentThreadsInput {
   /** Only the threads this user takes part in. */
   readonly participantPrincipal?: UserPrincipal
   /** Only the threads that run on this computer, in this folder, with a turn active. */
-  readonly activeOnComputer?: { readonly computerId: string; readonly folder: string }
+  readonly activeOnComputer?: AgentThreadPlace
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
@@ -512,7 +515,7 @@ export interface StartAgentRunInput {
    * Start it only as a computer's turn, there and in that folder: one whose thread moved meanwhile
    * is refused with `invalid_state`, so it never starts where its thread no longer runs.
    */
-  readonly onComputer?: Pick<AgentThreadComputer, "id" | "folder">
+  readonly onComputer?: AgentThreadPlace
 }
 
 export interface FinishQueuedAgentRunInput {

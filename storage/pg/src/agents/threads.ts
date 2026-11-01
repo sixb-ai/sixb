@@ -4,10 +4,10 @@ import {
   assertComputerPlace,
   assertConversationThreadRow,
   assertMovableToCloud,
-  cloudSpec,
   movesComputerPlace,
   participantsToAdd,
   planAgentThreadFork,
+  queuedTurnInCloud,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -22,7 +22,6 @@ import {
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type AssignAgentThreadComputerInput,
-  type ConversationAgentRunRecord,
   type CreateAgentThreadInput,
   type ForkAgentThreadInput,
   type ListAgentThreadChildrenInput,
@@ -191,10 +190,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
-            workspace: {
-              ...(source.runs_on === "computer" ? { runsOn: "computer" as const } : {}),
-              ...(source.moved_at ? { movedAt: new Date(source.moved_at) } : {}),
-            },
+            workspace: { runsOn: source.runs_on, movedAt: source.moved_at },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -389,7 +385,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
       whereClauses.push(
         `computer_id = $${index++} AND computer_folder = $${index++} AND active_run_id IS NOT NULL`
       )
-      params.push(input.activeOnComputer.computerId, input.activeOnComputer.folder)
+      params.push(input.activeOnComputer.id, input.activeOnComputer.folder)
     }
 
     const dir = input.order === "asc" ? "ASC" : "DESC"
@@ -496,19 +492,12 @@ export class PgAgentThreadStore implements AgentThreadStore {
       const { thread, active } = await lockThreadAndActiveRun(tx, input)
       assertMovableToCloud(thread, active, input.id, "SixbPg")
 
-      let queued: ConversationAgentRunRecord | undefined
-      if (
-        active?.kind === "conversation" &&
-        active.status === "queued" &&
-        active.spec?.runsOn === "computer"
-      ) {
-        const [moved] = await tx<AgentRunRow[]>`
-          UPDATE agent_runs SET spec = ${JSON.stringify(cloudSpec(active.spec))}::text::jsonb
-          WHERE project_id = ${input.projectId} AND id = ${active.id} AND status = 'queued'
-          RETURNING *
+      const queued = queuedTurnInCloud(active)
+      if (queued) {
+        await tx`
+          UPDATE agent_runs SET spec = ${JSON.stringify(queued.spec)}::text::jsonb
+          WHERE project_id = ${input.projectId} AND id = ${queued.id}
         `
-        const record = moved ? rowToRunRecord(moved) : null
-        if (record?.kind === "conversation") queued = record
       }
       const [movedThread] = await tx<AgentThreadRow[]>`
         UPDATE agent_threads

@@ -50,6 +50,31 @@ const LEASE = () => new Date(Date.now() + 60_000).toISOString()
 const LAPTOP = { id: "laptop", name: "Ava's MacBook Pro", folder: "/Users/ava/q3" }
 const DESKTOP = { id: "desktop", name: "Ava's iMac", folder: "/Users/ava/q3" }
 
+/** The turn asks to run an action, which waits for Ava's decision. */
+async function holdCall(storage: InMemoryStorage, runId: string) {
+  const turn = await storage.agents.runs.getById({ projectId, id: runId })
+  const createdAt = new Date()
+  await storage.agents.approvals.request({
+    id: "apr_1",
+    projectId,
+    runId,
+    callerRunId: runId,
+    executionToken: turn?.execution?.token ?? "",
+    requestedBy: { type: "user", id: "ava" },
+    mode: "manual",
+    call: {
+      kind: "action",
+      actionId: "tidy",
+      subject: { kind: "none" },
+      params: {},
+      actionRunId: "act_1",
+      effect: "external",
+    },
+    createdAt,
+    expiresAt: new Date(createdAt.getTime() + 60_000),
+  } as Parameters<typeof storage.agents.approvals.request>[0])
+}
+
 async function setup() {
   /** What reached the project: its tool's runs and its model's calls. */
   const reached = { tool: 0, model: 0 }
@@ -298,7 +323,7 @@ describe("a runner outside the worker", () => {
     })
   })
 
-  // Guard proof: drop the refuseOtherComputer call from the claim route; Ava's desktop runs a turn
+  // Guard proof: drop the computerClaiming call from the claim route; Ava's desktop runs a turn
   // of the conversation her laptop runs, and her laptop runs it in another folder.
   test("runs a conversation's turns on the computer and in the folder it runs in, until it moves", async () => {
     const { person, ask, claim, post, storage } = await setup()
@@ -486,7 +511,7 @@ describe("a runner outside the worker", () => {
     const moved = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
     expect(moved.status).toBe(200)
     const thread = await moved.json()
-    // Guard proof: answer serializeThread alone from movedThread; the chat, which keeps this
+    // Guard proof: answer serializeThread alone from serializeThreadRead; the chat, which keeps this
     // answer, loses the permission mode it shows until it next reads the thread.
     expect(thread).toMatchObject({
       id: threadId,
@@ -494,7 +519,7 @@ describe("a runner outside the worker", () => {
       approvalMode: expect.any(String),
     })
     expect(thread).not.toHaveProperty("runsOn")
-    // Guard proof: drop announceMove from the route; a sixb open in the old folder keeps taking
+    // Guard proof: drop announceThreadMoved from moveToCloud; a sixb open in the old folder keeps taking
     // messages it can no longer run.
     const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
     expect(
@@ -541,7 +566,7 @@ describe("a runner outside the worker", () => {
     await session?.close()
   })
 
-  // Guard proof: drop refuseHeldTurn from either route; the call Ava reviewed for one folder runs
+  // Guard proof: drop the held-call check from moveThread; the call Ava reviewed for one folder runs
   // in another once she approves it, or in the cloud's empty workspace.
   test("keeps a computer's thread in its folder while a turn waits on approvals there", async () => {
     const { person, ask, call, claim, storage } = await setup()
@@ -549,27 +574,7 @@ describe("a runner outside the worker", () => {
     const runId = await ask(ava, "Tidy the notes in this folder.")
     const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
     const session = await claim(ava, runId)
-    const paused = await storage.agents.runs.getById({ projectId, id: runId })
-    const createdAt = new Date()
-    await storage.agents.approvals.request({
-      id: "apr_1",
-      projectId,
-      runId,
-      callerRunId: runId,
-      executionToken: paused?.execution?.token ?? "",
-      requestedBy: { type: "user", id: "ava" },
-      mode: "manual",
-      call: {
-        kind: "action",
-        actionId: "tidy",
-        subject: { kind: "none" },
-        params: {},
-        actionRunId: "act_1",
-        effect: "external",
-      },
-      createdAt,
-      expiresAt: new Date(createdAt.getTime() + 60_000),
-    } as Parameters<typeof storage.agents.approvals.request>[0])
+    await holdCall(storage, runId)
     await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
 
     const elsewhere = { ...LAPTOP, folder: "/Users/ava/other" }
@@ -596,7 +601,7 @@ describe("a runner outside the worker", () => {
     expect(await moved.json()).toMatchObject({ approvalMode: expect.any(String) })
   })
 
-  // Guard proof: check refuseHeldTurn before the transaction instead of inside it; a running turn
+  // Guard proof: ask threadHoldsPausedTurn before moveThread's transaction instead of inside it; a running turn
   // passes the check, pauses, and its thread moves with the call Ava was asked about.
   test("keeps a thread in place when its turn pauses just as it moves", async () => {
     const { person, ask, call, claim, host, storage } = await setup()
@@ -604,27 +609,7 @@ describe("a runner outside the worker", () => {
     const runId = await ask(ava, "Tidy the notes in this folder.")
     const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
     const session = await claim(ava, runId)
-    const running = await storage.agents.runs.getById({ projectId, id: runId })
-    const createdAt = new Date()
-    await storage.agents.approvals.request({
-      id: "apr_1",
-      projectId,
-      runId,
-      callerRunId: runId,
-      executionToken: running?.execution?.token ?? "",
-      requestedBy: { type: "user", id: "ava" },
-      mode: "manual",
-      call: {
-        kind: "action",
-        actionId: "tidy",
-        subject: { kind: "none" },
-        params: {},
-        actionRunId: "act_1",
-        effect: "external",
-      },
-      createdAt,
-      expiresAt: new Date(createdAt.getTime() + 60_000),
-    } as Parameters<typeof storage.agents.approvals.request>[0])
+    await holdCall(storage, runId)
 
     // The turn pauses at the last moment a move could have missed it.
     const transaction = host.storage.transaction.bind(host.storage)
@@ -649,26 +634,23 @@ describe("a runner outside the worker", () => {
     const ava = await person("ava")
     const runId = await ask(ava, "Tidy the notes in this folder.")
     const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
-    const threads = storage.agents.threads
-    const getById = threads.getById.bind(threads)
-    threads.getById = async (input) => {
-      const thread = await getById(input)
-      if (input.id === threadId && thread?.computer?.folder === LAPTOP.folder) {
-        await threads.assignComputer({
-          projectId,
-          id: threadId,
-          computer: { ...LAPTOP, folder: "/Users/ava/other" },
-        })
-      }
-      return thread
+    const runs = storage.agents.runs
+    const start = runs.start.bind(runs)
+    runs.start = async (input) => {
+      await storage.agents.threads.assignComputer({
+        projectId,
+        id: threadId,
+        computer: { ...LAPTOP, folder: "/Users/ava/other" },
+      })
+      return start(input)
     }
 
-    expect(await claim(ava, runId).catch((error: unknown) => error)).toBeInstanceOf(Error)
-    threads.getById = getById
-    expect((await storage.agents.runs.getById({ projectId, id: runId }))?.status).toBe("queued")
+    await claim(ava, runId).catch((error: unknown) => error)
+    runs.start = start
+    expect((await runs.getById({ projectId, id: runId }))?.status).toBe("queued")
   })
 
-  // Guard proof: let dispatchMovedTurn's error reach the route; the thread moved, but its owner is
+  // Guard proof: call dispatchQueuedAgentRuns bare in moveToCloud; the thread moved, but its owner is
   // told it didn't, and each try again fails, as it runs in the cloud already.
   test("answers a move that committed, whatever its dispatch does", async () => {
     const { person, ask, call, storage } = await setup()

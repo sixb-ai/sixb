@@ -120,6 +120,7 @@ export type {
   AgentThreadKind,
   AgentThreadParent,
   AgentThreadParticipantRecord,
+  AgentThreadPlace,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,

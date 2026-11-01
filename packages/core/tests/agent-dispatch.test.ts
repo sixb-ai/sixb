@@ -66,11 +66,11 @@ describe("dispatchQueuedAgentRuns", () => {
       computer: { id: "laptop", name: "Laptop", folder: "/work" },
     })
     await storage.agents.runs.create({
-      id: "run-computer",
+      id: "run-0-computer",
       projectId: PROJECT_ID,
       executionId: await createTestAgentExecution(storage, {
         projectId: PROJECT_ID,
-        runId: "run-computer",
+        runId: "run-0-computer",
       }),
       threadId: "thread-computer",
       triggerMessageId: "message-computer",

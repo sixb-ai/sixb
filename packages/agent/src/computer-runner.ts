@@ -51,8 +51,6 @@ export interface ComputerRunnerOptions {
   readonly childCapacity?: number
   /** A run that failed, once its end is recorded. */
   readonly onFailure?: (error: unknown) => void
-  /** A turn this computer claimed, as it starts to run. */
-  readonly onClaimed?: (run: ConversationAgentRunRecord) => void
   readonly fetch?: (request: Request) => Promise<Response>
 }
 
@@ -73,7 +71,11 @@ export class ComputerRunner {
    * ended already, or another runner holds it. `signal` stops the runner: the turn ends
    * interrupted, its end recorded.
    */
-  async runTurn(runId: string, signal: AbortSignal): Promise<boolean> {
+  async runTurn(
+    runId: string,
+    signal: AbortSignal,
+    onClaimed?: (run: ConversationAgentRunRecord) => void
+  ): Promise<boolean> {
     const { apiUrl } = this.options
     const fetch = this.options.fetch
     const session = await claimAgentRunOverHttp({
@@ -87,7 +89,7 @@ export class ComputerRunner {
     if (!session) return false
 
     const { run } = session
-    this.options.onClaimed?.(run)
+    onClaimed?.(run)
     const turn: HttpAgentRunSessionInput<ConversationAgentRunRecord> = {
       apiUrl,
       runnerToken: runnerTokenFor({

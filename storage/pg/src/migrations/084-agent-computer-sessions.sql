@@ -20,3 +20,8 @@ CREATE TABLE agent_computer_sessions (
   PRIMARY KEY (project_id, owner_principal_type, owner_principal_id, id)
 );
 CREATE INDEX agent_computer_sessions_by_expiry ON agent_computer_sessions (project_id, expires_at);
+
+-- Each open sixb asks every 20 seconds which of its owner's threads here have a turn active.
+CREATE INDEX agent_threads_active_on_computer
+  ON agent_threads (project_id, owner_principal_type, owner_principal_id, computer_id, computer_folder)
+  WHERE active_run_id IS NOT NULL;
