@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { Principal } from "@sixb/core"
 import {
+  type AgentContextBudget,
   type AgentRunArtifacts,
   type AgentRunSession,
   type AgentToolCallFile,
@@ -40,7 +41,6 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import { prepareHandedFiles } from "./child-files"
-import type { AgentContextBudget } from "./context-budget"
 import {
   type AgentThreadCompactionInput,
   type BuildConversationRequest,

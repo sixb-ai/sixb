@@ -10,13 +10,13 @@ import {
 } from "@sixb/core"
 import {
   AGENT_IMAGE_INPUT_TOKENS,
-  agentContextBytesPerToken,
   createAgentRunExecutionToken,
   estimateAgentContextRequestTokens,
 } from "@sixb/core/internal/agents"
 import type { ModelRateCard } from "@sixb/core/models"
 import type { AgentMessageRecord, ConversationAgentRunSpec } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
+import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "../../core/src/agents/context-token-rate"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -182,8 +182,9 @@ function createFixture() {
   }
 
   /**
-   * What a request of a thread's stored messages weighs at a model's family rate, as the worker's
-   * estimate counts it, less the system prompt and tools the API cannot render.
+   * What a request of a thread's stored messages weighs at the rate an unmeasured model starts
+   * from, as the worker's estimate counts it, less the system prompt and tools the API cannot
+   * render.
    */
   async function messagesEstimate(threadId: string, modelId: string): Promise<number> {
     const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
@@ -192,7 +193,7 @@ function createFixture() {
       systemPrompt: "",
       tools: [],
       messages: records,
-      bytesPerToken: agentContextBytesPerToken({ modelId }),
+      bytesPerToken: AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
     }).tokens
   }
 

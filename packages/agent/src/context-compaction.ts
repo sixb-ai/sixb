@@ -1,5 +1,8 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
+  AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
+  type AgentContextBudget,
   type AgentContextCompactionBoundary,
   type AgentContextEstimateTool,
   AgentExecutionLostError,
@@ -8,6 +11,7 @@ import {
   type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
+  contextSummaryOutputTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
   estimateAgentThreadRequest,
@@ -31,12 +35,6 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
-import {
-  AGENT_CONTEXT_COMPACTED_SHARE,
-  AGENT_IDLE_COMPACTION_TOKENS,
-  type AgentContextBudget,
-  contextSummaryOutputTokens,
-} from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
 import { conversationModelSettings } from "./conversation-messages"
 import { AgentContextCompactionError } from "./errors"
