@@ -143,8 +143,8 @@ class ContextGuard {
   private cleared = false
   /**
    * The calls whose results this run cleared or cut, by tool and input. A result the model asks
-   * for again after that is one it needs: it is never cleared or cut again, or the two would take
-   * turns forever when the turn's working set does not fit.
+   * for again after that is one it needs: it is never cleared or cut again while it is the newest
+   * of its call, or the two would take turns forever when the turn's working set does not fit.
    */
   private readonly reducedCalls = new Map<string, Set<string>>()
   private readonly excluded: ReadonlySet<string>
@@ -461,11 +461,22 @@ class ContextGuard {
     }
   }
 
-  /** Whether the model asked for this result again after the run cleared or cut another's. */
+  /**
+   * Whether the model asked for this result again after the run cleared or cut another's, and it
+   * is the newest of its call. An older copy is superseded by the newer one: a command the model
+   * runs again and again (a status it polls, a listing) leaves every copy but the last clearable.
+   */
   private needed(calls: ReadonlyMap<string, string>, toolCallId: string): boolean {
     const key = calls.get(toolCallId)
     const reduced = key === undefined ? undefined : this.reducedCalls.get(key)
-    return reduced !== undefined && !reduced.has(toolCallId)
+    if (reduced === undefined || reduced.has(toolCallId)) return false
+
+    // In message order: the last call with the key is its newest.
+    let newest: string | undefined
+    for (const [id, other] of calls) {
+      if (other === key) newest = id
+    }
+    return newest === toolCallId
   }
 
   /**
