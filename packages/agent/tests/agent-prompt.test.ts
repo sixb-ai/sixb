@@ -42,6 +42,12 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("published artifacts")
     expect(prompt).toContain("within the user's authorization")
     expect(renderPrompt({ mode: "conversation", skills: [] })).not.toContain("<sandbox_state>")
+
+    // Every run writes the latest saved tool outputs back, so a reset keeps them, a child's too.
+    const child = renderPrompt({ mode: "subagent", skills: [], sandboxResetAt })
+    for (const reset of [prompt, child]) {
+      expect(reset).toContain("latest tool outputs saved under $SIXB_TOOL_OUTPUTS_DIR")
+    }
   })
 
   test.each([
