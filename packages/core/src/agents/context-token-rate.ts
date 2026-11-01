@@ -28,10 +28,10 @@ export const AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN = 2
 const CALIBRATION_MIN_TEXT_TOKENS = 1_000
 
 /**
- * How far a thread's measured rate may move from the rate its run started from. Down is the safe
- * side and goes to half. Up only a quarter: stored bytes the provider bills for less (replayed
- * reasoning, provider state) raise the measured rate, and an estimate too low crosses the window
- * unseen.
+ * How far a thread's measured rate may move. Down is the safe side and goes to half the rate its
+ * run started from. Up only a quarter above what the model typically measures: stored bytes the
+ * provider bills for less (replayed reasoning, provider state) raise the measured rate, and an
+ * estimate too low crosses the window unseen.
  */
 const CALIBRATION_MIN_FACTOR = 0.5
 const CALIBRATION_MAX_FACTOR = 1.25
@@ -77,21 +77,25 @@ export function measureAgentContextTokenRate(input: {
 }
 
 /**
- * The rate a thread's own traffic shows, bounded around the rate its run started from. What the
- * provider counted that the measure misses (tool-result images, one-off notes) lowers the rate, the
- * safe side; what it holds that the provider bills for less raises it, so the rise is bounded
- * tighter than the fall.
+ * The rate a thread's own traffic shows, at least half the rate its run started from and at most a
+ * quarter above the model's typical one (`typicalBytesPerToken`, else the starting rate). What the
+ * provider counted that the measure misses (tool-result images, one-off notes) lowers the rate,
+ * the safe side; what it holds that the provider bills for less raises it, so the rise is bounded
+ * tighter than the fall. Bounding the rise by the typical rate, not the dense starting one, keeps
+ * a few dense runs of the project from capping every thread below what it reads.
  */
 export function calibrateAgentContextBytesPerToken(input: {
   readonly bytesPerToken: number
+  readonly typicalBytesPerToken?: number
   readonly size: AgentContextSize
   readonly inputTokens: number
 }): number {
   const sample = measureAgentContextTokenRate(input)
   if (!sample) return input.bytesPerToken
 
+  const typical = input.typicalBytesPerToken ?? input.bytesPerToken
   return Math.min(
-    input.bytesPerToken * CALIBRATION_MAX_FACTOR,
+    typical * CALIBRATION_MAX_FACTOR,
     Math.max(input.bytesPerToken * CALIBRATION_MIN_FACTOR, sample.bytes / sample.tokens)
   )
 }
@@ -105,6 +109,16 @@ export function learnedAgentContextBytesPerToken(
   samples: readonly AgentContextTokenRateSample[]
 ): number {
   return rateQuantile(samples, LEARNED_RATE_QUANTILE)
+}
+
+/**
+ * What the model typically measures: the median of the same measurements, else the default. A
+ * thread's calibration rises at most a quarter above it.
+ */
+export function typicalAgentContextBytesPerToken(
+  samples: readonly AgentContextTokenRateSample[]
+): number {
+  return rateQuantile(samples, 0.5)
 }
 
 /**
