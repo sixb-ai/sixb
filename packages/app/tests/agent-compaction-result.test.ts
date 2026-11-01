@@ -10,6 +10,7 @@ test("only durable compacted responses expose their continuation summary", () =>
     createElement(MessageView, {
       message: assistantMessage({
         checkpointId: "checkpoint-1",
+        reason: "threshold",
         summary: "The user asked for organization research.",
         createdAt: "2026-08-28T10:00:00.000Z",
       }),

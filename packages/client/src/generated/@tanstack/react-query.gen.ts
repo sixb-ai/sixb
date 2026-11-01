@@ -60,6 +60,7 @@ import {
   getAgentPreferences,
   getAgentRun,
   getAgentThread,
+  getAgentThreadContext,
   getAiAccountingOverview,
   getAiLimitStatus,
   getAiLimitSubjectOptions,
@@ -348,6 +349,9 @@ import type {
   GetAgentRunData,
   GetAgentRunError,
   GetAgentRunResponse,
+  GetAgentThreadContextData,
+  GetAgentThreadContextError,
+  GetAgentThreadContextResponse,
   GetAgentThreadData,
   GetAgentThreadError,
   GetAgentThreadResponse,
@@ -4889,6 +4893,33 @@ export const retryAgentRunMutation = (
   }
   return mutationOptions
 }
+
+export const getAgentThreadContextQueryKey = (options: Options<GetAgentThreadContextData>) =>
+  createQueryKey("getAgentThreadContext", options)
+
+/**
+ * Measure an agent thread's context against a model's limits
+ *
+ * What the conversation's next request starts from, the model's target and hard limit, and the latest compaction. Read by the context meter after each turn.
+ */
+export const getAgentThreadContextOptions = (options: Options<GetAgentThreadContextData>) =>
+  queryOptions<
+    GetAgentThreadContextResponse,
+    GetAgentThreadContextError,
+    GetAgentThreadContextResponse,
+    ReturnType<typeof getAgentThreadContextQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentThreadContext({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentThreadContextQueryKey(options),
+  })
 
 export const listAgentThreadRunsQueryKey = (options: Options<ListAgentThreadRunsData>) =>
   createQueryKey("listAgentThreadRuns", options)

@@ -114,6 +114,8 @@ export {
   measuringAgentContextTokenRates,
   readAgentContextTokenRates,
 } from "./context-token-rate"
+export type { AgentThreadContextUse } from "./context-use"
+export { readAgentThreadContextUse } from "./context-use"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
@@ -289,6 +291,7 @@ export type {
   AgentTurnContext,
   AgentTurnHistory,
 } from "./run-turn"
+export { matchingAgentUsageAnchor } from "./run-turn"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,
