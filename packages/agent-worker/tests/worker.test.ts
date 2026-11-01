@@ -14955,9 +14955,14 @@ describe("context within a turn", () => {
     const requests: LanguageModelRequest[] = []
     // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
     const model = chapterReadingModel({ chapters: 2, requests, bytesPerToken: 4 })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      projectTools: [chapterTool(120_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(120_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -15722,10 +15727,15 @@ describe("context of a child and of a workflow step", () => {
       bytesPerToken: 4,
     })
     const parentModel = readerParent(parentCalls)
-    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [parentModel, childModel] },
-      projectTools: [chapterTool(120_000)],
-    })
+    const sixb = buildSixb(
+      parentModel,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        models: { language: [parentModel, childModel] },
+        projectTools: [chapterTool(120_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
 
@@ -16224,6 +16234,7 @@ describe("context of a child and of a workflow step", () => {
       model,
       tools: [chapterTool(120_000)],
       runId: "workflow-rate-run",
+      sandboxes: new ToolOutputWritesFailingSandboxFactory(),
     })
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
