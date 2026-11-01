@@ -209,6 +209,12 @@ Subagents and AI workflow steps keep each call under their own model's limit the
 One still too long for its model fails with what to do: a narrower task or prompt, or a model with
 a larger window.
 
+Chat shows how much of that point a conversation uses in a ring beside the model; it takes a color
+from 80%, and opens on the target and why, the share of the last call read from cache, and the last
+summary. `sixb agent` shows the same at the end of its status line, as `ctx 38k/100k · 92% cached`.
+A custom chat reads it from `GET /api/agent-threads/:threadId/context`, against the model the next
+message goes to with `?provider=…&modelId=…`, else the latest turn's.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies
