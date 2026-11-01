@@ -1,11 +1,15 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { BookmarkCheck, ChevronRight, FileX, Wrench } from "lucide-react"
+import { ArrowUpRight, BookmarkCheck, ChevronRight, FileX, Wrench } from "lucide-react"
 import { memo, useState } from "react"
+import { formatFileSize } from "../../artifacts/file-size"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
+import { viewerTargetKey } from "../../artifacts/target"
 import { latestWorkLabel } from "../activity-label"
 import { heldCallsInParts } from "../approvals"
 import { ArtifactCards } from "../artifact-card"
+import { useArtifactPanel } from "../artifact-panel"
 import { generatedMedia } from "../bash/bash-tool-view"
 import { savedMemories } from "../bash/interpret"
 import { ModelMediaView } from "../bash/model-media-view"
@@ -13,7 +17,12 @@ import { ChildCards } from "../delegation/child-cards"
 import { describeDelegationTool, spawnedChildren } from "../delegation/interpret"
 import { useAgentMessages } from "../i18n"
 import { childQuestions, describeMessageAgent } from "../message-agent/interpret"
-import { type NormalizedPart, type NormalizedTool, toolResultValue } from "../parts"
+import {
+  type NormalizedFile,
+  type NormalizedPart,
+  type NormalizedTool,
+  toolResultValue,
+} from "../parts"
 import { turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
 import { builtInToolView } from "../tool-views/built-in"
 import { AnswerToolViews, ProjectToolView, useAgentToolView } from "../tool-views/registry"
@@ -298,16 +307,73 @@ function ToolCallRow({
   parts: readonly NormalizedPart[]
 }) {
   const view = useAgentToolView(tool.toolName)
-  if (view?.placement === "work") {
-    return (
+  const row =
+    view?.placement === "work" ? (
       <ProjectToolView
         view={view}
         tool={tool}
         fallback={<BuiltInToolRow tool={tool} parts={parts} />}
       />
+    ) : (
+      <BuiltInToolRow tool={tool} parts={parts} />
     )
-  }
-  return <BuiltInToolRow tool={tool} parts={parts} />
+  if (!tool.outputFile) return row
+
+  return (
+    <div className="min-w-0">
+      {row}
+      <SavedOutputLink file={tool.outputFile} toolName={tool.toolName} />
+    </div>
+  )
+}
+
+/**
+ * Under a call whose output was too large for the model's context, the whole output it saved: it
+ * opens beside the conversation, or in a new tab where there is no panel.
+ */
+export function SavedOutputLink({
+  file,
+  toolName,
+}: {
+  readonly file: NormalizedFile
+  readonly toolName: string
+}) {
+  const panel = useArtifactPanel()
+  const messages = useAgentMessages().activity
+  const files = useAgentMessages().files
+  const locale = useLocale()
+  if (!file.source) return null
+
+  // Named for the call it came from, not the call id the run stored it under.
+  const extension = /\.[a-z0-9]+$/i.exec(file.fileRef.fileName ?? "")?.[0] ?? ".txt"
+  const source = { ...file.source, name: messages.savedOutputName(toolName, extension) }
+  const target = { type: "file", source } as const
+  const selected = panel?.openKey === viewerTargetKey(target)
+  const size = formatFileSize(file.fileRef.sizeBytes, locale, files)
+  const className =
+    "mt-1 ml-5 flex w-fit items-center gap-1 rounded-sm text-xs leading-normal text-muted-foreground/80 underline-offset-[3px] outline-none transition-colors hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline aria-pressed:text-foreground"
+  const content = (
+    <>
+      <span>{messages.fullOutput}</span>
+      <span className="tabular-nums text-muted-foreground/60">· {size}</span>
+      <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
+    </>
+  )
+
+  return panel ? (
+    <button
+      type="button"
+      className={className}
+      aria-pressed={selected}
+      onClick={() => (selected ? panel.close() : panel.open(target))}
+    >
+      {content}
+    </button>
+  ) : (
+    <a className={className} href={source.inlineUrl} target="_blank" rel="noreferrer">
+      {content}
+    </a>
+  )
 }
 
 /** A tool call through the framework's view of the tool, else the generic inspector. */
