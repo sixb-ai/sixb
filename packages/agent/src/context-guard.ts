@@ -19,11 +19,13 @@ import {
 } from "./context-budget"
 
 /**
- * The three most recent tool results the model has read always stay, as Anthropic's
- * `clear_tool_uses` keeps by default: the work in progress reads from them. Clearing goes oldest
- * first down to the aim.
+ * The most recent tool result the model has read always stays. Clearing goes oldest first, in one
+ * batch down to the aim: the three most recent stay whenever clearing the older ones gets there,
+ * as Anthropic's `clear_tool_uses` keeps by default, and the batch goes on through them when it
+ * does not. Keeping three whatever the aim would clear one more at every step of a turn whose
+ * results are large, and break the cache each time.
  */
-const KEPT_TOOL_RESULTS = 3
+const KEPT_TOOL_RESULTS = 1
 
 /**
  * What clearing has to free, as a share of the limit, to be worth the cache it breaks: every
@@ -82,13 +84,14 @@ export interface AgentContextGuard {
  * checked before each call from what the last call really read and what was added since. Right
  * before a request would cross it:
  *
- * 1. clear the oldest tool results the model has read, all but the {@link KEPT_TOOL_RESULTS} most
- *    recent, in one batch that frees enough to be worth the cache it breaks, down to
- *    {@link AGENT_CONTEXT_COMPACTED_SHARE} of the limit, so the steps after it read the cleared
- *    request through;
+ * 1. clear the oldest tool results the model has read in one batch, down to
+ *    {@link AGENT_CONTEXT_COMPACTED_SHARE} of the limit, when it frees enough to be worth the cache
+ *    it breaks: the three most recent stay when clearing the older ones gets there, only the
+ *    newest when it does not (see {@link KEPT_TOOL_RESULTS}), and the steps after it read the
+ *    cleared request through;
  * 2. else compact what came before the turn, once, and clear again what is still needed;
  * 3. past the limit even so, clear as many of the results the model has read as it takes, the
- *    {@link KEPT_TOOL_RESULTS} most recent still kept, and cut those it has not read to fit.
+ *    newest still kept, and cut those it has not read to fit.
  *
  * A call the provider rejects as too long for the window is measured at the window at least, and
  * reduced the same way, compacting first when it can, for the loop to ask it again once.
@@ -261,8 +264,8 @@ class ContextGuard {
   }
 
   /**
-   * The oldest tool results the model has read, cleared until `neededTokens` are freed or none
-   * is left, keeping the most recent {@link KEPT_TOOL_RESULTS}.
+   * The oldest tool results the model has read, cleared until `neededTokens` are freed or only
+   * the most recent {@link KEPT_TOOL_RESULTS} is left.
    */
   private clear(
     messages: readonly ModelMessage[],

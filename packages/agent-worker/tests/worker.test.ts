@@ -14822,6 +14822,43 @@ describe("context within a turn", () => {
     }
   })
 
+  test("clears in batches that land at 60 % of the limit, so the cache breaks once per batch", async () => {
+    // Reproduce: keep the three most recent results whatever the aim (candidates.slice(0, -3) in
+    // ContextGuard.clear); chapters of about 15,000 tokens then leave one to clear at each step
+    // past the first clearing, and every one of those calls rewrites the cache.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 12, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(45_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("succeeded")
+
+      // A call that does not extend the one before it rewrites the cache from where they differ.
+      const breaks = requests.flatMap((sent, index) => {
+        const before = requests[index - 1]?.messages ?? []
+        return index > 0 && !Bun.deepEquals(sent.messages.slice(0, before.length), [...before])
+          ? [index]
+          : []
+      })
+      expect(breaks.length).toBeGreaterThan(0)
+      // Never two calls in a row: each batch frees room for the calls after it.
+      expect(breaks.some((index) => breaks.includes(index - 1))).toBe(false)
+      // Each batch lands at 60 % of the 83,616-token limit at most.
+      for (const index of breaks) {
+        expect(estimateAgentRequestTokens(requests[index]!, 3)).toBeLessThanOrEqual(
+          Math.floor(HARD_LIMIT_TOKENS * 0.6)
+        )
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("weighs the next turn by what it replays after a turn cleared results", async () => {
     // Reproduce: drop the reducedRequest check in matchingUsageAnchor; the next turn then goes by
     // the cleared call and a rate measured on it, and its first call replays every chapter, past
