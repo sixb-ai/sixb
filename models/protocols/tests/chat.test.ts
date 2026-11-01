@@ -390,3 +390,50 @@ test("does not replay an answer cut short while reasoning", () => {
     { role: "user", content: [{ type: "text", text: "Go" }] },
   ])
 })
+
+// Removal proof: serialize with JSON.stringify in chat/input.ts; the replay from Postgres `jsonb`
+// key order prints other bytes.
+test("serializes JSON tool outputs and call arguments the same whatever their key order", () => {
+  const turn = (value: JsonObject, input: JsonObject): ModelMessage[] => [
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "call", toolName: "bash", input }],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call",
+          toolName: "bash",
+          output: { type: "json", value },
+        },
+      ],
+    },
+  ]
+  const input = { providerId: "provider", errorPrefix: "[Test]" }
+  const live = chatInput(
+    turn({ exitCode: 0, stdout: "hi", stderr: "" }, { command: "ls", timeoutMs: 5 }),
+    input
+  )
+  const replayed = chatInput(
+    turn({ stderr: "", stdout: "hi", exitCode: 0 }, { timeoutMs: 5, command: "ls" }),
+    input
+  )
+
+  expect(JSON.stringify(replayed)).toBe(JSON.stringify(live))
+  expect(live).toEqual([
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "call",
+          type: "function",
+          function: { name: "bash", arguments: '{"command":"ls","timeoutMs":5}' },
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "call", content: '{"exitCode":0,"stderr":"","stdout":"hi"}' },
+  ])
+})
