@@ -179,9 +179,10 @@ larger window.
 
 The same limit holds within a turn, before each model call, as tool results pile up:
 
-- right before the limit, the oldest tool results the agent has read are cleared in one batch,
-  the three most recent kept; a short note in their place tells the agent to run the tool again if
-  it needs one back;
+- right before the limit, the oldest tool results the agent has read are cleared in one batch
+  that brings the conversation down to 60% of it: the three most recent stay when that is enough,
+  the newest always does. A short note in their place tells the agent to run the tool again if it
+  needs one back;
 - if that is not enough, the turns before the current one are summarized, and the turn goes on;
 - results too large to fit the window at all are cut, each saying how much was left out.
 
