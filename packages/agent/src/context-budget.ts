@@ -1,24 +1,22 @@
 import { AgentDefinitionError } from "@sixb/core"
 import {
   AGENT_IMAGE_INPUT_TOKENS,
+  type AgentContextSize,
   agentContextBytesPerToken,
-  estimateModelRequestTokens,
+  agentContextSizeTokens,
+  calibrateAgentContextBytesPerToken,
+  measureModelRequest,
 } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelRequest,
+  type LanguageModelStreamEvent,
   type ModelReasoning,
 } from "@sixb/core/models"
 
 const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
-
-/**
- * How much denser than its family a thread may tokenize before a call overflows the window: the
- * ceiling is set when the model is prepared, before the thread's own rate is measured.
- */
-const OUTPUT_CEILING_RATE_MARGIN = 1.25
 
 /**
  * The model's input limit: `inputBudgetTokens`, the window less the output reserve, which no call
@@ -63,6 +61,10 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   ) {
     throw invalidBudget("output allowance must exceed the reasoning token budget.")
   }
+
+  // The rate the run's calls measured: the latest one the provider counted, else the family's.
+  let bytesPerToken = budget.bytesPerToken
+
   return {
     budget,
     model: Object.freeze({
@@ -73,58 +75,80 @@ export function prepareAgentModel(selection: AgentModelSelection): {
       ...(model.validateResponseFormat === undefined
         ? {}
         : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
-      stream: (request: LanguageModelRequest) =>
-        model.stream({
+      stream: async (request: LanguageModelRequest) => {
+        const size = measureRequestInput(request)
+        const stream = await model.stream({
           ...request,
           maxOutputTokens: Math.min(
             request.maxOutputTokens ?? maxOutputTokens,
-            outputCeilingTokens(request, budget, maxOutputTokens)
+            outputCeilingTokens(
+              agentContextSizeTokens(size, bytesPerToken),
+              budget,
+              maxOutputTokens
+            )
           ),
-        }),
+        })
+
+        return {
+          events: withCountedInput(stream.events, (inputTokens) => {
+            bytesPerToken = calibrateAgentContextBytesPerToken({
+              bytesPerToken: budget.bytesPerToken,
+              size,
+              inputTokens,
+            })
+          }),
+        }
+      },
     }),
   }
 }
 
 /**
- * A call may write whatever its input leaves of the window, up to the cap. Compaction keeps the
- * input within its budget, so the reserve is always left.
+ * A call may write whatever its input leaves of the window, up to the cap, and the reserve at
+ * least. The input is weighed at the rate the run's calls measured, not a pessimistic margin: a
+ * provider that still finds the request too long refuses it, and the turn recovers.
  */
 function outputCeilingTokens(
-  request: LanguageModelRequest,
+  inputTokens: number,
   budget: AgentContextBudget,
   capTokens: number
 ): number {
-  const inputTokens = estimateRequestInputTokens(
-    request,
-    budget.bytesPerToken / OUTPUT_CEILING_RATE_MARGIN
-  )
   return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
 }
 
 /**
- * The conversation estimator at the model's family rate, which errs low on bytes per token: an
- * underestimate is the costly side, as whenever the window bounds the ceiling, any input it misses
- * overflows providers that reject input plus output beyond the window.
+ * What a call's request weighs before any tokenizer, as the conversation estimator weighs it.
  *
  * An image counts as the most a provider charges for one, never as its base64 bytes. Attachments
  * stay in a thread's requests until compaction, so giving up on any file would cap every later
  * call of the thread at the reserve. Other inline files count by their encoded bytes.
  */
-function estimateRequestInputTokens(request: LanguageModelRequest, bytesPerToken: number): number {
-  let fileTokens = 0
+function measureRequestInput(request: LanguageModelRequest): AgentContextSize {
+  const size = { ...measureModelRequest(request) }
   for (const message of request.messages) {
     if (message.role !== "user") continue
 
     for (const part of message.content) {
       if (part.type !== "file") continue
 
-      fileTokens += part.mediaType.startsWith("image/")
-        ? AGENT_IMAGE_INPUT_TOKENS
-        : Math.ceil(new TextEncoder().encode(part.data.href).byteLength / bytesPerToken)
+      if (part.mediaType.startsWith("image/")) size.tokens += AGENT_IMAGE_INPUT_TOKENS
+      else size.bytes += new TextEncoder().encode(part.data.href).byteLength
     }
   }
+  return size
+}
 
-  return estimateModelRequestTokens(request, bytesPerToken) + fileTokens
+/** The events as they come, handing over the input tokens the provider counted once it says. */
+async function* withCountedInput(
+  events: AsyncIterable<LanguageModelStreamEvent>,
+  counted: (inputTokens: number) => void
+): AsyncIterable<LanguageModelStreamEvent> {
+  for await (const event of events) {
+    const inputTokens = event.type === "finish" ? event.usage.inputTokens : undefined
+    if (inputTokens !== undefined && inputTokens > 0) counted(inputTokens)
+
+    yield event
+  }
 }
 
 /** The most one call may write: the binding's limit, capped at the model maximum. */

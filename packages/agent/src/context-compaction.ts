@@ -8,6 +8,7 @@ import {
   calibrateAgentContextBytesPerToken,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  measureAgentContextRequest,
   projectAgentThreadModelContext,
   runModelLoop,
   selectAgentContextCompactionBoundary,
@@ -310,11 +311,11 @@ export function estimateAgentConversation(input: {
   const bytesPerToken = calibrateAgentContextBytesPerToken({
     bytesPerToken: budget.bytesPerToken,
     inputTokens: anchor.inputTokens,
-    request: {
+    size: measureAgentContextRequest({
       systemPrompt,
       tools,
       messages: [...threadContext.modelMessages.slice(0, offset + anchor.index), ...answered],
-    },
+    }),
   })
 
   const anchored =

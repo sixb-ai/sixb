@@ -1,7 +1,4 @@
-import {
-  type EstimateAgentContextRequestTokensInput,
-  measureAgentContextRequest,
-} from "./context-compaction"
+import type { AgentContextSize } from "./context-compaction"
 
 /**
  * UTF-8 bytes per token of the text an agent request carries (system prompt, tool catalog,
@@ -43,17 +40,18 @@ export function agentContextBytesPerToken(model: { readonly modelId: string }): 
 }
 
 /**
- * The rate a thread's own traffic shows: the bytes of a request it sent, as stored, against the
- * input tokens the provider counted for it. What the provider counted that the store does not
- * replay (tool-result images, one-off notes) lowers the rate, the safe side; what the store holds
- * that the provider bills for less raises it, so the rise is bounded tighter than the fall.
+ * The rate a thread's own traffic shows: what a request it sent weighs, as measured (see
+ * measureAgentContextRequest, measureModelRequest), against the input tokens the provider counted
+ * for it. What the provider counted that the measure misses (tool-result images, one-off notes)
+ * lowers the rate, the safe side; what it holds that the provider bills for less raises it, so the
+ * rise is bounded tighter than the fall.
  */
 export function calibrateAgentContextBytesPerToken(input: {
   readonly bytesPerToken: number
-  readonly request: EstimateAgentContextRequestTokensInput
+  readonly size: AgentContextSize
   readonly inputTokens: number
 }): number {
-  const size = measureAgentContextRequest(input.request)
+  const { size } = input
   const textTokens = input.inputTokens - size.tokens
   if (textTokens < CALIBRATION_MIN_TEXT_TOKENS || size.bytes <= 0) return input.bytesPerToken
 
