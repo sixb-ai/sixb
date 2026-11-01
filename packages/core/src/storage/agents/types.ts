@@ -1185,6 +1185,52 @@ export interface AgentMemoryStore {
 /** How long a file version that is not its path's latest stays in a repo's history. */
 export const AGENT_MEMORY_HISTORY_DAYS = 90
 
+// ── agent_token_rates — what each model's tokenizer measured on the project's agent runs ──────
+
+/** How many measurements a project keeps per model: its newest. */
+export const AGENT_TOKEN_RATE_SAMPLES = 20
+
+/**
+ * The band of bytes per token a measurement may show. Every tokenizer measured on agent turns
+ * reads 2.1 to 4.7; a value outside is a broken measurement, and a single one would set its
+ * model's rate for the whole project.
+ */
+export const AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN = 1
+export const AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN = 8
+
+/**
+ * One run's measurement of its model's tokenizer: the UTF-8 bytes of a request's text, as the
+ * Agent's context estimator weighs them, against the text tokens the provider counted for it.
+ */
+export interface AgentTokenRateRecord {
+  readonly projectId: string
+  readonly providerId: string
+  readonly modelId: string
+  /** The agent run or workflow step that measured it: one measurement each. */
+  readonly runId: string
+  readonly bytes: number
+  readonly tokens: number
+  readonly measuredAt: Date
+}
+
+/**
+ * The newest measurements of each model's bytes per token, per project. Agent runs start their
+ * context estimate from them; losing them only makes the next estimates more conservative.
+ */
+export interface AgentTokenRateStore {
+  /**
+   * Keep a run's measurement, in place of one it recorded before, and drop the model's
+   * measurements past its newest {@link AGENT_TOKEN_RATE_SAMPLES}.
+   */
+  record(input: AgentTokenRateRecord): Promise<void>
+  /** The model's measurements, newest first: at most {@link AGENT_TOKEN_RATE_SAMPLES}. */
+  listLatest(input: {
+    readonly projectId: string
+    readonly providerId: string
+    readonly modelId: string
+  }): Promise<readonly AgentTokenRateRecord[]>
+}
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly runs: AgentRunStore
@@ -1193,4 +1239,5 @@ export interface AgentStorage {
   readonly memory: AgentMemoryStore
   readonly approvals: AgentApprovalStore
   readonly approvalModes: AgentApprovalModeStore
+  readonly tokenRates: AgentTokenRateStore
 }

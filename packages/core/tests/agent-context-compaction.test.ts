@@ -11,6 +11,8 @@ import {
 } from "../src/agents"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
 
+const bytesPerToken = 4
+
 function message(seq: number, role: AgentMessageRecord["role"], text: string): AgentMessageRecord {
   return {
     id: `message_${seq}`,
@@ -36,8 +38,8 @@ describe("agent context token estimation", () => {
         { type: "provider-state", providerId: "anthropic", data: { opaque: "secret".repeat(100) } },
       ],
     }
-    expect(estimateAgentContextMessagesTokens([withState]).tokens).toBeGreaterThan(
-      estimateAgentContextMessagesTokens([base]).tokens
+    expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBeGreaterThan(
+      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
     )
     expect(serializeAgentMessagesForSummary([withState])).toBe(
       serializeAgentMessagesForSummary([base])
@@ -59,8 +61,8 @@ describe("agent context token estimation", () => {
       ],
     }
 
-    expect(estimateAgentContextMessagesTokens([withOutcome]).tokens).toBeGreaterThan(
-      estimateAgentContextMessagesTokens([base]).tokens
+    expect(estimateAgentContextMessagesTokens([withOutcome], bytesPerToken).tokens).toBeGreaterThan(
+      estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
     )
     expect(serializeAgentMessagesForSummary([withOutcome])).toContain(
       "The user denied `workflows start send-reminders`. It did not run."
@@ -85,10 +87,11 @@ describe("agent context token estimation", () => {
         },
       ],
     })
-    const one = estimateAgentContextMessagesTokens([withFile(1)]).tokens
+    const one = estimateAgentContextMessagesTokens([withFile(1)], bytesPerToken).tokens
     const files = (count: number) =>
       estimateAgentContextMessagesTokens(
-        Array.from({ length: count }, (_, index) => withFile(index + 1))
+        Array.from({ length: count }, (_, index) => withFile(index + 1)),
+        bytesPerToken
       ).tokens
 
     expect(one).toBeGreaterThan(12_800)
@@ -135,8 +138,8 @@ describe("agent context token estimation", () => {
       ),
     })
     const extra = (messages: AgentMessageRecord[], without: AgentMessageRecord[]) =>
-      estimateAgentContextMessagesTokens(messages).tokens -
-      estimateAgentContextMessagesTokens(without).tokens
+      estimateAgentContextMessagesTokens(messages, bytesPerToken).tokens -
+      estimateAgentContextMessagesTokens(without, bytesPerToken).tokens
 
     expect(extra([viewed(2, 30)], [bare(2, 30)])).toBe(30 * AGENT_IMAGE_INPUT_TOKENS)
     expect(extra([viewed(2, 75), viewed(4, 75)], [bare(2, 75), bare(4, 75)])).toBe(
@@ -162,9 +165,14 @@ describe("agent context token estimation", () => {
       ],
     })
 
-    expect(estimateAgentContextMessagesTokens([call()]).tokens).toBeGreaterThan(1_000)
+    expect(estimateAgentContextMessagesTokens([call()], bytesPerToken).tokens).toBeGreaterThan(
+      1_000
+    )
     expect(
-      estimateAgentContextMessagesTokens([call({ type: "text", value: "Published." })]).tokens
+      estimateAgentContextMessagesTokens(
+        [call({ type: "text", value: "Published." })],
+        bytesPerToken
+      ).tokens
     ).toBeLessThan(100)
   })
 
@@ -187,10 +195,10 @@ describe("agent context token estimation", () => {
       inputSchema: '{"type":"object"}',
     }
     const estimate = (systemPrompt: string, tools: (typeof tool)[]) =>
-      estimateAgentContextRequestTokens({ systemPrompt, tools, messages }).tokens
+      estimateAgentContextRequestTokens({ systemPrompt, tools, messages, bytesPerToken }).tokens
     const bare = estimate("", [])
 
-    expect(bare).toBeGreaterThan(estimateAgentContextMessagesTokens(messages).tokens)
+    expect(bare).toBeGreaterThan(estimateAgentContextMessagesTokens(messages, bytesPerToken).tokens)
     expect(estimate("system rules ".repeat(40), [])).toBeGreaterThan(bare)
     expect(estimate("", [tool, tool])).toBeGreaterThan(estimate("", [tool]))
   })
@@ -209,7 +217,13 @@ describe("agent context compaction boundary", () => {
     {
       label: "retains the triggering user turn and starts only at a user boundary",
       messages: turns,
-      keepRecentTokens: estimateAgentContextMessagesTokens(turns.slice(3)).tokens,
+      // The selector weighs one message at a time.
+      keepRecentTokens: turns
+        .slice(3)
+        .reduce(
+          (total, turn) => total + estimateAgentContextMessagesTokens([turn], bytesPerToken).tokens,
+          0
+        ),
       expected: { summarizedThroughSeq: 2, summarized: [1, 2], retained: [3, 4, 5] },
     },
     {
@@ -231,7 +245,11 @@ describe("agent context compaction boundary", () => {
       expected: { summarizedThroughSeq: 2, summarized: [1, 2], retained: [3] },
     },
   ])("$label", ({ messages, keepRecentTokens, expected }) => {
-    const boundary = selectAgentContextCompactionBoundary({ messages, keepRecentTokens })
+    const boundary = selectAgentContextCompactionBoundary({
+      messages,
+      keepRecentTokens,
+      bytesPerToken,
+    })
     const selected: unknown = boundary && {
       summarizedThroughSeq: boundary.summarizedThroughSeq,
       summarized: boundary.messagesToSummarize.map((item) => item.seq),

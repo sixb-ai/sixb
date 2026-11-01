@@ -5,8 +5,10 @@ import {
   type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
+  calibrateAgentContextBytesPerToken,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  measureAgentContextRequest,
   projectAgentThreadModelContext,
   runModelLoop,
   selectAgentContextCompactionBoundary,
@@ -24,7 +26,7 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
-import type { AgentContextBudget } from "./context-budget"
+import { type AgentContextBudget, contextSummaryOutputTokens } from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
 import { AgentContextCompactionError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -39,7 +41,6 @@ import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext } from "./types"
 
 const SUMMARY_FORMAT_VERSION = 1 as const
-const SUMMARY_MAX_OUTPUT_TOKENS = 8_192
 const CHECKPOINT_RETRY_DELAYS_MS = [50, 200, 600] as const
 
 const SUMMARY_SYSTEM_PROMPT = [
@@ -123,8 +124,9 @@ export async function prepareAgentConversationContext(input: {
     tools,
   })
   const estimateShape = estimateShapeWith(memory)
-  const estimatedInputTokensBefore = estimateAgentConversationInputTokens({
+  const { tokens: estimatedInputTokensBefore, bytesPerToken } = estimateAgentConversation({
     plan,
+    budget,
     threadContext: initialContext,
     ...estimateShape,
   })
@@ -157,6 +159,7 @@ export async function prepareAgentConversationContext(input: {
     const boundary = selectAgentContextCompactionBoundary({
       messages: initialContext.retainedMessages,
       keepRecentTokens: budget.keepRecentTokens,
+      bytesPerToken,
     })
     if (!boundary) {
       throw new AgentContextCompactionError(
@@ -191,6 +194,7 @@ export async function prepareAgentConversationContext(input: {
     const compactedShape = estimateShapeWith(compactedMemory)
     const minimumContinuationTokens = estimateAgentContextRequestTokens({
       ...compactedShape,
+      bytesPerToken,
       messages: projectAgentThreadModelContext({
         checkpoint: candidateBase,
         messages: boundary.retainedMessages,
@@ -211,11 +215,13 @@ export async function prepareAgentConversationContext(input: {
       previousCheckpoint: initialContext.checkpoint,
       messages: boundary.messagesToSummarize,
       continuationAllowanceTokens: budget.inputBudgetTokens - minimumContinuationTokens,
+      bytesPerToken,
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
     const estimatedInputTokensAfter = estimateAgentContextRequestTokens({
       ...compactedShape,
+      bytesPerToken,
       messages: projectAgentThreadModelContext({
         checkpoint: candidate,
         messages: boundary.retainedMessages,
@@ -271,45 +277,83 @@ export async function prepareAgentConversationContext(input: {
   }
 }
 
-/** Conservatively combine matching provider usage with the current deterministic request shape. */
-export function estimateAgentConversationInputTokens(input: {
+/**
+ * The conversation's next request as the model will count it, and the bytes per token it was
+ * counted at. The session found the model call that ended the latest assistant message after the
+ * checkpoint: when it is this model's, its real tokens anchor the estimate, and the input it
+ * carried (everything before that answer's last step) measures the thread's own rate. Otherwise
+ * the whole request is estimated at the rate the run started from. The full estimate still wins
+ * when larger, as a new system prompt or tool catalog is not in the anchor.
+ */
+export function estimateAgentConversation(input: {
   readonly plan: ResolvedAgentExecutionPlan
+  readonly budget: AgentContextBudget
   readonly threadContext: LoadedAgentThreadModelContext
   readonly systemPrompt: string
   readonly tools: readonly AgentContextEstimateTool[]
-}): number {
-  const { plan, threadContext } = input
-  const fullEstimate = estimateAgentContextRequestTokens({
-    systemPrompt: input.systemPrompt,
-    tools: input.tools,
-    messages: threadContext.modelMessages,
-  }).tokens
-  // The session found the model call that ended the latest assistant message after the checkpoint.
+}): { readonly tokens: number; readonly bytesPerToken: number } {
+  const { threadContext, budget, systemPrompt, tools } = input
+  const anchor = matchingUsageAnchor(input.plan, threadContext)
+  const full = (bytesPerToken: number) =>
+    estimateAgentContextRequestTokens({
+      systemPrompt,
+      tools,
+      messages: threadContext.modelMessages,
+      bytesPerToken,
+    }).tokens
+  if (!anchor) return { tokens: full(budget.bytesPerToken), bytesPerToken: budget.bytesPerToken }
+
+  // The synthetic summary leads the model messages; the retained tail follows it.
+  const offset = threadContext.modelMessages.length - threadContext.retainedMessages.length
+  const answer = threadContext.retainedMessages[anchor.index]!
+  const lastStep = answer.parts.map((part) => part.type).lastIndexOf("step-start")
+  const answered = lastStep > 0 ? [{ ...answer, parts: answer.parts.slice(0, lastStep) }] : []
+  const bytesPerToken = calibrateAgentContextBytesPerToken({
+    bytesPerToken: budget.bytesPerToken,
+    inputTokens: anchor.inputTokens,
+    size: measureAgentContextRequest({
+      systemPrompt,
+      tools,
+      messages: [...threadContext.modelMessages.slice(0, offset + anchor.index), ...answered],
+    }),
+  })
+
+  const anchored =
+    anchor.inputTokens +
+    anchor.outputTokens +
+    estimateAgentContextMessagesTokens(
+      threadContext.retainedMessages.slice(anchor.index + 1),
+      bytesPerToken
+    ).tokens
+  return { tokens: Math.max(anchored, full(bytesPerToken)), bytesPerToken }
+}
+
+/** The anchoring call, when it is this model's and counted both input and output. */
+function matchingUsageAnchor(
+  plan: ResolvedAgentExecutionPlan,
+  threadContext: LoadedAgentThreadModelContext
+):
+  | { readonly index: number; readonly inputTokens: number; readonly outputTokens: number }
+  | undefined {
   const anchor = threadContext.history.usageAnchor
-  const anchorIndex = anchor
+  const index = anchor
     ? threadContext.retainedMessages.findIndex((message) => message.id === anchor.messageId)
     : -1
   const usage = anchor?.modelCall
   const inputTokens = usage?.usage.inputTokens
   const outputTokens = usage?.usage.outputTokens
   if (
-    anchorIndex >= 0 &&
-    usage?.providerId === plan.model.providerId &&
-    usage.requestedModelId === plan.model.modelId &&
-    inputTokens !== undefined &&
-    inputTokens > 0 &&
-    outputTokens !== undefined &&
-    outputTokens > 0
+    index < 0 ||
+    usage?.providerId !== plan.model.providerId ||
+    usage.requestedModelId !== plan.model.modelId ||
+    inputTokens === undefined ||
+    inputTokens <= 0 ||
+    outputTokens === undefined ||
+    outputTokens <= 0
   ) {
-    const anchoredEstimate =
-      inputTokens +
-      outputTokens +
-      estimateAgentContextMessagesTokens(threadContext.retainedMessages.slice(anchorIndex + 1))
-        .tokens
-    return Math.max(anchoredEstimate, fullEstimate)
+    return undefined
   }
-
-  return fullEstimate
+  return { index, inputTokens, outputTokens }
 }
 
 function contextEstimateTools(
@@ -330,11 +374,11 @@ async function generateCheckpointSummary(input: {
   readonly previousCheckpoint: AgentContextCheckpointRecord | null
   readonly messages: readonly AgentMessageRecord[]
   readonly continuationAllowanceTokens: number
+  readonly bytesPerToken: number
 }): Promise<string> {
   const prompt = summaryPrompt(input.previousCheckpoint, input.messages)
   const maxOutputTokens = Math.min(
-    SUMMARY_MAX_OUTPUT_TOKENS,
-    Math.max(1, Math.floor(input.budget.reserveTokens / 2)),
+    contextSummaryOutputTokens(input.budget.reserveTokens),
     input.plan.model.definition.maxOutputTokens ?? Number.POSITIVE_INFINITY,
     input.continuationAllowanceTokens
   )
@@ -344,6 +388,7 @@ async function generateCheckpointSummary(input: {
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
     tools: [],
     messages: [{ role: "user", parts: [{ type: "text", text: prompt }] }],
+    bytesPerToken: input.bytesPerToken,
   }).tokens
   const inputBudgetTokens = Math.min(
     input.plan.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,

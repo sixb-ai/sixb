@@ -1,26 +1,50 @@
 import { AgentDefinitionError } from "@sixb/core"
-import { AGENT_IMAGE_INPUT_TOKENS } from "@sixb/core/internal/agents"
+import {
+  AGENT_TOKEN_RATE_SAMPLES,
+  type AgentContextTokenRateSample,
+  agentContextSizeTokens,
+  calibrateAgentContextBytesPerToken,
+  learnedAgentContextBytesPerToken,
+  measureAgentContextTokenRate,
+  measureAgentModelRequest,
+} from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelRequest,
+  type LanguageModelStreamEvent,
   type ModelReasoning,
 } from "@sixb/core/models"
 
 const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
 
+/**
+ * The model's input limit: `inputBudgetTokens`, the window less the output reserve, which no call
+ * crosses. Compaction starts past it.
+ */
 export interface AgentContextBudget {
   readonly windowTokens: number
   readonly inputBudgetTokens: number
   readonly reserveTokens: number
+  /** The recent work compaction keeps verbatim. */
   readonly keepRecentTokens: number
   readonly source: "model" | "fallback"
+  /**
+   * UTF-8 bytes per token the run starts from, before a thread calibrates it: what the project's
+   * runs measured on the model (see learnedAgentContextBytesPerToken).
+   */
+  readonly bytesPerToken: number
 }
 
 interface AgentModelSelection {
   readonly model: LanguageModel
   readonly reasoning?: ModelReasoning
+  /**
+   * What the project's runs measured of the model's tokenizer lately, newest first (see
+   * readAgentContextTokenRates); none, and the run starts from the default, which errs high.
+   */
+  readonly tokenRates?: readonly AgentContextTokenRateSample[]
 }
 
 /**
@@ -46,6 +70,14 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   ) {
     throw invalidBudget("output allowance must exceed the reasoning token budget.")
   }
+
+  // The run's rate, from the project's measurements and, newest first, its own calls'.
+  const tokenRates = selection.tokenRates ?? []
+  const runTokenRates: AgentContextTokenRateSample[] = []
+  let runBytesPerToken = budget.bytesPerToken
+  // The rate the run's latest counted call measured, bounded around the run's; else the run's.
+  let measuredBytesPerToken = budget.bytesPerToken
+
   return {
     budget,
     model: Object.freeze({
@@ -56,58 +88,68 @@ export function prepareAgentModel(selection: AgentModelSelection): {
       ...(model.validateResponseFormat === undefined
         ? {}
         : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
-      stream: (request: LanguageModelRequest) =>
-        model.stream({
+      stream: async (request: LanguageModelRequest) => {
+        const size = measureAgentModelRequest(request)
+        const stream = await model.stream({
           ...request,
           maxOutputTokens: Math.min(
             request.maxOutputTokens ?? maxOutputTokens,
-            outputCeilingTokens(request, budget, maxOutputTokens)
+            outputCeilingTokens(
+              agentContextSizeTokens(size, Math.min(runBytesPerToken, measuredBytesPerToken)),
+              budget,
+              maxOutputTokens
+            )
           ),
-        }),
+        })
+
+        return {
+          events: withCountedInput(stream.events, (inputTokens) => {
+            const sample = measureAgentContextTokenRate({ size, inputTokens })
+            if (sample) {
+              // The newest 20 are all the statistic reads.
+              runTokenRates.unshift(sample)
+              runTokenRates.splice(AGENT_TOKEN_RATE_SAMPLES)
+              runBytesPerToken = learnedAgentContextBytesPerToken([...runTokenRates, ...tokenRates])
+            }
+
+            measuredBytesPerToken = calibrateAgentContextBytesPerToken({
+              bytesPerToken: runBytesPerToken,
+              size,
+              inputTokens,
+            })
+          }),
+        }
+      },
     }),
   }
 }
 
 /**
- * A call may write whatever its input leaves of the window, up to the cap. Compaction keeps the
- * input within its budget, so the reserve is always left.
+ * A call may write whatever its input leaves of the window, up to the cap, and the reserve at
+ * least. The input is weighed at the denser of the run's rate and the one its latest call
+ * measured, so it errs high whichever way this request's content tokenizes: a call right after a
+ * large tool result can read denser than the calls it was calibrated on, and with no turn to ask
+ * it again, an allowance past the window's room is a refused call.
  */
 function outputCeilingTokens(
-  request: LanguageModelRequest,
+  inputTokens: number,
   budget: AgentContextBudget,
   capTokens: number
 ): number {
-  const inputTokens = estimateRequestInputTokens(request)
   return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
 }
 
-/**
- * Serialized bytes at two per token. Gateway tokenizers measured from 2.8 (Hindi on GLM) to 12
- * bytes per token, and an underestimate is the costly side: whenever the window bounds the ceiling,
- * any input it misses overflows providers that reject input plus output beyond the window.
- *
- * An image counts as the most a provider charges for one, never as its base64 bytes. Attachments
- * stay in a thread's requests until compaction, so giving up on any file would cap every later
- * call of the thread at the reserve. Other inline files count by their encoded bytes.
- */
-function estimateRequestInputTokens(request: LanguageModelRequest): number {
-  let imageTokens = 0
-  const messages = request.messages.map((message) => {
-    if (message.role !== "user") return message
+/** The events as they come, handing over the input tokens the provider counted once it says. */
+async function* withCountedInput(
+  events: AsyncIterable<LanguageModelStreamEvent>,
+  counted: (inputTokens: number) => void
+): AsyncIterable<LanguageModelStreamEvent> {
+  for await (const event of events) {
+    const inputTokens = event.type === "finish" ? event.usage.inputTokens : undefined
+    if (inputTokens !== undefined && inputTokens > 0) counted(inputTokens)
 
-    return {
-      ...message,
-      content: message.content.map((part) => {
-        if (part.type !== "file" || !part.mediaType.startsWith("image/")) return part
-
-        imageTokens += AGENT_IMAGE_INPUT_TOKENS
-        return { ...part, data: "image" }
-      }),
-    }
-  })
-
-  const serialized = JSON.stringify([messages, request.tools, request.responseFormat])
-  return Math.ceil(new TextEncoder().encode(serialized).byteLength / 2) + imageTokens
+    yield event
+  }
 }
 
 /** The most one call may write: the binding's limit, capped at the model maximum. */
@@ -148,6 +190,11 @@ export function resolveAgentContextBudget(
     windowTokens - reserveTokens
   )
   assertPositiveSafeInteger(inputBudgetTokens, "inputBudgetTokens")
+  const tokenRates = selection.tokenRates ?? []
+  const bytesPerToken = learnedAgentContextBytesPerToken(tokenRates)
+  if (!Number.isFinite(bytesPerToken) || bytesPerToken <= 0) {
+    throw invalidBudget("token rates must measure a positive number of bytes per token.")
+  }
   const keepRecentTokens = Math.min(20_000, Math.floor(inputBudgetTokens * 0.5))
   assertPositiveSafeInteger(keepRecentTokens, "keepRecentTokens")
   if (keepRecentTokens >= inputBudgetTokens) {
@@ -160,7 +207,13 @@ export function resolveAgentContextBudget(
     reserveTokens,
     keepRecentTokens,
     source: modelWindow === undefined ? "fallback" : "model",
+    bytesPerToken,
   })
+}
+
+/** The summary call's output allowance: half the output reserve, at most 8,192 tokens. */
+export function contextSummaryOutputTokens(reserveTokens: number): number {
+  return Math.min(8_192, Math.max(1, Math.floor(reserveTokens / 2)))
 }
 
 function invalidBudget(message: string): AgentDefinitionError {

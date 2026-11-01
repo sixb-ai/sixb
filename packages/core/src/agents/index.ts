@@ -4,6 +4,7 @@ export {
   sandboxCredentialIssue,
   staticSandboxRecipe,
 } from "../sandboxes/configuration"
+export { AGENT_TOKEN_RATE_SAMPLES } from "../storage/agents/types"
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
@@ -75,19 +76,33 @@ export {
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
+  AgentContextSize,
   AgentContextTokenEstimate,
   EstimateAgentContextRequestTokensInput,
 } from "./context-compaction"
 export {
   AGENT_CONTEXT_ESTIMATOR_VERSION,
+  agentContextSizeTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  measureAgentContextRequest,
+  measureAgentModelRequest,
+  measureModelRequest,
   selectAgentContextCompactionBoundary,
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
 export { resolveAgentContextParts } from "./context-resolution"
+export type { AgentContextTokenRateSample } from "./context-token-rate"
+export {
+  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
+  calibrateAgentContextBytesPerToken,
+  learnedAgentContextBytesPerToken,
+  measureAgentContextTokenRate,
+  measuringAgentContextTokenRates,
+  readAgentContextTokenRates,
+} from "./context-token-rate"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,

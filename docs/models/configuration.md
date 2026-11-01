@@ -165,6 +165,9 @@ per answer, cap it with `maxOutputTokens` on the binding, such as
 `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
+A conversation is summarized only near its model's limit, whatever the provider's price tiers. To
+summarize earlier, set a smaller `contextWindow` on the model definition.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies

@@ -12,6 +12,7 @@ import { type RenderedOntologyDocs, renderOntologyDocs } from "../ontology/docs-
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { Sixb } from "../runtime/sixb"
 import type { AgentRunRecord } from "../storage/agents"
+import type { AgentContextTokenRateSample } from "./context-token-rate"
 import { AgentMemoryError } from "./errors"
 import type { AgentMemoryRepoName } from "./memory"
 import type { AgentMemoryRepoView } from "./memory-execution"
@@ -44,6 +45,11 @@ export interface AgentRunPlan {
   readonly ontologyDocs: RenderedOntologyDocs
   /** The models a turn can hand a child; a child spawns none. */
   readonly delegation?: AgentRunDelegation
+  /**
+   * What the project's runs measured of its model's tokenizer lately, newest first, which its
+   * context estimate starts from (see readAgentContextTokenRates).
+   */
+  readonly tokenRates: readonly AgentContextTokenRateSample[]
 }
 
 /** The project's language models, as a turn chooses one for a child it spawns. */
@@ -99,7 +105,7 @@ export function readAgentRunPlan(
   definitions: AgentRunPlanDefinitions,
   run: AgentRunRecord,
   view: AgentRunView
-): AgentRunPlan {
+): Omit<AgentRunPlan, "tokenRates"> {
   const { agent, models, tools } = definitions
   const shared = {
     ...(agent.instructions === undefined ? {} : { instructions: agent.instructions }),

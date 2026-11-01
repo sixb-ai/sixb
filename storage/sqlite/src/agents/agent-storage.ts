@@ -11,6 +11,7 @@ import { SqliteAgentMessageStore } from "./messages"
 import { SqliteAgentRunStore } from "./runs"
 import { SqliteAgentApprovalModeStore } from "./settings"
 import { SqliteAgentThreadStore } from "./threads"
+import { SqliteAgentTokenRateStore } from "./token-rates"
 
 export interface SqliteAgentStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
@@ -22,8 +23,8 @@ export interface SqliteAgentStorageOptions {
 }
 
 /**
- * SQLite-backed agent persistence: thread, run, message, context-checkpoint, memory, approval and
- * approval-mode sub-stores sharing one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
+ * SQLite-backed agent persistence: thread, run, message, context-checkpoint, memory, approval,
+ * approval-mode and token-rate sub-stores sharing one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
  * serializes them for single-flight and checkpoint compare-and-swap safety.
  */
 export class SqliteAgentStorage implements AgentStorage {
@@ -34,6 +35,7 @@ export class SqliteAgentStorage implements AgentStorage {
   readonly memory: SqliteAgentMemoryStore
   readonly approvals: SqliteAgentApprovalStore
   readonly approvalModes: SqliteAgentApprovalModeStore
+  readonly tokenRates: SqliteAgentTokenRateStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -47,6 +49,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.memory = new SqliteAgentMemoryStore(this.connection.db)
     this.approvals = new SqliteAgentApprovalStore(this.connection.db)
     this.approvalModes = new SqliteAgentApprovalModeStore(this.connection.db)
+    this.tokenRates = new SqliteAgentTokenRateStore(this.connection.db)
   }
 
   close(): void {

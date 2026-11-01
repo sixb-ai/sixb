@@ -43,6 +43,7 @@ import {
   resolveInheritedAgentExecutionAuthorization,
   userCanRunAgent,
 } from "./authority"
+import { measuringAgentContextTokenRates, readAgentContextTokenRates } from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
 import { createAgentRunExecutionToken } from "./ids"
 import { type AgentRunArtifacts, agentRunArtifacts } from "./run-artifacts"
@@ -448,7 +449,15 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
           languageModels.set(key, resolved)
           resolved.catch(() => languageModels.delete(key))
         }
-        return (await openedModelCalls()).wrapModel(await resolved)
+        // Each call records itself, and what it measured of the model's tokenizer.
+        return measuringAgentContextTokenRates(
+          (await openedModelCalls()).wrapModel(await resolved),
+          {
+            tokenRates: agents.tokenRates,
+            projectId: host.projectId,
+            runId: run.id,
+          }
+        )
       },
     },
     async renewLease(leaseExpiresAt) {
@@ -537,10 +546,17 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         host.definitions.ontology,
         authorization
       )
-      return readAgentRunPlan(host.definitions, run, {
+      const plan = readAgentRunPlan(host.definitions, run, {
         sixb,
         ...(propertyClearance === undefined ? {} : { propertyClearance }),
       })
+
+      const tokenRates = await readAgentContextTokenRates({
+        tokenRates: agents.tokenRates,
+        projectId: host.projectId,
+        model: { providerId: plan.model.provider, modelId: plan.model.modelId },
+      })
+      return Object.freeze({ ...plan, tokenRates })
     },
     async memory({ asOf }) {
       // Others read a shared conversation, so its runs reach no one's own memory.

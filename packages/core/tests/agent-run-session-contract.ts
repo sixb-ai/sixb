@@ -20,6 +20,7 @@ import {
 } from "../src/agents"
 import { defineAgentTool } from "../src/agents/builders"
 import { emptyGrantIndex } from "../src/authorization/types"
+import type { LanguageModel, ModelMessage } from "../src/models"
 import type { AgentRunRecord } from "../src/storage/agents"
 import { createTestAgentExecution } from "../src/testing"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
@@ -50,6 +51,44 @@ const answeringModel = new MockLanguageModel({
     ]),
 })
 
+/**
+ * A model whose provider counts a request's text at 2.4 bytes per token, and the request's and
+ * each message's 8 overhead tokens, as the estimator weighs them.
+ */
+const countingModel = new MockLanguageModel({
+  providerId: "test",
+  modelId: "counting-model",
+  stream: async (request) => {
+    const text = request.messages.flatMap((message) =>
+      message.role === "system"
+        ? []
+        : message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+    )
+    const bytes = text.reduce((total, part) => total + part.length, 0)
+    const inputTokens = Math.ceil(bytes / 2.4) + 8 + 8 * request.messages.length
+    return streamFromArray([
+      { type: "stream-start" },
+      { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 3 } },
+    ])
+  },
+})
+
+/** One call of `model` with one user message, read to its end as a runner reads it. */
+async function streamAll(
+  model: LanguageModel,
+  content: Extract<ModelMessage, { role: "user" }>["content"]
+): Promise<void> {
+  const stream = await model.stream({
+    callId: crypto.randomUUID(),
+    messages: [{ role: "user", content }],
+    tools: [],
+    signal: new AbortController().signal,
+  })
+  for await (const _event of stream.events) {
+    // Each event is read.
+  }
+}
+
 /** A project tool that answers what run it ran in, and stores a file for the run's sandbox. */
 const chartTool = defineAgentTool("chart")
   .description("Draw a chart.")
@@ -77,7 +116,7 @@ function projectOver(storage: InMemoryStorage, broker: InMemoryBroker) {
   const sdk = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    models: { language: [answeringModel] },
+    models: { language: [answeringModel, countingModel] },
     tools: [chartTool, readTool, otherTool],
     storage,
     blobStorage: blobs,
@@ -340,6 +379,50 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       })
       expect(messages.messages.map((message) => message.id)).toContain("message-answer")
       session.close()
+    })
+
+    // Guard proof: return the recorded model from AgentRunSession.models without
+    // measuringAgentContextTokenRates; the next run on the model starts from the default again.
+    test("records what each call measured of its model, for the next run's plan", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const ref = { provider: "test", modelId: "counting-model" }
+      const stored = () =>
+        storage.agents.tokenRates.listLatest({
+          projectId: PROJECT_ID,
+          providerId: ref.provider,
+          modelId: ref.modelId,
+        })
+      const session = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!session) throw new Error("Expected the run to be claimed.")
+      const model = await session.models.language(ref)
+
+      await streamAll(model, [{ type: "text", text: "a".repeat(30_000) }])
+      expect(await stored()).toMatchObject([{ runId: run.id, bytes: 30_000, tokens: 12_500 }])
+      // The run's latest call stands for it; one that read an image measures nothing.
+      await streamAll(model, [{ type: "text", text: "b".repeat(36_000) }])
+      await streamAll(model, [
+        { type: "text", text: "c".repeat(30_000) },
+        { type: "file", mediaType: "image/png", data: new URL("data:image/png;base64,AAAA") },
+      ])
+      expect(await stored()).toMatchObject([{ runId: run.id, bytes: 36_000, tokens: 15_000 }])
+      await session.finish({ status: "succeeded", finishReason: "stop" })
+      session.close()
+
+      const next = await storage.agents.runs.create({
+        id: "run-2",
+        projectId: PROJECT_ID,
+        executionId: await createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: "run-2",
+        }),
+        threadId: run.threadId,
+        triggerMessageId: "message-run-2",
+        spec: { model: ref },
+      })
+      const nextSession = await claim(host, { run: next, leaseExpiresAt: LEASE })
+      if (!nextSession) throw new Error("Expected the next run to be claimed.")
+      expect((await nextSession.plan()).tokenRates).toEqual([{ bytes: 36_000, tokens: 15_000 }])
+      nextSession.close()
     })
   })
 

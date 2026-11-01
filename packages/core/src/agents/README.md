@@ -63,8 +63,9 @@ both publish through it.
 ```text
 renewLease · cancelled · assertOwned   ownership, and a cancel of the run or of its parent
 models.language(ref)                   the run's model, pinned once: each call is admitted against
-                                       the requester's AI limits and records itself, so the runner
-                                       never reports what a call used
+                                       the requester's AI limits and records itself, and what it
+                                       measured of the tokenizer (context-token-rate.ts), so the
+                                       runner never reports what a call used
 callTool(call)                         one call of a project tool the run offers, for the runner
                                        that holds the run, run as the run (run-tools.ts): its input
                                        checked against the tool's schema, its model calls billed to
@@ -73,7 +74,9 @@ callTool(call)                         one call of a project tool the run offers
 events · heldCalls                     live records (best effort) and the approvals that hold a run
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
-                                       docs and a turn's delegation models; and the memory it reads
+                                       docs, a turn's delegation models and the bytes per token its
+                                       model measured lately (context-token-rate.ts); and the
+                                       memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
 threads · children                     the conversation's messages and a turn's children; reads

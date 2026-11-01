@@ -24,6 +24,8 @@ import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
+  measuringAgentContextTokenRates,
+  readAgentContextTokenRates,
   renderAgentRunOntologyDocs,
   resolveAgentPropertyClearance,
   runAgentTool,
@@ -159,10 +161,19 @@ export async function executeWorkflowAgentNode(
       authorPrincipal: resolved.identity.principal,
     })
     // The step runs in this process: the worker pins its model and records each call.
-    const prepared = prepareAgentModel({
-      ...configuredPlan,
-      model: usageRecorder.wrapModel(await resolveLanguageModel(configuredPlan.model)),
+    const model = await resolveLanguageModel(configuredPlan.model)
+    const tokenRates = await readAgentContextTokenRates({
+      tokenRates: context.storage.agents.tokenRates,
+      projectId: context.id,
+      model,
     })
+    // Each call records itself, and what it measured of the model's tokenizer, as a run's does.
+    const measured = measuringAgentContextTokenRates(usageRecorder.wrapModel(model), {
+      tokenRates: context.storage.agents.tokenRates,
+      projectId: context.id,
+      runId: nodeRun.id,
+    })
+    const prepared = prepareAgentModel({ ...configuredPlan, model: measured, tokenRates })
     const authorization = { type: "principal" as const, context: resolved.context }
     const propertyClearance = resolveAgentPropertyClearance(
       input.host.definitions.ontology,

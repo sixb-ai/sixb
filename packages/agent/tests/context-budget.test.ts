@@ -1,7 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "@sixb/core/internal/agents"
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
+  type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelRequest,
   ModelCatalogUnavailableError,
@@ -46,6 +48,40 @@ function request(content: readonly (ModelTextPart | ModelFilePart)[] = []): Lang
 
 const text = (bytes: number): ModelTextPart => ({ type: "text", text: "a".repeat(bytes) })
 
+/** What the project's earlier runs measured of a model: twenty calls at `bytesPerToken`. */
+const measured = (bytesPerToken: number) =>
+  Array.from({ length: 20 }, () => ({ bytes: Math.round(bytesPerToken * 10_000), tokens: 10_000 }))
+
+/** A model whose provider counts the request's text at `bytesPerToken`. */
+function countingAt(model: WorkerTestModel, bytesPerToken: number): (number | undefined)[] {
+  const outputs: (number | undefined)[] = []
+  model.stream = async (request) => {
+    outputs.push(request.maxOutputTokens)
+    const bytes = request.messages
+      .flatMap((message) =>
+        message.role === "system"
+          ? []
+          : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+      )
+      .reduce((total, value) => total + value, 0)
+    // The request's and its message's 8 overhead tokens each, then its text.
+    const inputTokens = Math.ceil(bytes / bytesPerToken) + 16
+    return {
+      events: (async function* () {
+        yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+      })(),
+    }
+  }
+  return outputs
+}
+
+/** One call, read to the end as the model loop reads it. */
+async function streamAll(model: LanguageModel, input: LanguageModelRequest): Promise<void> {
+  for await (const _event of (await model.stream(input)).events) {
+    // Each event is read.
+  }
+}
+
 /** A model as a session hands it over, pinned once, then budgeted by the harness. */
 async function pinAndPrepare(selection: Parameters<typeof prepareAgentModel>[0]) {
   return prepareAgentModel({ ...selection, model: await resolveLanguageModel(selection.model) })
@@ -58,15 +94,157 @@ describe("agent context budget resolution", () => {
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
     const { model, budget } = await pinAndPrepare(base)
-    for (const bytes of [0, 300_000, 600_000]) await model.stream(request([text(bytes)]))
+    for (const bytes of [0, 300_000, 900_000]) await model.stream(request([text(bytes)]))
 
     expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
     expect(model.definition.maxOutputTokens).toBe(64_000)
     expect(outputs[0]).toBe(64_000)
-    // 300,000 bytes count as 150,000 tokens, plus the request's own JSON.
+    // 300,000 bytes count as 150,000 tokens at the 2 per token of a model no run measured yet,
+    // plus a few overheads.
     expect(outputs[1]).toBeGreaterThan(49_900)
     expect(outputs[1]).toBeLessThan(50_000)
     expect(outputs[2]).toBe(16_384)
+  })
+
+  test("estimates each call like the conversation, at the rate its model's runs measured", async () => {
+    // Removal proof: estimate the call by its serialized JSON, or ignore selection.tokenRates in
+    // resolveAgentContextBudget; the escaped quotes double, or the call is weighed at the default
+    // 2, and it asks for another output.
+    const base = selection({
+      modelId: "claude-haiku-5-5",
+      contextWindow: 200_000,
+      maxOutputTokens: 64_000,
+    })
+    const outputs = recordOutputs(base.model)
+    const { model, budget } = await pinAndPrepare({ ...base, tokenRates: measured(2.1) })
+    await model.stream(request([{ type: "text", text: '"'.repeat(300_000) }]))
+
+    expect(budget.bytesPerToken).toBe(2.1)
+    // 300,000 bytes at the 2.1 per token measured, plus the request's and the message's 8 tokens.
+    expect(outputs).toEqual([200_000 - (Math.ceil(300_000 / 2.1) + 16)])
+  })
+
+  test("starts a model no run measured at the default rate", async () => {
+    // Removal proof: default resolveAgentContextBudget to 2.1 again, the old Anthropic family rate; this
+    // model then starts there.
+    const { budget } = await pinAndPrepare(selection({ modelId: "claude-haiku-5-5" }))
+
+    expect(budget.bytesPerToken).toBe(AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN)
+    expect(() =>
+      resolveAgentContextBudget({ ...selection(), tokenRates: [{ bytes: 0, tokens: 0 }] })
+    ).toThrow("token rates must measure a positive number of bytes per token")
+  })
+
+  test("weighs an unmeasured model's next call at the rate its first call measured", async () => {
+    // Reproduce: leave the run's own calls out of runBytesPerToken in prepareAgentModel; the
+    // second call is weighed at the default 2, 280,000 tokens, and given only the reserve.
+    const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
+    // A sparse tokenizer, as OpenAI's measures about 4.4 bytes per token.
+    const outputs = countingAt(base.model, 4)
+    const { model, budget } = await pinAndPrepare(base)
+
+    for (const bytes of [100_000, 560_000]) await streamAll(model, request([text(bytes)]))
+
+    expect(budget.bytesPerToken).toBe(2)
+    // 560,000 bytes at the 4 per token the first call measured, plus the 16 overhead tokens.
+    expect(outputs[1]).toBe(200_000 - (140_000 + 16))
+  })
+
+  test("barely moves a model's twenty measurements with one call of a run", async () => {
+    // Reproduce: make the run's rate its latest call's alone; 4 bytes per token then weigh the
+    // second call, which the project's twenty runs measured at 2.4.
+    const base = selection({ contextWindow: 400_000, maxOutputTokens: 64_000 })
+    const outputs = countingAt(base.model, 4)
+    const { model } = await pinAndPrepare({ ...base, tokenRates: measured(2.4) })
+
+    for (const bytes of [100_000, 840_000]) await streamAll(model, request([text(bytes)]))
+
+    // 840,000 bytes at the project's 2.4 per token, plus the 16 overhead tokens.
+    expect(outputs[1]).toBe(400_000 - (350_000 + 16))
+  })
+
+  test("gives a long thread on an Anthropic model the room its window leaves", async () => {
+    // Reproduce: size the ceiling at the run's starting rate less a quarter, as before; the second
+    // call, about 130,000 real tokens of a 200,000 window, is then capped at the 16,384 reserve.
+    const base = {
+      ...selection({
+        modelId: "claude-haiku-5-5",
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+      }),
+      // The densest the project's runs measured on the model lately.
+      tokenRates: measured(2.1),
+    }
+    const outputs: (number | undefined)[] = []
+    base.model.stream = async (request) => {
+      outputs.push(request.maxOutputTokens)
+      // This provider counts 2.4 bytes per token, as Anthropic models measured on agent turns.
+      const bytes = request.messages.flatMap((message) =>
+        message.role === "system"
+          ? []
+          : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+      )
+      const inputTokens = Math.ceil(bytes.reduce((total, value) => total + value, 0) / 2.4)
+      return {
+        events: (async function* () {
+          yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+        })(),
+      }
+    }
+    const { model } = await pinAndPrepare(base)
+
+    for (const bytes of [300_000, 312_000]) {
+      for await (const _event of (await model.stream(request([text(bytes)]))).events) {
+        // Read to the end, as the model loop does.
+      }
+    }
+
+    // About 130,000 real tokens: weighed at the run's 2.1, denser than the 2.4 the first call
+    // measured, they leave more than three times the reserve.
+    expect(outputs[0]).toBeGreaterThan(16_384)
+    expect(outputs[1]).toBe(200_000 - (Math.ceil(312_000 / 2.1) + 16))
+  })
+
+  test("never lets input and allowance pass the window when a call reads denser than measured", async () => {
+    // Reproduce: weigh the request at the measured rate alone in prepareAgentModel; the call after
+    // the large result is then given the whole 64,000-token cap, about 21,000 past the window.
+    const base = {
+      ...selection({
+        modelId: "claude-haiku-5-5",
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+      }),
+      // What the project's runs measured on the model: its large tool results read at 2.1.
+      tokenRates: measured(2.1),
+    }
+    const calls: { readonly inputTokens: number; readonly maxOutputTokens?: number }[] = []
+    base.model.stream = async (request) => {
+      const bytes = request.messages
+        .flatMap((message) =>
+          message.role === "system"
+            ? []
+            : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+        )
+        .reduce((total, value) => total + value, 0)
+      // Conversation text at 2.6 bytes per token; the large tool result after it at 2.1.
+      const inputTokens = calls.length === 0 ? Math.ceil(bytes / 2.6) : Math.ceil(bytes / 2.1)
+      calls.push({ inputTokens, maxOutputTokens: request.maxOutputTokens })
+      return {
+        events: (async function* () {
+          yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+        })(),
+      }
+    }
+    const { model } = await pinAndPrepare(base)
+
+    for (const bytes of [100_000, 330_000]) {
+      for await (const _event of (await model.stream(request([text(bytes)]))).events) {
+        // Read to the end, as the model loop does.
+      }
+    }
+
+    const after = calls[1]!
+    expect(after.inputTokens + (after.maxOutputTokens ?? 0)).toBeLessThanOrEqual(200_000)
   })
 
   test("keeps a reasoning budget's reserve and rejects one the model cannot exceed", async () => {
@@ -78,7 +256,7 @@ describe("agent context budget resolution", () => {
     }
     const outputs = recordOutputs(base.model)
     const { model, budget } = await pinAndPrepare(base)
-    await model.stream(request([text(60_000)]))
+    await model.stream(request([text(90_000)]))
 
     expect(budget).toMatchObject({ reserveTokens: 10_001, inputBudgetTokens: 22_767 })
     expect(outputs).toEqual([10_001])
@@ -103,14 +281,14 @@ describe("agent context budget resolution", () => {
     })
     const pdf: ModelFilePart = {
       type: "file",
-      data: new URL(`data:application/pdf;base64,${"A".repeat(400_000)}`),
+      data: new URL(`data:application/pdf;base64,${"A".repeat(600_000)}`),
       mediaType: "application/pdf",
     }
 
     // A 4 MB image counts as 5,400 tokens, not 2,000,000; 30 of them as 162,000.
     await model.stream(request([image(4_000_000)]))
     await model.stream(request(Array.from({ length: 30 }, () => image(10))))
-    // A document counts by its encoded bytes.
+    // A document counts by its encoded bytes: 600,000 at 3 per token fill the window.
     await model.stream(request([pdf]))
 
     expect(outputs[0]).toBe(64_000)
