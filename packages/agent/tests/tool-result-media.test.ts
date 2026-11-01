@@ -288,6 +288,7 @@ describe("agent tool-result media bridge", () => {
       stepIndex: 1,
       model: imageModel(),
       messages: stepWith([{ toolCallId: "image-call-cancel", output: richImageResult(fileRef) }]),
+      steps: [],
       signal: abort.signal,
     })
     let bound: ReturnType<typeof setTimeout> | undefined
@@ -612,6 +613,7 @@ async function prepareBridge(
     stepIndex,
     model,
     messages,
+    steps: [],
     signal: new AbortController().signal,
   })
 }
