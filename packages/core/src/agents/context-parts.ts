@@ -147,8 +147,8 @@ export function measureAgentStepRequest(input: {
 
 /**
  * Split a request's tokens by part. The total is what the meter counts; the split is an estimate.
- * The prompt's parts and the tools weigh their bytes at the model's typical rate, so they stay put
- * from one turn to the next; the history shares what is left by its bytes, each image at what a
+ * The prompt's parts and the tools weigh their bytes at the rate a run starts from, so they stay
+ * put from one turn to the next; the history shares what is left by its bytes, each image at what a
  * provider charges at most for one. A prompt that alone outweighs the total is scaled down to it.
  * Rounded so the parts add up to the total exactly.
  */
