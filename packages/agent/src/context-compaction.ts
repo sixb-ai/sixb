@@ -16,9 +16,12 @@ import {
   selectAgentContextCompactionBoundary,
   shouldCompactAgentContext,
 } from "@sixb/core/internal/agents"
-import { isModelCallAccountingFailure } from "@sixb/core/internal/model-execution"
+import {
+  isModelCallAccountingFailure,
+  modelCacheLifetimeMs,
+} from "@sixb/core/internal/model-execution"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
-import type { ModelMessage, ModelReasoning, ModelTool } from "@sixb/core/models"
+import type { ModelCachingIntent, ModelMessage, ModelReasoning, ModelTool } from "@sixb/core/models"
 import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
@@ -29,6 +32,7 @@ import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
 import {
   AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
   type AgentContextBudget,
   contextSummaryOutputTokens,
 } from "./context-budget"
@@ -158,14 +162,21 @@ export async function prepareAgentConversationContext(input: {
   })
   runtime.assertCanContinue()
 
-  if (
-    !shouldCompactAgentContext({
-      estimatedInputTokens: estimatedInputTokensBefore,
-      inputBudgetTokens: budget.inputBudgetTokens,
-    })
-  ) {
-    return { threadContext: initialContext, ...(memory ? { memory } : {}) }
-  }
+  const unchanged = { threadContext: initialContext, ...(memory ? { memory } : {}) }
+  const overLimit = shouldCompactAgentContext({
+    estimatedInputTokens: estimatedInputTokensBefore,
+    inputBudgetTokens: budget.inputBudgetTokens,
+  })
+  const idle = shouldCompactIdleContext({
+    history: input.history,
+    caching: conversationModelSettings({
+      reasoning: undefined,
+      projectId: context.id,
+      threadId: run.threadId,
+    }).caching,
+    estimatedInputTokens: estimatedInputTokensBefore,
+  })
+  if (!overLimit && !idle) return unchanged
 
   // Compaction aims well under the limit, so the turns after it grow into the room it leaves
   // instead of compacting again: the system prompt and tools, the summary at its longest, and the
@@ -191,6 +202,17 @@ export async function prepareAgentConversationContext(input: {
         ),
         bytesPerToken,
       })
+
+  // Below the limit, compacting an idle thread only makes its cold cache's rewrite smaller: one it
+  // cannot bring under the idle size goes on as it is, rather than summarize at every idle turn.
+  if (!overLimit) {
+    const compactedTokens = boundary
+      ? fixedTokens +
+        summaryMessageTokens +
+        estimateAgentContextMessagesTokens(boundary.retainedMessages, bytesPerToken).tokens
+      : Number.POSITIVE_INFINITY
+    if (compactedTokens >= AGENT_IDLE_COMPACTION_TOKENS) return unchanged
+  }
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
   await session.events.publishCompactionStarted({
@@ -351,8 +373,32 @@ export async function prepareAgentConversationContext(input: {
       reason,
       errorCode: compactionError.code,
     })
-    throw compactionError
+    if (overLimit) throw compactionError
+
+    // Below the limit, a failed idle compaction leaves the turn as it was.
+    console.warn(
+      `[SixbAgent] Run '${run.id}' goes on uncompacted: ${compactionError.message}`,
+      compactionError
+    )
+    return unchanged
   }
+}
+
+/**
+ * Whether a run starts on a thread worth compacting though it fits: its last model call is older
+ * than the cache its calls ask for, so the next one rewrites the whole prompt anyway, and the
+ * prompt is large enough for a summary to make that rewrite much smaller. A thread whose last call
+ * the session cannot date (none since its checkpoint) is not compacted for it.
+ */
+function shouldCompactIdleContext(input: {
+  readonly history: AgentTurnHistory
+  readonly caching: ModelCachingIntent
+  readonly estimatedInputTokens: number
+}): boolean {
+  const lastCall = input.history.usageAnchor?.modelCall.occurredAt
+  if (!lastCall || input.estimatedInputTokens < AGENT_IDLE_COMPACTION_TOKENS) return false
+
+  return Date.now() - lastCall.getTime() > modelCacheLifetimeMs(input.caching.lifetime)
 }
 
 /**
