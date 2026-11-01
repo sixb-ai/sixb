@@ -19,7 +19,7 @@ const estimateModelRequestTokens = (
 ) => agentContextSizeTokens(measureModelRequest(request), bytesPerToken)
 
 describe("agent context token rate", () => {
-  // Removal proof: return DEFAULT_BYTES_PER_TOKEN from agentContextBytesPerToken; Claude requests
+  // Removal proof: return DEFAULT_BYTES_PER_TOKEN from agentContextBytesPerToken; Anthropic requests
   // are then counted at 3 bytes per token and GPT ones at half their real size. Drop the DeepSeek
   // family and its calls calibrate to 3.75 at most, under the 3.88 they measure.
   test.each([

@@ -6,10 +6,10 @@ import type { AgentContextSize } from "./context-compaction"
  * error, as it crosses the window unseen.
  *
  * Measured on logged Gateway requests (content bytes as the estimator counts them / provider
- * `input_tokens`): Claude (Haiku 5.5) 2.14–2.69 on agent turns, OpenAI (gpt-6.1-terra,
+ * `input_tokens`): Anthropic (Haiku 5.5) 2.14–2.69 on agent turns, OpenAI (gpt-6.1-terra,
  * gpt-4o-mini) 4.44–4.66, DeepSeek (deepseek-v4.1-flash) 3.08–3.88, median 3.49, over 91 calls of
  * natural-text turns (project lookups, a coding turn, actions). Other tokenizers are unmeasured
- * and start between Claude and OpenAI, below the 3.5–4 most reach on English: any lower and the
+ * and start between Anthropic and OpenAI, below the 3.5–4 most reach on English: any lower and the
  * hard-limit checks refuse conversations that fit. A thread corrects every rate from its first
  * anchored call.
  */
