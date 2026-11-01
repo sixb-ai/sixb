@@ -3,6 +3,7 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import { listSandboxModels } from "@sixb/core/internal/agents"
 import { createModelCatalog } from "@sixb/core/models"
 import {
+  measureAgentSystemPrompt,
   type RenderAgentSystemPromptInput,
   renderAgentSystemPrompt,
   renderCurrentTime,
@@ -631,6 +632,47 @@ describe("agent system prompt", () => {
     )
     expect(prompt).toContain("read /tmp/sixb-agent/run_1/skills/sixb-memory/SKILL.md.")
     expect(prompt).not.toContain(".sixb/agent")
+  })
+
+  // Removal proof: count the skills catalog as Sixb's own text in renderAgentSystemPromptSections;
+  // `skills` is then missing and `system` takes its bytes. Byte for byte against the prompt before
+  // it was rendered in sections: 384 combinations of mode, skills, ontology, memory, instructions
+  // and workspace rendered the same text.
+  test("measures each section of the prompt it renders: instructions, memory, skills, ontology", () => {
+    const input: RenderAgentSystemPromptInput = {
+      mode: "conversation",
+      contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
+      instructions: "Answer in euros.",
+      skills: SKILLS,
+      ontologyIndex: [
+        { path: "billing/invoice.md", summary: "Invoice: A bill sent to a customer.  " },
+      ],
+      facts: { requester: { type: "user", id: "usr_ava", displayName: "Ava" } },
+      memory: {
+        repos: [
+          { repo: "user", entry: "- Prefers bar charts\n" },
+          { repo: "project", entry: "- Fiscal year starts in April\n" },
+        ],
+      },
+    }
+    const prompt = renderAgentSystemPrompt(input)
+    const bytes = (text: string) => new TextEncoder().encode(text).byteLength
+    const between = (start: string, end: string) =>
+      prompt.slice(prompt.indexOf(start), prompt.indexOf(end, prompt.indexOf(start)))
+
+    const measured = measureAgentSystemPrompt(input)
+
+    expect(measured.text).toBe(prompt)
+    expect(measured.bytes).toEqual({
+      instructions: bytes("<agent_instructions>\nAnswer in euros.\n</agent_instructions>"),
+      memory: bytes(between('\n\n<memory repo="user">', "\n</sixb_memory>")),
+      skills: bytes(between("\nAgent Skills are installed", "\n\nOntology reference files")),
+      // The index's last summary ends in spaces, which the section trims.
+      ontology: bytes(between("\nOntology reference files", "\n</sixb_runtime_context>")),
+      system: expect.any(Number),
+    })
+    const total = Object.values(measured.bytes).reduce((sum, part) => sum + (part ?? 0), 0)
+    expect(total).toBe(bytes(prompt))
   })
 
   test("lists the ontology files it is given and tells the agent to read them first", () => {

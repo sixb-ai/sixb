@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import { renderInstanceHelp } from "@sixb/cli-core"
-import type { AgentSkillDefinition } from "@sixb/core"
-import type { SandboxModel } from "@sixb/core/internal/agents"
+import type { AgentSkillDefinition, AgentSystemPromptPartName } from "@sixb/core"
+import type { AgentSystemPromptSize, SandboxModel } from "@sixb/core/internal/agents"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
 import type { SubagentRunFile } from "@sixb/core/storage"
@@ -161,40 +161,123 @@ export interface RenderWorkflowOutputFinalizerPromptInput {
 
 /** Render the worker-owned system prompt, with task-specific instructions when supplied. */
 export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): string {
-  return [
-    promptSection(
-      "sixb_runtime_context",
-      renderRuntimeContext(
-        input.mode,
-        input.contextDirectory,
-        input.skills,
-        input.ontologyIndex,
-        input.sandboxModels
+  return renderAgentSystemPromptSections(input)
+    .map((section) => section.text)
+    .join("")
+}
+
+/**
+ * The system prompt with each section's bytes, as a step records what its request carried: the
+ * project's instructions, the memory indexes, the skills catalog and the ontology index apart
+ * from Sixb's own text.
+ */
+export function measureAgentSystemPrompt(
+  input: RenderAgentSystemPromptInput
+): AgentSystemPromptSize {
+  const sections = renderAgentSystemPromptSections(input)
+  const encoder = new TextEncoder()
+  const bytes: { [Part in AgentSystemPromptPartName]?: number } = {}
+  for (const { part, text } of sections) {
+    bytes[part] = (bytes[part] ?? 0) + encoder.encode(text).byteLength
+  }
+  return { text: sections.map((section) => section.text).join(""), bytes }
+}
+
+/** A piece of the system prompt, and the part of a request it is. */
+interface PromptSection {
+  readonly part: AgentSystemPromptPartName
+  readonly text: string
+}
+
+/** The system prompt in pieces: joined, they are renderAgentSystemPrompt's text, byte for byte. */
+function renderAgentSystemPromptSections(
+  input: RenderAgentSystemPromptInput
+): readonly PromptSection[] {
+  const runtime = renderRuntimeContext(
+    input.mode,
+    input.contextDirectory,
+    input.skills,
+    input.ontologyIndex,
+    input.sandboxModels
+  )
+  const memory = input.memory && renderMemory(input.memory, input.mode, input.contextDirectory)
+  const system = (text: string | undefined): PromptSection[] =>
+    text ? [{ part: "system", text }] : []
+
+  const blocks: (readonly PromptSection[])[] = [
+    promptSectionParts("sixb_runtime_context", [
+      ...system(runtime.base.join("\n")),
+      ...(runtime.skills.length > 0
+        ? [{ part: "skills" as const, text: `\n${runtime.skills.join("\n")}` }]
+        : []),
+      ...(runtime.skills.length > 0 && runtime.ontology.length > 0 ? system("\n") : []),
+      ...(runtime.ontology.length > 0
+        ? [{ part: "ontology" as const, text: `\n${runtime.ontology.join("\n")}` }]
+        : []),
+    ]),
+    promptSectionParts(
+      "sandbox_state",
+      system(input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode))
+    ),
+    promptSectionParts(
+      "agent_instructions",
+      input.instructions ? [{ part: "instructions", text: input.instructions }] : [],
+      "instructions"
+    ),
+    promptSectionParts(
+      "workspace",
+      system(input.workspace && renderWorkspaceContext(input.workspace))
+    ),
+    promptSectionParts(
+      "sixb_mode_rules",
+      system(
+        input.mode === "conversation"
+          ? conversationRules(input.contextDirectory)
+          : input.mode === "subagent"
+            ? SUBAGENT_RULES
+            : WORKFLOW_TASK_RULES
       )
     ),
-    promptSection(
-      "sandbox_state",
-      input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode)
+    promptSectionParts(
+      "sixb_runtime_facts",
+      system(input.facts && renderRuntimeFacts(input.facts))
     ),
-    promptSection("agent_instructions", input.instructions),
-    promptSection("workspace", input.workspace && renderWorkspaceContext(input.workspace)),
-    promptSection(
-      "sixb_mode_rules",
-      input.mode === "conversation"
-        ? conversationRules(input.contextDirectory)
-        : input.mode === "subagent"
-          ? SUBAGENT_RULES
-          : WORKFLOW_TASK_RULES
-    ),
-    promptSection("sixb_runtime_facts", input.facts && renderRuntimeFacts(input.facts)),
-    input.conversation ?? "",
-    promptSection(
-      "sixb_memory",
-      input.memory && renderMemory(input.memory, input.mode, input.contextDirectory)
-    ),
+    system(input.conversation),
+    memory
+      ? promptSectionParts("sixb_memory", [
+          ...system(memory.rules.join("\n")),
+          ...memory.indexes.map((text) => ({ part: "memory" as const, text: `\n${text}` })),
+        ])
+      : [],
   ]
-    .filter(Boolean)
-    .join("\n\n")
+
+  return blocks
+    .filter((block) => block.length > 0)
+    .flatMap((block, index) => (index === 0 ? block : [...system("\n\n"), ...block]))
+}
+
+/**
+ * promptSection in pieces: the tags, then the pieces trimmed as one text. The tags count as
+ * `tagPart`, Sixb's own unless the whole section is another part.
+ */
+function promptSectionParts(
+  tag: string,
+  sections: readonly PromptSection[],
+  tagPart: AgentSystemPromptPartName = "system"
+): readonly PromptSection[] {
+  const trimmed = sections.map((section) => ({ ...section }))
+  for (const section of trimmed) {
+    section.text = section.text.trimStart()
+    if (section.text) break
+  }
+  for (const section of [...trimmed].reverse()) {
+    section.text = section.text.trimEnd()
+    if (section.text) break
+  }
+  const body = trimmed.filter((section) => section.text)
+  if (body.length === 0) return []
+
+  return [{ part: tagPart, text: `<${tag}>\n` }, ...body, { part: tagPart, text: `\n</${tag}>` }]
 }
 
 /** What a run is told once its thread's workspace was lost and created again. */
@@ -218,13 +301,14 @@ export function renderWorkflowOutputFinalizerPrompt(
     .join("\n\n")
 }
 
+/** The runtime context's lines: Sixb's own, then the skills catalog and the ontology index. */
 function renderRuntimeContext(
   mode: AgentExecutionMode,
   contextDirectory: string,
   skills: readonly AgentSkillDefinition[],
   ontologyIndex: readonly OntologyDocsIndexEntry[] = [],
   sandboxModels: readonly SandboxModel[] = []
-): string {
+): { readonly base: string[]; readonly skills: string[]; readonly ontology: string[] } {
   const skillCatalog =
     skills.length === 0
       ? []
@@ -272,7 +356,7 @@ function renderRuntimeContext(
           "Return research results in your final answer. When the eventual workflow output requires a file reference, upload the complete file with the `sixb` CLI and include the resulting reference.",
         ]
 
-  return [
+  const base = [
     "You are operating inside a live Sixb project modeled as an ontology of object types, properties, links, actions, workflows, telemetry, and files.",
     "Use the `sixb` CLI only for the live project data or capability needed by the task; treat its output as the source of truth rather than guessing.",
     "The complete top-level Sixb CLI command catalog is included below. Do not run `sixb --help`; use the narrowest group or command help only when exact arguments are unknown.",
@@ -284,10 +368,8 @@ function renderRuntimeContext(
     ...renderModelCommands(sandboxModels),
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",
-    ...skillCatalog,
-    ...(skillCatalog.length > 0 && ontologyCatalog.length > 0 ? [""] : []),
-    ...ontologyCatalog,
-  ].join("\n")
+  ]
+  return { base, skills: skillCatalog, ontology: ontologyCatalog }
 }
 
 const MEDIA_MODEL_KINDS = ["image", "speech", "transcription"] as const
@@ -501,9 +583,9 @@ function renderMemory(
   memory: AgentMemoryPromptContext,
   mode: AgentExecutionMode,
   contextDirectory: string
-): string {
+): { readonly rules: string[]; readonly indexes: string[] } {
   const has = (repo: "user" | "project") => memory.repos.some((entry) => entry.repo === repo)
-  return [
+  const rules = [
     `You have a memory from earlier conversations under ${posix.join(contextDirectory, "memory")}/ ($SIXB_MEMORY_DIR):`,
     ...memory.repos.map(({ repo }) => `- ${repo}/: ${MEMORY_REPO_PURPOSE[repo]}.`),
     "Each repo's MEMORY.md is below as loaded for this conversation; the files are current. Grep them or follow [[links]] when a topic comes up.",
@@ -519,10 +601,12 @@ function renderMemory(
     ...(mode === "subagent"
       ? ["It is read-only for you: only the parent Agent saves to it."]
       : renderMemorySaving(memory, has, contextDirectory)),
-    ...memory.repos.map(
-      ({ repo, entry }) => `\n<memory repo="${repo}">\n${quoteMemory(entry).trim()}\n</memory>`
-    ),
-  ].join("\n")
+  ]
+  // Each repo's MEMORY.md, as loaded: what a context meter counts as memory.
+  const indexes = memory.repos.map(
+    ({ repo, entry }) => `\n<memory repo="${repo}">\n${quoteMemory(entry).trim()}\n</memory>`
+  )
+  return { rules, indexes }
 }
 
 function renderMemorySaving(

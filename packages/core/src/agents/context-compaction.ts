@@ -4,8 +4,15 @@ import type { AgentMessageRecord } from "../storage/agents/types"
 import { AGENT_CONTINUATION_INSTRUCTION, agentMessageSteps } from "./adapters"
 import { agentMailInstruction } from "./agent-mail"
 import { approvalOutcomeInstruction } from "./approval-outcome"
+import { agentContextFileKind } from "./context-files"
 import { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
-import type { AgentMessage, AgentMessagePart } from "./message"
+import type {
+  AgentContextPartBytes,
+  AgentHistoryPartName,
+  AgentMessage,
+  AgentMessagePart,
+} from "./message"
+import { isAgentThreadSummaryText } from "./thread-context-projection"
 import { isAgentToolResult } from "./tool-result"
 
 /**
@@ -43,6 +50,11 @@ export interface AgentContextSize {
   readonly tokens: number
   /** The images among `tokens`, each counted as the most a provider charges for one. */
   readonly images?: number
+}
+
+/** A history's size, with its bytes split by part (see AgentHistoryPartName). */
+export interface AgentContextHistorySize extends AgentContextSize {
+  readonly parts: AgentContextPartBytes<AgentHistoryPartName>
 }
 
 export interface AgentContextTokenEstimate {
@@ -88,7 +100,7 @@ export function estimateAgentContextMessagesTokens(
   bytesPerToken: number
 ): AgentContextTokenEstimate {
   return {
-    tokens: agentContextSizeTokens(measureAgentContextMessages(messages), bytesPerToken),
+    tokens: agentContextSizeTokens(measureAgentContextHistory({ messages }), bytesPerToken),
     estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION,
   }
 }
@@ -97,28 +109,70 @@ export function estimateAgentContextMessagesTokens(
 export function measureAgentContextRequest(
   input: EstimateAgentContextRequestTokensInput
 ): AgentContextSize {
-  const size = { bytes: utf8Bytes(input.systemPrompt), tokens: REQUEST_OVERHEAD_TOKENS }
-  for (const tool of input.tools) {
-    size.tokens += TOOL_OVERHEAD_TOKENS
-    size.bytes += utf8Bytes(tool.name) + utf8Bytes(tool.description) + utf8Bytes(tool.inputSchema)
-  }
+  return addAgentContextSizes(measureAgentContextFixed(input), measureAgentContextHistory(input))
+}
 
-  const messages = measureAgentContextMessages(input.messages)
+/** What every request of a conversation carries besides its history: its prompt and its tools. */
+export function measureAgentContextFixed(
+  input: Pick<EstimateAgentContextRequestTokensInput, "systemPrompt" | "tools">
+): AgentContextSize {
+  return fixedAgentContextSize({
+    systemBytes: utf8Bytes(input.systemPrompt),
+    tools: {
+      count: input.tools.length,
+      bytes: input.tools.reduce(
+        (bytes, tool) =>
+          bytes + utf8Bytes(tool.name) + utf8Bytes(tool.description) + utf8Bytes(tool.inputSchema),
+        0
+      ),
+    },
+  })
+}
+
+/** The same, from bytes already measured: a step's recorded request. */
+export function fixedAgentContextSize(input: {
+  readonly systemBytes: number
+  readonly tools: { readonly count: number; readonly bytes: number }
+}): AgentContextSize {
   return {
-    bytes: size.bytes + messages.bytes,
-    tokens: size.tokens + messages.tokens,
-    images: messages.images ?? 0,
+    bytes: input.systemBytes + input.tools.bytes,
+    tokens: REQUEST_OVERHEAD_TOKENS + input.tools.count * TOOL_OVERHEAD_TOKENS,
   }
 }
 
-function measureAgentContextMessages(messages: readonly AgentMessage[]): AgentContextSize {
+/**
+ * Weigh a history as a request sends it, split by part. A file the agent read with the read or
+ * view_file tool under `contextDirectory` counts as what it is (memory, a skill, the ontology).
+ */
+export function measureAgentContextHistory(input: {
+  readonly messages: readonly AgentMessage[]
+  readonly contextDirectory?: string
+}): AgentContextHistorySize {
   const images = { remaining: AGENT_INLINE_IMAGE_LIMITS.maxImages }
-  const size = { bytes: 0, tokens: 0 }
-  for (const message of messages) {
-    measureMessage(message, { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES }, images, size)
+  const size: MeasuredHistory = { bytes: 0, tokens: 0, parts: {} }
+  for (const message of input.messages) {
+    measureMessage(
+      message,
+      { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES },
+      images,
+      size,
+      input.contextDirectory
+    )
     if (message.role === "assistant") size.tokens += toolImageTokens(message, images)
   }
   return { ...size, images: AGENT_INLINE_IMAGE_LIMITS.maxImages - images.remaining }
+}
+
+/** Two sizes of one request, added. */
+export function addAgentContextSizes(
+  left: AgentContextSize,
+  right: AgentContextSize
+): AgentContextSize {
+  return {
+    bytes: left.bytes + right.bytes,
+    tokens: left.tokens + right.tokens,
+    images: (left.images ?? 0) + (right.images ?? 0),
+  }
 }
 
 /** Price a measured request at a tokenizer's rate. */
@@ -252,50 +306,78 @@ export function selectAgentContextCompactionBoundary(input: {
   }
 }
 
+interface MeasuredHistory {
+  bytes: number
+  tokens: number
+  readonly parts: { [Part in AgentHistoryPartName]?: number }
+}
+
+function addBytes(size: MeasuredHistory, part: AgentHistoryPartName, bytes: number): void {
+  size.bytes += bytes
+  size.parts[part] = (size.parts[part] ?? 0) + bytes
+}
+
 function measureMessage(
   message: AgentMessage,
   attachments: { textBytesRemaining: number },
   images: { remaining: number },
-  size: { bytes: number; tokens: number }
+  size: MeasuredHistory,
+  contextDirectory: string | undefined
 ): void {
   size.tokens += MESSAGE_OVERHEAD_TOKENS
   for (const part of message.parts) {
     switch (part.type) {
       case "text":
+        addBytes(
+          size,
+          message.role === "user" && isAgentThreadSummaryText(part.text) ? "summary" : "messages",
+          utf8Bytes(part.text)
+        )
+        break
       case "reasoning":
-        size.bytes += utf8Bytes(part.text)
+        addBytes(size, "messages", utf8Bytes(part.text))
         break
       case "step-start":
         size.tokens += STEP_OVERHEAD_TOKENS
         break
       case "continuation":
-        size.bytes += utf8Bytes(AGENT_CONTINUATION_INSTRUCTION)
+        addBytes(size, "messages", utf8Bytes(AGENT_CONTINUATION_INSTRUCTION))
         break
       case "approval-outcome":
-        size.bytes += utf8Bytes(approvalOutcomeInstruction(part))
+        addBytes(size, "messages", utf8Bytes(approvalOutcomeInstruction(part)))
         break
       case "mail":
-        size.bytes += utf8Bytes(agentMailInstruction(part))
+        addBytes(size, "messages", utf8Bytes(agentMailInstruction(part)))
         break
       case "context":
-        size.bytes += utf8Bytes(stableJsonStringify(part.context))
+        addBytes(size, "messages", utf8Bytes(stableJsonStringify(part.context)))
         break
       case "provider-state":
-        size.bytes += utf8Bytes(stableJsonStringify(part.data))
+        addBytes(size, "messages", utf8Bytes(stableJsonStringify(part.data)))
         break
       case "tool-call":
         size.tokens += TOOL_OVERHEAD_TOKENS
-        size.bytes +=
-          utf8Bytes(part.toolName) +
-          utf8Bytes(stableJsonStringify(part.input)) +
+        addBytes(
+          size,
+          "messages",
+          utf8Bytes(part.toolName) + utf8Bytes(stableJsonStringify(part.input))
+        )
+        addBytes(
+          size,
+          agentContextFileKind(part, contextDirectory) ?? "toolResults",
           toolOutputBytes(part)
+        )
         break
       case "file": {
         const file = part.fileRef
-        size.bytes += utf8Bytes(
-          [file.blobId, file.digest, file.fileName, file.mediaType, file.logicalPath]
-            .filter((value): value is string => value !== undefined)
-            .join(" ")
+        addBytes(
+          size,
+          "files",
+          utf8Bytes(
+            [file.blobId, file.digest, file.fileName, file.mediaType, file.logicalPath]
+              .filter((value): value is string => value !== undefined)
+              .join(" ")
+          )
         )
         if (message.role !== "assistant") {
           if (looksLikeImage(file.mediaType, file.fileName)) {
@@ -307,7 +389,7 @@ function measureMessage(
               attachments.textBytesRemaining
             )
             attachments.textBytesRemaining -= inlineBytes
-            size.bytes += inlineBytes
+            addBytes(size, "files", inlineBytes)
           }
         }
         break

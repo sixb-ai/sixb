@@ -7,6 +7,7 @@ import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentSystemPromptSize,
   type AgentThreadModelContextMessage,
   type AgentToolSpec,
   type AgentTurnHistory,
@@ -72,6 +73,8 @@ const SHRUNK_PART_MIN_BYTES = 1_024
 /** What a turn's model calls start with: the prefix a summary of the conversation continues. */
 export interface ConversationRequest {
   readonly systemPrompt: string
+  /** The same prompt with each section's bytes, when the environment rendered it. */
+  readonly systemPromptSize?: AgentSystemPromptSize
   readonly tools: readonly Pick<ModelTool, "name" | "description" | "inputSchema">[]
   readonly messages: readonly ModelMessage[]
 }

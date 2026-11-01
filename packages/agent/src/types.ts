@@ -1,6 +1,7 @@
 import type { AuthorizablePrincipal } from "@sixb/core"
 import type {
   AgentRunFileStore,
+  AgentSystemPromptSize,
   AgentToolCallFile,
   RunModelLoopInput,
 } from "@sixb/core/internal/agents"
@@ -56,6 +57,10 @@ export interface AgentTurnContext {
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string
+  /** The same prompt with each section's bytes, for each step to record what its request sent. */
+  readonly systemPromptSize?: AgentSystemPromptSize
+  /** Where the run's context files are, as the agent names them: its reads of them are named. */
+  readonly contextDirectory?: string
   /** Time zone and locale of runs that captured none, used to date their user messages. */
   readonly projectTimeZone: string
   readonly projectLocale: string
