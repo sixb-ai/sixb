@@ -4966,7 +4966,7 @@ describe("AgentWorker", () => {
     ["its window", { contextWindow: 32_768 }],
     ["its input limit", { contextWindow: 128_000, maxInputTokens: 20_000 }],
   ] as const)("summarizes a history past a smaller model's %s, cut to what it reads", async (_limit, limits) => {
-    // Reproduce: return undefined from planSummary instead of shrinkStep; the switch then fails
+    // Reproduce: return undefined from planSummary instead of shrunkStep; the switch then fails
     // the turn with agent.context_limit_exceeded although the new request fits.
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const large = answerModel()
