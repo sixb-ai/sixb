@@ -4359,6 +4359,121 @@ describe("AgentWorker", () => {
     }
   })
 
+  /** A conversation's second turn, sent `idleMinutes` after its first answered. */
+  async function idleConversationTurn(input: {
+    readonly first: string
+    readonly next: string
+    readonly idleMinutes: number
+    readonly summary?: (request: LanguageModelRequest) => string
+  }) {
+    const requests: LanguageModelRequest[] = []
+    // A 383,616-token limit, so that 200,000 tokens fit well.
+    const model = measuredConversationModel({
+      contextWindow: 400_000,
+      maxOutputTokens: 16_384,
+      answer: "Done.",
+      summary: input.summary ?? (() => "## Goal\nGo on with the work."),
+      requests,
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: input.first })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      setSystemTime(new Date(Date.now() + input.idleMinutes * 60_000))
+      const threadId = first.run.threadId
+      const next = await requestAgent(sixb, { threadId, text: input.next })
+      const run = await waitForTerminalRun(storage, next.run.id)
+
+      return {
+        run,
+        checkpoint: await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId }),
+        records: await listRunStreamRecords(sixb.broker, run.id),
+        summaries: requests.filter(isSummaryRequest).length,
+      }
+    } finally {
+      setSystemTime()
+      await worker.stop()
+    }
+  }
+
+  // Reproduce: leave out `idle` in prepareAgentConversationContext and the first row goes on
+  // uncompacted; drop its 200,000-token floor and the second compacts; compare the idle time with
+  // a default cache's five minutes, not the conversation's hour, and the third does; drop the
+  // check that compacting brings it under the floor and the last summarizes a turn for nothing.
+  test.each([
+    {
+      thread: "an hour idle at about 210,000 tokens",
+      first: "x".repeat(630_000),
+      next: "Continue.",
+      idleMinutes: 61,
+      compacts: true,
+    },
+    {
+      thread: "an hour idle at about 50,000 tokens",
+      first: "x".repeat(150_000),
+      next: "Continue.",
+      idleMinutes: 61,
+      compacts: false,
+    },
+    {
+      thread: "ten minutes idle at about 210,000 tokens",
+      first: "x".repeat(630_000),
+      next: "Continue.",
+      idleMinutes: 10,
+      compacts: false,
+    },
+    {
+      thread: "an hour idle whose newest message alone passes 200,000 tokens",
+      first: "Hello.",
+      next: "y".repeat(630_000),
+      idleMinutes: 61,
+      compacts: false,
+    },
+  ])("compacts a conversation below its limit only when idle and large: $thread", async (input) => {
+    const { run, checkpoint, summaries } = await idleConversationTurn(input)
+
+    expect(run.status).toBe("succeeded")
+    expect(summaries).toBe(input.compacts ? 1 : 0)
+    if (!input.compacts) {
+      expect(checkpoint).toBeNull()
+      return
+    }
+
+    expect(checkpoint?.reason).toBe("threshold")
+    expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
+    expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
+  })
+
+  test("goes on uncompacted when an idle compaction fails", async () => {
+    // Reproduce: throw compactionError whatever the estimate at the end of
+    // prepareAgentConversationContext; a failed summary then fails a turn that fits its limit.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const { run, checkpoint, records, summaries } = await idleConversationTurn({
+        first: "x".repeat(630_000),
+        next: "Continue.",
+        idleMinutes: 61,
+        summary: () => {
+          throw new Error("[test] The provider is down.")
+        },
+      })
+
+      expect(run.status).toBe("succeeded")
+      expect(summaries).toBe(1)
+      expect(checkpoint).toBeNull()
+      expect(
+        records.find((record) => record.name === "agent.compaction.failed")?.payload
+      ).toMatchObject({ errorCode: "summary_failed" })
+      expect(String(warn.mock.calls[0]?.[0])).toContain("goes on uncompacted")
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   test("counts a thread at the bytes per token its own calls measured", async () => {
     // Reproduce: estimate prepareAgentConversationContext at budget.bytesPerToken instead of
     // agentConversationBytesPerToken; the second turn then compacts at the project's rate.

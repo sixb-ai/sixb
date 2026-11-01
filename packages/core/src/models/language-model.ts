@@ -98,6 +98,15 @@ export interface ModelCachingIntent {
   readonly key?: string
 }
 
+/**
+ * How long a prompt stays cached after the last call that read it, by its intent's lifetime: the
+ * hour providers keep a `"long"` one for, else the five minutes Anthropic keeps by default, the
+ * shortest of theirs.
+ */
+export function modelCacheLifetimeMs(lifetime: ModelCachingIntent["lifetime"]): number {
+  return lifetime === "long" ? 60 * 60_000 : 5 * 60_000
+}
+
 export interface LanguageModelStream {
   readonly events: AsyncIterable<LanguageModelStreamEvent>
 }
