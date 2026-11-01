@@ -72,7 +72,7 @@ describe("agent context budget resolution", () => {
 
   test("estimates each call like the conversation, at the model's tokenizer rate", async () => {
     // Removal proof: estimate the call by its serialized JSON, or at a fixed two bytes per token;
-    // the escaped quotes double, or the Claude rate is lost, and the call asks for another output.
+    // the escaped quotes double, or the Anthropic rate is lost, and the call asks for another output.
     const base = selection({
       modelId: "claude-haiku-5-5",
       contextWindow: 200_000,
@@ -82,11 +82,11 @@ describe("agent context budget resolution", () => {
     const { model } = await pinAndPrepare(base)
     await model.stream(request([{ type: "text", text: '"'.repeat(300_000) }]))
 
-    // 300,000 bytes at Claude's 2.1 per token, plus the request's and the message's 8 tokens each.
+    // 300,000 bytes at Anthropic's 2.1 per token, plus the request's and the message's 8 tokens each.
     expect(outputs).toEqual([200_000 - (Math.ceil(300_000 / 2.1) + 16)])
   })
 
-  test("gives a long Claude thread the room its window leaves, at the rate its calls measure", async () => {
+  test("gives a long thread on an Anthropic model the room its window leaves, at the rate its calls measure", async () => {
     // Reproduce: size the ceiling at the family rate less a quarter, as before; the second call,
     // about 130,000 real tokens of a 200,000 window, is then capped at the 16,384 reserve.
     const base = selection({
@@ -97,7 +97,7 @@ describe("agent context budget resolution", () => {
     const outputs: (number | undefined)[] = []
     base.model.stream = async (request) => {
       outputs.push(request.maxOutputTokens)
-      // This provider counts 2.4 bytes per token, as Claude measured on agent turns.
+      // This provider counts 2.4 bytes per token, as Anthropic models measured on agent turns.
       const bytes = request.messages.flatMap((message) =>
         message.role === "system"
           ? []
@@ -118,7 +118,7 @@ describe("agent context budget resolution", () => {
       }
     }
 
-    // The first call goes by Claude's family rate, the second by what the first measured: about
+    // The first call goes by Anthropic's family rate, the second by what the first measured: about
     // 130,000 tokens, which leave 70,000 of the window and so the whole 64,000-token cap.
     expect(outputs[0]).toBeGreaterThan(16_384)
     expect(outputs[1]).toBe(64_000)
