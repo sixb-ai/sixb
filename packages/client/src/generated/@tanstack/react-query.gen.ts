@@ -4900,7 +4900,7 @@ export const getAgentThreadContextQueryKey = (options: Options<GetAgentThreadCon
 /**
  * Measure an agent thread's context against a model's limits
  *
- * What the conversation's next request starts from, the model's target and hard limit, and the latest compaction. Read by the context meter after each turn.
+ * What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.
  */
 export const getAgentThreadContextOptions = (options: Options<GetAgentThreadContextData>) =>
   queryOptions<

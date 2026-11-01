@@ -228,15 +228,15 @@ export function runFailureText(error: { readonly code: string; readonly message:
 
 /** What the status line needs of a conversation's context against its model's limits. */
 export interface ContextUse {
-  readonly target: { readonly tokens: number }
+  readonly limitTokens: number
   readonly usedTokens?: number
   readonly lastCall?: { readonly inputTokens: number; readonly cacheReadInputTokens?: number }
 }
 
 /**
  * The context as the status line shows it, `ctx 38k/100k · 92% cached`, and without the cache
- * share where room is short: amber from 80% of the target, red past it. A price tier crossed below
- * a window target is no reason for alarm. Undefined before the first answer.
+ * share where room is short: amber from 80% of the model's limit, red past it. Undefined before
+ * the first answer.
  */
 export function contextStatus(context: ContextUse):
   | {
@@ -248,14 +248,14 @@ export function contextStatus(context: ContextUse):
   const used = context.usedTokens
   if (used === undefined) return undefined
 
-  const share = used / context.target.tokens
+  const share = used / context.limitTokens
   const tone = share > 1 ? "over" : share >= 0.8 ? "near" : "quiet"
   const call = context.lastCall
   const cached =
     call?.cacheReadInputTokens !== undefined && call.inputTokens > 0
       ? ` · ${Math.round((call.cacheReadInputTokens / call.inputTokens) * 100)}% cached`
       : ""
-  const short = `ctx ${tokenCount(used)}/${tokenCount(context.target.tokens)}`
+  const short = `ctx ${tokenCount(used)}/${tokenCount(context.limitTokens)}`
 
   return { text: `${short}${cached}`, short, tone }
 }

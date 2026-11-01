@@ -47,13 +47,12 @@ afterAll(() => {
   mock.module(layoutEffect, () => ({ useLayoutEffect: loaded }))
 })
 
-/** Haiku 5.5 on a conversation of 38k: its ×5 tier from 100,001 is the target. */
+/** A conversation of 38k on a model with a 200k window: 183,616 tokens of input at most. */
 function context(overrides: Partial<AgentThreadContext> = {}): AgentThreadContext {
   return {
-    model: { provider: "vercel-ai-gateway", modelId: "anthropic/claude-haiku-5.5" },
-    windowTokens: 1_000_000,
-    limitTokens: 983_616,
-    target: { tokens: 100_000, limit: "price-tier", tier: { fromTokens: 100_001, priceRatio: 5 } },
+    model: { provider: "vercel-ai-gateway", modelId: "anthropic/claude-haiku-4.5" },
+    windowTokens: 200_000,
+    limitTokens: 183_616,
     usedTokens: 38_200,
     lastCall: {
       inputTokens: 37_000,
@@ -76,31 +75,17 @@ describe("the context meter", () => {
     expect(render(<ContextMeter />).container.innerHTML).toBe("")
   })
 
-  // Removal proof: color past a price tier too; Sonnet 4.5 at 23% of its window turns red.
-  test("takes a color only by how close it is to its target", () => {
-    const quiet = render(<ContextMeter context={context()} modelName="Claude Haiku 5.5" />)
-    expect(meter(quiet).getAttribute("aria-label")).toBe("Context: 38k of 100k tokens")
+  test("takes a color only by how close it is to its model's limit", () => {
+    const quiet = render(<ContextMeter context={context()} modelName="Claude Haiku 4.5" />)
+    expect(meter(quiet).getAttribute("aria-label")).toBe("Context: 38k of 184k tokens")
     expect(meter(quiet).dataset.tone).toBe("quiet")
     quiet.unmount()
 
-    expect(contextMeterReading(context({ usedTokens: 85_000 })).tone).toBe("near")
-    expect(contextMeterReading(context({ usedTokens: 104_000 })).tone).toBe("over")
-    // Past a tier its window target lets it cross: the details say so, the ring stays quiet.
-    expect(
-      contextMeterReading(
-        context({
-          usedTokens: 230_000,
-          target: {
-            tokens: 983_616,
-            limit: "window",
-            tier: { fromTokens: 200_001, priceRatio: 2 },
-          },
-        })
-      )
-    ).toMatchObject({ tone: "quiet", pastTier: true })
+    expect(contextMeterReading(context({ usedTokens: 150_000 })).tone).toBe("near")
+    expect(contextMeterReading(context({ usedTokens: 190_000 })).tone).toBe("over")
   })
 
-  test("opens on what is used, the target and why, the cache and the last condensing", async () => {
+  test("opens on what is used of the limit, the cache and the last condensing", async () => {
     const view = render(
       <ContextMeter
         context={context({
@@ -111,7 +96,7 @@ describe("the context meter", () => {
             estimatedInputTokensAfter: 41_000,
           },
         })}
-        modelName="Claude Haiku 5.5"
+        modelName="Claude Haiku 4.5"
       />
     )
     fireEvent.click(meter(view))
@@ -122,46 +107,12 @@ describe("the context meter", () => {
       return found
     })
     const text = details.textContent ?? ""
-    expect(text).toContain("38k / 100k")
-    expect(text).toContain("38%")
-    expect(text).toContain(
-      "Claude Haiku 5.5 costs 5× past 100k tokens, so the conversation is condensed before it gets there."
-    )
+    expect(text).toContain("38k / 184k")
+    expect(text).toContain("21%")
+    expect(text).toContain("Condensed before it reaches Claude Haiku 4.5’s 184k-token limit.")
     expect(text).toContain("Read from cache92%")
-    expect(text).toContain("Model limit984k")
     expect(text).toContain("Last condensed12m ago · 131k → 41k")
     expect(within(details).getByRole("meter").getAttribute("aria-valuenow")).toBe("38200")
-  })
-
-  test("says why a model without a tier worth staying under keeps its window", async () => {
-    const view = render(
-      <ContextMeter
-        context={context({
-          usedTokens: 230_000,
-          lastCall: undefined,
-          target: {
-            tokens: 983_616,
-            limit: "window",
-            tier: { fromTokens: 200_001, priceRatio: 2 },
-          },
-        })}
-        modelName="Claude Sonnet 4.5"
-      />
-    )
-    fireEvent.click(meter(view))
-
-    const details = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-context-details]")
-      if (!found) throw new Error("No details.")
-      return found
-    })
-    expect(details.textContent).toContain(
-      "Condensed near Claude Sonnet 4.5’s 984k-token limit. Past 200k tokens, each call costs 2×."
-    )
-    expect(details.textContent).toContain(
-      "Past 200k tokens: each call costs 2× until the conversation is condensed."
-    )
-    expect(details.textContent).not.toContain("Read from cache")
   })
 
   // Removal proof: put every relative time through `ago`; a week-old one reads "Oct 24 ago".
@@ -203,7 +154,7 @@ describe("the context meter", () => {
   test("on a phone, a tap opens the details as a bottom sheet beside a fixed-size ring", async () => {
     browser.happyDOM.setViewport({ width: 375, height: 812 })
     try {
-      const view = render(<ContextMeter context={context()} modelName="Claude Haiku 5.5" />)
+      const view = render(<ContextMeter context={context()} modelName="Claude Haiku 4.5" />)
       const button = meter(view)
       // A fixed 36px target that never shrinks the composer's text below it.
       expect(button.className).toContain("size-9")
@@ -228,13 +179,13 @@ test("the composer shows the meter beside the model, and leaves it out without a
   const renderComposer = (context?: AgentThreadContext) =>
     render(
       <QueryClientProvider client={queryClient}>
-        <Composer onSend={() => {}} contextMeter={{ context, modelName: "Claude Haiku 5.5" }} />
+        <Composer onSend={() => {}} contextMeter={{ context, modelName: "Claude Haiku 4.5" }} />
       </QueryClientProvider>
     )
 
   try {
     const shown = renderComposer(context())
-    expect(shown.getByRole("button", { name: "Context: 38k of 100k tokens" })).toBeDefined()
+    expect(shown.getByRole("button", { name: "Context: 38k of 184k tokens" })).toBeDefined()
     shown.unmount()
 
     const fresh = renderComposer()
