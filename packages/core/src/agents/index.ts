@@ -102,6 +102,7 @@ export {
   measureAgentContextTokenRate,
   measuringAgentContextTokenRates,
   readAgentContextTokenRates,
+  typicalAgentContextBytesPerToken,
 } from "./context-token-rate"
 export type {
   AgentRunDispatchFailure,

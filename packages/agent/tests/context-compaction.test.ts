@@ -297,10 +297,10 @@ describe("agent conversation token rate", () => {
         },
       },
     })
-  const rate = (usage: Parameters<typeof context>[0]) =>
+  const rate = (usage: Parameters<typeof context>[0], over = budget) =>
     estimateAgentConversation({
       plan,
-      budget,
+      budget: over,
       threadContext: context(usage),
       systemPrompt: "",
       tools: [],
@@ -317,5 +317,21 @@ describe("agent conversation token rate", () => {
   test("measures the rate on what the anchored call read", () => {
     // 30,000 bytes over 12,500 text tokens: the provider's count less 8 + 2 × 8 + 2 overhead.
     expect(rate({ inputTokens: 12_526 })).toBe(2.4)
+  })
+
+  // Reproduce: bound the thread's rise by budget.bytesPerToken again (leave typicalBytesPerToken
+  // out of estimateAgentConversation's calibration); the thread is then counted at 1.5.
+  test("is not capped by a few dense runs of the project", () => {
+    // Two base64-heavy runs at 1.2 bytes per token among eighteen English ones at 2.4.
+    const tokenRates = [
+      { bytes: 12_000, tokens: 10_000 },
+      { bytes: 12_000, tokens: 10_000 },
+      ...Array.from({ length: 18 }, () => ({ bytes: 24_000, tokens: 10_000 })),
+    ]
+    const dense = prepareAgentModel({ model, tokenRates }).budget
+
+    expect(dense.bytesPerToken).toBe(1.2)
+    // The thread reads 2.4, as the project's usual runs do.
+    expect(rate({ inputTokens: 12_526 }, dense)).toBe(2.4)
   })
 })

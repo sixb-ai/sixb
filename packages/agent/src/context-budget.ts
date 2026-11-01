@@ -7,6 +7,7 @@ import {
   learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
   measureAgentModelRequest,
+  typicalAgentContextBytesPerToken,
 } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
@@ -35,6 +36,11 @@ export interface AgentContextBudget {
    * runs measured on the model (see learnedAgentContextBytesPerToken).
    */
   readonly bytesPerToken: number
+  /**
+   * What the model typically measures, a thread's calibration rising at most a quarter above it
+   * (see typicalAgentContextBytesPerToken). Absent, `bytesPerToken`.
+   */
+  readonly typicalBytesPerToken?: number
 }
 
 interface AgentModelSelection {
@@ -75,6 +81,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   const tokenRates = selection.tokenRates ?? []
   const runTokenRates: AgentContextTokenRateSample[] = []
   let runBytesPerToken = budget.bytesPerToken
+  let runTypicalBytesPerToken = budget.typicalBytesPerToken ?? budget.bytesPerToken
   // The rate the run's latest counted call measured, bounded around the run's; else the run's.
   let measuredBytesPerToken = budget.bytesPerToken
 
@@ -109,11 +116,14 @@ export function prepareAgentModel(selection: AgentModelSelection): {
               // The newest 20 are all the statistic reads.
               runTokenRates.unshift(sample)
               runTokenRates.splice(AGENT_TOKEN_RATE_SAMPLES)
-              runBytesPerToken = learnedAgentContextBytesPerToken([...runTokenRates, ...tokenRates])
+              const rates = [...runTokenRates, ...tokenRates]
+              runBytesPerToken = learnedAgentContextBytesPerToken(rates)
+              runTypicalBytesPerToken = typicalAgentContextBytesPerToken(rates)
             }
 
             measuredBytesPerToken = calibrateAgentContextBytesPerToken({
               bytesPerToken: runBytesPerToken,
+              typicalBytesPerToken: runTypicalBytesPerToken,
               size,
               inputTokens,
             })
@@ -208,6 +218,7 @@ export function resolveAgentContextBudget(
     keepRecentTokens,
     source: modelWindow === undefined ? "fallback" : "model",
     bytesPerToken,
+    typicalBytesPerToken: typicalAgentContextBytesPerToken(tokenRates),
   })
 }
 
