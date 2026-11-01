@@ -197,7 +197,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
 
 /** What a turn is told once its conversation moved here: from a computer, or another folder. */
 function renderWorkspaceMove(movedAt: string): string {
-  return `This conversation moved to this workspace at ${movedAt}. The files and paths that earlier tool calls used were in the workspace it moved from and are not here. Conversation history and attachments remain available. Inspect this workspace before relying on earlier filesystem results.`
+  return `This conversation moved to this workspace at ${movedAt}. The files and paths that earlier tool calls used were in the workspace it moved from and are not here. Conversation history and attachments remain available. Inspect this workspace before relying on earlier filesystem results. Whenever you report that this workspace is empty or that a file is missing, add that files from before the move stayed in the workspace it moved from.`
 }
 
 /** What a run is told once its thread's workspace was lost and created again. */

@@ -805,6 +805,19 @@ describe("a conversation on its owner's computer", () => {
     expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
   })
 
+  // Guard proof: render shownFolder in ComputerBadge; a deep folder crowds the computer's name out
+  // of the badge, and the whole path still doesn't fit.
+  test("keeps a deep folder short in the badge, and whole in its title", async () => {
+    const folder = "/Users/alice/work/clients/acme/q3"
+    const { view } = renderChat("alice", {
+      thread: thread({ runsOn: "computer", computer: { ...laptop, folder, online: true } }),
+    })
+
+    const name = await view.findByText("Alice's MacBook Pro")
+    expect(view.getByText("· ~/…/q3")).toBeDefined()
+    expect(name.parentElement?.getAttribute("title")).toBe(`Alice's MacBook Pro · ${folder}`)
+  })
+
   // Guard proof: drop the DELETE from handleContinueInCloud, or `computerOffline` from the
   // notice; the turn waits for a computer nobody opens, and the owner has no way on.
   test("offline, its turn waits for the computer, or the whole conversation moves to the cloud", async () => {

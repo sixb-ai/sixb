@@ -749,7 +749,7 @@ export const en = {
     moveFailed: "Could not move it to the cloud. Try again.",
     confirmTitle: "Continue in the cloud?",
     confirmDescription:
-      "Its turns run in the cloud from now on, starting with the message waiting, if any. The conversation, its attachments and artifacts come along; the files in its folder stay on the computer. It can't move back: start a new conversation in sixb to work on the computer again.",
+      "This conversation will run in the cloud from now on, including any waiting message. Its folder's files stay on your computer, and it can't move back.",
     cancel: "Cancel",
     movedToCloud: "Moved to the cloud. Files from before stayed on the computer.",
     movedToFolder: (folder: string) =>

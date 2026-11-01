@@ -54,6 +54,7 @@ describe("agent system prompt", () => {
     )
     expect(prompt).toContain("are not here")
     expect(prompt).toContain("Conversation history and attachments remain available")
+    expect(prompt).toContain("stayed in the workspace it moved from")
   })
 
   test.each([

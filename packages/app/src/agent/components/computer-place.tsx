@@ -24,6 +24,12 @@ export function shownFolder(folder: string): string {
   return folder.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~")
 }
 
+/** A folder short enough for the badge: its home or root, then its last name. */
+function shortFolder(folder: string): string {
+  const parts = shownFolder(folder).split("/")
+  return parts.length > 3 ? `${parts[0]}/…/${parts.at(-1)}` : parts.join("/")
+}
+
 /** The computer a conversation runs on, its folder there, and whether `sixb` is open in it. */
 export function ComputerBadge({ computer }: { readonly computer: ThreadComputer }) {
   const messages = useAgentMessages().computer
@@ -40,8 +46,8 @@ export function ComputerBadge({ computer }: { readonly computer: ThreadComputer 
           computer.online ? "bg-emerald-500" : "border border-muted-foreground"
         )}
       />
-      <span className="truncate text-foreground">{computer.name}</span>
-      <span className="hidden truncate sm:inline">· {shownFolder(computer.folder)}</span>
+      <span className="max-w-full shrink-0 truncate text-foreground">{computer.name}</span>
+      <span className="hidden min-w-0 truncate sm:inline">· {shortFolder(computer.folder)}</span>
       <span className="sr-only">{computer.online ? messages.online : messages.offline}</span>
     </Badge>
   )

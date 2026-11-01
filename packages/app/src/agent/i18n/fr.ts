@@ -804,7 +804,7 @@ export const fr: Translation<AgentMessages> = {
     moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
     confirmTitle: "Continuer dans le cloud ?",
     confirmDescription:
-      "Ses tours s’exécutent désormais dans le cloud, à commencer par le message en attente, s’il y en a un. La conversation, ses pièces jointes et ses artefacts suivent ; les fichiers de son dossier restent sur l’ordinateur. Elle ne peut pas revenir : démarrez une nouvelle conversation dans sixb pour retravailler sur l’ordinateur.",
+      "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et elle ne pourra pas revenir.",
     cancel: "Annuler",
     movedToCloud: "Déplacée vers le cloud. Les fichiers d’avant sont restés sur l’ordinateur.",
     movedToFolder: (folder) =>
