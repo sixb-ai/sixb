@@ -35,7 +35,9 @@ afterEach(async () => {
  */
 async function avasRunner(
   turn: { status: string },
-  computer: { readonly id?: string; readonly folder?: string } = {}
+  computer: { readonly id?: string; readonly folder?: string } = {},
+  /** What a session's renewal waits for before it answers. */
+  renewalGate: Promise<void> = Promise.resolve()
 ) {
   const thread = {
     id: "thr_1",
@@ -68,6 +70,7 @@ async function avasRunner(
         body: request.method === "PUT" ? await request.json() : undefined,
       })
       if (request.method === "DELETE") return new Response(null, { status: 204 })
+      await renewalGate
       return Response.json({ expiresAt: "2026-10-31T09:01:00.000Z", waiting: ["run_9"] })
     }
     return Response.json({ error: "Not found" }, { status: 404 })
@@ -171,6 +174,45 @@ describe("a session", () => {
     await runner.closeSession()
     expect(sessions.at(-1)?.method).toBe("DELETE")
     expect(runner.sessionOpen).toBe(false)
+  })
+})
+
+describe("a session closing while its renewal is on its way", () => {
+  // Guard proof: drop the session check after the PUT in openSession; the turn runs here after the
+  // person turned Messages from the web off, or quit. Drop `this.renewal` from closeSession's
+  // release; the DELETE overtakes the PUT, which opens the session again.
+  test("claims nothing the renewal lists, and releases the session after it", async () => {
+    let answer = () => {}
+    const gate = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    const { runner, claimed, sessions } = await avasRunner({ status: "queued" }, {}, gate)
+    runner.openSession()
+    while (sessions.length === 0) await Bun.sleep(0)
+
+    const closed = runner.closeSession()
+    for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(0)
+    expect(sessions.map((session) => session.method)).toEqual(["PUT"])
+
+    answer()
+    await closed
+    expect(sessions.map((session) => session.method)).toEqual(["PUT", "DELETE"])
+    expect(claimed).toEqual([])
+  })
+
+  // Guard proof: drop `&& this.session` from claimIfHere; a turn it was reading about when the
+  // session closed runs here anyway.
+  test("claims no turn it was still reading about", async () => {
+    const { runner, claimed } = await avasRunner({ status: "queued" })
+    runner.openSession()
+    await runner.closeSession()
+    claimed.length = 0
+    runner.openSession()
+
+    const reading = runner.claimIfHere("thr_1", "run_1")
+    const closing = runner.closeSession()
+    await Promise.all([reading, closing])
+    expect(claimed).toEqual([])
   })
 })
 

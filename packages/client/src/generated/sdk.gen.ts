@@ -3239,7 +3239,7 @@ export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
 /**
  * Move a thread from your computer to the cloud
  *
- * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there.
+ * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
  */
 export const moveAgentThreadToCloud = <ThrowOnError extends boolean = false>(
   options: Options<MoveAgentThreadToCloudData, ThrowOnError>
@@ -3260,7 +3260,7 @@ export const moveAgentThreadToCloud = <ThrowOnError extends boolean = false>(
 /**
  * Move a thread to one of your computers, in a folder there
  *
- * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer.
+ * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.
  */
 export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
   options: Options<MoveAgentThreadToComputerData, ThrowOnError>

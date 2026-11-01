@@ -11,6 +11,7 @@ export type {
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
+  AgentThreadMovedEvent,
 } from "./protocol"
 export {
   AGENT_ACTIVITY_STREAM_ID,

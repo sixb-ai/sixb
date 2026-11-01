@@ -15044,6 +15044,13 @@ export type MoveAgentThreadToComputerErrors = {
     code?: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
    * Response for status 501
    */
   501: {

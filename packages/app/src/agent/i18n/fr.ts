@@ -802,6 +802,7 @@ export const fr: Translation<AgentMessages> = {
     continueInCloud: "Continuer dans le cloud",
     moving: "Déplacement…",
     moveFailed: "Impossible de la déplacer vers le cloud. Réessayez.",
+    moveBusy: "Un tour est en cours ou attend votre approbation. Arrêtez-le ou répondez d’abord.",
     confirmTitle: "Continuer dans le cloud ?",
     confirmDescription:
       "Cette conversation s’exécutera désormais dans le cloud, y compris le message en attente. Les fichiers de son dossier restent sur votre ordinateur, et elle ne pourra pas revenir.",

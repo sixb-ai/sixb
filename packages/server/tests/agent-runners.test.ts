@@ -486,8 +486,23 @@ describe("a runner outside the worker", () => {
     const moved = await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`)
     expect(moved.status).toBe(200)
     const thread = await moved.json()
-    expect(thread).toMatchObject({ id: threadId, movedAt: expect.any(String) })
+    // Guard proof: answer serializeThread alone from movedThread; the chat, which keeps this
+    // answer, loses the permission mode it shows until it next reads the thread.
+    expect(thread).toMatchObject({
+      id: threadId,
+      movedAt: expect.any(String),
+      approvalMode: expect.any(String),
+    })
     expect(thread).not.toHaveProperty("runsOn")
+    // Guard proof: drop announceMove from the route; a sixb open in the old folder keeps taking
+    // messages it can no longer run.
+    const { records } = await host.broker.read({ projectId, streamId: "agents.activity" })
+    expect(
+      records
+        .map((record) => record.payload as Record<string, unknown>)
+        .filter((event) => event.type === "agent.thread.moved")
+        .map(({ threadId: moved, ownerPrincipal }) => ({ moved, ownerPrincipal }))
+    ).toEqual([{ moved: threadId, ownerPrincipal: { type: "user", id: "ava" } }])
     expect((await storage.agents.runs.getById({ projectId, id: runId }))?.spec).not.toHaveProperty(
       "runsOn"
     )
@@ -524,6 +539,61 @@ describe("a runner outside the worker", () => {
       computer: LAPTOP,
     })
     await session?.close()
+  })
+
+  // Guard proof: drop refuseHeldTurn from either route; the call Ava reviewed for one folder runs
+  // in another once she approves it, or in the cloud's empty workspace.
+  test("keeps a computer's thread in its folder while a turn waits on approvals there", async () => {
+    const { person, ask, call, claim, storage } = await setup()
+    const ava = await person("ava")
+    const runId = await ask(ava, "Tidy the notes in this folder.")
+    const threadId = (await storage.agents.runs.getById({ projectId, id: runId }))?.threadId ?? ""
+    const session = await claim(ava, runId)
+    const paused = await storage.agents.runs.getById({ projectId, id: runId })
+    const createdAt = new Date()
+    await storage.agents.approvals.request({
+      id: "apr_1",
+      projectId,
+      runId,
+      callerRunId: runId,
+      executionToken: paused?.execution?.token ?? "",
+      requestedBy: { type: "user", id: "ava" },
+      mode: "manual",
+      call: {
+        kind: "action",
+        actionId: "tidy",
+        subject: { kind: "none" },
+        params: {},
+        actionRunId: "act_1",
+        effect: "external",
+      },
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + 60_000),
+    } as Parameters<typeof storage.agents.approvals.request>[0])
+    await session?.finish({ status: "succeeded", finishReason: "awaiting_approval" })
+
+    const elsewhere = { ...LAPTOP, folder: "/Users/ava/other" }
+    for (const refused of [
+      await call(ava, "DELETE", `/api/agent-threads/${threadId}/computer`),
+      await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, { computer: elsewhere }),
+    ]) {
+      expect(refused.status).toBe(409)
+      expect(await refused.json()).toMatchObject({
+        code: "active_run_exists",
+        error: expect.stringContaining("waiting for your approval"),
+      })
+    }
+    expect((await storage.agents.threads.getById({ projectId, id: threadId }))?.computer).toEqual(
+      LAPTOP
+    )
+
+    // Stopped, it never resumes, and the thread moves.
+    expect((await call(ava, "POST", `/api/agent-runs/${runId}/cancel`)).status).toBe(202)
+    const moved = await call(ava, "POST", `/api/agent-threads/${threadId}/computer`, {
+      computer: elsewhere,
+    })
+    expect(moved.status).toBe(200)
+    expect(await moved.json()).toMatchObject({ approvalMode: expect.any(String) })
   })
 
   // Removal proof: drop the runsOn check from the claim route; Ava's own runner takes her cloud

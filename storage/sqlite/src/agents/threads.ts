@@ -16,6 +16,7 @@ import {
 import {
   type AddAgentThreadParticipantsInput,
   type AgentContextCheckpointRecord,
+  type AgentRunRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
@@ -133,6 +134,15 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     }
 
     return this.requireThread(input.projectId, input.id)
+  }
+
+  private activeRunOf(projectId: string, thread: AgentThreadRecord | null): AgentRunRecord | null {
+    const row = thread?.activeRunId
+      ? (this.db
+          .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+          .get(projectId, thread.activeRunId) as AgentRunRow | null)
+      : null
+    return row ? rowToRunRecord(row) : null
   }
 
   async fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord> {
@@ -435,7 +445,13 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
           .get(input.projectId, input.id) as AgentThreadRow | null
         const thread = row ? rowToThreadRecord(row) : null
-        assertAssignableComputer(thread, input.id, "SixbSqlite")
+        assertAssignableComputer(
+          thread,
+          this.activeRunOf(input.projectId, thread),
+          input.computer,
+          input.id,
+          "SixbSqlite"
+        )
         const movedAt = movesComputerPlace(thread, input.computer)
           ? (input.movedAt ?? new Date()).toISOString()
           : null
@@ -466,12 +482,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
           .get(input.projectId, input.id) as AgentThreadRow | null
         const thread = row ? rowToThreadRecord(row) : null
-        const activeRow = thread?.activeRunId
-          ? (this.db
-              .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
-              .get(input.projectId, thread.activeRunId) as AgentRunRow | null)
-          : null
-        const active = activeRow ? rowToRunRecord(activeRow) : null
+        const active = this.activeRunOf(input.projectId, thread)
         assertMovableToCloud(thread, active, input.id, "SixbSqlite")
 
         let queued: ConversationAgentRunRecord | undefined

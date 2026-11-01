@@ -43790,7 +43790,7 @@
     "/api/agent-threads/{threadId}/computer": {
       "post": {
         "summary": "Move a thread to one of your computers, in a folder there",
-        "description": "A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer.",
+        "description": "A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.",
         "tags": ["Agent Threads"],
         "operationId": "moveAgentThreadToComputer",
         "security": [
@@ -44211,6 +44211,26 @@
               }
             }
           },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "501": {
             "description": "Response for status 501",
             "content": {
@@ -44232,7 +44252,7 @@
       },
       "delete": {
         "summary": "Move a thread from your computer to the cloud",
-        "description": "Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there.",
+        "description": "Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.",
         "tags": ["Agent Threads"],
         "operationId": "moveAgentThreadToCloud",
         "security": [

@@ -44,7 +44,8 @@ In the app, such a conversation shows its computer and folder, and whether `sixb
 A message you send from the app runs on your computer as one typed in `sixb` does, in the
 permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the
 cloud** moves the conversation to the cloud instead, for good: the waiting message runs there,
-and the files in the folder stay on your computer. To keep messages from the app from running in
+and the files in the folder stay on your computer. A conversation moves only once no turn is
+running or waiting for your approval. To keep messages from the app from running in
 a folder, turn off **Messages from the web** in `ctrl+p` there: they wait until you turn it back
 on, or move the conversation to the cloud.
 

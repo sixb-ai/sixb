@@ -46,6 +46,8 @@ export class LocalRunner {
   private session: { readonly id: string; readonly timer: ReturnType<typeof setInterval> } | null =
     null
   private closing: Promise<void> | null = null
+  /** The renewal on its way: the session's release follows it, or it would open the session again. */
+  private renewal: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly connection: Connection,
@@ -122,13 +124,16 @@ export class LocalRunner {
         body: { computer: { ...(await thisComputer()), folder: this.folder } },
       })
       if (error) throw error
+      // Closed meanwhile, with the setting or by quitting: what waits keeps waiting.
+      if (this.session?.id !== id) return
       for (const runId of data?.waiting ?? []) void this.claimElsewhere(runId)
     }
     // A missed renewal is retried at the next; the session lasts three of them.
-    const renew = () =>
-      void hold().catch((error: unknown) =>
+    const renew = () => {
+      this.renewal = hold().catch((error: unknown) =>
         console.error("[SixbCLI] Session renewal failed.", error)
       )
+    }
     this.session = { id, timer: setInterval(renew, SESSION_RENEW_MS) }
     renew()
   }
@@ -140,13 +145,17 @@ export class LocalRunner {
       this.session = null
       clearInterval(session.timer)
       // Whoever closes it next waits for this one, as quitting does after the screen let go.
-      this.closing = releaseAgentComputerSession({
-        client: this.connection.client,
-        path: { sessionId: session.id },
-      }).then(
-        () => {},
-        () => {}
-      )
+      this.closing = this.renewal
+        .then(() =>
+          releaseAgentComputerSession({
+            client: this.connection.client,
+            path: { sessionId: session.id },
+          })
+        )
+        .then(
+          () => {},
+          () => {}
+        )
     }
     await this.closing
   }
@@ -171,7 +180,7 @@ export class LocalRunner {
     const turn = runId ?? thread.activeRunId
     if (!turn) return
     const { data: run } = await getAgentRun({ client, path: { runId: turn } })
-    if (run?.status === "queued") void this.claimElsewhere(turn)
+    if (run?.status === "queued" && this.session) void this.claimElsewhere(turn)
   }
 
   /** Whether this `sixb` runs `thread`'s turns: its owner's, on this computer, in this folder. */

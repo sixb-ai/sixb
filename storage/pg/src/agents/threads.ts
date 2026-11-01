@@ -15,6 +15,7 @@ import {
 import {
   type AddAgentThreadParticipantsInput,
   type AgentContextCheckpointRecord,
+  type AgentRunRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
@@ -464,12 +465,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
     assertAgentThreadComputer(input.computer, "SixbPg")
     return runPgTransaction(this.sql, async (tx) => {
-      const [row] = await tx<AgentThreadRow[]>`
-        SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${input.id}
-        FOR UPDATE
-      `
-      const thread = row ? rowToThreadRecord(row) : null
-      assertAssignableComputer(thread, input.id, "SixbPg")
+      const { thread, active } = await lockThreadAndActiveRun(tx, input)
+      assertAssignableComputer(thread, active, input.computer, input.id, "SixbPg")
       const movedAt = movesComputerPlace(thread, input.computer)
         ? (input.movedAt ?? new Date())
         : null
@@ -488,61 +485,33 @@ export class PgAgentThreadStore implements AgentThreadStore {
 
   async moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult> {
     return runPgTransaction(this.sql, async (tx) => {
-      // Same lock order as run finalization: run, then thread. The thread names the run to lock,
-      // so it is read again once both are held, in case its turn changed in between.
-      for (let attempt = 0; ; attempt += 1) {
-        const [peek] = await tx<Pick<AgentThreadRow, "active_run_id">[]>`
-          SELECT active_run_id FROM agent_threads
-          WHERE project_id = ${input.projectId} AND id = ${input.id}
-        `
-        const runId = peek?.active_run_id ?? null
-        const runs = runId
-          ? await tx<AgentRunRow[]>`
-              SELECT * FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${runId}
-              FOR UPDATE
-            `
-          : []
-        const [row] = await tx<AgentThreadRow[]>`
-          SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${input.id}
-          FOR UPDATE
-        `
-        if ((row?.active_run_id ?? null) !== runId) {
-          if (attempt < 3) continue
-          throw new AgentStorageError(
-            "invalid_state",
-            `[SixbPg] Agent thread '${input.id}' kept changing turns while it moved: try again.`
-          )
-        }
+      const { thread, active } = await lockThreadAndActiveRun(tx, input)
+      assertMovableToCloud(thread, active, input.id, "SixbPg")
 
-        const thread = row ? rowToThreadRecord(row) : null
-        const active = runs[0] ? rowToRunRecord(runs[0]) : null
-        assertMovableToCloud(thread, active, input.id, "SixbPg")
-
-        let queued: ConversationAgentRunRecord | undefined
-        if (
-          active?.kind === "conversation" &&
-          active.status === "queued" &&
-          active.spec?.runsOn === "computer"
-        ) {
-          const [moved] = await tx<AgentRunRow[]>`
-            UPDATE agent_runs SET spec = ${JSON.stringify(cloudSpec(active.spec))}::text::jsonb
-            WHERE project_id = ${input.projectId} AND id = ${active.id} AND status = 'queued'
-            RETURNING *
-          `
-          const record = moved ? rowToRunRecord(moved) : null
-          if (record?.kind === "conversation") queued = record
-        }
-        const [movedThread] = await tx<AgentThreadRow[]>`
-          UPDATE agent_threads
-          SET runs_on = NULL, computer_id = NULL, computer_name = NULL, computer_folder = NULL,
-            moved_at = ${input.movedAt ?? new Date()}
-          WHERE project_id = ${input.projectId} AND id = ${input.id}
+      let queued: ConversationAgentRunRecord | undefined
+      if (
+        active?.kind === "conversation" &&
+        active.status === "queued" &&
+        active.spec?.runsOn === "computer"
+      ) {
+        const [moved] = await tx<AgentRunRow[]>`
+          UPDATE agent_runs SET spec = ${JSON.stringify(cloudSpec(active.spec))}::text::jsonb
+          WHERE project_id = ${input.projectId} AND id = ${active.id} AND status = 'queued'
           RETURNING *
         `
-        return {
-          thread: rowToThreadRecord(movedThread as AgentThreadRow),
-          ...(queued ? { queued } : {}),
-        }
+        const record = moved ? rowToRunRecord(moved) : null
+        if (record?.kind === "conversation") queued = record
+      }
+      const [movedThread] = await tx<AgentThreadRow[]>`
+        UPDATE agent_threads
+        SET runs_on = NULL, computer_id = NULL, computer_name = NULL, computer_folder = NULL,
+          moved_at = ${input.movedAt ?? new Date()}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return {
+        thread: rowToThreadRecord(movedThread as AgentThreadRow),
+        ...(queued ? { queued } : {}),
       }
     })
   }
@@ -551,6 +520,46 @@ export class PgAgentThreadStore implements AgentThreadStore {
     input: ListAgentThreadParticipantsInput
   ): Promise<readonly AgentThreadParticipantRecord[]> {
     return selectParticipants(this.sql, input.projectId, [...new Set(input.threadIds)])
+  }
+}
+
+/**
+ * Lock a thread that is about to move, with its active turn. Same lock order as run finalization:
+ * run, then thread. The thread names the run to lock, so it is read again once both are held, in
+ * case its turn changed in between.
+ */
+async function lockThreadAndActiveRun(
+  tx: PgStoreClient,
+  input: { readonly projectId: string; readonly id: string }
+): Promise<{ readonly thread: AgentThreadRecord | null; readonly active: AgentRunRecord | null }> {
+  for (let attempt = 0; ; attempt += 1) {
+    const [peek] = await tx<Pick<AgentThreadRow, "active_run_id">[]>`
+      SELECT active_run_id FROM agent_threads
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
+    `
+    const runId = peek?.active_run_id ?? null
+    const runs = runId
+      ? await tx<AgentRunRow[]>`
+          SELECT * FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${runId}
+          FOR UPDATE
+        `
+      : []
+    const [row] = await tx<AgentThreadRow[]>`
+      SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${input.id}
+      FOR UPDATE
+    `
+    if ((row?.active_run_id ?? null) === runId) {
+      return {
+        thread: row ? rowToThreadRecord(row) : null,
+        active: runs[0] ? rowToRunRecord(runs[0]) : null,
+      }
+    }
+    if (attempt >= 3) {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[SixbPg] Agent thread '${input.id}' kept changing turns while it moved: try again.`
+      )
+    }
   }
 }
 

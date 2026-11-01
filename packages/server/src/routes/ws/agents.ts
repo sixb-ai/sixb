@@ -99,13 +99,13 @@ export async function canAccessAgentRunStream(
 
 /**
  * A run's or an approval's activity reaches whoever reads the turn it belongs to; a computer
- * session's, its owner alone.
+ * session's, or a thread's move, its owner alone.
  */
 export async function canAccessAgentThreadActivity(
   sixb: Sixb,
   event: AgentActivityEvent
 ): Promise<boolean> {
-  if (event.type === "agent.computer.activity") {
+  if (event.type === "agent.computer.activity" || event.type === "agent.thread.moved") {
     return principalsEqual(event.ownerPrincipal as Principal, requestActor(sixb))
   }
   const run = await sixb.agent.runs.getById(event.runId)

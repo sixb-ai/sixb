@@ -747,6 +747,7 @@ export const en = {
     continueInCloud: "Continue in the cloud",
     moving: "Moving…",
     moveFailed: "Could not move it to the cloud. Try again.",
+    moveBusy: "A turn is running or waiting for your approval. Stop or answer it first.",
     confirmTitle: "Continue in the cloud?",
     confirmDescription:
       "This conversation will run in the cloud from now on, including any waiting message. Its folder's files stay on your computer, and it can't move back.",

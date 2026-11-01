@@ -879,7 +879,8 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           "invalid_input"
         )
 
-        // A turn running on the computer stays there, and so does its thread.
+        // A turn running on the computer stays there, and so does its thread. Guard proof: drop
+        // the check from assertAssignableComputer; the turn goes on in a folder its thread left.
         await storage.threads.create(
           threadInput({ id: "thr_busy", runsOn: "computer", computer: laptop })
         )
@@ -892,8 +893,22 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           storage.threads.moveToCloud({ projectId, id: "thr_busy" }),
           "active_run_exists"
         )
+        await expectAgentError(
+          storage.threads.assignComputer({
+            projectId,
+            id: "thr_busy",
+            computer: { ...laptop, folder: "/Users/anthony/other" },
+          }),
+          "active_run_exists"
+        )
+        // Renaming the computer it runs on moves nothing.
+        await storage.threads.assignComputer({
+          projectId,
+          id: "thr_busy",
+          computer: { ...laptop, name: "Work laptop" },
+        })
         await expect(storage.threads.getById({ projectId, id: "thr_busy" })).resolves.toMatchObject(
-          { runsOn: "computer", computer: laptop }
+          { runsOn: "computer", computer: { ...laptop, name: "Work laptop" } }
         )
 
         // An idle thread moves alone.

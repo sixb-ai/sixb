@@ -501,6 +501,8 @@ const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\
 /** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
 export function assertAssignableComputer(
   thread: AgentThreadRecord | null,
+  activeRun: AgentRunRecord | null,
+  computer: AgentThreadComputer,
   id: string,
   prefix = "Sixb"
 ): asserts thread is AgentThreadRecord {
@@ -513,6 +515,7 @@ export function assertAssignableComputer(
       `[${prefix}] Agent thread '${id}' runs in the cloud: no computer runs its turns.`
     )
   }
+  if (movesComputerPlace(thread, computer)) assertNoTurnRunning(activeRun, id, prefix)
 }
 
 /**
@@ -534,6 +537,11 @@ export function assertMovableToCloud(
       `[${prefix}] Agent thread '${id}' runs in the cloud already.`
     )
   }
+  assertNoTurnRunning(activeRun, id, prefix)
+}
+
+/** A turn works in its thread's folder until it ends: its thread moves after that. */
+function assertNoTurnRunning(activeRun: AgentRunRecord | null, id: string, prefix: string): void {
   if (activeRun?.status === "running") {
     throw new AgentStorageError(
       "active_run_exists",

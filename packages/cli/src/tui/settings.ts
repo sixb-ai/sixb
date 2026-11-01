@@ -19,8 +19,9 @@ export interface Settings {
   readonly model?: { readonly provider: string; readonly modelId: string }
   readonly reasoning?: ReasoningLevel
   /**
-   * Whether your messages from the web, or another device, run here: while it is on, `sixb` tells
-   * the project it is open in this folder, and runs the turns sent to its conversations here.
+   * Whether your messages from the web, or another device, run in this folder: while it is on,
+   * `sixb` tells the project it is open here, and runs the turns sent to its conversations here.
+   * Kept per folder, apart from the settings every `sixb` rewrites: see {@link rememberWebMessages}.
    */
   readonly continueFromWeb: boolean
 }
@@ -69,7 +70,37 @@ export function placeLabel(place: Place): string {
 
 const SETTINGS_FILE = () => join(dirname(resolveConfigPath()), "tui.json")
 
-export async function loadSettings(): Promise<Settings> {
+/** The folders where the person turned off messages from the web. */
+const WEB_MESSAGES_OFF_FILE = () => join(dirname(resolveConfigPath()), "web-messages-off.json")
+
+async function foldersWithWebMessagesOff(): Promise<readonly string[]> {
+  const stored: unknown = JSON.parse(await readFile(WEB_MESSAGES_OFF_FILE(), "utf8"))
+  if (!Array.isArray(stored)) throw new Error("[SixbCLI] Unreadable web-messages-off.json.")
+  return stored.filter((folder): folder is string => typeof folder === "string")
+}
+
+/** On unless turned off in `folder`. A choice it can't read stays off rather than run turns here. */
+async function webMessagesOnIn(folder: string): Promise<boolean> {
+  try {
+    return !(await foldersWithWebMessagesOff()).includes(folder)
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+  }
+}
+
+/** Keep the choice for this folder alone. Reads the file first: another `sixb` may have written it. */
+export async function rememberWebMessages(folder: string, on: boolean): Promise<void> {
+  const folders = await foldersWithWebMessagesOff().catch(() => [])
+  const others = folders.filter((other) => other !== folder)
+  await writeFile(
+    WEB_MESSAGES_OFF_FILE(),
+    `${JSON.stringify(on ? others : [...others, folder], null, 2)}\n`,
+    { mode: 0o600 }
+  )
+}
+
+export async function loadSettings(folder: string): Promise<Settings> {
+  const continueFromWeb = await webMessagesOnIn(folder)
   try {
     const stored = JSON.parse(await readFile(SETTINGS_FILE(), "utf8")) as Partial<Settings>
     return {
@@ -79,15 +110,16 @@ export async function loadSettings(): Promise<Settings> {
         : DEFAULT_SETTINGS.approvalMode,
       ...(stored.model?.provider && stored.model.modelId ? { model: stored.model } : {}),
       ...(stored.reasoning ? { reasoning: stored.reasoning } : {}),
-      continueFromWeb: stored.continueFromWeb !== false,
+      continueFromWeb,
     }
   } catch {
-    return DEFAULT_SETTINGS
+    return { ...DEFAULT_SETTINGS, continueFromWeb }
   }
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  await writeFile(SETTINGS_FILE(), `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 }).catch(
+  const { continueFromWeb: _perFolder, ...shared } = settings
+  await writeFile(SETTINGS_FILE(), `${JSON.stringify(shared, null, 2)}\n`, { mode: 0o600 }).catch(
     () => {}
   )
 }

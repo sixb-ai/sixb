@@ -109,11 +109,22 @@ export interface AgentComputerActivityEvent {
   readonly occurredAt: string
 }
 
+/** A thread moved to another folder or computer, or to the cloud. Its owner alone hears it. */
+export interface AgentThreadMovedEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.thread.moved"
+  readonly projectId: string
+  readonly ownerPrincipal: { readonly type: string; readonly id: string }
+  readonly threadId: string
+  readonly occurredAt: string
+}
+
 /** Everything the project's activity feed carries. */
 export type AgentActivityEvent =
   | AgentRunActivityEvent
   | AgentApprovalActivityEvent
   | AgentComputerActivityEvent
+  | AgentThreadMovedEvent
 
 export function agentApprovalActivityEvent(
   approval: AgentApprovalRecord,
@@ -163,11 +174,26 @@ export function isAgentComputerActivityEvent(value: unknown): value is AgentComp
   )
 }
 
+export function isAgentThreadMovedEvent(value: unknown): value is AgentThreadMovedEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.thread.moved" &&
+    typeof value.projectId === "string" &&
+    isPlainRecord(value.ownerPrincipal) &&
+    typeof value.ownerPrincipal.type === "string" &&
+    typeof value.ownerPrincipal.id === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.occurredAt === "string"
+  )
+}
+
 export function isAgentActivityEvent(value: unknown): value is AgentActivityEvent {
   return (
     isAgentRunActivityEvent(value) ||
     isAgentApprovalActivityEvent(value) ||
-    isAgentComputerActivityEvent(value)
+    isAgentComputerActivityEvent(value) ||
+    isAgentThreadMovedEvent(value)
   )
 }
 
@@ -193,6 +219,33 @@ export async function publishAgentComputerActivity(
         // The event is composed only of validated JSON primitives.
         payload: event as unknown as JsonValue,
         idempotencyKey: `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`,
+      },
+    ],
+  })
+}
+
+/** Announce that a thread moved, so whatever has it open follows. */
+export async function publishAgentThreadMoved(
+  broker: Broker,
+  input: Omit<AgentThreadMovedEvent, "schemaVersion" | "type" | "occurredAt">
+): Promise<void> {
+  const event: AgentThreadMovedEvent = {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.thread.moved",
+    ...input,
+    occurredAt: new Date().toISOString(),
+  }
+  await broker.ensureStream({ projectId: input.projectId, stream: agentActivityStreamDefinition() })
+  await broker.append({
+    projectId: input.projectId,
+    streamId: AGENT_ACTIVITY_STREAM_ID,
+    records: [
+      {
+        name: event.type,
+        key: event.threadId,
+        // The event is composed only of validated JSON primitives.
+        payload: event as unknown as JsonValue,
+        idempotencyKey: `${event.threadId}:moved:${event.occurredAt}`,
       },
     ],
   })

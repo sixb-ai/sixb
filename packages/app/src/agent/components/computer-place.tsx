@@ -57,7 +57,8 @@ export interface ComputerOfflineNoticeProps {
   /** Null for a conversation from before folders were kept, until it moves. */
   readonly computer: ThreadComputer | null
   readonly pending: boolean
-  readonly error: boolean
+  /** Why the last move failed: a turn it must wait for, or anything else. */
+  readonly error: "busy" | "failed" | null
   readonly onContinueInCloud: () => void
 }
 
@@ -85,7 +86,7 @@ export function ComputerOfflineNotice({
       </span>
       {error ? (
         <span role="alert" className="text-destructive">
-          {messages.moveFailed}
+          {error === "busy" ? messages.moveBusy : messages.moveFailed}
         </span>
       ) : null}
       <AlertDialog>

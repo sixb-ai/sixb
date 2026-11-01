@@ -17,5 +17,6 @@ export {
   publishAgentRunActivity,
   publishAgentRunCancel,
   publishAgentRunFinished,
+  publishAgentThreadMoved,
   subscribeAgentRunCancel,
 } from "./protocol"

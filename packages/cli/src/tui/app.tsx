@@ -41,6 +41,7 @@ import {
   modelLabel,
   placeLabel,
   type ReasoningLevel,
+  rememberWebMessages,
   type Settings,
   saveSettings,
 } from "./settings"
@@ -364,8 +365,11 @@ export function Workspace(props: WorkspaceProps) {
                   const continueFromWeb = !current.continueFromWeb
                   say(
                     continueFromWeb
-                      ? "Messages from the web run here"
-                      : "Messages from the web wait for you to turn this back on"
+                      ? "Messages from the web run in this folder"
+                      : "Messages from the web wait, in this folder, until you turn this back on"
+                  )
+                  void rememberWebMessages(runner.folder, continueFromWeb).catch(() =>
+                    say("Could not keep this choice for next time", "error")
                   )
                   return { ...current, continueFromWeb }
                 }),
@@ -757,6 +761,9 @@ function ThreadView(
         if (event.threadId === threadId) void reload()
       },
       onApprovalActivity: (event) => {
+        if (event.threadId === threadId) void reload()
+      },
+      onThreadMoved: (event) => {
         if (event.threadId === threadId) void reload()
       },
     })

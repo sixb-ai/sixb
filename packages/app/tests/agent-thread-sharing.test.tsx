@@ -219,6 +219,8 @@ interface Scenario {
   retryStatus: number
   /** Holds the fork's answer until the test lets it go. */
   forkGate?: Promise<void>
+  /** Moving it to the cloud is refused: a turn runs, or waits on approvals. */
+  moveRefused?: boolean
   /** Holds a posted message until the test lets it go. */
   postGate?: Promise<void>
   /** The members `GET /api/users` lists; without them the reader may not read the directory. */
@@ -332,6 +334,12 @@ function api(scenario: Scenario, requests: string[]) {
     }
     // The thread moves to the cloud: its turns run there from now on.
     if (url.pathname === "/api/agent-threads/thr_1/computer" && method === "DELETE") {
+      if (scenario.moveRefused) {
+        return Response.json(
+          { error: "[SixbServer] A turn is waiting for your approval.", code: "active_run_exists" },
+          { status: 409 }
+        )
+      }
       const { runsOn: _runsOn, computer: _computer, ...cloud } = scenario.thread
       scenario.thread = { ...cloud, movedAt: "2026-10-21T10:00:00.000Z" }
       return Response.json(scenario.thread)
@@ -816,6 +824,57 @@ describe("a conversation on its owner's computer", () => {
     const name = await view.findByText("Alice's MacBook Pro")
     expect(view.getByText("· ~/…/q3")).toBeDefined()
     expect(name.parentElement?.getAttribute("title")).toBe(`Alice's MacBook Pro · ${folder}`)
+    expect(await view.findByRole("textbox", { name: "Message" })).toBeDefined()
+  })
+
+  // Guard proof: show moveFailed for every error in ComputerOfflineNotice; the owner is told to
+  // try again, which can't work until the turn is answered or stopped.
+  test("says what to do when a turn keeps it from moving", async () => {
+    const { view } = renderChat("alice", {
+      thread: thread({ runsOn: "computer", computer: { ...laptop, online: false } }),
+      moveRefused: true,
+    })
+    fireEvent.click(await view.findByRole("button", { name: "Continue in the cloud" }))
+    const dialog = within(await view.findByRole("alertdialog"))
+    fireEvent.click(dialog.getByRole("button", { name: "Continue in the cloud" }))
+
+    expect(
+      await view.findByText(
+        "A turn is running or waiting for your approval. Stop or answer it first."
+      )
+    ).toBeDefined()
+    expect(view.queryByText("Could not move it to the cloud. Try again.")).toBeNull()
+  })
+
+  // Guard proof: drop onThreadMoved from useAgentConversation; a second tab keeps the badge and the
+  // notice of a place the conversation left.
+  test("follows a move made elsewhere", async () => {
+    const { view, state } = renderChat("alice", {
+      thread: thread({ runsOn: "computer", computer: { ...laptop, online: true } }),
+    })
+    expect(await view.findByText("Alice's MacBook Pro")).toBeDefined()
+    const activity = await subscribeActivity()
+
+    const { runsOn: _runsOn, computer: _computer, ...cloud } = state.thread
+    state.thread = { ...cloud, movedAt: "2026-10-21T10:00:00.000Z" }
+    await act(async () => {
+      activity.onmessage?.({
+        data: JSON.stringify({
+          type: "activity",
+          event: {
+            schemaVersion: 1,
+            type: "agent.thread.moved",
+            projectId: "p",
+            ownerPrincipal: { type: "user", id: "alice" },
+            threadId: "thr_1",
+            occurredAt: "2026-10-21T10:00:00.000Z",
+          },
+        }),
+      })
+    })
+
+    // Not toBeNull on the element: printing a DOM node for each failed try outlasts the test.
+    await waitFor(() => expect(view.queryByText("Alice's MacBook Pro") === null).toBe(true))
   })
 
   // Guard proof: drop the DELETE from handleContinueInCloud, or `computerOffline` from the

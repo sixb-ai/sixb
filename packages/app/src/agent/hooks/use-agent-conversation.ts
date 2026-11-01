@@ -201,6 +201,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         void refreshThread(threadId)
       }
     },
+    // It moved from another tab or from sixb: the badge and notice follow.
+    onThreadMoved: (event) => {
+      if (event.threadId === threadId) void refreshThread(threadId)
+    },
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
@@ -1028,11 +1032,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     dictation: projectDictation(modelsQuery.data),
   }
 
+  const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
   const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
     ? {
         computer: thread?.computer ?? null,
-        pending: moveToCloud.isPending,
-        error: moveToCloud.isError,
+        // One mutation serves every conversation this view opens: only this one's state shows.
+        pending: movingThisThread && moveToCloud.isPending,
+        error:
+          !movingThisThread || !moveToCloud.isError
+            ? null
+            : (moveToCloud.error as { readonly code?: string }).code === "active_run_exists"
+              ? "busy"
+              : "failed",
         onContinueInCloud: handleContinueInCloud,
       }
     : null

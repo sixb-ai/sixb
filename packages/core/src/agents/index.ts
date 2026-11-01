@@ -32,6 +32,7 @@ export {
   listChildApprovalsAwaiting,
   listTurnApprovals,
   stopAgentTurn,
+  threadHoldsPausedTurn,
   turnPausesOnHeldCalls,
   turnResumeReadiness,
 } from "./approvals"

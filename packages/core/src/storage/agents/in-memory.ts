@@ -441,7 +441,10 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     assertAgentThreadComputer(input.computer)
     const threadKey = key(input.projectId, input.id)
     const thread = this.state.threads.get(threadKey) ?? null
-    assertAssignableComputer(thread, input.id)
+    const active = thread?.activeRunId
+      ? (this.state.runs.get(key(input.projectId, thread.activeRunId)) ?? null)
+      : null
+    assertAssignableComputer(thread, active, input.computer, input.id)
 
     const assigned: AgentThreadRecord = {
       ...thread,

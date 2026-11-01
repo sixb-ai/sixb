@@ -93,7 +93,9 @@ async function main(): Promise<void> {
     if (canRunLive()) {
       const { runTui } = await import("./tui")
       await runTui({ version: VERSION })
-      return
+      // Its turns ended and its session closed, or their wait ran out: nothing is left to wait for,
+      // and whatever the app leaves running would keep the terminal from its prompt.
+      process.exit()
     }
   }
   const parsed = parseCliArgs(args)
