@@ -226,6 +226,61 @@ export function runFailureText(error: { readonly code: string; readonly message:
   return error.message
 }
 
+/** What the status line needs of a conversation's context against its model's limits. */
+export interface ContextUse {
+  readonly target: { readonly tokens: number }
+  readonly usedTokens?: number
+  readonly lastCall?: { readonly inputTokens: number; readonly cacheReadInputTokens?: number }
+}
+
+/**
+ * The context as the status line shows it, `ctx 38k/100k · 92% cached`, and without the cache
+ * share where room is short: amber from 80% of the target, red past it. A price tier crossed below
+ * a window target is no reason for alarm. Undefined before the first answer.
+ */
+export function contextStatus(context: ContextUse):
+  | {
+      readonly text: string
+      readonly short: string
+      readonly tone: "quiet" | "near" | "over"
+    }
+  | undefined {
+  const used = context.usedTokens
+  if (used === undefined) return undefined
+
+  const share = used / context.target.tokens
+  const tone = share > 1 ? "over" : share >= 0.8 ? "near" : "quiet"
+  const call = context.lastCall
+  const cached =
+    call?.cacheReadInputTokens !== undefined && call.inputTokens > 0
+      ? ` · ${Math.round((call.cacheReadInputTokens / call.inputTokens) * 100)}% cached`
+      : ""
+  const short = `ctx ${tokenCount(used)}/${tokenCount(context.target.tokens)}`
+
+  return { text: `${short}${cached}`, short, tone }
+}
+
+/**
+ * What of the context fits at the end of a status line whose items take `columns` of `room`: it
+ * whole, without the cache share, or nothing, so the line never wraps.
+ */
+export function fittedContextText(
+  context: { readonly text: string; readonly short: string },
+  columns: number,
+  room: number
+): string | undefined {
+  const separator = columns > 0 ? 3 : 0
+  return [context.text, context.short].find((text) => columns + separator + text.length <= room)
+}
+
+/** `950`, `9.5k`, `38k`, `984k`, `1.2M`. */
+function tokenCount(tokens: number): string {
+  if (tokens < 1_000) return String(Math.round(tokens))
+  if (tokens < 10_000) return `${Math.round(tokens / 100) / 10}k`
+  if (tokens < 999_500) return `${Math.round(tokens / 1_000)}k`
+  return `${Math.round(tokens / 100_000) / 10}M`
+}
+
 /** `1m 04s`, `12.4s`, `820ms`. */
 export function duration(ms: number): string {
   if (ms < 1_000) return `${Math.round(ms)}ms`
