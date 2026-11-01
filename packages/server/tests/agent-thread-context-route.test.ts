@@ -13,7 +13,6 @@ import {
   createAgentRunExecutionToken,
   estimateAgentContextRequestTokens,
 } from "@sixb/core/internal/agents"
-import type { ModelRateCard } from "@sixb/core/models"
 import type { AgentMessageRecord, ConversationAgentRunSpec } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "../../core/src/agents/context-token-rate"
@@ -26,24 +25,7 @@ import { createTestBrowserPolicy } from "./helpers"
 const projectId = "agent-thread-context"
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 9, minute))
 
-/** Prices that rise ×5 from 100,001 tokens, as Haiku 5.5's do. */
-const price = (base: number) => ({
-  default: String(base),
-  tiers: [{ minTokens: 100_001, price: String(base * 5) }],
-})
-const tieredCard: ModelRateCard = {
-  currency: "USD",
-  input: price(1),
-  output: price(5),
-  cacheReadInput: price(0.1),
-  cacheWriteInput: price(1.25),
-}
-
-function languageModel(
-  modelId: string,
-  contextWindow: number,
-  rateCard?: ModelRateCard
-): LanguageModel {
+function languageModel(modelId: string, contextWindow: number): LanguageModel {
   return {
     providerId: "test",
     modelId,
@@ -55,7 +37,6 @@ function languageModel(
       maxOutputTokens: 128_000,
       capabilities: {},
     },
-    ...(rateCard ? { rateCard } : {}),
     stream: async () => {
       throw new Error("Must not invoke the route test model")
     },
@@ -68,7 +49,7 @@ function createFixture() {
     id: projectId,
     ontology: [],
     models: {
-      language: [languageModel("flat", 200_000), languageModel("tiered", 1_000_000, tieredCard)],
+      language: [languageModel("small", 200_000), languageModel("large", 1_000_000)],
     },
     storage,
     broker: new InMemoryBroker(),
@@ -203,7 +184,7 @@ function createFixture() {
 describe("GET /api/agent-threads/:threadId/context", () => {
   test("measures the last call against the limit of the latest turn's model", async () => {
     const { storage, read, seedTurn, messagesEstimate } = createFixture()
-    const turn = await seedTurn("thr_tiered", "tiered")
+    const turn = await seedTurn("thr_large", "large")
     await storage.aiUsage.recordModelCall({
       id: "usage_first",
       projectId,
@@ -212,7 +193,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       callId: "call_first",
       requesterGroupIds: [],
       providerId: "test",
-      requestedModelId: "tiered",
+      requestedModelId: "large",
       responseId: "response_first",
       usage: { inputTokens: 30_000, outputTokens: 400, cacheReadInputTokens: 0 },
       occurredAt: at(1),
@@ -225,18 +206,18 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       callId: "call_last",
       requesterGroupIds: [],
       providerId: "test",
-      requestedModelId: "tiered",
+      requestedModelId: "large",
       responseId: "response_last",
       usage: { inputTokens: 38_000, outputTokens: 1_200, cacheReadInputTokens: 35_000 },
       occurredAt: at(2),
     })
 
     // Removal proof: resolve the default model instead of the latest turn's; the limit becomes the
-    // flat model's. A price tier changes nothing: the meter measures up to the model's limit.
-    const { status, body } = await read("thr_tiered")
+    // small model's.
+    const { status, body } = await read("thr_large")
     expect(status).toBe(200)
     expect(body).toEqual({
-      model: { provider: "test", modelId: "tiered" },
+      model: { provider: "test", modelId: "large" },
       windowTokens: 1_000_000,
       limitTokens: 1_000_000 - 16_384,
       // The answer the last call wrote joins what the next request reads.
@@ -251,12 +232,12 @@ describe("GET /api/agent-threads/:threadId/context", () => {
 
     // Measured against another model, the same conversation has that model's limit, and what it
     // uses is estimated: another model's counts say nothing of this one's tokenizer.
-    // Removal proof: anchor on the last call whatever its model; the flat model reads 39,200.
-    const flat = await read("thr_tiered", "?provider=test&modelId=flat")
-    expect(flat.body).toMatchObject({
-      model: { provider: "test", modelId: "flat" },
+    // Removal proof: anchor on the last call whatever its model; the small model reads 39,200.
+    const small = await read("thr_large", "?provider=test&modelId=small")
+    expect(small.body).toMatchObject({
+      model: { provider: "test", modelId: "small" },
       limitTokens: 200_000 - 16_384,
-      usedTokens: await messagesEstimate("thr_tiered", "flat"),
+      usedTokens: await messagesEstimate("thr_large", "small"),
     })
   })
 
@@ -266,7 +247,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
   test("counts what the worker counts: images at the most a provider charges for one", async () => {
     const { storage, read, seedTurn } = createFixture()
     // The call read the screenshots, and its provider counted them for less.
-    const turn = await seedTurn("thr_screenshots", "tiered", { screenshots: 15 })
+    const turn = await seedTurn("thr_screenshots", "large", { screenshots: 15 })
     await storage.aiUsage.recordModelCall({
       id: "usage_screenshots",
       projectId,
@@ -275,7 +256,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       callId: "call_screenshots",
       requesterGroupIds: [],
       providerId: "test",
-      requestedModelId: "tiered",
+      requestedModelId: "large",
       responseId: "response_screenshots",
       usage: { inputTokens: 60_000, outputTokens: 500 },
       occurredAt: at(1),
@@ -289,7 +270,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
   // reads a call that saw less than the stored steps replay.
   test("a last call whose request the turn reduced is not what the next request weighs", async () => {
     const { storage, read, seedTurn, messagesEstimate } = createFixture()
-    const turn = await seedTurn("thr_reduced", "tiered", { reduced: true })
+    const turn = await seedTurn("thr_reduced", "large", { reduced: true })
     await storage.aiUsage.recordModelCall({
       id: "usage_reduced",
       projectId,
@@ -298,14 +279,14 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       callId: "call_reduced",
       requesterGroupIds: [],
       providerId: "test",
-      requestedModelId: "tiered",
+      requestedModelId: "large",
       responseId: "response_reduced",
       usage: { inputTokens: 60_000, outputTokens: 900, cacheReadInputTokens: 0 },
       occurredAt: at(1),
     })
 
     const { body } = await read("thr_reduced")
-    expect(body.usedTokens).toBe(await messagesEstimate("thr_reduced", "tiered"))
+    expect(body.usedTokens).toBe(await messagesEstimate("thr_reduced", "large"))
     // The call is still the one the cache share is read from.
     expect(body).toMatchObject({ lastCall: { inputTokens: 60_000 } })
   })
@@ -314,7 +295,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
   // reserve while the worker leaves the reasoning budget.
   test("the limit leaves the reserve the latest turn's reasoning budget needs", async () => {
     const { read, seedTurn } = createFixture()
-    await seedTurn("thr_reasoning", "flat", { reasoning: { budgetTokens: 20_000 } })
+    await seedTurn("thr_reasoning", "small", { reasoning: { budgetTokens: 20_000 } })
 
     const { body } = await read("thr_reasoning")
     expect(body).toMatchObject({ limitTokens: 200_000 - 20_001 })
@@ -322,7 +303,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
 
   test("a compaction no call followed yet is measured by its own estimate", async () => {
     const { storage, read, seedTurn } = createFixture()
-    const turn = await seedTurn("thr_condensed", "tiered", { answer: false, earlier: true })
+    const turn = await seedTurn("thr_condensed", "large", { answer: false, earlier: true })
     await storage.agents.checkpoints.create({
       projectId,
       id: "checkpoint_condensed",
@@ -338,7 +319,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       observedHeadSeq: 3,
       estimatedInputTokensBefore: 131_000,
       estimatedInputTokensAfter: 41_000,
-      summaryModelId: "tiered",
+      summaryModelId: "large",
       createdAt: at(3),
     })
 
@@ -367,7 +348,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
 
     const fresh = await read("thr_fresh")
     expect(fresh.status).toBe(200)
-    expect(fresh.body).toMatchObject({ model: { provider: "test", modelId: "flat" } })
+    expect(fresh.body).toMatchObject({ model: { provider: "test", modelId: "small" } })
     expect(fresh.body).not.toHaveProperty("usedTokens")
 
     expect((await read("thr_missing")).status).toBe(404)
