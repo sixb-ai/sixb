@@ -209,6 +209,28 @@ export const en = {
     hours: (hours: number) => `${hours}h`,
     days: (days: number) => `${days}d`,
   },
+  /** The meter beside the model: how much of its target the conversation uses. */
+  contextMeter: {
+    title: "Context",
+    label: (used: string, target: string) => `Context: ${used} of ${target} tokens`,
+    condensing: "Condensing…",
+    condensingLabel: "Condensing the conversation",
+    priceTier: (model: string, ratio: string, tier: string) =>
+      `${model} costs ${ratio} past ${tier} tokens, so the conversation is condensed before it gets there.`,
+    windowPastTier: (model: string, limit: string, ratio: string, tier: string) =>
+      `Condensed near ${model}’s ${limit}-token limit. Past ${tier} tokens, each call costs ${ratio}.`,
+    window: (model: string, limit: string) =>
+      `Condensed before it reaches ${model}’s ${limit}-token limit.`,
+    pastTier: (ratio: string, tier: string) =>
+      `Past ${tier} tokens: each call costs ${ratio} until the conversation is condensed.`,
+    /** What the meter calls a model it cannot name. */
+    thisModel: "This model",
+    cached: "Read from cache",
+    limit: "Model limit",
+    lastCondensed: "Last condensed",
+    justNow: "just now",
+    ago: (time: string) => `${time} ago`,
+  },
   transcript: {
     condensed: "Condensed conversation",
     condensing: "Condensing earlier conversation…",
