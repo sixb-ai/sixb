@@ -14914,6 +14914,15 @@ describe("context within a turn", () => {
         (record) => record.name === "agent.compaction.started"
       )
       expect(started?.payload).toMatchObject({ reason: "threshold" })
+
+      // Before and after weigh the same request, the history and the turn's message, as the
+      // turn's first call sent it: not the chapter it had read, which stays as it was.
+      // Reproduce: give compactAgentConversation the request the guard measured as its estimate
+      // before; it then counts that chapter, which after leaves out.
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      const opening = estimateAgentRequestTokens(requests[0]!, 3)
+      expect(Math.abs(checkpoint!.estimatedInputTokensBefore - opening)).toBeLessThan(2_000)
+      expect(checkpoint!.estimatedInputTokensAfter).toBeLessThan(opening)
     } finally {
       await worker.stop()
     }

@@ -95,7 +95,6 @@ export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnv
    */
   readonly compactInTurn?: (input: {
     readonly reason: AgentContextCheckpointReason
-    readonly estimatedInputTokens: number
   }) => Promise<ConversationRequest | undefined>
   /** The bytes per token the preflight measured the history at, which the turn's calls go by. */
   readonly bytesPerToken?: number
@@ -350,13 +349,12 @@ export async function createConversationAgentEnvironment(
     // The turn compacts from within at most once: a run writes one checkpoint.
     const compactInTurn: ConversationAgentExecutionEnvironment["compactInTurn"] =
       compaction &&
-      (async ({ reason, estimatedInputTokens }) => {
+      (async ({ reason }) => {
         const compacted = await compactAgentConversationInTurn({
           ...compaction,
           threadContext,
           memory,
           reason,
-          estimatedInputTokens,
         })
         return (
           compacted &&
