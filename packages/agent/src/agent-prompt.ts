@@ -201,9 +201,9 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
 function renderSandboxReset(resetAt: string, mode: AgentExecutionMode): string {
   // A sub-agent's workspace is blank: only what it was handed and its out/ are given back.
   if (mode === "subagent") {
-    return `Your sandbox was reset at ${resetAt}: the files it held before that time were lost. The files you were handed are back at their paths, and so is what your out/ held when you paused, if it could be kept; nothing else is. Inspect the sandbox before relying on earlier tool results, and redo missing work.`
+    return `Your sandbox was reset at ${resetAt}: the files it held before that time were lost. The files you were handed are back at their paths, and so is what your out/ held when you paused, if it could be kept, and so are the latest tool outputs saved under $SIXB_TOOL_OUTPUTS_DIR; nothing else is. Inspect the sandbox before relying on earlier tool results, and redo missing work.`
   }
-  return `The sandbox was reset at ${resetAt}. Local files and uncommitted edits from before that time are not in it, including the paths earlier tool calls used. Conversation history and attachments remain available: read attachments from the current $SIXB_ATTACHMENTS list. Inspect the current environment before relying on earlier filesystem results, and recover or redo missing work within the user's authorization.`
+  return `The sandbox was reset at ${resetAt}. Local files and uncommitted edits from before that time are not in it, including the paths earlier tool calls used. Conversation history and attachments remain available: read attachments from the current $SIXB_ATTACHMENTS list. The latest tool outputs saved under $SIXB_TOOL_OUTPUTS_DIR are back at their paths. Inspect the current environment before relying on earlier filesystem results, and recover or redo missing work within the user's authorization.`
 }
 
 /** Render the worker-owned prompt for the tool-free workflow output projection call. */
