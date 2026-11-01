@@ -20,6 +20,7 @@ import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type ConversationReaders, conversationAuthors } from "./message-authors"
 import { userMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
+import { conversationPromptCaching } from "./prompt-cache"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { toolFilesStepKey } from "./tools/result-media"
@@ -80,27 +81,23 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const { threadContext } = input
   const { attachmentContext } = context
-  const sentTimes = userMessageTimes(threadContext.history, context.projectTimeZone)
+  const sentTimes = userMessageTimes(threadContext.history, {
+    timeZone: context.projectTimeZone,
+    locale: context.projectLocale,
+  })
   const authors = input.conversation
     ? conversationAuthors({
         conversation: input.conversation,
         messages: threadContext.retainedMessages,
       })
     : undefined
-  const newestUserMessageId = threadContext.retainedMessages
-    .filter((message) => message.role === "user")
-    .at(-1)?.id
-
   const modelMessages = toModelMessages(threadContext.modelMessages, {
-    // Who takes part, then when, then who wrote it: `<sixb_author>` stays the message's last tag.
+    // When, then who wrote it: `<sixb_author>` stays the message's last tag. Who takes part is in
+    // the system prompt, so no message changes when the next one comes.
     userMessageSuffix: (message) => {
       if (!message.id) return undefined
 
-      const closing = [
-        message.id === newestUserMessageId ? authors?.section : undefined,
-        sentTimes.get(message.id),
-        authors?.byMessageId.get(message.id),
-      ]
+      const closing = [sentTimes.get(message.id), authors?.byMessageId.get(message.id)]
       return closing.filter(Boolean).join("\n") || undefined
     },
     fileText: ({ message, partIndex }) =>
@@ -174,6 +171,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ],
         tools,
         ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
+        caching: conversationPromptCaching({ projectId, threadId: run.threadId, lifetime: "long" }),
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined

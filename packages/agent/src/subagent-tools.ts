@@ -43,7 +43,7 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError } from "@sixb/core/storage"
 import { delay } from "./abort"
-import { renderHandedFiles } from "./agent-prompt"
+import { renderHandedFiles, sentSettings } from "./agent-prompt"
 import { formatBytes, SANDBOX_ATTACHMENT_LIMITS } from "./attachments"
 import {
   handedFileRefs,
@@ -840,7 +840,7 @@ export class SubagentCoordinator {
       paused,
       keepsWorkspace: this.context.keepsChildWorkspaces,
       createdAt,
-      timeZone: spec.timeZone ?? this.context.timeZone,
+      settings: sentSettings(spec, this.context),
     })
     return {
       spec,

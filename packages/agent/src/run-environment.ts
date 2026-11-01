@@ -17,7 +17,7 @@ import type {
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
-import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
+import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import {
   type InstalledArtifacts,
@@ -38,7 +38,7 @@ import { type ConversationMemory, loadConversationMemory } from "./conversation-
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { InlineImageBudget } from "./inline-images"
-import type { ConversationReaders } from "./message-authors"
+import { type ConversationReaders, conversationAuthors } from "./message-authors"
 import { type AgentErrorDetails, type AgentToolCaller, projectModelTools } from "./model-adapters"
 import type { AcquiredRunSandbox, BeforeFinalizeOptions, RunSandbox } from "./run-sandbox"
 import {
@@ -208,6 +208,9 @@ export async function createConversationAgentEnvironment(
       : undefined
     const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
     const messages = threadContext.retainedMessages
+    const conversation = input.conversation
+      ? conversationAuthors({ conversation: input.conversation, messages }).section
+      : undefined
     const [inlineImages, memory] = await Promise.all([
       modelSupportsInlineImages(plan.model),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
@@ -262,6 +265,7 @@ export async function createConversationAgentEnvironment(
       ontologyDocs,
       frameworkTools: input.frameworkTools,
       ...(memory ? { memory } : {}),
+      ...(conversation === undefined ? {} : { conversation }),
       onDetachedTeardown: input.onDetachedTeardown,
     })
     return { ...environment, threadContext }
@@ -487,6 +491,8 @@ interface AgentEnvironmentSetup
   }
   /** A conversation's memory, or a child's to read: installed in the sandbox and in the prompt. */
   readonly memory?: ConversationMemory
+  /** Who takes part in a conversation several people write in, for its prompt. */
+  readonly conversation?: string
 }
 
 /**
@@ -633,11 +639,8 @@ async function startAgentEnvironment(
         : {}),
       sandboxResetAt: workspace?.resetAt,
       workspace: workspace?.promptContext,
-      facts: agentRuntimeFacts({
-        settings: plan,
-        project: context,
-        requester: context.requester,
-      }),
+      facts: context.requester === undefined ? {} : { requester: context.requester },
+      ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
       ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
       ...(input.memory ? { memory: input.memory.prompt } : {}),
     })
@@ -687,6 +690,7 @@ async function startAgentEnvironment(
       prepareStep: mediaBridge.prepareStep,
       systemPrompt,
       projectTimeZone: context.timeZone,
+      projectLocale: context.locale,
       sandboxReady: ready,
     },
     dispose,
