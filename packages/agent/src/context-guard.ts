@@ -85,10 +85,10 @@ export interface AgentContextGuard {
  * before a request would cross it:
  *
  * 1. clear the oldest tool results the model has read in one batch, down to
- *    {@link AGENT_CONTEXT_COMPACTED_SHARE} of the limit, when it frees enough to be worth the cache
- *    it breaks: the three most recent stay when clearing the older ones gets there, only the
- *    newest when it does not (see {@link KEPT_TOOL_RESULTS}), and the steps after it read the
- *    cleared request through;
+ *    {@link AGENT_CONTEXT_COMPACTED_SHARE} of the limit, when it frees at least a tenth of the
+ *    limit ({@link CLEARED_AT_LEAST_SHARE}), enough to be worth the cache it breaks: the three most
+ *    recent stay when clearing the older ones gets there, only the newest when it does not (see
+ *    {@link KEPT_TOOL_RESULTS}), and the steps after it read the cleared request through;
  * 2. else compact what came before the turn, once, and clear again what is still needed;
  * 3. past the limit even so, clear as many of the results the model has read as it takes, the
  *    newest still kept, and cut those it has not read to fit.
