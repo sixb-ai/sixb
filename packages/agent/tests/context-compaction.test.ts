@@ -257,7 +257,10 @@ describe("agent conversation token rate", () => {
     maxSteps: 4,
   }
   // The rate the project's runs measured on the model lately.
-  const budget = prepareAgentModel({ model, bytesPerToken: 2.1 }).budget
+  const budget = prepareAgentModel({
+    model,
+    tokenRates: [{ bytes: 21_000, tokens: 10_000 }],
+  }).budget
   // 30,000 bytes sent before the answer's last step; that step's text is the call's output.
   const user = record("user", "user", [{ type: "text", text: "a".repeat(20_000) }], 1)
   const answer = record(

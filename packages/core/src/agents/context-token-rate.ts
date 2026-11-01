@@ -1,4 +1,5 @@
 import type { AgentTokenRateStore } from "../storage/agents"
+import { AGENT_TOKEN_RATE_SAMPLES } from "../storage/agents/types"
 import type { AgentContextSize } from "./context-compaction"
 
 /**
@@ -7,10 +8,10 @@ import type { AgentContextSize } from "./context-compaction"
  *
  * Each run records what its latest model call measured: the bytes of its request as the estimator
  * weighs them, against the input tokens the provider counted (see AgentTokenRateStore). A run's
- * estimate starts from a low quantile of its model's recent measurements, and a thread corrects
- * it from its own calls. A tokenizer that changes is followed within a few runs, and a model no
- * run measured yet starts on the dense side: an underestimate is the costly error, as it crosses
- * the window unseen.
+ * rate is a low quantile of its model's newest measurements, the project's and its own calls'
+ * alike, and a thread corrects it from its own calls. A tokenizer that changes is followed within
+ * a few runs, and a model no run measured yet starts on the dense side until its first call
+ * counts: an underestimate is the costly error, as it crosses the window unseen.
  */
 
 /** Denser than every tokenizer measured on agent turns, so an unmeasured model's estimate errs high. */
@@ -85,27 +86,35 @@ export function calibrateAgentContextBytesPerToken(input: {
   )
 }
 
-/** The rate a run starts from: a low quantile of its model's recent measurements, else the default. */
+/**
+ * A run's rate: a low quantile of its model's newest measurements, newest first, else the default.
+ * A run puts its own calls' in front of the project's, so its first call sets the rate of a model
+ * no run measured, and barely moves a model's 20.
+ */
 export function learnedAgentContextBytesPerToken(
   samples: readonly AgentContextTokenRateSample[]
 ): number {
   if (samples.length === 0) return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
 
-  const rates = samples.map((sample) => sample.bytes / sample.tokens).sort((a, b) => a - b)
+  const rates = samples
+    .slice(0, AGENT_TOKEN_RATE_SAMPLES)
+    .map((sample) => sample.bytes / sample.tokens)
+    .sort((a, b) => a - b)
   // Nearest rank: the smallest rate at least this share of the measurements reach down to.
   const rank = Math.max(1, Math.ceil(rates.length * LEARNED_RATE_QUANTILE))
   return rates[rank - 1]!
 }
 
 /**
- * The rate a run on `model` starts from, read once with its plan. The measurements are a cache: a
- * project whose storage cannot read them starts from the default, which errs high.
+ * What the project's runs measured on `model` lately, newest first, read once with a run's plan.
+ * The measurements are a cache: a project whose storage cannot read them has none, and its runs
+ * start from the default, which errs high.
  */
-export async function readAgentContextBytesPerToken(input: {
+export async function readAgentContextTokenRates(input: {
   readonly tokenRates: AgentTokenRateStore
   readonly projectId: string
   readonly model: { readonly providerId: string; readonly modelId: string }
-}): Promise<number> {
+}): Promise<readonly AgentContextTokenRateSample[]> {
   const { projectId, model } = input
 
   try {
@@ -114,13 +123,13 @@ export async function readAgentContextBytesPerToken(input: {
       providerId: model.providerId,
       modelId: model.modelId,
     })
-    return learnedAgentContextBytesPerToken(samples)
+    return samples.map(({ bytes, tokens }) => ({ bytes, tokens }))
   } catch (error) {
     console.warn(
-      `[Sixb] Could not read the bytes per token measured for '${model.providerId}/${model.modelId}'; estimating its context at ${AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN}.`,
+      `[Sixb] Could not read the bytes per token measured for '${model.providerId}/${model.modelId}'; estimating its context at ${AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN} until a call counts.`,
       error
     )
-    return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
+    return []
   }
 }
 

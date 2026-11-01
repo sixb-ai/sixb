@@ -25,7 +25,7 @@ import {
   type AgentModelTokenRateSample,
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
-  readAgentContextBytesPerToken,
+  readAgentContextTokenRates,
   recordAgentContextTokenRate,
   renderAgentRunOntologyDocs,
   resolveAgentPropertyClearance,
@@ -176,13 +176,13 @@ export async function executeWorkflowAgentNode(
     })
     // The step runs in this process: the worker pins its model and records each call.
     const model = await resolveLanguageModel(configuredPlan.model)
-    const bytesPerToken = await readAgentContextBytesPerToken({
+    const tokenRates = await readAgentContextTokenRates({
       tokenRates: context.storage.agents.tokenRates,
       projectId: context.id,
       model,
     })
     const prepared = prepareAgentModel(
-      { ...configuredPlan, model: usageRecorder.wrapModel(model), bytesPerToken },
+      { ...configuredPlan, model: usageRecorder.wrapModel(model), tokenRates },
       (sample) => {
         tokenRate = sample
       }
