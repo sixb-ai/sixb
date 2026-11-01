@@ -6,6 +6,13 @@ export class ModelCatalogUnavailableError extends Error {
   readonly name = "ModelCatalogUnavailableError"
 }
 
+/**
+ * Why a provider rejected a request, when the provider says so in terms Sixb acts on:
+ * `context-window-exceeded` means the request was too long for the model's context window, and a
+ * shorter one may succeed.
+ */
+export type ModelProviderErrorReason = "context-window-exceeded"
+
 /** A provider or provider protocol rejected a model request. */
 export class ModelProviderError extends Error {
   readonly name = "ModelProviderError"
@@ -20,6 +27,7 @@ export class ModelProviderError extends Error {
       readonly requestId?: string
       readonly retryAfterMs?: number
       readonly retryable?: boolean
+      readonly reason?: ModelProviderErrorReason
     }
   ) {
     super(message, options)
@@ -28,6 +36,7 @@ export class ModelProviderError extends Error {
     this.requestId = options?.requestId
     this.retryAfterMs = options?.retryAfterMs
     this.retryable = options?.retryable ?? false
+    this.reason = options?.reason
   }
 
   readonly status?: number
@@ -35,6 +44,7 @@ export class ModelProviderError extends Error {
   readonly requestId?: string
   readonly retryAfterMs?: number
   readonly retryable: boolean
+  readonly reason?: ModelProviderErrorReason
 }
 
 export class ModelStreamError extends Error {

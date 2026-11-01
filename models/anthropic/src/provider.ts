@@ -28,7 +28,11 @@ import {
   rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
+import {
+  contextWindowRejection,
+  messagesEvents,
+  messagesInput,
+} from "@sixb/model-protocols/messages"
 import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
 import { anthropicOutputSchema } from "./structured-output"
@@ -680,6 +684,7 @@ async function providerHttpError(
     status: response.status,
     ...(code === undefined ? {} : { code }),
     ...requestErrorMetadata(response),
+    ...contextWindowRejection({ status: response.status, code, message }),
   })
 }
 

@@ -1,4 +1,5 @@
 import { ModelProviderError } from "@sixb/core/models"
+import { contextWindowRejection } from "@sixb/model-protocols/responses"
 import { RequestDiagnostics } from "./diagnostics"
 import { object, PREFIX, positiveInteger } from "./util"
 
@@ -257,6 +258,7 @@ async function httpError(
     status: response.status,
     requestId: requestId(response),
     code,
+    ...contextWindowRejection({ status: response.status, code, message }),
     retryable: response.status === 408 || response.status === 429 || response.status >= 500,
     ...(ms !== undefined && Number.isFinite(ms) && ms >= 0 ? { retryAfterMs: Math.ceil(ms) } : {}),
   })
