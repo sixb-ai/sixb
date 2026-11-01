@@ -10,6 +10,7 @@ import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { fileRefKey } from "./file-ref"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
+import { INLINE_IMAGE_BUDGET_NOTE } from "./inline-images"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
   textInlineMaxBytes: 50 * 1024,
@@ -50,6 +51,35 @@ export interface PreparedAgentAttachmentContext {
   readonly manifestJson: string
   /** The images each stored step's tools returned, as the model read them after that step. */
   readonly toolFilesByStep?: ReadonlyMap<string, ModelMessage>
+  /**
+   * The user attachments the request may inline as images, projected only once the request's
+   * inline image budget decides them ({@link settleAttachmentImages}). Until then each reads as
+   * the budget had no room for it.
+   */
+  readonly pendingImages?: ReadonlyMap<string, PendingAttachmentImage>
+}
+
+/** What projecting an attachment as an image gave: its inline data, or why there is none. */
+export type AttachmentImageProjection =
+  | {
+      readonly kind: "inline"
+      readonly data: AgentFileDataProjection
+      readonly notes: readonly string[]
+    }
+  | { readonly kind: "not-inlined"; readonly notes: readonly string[] }
+
+/** An image's fate in the request: projected, or left out because the budget was used up. */
+export type AttachmentImageOutcome = AttachmentImageProjection | { readonly kind: "budget" }
+
+/** A user attachment the request may inline as an image, decoded and encoded only on demand. */
+export interface PendingAttachmentImage {
+  project(signal: AbortSignal): Promise<AttachmentImageProjection>
+  /** The attachment as the request reads it once its image's fate is known. */
+  settle(outcome: AttachmentImageOutcome): {
+    readonly entry: PreparedAgentAttachment
+    readonly promptText: string
+    readonly modelFileData?: AgentFileDataProjection
+  }
 }
 
 export interface PreparedAgentAttachment {
@@ -109,6 +139,7 @@ export async function prepareAgentAttachments(input: {
   const entries: { readonly order: number; readonly entry: PreparedAgentAttachment }[] = []
   const materialized = new Map<string, string>()
   const textInlineBytesByMessage = new Map<string, number>()
+  const pendingImages = new Map<string, PendingAttachmentImage>()
   let sandboxBytes = 0
 
   // The user's files take the sandbox budget first, in message order: what a user message reads
@@ -142,6 +173,7 @@ export async function prepareAgentAttachments(input: {
       sandboxFiles.push(prepared.sandboxFile)
       materialized.set(fileRefKey(prepared.sandboxFile.fileRef), prepared.sandboxFile.path)
     }
+    if (prepared.pendingImage) pendingImages.set(prepared.entry.key, prepared.pendingImage)
   }
 
   const ordered = entries.sort((left, right) => left.order - right.order).map(({ entry }) => entry)
@@ -150,6 +182,7 @@ export async function prepareAgentAttachments(input: {
     promptTextByPartKey,
     modelFileDataByPartKey,
     sandboxFiles,
+    ...(pendingImages.size === 0 ? {} : { pendingImages }),
     manifestJson: JSON.stringify(
       {
         projectId: input.projectId,
@@ -309,6 +342,7 @@ async function prepareOneAttachment(input: {
   readonly promptText: string
   readonly modelFileData?: AgentFileDataProjection
   readonly sandboxFile?: PreparedSandboxAttachmentFile
+  readonly pendingImage?: PendingAttachmentImage
   readonly sandboxBytesAdded: number
   readonly textInlineBytesAdded: number
 }> {
@@ -334,7 +368,8 @@ async function prepareOneAttachment(input: {
   let sandboxBytesAdded = 0
   let textExcerpt: string | undefined
   let textInlineBytesAdded = 0
-  let modelFileData: AgentFileDataProjection | undefined
+  let projectImage: ((signal: AbortSignal) => Promise<AttachmentImageProjection>) | undefined
+  let metadataNote: string | undefined
 
   const stat = await safeBlobStat(input.blobStorage, fileRef, notes, signal)
   if (!stat) {
@@ -350,8 +385,6 @@ async function prepareOneAttachment(input: {
       mayInlineContent &&
       remainingTextBytes > 0 &&
       shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
-    const shouldReadForImage =
-      mayInlineContent && input.inlineImages && shouldAttemptImageInline(mediaType, fileName)
     // A tool can return a file the sandbox holds already, such as an attachment view_file showed:
     // its output named that path, and the file stays there once.
     const alreadyAt =
@@ -361,9 +394,7 @@ async function prepareOneAttachment(input: {
       ? stat.sizeBytes
       : shouldReadForText
         ? Math.min(DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes, remainingTextBytes) + 4
-        : shouldReadForImage
-          ? DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes
-          : 0
+        : 0
 
     if (needsFullBytes || readLimit > 0) {
       const read = await readBlobBytes(input.blobStorage, fileRef.blobId, readLimit, signal, {
@@ -410,70 +441,133 @@ async function prepareOneAttachment(input: {
         }
       }
 
-      if (!textExcerpt) {
-        const image = await maybeImageData({
-          bytes,
-          mediaType,
-          fileName,
-          inlineImages: mayInlineContent && input.inlineImages,
-          hasImageHint: hasImageHint(mediaType, fileName),
-          signal,
-        })
-        if (image) {
-          if (image.ok) {
-            inlineDisposition = "image"
-            notes.push(...image.notes)
-            modelFileData = {
-              data: image.dataUrl,
-              mediaType: image.mediaType,
-              filename: fileName,
-            }
-          } else if (image.notes.length > 0) {
-            notes.push(...image.notes)
-          }
-        }
-      } else if (hasImageHint(mediaType, fileName)) {
+      if (textExcerpt && hasImageHint(mediaType, fileName)) {
         notes.push("[Image not inlined: attachment was treated as text based on its content.]")
       }
+    }
+
+    // An image is decoded and encoded only once the request's inline image budget has room for
+    // it: see settleAttachmentImages.
+    const fullBytes = bytes?.byteLength === stat.sizeBytes ? bytes : undefined
+    if (!textExcerpt && mayInlineContent && input.inlineImages) {
+      projectImage = (projectSignal) =>
+        projectAttachmentImage({
+          ...input,
+          fileRef,
+          fileName,
+          mediaType,
+          ...(fullBytes === undefined ? {} : { bytes: fullBytes }),
+          signal: projectSignal,
+        })
     }
 
     if (mayInlineContent && !input.inlineImages && hasImageHint(mediaType, fileName)) {
       notes.push("[Image not inlined: the selected model does not advertise image input support.]")
     }
 
-    if (inlineDisposition === "metadata-only" && notes.length === 0) {
-      notes.push(
-        !item.inlineContent
-          ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
-          : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
-            ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
-            : "[File not inlined: available through the sandbox path or content URL.]"
-      )
-    }
+    metadataNote = !item.inlineContent
+      ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
+      : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
+        ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
+        : "[File not inlined: available through the sandbox path or content URL.]"
   }
 
-  const entry: PreparedAgentAttachment = {
-    key,
-    messageId: item.message.id,
-    partIndex: item.partIndex,
-    fileRef,
-    fileName,
-    mediaType,
-    sizeBytes: fileRef.sizeBytes,
-    contentPath,
-    contentUrl,
-    ...(sandboxPath === undefined ? {} : { sandboxPath }),
-    inlineDisposition,
-    notes,
+  const attachment = (
+    imageNotes: readonly string[],
+    image?: AgentFileDataProjection
+  ): { readonly entry: PreparedAgentAttachment; readonly promptText: string } => {
+    const disposition = image ? "image" : inlineDisposition
+    const allNotes = [...notes, ...imageNotes]
+    if (disposition === "metadata-only" && allNotes.length === 0 && metadataNote) {
+      allNotes.push(metadataNote)
+    }
+
+    const entry: PreparedAgentAttachment = {
+      key,
+      messageId: item.message.id,
+      partIndex: item.partIndex,
+      fileRef,
+      fileName,
+      mediaType,
+      sizeBytes: fileRef.sizeBytes,
+      contentPath,
+      contentUrl,
+      ...(sandboxPath === undefined ? {} : { sandboxPath }),
+      inlineDisposition: disposition,
+      notes: allNotes,
+    }
+    return { entry, promptText: attachmentPromptText(entry, textExcerpt) }
+  }
+
+  const imageHint = hasImageHint(mediaType, fileName)
+  const pendingImage: PendingAttachmentImage | undefined = projectImage && {
+    project: projectImage,
+    settle: (outcome) => {
+      if (outcome.kind === "inline") {
+        return { ...attachment(outcome.notes, outcome.data), modelFileData: outcome.data }
+      }
+      if (outcome.kind === "not-inlined") return attachment(outcome.notes)
+      return attachment(imageHint ? [INLINE_IMAGE_BUDGET_NOTE] : [])
+    },
   }
 
   return {
-    entry,
-    promptText: attachmentPromptText(entry, textExcerpt),
-    ...(modelFileData === undefined ? {} : { modelFileData }),
+    ...(pendingImage ? pendingImage.settle({ kind: "budget" }) : attachment([])),
     ...(sandboxFile === undefined ? {} : { sandboxFile }),
+    ...(pendingImage === undefined ? {} : { pendingImage }),
     sandboxBytesAdded,
     textInlineBytesAdded,
+  }
+}
+
+/**
+ * Decode and encode a user attachment as the request inlines an image, from the bytes already read
+ * for the sandbox or from its blob. A file whose bytes are no image is not inlined, without a note
+ * unless it was named as one.
+ */
+async function projectAttachmentImage(input: {
+  readonly blobStorage: AgentRunFileStore
+  readonly fileRef: FileRef
+  readonly fileName: string
+  readonly mediaType: string
+  readonly bytes?: Uint8Array
+  readonly signal: AbortSignal
+}): Promise<AttachmentImageProjection> {
+  let bytes = input.bytes
+  if (!bytes) {
+    const read = await readBlobBytes(
+      input.blobStorage,
+      input.fileRef.blobId,
+      DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes,
+      input.signal
+    )
+    if (!read.ok) {
+      return {
+        kind: "not-inlined",
+        notes: [
+          read.reason === "too_large"
+            ? "[File not read inline: file exceeds the attachment read limit.]"
+            : `[File not read inline: ${read.reason}.]`,
+        ],
+      }
+    }
+    bytes = read.bytes
+  }
+
+  const image = await maybeImageData({
+    bytes,
+    mediaType: input.mediaType,
+    fileName: input.fileName,
+    inlineImages: true,
+    hasImageHint: hasImageHint(input.mediaType, input.fileName),
+    signal: input.signal,
+  })
+  if (!image) return { kind: "not-inlined", notes: [] }
+  if (!image.ok) return { kind: "not-inlined", notes: image.notes }
+  return {
+    kind: "inline",
+    data: { data: image.dataUrl, mediaType: image.mediaType, filename: input.fileName },
+    notes: image.notes,
   }
 }
 
@@ -706,6 +800,43 @@ export function modelSupportsInlineImages(model: LanguageModel): boolean {
     inputMediaTypes === "any" ||
     inputMediaTypes?.some((mediaType) => mediaType.toLowerCase().startsWith("image/")) === true
   )
+}
+
+/**
+ * The context once the request's inline image budget decided its pending images: each reads inline,
+ * or as metadata with the note that says why, in the prompt and in the manifest.
+ */
+export function settleAttachmentImages(
+  context: PreparedAgentAttachmentContext,
+  outcomes: ReadonlyMap<string, AttachmentImageOutcome>
+): PreparedAgentAttachmentContext {
+  const { pendingImages, ...settled } = context
+  if (!pendingImages) return context
+
+  const promptTextByPartKey = new Map(context.promptTextByPartKey)
+  const modelFileDataByPartKey = new Map(context.modelFileDataByPartKey)
+  const entries = context.entries.map((entry) => {
+    const pending = pendingImages.get(entry.key)
+    if (!pending) return entry
+
+    const attachment = pending.settle(outcomes.get(entry.key) ?? { kind: "budget" })
+    promptTextByPartKey.set(entry.key, attachment.promptText)
+    if (attachment.modelFileData) modelFileDataByPartKey.set(entry.key, attachment.modelFileData)
+    return attachment.entry
+  })
+
+  const manifest = JSON.parse(context.manifestJson) as Record<string, unknown>
+  return {
+    ...settled,
+    entries,
+    promptTextByPartKey,
+    modelFileDataByPartKey,
+    manifestJson: JSON.stringify(
+      { ...manifest, attachments: entries.map((entry) => manifestEntry(entry)) },
+      null,
+      2
+    ),
+  }
 }
 
 function attachmentPromptText(
