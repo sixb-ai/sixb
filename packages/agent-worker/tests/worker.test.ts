@@ -15459,6 +15459,8 @@ function scriptedWindowModel(input: {
   readonly script: (request: LanguageModelRequest) => readonly WorkerTestStreamEvent[]
   readonly reject?: (request: LanguageModelRequest) => Error | undefined
   readonly contextWindow?: number
+  /** The bytes per token it counts requests at, 3 unless set. */
+  readonly bytesPerToken?: number
   /** What it answers a summary request with. */
   readonly summary?: string
   /**
@@ -15487,7 +15489,10 @@ function scriptedWindowModel(input: {
       const rejection = isSummaryRequest(request) ? undefined : input.reject?.(request)
       if (rejection) throw rejection
 
-      const usage = { inputTokens: estimateAgentRequestTokens(request, 3), outputTokens: 20 }
+      const usage = {
+        inputTokens: estimateAgentRequestTokens(request, input.bytesPerToken ?? 3),
+        outputTokens: 20,
+      }
       const events = isSummaryRequest(request)
         ? textEvents(input.summary ?? "## Goal\nRead the book.")
         : input.script(request)
@@ -15623,6 +15628,44 @@ describe("context of a child and of a workflow step", () => {
       expect(last).toHaveLength(6)
       expect(last.slice(0, 2)).toEqual([cleared, cleared])
       expect(last.slice(-2)).not.toContainEqual(cleared)
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  test("a child weighs its calls at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the contextLimits ChildRunner hands
+    // runSubagent; its guard weighs the second chapter at the default 2 bytes per token, past the
+    // limit, and reduces a request that fits.
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      script: readChapters(2, () => textEvents("Read them all.")),
+      bytesPerToken: 4,
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(120_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      const run = await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(run.status).toBe("succeeded")
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(childRequests.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
     } finally {
       await stopUnderFakeTime(worker)
     }
@@ -16048,6 +16091,44 @@ describe("context of a child and of a workflow step", () => {
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()
+    }
+  })
+
+  test("a workflow step weighs its calls at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of what executeWorkflowAgentNode hands
+    // runWorkflowAgentNode; its guard weighs the second chapter at the default 2 bytes per token,
+    // past the limit, and reduces a request that fits.
+    const requests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const model = scriptedWindowModel({
+      providerId: "mock",
+      modelId: "mock-model",
+      requests,
+      script: (request) =>
+        request.responseFormat
+          ? textEvents(JSON.stringify({ answer: "Project Alpha", confidence: 0.9 }))
+          : readChapters(2, () => textEvents("Project Alpha, from the book."))(request),
+      bytesPerToken: 4,
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      tools: [chapterTool(120_000)],
+      runId: "workflow-rate-run",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      const research = requests.filter((request) => !request.responseFormat)
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(research.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
+    } finally {
+      await worker.stop()
     }
   })
 
