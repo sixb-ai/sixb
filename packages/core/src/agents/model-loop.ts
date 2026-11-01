@@ -106,6 +106,8 @@ export interface RecoverModelStepInput extends PrepareModelStepInput {
 export interface PrepareModelStepResult {
   /** Replacement history retained for this request and subsequent steps. */
   readonly messages?: readonly ModelMessage[]
+  /** The most this request may write, when less than the loop's: what its input leaves room for. */
+  readonly maxOutputTokens?: number
 }
 
 export type ModelLoopResult<TOutput = string> =
@@ -187,6 +189,7 @@ export async function runModelLoop(
     await input.onEvent?.({ type: "start-step" })
 
     let requestMessages: readonly ModelMessage[]
+    let requestMaxOutputTokens: number | undefined
     try {
       const prepared = await input.prepareStep?.({
         stepIndex,
@@ -196,6 +199,7 @@ export async function runModelLoop(
         signal: input.signal,
       })
       requestMessages = prepared?.messages ?? messages
+      requestMaxOutputTokens = prepared?.maxOutputTokens
     } catch (error) {
       if (!input.signal.aborted && !isAbortError(error)) throw error
       return { status: "aborted", steps, partialContent: [] }
@@ -219,6 +223,9 @@ export async function runModelLoop(
         messages: requestMessages,
         tools: toolSpecifications,
         accumulator,
+        ...(requestMaxOutputTokens === undefined
+          ? {}
+          : { maxOutputTokens: requestMaxOutputTokens }),
       })
       cost = call.cost
       if (call.aborted) {
@@ -265,6 +272,7 @@ export async function runModelLoop(
 
         if (recovered?.messages) {
           requestMessages = recovered.messages
+          requestMaxOutputTokens = recovered.maxOutputTokens
           // What the call streamed is not the step's: its reader drops it.
           if (accumulator.streamed) await input.onEvent?.({ type: "start-step", retry: true })
           continue
@@ -423,6 +431,8 @@ async function callModel(
     readonly messages: readonly ModelMessage[]
     readonly tools: readonly ModelToolSpecification[]
     readonly accumulator: StreamAccumulator
+    /** Its step's own cap, below the loop's. */
+    readonly maxOutputTokens?: number
   }
 ): Promise<{
   readonly cost: ModelCallCost
@@ -430,6 +440,10 @@ async function callModel(
   readonly failure?: { readonly error: unknown }
 }> {
   const { accumulator } = call
+  const maxOutputTokens =
+    call.maxOutputTokens === undefined
+      ? input.maxOutputTokens
+      : Math.min(call.maxOutputTokens, input.maxOutputTokens ?? Number.POSITIVE_INFINITY)
   let accepted = false
   let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
   let failure: { readonly error: unknown } | undefined
@@ -440,7 +454,7 @@ async function callModel(
       messages: call.messages,
       tools: call.tools,
       ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-      ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       ...(input.caching === undefined ? {} : { caching: input.caching }),
       ...(input.output === undefined
         ? {}

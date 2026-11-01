@@ -7,6 +7,7 @@ import {
   type RecoverModelStepInput,
 } from "@sixb/core/internal/agents"
 import {
+  type LanguageModel,
   type ModelMessage,
   ModelProviderError,
   type ModelStep,
@@ -18,6 +19,8 @@ import { stableJsonStringify } from "@sixb/core/storage"
 import {
   AGENT_CONTEXT_COMPACTED_SHARE,
   type AgentContextBudget,
+  agentMinimumAnswerTokens,
+  agentOutputRoomTokens,
   estimateAgentRequestTokens,
 } from "./context-budget"
 
@@ -208,29 +211,26 @@ class ContextGuard {
     stepIndex,
     messages,
     steps,
+    model,
   }: PrepareModelStepInput): Promise<PrepareModelStepResult | undefined> {
     this.headLength ??= messages.length
     this.learn(steps)
 
-    // The growth since the last call is what the estimate may miss. The first call has none to
-    // go by: its whole request is estimated, at the rate the thread measured, as its preflight
-    // weighed it.
-    const { fixed, added } = this.measure(messages, steps)
-    const margin = fixed > 0 ? Math.ceil(added * this.scale * GROWTH_MARGIN) : 0
-    const tokens = this.projectedTokens(messages, steps) + margin
+    const tokens = this.weighed(messages, steps)
     const reduced =
       tokens > this.input.budget.inputBudgetTokens
         ? await this.reduce(messages, steps, tokens, "threshold")
         : undefined
 
     this.record(stepIndex, reduced ?? messages)
-    return reduced ? { messages: reduced } : undefined
+    return this.sending(reduced, reduced ? this.weighed(reduced, steps) : tokens, model)
   }
 
   async recoverStep({
     stepIndex,
     messages,
     steps,
+    model,
     error,
     usage,
   }: RecoverModelStepInput): Promise<PrepareModelStepResult | undefined> {
@@ -259,7 +259,53 @@ class ContextGuard {
     if (!reduced) return undefined
 
     this.record(stepIndex, reduced)
-    return { messages: reduced }
+    return this.sending(reduced, this.weighed(reduced, steps), model, "asked again")
+  }
+
+  /**
+   * What a request weighs before the guard sends it: its projection, and a margin on the growth
+   * since the last call, which the estimate may miss. The first call has none to go by: its whole
+   * request is estimated, at the rate the thread measured, as its preflight weighed it.
+   */
+  private weighed(messages: readonly ModelMessage[], steps: readonly ModelStep[]): number {
+    const { fixed, added } = this.measure(messages, steps)
+    const margin = fixed > 0 ? Math.ceil(added * this.scale * GROWTH_MARGIN) : 0
+    return this.projectedTokens(messages, steps) + margin
+  }
+
+  /**
+   * The step's request as it goes out. Within the limit, as it is. Past it, nothing more could be
+   * reduced: its answer gets only the room its input leaves of the window, so input and answer
+   * still fit it, and a request left less than an answer is worth (see agentMinimumAnswerTokens)
+   * is not sent: it fails as the provider's refusal would, which ends the turn with the context
+   * error rather than a call cut off at once.
+   */
+  private sending(
+    reduced: readonly ModelMessage[] | undefined,
+    tokens: number,
+    model: LanguageModel,
+    attempt: "first" | "asked again" = "first"
+  ): PrepareModelStepResult | undefined {
+    const { budget } = this.input
+    if (tokens <= budget.inputBudgetTokens) return reduced ? { messages: reduced } : undefined
+
+    const room = agentOutputRoomTokens(tokens, budget, Number.POSITIVE_INFINITY)
+    const minimum = agentMinimumAnswerTokens(budget)
+    // A call the provider refused is asked again once, whatever the guard weighs it at: after a
+    // refusal, what it weighs leans on the window as the least the provider counted, and the
+    // provider's own count of the reduced request decides.
+    if (attempt === "asked again" && room < minimum) {
+      return { ...(reduced ? { messages: reduced } : {}), maxOutputTokens: minimum }
+    }
+    if (room < minimum) {
+      throw new ModelProviderError(
+        `[SixbAgent] The request leaves no room in the model's ${budget.windowTokens.toLocaleString("en-US")}-token context window for an answer, and nothing more of it can be cleared or summarized.`,
+        model.providerId,
+        model.modelId,
+        { reason: "context-window-exceeded" }
+      )
+    }
+    return { ...(reduced ? { messages: reduced } : {}), maxOutputTokens: room }
   }
 
   /** The request a step sends, and from which step on the requests are reduced. */
