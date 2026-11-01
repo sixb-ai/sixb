@@ -39,7 +39,12 @@ import {
   type TranscriptionModel,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { responsesEvents, responsesInput, responsesUsage } from "@sixb/model-protocols/responses"
+import {
+  contextWindowRejection,
+  responsesEvents,
+  responsesInput,
+  responsesUsage,
+} from "@sixb/model-protocols/responses"
 import {
   createGatewayDecision,
   type GatewayDecisionResolution,
@@ -1470,6 +1475,7 @@ async function providerHttpError(
     status: response.status,
     ...(code === undefined ? {} : { code }),
     ...requestErrorMetadata(response),
+    ...contextWindowRejection({ status: response.status, code, message }),
   })
 }
 

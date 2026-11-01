@@ -1120,5 +1120,57 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(after.usageAnchor).toBeUndefined()
       second.close()
     })
+
+    // Guard proof: drop the createdByRunId check from readUsageAnchor; the run that failed after
+    // compacting anchors the next turn on its last call, the summary's, which read the history the
+    // summary replaced.
+    test.each([
+      "succeeded",
+      "failed",
+    ] as const)("anchors on a run that compacted the thread only once it %s", async (status) => {
+      const { thread, say, turn, open, storage } = await seedConversation(claim)
+      await say("msg_1", "user")
+      await say("msg_2", "assistant")
+      await say("msg_3", "user")
+      const compacting = await open(await turn("run_1", "msg_3"))
+      await compacting.checkpoint({
+        id: "ckpt_1",
+        threadId: thread.id,
+        expectedPreviousCheckpointId: null,
+        expectedHeadSeq: 3,
+        reason: "threshold",
+        summary: "Earlier turns.",
+        summaryFormatVersion: 1,
+        summarizedThroughSeq: 2,
+        observedHeadSeq: 3,
+        estimatedInputTokensBefore: 10,
+        estimatedInputTokensAfter: 5,
+        summaryModelId: "test-model",
+      })
+      // The steps it completed, then its last call: the summary, or a step after it.
+      await say("msg_4", "assistant", "run_1")
+      await storage.aiUsage.recordModelCall({
+        id: "usage_1",
+        projectId: PROJECT_ID,
+        executionId: compacting.run.executionId,
+        attempt: 1,
+        callId: "call_1",
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "test-model",
+        responseId: "response_1",
+        usage: { inputTokens: 100, outputTokens: 20 },
+        occurredAt: new Date("2026-08-27T12:01:00.000Z"),
+      })
+      await compacting.finish({ status })
+      compacting.close()
+      await say("msg_5", "user")
+      const next = await open(await turn("run_2", "msg_5"))
+
+      const { history } = await next.context()
+
+      expect(history.usageAnchor?.modelCall.id).toBe(status === "succeeded" ? "usage_1" : undefined)
+      next.close()
+    })
   })
 }

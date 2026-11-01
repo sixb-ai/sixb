@@ -19,6 +19,8 @@ export interface LiveRunState {
   readonly partKeys: readonly string[]
   /** Model step currently being streamed. Used to keep reused part ids ordered. */
   readonly stepIndex: number
+  /** How many parts came before the current step: a step asked again drops the ones after. */
+  readonly stepStart: number
   /** Set once the worker persists the assistant message; the hook reloads durable state on change. */
   readonly finalizedMessageId: string | null
   /** Terminal run status, or null while in-flight. */
@@ -44,6 +46,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     parts: [],
     partKeys: [],
     stepIndex: 0,
+    stepStart: 0,
     finalizedMessageId: null,
     finishStatus: null,
     finishReason: null,
@@ -122,7 +125,15 @@ function applyChunk(state: LiveRunState, chunk: ModelUiChunk): LiveRunState {
     case "reasoning-end":
       return reduceReasoning(state, chunk)
     case "start-step":
-      return { ...state, stepIndex: state.stepIndex + 1 }
+      // A step asked again drops what its first call streamed.
+      if (chunk.retry) {
+        return {
+          ...state,
+          parts: state.parts.slice(0, state.stepStart),
+          partKeys: state.partKeys.slice(0, state.stepStart),
+        }
+      }
+      return { ...state, stepIndex: state.stepIndex + 1, stepStart: state.parts.length }
     case "tool-input-start":
     case "tool-input-delta":
     case "tool-input-available":

@@ -1,0 +1,630 @@
+import { describe, expect, test } from "bun:test"
+import type { PrepareModelStepInput } from "@sixb/core/internal/agents"
+import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
+import {
+  defineLanguageModel,
+  type JsonObject,
+  type ModelMessage,
+  ModelProviderError,
+  type ModelStep,
+} from "@sixb/core/models"
+import {
+  type AgentContextBudget,
+  estimateAgentRequestTokens,
+  prepareAgentModel,
+} from "../src/context-budget"
+import {
+  type CompactConversationBeforeTurn,
+  clearedToolResultText,
+  createAgentContextGuard,
+} from "../src/context-guard"
+import { testStream, WorkerTestModel } from "./worker-model-fixture"
+
+/** A model whose input stops at `inputBudgetTokens`, counted at 3 bytes per token. */
+function limited(inputBudgetTokens: number): AgentContextBudget {
+  return {
+    windowTokens: inputBudgetTokens + 16_384,
+    inputBudgetTokens,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
+    source: "model",
+    bytesPerToken: 3,
+  }
+}
+
+/** A 100,000-token window: 83,616 tokens of input at most. */
+const BUDGET = limited(83_616)
+
+const HEAD: readonly ModelMessage[] = [
+  { role: "system", content: "You read chapters." },
+  { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+]
+
+/** One step that read a chapter: the call, then its result. */
+function readStep(index: number, bytes: number): ModelMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: `call_${index}`, toolName: "read", input: { index } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          output: { type: "text", value: `chapter ${index}\n${"x".repeat(bytes)}` },
+        },
+      ],
+    },
+  ]
+}
+
+/** The steps a loop completed, without usage: the guard estimates their requests whole. */
+function steps(count: number, usage: ModelStep["usage"] = {}): ModelStep[] {
+  return Array.from({ length: count }, (_, index) => ({
+    content: [],
+    finishReason: "tool-calls",
+    usage,
+    responseId: `response_${index}`,
+    cost: { status: "unpriceable", reason: "missing-usage" },
+  }))
+}
+
+function step(
+  stepIndex: number,
+  messages: readonly ModelMessage[],
+  completed = steps(stepIndex)
+): PrepareModelStepInput {
+  return {
+    stepIndex,
+    messages,
+    steps: completed,
+    model: { providerId: "mock", modelId: "model" } as never,
+    signal: new AbortController().signal,
+  }
+}
+
+function outputs(messages: readonly ModelMessage[]): string[] {
+  return messages.flatMap((message) =>
+    message.role === "tool"
+      ? message.content.map((part) =>
+          typeof part.output.value === "string" ? part.output.value : ""
+        )
+      : []
+  )
+}
+
+function tokens(messages: readonly ModelMessage[]): number {
+  return estimateAgentRequestTokens({ messages, tools: [] }, BUDGET.bytesPerToken)
+}
+
+describe("createAgentContextGuard", () => {
+  // Reproduce: return undefined from ContextGuard.reduce; the request then goes out at about
+  // 80,000 tokens, past its 60,000-token limit. Keep the three most recent whatever the aim
+  // (KEPT_TOOL_RESULTS = 3); the batch then stops at 40,000 tokens, and the next steps clear again.
+  test("clears the oldest results the model read in one batch, down to 60 % of the limit", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    // Eight chapters of about 10,000 tokens each; the model has not read the last one yet.
+    const messages = [...HEAD, ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat()]
+
+    const prepared = await guard.prepareStep(step(8, messages))
+
+    // Oldest first, through the three most recent it read since the aim needs it: the newest
+    // it read stays, and so does the one it has not read.
+    const cleared = outputs(prepared?.messages ?? messages)
+    expect(cleared.slice(0, 5)).toEqual(Array(5).fill(clearedToolResultText("read")))
+    expect(cleared.slice(5).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(36_000)
+  })
+
+  // Reproduce: clear newest first in ContextGuard.clear; the three most recent are then cleared
+  // although the older ones were enough.
+  test("keeps the three most recent results it read when clearing the older ones reaches the aim", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    // Twelve chapters of about 5,500 tokens each, the last one unread.
+    const messages = [...HEAD, ...Array.from({ length: 12 }, (_, i) => readStep(i, 16_500)).flat()]
+
+    const prepared = await guard.prepareStep(step(12, messages))
+
+    const cleared = outputs(prepared?.messages ?? messages)
+    expect(cleared[0]).toBe(clearedToolResultText("read"))
+    expect(cleared.slice(-4).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(36_000)
+  })
+
+  // Reproduce: return undefined from prepareStep at step 0; a turn whose history replays results
+  // an earlier turn cleared then sends them all again, past its 60,000-token limit.
+  test("weighs a turn's first call too, from its whole request", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    const messages = [
+      ...HEAD,
+      ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat(),
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "Read them all." }] },
+      { role: "user" as const, content: [{ type: "text" as const, text: "Thanks." }] },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toBe(clearedToolResultText("read"))
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
+  })
+
+  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the four older small results are then cleared,
+  // which breaks the cache to free about 1,900 tokens, and the earlier turn stays.
+  test("compacts rather than clear too little to be worth the cache it breaks", async () => {
+    let compactions = 0
+    const summarized: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: "<sixb_thread_summary>…" }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const head: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(90_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const turn = Array.from({ length: 6 }, (_, i) => readStep(i, 1_500)).flat()
+    const messages = [...head, ...turn]
+    // 600 tokens past the limit: clearing the results it may would bring it under.
+    const guard = createAgentContextGuard({
+      budget: limited(tokens(messages) - 600),
+      tools: [],
+      compact: async () => {
+        compactions += 1
+        return summarized
+      },
+    })
+    await guard.prepareStep(step(0, head))
+
+    const prepared = await guard.prepareStep(step(6, messages))
+
+    expect(compactions).toBe(1)
+    expect(prepared?.messages).toEqual([...summarized, ...turn])
+  })
+
+  // Reproduce: skip the compact call in ContextGuard.reduce; the earlier turn then stays, and the
+  // request goes out past its limit.
+  test("compacts what came before the turn, and keeps the turn's steps as they are", async () => {
+    const reasons: string[] = []
+    const summarized: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: "<sixb_thread_summary>…" }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const compact: CompactConversationBeforeTurn = async ({ reason }) => {
+      reasons.push(reason)
+      return summarized
+    }
+    const guard = createAgentContextGuard({ budget: limited(50_000), tools: [], compact })
+    const head: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(90_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    await guard.prepareStep(step(0, head))
+    const turn = Array.from({ length: 3 }, (_, i) => readStep(i, 30_000)).flat()
+
+    const prepared = await guard.prepareStep(step(3, [...head, ...turn]))
+
+    expect(reasons).toEqual(["threshold"])
+    expect(prepared?.messages).toEqual([...summarized, ...turn])
+  })
+
+  // Reproduce: drop the cutUnread call in ContextGuard.reduce; the step's 300,000 bytes then go
+  // out past the model's 83,616-token input limit.
+  test("cuts the results the model has not read to fit the limit", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    const parallel: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [0, 1, 2].map((index) => ({
+          type: "tool-call" as const,
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          input: { index },
+        })),
+      },
+      {
+        role: "tool",
+        content: [0, 1, 2].map((index) => ({
+          type: "tool-result" as const,
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          output: { type: "text" as const, value: `chapter ${index}\n${"z\n".repeat(50_000)}` },
+        })),
+      },
+    ]
+
+    const prepared = await guard.prepareStep(step(1, [...HEAD, ...parallel]))
+
+    const cut = outputs(prepared?.messages ?? [])
+    expect(cut).toHaveLength(3)
+    for (const [index, output] of cut.entries()) {
+      expect(output.startsWith(`chapter ${index}\nz\n`)).toBe(true)
+      expect(output).toContain("[Cut to fit the model's context:")
+    }
+    expect(tokens(prepared?.messages ?? [])).toBeLessThanOrEqual(BUDGET.inputBudgetTokens)
+  })
+
+  // Reproduce: measure every request whole in ContextGuard.measure; the small request then looks
+  // far under its limit, though the last call read 62,000 tokens.
+  test("weighs a request from what the last call really read", async () => {
+    const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
+    const messages = [...HEAD, ...Array.from({ length: 6 }, (_, i) => readStep(i, 3_000)).flat()]
+    await guard.prepareStep(step(0, HEAD))
+    for (let index = 1; index < 6; index += 1) {
+      await guard.prepareStep(step(index, messages.slice(0, HEAD.length + 2 * index)))
+    }
+
+    const prepared = await guard.prepareStep(
+      step(6, messages, steps(6, { inputTokens: 62_000, outputTokens: 10 }))
+    )
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toBe(clearedToolResultText("read"))
+  })
+
+  // Reproduce: return undefined from recoverStep whatever the error; the rejected call then fails
+  // the turn instead of being asked again compacted.
+  test("compacts a request the provider rejected as too long, and nothing else", async () => {
+    const reasons: string[] = []
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      tools: [],
+      compact: async ({ reason }) => {
+        reasons.push(reason)
+        return HEAD
+      },
+    })
+    const head: ModelMessage[] = [
+      ...HEAD.slice(0, 1),
+      // About 80,000 tokens by the estimate, which the provider counted past the window.
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(240_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      HEAD[1]!,
+    ]
+    await guard.prepareStep(step(0, head))
+    const messages = [...head, ...readStep(0, 3_000)]
+    const recover = (error: unknown) => guard.recoverStep({ ...step(1, messages), error })
+
+    expect(await recover(new Error("[test] The provider is down."))).toBeUndefined()
+    expect(reasons).toEqual([])
+
+    const recovered = await recover(
+      new ModelProviderError("[test] Too long.", "test", "test", {
+        status: 400,
+        reason: "context-window-exceeded",
+      })
+    )
+    expect(reasons).toEqual(["overflow"])
+    expect(recovered?.messages).toEqual([...HEAD, ...readStep(0, 3_000)])
+  })
+
+  // Reproduce: count what changed at the rejection's rate as a whole in
+  // ContextGuard.projectedTokens (`fixed + ceil((added - removed) * scale)`); the compacted
+  // request then looks about 47,000 tokens long and goes out uncut, though the provider counts its
+  // new result past the limit.
+  test("weighs a rejected request after compaction at the rate the rejection showed", async () => {
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      tools: [],
+      compact: async () => HEAD,
+    })
+    const head: ModelMessage[] = [
+      HEAD[0]!,
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(36_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      HEAD[1]!,
+    ]
+    await guard.prepareStep(step(0, head))
+    // The last call read 12,100 tokens; its 60 KB result, 20,000 by the estimate, took the request
+    // past the 100,000-token window: the provider counts what was added about 4.4 times higher.
+    const messages = [...head, ...readStep(0, 60_000)]
+    const recovered = await guard.recoverStep({
+      ...step(1, messages, steps(1, { inputTokens: 12_100 })),
+      error: new ModelProviderError("[test] Too long.", "test", "test", {
+        reason: "context-window-exceeded",
+      }),
+    })
+
+    const sent = recovered?.messages ?? []
+    expect(outputs(sent)[0]).toContain("[Cut to fit the model's context:")
+    expect(tokens(sent) * 4.4).toBeLessThanOrEqual(BUDGET.inputBudgetTokens)
+  })
+
+  // Reproduce: ignore `usage` in recoverStep (count the rejected request at the window); an answer
+  // the window cut then sets the rate about ten times higher, and the next step clears for nothing.
+  test("rates a turn from what the provider counted when the answer filled the window", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, tools: [] })
+    const first = [...HEAD, ...readStep(0, 30_000)]
+    const second = [...first, ...readStep(1, 30_000)]
+    const read = (messages: readonly ModelMessage[]) => ({ inputTokens: tokens(messages) })
+
+    await guard.prepareStep(step(0, HEAD))
+    await guard.prepareStep(step(1, first, steps(1, read(HEAD))))
+    // The input fit: the answer is what filled the window.
+    await guard.recoverStep({
+      ...step(1, first, steps(1, read(HEAD))),
+      usage: read(first),
+      error: new ModelProviderError("[test] Window filled.", "test", "test", {
+        reason: "context-window-exceeded",
+      }),
+    })
+
+    const completed = [...steps(1, read(HEAD)), ...steps(1, read(first))]
+    expect((await guard.prepareStep(step(2, second, completed)))?.messages).toBeUndefined()
+  })
+})
+
+describe("the rate a guard weighs calls at", () => {
+  test("follows the first call an unmeasured model counted", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the guard's rate in ContextGuard; the call is
+    // weighed at the default 2 bytes per token, 120,000 tokens, and its chapter cleared.
+    const counting = new WorkerTestModel({
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "mock",
+        modelId: "sparse",
+        capabilities: {},
+        contextWindow: 100_000,
+        maxOutputTokens: 16_384,
+      }),
+      // A sparse tokenizer: 4 bytes per token, as OpenAI's measures about 4.4.
+      stream: async (request) =>
+        testStream([
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: { inputTokens: estimateAgentRequestTokens(request, 4), outputTokens: 10 },
+          },
+        ]),
+    })
+    const prepared = prepareAgentModel({ model: await resolveLanguageModel(counting) })
+    const first = await prepared.model.stream({
+      callId: "first",
+      tools: [],
+      messages: [...HEAD, ...readStep(0, 100_000)],
+      signal: new AbortController().signal,
+    })
+    for await (const _event of first.events) {
+      // Each event is read, as the model loop reads them.
+    }
+
+    const guard = createAgentContextGuard({
+      budget: prepared.budget,
+      tools: [],
+      measuredBytesPerToken: prepared.measuredBytesPerToken,
+    })
+    // 240,000 bytes: 60,000 tokens at the 4 the first call measured, under the 83,616 limit.
+    const reduced = await guard.prepareStep(step(0, [...HEAD, ...readStep(1, 240_000)]))
+
+    expect(prepared.budget.bytesPerToken).toBe(2)
+    expect(prepared.measuredBytesPerToken()).toBeCloseTo(4, 2)
+    expect(reduced?.messages).toBeUndefined()
+  })
+})
+
+describe("what a turn adds", () => {
+  /** A window of 65,536 tokens: 49,152 of input at most, the run reading prose at 3 bytes a token. */
+  const SMALL = {
+    windowTokens: 65_536,
+    inputBudgetTokens: 49_152,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
+    source: "model",
+    bytesPerToken: 3,
+  } satisfies AgentContextBudget
+
+  /** `bytes` of base64, as `head -c N /dev/urandom | base64` prints it, the same on every run. */
+  function base64(bytes: number): string {
+    const raw = new Uint8Array(Math.ceil((bytes * 3) / 4))
+    let state = 0x2545f491
+    for (let index = 0; index < raw.length; index++) {
+      state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
+      raw[index] = state >>> 24
+    }
+    return Buffer.from(raw).toString("base64").slice(0, bytes)
+  }
+
+  const isBase64 = (text: string) => text.length > 1_000 && /^[A-Za-z0-9+/=]+$/.test(text)
+
+  /**
+   * What a provider counts: the request as the estimator weighs prose, at 3 bytes per token,
+   * except base64, which its tokenizer reads at about 1.33 bytes a token, as DeepSeek's and most do.
+   */
+  function counted(messages: readonly ModelMessage[]): number {
+    const dense = outputs(messages)
+      .filter(isBase64)
+      .reduce((total, text) => total + text.length, 0)
+    return tokens(messages) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
+  }
+
+  /** One step: the call, with `input`, then its result. */
+  function resultStep(
+    index: number,
+    output: string,
+    input: JsonObject = { index }
+  ): ModelMessage[] {
+    return [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: `call_${index}`, toolName: "bash", input }],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: `call_${index}`,
+            toolName: "bash",
+            output: { type: "text", value: output },
+          },
+        ],
+      },
+    ]
+  }
+
+  /**
+   * A turn whose steps return `results` in order, as the model loop drives the guard: each call
+   * counted by the provider before the next is prepared. What each call carried, as counted.
+   */
+  async function runTurn(results: readonly string[], input?: JsonObject): Promise<number[]> {
+    const guard = createAgentContextGuard({ budget: SMALL, tools: [] })
+    const completed: ModelStep[] = []
+    const sentCounts: number[] = []
+    let messages: readonly ModelMessage[] = HEAD
+    for (let index = 0; index <= results.length; index++) {
+      const prepared = await guard.prepareStep(step(index, messages, completed))
+      const sent = prepared?.messages ?? messages
+      sentCounts.push(counted(sent))
+      if (index === results.length) break
+
+      completed.push({ ...steps(1)[0]!, usage: { inputTokens: sentCounts.at(-1)! } })
+      messages = [...sent, ...resultStep(index, results[index]!, input)]
+    }
+    return sentCounts
+  }
+
+  // Reproduce: weigh what a turn adds at the run's rate alone (return this.bytesPerToken from
+  // ContextGuard.addedBytesPerToken); its base64 is weighed at 3 bytes a token while the provider
+  // counts 1.33, and the tenth call goes out at 49,968 tokens, past the 49,152 limit.
+  test("never lets a call pass the limit when the turn adds content denser than the run's", async () => {
+    // A note of prose, then base64 dumps of about 6,000 real tokens each.
+    const counts = await runTurn([
+      "word ".repeat(800),
+      ...Array.from({ length: 9 }, () => base64(8_000)),
+    ])
+
+    expect(Math.max(...counts)).toBeLessThanOrEqual(SMALL.inputBudgetTokens)
+  })
+
+  test("leaves a prose turn past 70 % of its limit as it is", async () => {
+    // Reproduce: weigh what a turn adds at one byte a token, the densest any tokenizer reads
+    // (return AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN from ContextGuard.addedBytesPerToken); this turn
+    // then clears at about 70 % of its limit, though every call fits.
+    // Results of 16 KB of prose, about 5,300 tokens each.
+    const counts = await runTurn(Array.from({ length: 7 }, () => "word ".repeat(3_200)))
+
+    // The last call carries about 76 % of the limit, and nothing was cleared on the way.
+    expect(counts.at(-1)! / SMALL.inputBudgetTokens).toBeGreaterThan(0.75)
+    expect(counts).toEqual([...counts].sort((a, b) => a - b))
+  })
+
+  // Reproduce: protect every copy of a call once one was cleared (drop the newest check from
+  // ContextGuard.needed); the same command run again and again then has nothing left to clear,
+  // and its calls go out past the limit.
+  test("clears the older copies of a command the turn runs again and again", async () => {
+    const command = { command: "git log -p -1" }
+    // Twenty runs of the same command, 16 KB of prose each: about 5,300 tokens.
+    const counts = await runTurn(
+      Array.from({ length: 20 }, () => "word ".repeat(3_200)),
+      command
+    )
+
+    expect(Math.max(...counts)).toBeLessThanOrEqual(SMALL.inputBudgetTokens)
+  })
+})
+
+describe("a request nothing more can reduce", () => {
+  /** A 65,536-token window: 49,152 tokens of input at most, and the 16,384 reserve. */
+  const budget = limited(49_152)
+
+  /** One message the guard cannot clear, cut nor compact, of `bytes` of prose. */
+  const request = (bytes: number): ModelMessage[] => [
+    { role: "system", content: "You read." },
+    { role: "user", content: [{ type: "text", text: "word ".repeat(bytes / 5) }] },
+  ]
+
+  // Reproduce: return the request as it is from ContextGuard.sending past the limit; it then goes
+  // out with the whole reserve, and input and answer pass the window by about 5,000 tokens.
+  test("goes out past the limit with only the room the window leaves for its answer", async () => {
+    const guard = createAgentContextGuard({ budget, tools: [] })
+    const messages = request(162_000)
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(tokens(messages)).toBeGreaterThan(budget.inputBudgetTokens)
+    expect(prepared?.maxOutputTokens).toBe(budget.windowTokens - tokens(messages))
+    expect(prepared?.maxOutputTokens).toBeLessThan(budget.reserveTokens)
+  })
+
+  // Reproduce: send whatever the room (drop the throw from ContextGuard.sending); a request that
+  // leaves 4,000 tokens of the window goes out, and its answer is cut off almost at once.
+  test("is not sent when it leaves less room than an answer is worth", async () => {
+    const guard = createAgentContextGuard({ budget, tools: [] })
+
+    const refused = await guard.prepareStep(step(0, request(184_000))).catch((error) => error)
+
+    expect(refused).toBeInstanceOf(ModelProviderError)
+    expect(refused).toMatchObject({ reason: "context-window-exceeded" })
+  })
+})
+
+describe("the room a first call's answer has", () => {
+  // Reproduce: size a first call's room by its estimate alone (return this.weighed in
+  // ContextGuard.heaviest when nothing was counted); a request the provider counts 3 % above its
+  // estimate then has input and answer pass the window.
+  test("stays within the window when the provider counts a few percent above the estimate", async () => {
+    const budget = limited(49_152)
+    const guard = createAgentContextGuard({ budget, tools: [] })
+    const messages: ModelMessage[] = [
+      { role: "system", content: "You read." },
+      { role: "user", content: [{ type: "text", text: "word ".repeat(4_400) }] },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    // What the provider counts: 3 % more than the estimate, as a thread's rate can run.
+    const counted = Math.ceil(tokens(messages) * 1.03)
+    expect(counted + (prepared?.maxOutputTokens ?? 0)).toBeLessThanOrEqual(budget.windowTokens)
+    // A small share of the room: the answer still has far more than the reserve.
+    expect(prepared?.maxOutputTokens).toBeGreaterThan(budget.windowTokens - counted - 1_000)
+  })
+})
+
+describe("a result cut to fit", () => {
+  // Reproduce: give view_file the generic note in cutToolResult; it then says to call view_file
+  // again for a smaller part, which it cannot ask for.
+  test("of view_file names the file to page through with read", async () => {
+    const guard = createAgentContextGuard({ budget: limited(5_000), tools: [] })
+    const messages: ModelMessage[] = [
+      ...HEAD,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "view",
+            toolName: "view_file",
+            input: { path: "report.txt" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "view",
+            toolName: "view_file",
+            output: { type: "text", value: "report line\n".repeat(2_500) },
+          },
+        ],
+      },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toEndWith(
+      'Read the rest with read({ path: "report.txt" }), which pages through the file.]'
+    )
+  })
+})

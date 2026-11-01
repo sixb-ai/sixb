@@ -43,6 +43,11 @@ export interface AgentReasoningPart {
 /** A step boundary between assistant loop iterations. */
 export interface AgentStepStartPart {
   readonly type: "step-start"
+  /**
+   * The step answered a request whose tool results the turn cleared or cut to fit its context:
+   * the provider counted less for it than replaying the stored steps sends.
+   */
+  readonly reducedRequest?: true
 }
 
 /** A blob-backed file attached to a user message or produced by an agent/tool. */

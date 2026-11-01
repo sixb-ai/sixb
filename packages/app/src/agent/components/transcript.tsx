@@ -238,7 +238,14 @@ function TranscriptView({
               )
             })}
             {trailingAt === messages.length ? trailingCards : null}
-            {liveReply ? null : showThinking && turn.kind === "responding" ? (
+            {liveReply ? (
+              // A turn that compacts from within says so under what it has streamed.
+              turn.kind === "responding" && turn.compacting ? (
+                <MessageScrollerItem messageId="compacting">
+                  <CompactionMarker />
+                </MessageScrollerItem>
+              ) : null
+            ) : showThinking && turn.kind === "responding" ? (
               <MessageScrollerItem messageId="thinking" scrollAnchor={anchoredKey === THINKING}>
                 {turn.compacting ? (
                   <CompactionMarker />

@@ -60,6 +60,12 @@ interface AgentModelSelection {
 export function prepareAgentModel(selection: AgentModelSelection): {
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
+  /**
+   * The bytes per token the run's latest counted call measured, bounded around the run's rate (the
+   * project's measurements and its own calls'), as calibration and the output ceiling read it.
+   * Undefined until a call is counted.
+   */
+  readonly measuredBytesPerToken: () => number | undefined
 } {
   const model = selection.model
   const definition = defineLanguageModel(model.definition)
@@ -82,10 +88,12 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   const runTokenRates: AgentContextTokenRateSample[] = []
   let runBytesPerToken = budget.bytesPerToken
   // The rate the run's latest counted call measured, bounded around the run's; else the run's.
+  let counted = false
   let measuredBytesPerToken = budget.bytesPerToken
 
   return {
     budget,
+    measuredBytesPerToken: () => (counted ? measuredBytesPerToken : undefined),
     model: Object.freeze({
       providerId: model.providerId,
       modelId: model.modelId,
@@ -123,6 +131,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
               size,
               inputTokens,
             })
+            counted = true
           }),
         }
       },
@@ -136,13 +145,52 @@ export function prepareAgentModel(selection: AgentModelSelection): {
  * measured, so it errs high whichever way this request's content tokenizes: a call right after a
  * large tool result can read denser than the calls it was calibrated on, and with no turn to ask
  * it again, an allowance past the window's room is a refused call.
+ *
+ * Below the reserve, only the guard decides (see createAgentContextGuard): it weighs the request
+ * from what the provider counted, and caps the request it lets past the limit at its own room.
  */
 function outputCeilingTokens(
   inputTokens: number,
   budget: AgentContextBudget,
   capTokens: number
 ): number {
-  return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
+  return Math.max(
+    Math.min(capTokens, budget.reserveTokens),
+    agentOutputRoomTokens(inputTokens, budget, capTokens)
+  )
+}
+
+/**
+ * What a call may write for what its input weighs: the room it leaves of the window, up to
+ * `capTokens`. The one measure the output ceiling and the guard size a call's answer by.
+ */
+export function agentOutputRoomTokens(
+  inputTokens: number,
+  budget: AgentContextBudget,
+  capTokens: number
+): number {
+  return Math.min(capTokens, budget.windowTokens - inputTokens)
+}
+
+/**
+ * The least room a request past its model's limit is still sent with: what a compaction summary
+ * may write (see contextSummaryOutputTokens), the answer the framework already sizes as enough to
+ * carry a conversation on. With less, the turn ends with the context error rather than send a
+ * call whose answer would be cut off almost at once.
+ */
+export function agentMinimumAnswerTokens(budget: AgentContextBudget): number {
+  return contextSummaryOutputTokens(budget.reserveTokens)
+}
+
+/**
+ * A call's request as the conversation estimator weighs it (see measureAgentModelRequest), at
+ * `bytesPerToken`.
+ */
+export function estimateAgentRequestTokens(
+  request: Pick<LanguageModelRequest, "messages" | "tools" | "responseFormat">,
+  bytesPerToken: number
+): number {
+  return agentContextSizeTokens(measureAgentModelRequest(request), bytesPerToken)
 }
 
 /** The events as they come, handing over the input tokens the provider counted once it says. */

@@ -269,7 +269,7 @@ describe("agent context budget resolution", () => {
   })
 
   test("counts an attached image at its provider ceiling, never capping the call at the reserve", async () => {
-    // Removal proof: return undefined from estimateRequestInputTokens when a user message holds a
+    // Removal proof: return undefined from estimateAgentRequestTokens when a user message holds a
     // file; every call of a thread with an attachment asks for the 16,384-token reserve.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)

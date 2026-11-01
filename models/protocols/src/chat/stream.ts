@@ -5,6 +5,7 @@ import {
   ModelProviderError,
   type ModelUsage,
 } from "@sixb/core/models"
+import { contextWindowRejection } from "../context-window"
 import { integer, object } from "../json"
 import { decodeServerSentEvents } from "../sse"
 
@@ -33,7 +34,7 @@ export async function* chatEvents(
       `${options.errorPrefix} ${message}`,
       options.providerId,
       options.modelId,
-      { requestId: options.requestId, code }
+      { requestId: options.requestId, code, ...contextWindowRejection({ code, message }) }
     )
   const tools = new Map<number, Tool>()
   const annotations: JsonObject[] = []

@@ -124,6 +124,11 @@ export type LanguageModelStreamEvent =
       readonly type: "finish"
       readonly finishReason: ModelFinishReason
       readonly rawFinishReason?: string
+      /**
+       * The model's context window, not its output limit, stopped a `length` response: the
+       * request left the answer less room than it asked for. A shorter request may answer.
+       */
+      readonly contextWindowExceeded?: boolean
       readonly usage: ModelUsage
       readonly providerData?: ProviderData
       readonly reportedCost?: ModelReportedCost
@@ -132,7 +137,14 @@ export type LanguageModelStreamEvent =
   | { readonly type: "error"; readonly error: unknown }
 
 export type ModelUiChunk =
-  | { readonly type: "start-step" }
+  | {
+      readonly type: "start-step"
+      /**
+       * The step's call is made again: what it streamed since the step started is dropped. A
+       * reader that does not know the field sees a new step.
+       */
+      readonly retry?: true
+    }
   | { readonly type: "text-start"; readonly id: string }
   | { readonly type: "text-delta"; readonly id: string; readonly delta: string }
   | { readonly type: "text-end"; readonly id: string }

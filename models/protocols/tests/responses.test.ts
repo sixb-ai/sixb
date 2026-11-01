@@ -272,3 +272,29 @@ test("serializes JSON tool outputs and synthesized arguments the same whatever t
     },
   ])
 })
+
+test("names a failed response about the context window as one", async () => {
+  const events = []
+  for await (const event of responsesEvents(
+    stream([
+      {
+        type: "response.failed",
+        response: {
+          error: {
+            code: "context_length_exceeded",
+            message: "Your input exceeds the context window of this model.",
+          },
+        },
+      },
+    ]),
+    new AbortController().signal,
+    { providerId: "test", modelId: "test", errorPrefix: "[Test]" }
+  ))
+    events.push(event)
+  const failed = events.find((event) => event.type === "error")
+  expect(failed?.type === "error" ? failed.error : undefined).toMatchObject({
+    name: "ModelProviderError",
+    code: "context_length_exceeded",
+    reason: "context-window-exceeded",
+  })
+})

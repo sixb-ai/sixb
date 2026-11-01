@@ -6,18 +6,23 @@ import {
   runModelLoop,
 } from "@sixb/core/internal/agents"
 import { isAbortError } from "@sixb/core/internal/workers"
+import { type ModelMessage, ModelProviderError, type ModelStep } from "@sixb/core/models"
 import {
   type AgentRunDiagnostic,
   type AgentRunFinishReason,
   type AgentRunRecord,
+  type AppendAgentMessageInput,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
+import type { AgentContextBudget } from "./context-budget"
+import { createAgentContextGuard } from "./context-guard"
 import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
-import { throwIfExecutionLost } from "./errors"
+import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { ConversationReaders } from "./message-authors"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
+import type { ConversationAgentExecutionEnvironment } from "./run-environment"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
@@ -46,6 +51,24 @@ export interface RunAgentTurnInput {
   readonly threadContext: LoadedAgentThreadModelContext
   /** What the turn's children ask it, and the work it waits for, when it can delegate. */
   readonly children?: TurnChildren
+  /**
+   * The model's limit every call of the turn keeps under (see createAgentContextGuard), and how
+   * it compacts the history before it from within. Without them, only the turn's start was
+   * weighed.
+   */
+  readonly contextLimits?: {
+    readonly budget: AgentContextBudget
+    /** The bytes per token the turn's history was measured at, else its run's starting one. */
+    readonly bytesPerToken?: number
+    /** What the run's latest counted call measured (see prepareAgentModel). */
+    readonly measuredBytesPerToken?: () => number | undefined
+    readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
+  }
+  /**
+   * Handed the answer so far after each step that completed, as the message the turn would
+   * append: a turn that fails then records it with its failure, and keeps that work.
+   */
+  readonly onWork?: (message: AppendAgentMessageInput) => void
 }
 
 /**
@@ -110,34 +133,93 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     })
   }
 
+  // What every request starts with: the system prompt, the conversation, then what children of
+  // earlier turns still wait on.
+  const requestHead = (systemPrompt: string, conversation: readonly ModelMessage[]) => [
+    { role: "system" as const, content: systemPrompt },
+    ...conversation,
+    ...(input.children?.waiting
+      ? [
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: input.children.waiting }],
+          },
+        ]
+      : []),
+  ]
+  const limits = input.contextLimits
+  const compactInTurn = limits?.compactInTurn
+  const guard =
+    limits &&
+    createAgentContextGuard({
+      budget: limits.budget,
+      ...(limits.bytesPerToken === undefined ? {} : { bytesPerToken: limits.bytesPerToken }),
+      ...(limits.measuredBytesPerToken === undefined
+        ? {}
+        : { measuredBytesPerToken: limits.measuredBytesPerToken }),
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+      ...(compactInTurn
+        ? {
+            compact: async (compaction) => {
+              const request = await compactInTurn(compaction)
+              return request && requestHead(request.systemPrompt, request.messages)
+            },
+          }
+        : {}),
+    })
+  const prepareStep = guard
+    ? async (step: Parameters<typeof guard.prepareStep>[0]) => {
+        const prepared = await context.prepareStep?.(step)
+        const guarded = await guard.prepareStep({
+          ...step,
+          messages: prepared?.messages ?? step.messages,
+        })
+        // The guard's request, when it reduced the one prepared, and the room its answer has.
+        return { ...prepared, ...guarded }
+      }
+    : context.prepareStep
+
+  // The answer so far, as one message whatever step it is at.
+  const workMessageId = createAgentMessageId()
+  const finishedSteps: ModelStep[] = []
+  const recordStep = (step: ModelStep) => {
+    finishedSteps.push(step)
+    input.onWork?.({
+      id: workMessageId,
+      projectId,
+      threadId: run.threadId,
+      runId,
+      role: "assistant",
+      parts: markReducedSteps(
+        agentTraceFromModelSteps(finishedSteps, { threadId: run.threadId, runId }),
+        guard?.reducedFromStep()
+      ),
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
+    })
+  }
+
   try {
     let chunkIndex = 0
     let result: PausableModelLoopResult
     try {
       result = await runModelLoop({
         model: plan.model,
-        messages: [
-          {
-            role: "system",
-            content: context.systemPrompt,
-          },
-          ...modelMessages,
-          ...(input.children?.waiting
-            ? [
-                {
-                  role: "user" as const,
-                  content: [{ type: "text" as const, text: input.children.waiting }],
-                },
-              ]
-            : []),
-        ],
+        messages: requestHead(context.systemPrompt, modelMessages),
         tools,
         ...conversationModelSettings({
           reasoning: plan.reasoning,
           projectId,
           threadId: run.threadId,
         }),
-        ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
+        ...(prepareStep === undefined ? {} : { prepareStep }),
+        ...(guard ? { recoverStep: guard.recoverStep } : {}),
+        onStepEnd: recordStep,
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined
           ? {}
@@ -161,16 +243,28 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     } catch (error) {
       const interrupted = await finalizeIfInterrupted(error)
       if (interrupted) return interrupted
+
+      // Compacted and asked again, the request still did not fit the model's window.
+      if (error instanceof ModelProviderError && error.reason === "context-window-exceeded") {
+        throw new AgentContextCompactionError(
+          "context_limit_exceeded",
+          runId,
+          "The conversation still exceeds the model's context window after it was reduced. Start a new conversation or select a model with a larger context window.",
+          { cause: error }
+        )
+      }
       throw error
     }
 
-    interruptedParts =
+    interruptedParts = markReducedSteps(
       result.status === "aborted"
         ? agentTraceFromPartialModelLoop(result.steps, result.partialContent, {
             threadId: run.threadId,
             runId,
           })
-        : agentTraceFromModelSteps(result.steps, { threadId: run.threadId, runId })
+        : agentTraceFromModelSteps(result.steps, { threadId: run.threadId, runId }),
+      guard?.reducedFromStep()
+    )
 
     const interruptedAfterModel = await finalizeIfInterrupted()
     if (interruptedAfterModel) return interruptedAfterModel
@@ -246,6 +340,25 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Whether the turn holds a call for its requester, as `runs.finish` checks before it pauses: one
  * waiting, or decided and not reported to the model yet, its children's included.
  */
+
+/**
+ * Mark each step from `fromStep` on as answering a request the turn reduced, for the next turn's
+ * estimate not to go by what those calls read.
+ */
+function markReducedSteps(
+  parts: readonly AgentMessagePart[],
+  fromStep: number | undefined
+): readonly AgentMessagePart[] {
+  if (fromStep === undefined) return parts
+
+  let step = -1
+  return parts.map((part) => {
+    if (part.type !== "step-start") return part
+
+    step += 1
+    return step >= fromStep ? { type: "step-start", reducedRequest: true } : part
+  })
+}
 
 /**
  * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:

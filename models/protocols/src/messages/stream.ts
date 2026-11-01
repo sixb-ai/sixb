@@ -8,6 +8,7 @@ import {
   type ModelUsage,
   type ProviderData,
 } from "@sixb/core/models"
+import { contextWindowRejection } from "../context-window"
 import { integer, object, string } from "../json"
 import { decodeServerSentEvents } from "../sse"
 import { messagesUsage } from "./usage"
@@ -96,6 +97,10 @@ class MessageState {
               ...(this.options.requestId === undefined
                 ? {}
                 : { requestId: this.options.requestId }),
+              ...contextWindowRejection({
+                code: string(error?.type),
+                message: string(error?.message),
+              }),
             }
           ),
         },
@@ -122,6 +127,10 @@ class MessageState {
           type: "finish",
           finishReason: reason,
           ...(this.stopReason ? { rawFinishReason: this.stopReason } : {}),
+          // The context window, not the output limit, stopped the message.
+          ...(this.stopReason === "model_context_window_exceeded"
+            ? { contextWindowExceeded: true }
+            : {}),
           usage: (this.options.usage ?? messagesUsage)(this.usage),
         },
       ]

@@ -1473,6 +1473,34 @@ describe("Anthropic provider", () => {
     expect(attempts).toBe(2)
   })
 
+  // Reproduce: drop contextWindowRejection from providerHttpError; the rejection then carries no
+  // reason, and an agent turn fails instead of compacting and asking again.
+  test("names a prompt too long for the model's context window", async () => {
+    const provider = createAnthropic({
+      maxRetries: 0,
+      fetch: async () =>
+        Response.json(
+          {
+            type: "error",
+            error: {
+              type: "invalid_request_error",
+              message: "prompt is too long: 215000 tokens > 200000 maximum",
+            },
+          },
+          { status: 400 }
+        ),
+    })
+    const error = await provider("claude-opus-5")
+      .stream(request())
+      .catch((value) => value)
+    expect(error).toBeInstanceOf(ModelProviderError)
+    expect(error).toMatchObject({
+      status: 400,
+      code: "invalid_request_error",
+      reason: "context-window-exceeded",
+    })
+  })
+
   test("sanitizes HTTP failures and validates convenience defaults", async () => {
     const provider = createAnthropic({
       maxRetries: 0,
