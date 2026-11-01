@@ -7,7 +7,7 @@ import type { AgentMessages } from "../i18n/en"
 import type { AgentThreadContext } from "../types"
 import { ComposerMenu } from "./composer-menu"
 
-/** From this share of its target on, the meter takes a color: the conversation nears condensing. */
+/** From this share of its limit on, the meter takes a color: the conversation nears condensing. */
 export const CONTEXT_METER_NEAR_SHARE = 0.8
 
 export interface ContextMeterProps {
@@ -19,18 +19,13 @@ export interface ContextMeterProps {
   readonly condensing?: boolean
 }
 
-/**
- * How full the conversation is against its target: quiet, nearing it, or past it. A price tier
- * crossed below a window target is no reason for alarm: the details say it, the color does not.
- */
+/** How full the conversation is against its model's limit: quiet, nearing it, or past it. */
 export type ContextMeterTone = "quiet" | "near" | "over"
 
-/** What the meter draws from a conversation's context: how much of its target it uses, and why. */
+/** What the meter draws from a conversation's context: how much of its limit it uses. */
 export function contextMeterReading(context: AgentThreadContext) {
   const used = context.usedTokens ?? 0
-  const share = used / context.target.tokens
-  const tier = context.target.tier
-  const pastTier = tier !== undefined && used >= tier.fromTokens
+  const share = used / context.limitTokens
   const tone: ContextMeterTone =
     share > 1 ? "over" : share >= CONTEXT_METER_NEAR_SHARE ? "near" : "quiet"
   const lastCall = context.lastCall
@@ -39,12 +34,12 @@ export function contextMeterReading(context: AgentThreadContext) {
       ? lastCall.cacheReadInputTokens / lastCall.inputTokens
       : undefined
 
-  return { used, share, tone, pastTier, cacheShare }
+  return { used, share, tone, cacheShare }
 }
 
 /**
  * A ring beside the model that fills as the conversation nears the point where it is condensed,
- * colored only once it is close. It opens the details: how much is used, the target and why, the
+ * colored only once it is close. It opens the details: how much of the model's limit is used, the
  * share read from cache and the last condensing. Nothing shows before the first answer.
  */
 export function ContextMeter({ context, modelName, condensing = false }: ContextMeterProps) {
@@ -57,7 +52,7 @@ export function ContextMeter({ context, modelName, condensing = false }: Context
   const tokens = (value: number) => formatTokenCount(value, locale)
   const label = condensing
     ? messages.condensingLabel
-    : messages.label(tokens(reading.used), tokens(context.target.tokens))
+    : messages.label(tokens(reading.used), tokens(context.limitTokens))
 
   return (
     <ComposerMenu
@@ -153,9 +148,6 @@ function ContextDetails({
   const agentMessages = useAgentMessages()
   const locale = useLocale()
   const tokens = (value: number) => formatTokenCount(value, locale)
-  const ratio = (value: number) => `${value.toLocaleString(locale, { maximumFractionDigits: 1 })}×`
-  const { target } = context
-  const tier = target.tier
 
   // "12m ago", "just now", or a date once it is a week old: `ago` reads only a relative time.
   const condensedWhen = (iso: string) => {
@@ -164,17 +156,6 @@ function ContextDetails({
     return relative === agentMessages.time.now ? messages.justNow : messages.ago(relative)
   }
 
-  const why =
-    target.limit === "price-tier" && tier
-      ? messages.priceTier(modelName, ratio(tier.priceRatio), tokens(tier.fromTokens))
-      : tier
-        ? messages.windowPastTier(
-            modelName,
-            tokens(context.limitTokens),
-            ratio(tier.priceRatio),
-            tokens(tier.fromTokens)
-          )
-        : messages.window(modelName, tokens(context.limitTokens))
   const compaction = context.lastCompaction
   const when = compaction ? condensedWhen(compaction.createdAt) : undefined
 
@@ -195,15 +176,15 @@ function ContextDetails({
           {tokens(reading.used)}
           <span className="text-[15px] font-medium text-muted-foreground">
             {" "}
-            / {tokens(target.tokens)}
+            / {tokens(context.limitTokens)}
           </span>
         </p>
         <div
           role="meter"
           aria-label={messages.title}
           aria-valuemin={0}
-          aria-valuemax={target.tokens}
-          aria-valuenow={Math.min(reading.used, target.tokens)}
+          aria-valuemax={context.limitTokens}
+          aria-valuenow={Math.min(reading.used, context.limitTokens)}
           className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.1]"
         >
           <div
@@ -214,12 +195,9 @@ function ContextDetails({
             style={{ width: `${Math.min(100, Math.max(2, reading.share * 100))}%` }}
           />
         </div>
-        <p className="mt-2.5 text-xs leading-[1.45] text-muted-foreground">{why}</p>
-        {reading.pastTier && tier ? (
-          <p className="mt-1.5 text-xs leading-[1.45] text-amber-700 dark:text-amber-400">
-            {messages.pastTier(ratio(tier.priceRatio), tokens(tier.fromTokens))}
-          </p>
-        ) : null}
+        <p className="mt-2.5 text-xs leading-[1.45] text-muted-foreground">
+          {messages.limit(modelName, tokens(context.limitTokens))}
+        </p>
       </div>
       <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 border-t-[0.5px] border-black/[0.08] px-2.5 pt-2.5 pb-2 text-[12.5px] dark:border-white/[0.08]">
         {reading.cacheShare !== undefined ? (
@@ -227,7 +205,6 @@ function ContextDetails({
             {Math.round(reading.cacheShare * 100).toLocaleString(locale)}%
           </DetailRow>
         ) : null}
-        <DetailRow label={messages.limit}>{tokens(context.limitTokens)}</DetailRow>
         {compaction && when !== undefined ? (
           <DetailRow label={messages.lastCondensed}>
             {when}
