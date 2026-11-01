@@ -202,6 +202,8 @@ export const fr: Translation<AgentMessages> = {
     condensed: "Conversation condensée",
     condensing: "Condensation de la conversation précédente…",
     condensingLabel: "L’agent condense la conversation précédente",
+    condensedFull: "Contexte plein — condensé, puis poursuivi",
+    condensingFull: "Contexte plein — condensation avant de poursuivre…",
     working: "L’agent travaille",
     thinking: "Réflexion",
     takingLonger: "Cela prend un peu plus de temps",
