@@ -65,6 +65,59 @@ describe("agent context token estimation", () => {
       "The user denied `workflows start send-reminders`. It did not run."
     )
   })
+  // Removal proof: share one text budget across the messages, as the estimator once did; the
+  // second message's file then counts for nothing although each message sends its own inline.
+  test("counts each retained user message's files inline, within that message's budget", () => {
+    const withFile = (seq: number): AgentMessageRecord => ({
+      ...message(seq, "user", "see attached"),
+      parts: [
+        { type: "text", text: "see attached" },
+        {
+          type: "file",
+          fileRef: {
+            blobId: `blob_${seq}`,
+            digest: `sha256:${seq}`,
+            sizeBytes: 50 * 1024,
+            fileName: "data.csv",
+            mediaType: "text/csv",
+          },
+        },
+      ],
+    })
+    const one = estimateAgentContextMessagesTokens([withFile(1)]).tokens
+    const files = (count: number) =>
+      estimateAgentContextMessagesTokens(
+        Array.from({ length: count }, (_, index) => withFile(index + 1))
+      ).tokens
+
+    expect(one).toBeGreaterThan(12_800)
+    expect(files(6)).toBeGreaterThanOrEqual(6 * one - 6)
+  })
+
+  // Removal proof: count stableJsonStringify(part.output) for every call; the publish summary the
+  // model read counts as its much larger stored object.
+  test("counts a call's output as the model read it", () => {
+    const call = (modelOutput?: { type: "text"; value: string }): AgentMessageRecord => ({
+      ...message(2, "assistant", ""),
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "publish",
+          toolName: "publish_artifact",
+          input: {},
+          state: "output-available",
+          output: { warnings: "x".repeat(4_000) },
+          ...(modelOutput === undefined ? {} : { modelOutput }),
+        },
+      ],
+    })
+
+    expect(estimateAgentContextMessagesTokens([call()]).tokens).toBeGreaterThan(1_000)
+    expect(
+      estimateAgentContextMessagesTokens([call({ type: "text", value: "Published." })]).tokens
+    ).toBeLessThan(100)
+  })
+
   test("compacts only above the reserved input budget", () => {
     const inputBudgetTokens = 8_000
     expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 7_999 })).toBe(
