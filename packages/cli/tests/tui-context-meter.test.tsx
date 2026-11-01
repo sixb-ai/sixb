@@ -214,4 +214,22 @@ describe("the context in the terminal", () => {
     const frame = await until(screen, (text) => text.includes("ctx 38k/184k"))
     expect(frame).not.toContain("cached")
   })
+
+  // Removal proof: leave the `context` command out of ThreadView's slash commands; `/context` then
+  // goes to the agent as a message.
+  test("/context opens what the conversation uses of its model's window, and esc closes it", async () => {
+    const api = fakeApi()
+    const screen = await openTerminal(api, 100)
+    await startTurn(screen, api)
+    await until(screen, (frame) => frame.includes("ctx 38k/184k"))
+
+    await screen.mockInput.typeText("/context")
+    screen.mockInput.pressEnter()
+    const panel = await until(screen, (frame) => frame.includes("38k of 184k tokens"))
+    expect(panel).toContain("Free space")
+    expect(panel).toContain("Kept for the answer")
+
+    screen.mockInput.pressEscape()
+    expect(await until(screen, (frame) => !frame.includes("Kept for the answer"))).toBeTruthy()
+  })
 })
