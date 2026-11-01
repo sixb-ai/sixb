@@ -11,6 +11,7 @@ import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
+  AgentContextCheckpointReason,
   AgentMessageRecord,
   AgentThreadRecord,
   ConversationAgentRunRecord,
@@ -36,6 +37,8 @@ import { prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
 import {
   type BuildConversationRequest,
+  type ConversationRequest,
+  compactAgentConversationInTurn,
   type LoadConversationMemory,
   prepareAgentConversationContext,
 } from "./context-compaction"
@@ -85,6 +88,18 @@ export interface AgentExecutionEnvironment {
 export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnvironment {
   /** The history the turn runs on: as it started, or as its compaction left it. */
   readonly threadContext: LoadedAgentThreadModelContext
+  /**
+   * Compact the history before the turn from within it, once: the request the turn's calls then
+   * start with. Undefined when it could not. Only a turn whose environment ran its preflight has
+   * it.
+   */
+  readonly compactInTurn?: (input: {
+    readonly reason: AgentContextCheckpointReason
+    readonly estimatedInputTokens: number
+    readonly targetTokens: number
+  }) => Promise<ConversationRequest | undefined>
+  /** The bytes per token the preflight measured the history at, which the turn's calls go by. */
+  readonly bytesPerToken?: number
 }
 
 /**
@@ -273,31 +288,32 @@ export async function createConversationAgentEnvironment(
 
   try {
     const { ontologyDocs } = plan
+    // What the conversation's compaction reads and writes through, before the turn or during it.
+    const compaction = preflight && {
+      context,
+      session: input.session,
+      plan,
+      ontologyIndex: ontologyDocs.index,
+      contextDirectory: sandbox.contextDirectory,
+      run,
+      ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
+      budget: preflight.budget,
+      runtime: {
+        ...preflight.runtime,
+        signal: sandboxSignal,
+        assertCanContinue() {
+          preflight.runtime.assertCanContinue()
+          failure.signal.throwIfAborted()
+        },
+      },
+      frameworkTools: input.frameworkTools,
+      loadMemory,
+      conversationRequest,
+    }
     // Resolve application access before any compaction model call. Once acquired, this
     // environment owns preservation even if history, attachments or runtime preparation fail.
-    const prepared = preflight
-      ? await prepareAgentConversationContext({
-          context,
-          session: input.session,
-          plan,
-          ontologyIndex: ontologyDocs.index,
-          contextDirectory: sandbox.contextDirectory,
-          run,
-          history: input.history,
-          ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
-          budget: preflight.budget,
-          runtime: {
-            ...preflight.runtime,
-            signal: sandboxSignal,
-            assertCanContinue() {
-              preflight.runtime.assertCanContinue()
-              failure.signal.throwIfAborted()
-            },
-          },
-          frameworkTools: input.frameworkTools,
-          loadMemory,
-          conversationRequest,
-        })
+    const prepared = compaction
+      ? await prepareAgentConversationContext({ ...compaction, history: input.history })
       : undefined
     const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
     const messages = threadContext.retainedMessages
@@ -331,7 +347,30 @@ export async function createConversationAgentEnvironment(
       ...(conversation === undefined ? {} : { conversation }),
       onDetachedTeardown: input.onDetachedTeardown,
     })
-    return { ...environment, threadContext }
+
+    // The turn compacts from within at most once: a run writes one checkpoint.
+    const compactInTurn: ConversationAgentExecutionEnvironment["compactInTurn"] =
+      compaction &&
+      (async ({ reason, estimatedInputTokens, targetTokens }) => {
+        const compacted = await compactAgentConversationInTurn({
+          ...compaction,
+          threadContext,
+          memory,
+          reason,
+          estimatedInputTokens,
+          targetTokens,
+        })
+        return (
+          compacted &&
+          conversationRequest({ threadContext: compacted.threadContext, memory: compacted.memory })
+        )
+      })
+    return {
+      ...environment,
+      threadContext,
+      ...(compactInTurn ? { compactInTurn } : {}),
+      ...(prepared?.bytesPerToken === undefined ? {} : { bytesPerToken: prepared.bytesPerToken }),
+    }
   } catch (error) {
     // Preparation can fail before the worker receives this environment. Preserve here, before
     // the worker records the run's terminal outcome; a lost execution must touch nothing.

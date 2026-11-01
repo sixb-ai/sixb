@@ -145,8 +145,9 @@ import {
 } from "../../agent/src/artifacts/materialize"
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
-import { prepareAgentModel } from "../../agent/src/context-budget"
+import { estimateAgentRequestTokens, prepareAgentModel } from "../../agent/src/context-budget"
 import * as conversationPreparation from "../../agent/src/context-compaction"
+import { clearedToolResultText } from "../../agent/src/context-guard"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
 import { conversationPromptCaching } from "../../agent/src/prompt-cache"
@@ -14677,6 +14678,317 @@ describe("a later turn's request", () => {
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()
+    }
+  })
+})
+
+/** A tool whose results take `bytes` each: a chapter the model asks for by its number. */
+function chapterTool(bytes: number) {
+  return defineAgentTool("chapter")
+    .description("Read one chapter of the book.")
+    .input({ number: "string" })
+    .run(({ input }) => ({ chapter: input.number, text: `${"x".repeat(bytes - 1)}\n` }))
+}
+
+/** The chapter results a request carries, in order: what the model has read this turn. */
+function chapterResults(request: LanguageModelRequest) {
+  return request.messages.flatMap((message) =>
+    message.role === "tool"
+      ? message.content.filter((part) => part.toolName === "chapter").map((part) => part.output)
+      : []
+  )
+}
+
+/**
+ * A model with a 100,000-token window (83,616 tokens of input at most) that reads `chapters`
+ * chapters, one per call, then answers. It counts each request as the estimator does at its
+ * 3 bytes per token, keeps every request, and calls `reject` before answering one: what it
+ * throws, the provider rejected.
+ */
+function chapterReadingModel(input: {
+  readonly chapters: number
+  readonly requests: LanguageModelRequest[]
+  readonly reject?: (request: LanguageModelRequest) => Error | undefined
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+      contextWindow: 100_000,
+      maxOutputTokens: 16_384,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      const rejection = isSummaryRequest(request) ? undefined : input.reject?.(request)
+      if (rejection) throw rejection
+
+      const usage = {
+        inputTokens: estimateAgentRequestTokens(request, 3),
+        outputTokens: 20,
+      }
+      // It reads the book when asked to, and answers anything else at once.
+      const read = chapterResults(request).length
+      const lastUser = [...request.messages].reverse().find((message) => message.role === "user")
+      const asked =
+        lastUser?.role === "user" &&
+        lastUser.content.some((part) => part.type === "text" && part.text.includes("Read the book"))
+      if (!isSummaryRequest(request) && asked && read < input.chapters) {
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `chapter_${read}`,
+            toolName: "chapter",
+            input: JSON.stringify({ number: String(read) }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      }
+      const text = isSummaryRequest(request) ? "## Goal\nRead the book." : "Read them all."
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: text },
+        { type: "text-end", id: "text" },
+        { type: "finish", finishReason: "stop", usage },
+      ])
+    },
+  })
+}
+
+function contextWindowRejection(): ModelProviderError {
+  return new ModelProviderError(
+    "[test] Your input exceeds the context window of this model",
+    "mock",
+    "mock-model",
+    { status: 400, reason: "context-window-exceeded" }
+  )
+}
+
+describe("context within a turn", () => {
+  const HARD_LIMIT_TOKENS = 83_616
+
+  test("clears what the model read before a call would cross the target", async () => {
+    // Reproduce: leave out contextLimits where runConversationTurn calls runAgentTurn; the
+    // seventh call then carries six chapters of about 15,000 tokens, past the 83,616-token limit.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 8, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(45_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests).toHaveLength(9)
+      for (const sent of requests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The oldest chapters were cleared in one batch; the most recent ones stay.
+      const cleared = { type: "text", value: clearedToolResultText("chapter") }
+      const first = requests.findIndex((sent) =>
+        chapterResults(sent).some((output) => output.value === cleared.value)
+      )
+      expect(first).toBeGreaterThan(0)
+      // Oldest first; the most recent it read stays, and so does the one it has not read.
+      const results = chapterResults(requests[first]!)
+      const kept = results.findIndex((output) => output.type === "json")
+      expect(kept).toBeGreaterThan(0)
+      expect(results.slice(0, kept)).toEqual(Array(kept).fill(cleared))
+      expect(results.slice(kept).every((output) => output.type === "json")).toBe(true)
+      expect(results.length - kept).toBeGreaterThanOrEqual(2)
+      // The call after a clearing reads its request through: only the step it adds is new.
+      // Reproduce: set KEPT_TOOL_RESULTS to 3 in context-guard.ts; the call after the clearing
+      // then clears one more result, and rewrites the cache from it.
+      const clearedRequest = [...requests[first]!.messages]
+      expect(requests[first + 1]!.messages.slice(0, clearedRequest.length)).toEqual(clearedRequest)
+      // The transcript keeps every result whole.
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId: run.threadId,
+        roles: ["assistant"],
+      })
+      const calls = messages[0]?.parts.filter((part) => part.type === "tool-call") ?? []
+      expect(calls).toHaveLength(8)
+      expect(JSON.stringify(calls)).not.toContain("was cleared")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("weighs the next turn by what it replays after a turn cleared results", async () => {
+    // Reproduce: drop the reducedRequest check in matchingUsageAnchor; the next turn then goes by
+    // the cleared call and a rate measured on it, and its first call replays every chapter, past
+    // the 83,616-token limit. Drop `replaysReduced` from the summary's input limit instead; the
+    // summary then reads that whole replay at once, past the limit too.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 6, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(42_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Read the book." })
+      const read = await waitForTerminalRun(storage, first.run.id)
+      expect(read.status).toBe("succeeded")
+      // The turn cleared chapters before its last calls, which its stored steps keep whole.
+      expect(
+        requests.some((sent) => chapterResults(sent).some((output) => output.type === "text"))
+      ).toBe(true)
+      const replayed = requests.length
+
+      const second = await requestAgent(sixb, { threadId: read.threadId, text: "Thanks." })
+      const run = await waitForTerminalRun(storage, second.run.id)
+
+      expect(run.status).toBe("succeeded")
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: read.threadId })
+      ).resolves.toMatchObject({ createdByRunId: run.id })
+      const turn = requests.slice(replayed)
+      expect(turn.some(isSummaryRequest)).toBe(true)
+      for (const sent of turn) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("compacts the turns before it when clearing cannot bring a call under the target", async () => {
+    // Reproduce: leave out compactInTurn where runConversationTurn builds contextLimits; the turn
+    // then cuts its newest chapter to fit, and writes no checkpoint.
+    const requests: LanguageModelRequest[] = []
+    const model = chapterReadingModel({ chapters: 2, requests })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(105_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const threadId = "in_turn_compaction_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // About 48,000 tokens of earlier turns: under the limit when the turn starts. With its first
+    // chapter of 35,000 tokens, which the model has not read, the second call would cross it.
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `in-turn-${index}-${"x".repeat(12_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      const trigger = await storage.messages.getById({
+        projectId: PROJECT_ID,
+        id: run.triggerMessageId,
+      })
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({
+        createdByRunId: run.id,
+        reason: "threshold",
+        summarizedThroughSeq: (trigger?.seq ?? 0) - 1,
+      })
+      // The calls after the summary read it, then the turn's chapters as they were.
+      const summaryIndex = requests.findIndex(isSummaryRequest)
+      expect(summaryIndex).toBeGreaterThan(0)
+      const after = requests[summaryIndex + 1]!
+      expect(previousSummary(after)).toBe("## Goal\nRead the book.")
+      expect(chapterResults(after).map((output) => output.type)).toEqual(["json"])
+      for (const sent of requests.filter((sent) => !isSummaryRequest(sent))) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      const started = (await listRunStreamRecords(sixb.broker, run.id)).find(
+        (record) => record.name === "agent.compaction.started"
+      )
+      expect(started?.payload).toMatchObject({ reason: "threshold" })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("compacts and asks again when the provider rejects a call as too long", async () => {
+    // Reproduce: leave out recoverStep where runAgentTurn calls runModelLoop; the rejection then
+    // fails the turn.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      // The estimate missed what the provider counted: the second call, before any summary.
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || previousSummary(request) !== undefined) {
+          return undefined
+        }
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const threadId = "overflow_resume_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 3; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `overflow-${index}-${"x".repeat(6_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({ createdByRunId: run.id, reason: "overflow" })
+      const records = await listRunStreamRecords(sixb.broker, run.id)
+      expect(
+        records.find((record) => record.name === "agent.compaction.started")?.payload
+      ).toMatchObject({ reason: "overflow" })
+      // The call asked again starts from the summary, and the next one reads it through.
+      const retried = requests.findIndex(isSummaryRequest) + 1
+      expect(previousSummary(requests[retried]!)).toBe("## Goal\nRead the book.")
+      const retriedRequest = [...requests[retried]!.messages]
+      expect(requests[retried + 1]!.messages.slice(0, retriedRequest.length)).toEqual(
+        retriedRequest
+      )
+
+      // The same turn went on: the chapter read before the rejection, the one after, the answer.
+      const { messages } = await storage.messages.list({
+        projectId: PROJECT_ID,
+        threadId,
+        roles: ["assistant"],
+        order: "desc",
+        limit: 1,
+      })
+      const parts = messages[0]?.parts ?? []
+      expect(messages[0]?.runId).toBe(run.id)
+      expect(parts.flatMap((part) => (part.type === "tool-call" ? [part.toolCallId] : []))).toEqual(
+        ["chapter_0", "chapter_1"]
+      )
+      expect(parts.at(-1)).toMatchObject({ type: "text", text: "Read them all." })
+    } finally {
+      await worker.stop()
     }
   })
 })

@@ -145,6 +145,17 @@ function outputCeilingTokens(
   return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
 }
 
+/**
+ * A call's request as the conversation estimator weighs it (see measureAgentModelRequest), at
+ * `bytesPerToken`.
+ */
+export function estimateAgentRequestTokens(
+  request: Pick<LanguageModelRequest, "messages" | "tools" | "responseFormat">,
+  bytesPerToken: number
+): number {
+  return agentContextSizeTokens(measureAgentModelRequest(request), bytesPerToken)
+}
+
 /** The events as they come, handing over the input tokens the provider counted once it says. */
 async function* withCountedInput(
   events: AsyncIterable<LanguageModelStreamEvent>,
