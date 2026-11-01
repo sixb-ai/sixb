@@ -923,6 +923,10 @@ describe("a paused child, once its requester decides", () => {
       // Its history is the paused child's last request, then how its call ended, as its own.
       const [last] = harness.childRequests("pay").slice(-1)
       const [first] = harness.childRequests("pay'")
+      // Its calls can wait on the user's decision, so both runs cache for the long lifetime.
+      // Guard proof: give every child `lifetime: "default"` in runSubagent.
+      expect(last?.caching).toMatchObject({ lifetime: "long" })
+      expect(first?.caching).toMatchObject({ lifetime: "long" })
       const lastMessages = last?.messages ?? []
       expect(first?.messages.slice(0, lastMessages.length + 2)).toEqual([
         ...lastMessages,
@@ -933,7 +937,11 @@ describe("a paused child, once its requester decides", () => {
       expect(outcome).toContain(`<sixb_approval id=\\"${held.id}\\" status=\\"approved\\">`)
       expect(outcome).toContain("Your sandbox restarted")
       // It is told when it continues, not only when its task was first given.
-      expect(outcome).toContain(renderCurrentTime(continued.createdAt, "UTC"))
+      expect(outcome).toContain(
+        JSON.stringify(
+          renderCurrentTime(continued.createdAt, { timeZone: "UTC", locale: "en" })
+        ).slice(1, -1)
+      )
       expect(outcome).not.toContain("Your sub-agent")
 
       // The parent reads which child asked, that it continues, and gets its answer by the old id.

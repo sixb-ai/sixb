@@ -45,6 +45,11 @@ export interface AgentTurnHistory {
   /** The time zone of the run that answered each retained user message, by message id. */
   readonly sentTimeZones: Readonly<Record<string, string>>
   /**
+   * The locale of the run that answered each retained user message, by message id. Absent from a
+   * project that predates it.
+   */
+  readonly sentLocales?: Readonly<Record<string, string>>
+  /**
    * The model call that ended the latest assistant message after the checkpoint: what a token
    * estimate anchors on, as the provider counted it.
    */
@@ -99,11 +104,11 @@ export async function readAgentTurnHistory(
     ...(checkpoint ? { afterSeq: checkpoint.summarizedThroughSeq } : {}),
     order: "asc",
   })
-  const [sentTimeZones, usageAnchor] = await Promise.all([
-    readSentTimeZones(host, threadId, messages),
+  const [sent, usageAnchor] = await Promise.all([
+    readSentSettings(host, threadId, messages),
     readUsageAnchor(host, messages, checkpoint?.observedHeadSeq ?? 0),
   ])
-  return { checkpoint, messages, sentTimeZones, ...(usageAnchor ? { usageAnchor } : {}) }
+  return { checkpoint, messages, ...sent, ...(usageAnchor ? { usageAnchor } : {}) }
 }
 
 async function readTurnContext(
@@ -216,15 +221,18 @@ function readUser(host: AgentRunSessionHost, id: string) {
   return host.storage.auth.users.getById({ projectId: host.projectId, id })
 }
 
-/** The time zone each retained user message was sent in: the zone of the run that answered it. */
-async function readSentTimeZones(
+/**
+ * The time zone and locale each retained user message was sent in: those of the run that answered
+ * it, as its requester's settings froze them.
+ */
+async function readSentSettings(
   host: AgentRunSessionHost,
   threadId: string,
   messages: readonly AgentMessageRecord[]
-): Promise<Readonly<Record<string, string>>> {
+): Promise<Pick<AgentTurnHistory, "sentTimeZones" | "sentLocales">> {
   const userMessages = messages.filter((message) => message.role === "user")
   const oldest = userMessages[0]
-  if (!oldest) return {}
+  if (!oldest) return { sentTimeZones: {}, sentLocales: {} }
 
   // A run starts after its trigger message, so this window holds every run that answered one.
   const { runs } = await host.storage.agents.runs.list({
@@ -235,12 +243,14 @@ async function readSentTimeZones(
   })
   const retained = new Set(userMessages.map((message) => message.id))
   const zones: Record<string, string> = {}
+  const locales: Record<string, string> = {}
   for (const run of runs) {
-    if (run.kind === "conversation" && run.spec?.timeZone && retained.has(run.triggerMessageId)) {
-      zones[run.triggerMessageId] = run.spec.timeZone
-    }
+    if (run.kind !== "conversation" || !retained.has(run.triggerMessageId)) continue
+
+    if (run.spec?.timeZone) zones[run.triggerMessageId] = run.spec.timeZone
+    if (run.spec?.locale) locales[run.triggerMessageId] = run.spec.locale
   }
-  return zones
+  return { sentTimeZones: zones, sentLocales: locales }
 }
 
 async function readUsageAnchor(

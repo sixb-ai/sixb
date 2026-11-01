@@ -1,6 +1,6 @@
 import type { AgentMessagePart } from "@sixb/core"
 import type { AgentMessageRecord, SubagentRunRecord } from "@sixb/core/storage"
-import { renderCurrentTime } from "./agent-prompt"
+import { renderCurrentTime, type SentSettings } from "./agent-prompt"
 import { mailPart } from "./subagent-inbox"
 
 // A child that paused continues as the next run of its thread under a later turn: once its held
@@ -31,7 +31,7 @@ export function continuationTrigger(input: {
   /** Whether the sandbox provider keeps the child's workspace while it pauses. */
   readonly keepsWorkspace: boolean
   readonly createdAt: Date
-  readonly timeZone: string
+  readonly settings: SentSettings
 }): readonly AgentMessagePart[] {
   return [
     ...input.goesOnWith,
@@ -39,7 +39,7 @@ export function continuationTrigger(input: {
     ...(input.keepsWorkspace
       ? []
       : [{ type: "text" as const, text: sandboxRestarted(input.paused) }]),
-    { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.timeZone)}` },
+    { type: "text", text: `\n\n${renderCurrentTime(input.createdAt, input.settings)}` },
   ]
 }
 
