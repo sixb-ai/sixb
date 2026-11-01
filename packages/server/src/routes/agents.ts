@@ -354,7 +354,7 @@ export async function agentMessageFileContentResponse(
 export async function readThreadMessages(
   host: SixbHostView,
   storage: AgentStorage,
-  thread: AgentThreadRecord,
+  thread: Pick<AgentThreadRecord, "id">,
   query: z.infer<typeof AgentMessagesQuerySchema>
 ) {
   const projectId = host.id
@@ -744,14 +744,24 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
       "/api/agent-threads/:threadId/messages",
       async (context) => {
         const { params, query, set } = context
-        const sixb = requireRequestSixb(context)
+        const authState = requestAuthState(context)
         try {
           const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agent.threads.getById(params.threadId)
+          // A run reads its own conversation alone, as it reads that conversation's files; a
+          // child or a workflow step reads none.
+          const thread =
+            authState.agentExecution && !authState.agentRun
+              ? null
+              : await getAgentMessageFileContentThread({
+                  authState,
+                  storage,
+                  projectId: host.id,
+                  threadId: params.threadId,
+                })
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -778,6 +788,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "List agent thread messages",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "listAgentThreadMessages",
+          security: accessTokenSecurityRequirement("listAgentThreadMessages"),
         },
       }
     )

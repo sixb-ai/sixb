@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 // The `sixb` a sandbox runs: the API commands people run, plus the run's own (`status`,
-// `context`, `memory`). `bun run generate:sandbox-cli` bundles it into generated/sixb.mjs.
+// `context`, `memory`, `history`). `bun run generate:sandbox-cli` bundles it into generated/sixb.mjs.
 import { isHelp } from "./arguments"
 import { isInstanceCommand } from "./commands"
+import { history } from "./commands/history"
 import { memory } from "./commands/memory"
 import { renderInstanceHelp } from "./commands/metadata"
 import { context, status } from "./commands/system"
 import { fail, INSTANCE_CLI_VERSION, reportError, writeText } from "./output"
-import { runInstanceCli } from "./run"
+import { createInstanceApiClient, runInstanceCli } from "./run"
 
 async function main(args: readonly string[]): Promise<void> {
   const [command, ...rest] = args
@@ -19,6 +20,7 @@ async function main(args: readonly string[]): Promise<void> {
   if (command === "status") return status(rest, sandboxMode())
   if (command === "context") return context(rest)
   if (command === "memory") return memory(rest, sandboxMode())
+  if (command === "history") return history(createInstanceApiClient(sandboxMode()), rest)
   if (!isInstanceCommand(command)) fail(`Unknown command '${command}'. Run 'sixb --help'.`)
 
   await runInstanceCli({ args, mode: sandboxMode() })

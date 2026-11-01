@@ -167,6 +167,7 @@ var CLI_LIMITS = {
   telemetryHistory: { default: 100, maximum: 1000 },
   linkPage: { default: 100, maximum: 1000 },
   users: { default: 20, maximum: 200 },
+  history: { default: 20, maximum: 100 },
   datasetVersions: { default: 20, maximum: 100 },
   datasetRows: { default: 100, maximum: 1000 },
   inspect: {
@@ -372,6 +373,13 @@ optionally under filters; k bounds the ranked matches and results carry a score.
 var GROUP_HELP = {
   status: "Usage: sixb status",
   context: "Usage: sixb context",
+  history: `Usage:
+  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
+  sixb history <seq>
+
+Prints this conversation's messages as text, oldest first, including those summarized when it
+was compacted: what was said, the files sent, and each tool call with its result. A page holds
+${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]
@@ -1976,6 +1984,87 @@ async function dispatch(api, command, args) {
   }
 }
 
+// src/commands/history.ts
+var PAGE_TEXT_CHARS = 4000;
+var PAGE_TOOL_CHARS = 1000;
+async function history(api, args) {
+  if (isHelp(args[0]) || requestsHelp(args))
+    return writeText(GROUP_HELP.history);
+  const { positionals, options } = parseCommandArgs(args, { "--offset": "string", "--limit": "string" }, "history", [0, 1]);
+  const threadId = process.env.SIXB_THREAD_ID;
+  if (!threadId)
+    fail("This run has no conversation to read: SIXB_THREAD_ID is not set.");
+  const path = `/api/agent-threads/${idSegment(threadId)}/messages`;
+  const seq = positionals[0];
+  if (seq !== undefined) {
+    const wanted = integerInRange("<seq>", seq, 1, Number.MAX_SAFE_INTEGER);
+    const page = messagePage(await api.get(path, { order: "asc", offset: String(wanted - 1), limit: "1" }));
+    const message = page.messages[0];
+    if (message?.seq !== wanted) {
+      throw new CliError({ code: "not_found", message: `The conversation has no message #${wanted}.` }, EXIT_API);
+    }
+    return writeText(renderMessage(message, page, { whole: true }));
+  }
+  const offset = nonNegativeInteger("--offset", options["--offset"] ?? "0");
+  const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.history.default), 1, CLI_LIMITS.history.maximum);
+  const page = messagePage(await api.get(path, { order: "asc", offset: String(offset), limit: String(limit) }));
+  const shown = page.messages.map((message) => renderMessage(message, page, { whole: false }));
+  const end = offset + page.messages.length;
+  const footer = page.messages.length === 0 ? `No messages from offset ${offset}: the conversation has ${page.total}.` : page.hasMore ? `Messages ${offset + 1}–${end} of ${page.total}. Next: sixb history --offset ${end}` : `Messages ${offset + 1}–${end} of ${page.total}: the end of the conversation.`;
+  writeText([...shown, footer].join(`
+
+`));
+}
+function renderMessage(message, page, options) {
+  const author = message.authorPrincipal ? page.authors.find((person) => person.id === message.authorPrincipal?.id)?.displayName : undefined;
+  const heading = [`#${message.seq} ${message.role}`, author, message.createdAt].filter(Boolean).join(" · ");
+  const bounds = {
+    seq: message.seq,
+    textChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TEXT_CHARS,
+    toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS
+  };
+  return [`── ${heading}`, ...message.parts.flatMap((part) => renderPart(part, bounds))].join(`
+`);
+}
+function renderPart(part, bounds) {
+  const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: sixb history ${bounds.seq}]`;
+  switch (part.type) {
+    case "text":
+      return typeof part.text === "string" && part.text.trim() ? [cut(part.text, bounds.textChars)] : [];
+    case "file": {
+      const file = record(part.fileRef);
+      const name = file?.fileName ?? file?.logicalPath ?? file?.blobId;
+      return [`[file ${String(name)}${file?.mediaType ? `, ${String(file.mediaType)}` : ""}]`];
+    }
+    case "tool-call": {
+      const input = cut(JSON.stringify(part.input ?? {}), bounds.toolChars);
+      const outcome = part.state === "output-error" ? `error: ${cut(String(part.errorText ?? ""), bounds.toolChars)}` : part.state === "output-available" ? cut(typeof part.output === "string" ? part.output : JSON.stringify(part.output), bounds.toolChars) : String(part.state ?? "");
+      return [`[${String(part.toolName)}] ${input}`, `→ ${outcome}`];
+    }
+    case "continuation":
+      return ["[asked to continue]"];
+    case "approval-outcome":
+      return [`[approval ${String(part.status)}]`];
+    default:
+      return [];
+  }
+}
+function messagePage(value) {
+  const page = record(value);
+  if (!page || !Array.isArray(page.messages) || typeof page.total !== "number") {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid message page." }, EXIT_API);
+  }
+  return {
+    messages: page.messages,
+    authors: Array.isArray(page.authors) ? page.authors : [],
+    hasMore: page.hasMore === true,
+    total: page.total
+  };
+}
+function record(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+}
+
 // src/commands/memory.ts
 import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
 import { dirname as dirname3, join as join3 } from "node:path";
@@ -2529,6 +2618,8 @@ async function main(args) {
     return context(rest);
   if (command === "memory")
     return memory(rest, sandboxMode());
+  if (command === "history")
+    return history(createInstanceApiClient(sandboxMode()), rest);
   if (!isInstanceCommand(command))
     fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   await runInstanceCli({ args, mode: sandboxMode() });
