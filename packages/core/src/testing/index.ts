@@ -29,6 +29,11 @@ export {
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"
 export {
+  type AgentTokenRateStorageContractStorage,
+  type AgentTokenRateStorageContractSuiteOptions,
+  runAgentTokenRateStorageContractSuite,
+} from "./agent-token-rate-storage-contract"
+export {
   type AiStorageContractSuiteOptions,
   runAiCostStorageContractSuite,
   seedAiCostStorageContractUsage,
