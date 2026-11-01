@@ -492,6 +492,14 @@ export const fr: Translation<AgentMessages> = {
       running: "Vérification de l’environnement de l’agent",
     },
     runContext: { title: "Contexte d’exécution lu", running: "Lecture du contexte d’exécution" },
+    history: {
+      title: "Conversation précédente relue",
+      running: "Lecture de la conversation précédente",
+    },
+    historyMessage: {
+      title: (seq) => `Message ${seq} relu`,
+      running: (seq) => `Lecture du message ${seq}`,
+    },
     ontology: { title: "Ontologie explorée", running: "Exploration de l’ontologie" },
     objectType: {
       title: (type) => (type ? `Type ${quoted(type)} examiné` : "Type d’objet examiné"),
