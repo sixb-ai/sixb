@@ -73,7 +73,9 @@ callTool(call)                         one call of a project tool the run offers
 events · heldCalls                     live records (best effort) and the approvals that hold a run
 plan() · memory                        what a run is set up with, as plain data (run-plan.ts): its
                                        model, SIXB.md, skills, tool names, the requester's ontology
-                                       docs and a turn's delegation models; and the memory it reads
+                                       docs, a turn's delegation models and the bytes per token its
+                                       model measured lately (context-token-rate.ts); and the
+                                       memory it reads
 context() · checkpoint                 what a run starts from, in one read (run-turn.ts), and the
                                        compaction write, which answers the history that follows
 threads · children                     the conversation's messages and a turn's children; reads
@@ -85,7 +87,8 @@ files                                  where the run's files are stored and read
 authorization · workspace              for a runner that binds the project in its own process: the
                                        execution's authority, and a persistent workspace's moves
 finish                                 messages and the run's end in one transaction, then the
-                                       host's afterFinish: children stopped, a decided turn resumed
+                                       host's afterFinish: children stopped, a decided turn resumed;
+                                       then, best effort, what noteTokenRate kept of its latest call
 ```
 
 `tests/agent-run-session-contract.ts` is what every session does: the in-process one and the one

@@ -22,8 +22,11 @@ import {
 } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
+  type AgentModelTokenRateSample,
   claimWorkflowAgentNode,
   enqueueWorkflowAgentNodeResume,
+  readAgentContextBytesPerToken,
+  recordAgentContextTokenRate,
   renderAgentRunOntologyDocs,
   resolveAgentPropertyClearance,
   runAgentTool,
@@ -116,6 +119,19 @@ export async function executeWorkflowAgentNode(
   )
   const reserved = session.node
   let usageRecorder: AiModelCallRecorder | undefined
+  // What the step's latest call measured of its model's tokenizer, recorded once the step ends.
+  let tokenRate: AgentModelTokenRateSample | undefined
+  const recordTokenRate = async () => {
+    if (!tokenRate) return
+
+    await recordAgentContextTokenRate({
+      tokenRates: context.storage.agents.tokenRates,
+      projectId: context.id,
+      runId: nodeRun.id,
+      sample: tokenRate,
+      measuredAt: new Date(),
+    })
+  }
 
   let environment: AgentExecutionEnvironment | null = null
   let modelId = reserved.modelId
@@ -159,10 +175,18 @@ export async function executeWorkflowAgentNode(
       authorPrincipal: resolved.identity.principal,
     })
     // The step runs in this process: the worker pins its model and records each call.
-    const prepared = prepareAgentModel({
-      ...configuredPlan,
-      model: usageRecorder.wrapModel(await resolveLanguageModel(configuredPlan.model)),
+    const model = await resolveLanguageModel(configuredPlan.model)
+    const bytesPerToken = await readAgentContextBytesPerToken({
+      tokenRates: context.storage.agents.tokenRates,
+      projectId: context.id,
+      model,
     })
+    const prepared = prepareAgentModel(
+      { ...configuredPlan, model: usageRecorder.wrapModel(model), bytesPerToken },
+      (sample) => {
+        tokenRate = sample
+      }
+    )
     const authorization = { type: "principal" as const, context: resolved.context }
     const propertyClearance = resolveAgentPropertyClearance(
       input.host.definitions.ontology,
@@ -239,6 +263,7 @@ export async function executeWorkflowAgentNode(
       output: result.output,
       totalNodes: workflow.nodes.length,
     })
+    await recordTokenRate()
   } catch (error) {
     if (error instanceof WorkflowResumeDispatchError) throw error
     // Queue ownership or the node's execution token was lost: the current owner records the fate.
@@ -299,6 +324,8 @@ export async function executeWorkflowAgentNode(
       finishReason: debug?.finishReason,
       failurePhase,
     })
+    await recordTokenRate()
+
     if (status === "failed") {
       reportRunFailure(input.host, executionError, {
         projectId: context.id,

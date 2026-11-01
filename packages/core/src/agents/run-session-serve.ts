@@ -1,6 +1,8 @@
 import { captureSixbFailure, createSixbError, withFailureMessage } from "../errors/internal"
+import { isPlainRecord } from "../json"
 import type { LanguageModelRequest } from "../models/language-model"
 import { AGENT_RUN_FAILURE_CODES, type AgentRunRecord } from "../storage/agents"
+import type { AgentModelTokenRateSample } from "./context-token-rate"
 import { AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
@@ -55,12 +57,16 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
   context: (session) => session.context(),
   checkpoint: (session, [input]) =>
     session.checkpoint(input as Parameters<AgentRunSession["checkpoint"]>[0]),
-  finish: (session, [outcome, messages]) =>
-    finish(
+  finish: (session, [outcome, messages, tokenRate]) => {
+    const sample = tokenRateSample(tokenRate)
+    if (sample) session.noteTokenRate(sample)
+
+    return finish(
       session,
       outcome as Parameters<AgentRunSession["finish"]>[0],
       ownMessages(session.run, messages as Parameters<AgentRunSession["finish"]>[1])
-    ),
+    )
+  },
   assertOwned: (session) => session.assertOwned(),
   renewLease: (session, [leaseExpiresAt]) => renew(session, capLease(leaseExpiresAt as string)),
   "heldCalls.holdsRun": (session) => session.heldCalls.holdsRun(),
@@ -380,6 +386,16 @@ async function finish(
   }
   await session.events.publishRunFinished(finished)
   return finished
+}
+
+/** What a runner's calls measured, as its finish sends it: the store validates the values. */
+function tokenRateSample(value: unknown): AgentModelTokenRateSample | undefined {
+  if (!isPlainRecord(value)) return undefined
+
+  const { providerId, modelId, bytes, tokens } = value
+  if (typeof providerId !== "string" || typeof modelId !== "string") return undefined
+  if (typeof bytes !== "number" || typeof tokens !== "number") return undefined
+  return { providerId, modelId, bytes, tokens }
 }
 
 /**

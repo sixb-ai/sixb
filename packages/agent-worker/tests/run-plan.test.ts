@@ -83,6 +83,7 @@ describe("resolveRunPlan", () => {
     tools: [agentToolSpec(lookup, new Map())],
     sandboxModels: [],
     ontologyDocs: { files: [], index: [] },
+    bytesPerToken: 2.4,
   }
 
   test("takes the session's model and the plan's tool specs, and adds the harness's skills", () => {
@@ -91,6 +92,7 @@ describe("resolveRunPlan", () => {
     expect(resolved).toEqual({
       model,
       ontologyDocs: { files: [], index: [] },
+      bytesPerToken: 2.4,
       reasoning: "high",
       instructions: "Answer in French.",
       tools: [agentToolSpec(lookup, new Map())],

@@ -341,6 +341,54 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       expect(messages.messages.map((message) => message.id)).toContain("message-answer")
       session.close()
     })
+
+    // Guard proof: drop the record from AgentRunSession.finish, or the rate from the finish a runner
+    // sends over HTTP; the next run on the model starts from the default again.
+    test("records what its latest call measured once it ends, for the next run's plan", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const model = { providerId: "test", modelId: "test-model" }
+      const session = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!session) throw new Error("Expected the run to be claimed.")
+
+      expect((await session.plan()).bytesPerToken).toBe(2)
+      session.noteTokenRate({ ...model, bytes: 30_000, tokens: 10_000 })
+      session.noteTokenRate({ ...model, bytes: 24_000, tokens: 10_000 })
+      // Nothing is kept before the run's end.
+      expect(
+        await storage.agents.tokenRates.listLatest({ projectId: PROJECT_ID, ...model })
+      ).toEqual([])
+      const finished = await session.finish({ status: "succeeded", finishReason: "stop" })
+      session.close()
+
+      expect(
+        await storage.agents.tokenRates.listLatest({ projectId: PROJECT_ID, ...model })
+      ).toEqual([
+        {
+          projectId: PROJECT_ID,
+          ...model,
+          runId: run.id,
+          bytes: 24_000,
+          tokens: 10_000,
+          measuredAt: finished.completedAt!,
+        },
+      ])
+
+      const next = await storage.agents.runs.create({
+        id: "run-2",
+        projectId: PROJECT_ID,
+        executionId: await createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          runId: "run-2",
+        }),
+        threadId: run.threadId,
+        triggerMessageId: "message-run-2",
+        spec: { model: { provider: "test", modelId: "test-model" } },
+      })
+      const nextSession = await claim(host, { run: next, leaseExpiresAt: LEASE })
+      if (!nextSession) throw new Error("Expected the next run to be claimed.")
+      expect((await nextSession.plan()).bytesPerToken).toBe(2.4)
+      nextSession.close()
+    })
   })
 
   describe("a cancel recorded on the run", () => {
