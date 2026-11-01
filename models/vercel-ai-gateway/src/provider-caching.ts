@@ -28,9 +28,10 @@ export interface GatewayPromptCaching {
  *   caching. Explicit-caching providers such as Anthropic then cache the conversation tail, and
  *   `cache_anchor_items` also marks the leading system messages, which hold across turns even
  *   when replayed history differs. Gateway reads both only as top-level fields.
- * - A one-shot request (compaction summaries, `generate()`) is read once, so a cache write would
- *   only add 25% to its input price. It gets no automatic caching, and OpenAI GPT-5.6 and later,
- *   which cache implicitly, are told to write nothing.
+ * - A one-shot request (`generate()`) is read once, so a cache write would only add 25% to its
+ *   input price. It gets no automatic caching, and OpenAI GPT-5.6 and later, which cache
+ *   implicitly, are told to write nothing. A compaction summary is none: it continues its
+ *   conversation's request, tools included, so it reads that cache and keeps its lifetime.
  * - `caching: "off"` caches nothing; `"auto"` caches a one-shot request too.
  * - An intent caches what an absent choice would. Its `"long"` lifetime asks for the hour-long
  *   cache (`cache_ttl: "1h"`, a warning and never an error where the model has none), and its key
