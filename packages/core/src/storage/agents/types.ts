@@ -235,6 +235,7 @@ export type AgentRunKind = "conversation" | "subagent"
 export const AGENT_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "agent.context_limit_exceeded",
   "agent.execution_failed",
   "ai.usage_limit_exceeded",
   "ai.usage_limit_unavailable",

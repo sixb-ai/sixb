@@ -87,6 +87,9 @@ export function selectActiveRunId(sources: {
   )
 }
 
+/** A conversation too long for its model, even compacted: it fails the same way when run again. */
+export const CONTEXT_LIMIT_EXCEEDED = "agent.context_limit_exceeded"
+
 export interface ActiveTurnSources {
   readonly activeRunId: string | null
   /** The canonical run from an in-flight send, when it belongs to the current thread. */

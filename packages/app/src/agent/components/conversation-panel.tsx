@@ -140,7 +140,7 @@ export function ConversationPanel({
                 <p className="max-w-md text-sm text-destructive">{messagesError}</p>
               </div>
             ) : (
-              <Transcript {...transcript} />
+              <Transcript onNewThread={onNewChat} {...transcript} />
             )}
           </div>
 

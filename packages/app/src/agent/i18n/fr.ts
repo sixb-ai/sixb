@@ -216,6 +216,8 @@ export const fr: Translation<AgentMessages> = {
     retry: "Réessayer",
     retrying: "Nouvelle tentative…",
     notStarted: "Je n’ai pas pu commencer à répondre.",
+    contextFull:
+      "Cette conversation est trop longue pour ce modèle. Ouvrez un nouveau fil, ou choisissez un modèle au contexte plus grand.",
     notFinished: "Je n’ai pas pu terminer cette réponse.",
     interrupted: "La réponse a été interrompue avant la fin.",
     reconnecting: "Connexion perdue — reconnexion…",
