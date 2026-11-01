@@ -39,7 +39,6 @@ beforeAll(async () => {
     SELECT 'bench', 'User', lpad(n::text, 5, '0'), 'group', 'Small', '001', NULL, now(), now(), 'seed'
     FROM generate_series(1, 5000) n`
   await storage.ensureObjectQueryIndexes([
-    { projectId: "bench", objectTypeId: "Small", kind: "incomingLinks" },
     {
       projectId: "bench",
       objectTypeId: "User",

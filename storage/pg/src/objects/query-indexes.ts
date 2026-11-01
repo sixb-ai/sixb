@@ -26,7 +26,6 @@ export type PgObjectQueryIndex = PgObjectQueryIndexScope &
           readonly scalarKind?: QueryScalarKind
         }[]
       }
-    | { readonly kind: "incomingLinks"; readonly where?: never }
     | { readonly kind: "text"; readonly propertyId: string }
     | { readonly kind: "value"; readonly propertyId: string }
     | { readonly kind: "count" }
@@ -39,11 +38,7 @@ export async function ensurePgObjectQueryIndexes(
   schema: string,
   indexes: readonly PgObjectQueryIndex[]
 ): Promise<readonly string[]> {
-  const definitions = indexes.map((index) => ({
-    table: index.kind === "incomingLinks" ? "links" : "objects",
-    expression: compileIndex(index),
-    index,
-  }))
+  const definitions = indexes.map((index) => ({ expression: compileIndex(index), index }))
   if (indexes.some((index) => index.kind === "text")) {
     const [extension] = await sql<{ ready: boolean }[]>`
       SELECT EXISTS (
@@ -82,19 +77,12 @@ export async function ensurePgObjectQueryIndexes(
 async function createQueryIndex(
   connection: ReservedSQL,
   schema: string,
-  definition: { table: string; expression: string; index: PgObjectQueryIndex }
+  definition: { expression: string; index: PgObjectQueryIndex }
 ): Promise<string> {
-  // An object index lives on its type's partition, so its expression no longer names the type.
-  const table =
-    definition.index.kind === "incomingLinks"
-      ? definition.table
-      : await ensureObjectPartition(connection, schema, definition.index.objectTypeId)
+  // An index lives on its type's partition, so its expression no longer names the type.
+  const table = await ensureObjectPartition(connection, schema, definition.index.objectTypeId)
   const name = `sixb_query_${createHash("sha256")
-    .update(
-      definition.index.kind === "incomingLinks"
-        ? `${definition.table}:${definition.expression}`
-        : `${definition.index.objectTypeId}:${definition.expression}`
-    )
+    .update(`${definition.index.objectTypeId}:${definition.expression}`)
     .digest("hex")
     .slice(0, 32)}`
   await connection.unsafe(
@@ -147,7 +135,6 @@ async function ensureExpressionStatistics(
   // query with its partition's statistics, so they live there, and ANALYZE stays per type.
   const expressionsByType = new Map<string, Set<string>>()
   for (const index of indexes) {
-    if (index.kind === "incomingLinks") continue
     const expressions = expressionsByType.get(index.objectTypeId) ?? new Set<string>()
     for (const expression of statisticsExpressions(index)) expressions.add(expression)
     expressionsByType.set(index.objectTypeId, expressions)
@@ -174,9 +161,7 @@ async function ensureExpressionStatistics(
   }
 }
 
-function statisticsExpressions(
-  index: Exclude<PgObjectQueryIndex, { kind: "incomingLinks" }>
-): string[] {
+function statisticsExpressions(index: PgObjectQueryIndex): string[] {
   const equality = new Set(Object.keys(index.where ?? {}))
   if (index.kind === "filter") for (const property of index.properties) equality.add(property)
   if (index.kind === "sort") for (const property of index.equality ?? []) equality.add(property)
@@ -192,11 +177,6 @@ function statisticsExpressions(
 }
 
 function compileIndex(index: PgObjectQueryIndex): string {
-  if (index.kind === "incomingLinks") {
-    if (index.where)
-      throw new Error("[SixbPg] Incoming link indexes do not accept object property conditions")
-    return `(target_id, link_id, source_type_id, source_id) INCLUDE (project_id, target_type_id) WHERE project_id = ${literal(index.projectId)} AND target_type_id = ${literal(index.objectTypeId)}`
-  }
   const predicate = [`project_id = ${literal(index.projectId)}`]
   for (const [propertyId, value] of Object.entries(index.where ?? {}).sort(([a], [b]) =>
     a.localeCompare(b)

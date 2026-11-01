@@ -155,7 +155,7 @@ test("failed preparation does not record success and can resume on a later start
   })
   try {
     await sql.begin(async (tx) => {
-      await tx`LOCK TABLE links IN ACCESS EXCLUSIVE MODE`
+      await tx`LOCK TABLE objects_default IN ACCESS EXCLUSIVE MODE`
       await expect(
         prepareObjectQueries({ projectId: "p", ontology, storage: impatient })
       ).rejects.toThrow()

@@ -35,12 +35,6 @@ console.log(
 )
 console.timeEnd("text")
 
-for (const objectTypeId of ["City", "User"])
-  console.log(
-    await pg.ensureObjectQueryIndexes([
-      { projectId: "query-benchmark", objectTypeId, kind: "incomingLinks" },
-    ])
-  )
 await sql.unsafe("VACUUM (ANALYZE) objects")
 await sql.unsafe("VACUUM (ANALYZE) links")
 console.log(await sql`SELECT pg_size_pretty(pg_total_relation_size('objects')) AS objects`)
