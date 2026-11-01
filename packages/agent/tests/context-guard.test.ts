@@ -83,7 +83,7 @@ function step(
     stepIndex,
     messages,
     steps: completed,
-    model: undefined as never,
+    model: { providerId: "mock", modelId: "model" } as never,
     signal: new AbortController().signal,
   }
 }
@@ -256,7 +256,7 @@ describe("createAgentContextGuard", () => {
   })
 
   // Reproduce: measure every request whole in ContextGuard.measure; the small request then looks
-  // far under its limit, though the last call read 90,000 tokens.
+  // far under its limit, though the last call read 62,000 tokens.
   test("weighs a request from what the last call really read", async () => {
     const guard = createAgentContextGuard({ budget: limited(60_000), tools: [] })
     const messages = [...HEAD, ...Array.from({ length: 6 }, (_, i) => readStep(i, 3_000)).flat()]
@@ -266,7 +266,7 @@ describe("createAgentContextGuard", () => {
     }
 
     const prepared = await guard.prepareStep(
-      step(6, messages, steps(6, { inputTokens: 90_000, outputTokens: 10 }))
+      step(6, messages, steps(6, { inputTokens: 62_000, outputTokens: 10 }))
     )
 
     expect(outputs(prepared?.messages ?? messages)[0]).toBe(clearedToolResultText("read"))
@@ -530,5 +530,40 @@ describe("what a turn adds", () => {
     )
 
     expect(Math.max(...counts)).toBeLessThanOrEqual(SMALL.inputBudgetTokens)
+  })
+})
+
+describe("a request nothing more can reduce", () => {
+  /** A 65,536-token window: 49,152 tokens of input at most, and the 16,384 reserve. */
+  const budget = limited(49_152)
+
+  /** One message the guard cannot clear, cut nor compact, of `bytes` of prose. */
+  const request = (bytes: number): ModelMessage[] => [
+    { role: "system", content: "You read." },
+    { role: "user", content: [{ type: "text", text: "word ".repeat(bytes / 5) }] },
+  ]
+
+  // Reproduce: return the request as it is from ContextGuard.sending past the limit; it then goes
+  // out with the whole reserve, and input and answer pass the window by about 5,000 tokens.
+  test("goes out past the limit with only the room the window leaves for its answer", async () => {
+    const guard = createAgentContextGuard({ budget, tools: [] })
+    const messages = request(162_000)
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(tokens(messages)).toBeGreaterThan(budget.inputBudgetTokens)
+    expect(prepared?.maxOutputTokens).toBe(budget.windowTokens - tokens(messages))
+    expect(prepared?.maxOutputTokens).toBeLessThan(budget.reserveTokens)
+  })
+
+  // Reproduce: send whatever the room (drop the throw from ContextGuard.sending); a request that
+  // leaves 4,000 tokens of the window goes out, and its answer is cut off almost at once.
+  test("is not sent when it leaves less room than an answer is worth", async () => {
+    const guard = createAgentContextGuard({ budget, tools: [] })
+
+    const refused = await guard.prepareStep(step(0, request(184_000))).catch((error) => error)
+
+    expect(refused).toBeInstanceOf(ModelProviderError)
+    expect(refused).toMatchObject({ reason: "context-window-exceeded" })
   })
 })
