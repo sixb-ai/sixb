@@ -155,6 +155,13 @@ describe("the context meter", () => {
     expect((length - offset) / length).toBeGreaterThan(1 / 15)
     low.unmount()
 
+    // Removal proof: leave the share's figures out of the trigger; a nearly empty ring beside a
+    // conversation that streams then reads as a loading spinner. Its name still says it all.
+    const quiet = render(<ContextMeter context={context({ usedTokens: 3_700 })} />)
+    expect(meter(quiet).textContent).toBe("2%")
+    expect(meter(quiet).getAttribute("aria-label")).toBe("Context: 3.7k of 184k tokens")
+    quiet.unmount()
+
     const view = render(<ContextMeter context={context()} condensing />)
     const button = view.getByRole("button", { name: "Condensing the conversation" })
     expect(button.dataset.condensing).toBe("true")
@@ -218,8 +225,8 @@ describe("the context meter", () => {
     try {
       const view = render(<ContextMeter context={context()} modelName="Claude Haiku 4.5" />)
       const button = meter(view)
-      // A fixed 36px target that never shrinks the composer's text below it.
-      expect(button.className).toContain("size-9")
+      // A 36px-high target that never shrinks the composer's text below it.
+      expect(button.className).toContain("h-9")
       expect(button.className).toContain("shrink-0")
 
       fireEvent.click(button)
