@@ -735,6 +735,28 @@ export const en = {
     create: "Create fresh sandbox",
     ownerOnly: (owner: string) => `Only ${owner} can start this conversation with a fresh sandbox.`,
   },
+  /** A conversation that runs on its owner's computer, as its owner sees it. */
+  computer: {
+    online: "sixb is open there",
+    offline: "sixb is closed there",
+    offlineNotice: (computer: string, folder: string) =>
+      `${computer} is offline. Your message waits until sixb is open in ${folder} with messages from the web on.`,
+    noFolder:
+      "This conversation has no folder yet. Open sixb in its folder and press ctrl+f, or continue in the cloud.",
+    waitingFor: (computer: string) => `Waiting for ${computer}`,
+    continueInCloud: "Continue in the cloud",
+    moving: "Moving…",
+    moveFailed: "Could not move it to the cloud. Try again.",
+    moveBusy: "A turn is running or waiting for your approval. Stop or answer it first.",
+    confirmTitle: "Continue in the cloud?",
+    confirmDescription:
+      "This conversation will run in the cloud from now on, including any waiting message. Its folder's files stay on your computer, and it can't move back.",
+    cancel: "Cancel",
+    movedToCloud: "Moved to the cloud. Files from before stayed on the computer.",
+    movedToFolder: (folder: string) =>
+      `Moved to ${folder}. Files from before stayed where they were.`,
+    movedElsewhere: "Moved to another folder. Files from before stayed where they were.",
+  },
   /** A conversation its owner shares with other users of the project. */
   sharing: {
     share: "Share thread",

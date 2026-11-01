@@ -2,6 +2,7 @@ import type { FileRef } from "../blob-storage/types"
 import type { LanguageModel, LanguageModelStreamEvent } from "../models"
 import type {
   AgentRunRecord,
+  AgentThreadComputer,
   ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "../storage/agents"
@@ -232,8 +233,11 @@ export async function claimAgentRunOverHttp(input: {
   readonly runId: string
   readonly authorization: string
   readonly leaseExpiresAt: string
-  /** The computer claiming it: a computer's turn runs only on the one that runs its thread. */
-  readonly computerId?: string
+  /**
+   * The computer claiming it, and its folder: a computer's turn runs only there, where its thread
+   * runs.
+   */
+  readonly computer?: AgentThreadComputer
   readonly fetch?: (request: Request) => Promise<Response>
 }): Promise<AgentRunSession<ConversationAgentRunRecord> | null> {
   const send = input.fetch ?? ((request: Request) => fetch(request))
@@ -243,7 +247,7 @@ export async function claimAgentRunOverHttp(input: {
       headers: { authorization: input.authorization, "content-type": "application/json" },
       body: encodeWireValue({
         leaseExpiresAt: input.leaseExpiresAt,
-        ...(input.computerId === undefined ? {} : { computerId: input.computerId }),
+        ...(input.computer === undefined ? {} : { computer: input.computer }),
       }),
     })
   )

@@ -1,8 +1,10 @@
 import type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
+  AgentComputerActivityEvent,
   AgentRunActivityEvent,
   AgentRunStreamEvent,
+  AgentThreadMovedEvent,
 } from "@sixb/core/agents/streams"
 // Import the wire validator from the browser-safe streams subpath: the `@sixb/core` root pulls in
 // node-only runtime (e.g. `node:crypto`), which breaks browser bundles.
@@ -20,9 +22,11 @@ import {
 export type {
   AgentActivityEvent,
   AgentApprovalActivityEvent,
+  AgentComputerActivityEvent,
   AgentRunActivityEvent,
   AgentRunFailure,
   AgentRunStreamEvent,
+  AgentThreadMovedEvent,
   ModelUiChunk,
 } from "@sixb/core/agents/streams"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
@@ -107,6 +111,13 @@ export interface AgentActivitySocketOptions {
   readonly onActivity: (event: AgentRunActivityEvent) => void
   /** One of a turn's held calls was held, decided, ran, or was set aside. */
   readonly onApprovalActivity?: (event: AgentApprovalActivityEvent) => void
+  /**
+   * `sixb` opened or closed on one of your computers, in a folder: your threads there are
+   * reachable, or not.
+   */
+  readonly onComputerActivity?: (event: AgentComputerActivityEvent) => void
+  /** One of your threads moved to another folder or computer, or to the cloud. */
+  readonly onThreadMoved?: (event: AgentThreadMovedEvent) => void
   /** Called after each initial or reconnect subscription, so durable state can be reconciled. */
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
@@ -173,8 +184,11 @@ export function createAgentActivitySocket(options: AgentActivitySocketOptions): 
       const message = parseAgentRunStreamServerMessage(data)
       if (!message) return
       if (message.type === "activity") {
-        if (message.event.type === "agent.run.activity") options.onActivity(message.event)
-        else options.onApprovalActivity?.(message.event)
+        const { event } = message
+        if (event.type === "agent.run.activity") options.onActivity(event)
+        else if (event.type === "agent.approval.activity") options.onApprovalActivity?.(event)
+        else if (event.type === "agent.thread.moved") options.onThreadMoved?.(event)
+        else options.onComputerActivity?.(event)
         return
       }
       if (message.type === "subscribed.activity") {

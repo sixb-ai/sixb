@@ -1,11 +1,14 @@
 import type { Database } from "bun:sqlite"
 import {
+  assertAgentThreadComputer,
   assertAssignableComputer,
-  assertComputerId,
+  assertComputerPlace,
   assertConversationThreadRow,
-  assertRunsOn,
+  assertMovableToCloud,
+  movesComputerPlace,
   participantsToAdd,
   planAgentThreadFork,
+  queuedTurnInCloud,
   remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
@@ -13,6 +16,7 @@ import {
 import {
   type AddAgentThreadParticipantsInput,
   type AgentContextCheckpointRecord,
+  type AgentRunRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
@@ -25,6 +29,8 @@ import {
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type MoveAgentThreadToCloudInput,
+  type MoveAgentThreadToCloudResult,
   type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
@@ -68,7 +74,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    assertRunsOn(input.runsOn, "Agent thread", "SixbSqlite")
+    assertComputerPlace(input.runsOn, input.computer, "SixbSqlite")
     const sandboxParams =
       input.sandboxParams === undefined
         ? null
@@ -88,13 +94,16 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             title,
             sandbox_params,
             runs_on,
+            computer_id,
+            computer_name,
+            computer_folder,
             status,
             active_run_id,
             last_message_at,
             message_count,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
         `
         )
         .run(
@@ -105,6 +114,9 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           input.title ?? null,
           sandboxParams,
           input.runsOn ?? null,
+          input.computer?.id ?? null,
+          input.computer?.name ?? null,
+          input.computer?.folder ?? null,
           input.status ?? "active",
           createdAt.toISOString(),
           updatedAt.toISOString()
@@ -123,16 +135,25 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return this.requireThread(input.projectId, input.id)
   }
 
+  private activeRunOf(projectId: string, thread: AgentThreadRecord | null): AgentRunRecord | null {
+    const row = thread?.activeRunId
+      ? (this.db
+          .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+          .get(projectId, thread.activeRunId) as AgentRunRow | null)
+      : null
+    return row ? rowToRunRecord(row) : null
+  }
+
   async fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord> {
     return this.db
       .transaction(() => {
         const source = this.db
           .query(
-            "SELECT id, kind, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?"
+            "SELECT id, kind, active_run_id, runs_on, moved_at FROM agent_threads WHERE project_id = ? AND id = ?"
           )
           .get(input.projectId, input.sourceThreadId) as Pick<
           AgentThreadRow,
-          "id" | "kind" | "active_run_id"
+          "id" | "kind" | "active_run_id" | "runs_on" | "moved_at"
         > | null
 
         if (!source) {
@@ -179,6 +200,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         const plan = planAgentThreadFork(
           input,
           {
+            workspace: { runsOn: source.runs_on, movedAt: source.moved_at },
             ...(activeRun?.trigger_message_id
               ? { triggerMessageId: activeRun.trigger_message_id }
               : {}),
@@ -335,6 +357,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       args.push(input.participantPrincipal.type, input.participantPrincipal.id)
     }
 
+    if (input.activeOnComputer) {
+      whereClauses.push("computer_id = ? AND computer_folder = ? AND active_run_id IS NOT NULL")
+      args.push(input.activeOnComputer.id, input.activeOnComputer.folder)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = queryAgentList<AgentThreadRow>({
       db: this.db,
@@ -411,22 +438,71 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async assignComputer(input: AssignAgentThreadComputerInput): Promise<AgentThreadRecord> {
-    assertComputerId(input.computerId, "SixbSqlite")
-    this.db
-      .query(`
-        UPDATE agent_threads SET computer_id = ?
-        WHERE project_id = ? AND id = ? AND runs_on = 'computer'
-          ${input.ifUnassigned ? "AND computer_id IS NULL" : ""}
-      `)
-      .run(input.computerId, input.projectId, input.id)
+    assertAgentThreadComputer(input.computer, "SixbSqlite")
+    return this.db
+      .transaction(() => {
+        const row = this.db
+          .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.id) as AgentThreadRow | null
+        const thread = row ? rowToThreadRecord(row) : null
+        assertAssignableComputer(
+          thread,
+          this.activeRunOf(input.projectId, thread),
+          input.computer,
+          input.id,
+          "SixbSqlite"
+        )
+        const movedAt = movesComputerPlace(thread, input.computer)
+          ? (input.movedAt ?? new Date()).toISOString()
+          : null
+        this.db
+          .query(`
+            UPDATE agent_threads
+            SET computer_id = ?, computer_name = ?, computer_folder = ?,
+              moved_at = COALESCE(?, moved_at)
+            WHERE project_id = ? AND id = ?
+          `)
+          .run(
+            input.computer.id,
+            input.computer.name,
+            input.computer.folder,
+            movedAt,
+            input.projectId,
+            input.id
+          )
+        return this.requireThread(input.projectId, input.id)
+      })
+      .immediate()
+  }
 
-    // Read in the same tick: nothing else writes to the database in between.
-    const row = this.db
-      .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
-      .get(input.projectId, input.id) as AgentThreadRow | null
-    const thread = row ? rowToThreadRecord(row) : null
-    assertAssignableComputer(thread, input.id, "SixbSqlite")
-    return thread
+  async moveToCloud(input: MoveAgentThreadToCloudInput): Promise<MoveAgentThreadToCloudResult> {
+    return this.db
+      .transaction(() => {
+        const row = this.db
+          .query("SELECT * FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.id) as AgentThreadRow | null
+        const thread = row ? rowToThreadRecord(row) : null
+        const active = this.activeRunOf(input.projectId, thread)
+        assertMovableToCloud(thread, active, input.id, "SixbSqlite")
+
+        const queued = queuedTurnInCloud(active)
+        if (queued) {
+          this.db
+            .query("UPDATE agent_runs SET spec = ? WHERE project_id = ? AND id = ?")
+            .run(JSON.stringify(queued.spec), input.projectId, queued.id)
+        }
+        this.db
+          .query(`
+            UPDATE agent_threads
+            SET runs_on = NULL, computer_id = NULL, computer_name = NULL, computer_folder = NULL,
+              moved_at = ?
+            WHERE project_id = ? AND id = ?
+          `)
+          .run((input.movedAt ?? new Date()).toISOString(), input.projectId, input.id)
+        const moved = this.requireThread(input.projectId, input.id)
+        return { thread: moved, ...(queued ? { queued } : {}) }
+      })
+      .immediate()
   }
 
   async listParticipants(
@@ -482,9 +558,10 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             active_run_id,
             last_message_at,
             message_count,
+            moved_at,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -498,6 +575,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           thread.status,
           thread.lastMessageAt?.toISOString() ?? null,
           thread.messageCount,
+          thread.movedAt?.toISOString() ?? null,
           thread.createdAt.toISOString(),
           thread.updatedAt.toISOString()
         )

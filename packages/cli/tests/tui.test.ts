@@ -186,7 +186,7 @@ describe("what a message is sent with", () => {
 
   test("asks for nothing the person did not choose, so the project's defaults apply", () => {
     const models = [model("a", { isDefault: true }), model("b")]
-    const settings = { place: "computer", approvalMode: "manual" } as const
+    const settings = { place: "computer", approvalMode: "manual", continueFromWeb: true } as const
     expect(messageSelection(models, settings)).toEqual({})
     expect(modelLabel(models, settings)).toEqual({ name: "a" })
     expect(
@@ -200,7 +200,9 @@ describe("what a message is sent with", () => {
 
   test("names Auto when the project picks each message's model by tier", () => {
     const models = [model("a", { tier: "standard" }), model("b", { tier: "heavy" })]
-    expect(modelLabel(models, { place: "cloud", approvalMode: "auto" })).toEqual({ name: "Auto" })
+    expect(
+      modelLabel(models, { place: "cloud", approvalMode: "auto", continueFromWeb: true })
+    ).toEqual({ name: "Auto" })
   })
 })
 
@@ -239,7 +241,7 @@ describe("formatting", () => {
     expect(friendlyPath("/Users/me/work/q3/report.md", "/Users/me/work/q3")).toBe("report.md")
     expect(
       friendlyPath(
-        "/private/var/folders/g5/x/T/sixb-agent/agt_run_1/children/totals/out.md",
+        "/private/var/folders/g5/x/T/sixb-agent/agt_run_1/.sixb/agent/children/totals/out.md",
         "/Users/me/work/q3"
       )
     ).toBe("run/children/totals/out.md")

@@ -326,6 +326,28 @@ export async function turnPausesOnHeldCalls(
   return !(await hasActiveChildren(agents, run))
 }
 
+/**
+ * Whether the thread's latest turn paused on calls that may still resume it. Those calls were asked
+ * for and reviewed where it runs, so it moves only once they are answered or the turn is stopped.
+ */
+export async function threadHoldsPausedTurn(
+  agents: AgentStorage,
+  thread: { readonly projectId: string; readonly id: string }
+): Promise<boolean> {
+  const { projectId, id: threadId } = thread
+  const { runs } = await agents.runs.list({
+    projectId,
+    threadId,
+    kinds: ["conversation"],
+    order: "desc",
+    limit: 1,
+  })
+  const latest = runs[0]
+  if (!isAwaitingApprovalRun(latest) || !latest) return false
+  const approvals = await listTurnApprovals(agents, { projectId, runId: latest.id })
+  return turnResumeReadiness(approvals) !== "closed"
+}
+
 /** Whether any child of the turn is queued or running. */
 export async function hasActiveChildren(
   agents: AgentStorage,

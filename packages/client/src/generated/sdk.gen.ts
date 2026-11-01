@@ -322,6 +322,9 @@ import type {
   HeadWorkflowRunFileContentData,
   HeadWorkflowRunFileContentErrors,
   HeadWorkflowRunFileContentResponses,
+  HoldAgentComputerSessionData,
+  HoldAgentComputerSessionErrors,
+  HoldAgentComputerSessionResponses,
   IssueSharedAccessGrantData,
   IssueSharedAccessGrantErrors,
   IssueSharedAccessGrantResponses,
@@ -466,6 +469,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  MoveAgentThreadToCloudData,
+  MoveAgentThreadToCloudErrors,
+  MoveAgentThreadToCloudResponses,
   MoveAgentThreadToComputerData,
   MoveAgentThreadToComputerErrors,
   MoveAgentThreadToComputerResponses,
@@ -493,6 +499,9 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionErrors,
   RefreshAuthSessionResponses,
+  ReleaseAgentComputerSessionData,
+  ReleaseAgentComputerSessionErrors,
+  ReleaseAgentComputerSessionResponses,
   RemoveAgentThreadParticipantData,
   RemoveAgentThreadParticipantErrors,
   RemoveAgentThreadParticipantResponses,
@@ -3228,9 +3237,30 @@ export const headAgentChildFileContent = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Move a thread to another of your computers
+ * Move a thread from your computer to the cloud
  *
- * A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.
+ * Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.
+ */
+export const moveAgentThreadToCloud = <ThrowOnError extends boolean = false>(
+  options: Options<MoveAgentThreadToCloudData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    MoveAgentThreadToCloudResponses,
+    MoveAgentThreadToCloudErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/computer",
+    ...options,
+  })
+
+/**
+ * Move a thread to one of your computers, in a folder there
+ *
+ * A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.
  */
 export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
   options: Options<MoveAgentThreadToComputerData, ThrowOnError>
@@ -3245,6 +3275,52 @@ export const moveAgentThreadToComputer = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/computer",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Close a computer session
+ *
+ * `sixb` closes its session when it quits.
+ */
+export const releaseAgentComputerSession = <ThrowOnError extends boolean = false>(
+  options: Options<ReleaseAgentComputerSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    ReleaseAgentComputerSessionResponses,
+    ReleaseAgentComputerSessionErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-computers/sessions/{sessionId}",
+    ...options,
+  })
+
+/**
+ * Open or renew a computer session
+ *
+ * `sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.
+ */
+export const holdAgentComputerSession = <ThrowOnError extends boolean = false>(
+  options: Options<HoldAgentComputerSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    HoldAgentComputerSessionResponses,
+    HoldAgentComputerSessionErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-computers/sessions/{sessionId}",
     ...options,
     headers: {
       "Content-Type": "application/json",

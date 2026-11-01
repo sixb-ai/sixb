@@ -15,7 +15,7 @@ import { ChildRunner } from "./run-child"
 import { runConversationTurn } from "./run-conversation-turn"
 import { runApiCredential, runnerTokenFor, runTokenFor } from "./run-credential"
 import type { OpenRunSandbox } from "./run-environment"
-import type { RunSandbox } from "./run-sandbox"
+import { type RunSandbox, SANDBOX_CONTEXT_DIRECTORY } from "./run-sandbox"
 import type { AgentRunSettings } from "./types"
 
 // A turn on its owner's computer: claimed over HTTP as them, run in their folder, its children
@@ -38,11 +38,11 @@ export interface ComputerRunnerOptions {
   /** The user's own credential, as an `Authorization` header value, read for each claim. */
   authorization(): Promise<string>
   /**
-   * This computer's id, which each claim names: a thread runs on one of its owner's computers, and
-   * only that one claims its turns.
+   * This computer, as each claim names it with the folder: a thread runs on one of its owner's
+   * computers, in one folder there, and only `sixb` open there claims its turns.
    */
-  computerId(): Promise<string>
-  /** The folder the user's turns work in. */
+  computer(): Promise<{ readonly id: string; readonly name: string }>
+  /** The folder the user's turns work in: its real path. */
   readonly folder: string
   /** Where each run's own files go, a directory per run, removed when the run ends. */
   readonly runFilesRoot: string
@@ -71,20 +71,25 @@ export class ComputerRunner {
    * ended already, or another runner holds it. `signal` stops the runner: the turn ends
    * interrupted, its end recorded.
    */
-  async runTurn(runId: string, signal: AbortSignal): Promise<boolean> {
+  async runTurn(
+    runId: string,
+    signal: AbortSignal,
+    onClaimed?: (run: ConversationAgentRunRecord) => void
+  ): Promise<boolean> {
     const { apiUrl } = this.options
     const fetch = this.options.fetch
     const session = await claimAgentRunOverHttp({
       apiUrl,
       runId,
       authorization: await this.options.authorization(),
-      computerId: await this.options.computerId(),
+      computer: { ...(await this.options.computer()), folder: this.options.folder },
       leaseExpiresAt: lease(),
       ...(fetch === undefined ? {} : { fetch }),
     })
     if (!session) return false
 
     const { run } = session
+    onClaimed?.(run)
     const turn: HttpAgentRunSessionInput<ConversationAgentRunRecord> = {
       apiUrl,
       runnerToken: runnerTokenFor({
@@ -233,9 +238,11 @@ export class ComputerRunner {
     const { apiUrl } = this.options
     const credential = runApiCredential(apiUrl, runTokenFor(input))
     return async ({ signal }) => {
-      await mkdir(join(this.options.runFilesRoot, input.runId), { recursive: true })
+      // Named as a cloud sandbox names them, so a path reads as the run's files wherever it ran.
+      const runDirectory = join(this.options.runFilesRoot, input.runId)
+      await mkdir(join(runDirectory, SANDBOX_CONTEXT_DIRECTORY), { recursive: true })
       // Real paths: the OS sandbox compares them, and the agent names files by them.
-      const runFiles = await realpath(join(this.options.runFilesRoot, input.runId))
+      const runFiles = await realpath(join(runDirectory, SANDBOX_CONTEXT_DIRECTORY))
       const folder = input.folder === undefined ? undefined : await realpath(input.folder)
       const sandbox: RunSandbox = {
         waitBeforeModel: folder !== undefined,
@@ -253,7 +260,7 @@ export class ComputerRunner {
         }),
         release: async ({ sandbox }) => {
           await sandbox.destroy()
-          await rm(runFiles, { recursive: true, force: true })
+          await rm(runDirectory, { recursive: true, force: true })
         },
       }
       return { sandbox }

@@ -99,6 +99,8 @@ export interface RenderAgentSystemPromptInput {
   /** Ontology reference files to list; omitted, the prompt does not mention them. */
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   readonly sandboxResetAt?: string
+  /** When the conversation's turns moved to this workspace, from a computer or another folder. */
+  readonly workspaceMovedAt?: string
   readonly workspace?: AgentWorkspacePromptContext
   readonly facts?: AgentRuntimeFacts
   /** Models the sandbox CLI can call; omitted, the prompt does not mention them. */
@@ -166,7 +168,12 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
     ),
     promptSection(
       "sandbox_state",
-      input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode)
+      [
+        input.workspaceMovedAt && renderWorkspaceMove(input.workspaceMovedAt),
+        input.sandboxResetAt && renderSandboxReset(input.sandboxResetAt, input.mode),
+      ]
+        .filter(Boolean)
+        .join("\n\n")
     ),
     promptSection("agent_instructions", input.instructions),
     promptSection("workspace", input.workspace && renderWorkspaceContext(input.workspace)),
@@ -186,6 +193,11 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
   ]
     .filter(Boolean)
     .join("\n\n")
+}
+
+/** What a turn is told once its conversation moved here: from a computer, or another folder. */
+function renderWorkspaceMove(movedAt: string): string {
+  return `This conversation moved to this workspace at ${movedAt}. The files and paths that earlier tool calls used were in the workspace it moved from and are not here. Conversation history and attachments remain available. Inspect this workspace before relying on earlier filesystem results. Whenever you report that this workspace is empty or that a file is missing, add that files from before the move stayed in the workspace it moved from.`
 }
 
 /** What a run is told once its thread's workspace was lost and created again. */

@@ -7,6 +7,7 @@ import type { FileRef } from "../blob-storage/types"
 import type { SixbFailure } from "../errors/types"
 import {
   type AddAgentThreadParticipantsInput,
+  type AgentComputerSessionRecord,
   type AgentRunExecution,
   type AgentRunFailureCode,
   type AgentStorage,
@@ -58,6 +59,8 @@ function failure(
 ): SixbFailure<AgentRunFailureCode> {
   return { code, message, retryable: false, at }
 }
+
+const laptop = { id: "cmp_laptop", name: "Anthony's MacBook Pro", folder: "/Users/anthony/sixb" }
 
 function at(value: string): Date {
   return new Date(value)
@@ -751,13 +754,37 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
     test("keeps a thread that runs on its owner's computer, and its turns' place", async () => {
       await withStorage(async (storage, fixture) => {
-        const thread = await storage.threads.create(threadInput({ runsOn: "computer" }))
-        expect(thread.runsOn).toBe("computer")
+        const thread = await storage.threads.create(
+          threadInput({ runsOn: "computer", computer: laptop })
+        )
+        expect(thread).toMatchObject({ runsOn: "computer", computer: laptop })
         await expect(storage.threads.getById({ projectId, id: thread.id })).resolves.toMatchObject({
           runsOn: "computer",
+          computer: laptop,
         })
         const cloud = await storage.threads.create(threadInput({ id: "thr_cloud" }))
         expect(cloud).not.toHaveProperty("runsOn")
+        expect(cloud).not.toHaveProperty("computer")
+
+        // A computer's thread says where it runs; a cloud thread names no computer.
+        await expectAgentError(
+          storage.threads.create(threadInput({ id: "thr_nowhere", runsOn: "computer" })),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.create(threadInput({ id: "thr_mixed", computer: laptop })),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.create(
+            threadInput({
+              id: "thr_control",
+              runsOn: "computer",
+              computer: { ...laptop, folder: "/Users/anthony/\u001b[2Jsixb" },
+            })
+          ),
+          "invalid_input"
+        )
 
         const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
         await createRun(storage, fixture, runInput({ id: "run_1", spec }))
@@ -777,42 +804,357 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
-    // Guard proof: drop `ifUnassigned` from a store's assignComputer; the second claim takes the
-    // thread from the laptop that runs it.
-    test("names the computer a computer's thread runs on, which only a move changes", async () => {
+    // Guard proof: drop `movesComputerPlace` from a store's assignComputer; a rename on the same
+    // folder records a move.
+    test("moves a computer's thread to another computer or folder, and says when", async () => {
       await withStorage(async (storage) => {
-        await storage.threads.create(threadInput({ runsOn: "computer" }))
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
         await storage.threads.create(threadInput({ id: "thr_cloud" }))
         const thread = { projectId, id: "thr_1" }
 
-        // The first claim names the computer; a later one from elsewhere keeps it.
-        await expect(
-          storage.threads.assignComputer({ ...thread, computerId: "laptop", ifUnassigned: true })
-        ).resolves.toMatchObject({ computerId: "laptop" })
-        await expect(
-          storage.threads.assignComputer({ ...thread, computerId: "desktop", ifUnassigned: true })
-        ).resolves.toMatchObject({ computerId: "laptop" })
+        // The same folder under a new name is no move.
+        const renamed = await storage.threads.assignComputer({
+          ...thread,
+          computer: { ...laptop, name: "Work laptop" },
+          movedAt: at("2026-06-23T11:00:00.000Z"),
+        })
+        expect(renamed.computer?.name).toBe("Work laptop")
+        expect(renamed).not.toHaveProperty("movedAt")
 
-        // A move names another.
-        await storage.threads.assignComputer({ ...thread, computerId: "desktop" })
+        const elsewhere = { ...laptop, folder: "/Users/anthony/other" }
+        await storage.threads.assignComputer({
+          ...thread,
+          computer: elsewhere,
+          movedAt: at("2026-06-23T12:00:00.000Z"),
+        })
         await expect(storage.threads.getById(thread)).resolves.toMatchObject({
-          computerId: "desktop",
+          computer: elsewhere,
+          movedAt: at("2026-06-23T12:00:00.000Z"),
         })
 
         await expectAgentError(
-          storage.threads.assignComputer({ projectId, id: "thr_cloud", computerId: "laptop" }),
+          storage.threads.assignComputer({ projectId, id: "thr_cloud", computer: laptop }),
           "invalid_input"
         )
         await expectAgentError(
-          storage.threads.assignComputer({ projectId, id: "thr_none", computerId: "laptop" }),
+          storage.threads.assignComputer({ projectId, id: "thr_none", computer: laptop }),
           "thread_not_found"
         )
         await expectAgentError(
-          storage.threads.assignComputer({ ...thread, computerId: " " }),
+          storage.threads.assignComputer({ ...thread, computer: { ...laptop, id: " " } }),
           "invalid_input"
         )
         expect(await storage.threads.getById({ projectId, id: "thr_cloud" })).not.toHaveProperty(
-          "computerId"
+          "computer"
+        )
+      })
+    })
+
+    // Guard proof: drop the run update from a store's moveToCloud; the queued turn still names the
+    // computer, so no worker takes it.
+    test("moves a computer's thread to the cloud with its queued turn, never while one runs", async () => {
+      await withStorage(async (storage, fixture) => {
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+
+        const moved = await storage.threads.moveToCloud({
+          projectId,
+          id: "thr_1",
+          movedAt: at("2026-06-23T12:00:00.000Z"),
+        })
+        expect(moved.thread).not.toHaveProperty("runsOn")
+        expect(moved.thread).not.toHaveProperty("computer")
+        expect(moved.thread.movedAt).toEqual(at("2026-06-23T12:00:00.000Z"))
+        expect(moved.queued).toMatchObject({ id: "run_1", status: "queued" })
+        expect(moved.queued?.spec).toEqual({ model: spec.model })
+        expect((await storage.runs.getById({ projectId, id: "run_1" }))?.spec).toEqual({
+          model: spec.model,
+        })
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toEqual(
+          moved.thread
+        )
+        await expectAgentError(
+          storage.threads.moveToCloud({ projectId, id: "thr_1" }),
+          "invalid_input"
+        )
+
+        // A turn running on the computer stays there, and so does its thread. Guard proof: drop
+        // the check from assertAssignableComputer; the turn goes on in a folder its thread left.
+        await storage.threads.create(
+          threadInput({ id: "thr_busy", runsOn: "computer", computer: laptop })
+        )
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({ id: "run_busy", threadId: "thr_busy", spec, execution: execution("busy") })
+        )
+        await expectAgentError(
+          storage.threads.moveToCloud({ projectId, id: "thr_busy" }),
+          "active_run_exists"
+        )
+        await expectAgentError(
+          storage.threads.assignComputer({
+            projectId,
+            id: "thr_busy",
+            computer: { ...laptop, folder: "/Users/anthony/other" },
+          }),
+          "active_run_exists"
+        )
+        // Renaming the computer it runs on moves nothing.
+        await storage.threads.assignComputer({
+          projectId,
+          id: "thr_busy",
+          computer: { ...laptop, name: "Work laptop" },
+        })
+        await expect(storage.threads.getById({ projectId, id: "thr_busy" })).resolves.toMatchObject(
+          { runsOn: "computer", computer: { ...laptop, name: "Work laptop" } }
+        )
+
+        // An idle thread moves alone.
+        await storage.threads.create(
+          threadInput({ id: "thr_idle", runsOn: "computer", computer: laptop })
+        )
+        const idle = await storage.threads.moveToCloud({ projectId, id: "thr_idle" })
+        expect(idle).not.toHaveProperty("queued")
+        expect(idle.thread.movedAt).toBeInstanceOf(Date)
+
+        await expectAgentError(
+          storage.threads.moveToCloud({ projectId, id: "thr_none" }),
+          "thread_not_found"
+        )
+      })
+    })
+
+    // Guard proof: drop the folder check from assertStartsOnComputer; a claim that passed its check
+    // just before a move starts the turn in the folder its thread left.
+    test("starts a computer's turn only where its thread runs now", async () => {
+      await withStorage(async (storage, fixture) => {
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        const elsewhere = { ...laptop, folder: "/Users/anthony/other" }
+        await storage.threads.assignComputer({ projectId, id: "thr_1", computer: elsewhere })
+
+        const start = (onComputer: typeof laptop) =>
+          storage.runs.start({
+            projectId,
+            id: "run_1",
+            execution: execution("laptop"),
+            onComputer,
+          })
+        await expectAgentError(start(laptop), "invalid_state")
+        await expect(start(elsewhere)).resolves.toMatchObject({ status: "running" })
+      })
+    })
+
+    // Guard proof: leave the filter out of a store's list; turns waiting for closed sixbs fill the
+    // worker's recovery scan, and a cloud turn whose publication failed is never found.
+    test("lists runs without the turns waiting for a computer", async () => {
+      await withStorage(async (storage, fixture) => {
+        const model = { provider: "test", modelId: "large" }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+        await createRun(
+          storage,
+          fixture,
+          runInput({ id: "run_computer", spec: { model, runsOn: "computer" } })
+        )
+        await createRun(
+          storage,
+          fixture,
+          runInput({
+            id: "run_cloud",
+            threadId: "thr_cloud",
+            spec: { model },
+            execution: execution("cloud"),
+          })
+        )
+
+        const listed = await storage.runs.list({
+          projectId,
+          statuses: ["queued"],
+          excludeComputerTurns: true,
+        })
+        expect(listed.runs.map((run) => run.id)).toEqual(["run_cloud"])
+        expect(listed.total).toBe(1)
+      })
+    })
+
+    // Guard proof: drop `workspace` from a store's fork; a fork of a computer's conversation reads
+    // its local paths as if they were in its cloud workspace.
+    test("forks a computer's thread into the cloud, as a move", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+
+        const createdAt = at("2026-06-23T12:00:00.000Z")
+        const fork = await storage.threads.fork(
+          forkInput({ sourceThreadId: "thr_1", id: "thr_fork", createdAt })
+        )
+        expect(fork).toMatchObject({ movedAt: createdAt })
+        expect(fork).not.toHaveProperty("runsOn")
+        await expect(storage.threads.getById({ projectId, id: "thr_fork" })).resolves.toMatchObject(
+          {
+            movedAt: createdAt,
+          }
+        )
+
+        const cloudFork = await storage.threads.fork(
+          forkInput({ sourceThreadId: "thr_cloud", id: "thr_cloud_fork" })
+        )
+        expect(cloudFork).not.toHaveProperty("movedAt")
+      })
+    })
+
+    // Guard proof: drop `onComputer` from a store's start; the laptop starts the turn that moved
+    // to the cloud, and the worker's run of it waits on a lease nobody gives back.
+    test("starts a computer's turn only while it still runs on the computer", async () => {
+      await withStorage(async (storage, fixture) => {
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        await storage.threads.moveToCloud({ projectId, id: "thr_1" })
+
+        const start = (id: string, token: string) =>
+          storage.runs.start({ projectId, id, execution: execution(token), onComputer: laptop })
+        await expectAgentError(start("run_1", "laptop"), "invalid_state")
+        expect((await storage.runs.getById({ projectId, id: "run_1" }))?.status).toBe("queued")
+
+        await storage.threads.create(
+          threadInput({ id: "thr_2", runsOn: "computer", computer: laptop })
+        )
+        await createRun(
+          storage,
+          fixture,
+          runInput({ id: "run_2", threadId: "thr_2", spec, execution: execution("second") })
+        )
+        await expect(start("run_2", "second")).resolves.toMatchObject({ status: "running" })
+      })
+    })
+
+    // Guard proof: drop assertTurnInThreadPlace from a store's create; a message asked for just
+    // before its thread moved to the cloud makes a computer's turn nothing claims or dispatches.
+    test("creates a turn only where its thread runs", async () => {
+      await withStorage(async (storage, fixture) => {
+        const model = { provider: "test", modelId: "large" }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(threadInput({ id: "thr_cloud" }))
+
+        await expectAgentError(
+          createRun(storage, fixture, runInput({ id: "run_1", spec: { model } })),
+          "invalid_state"
+        )
+        await expectAgentError(
+          createRun(
+            storage,
+            fixture,
+            runInput({ id: "run_2", threadId: "thr_cloud", spec: { model, runsOn: "computer" } })
+          ),
+          "invalid_state"
+        )
+        expect((await storage.threads.getById({ projectId, id: "thr_1" }))?.activeRunId).toBeNull()
+      })
+    })
+
+    // Guard proof: drop the activeOnComputer filter from a store's list; every thread of the
+    // owner comes back, idle or elsewhere.
+    test("lists an owner's threads with a turn active on a computer, in a folder", async () => {
+      await withStorage(async (storage, fixture) => {
+        const spec = { model: { provider: "test", modelId: "large" }, runsOn: "computer" as const }
+        const elsewhere = { ...laptop, folder: "/Users/anthony/other" }
+        await storage.threads.create(threadInput({ runsOn: "computer", computer: laptop }))
+        await storage.threads.create(
+          threadInput({ id: "thr_idle", runsOn: "computer", computer: laptop })
+        )
+        await storage.threads.create(
+          threadInput({ id: "thr_other", runsOn: "computer", computer: elsewhere })
+        )
+        await storage.threads.create(
+          threadInput({
+            id: "thr_theirs",
+            ownerPrincipal: otherUser,
+            runsOn: "computer",
+            computer: laptop,
+          })
+        )
+        await createRun(storage, fixture, runInput({ id: "run_1", spec }))
+        await createRun(
+          storage,
+          fixture,
+          runInput({ id: "run_2", threadId: "thr_other", spec, execution: execution("other") })
+        )
+        await createRun(
+          storage,
+          fixture,
+          runInput({ id: "run_3", threadId: "thr_theirs", spec, execution: execution("theirs") })
+        )
+
+        const { threads } = await storage.threads.list({
+          projectId,
+          ownerPrincipal: owner,
+          activeOnComputer: { id: laptop.id, folder: laptop.folder },
+        })
+        expect(threads.map((thread) => thread.id)).toEqual(["thr_1"])
+      })
+    })
+
+    test("keeps each open sixb as a lease its owner renews and ends", async () => {
+      await withStorage(async (storage) => {
+        const now = at("2026-06-23T12:00:00.000Z")
+        const live = at("2026-06-23T12:01:00.000Z")
+        const session = (id: string, overrides: Partial<AgentComputerSessionRecord> = {}) => ({
+          projectId,
+          id,
+          ownerPrincipal: owner,
+          computer: laptop,
+          expiresAt: live,
+          ...overrides,
+        })
+        await storage.computers.hold(session("s_1"))
+        await storage.computers.hold(
+          session("s_2", { computer: { ...laptop, folder: "/Users/anthony/other" } })
+        )
+        await storage.computers.hold(session("s_3", { ownerPrincipal: otherUser }))
+        await storage.computers.hold(session("s_4", { projectId: otherProjectId }))
+        await storage.computers.hold(session("s_lapsed", { expiresAt: now }))
+
+        const listed = await storage.computers.listLive({ projectId, ownerPrincipal: owner, now })
+        expect(listed.map((each) => each.id)).toEqual(["s_1", "s_2"])
+        expect(listed[0]).toEqual(session("s_1"))
+
+        // A renewal moves its lease on.
+        const later = at("2026-06-23T12:05:00.000Z")
+        await storage.computers.hold(session("s_1", { expiresAt: later }))
+        const renewed = await storage.computers.listLive({
+          projectId,
+          ownerPrincipal: owner,
+          now: at("2026-06-23T12:02:00.000Z"),
+        })
+        expect(renewed.map((each) => each.id)).toEqual(["s_1"])
+
+        // Only its owner ends it.
+        await expect(
+          storage.computers.release({ projectId, id: "s_1", ownerPrincipal: otherUser })
+        ).resolves.toBeNull()
+        await expect(
+          storage.computers.release({ projectId, id: "s_1", ownerPrincipal: owner })
+        ).resolves.toEqual(session("s_1", { expiresAt: later }))
+        await expect(
+          storage.computers.release({ projectId, id: "s_1", ownerPrincipal: owner })
+        ).resolves.toBeNull()
+
+        const lapsed = await storage.computers.removeLapsed({ projectId, now })
+        expect(lapsed.map((each) => each.id)).toEqual(["s_lapsed"])
+        await expect(storage.computers.removeLapsed({ projectId, now })).resolves.toEqual([])
+        await expect(
+          storage.computers.listLive({ projectId: otherProjectId, ownerPrincipal: owner, now })
+        ).resolves.toEqual([session("s_4", { projectId: otherProjectId })])
+
+        await expectAgentError(storage.computers.hold(session(" ")), "invalid_input")
+        await expectAgentError(
+          storage.computers.hold(session("s_5", { computer: { ...laptop, name: "a\u0007b" } })),
+          "invalid_input"
         )
       })
     })

@@ -31,6 +31,7 @@ import {
   type ConversationAgentRunRecord,
   type CreateAgentContextCheckpointInput,
   type FinishAgentRunInput,
+  type StartAgentRunInput,
   type SubagentRunFile,
   type SubagentRunRecord,
   type TransitionAgentThreadSandboxInput,
@@ -288,6 +289,8 @@ export interface ClaimAgentRunInput<TRun extends AgentRunRecord> {
   readonly leaseExpiresAt: string
   /** Other runs whose cancellation cancels this one: a child's parent. */
   readonly cancelWith?: readonly string[]
+  /** Start it only as a computer's turn: see `StartAgentRunInput.onComputer`. */
+  readonly onComputer?: StartAgentRunInput["onComputer"]
   /**
    * The runner's own stop: its process shutting down, or its delivery lost. The calls its project
    * tools make stop with it, as the run's own do.
@@ -751,7 +754,13 @@ async function startOrReclaim<TRun extends AgentRunRecord>(
     return run.status === "queued"
       ? sameKind(
           run,
-          await agents.runs.start({ projectId, id: run.id, modelId: input.modelId, execution }),
+          await agents.runs.start({
+            projectId,
+            id: run.id,
+            modelId: input.modelId,
+            execution,
+            ...(input.onComputer ? { onComputer: input.onComputer } : {}),
+          }),
           "starting"
         )
       : sameKind(

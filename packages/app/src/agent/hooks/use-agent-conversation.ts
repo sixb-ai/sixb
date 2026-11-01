@@ -17,6 +17,7 @@ import {
   listAgentThreadRunsQueryKey,
   listAgentThreadsQueryKey,
   listModelsOptions,
+  moveAgentThreadToCloudMutation,
   postAgentThreadMessageMutation,
   recreateAgentThreadSandboxMutation,
   retryAgentRunMutation,
@@ -40,6 +41,7 @@ import {
   type TranscriptApprovals,
 } from "../approvals"
 import type { ComposerProps } from "../components/composer"
+import { type ComputerOfflineNoticeProps, shownFolder } from "../components/computer-place"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
 import { conversationMessages, conversationTurn, type PendingUserMessage } from "../conversation"
@@ -192,6 +194,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     // A held call changed: its card, and the thread list's count of what waits for the reader. Its
     // turn's runs follow from their own events.
     onApprovalActivity: (event) => void refreshApprovals(event.threadId),
+    // Its owner's sixb opened or closed where the open conversation runs: its badge follows.
+    onComputerActivity: (event) => {
+      const place = thread?.computer
+      if (threadId && place?.id === event.computerId && place.folder === event.folder) {
+        void refreshThread(threadId)
+      }
+    },
+    // It moved from another tab or from sixb: the badge and notice follow.
+    onThreadMoved: (event) => {
+      if (event.threadId === threadId) void refreshThread(threadId)
+    },
     // On every (re)subscription: catch up with what changed while the socket was away.
     onSubscribed: () => {
       void queryClient.invalidateQueries({ queryKey: listAgentApprovalsQueryKey() })
@@ -224,8 +237,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
     enabled: threadId !== null,
     refetchInterval: recoveryPollMs,
-    // A shared thread can lose its reader without an event: read it again when they come back.
-    refetchOnWindowFocus: (query) => isShared(query.state.data ?? null),
+    // A shared thread can lose its reader without an event, and a computer's sixb can stop
+    // without saying so: read it again when they come back.
+    refetchOnWindowFocus: (query) =>
+      isShared(query.state.data ?? null) || query.state.data?.computer !== undefined,
   })
   // A 404 after a read means the reader no longer reads it, such as a participant someone removed:
   // the last copy the query keeps must not stand in for it.
@@ -241,6 +256,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const removedFromThread =
     threadGone && threadQuery.data !== undefined && threadAccess(threadQuery.data, user) !== "owner"
   const access = thread ? threadAccess(thread, user) : "owner"
+  // The reader's own conversation on their computer, with no sixb open in its folder: a message
+  // waits for it, or the conversation moves to the cloud.
+  const computerOffline =
+    access === "owner" && thread?.runsOn === "computer" && thread.computer?.online !== true
 
   const messagesQuery = useQuery({
     ...listAgentThreadMessagesOptions({
@@ -375,6 +394,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
   const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
+  const moveToCloud = useMutation(moveAgentThreadToCloudMutation())
   const decideApproval = useMutation(decideAgentApprovalMutation())
   // Each runs after the one before, so the last choice is the one the server keeps.
   const saveThreadApprovalMode = useMutation({
@@ -705,6 +725,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     }
   }
 
+  const handleContinueInCloud = () => {
+    if (!thread || thread.runsOn !== "computer" || access !== "owner") return
+    moveToCloud.mutate(
+      { path: { threadId: thread.id } },
+      {
+        onSuccess: (moved) => {
+          queryClient.setQueryData(getAgentThreadQueryKey({ path: { threadId: moved.id } }), moved)
+          void queryClient.invalidateQueries({
+            queryKey: listAgentThreadRunsQueryKey({ path: { threadId: moved.id } }),
+          })
+          void refreshThreads()
+        },
+      }
+    )
+  }
+
   const handleRecreateSandbox = () => {
     if (!thread?.sandboxState || isRunning || access !== "owner") return
     recreateSandbox.mutate(
@@ -846,6 +882,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     retrying: retryRun.isPending,
     continuing: continuingThreadId !== null && continuingThreadId === threadId,
     waitingLonger,
+    waitingFor: computerOffline ? (thread?.computer?.name ?? null) : null,
     compacting: live.compacting,
     reconnecting: live.active && reconnecting,
     answeringFor: answeringFor
@@ -922,9 +959,32 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     [runs, access, user]
   )
 
+  // Where the conversation moved, after the last message saved before then: the files earlier
+  // turns worked on stayed behind.
+  const movedAt = thread?.movedAt
+  const savedBefore = movedAt
+    ? new Set(savedMessages.filter((saved) => saved.createdAt <= movedAt).map(({ id }) => id))
+    : null
+  // The last one the transcript shows: not every saved message is drawn.
+  const movedAfterId =
+    savedBefore && messages.filter(({ id }) => id !== null && savedBefore.has(id)).at(-1)?.id
+  const moved =
+    thread && movedAfterId
+      ? {
+          afterMessageId: movedAfterId,
+          label:
+            thread.runsOn !== "computer"
+              ? agentMessages.computer.movedToCloud
+              : thread.computer
+                ? agentMessages.computer.movedToFolder(shownFolder(thread.computer.folder))
+                : agentMessages.computer.movedElsewhere,
+        }
+      : null
+
   const transcriptProps: TranscriptProps = {
     threadId,
     messages,
+    moved,
     turn,
     anchorCurrentTurn,
     onRetry: canRetry ? retry : undefined,
@@ -974,6 +1034,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     awaitingApproval,
     dictation: projectDictation(modelsQuery.data),
   }
+
+  const movingThisThread = moveToCloud.variables?.path.threadId === thread?.id
+  const computerNoticeProps: ComputerOfflineNoticeProps | null = computerOffline
+    ? {
+        computer: thread?.computer ?? null,
+        // One mutation serves every conversation this view opens: only this one's state shows.
+        pending: movingThisThread && moveToCloud.isPending,
+        error:
+          !movingThisThread || !moveToCloud.isError
+            ? null
+            : isSixbApiError(moveToCloud.error) && moveToCloud.error.code === "active_run_exists"
+              ? "busy"
+              : "failed",
+        onContinueInCloud: handleContinueInCloud,
+      }
+    : null
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
     ? {
@@ -1055,6 +1131,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     composerProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
+    /** Where the reader's own conversation runs on their computer, for its badge. */
+    computer: access === "owner" ? (thread?.computer ?? null) : null,
+    /** Spread into `<ComputerOfflineNotice>` while its computer is offline. */
+    computerNoticeProps,
   }
 }
 

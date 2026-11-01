@@ -13,6 +13,7 @@ import type {
   AgentApprovalRecord,
   AgentRunRecord,
   AgentStorage,
+  AgentThreadComputer,
   AgentThreadRecord,
   ConversationAgentRunRecord,
   ListAgentApprovalsInput,
@@ -23,6 +24,8 @@ import type {
   ListAgentThreadsResult,
   SubagentRunRecord,
 } from "../storage/agents"
+import { AgentStorageError } from "../storage/agents/errors"
+import { movesComputerPlace } from "../storage/agents/provider"
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import { resolveTurnAccounting } from "./accounting"
@@ -41,6 +44,7 @@ import {
   resolveAgentApprovalMode,
   resumedApprovalMode,
   stopAgentTurn,
+  threadHoldsPausedTurn,
 } from "./approvals"
 import { cancelAgentRun } from "./cancel"
 import {
@@ -60,6 +64,8 @@ import {
   removeAgentThreadParticipant,
 } from "./participants"
 import {
+  assertComputerPlaceRequest,
+  dispatchAgentRun,
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
@@ -68,6 +74,7 @@ import {
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
+import { publishAgentThreadMoved } from "./streams/protocol"
 import { listSubagentThreadRuns } from "./subagent-runs"
 import {
   type AgentThreadView,
@@ -102,6 +109,8 @@ export type CreateExecutionAgentThreadInput<
    * that computer's folder, so it takes no sandbox, and only its owner can message it.
    */
   readonly runsOn?: "computer"
+  /** The computer and folder its turns run in: required with `runsOn: "computer"`. */
+  readonly computer?: AgentThreadComputer
 }
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
@@ -111,6 +120,16 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
       threadId: string,
       input: { readonly expectedSandboxName: string }
     ): Promise<AgentThreadView>
+    /**
+     * Move a computer's thread to another of its owner's computers or folders, which alone run its
+     * turns from then on. Owner only; refused while a turn runs or waits on approvals.
+     */
+    moveToComputer(threadId: string, computer: AgentThreadComputer): Promise<AgentThreadView>
+    /**
+     * Move a computer's thread to the cloud for good, with the turn waiting for it, if any. Owner
+     * only; refused while a turn runs or waits on approvals. The files stay on the computer.
+     */
+    moveToCloud(threadId: string): Promise<AgentThreadView>
     create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadView>
     /**
      * Copy a thread of the caller's, or one shared with them, into a new one the caller owns alone,
@@ -705,6 +724,70 @@ export function createAgentRuntime<
     },
   }
 
+  const ownedComputerThread = async (threadId: string): Promise<AgentThreadRecord> => {
+    const readable = await rule.read(threadId)
+    if (!readable) throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+    if (readable.access !== "owner") {
+      throw new AgentRequestError(
+        "not_thread_owner",
+        `[Sixb] Only the owner of Agent thread '${threadId}' moves it.`
+      )
+    }
+    if (readable.thread.runsOn !== "computer") {
+      throw new AgentRequestError(
+        "invalid_message",
+        `[Sixb] Agent thread '${threadId}' runs in the cloud, on no computer.`
+      )
+    }
+    return readable.thread
+  }
+
+  /**
+   * Move a thread in one transaction, refused while a turn holds it. Held calls are asked about
+   * after the move: with the thread locked, a turn that was running has either paused by now, which
+   * this sees, or still runs, which refused the move. They were reviewed for where the turn runs.
+   */
+  const moveThread = <T>(
+    thread: AgentThreadRecord,
+    moves: boolean,
+    move: (agents: AgentStorage) => Promise<T>
+  ): Promise<T> =>
+    runtime.storage.transaction(async (tx) => {
+      const agents = tx.agents
+      if (!agents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+      const moved = await move(agents).catch((error: unknown) => {
+        throw error instanceof AgentStorageError && error.code === "active_run_exists"
+          ? new AgentRequestError(
+              "active_run_exists",
+              "[Sixb] A turn is running on the computer: stop it, or let it end, first."
+            )
+          : error
+      })
+      if (moves && (await threadHoldsPausedTurn(agents, thread))) {
+        throw new AgentRequestError(
+          "active_run_exists",
+          "[Sixb] A turn is waiting for your approval: answer or stop it first."
+        )
+      }
+      return moved
+    })
+
+  /** A hint whatever has the thread open follows: a lost one is corrected by its next read. */
+  const announceThreadMoved = async (thread: AgentThreadRecord): Promise<void> => {
+    await publishAgentThreadMoved(runtime.broker, {
+      projectId: runtime.projectId,
+      ownerPrincipal: thread.ownerPrincipal,
+      threadId: thread.id,
+    }).catch((error: unknown) => {
+      console.error(`[Sixb] Could not announce the move of Agent thread '${thread.id}'.`, error)
+    })
+  }
+
   const agentRuntime: AgentRuntime<TParams> = {
     get: getAgent,
     memory: createAgentMemoryRuntime(runtime),
@@ -740,6 +823,26 @@ export function createAgentRuntime<
         const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
         return view ?? thread
       },
+      moveToComputer: async (threadId, computer) => {
+        const thread = await ownedComputerThread(threadId)
+        const moves = movesComputerPlace(thread, computer)
+        const moved = await moveThread(thread, moves, (agents) =>
+          agents.threads.assignComputer({ projectId: runtime.projectId, id: threadId, computer })
+        )
+        if (moves) await announceThreadMoved(thread)
+        const [view] = await agentThreadViews(runtime, [moved])
+        return view ?? moved
+      },
+      moveToCloud: async (threadId) => {
+        const thread = await ownedComputerThread(threadId)
+        const { thread: moved, queued } = await moveThread(thread, true, (agents) =>
+          agents.threads.moveToCloud({ projectId: runtime.projectId, id: threadId })
+        )
+        if (queued) await dispatchAgentRun(runtime, requireAgents(), queued.id)
+        await announceThreadMoved(thread)
+        const [view] = await agentThreadViews(runtime, [moved])
+        return view ?? moved
+      },
       create: async (input) => {
         assertNoAgentSelector(input)
         const agent = getAgent()
@@ -759,6 +862,7 @@ export function createAgentRuntime<
             `[Sixb] 'runsOn' must be "computer" or omitted.`
           )
         }
+        assertComputerPlaceRequest(input.runsOn, input.computer)
         if (input.runsOn === "computer" && input.sandbox !== undefined) {
           throw new AgentRequestError(
             "invalid_sandbox_params",
@@ -782,6 +886,7 @@ export function createAgentRuntime<
           ownerPrincipal: principal,
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.runsOn === undefined ? {} : { runsOn: input.runsOn }),
+          ...(input.computer === undefined ? {} : { computer: input.computer }),
         })
         return { ...created, participants: [] }
       },

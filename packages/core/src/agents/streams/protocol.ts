@@ -35,6 +35,8 @@ export interface AgentRunActivityEvent {
   readonly threadId: string
   readonly status: AgentRunRecord["status"]
   readonly attempt: number
+  /** Set on a computer's turn: a `sixb` hearing of any other has nothing to read about it. */
+  readonly runsOn?: "computer"
   readonly occurredAt: string
 }
 
@@ -57,6 +59,7 @@ export function agentRunActivityEvent(
     threadId: run.threadId,
     status: run.status,
     attempt: run.attempt,
+    ...(run.spec?.runsOn === "computer" ? { runsOn: "computer" as const } : {}),
     occurredAt: occurredAt.toISOString(),
   }
 }
@@ -72,6 +75,7 @@ export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivi
     isAgentRunStatus(value.status) &&
     typeof value.attempt === "number" &&
     Number.isFinite(value.attempt) &&
+    (value.runsOn === undefined || value.runsOn === "computer") &&
     typeof value.occurredAt === "string"
   )
 }
@@ -94,8 +98,37 @@ export interface AgentApprovalActivityEvent {
   readonly occurredAt: string
 }
 
+/**
+ * An open `sixb` on its owner's computer came or went: the threads that run on that computer in
+ * that folder are reachable now, or not. Only its owner hears it.
+ */
+export interface AgentComputerActivityEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.computer.activity"
+  readonly projectId: string
+  readonly ownerPrincipal: { readonly type: string; readonly id: string }
+  readonly computerId: string
+  readonly folder: string
+  readonly online: boolean
+  readonly occurredAt: string
+}
+
+/** A thread moved to another folder or computer, or to the cloud. Its owner alone hears it. */
+export interface AgentThreadMovedEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.thread.moved"
+  readonly projectId: string
+  readonly ownerPrincipal: { readonly type: string; readonly id: string }
+  readonly threadId: string
+  readonly occurredAt: string
+}
+
 /** Everything the project's activity feed carries. */
-export type AgentActivityEvent = AgentRunActivityEvent | AgentApprovalActivityEvent
+export type AgentActivityEvent =
+  | AgentRunActivityEvent
+  | AgentApprovalActivityEvent
+  | AgentComputerActivityEvent
+  | AgentThreadMovedEvent
 
 export function agentApprovalActivityEvent(
   approval: AgentApprovalRecord,
@@ -129,8 +162,98 @@ export function isAgentApprovalActivityEvent(value: unknown): value is AgentAppr
   )
 }
 
+function isAgentComputerActivityEvent(value: unknown): value is AgentComputerActivityEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.computer.activity" &&
+    typeof value.projectId === "string" &&
+    isPlainRecord(value.ownerPrincipal) &&
+    typeof value.ownerPrincipal.type === "string" &&
+    typeof value.ownerPrincipal.id === "string" &&
+    typeof value.computerId === "string" &&
+    typeof value.folder === "string" &&
+    typeof value.online === "boolean" &&
+    typeof value.occurredAt === "string"
+  )
+}
+
+function isAgentThreadMovedEvent(value: unknown): value is AgentThreadMovedEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.thread.moved" &&
+    typeof value.projectId === "string" &&
+    isPlainRecord(value.ownerPrincipal) &&
+    typeof value.ownerPrincipal.type === "string" &&
+    typeof value.ownerPrincipal.id === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.occurredAt === "string"
+  )
+}
+
 export function isAgentActivityEvent(value: unknown): value is AgentActivityEvent {
-  return isAgentRunActivityEvent(value) || isAgentApprovalActivityEvent(value)
+  return (
+    isAgentRunActivityEvent(value) ||
+    isAgentApprovalActivityEvent(value) ||
+    isAgentComputerActivityEvent(value) ||
+    isAgentThreadMovedEvent(value)
+  )
+}
+
+/** Announce that the owner's computer is reachable, or no longer, in a folder. */
+export async function publishAgentComputerActivity(
+  broker: Broker,
+  input: Omit<AgentComputerActivityEvent, "schemaVersion" | "type" | "occurredAt">
+): Promise<void> {
+  const event: AgentComputerActivityEvent = {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.computer.activity",
+    ...input,
+    occurredAt: new Date().toISOString(),
+  }
+  await appendActivity(
+    broker,
+    event,
+    event.computerId,
+    `${event.computerId}:${event.folder}:${event.online}:${event.occurredAt}`
+  )
+}
+
+/** Announce that a thread moved, so whatever has it open follows. */
+export async function publishAgentThreadMoved(
+  broker: Broker,
+  input: Omit<AgentThreadMovedEvent, "schemaVersion" | "type" | "occurredAt">
+): Promise<void> {
+  const event: AgentThreadMovedEvent = {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.thread.moved",
+    ...input,
+    occurredAt: new Date().toISOString(),
+  }
+  await appendActivity(broker, event, event.threadId, `${event.threadId}:moved:${event.occurredAt}`)
+}
+
+async function appendActivity(
+  broker: Broker,
+  event: AgentComputerActivityEvent | AgentThreadMovedEvent,
+  key: string,
+  idempotencyKey: string
+): Promise<void> {
+  await broker.ensureStream({ projectId: event.projectId, stream: agentActivityStreamDefinition() })
+  await broker.append({
+    projectId: event.projectId,
+    streamId: AGENT_ACTIVITY_STREAM_ID,
+    records: [
+      {
+        name: event.type,
+        key,
+        // The event is composed only of validated JSON primitives.
+        payload: event as unknown as JsonValue,
+        idempotencyKey,
+      },
+    ],
+  })
 }
 
 /** Announce held calls that changed, in one append. Each change is announced once. */

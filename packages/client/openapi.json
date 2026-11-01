@@ -36224,7 +36224,26 @@
                             "type": "string",
                             "enum": ["computer"]
                           },
-                          "computerId": {
+                          "computer": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "folder": {
+                                "type": "string"
+                              },
+                              "online": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["id", "name", "folder", "online"],
+                            "additionalProperties": false
+                          },
+                          "movedAt": {
                             "type": "string"
                           },
                           "status": {
@@ -36377,6 +36396,28 @@
                   "runsOn": {
                     "type": "string",
                     "enum": ["computer"]
+                  },
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -36423,6 +36464,28 @@
                   "runsOn": {
                     "type": "string",
                     "enum": ["computer"]
+                  },
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -36469,6 +36532,28 @@
                   "runsOn": {
                     "type": "string",
                     "enum": ["computer"]
+                  },
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -36642,7 +36727,26 @@
                           "type": "string",
                           "enum": ["computer"]
                         },
-                        "computerId": {
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            },
+                            "online": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["id", "name", "folder", "online"],
+                          "additionalProperties": false
+                        },
+                        "movedAt": {
                           "type": "string"
                         },
                         "status": {
@@ -36946,7 +37050,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {
@@ -37375,7 +37498,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {
@@ -37852,7 +37994,26 @@
                           "type": "string",
                           "enum": ["computer"]
                         },
-                        "computerId": {
+                        "computer": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "type": "string"
+                            },
+                            "online": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["id", "name", "folder", "online"],
+                          "additionalProperties": false
+                        },
+                        "movedAt": {
                           "type": "string"
                         },
                         "status": {
@@ -38214,7 +38375,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {
@@ -43600,8 +43780,8 @@
     },
     "/api/agent-threads/{threadId}/computer": {
       "post": {
-        "summary": "Move a thread to another of your computers",
-        "description": "A thread that runs on its owner's computer runs there alone: its turns are claimed by that computer only. Its owner moves it to another.",
+        "summary": "Move a thread to one of your computers, in a folder there",
+        "description": "A thread that runs on its owner's computer runs there alone, in one folder: only `sixb` open in that folder claims its turns. Its owner moves it to another folder or computer. Refused while a turn runs or waits on approvals.",
         "tags": ["Agent Threads"],
         "operationId": "moveAgentThreadToComputer",
         "security": [
@@ -43630,13 +43810,30 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "computerId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
-                "required": ["computerId"],
+                "required": ["computer"],
                 "additionalProperties": false
               }
             },
@@ -43644,13 +43841,30 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "computerId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
-                "required": ["computerId"],
+                "required": ["computer"],
                 "additionalProperties": false
               }
             },
@@ -43658,13 +43872,30 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "computerId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
                   }
                 },
-                "required": ["computerId"],
+                "required": ["computer"],
                 "additionalProperties": false
               }
             }
@@ -43833,7 +44064,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {
@@ -43940,6 +44190,639 @@
                   "required": ["error"],
                   "additionalProperties": false
                 }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Move a thread from your computer to the cloud",
+        "description": "Its turns run in the cloud from now on, starting with the one waiting for the computer, if any. The files it worked on stay on the computer. Refused while a turn runs there or waits on approvals.",
+        "tags": ["Agent Threads"],
+        "operationId": "moveAgentThreadToCloud",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandboxState": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                        },
+                        "initialized": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["name", "status", "initialized"],
+                      "additionalProperties": false
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": ["conversation", "subagent"]
+                    },
+                    "parent": {
+                      "type": "object",
+                      "properties": {
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "spawnedBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["threadId", "spawnedBy", "key"],
+                      "additionalProperties": false
+                    },
+                    "ownerPrincipal": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "owner": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "participants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "principal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["principal", "addedAt", "addedBy"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "sandboxParams": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    "runsOn": {
+                      "type": "string",
+                      "enum": ["computer"]
+                    },
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "archived"]
+                    },
+                    "activeRunId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "lastMessageAt": {
+                      "type": "string"
+                    },
+                    "messageCount": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    },
+                    "approvalMode": {
+                      "type": "string",
+                      "enum": ["manual", "accept-edits", "auto"]
+                    },
+                    "approvalModeSource": {
+                      "type": "string",
+                      "enum": ["thread", "default", "fallback", "run"]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "kind",
+                    "ownerPrincipal",
+                    "owner",
+                    "participants",
+                    "status",
+                    "activeRunId",
+                    "messageCount",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-computers/sessions/{sessionId}": {
+      "put": {
+        "summary": "Open or renew a computer session",
+        "description": "`sixb` holds one while it is open: your threads on this computer, in this folder, read as online, and you can continue them from anywhere. It lapses a minute after its last renewal. The answer lists the turns waiting for it.",
+        "tags": ["Agent Threads"],
+        "operationId": "holdAgentComputerSession",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["computer"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["computer"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "computer": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "folder": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["id", "name", "folder"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["computer"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "waiting": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["expiresAt", "waiting"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Close a computer session",
+        "description": "`sixb` closes its session when it quits.",
+        "tags": ["Agent Threads"],
+        "operationId": "releaseAgentComputerSession",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Response for status 204",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -44405,7 +45288,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {
@@ -46874,7 +47776,26 @@
                       "type": "string",
                       "enum": ["computer"]
                     },
-                    "computerId": {
+                    "computer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "type": "string"
+                        },
+                        "online": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["id", "name", "folder", "online"],
+                      "additionalProperties": false
+                    },
+                    "movedAt": {
                       "type": "string"
                     },
                     "status": {

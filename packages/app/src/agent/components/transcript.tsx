@@ -29,6 +29,7 @@ import { ApprovalCards } from "./approval-card"
 import {
   CompactionMarker,
   MessageView,
+  MovedMarker,
   ReconnectingMarker,
   RunCancelledMarker,
   RunErrorMarker,
@@ -61,6 +62,8 @@ export interface TranscriptProps {
    * that spawned it. Without it, as for an observer, the cards only read.
    */
   readonly delegation?: TranscriptDelegation
+  /** Where the conversation moved, after which saved message: the files from before stayed. */
+  readonly moved?: { readonly afterMessageId: string; readonly label: string } | null
 }
 
 const NO_OUTCOMES: ReadonlyMap<string, ReportedApprovalOutcome> = new Map()
@@ -103,6 +106,7 @@ function TranscriptView({
   onRetry,
   onContinue,
   approvals,
+  moved,
 }: TranscriptProps & { readonly threadDelegation: ThreadDelegation }) {
   // Messages one person sends in a row name them once; an answer in between names them again.
   const continuedKeys = useMemo(() => continuedUserMessages(messages), [messages])
@@ -230,6 +234,11 @@ function TranscriptView({
                       <ApprovalCards calls={calls} />
                     </MessageScrollerItem>
                   ) : null}
+                  {moved && message.id === moved.afterMessageId ? (
+                    <MessageScrollerItem messageId="moved">
+                      <MovedMarker label={moved.label} />
+                    </MessageScrollerItem>
+                  ) : null}
                 </Fragment>
               )
             })}
@@ -239,7 +248,7 @@ function TranscriptView({
                 {turn.compacting ? (
                   <CompactionMarker />
                 ) : (
-                  <ThinkingMarker takingLonger={turn.waitingLonger} />
+                  <ThinkingMarker takingLonger={turn.waitingLonger} waitingFor={turn.waitingFor} />
                 )}
               </MessageScrollerItem>
             ) : turn.kind === "timeout" ? (

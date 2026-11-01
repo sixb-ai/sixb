@@ -26,12 +26,12 @@ import {
 } from "@sixb/client"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Logo } from "./brand"
+import { thisComputer } from "./computer"
 import type { Connection } from "./connection"
-import { conversationsIn, folderOf, rememberFolder } from "./folders"
 import { shortPath } from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
-import { type LocalRunner, owns, runsOnThisComputer } from "./runner"
+import { type LocalRunner, owns } from "./runner"
 import {
   APPROVAL_MODES,
   type ApprovalMode,
@@ -41,6 +41,7 @@ import {
   modelLabel,
   placeLabel,
   type ReasoningLevel,
+  rememberWebMessages,
   type Settings,
   saveSettings,
 } from "./settings"
@@ -125,17 +126,26 @@ export function Workspace(props: WorkspaceProps) {
     }, 300)
   })
 
-  // This folder's conversations run here whatever screen is open: a message sent from the web app,
-  // or a turn going on after approvals decided there, and those that queued while sixb was closed.
+  // This folder's conversations run here whatever screen is open, while its session is: a message
+  // sent from the web app, a turn going on after approvals decided there, and those that queued
+  // while sixb was closed, which the session's first renewal lists.
   const { runner } = props
   useEffect(() => {
-    void conversationsIn(runner.folder).then((threadIds) => {
-      for (const threadId of threadIds) void runner.claimIfHere(threadId)
-    })
+    if (!settings.continueFromWeb) return
+    runner.openSession()
+    return () => void runner.closeSession()
+  }, [settings.continueFromWeb, runner])
+  useEffect(
+    () => runner.onElsewhere(() => say("A message sent from elsewhere runs here")),
+    [runner, say]
+  )
+  useEffect(() => {
     const socket = createAgentActivitySocket({
       client: connection.client,
       onActivity: (event) => {
-        if (event.status === "queued") void runner.claimIfHere(event.threadId, event.runId)
+        if (event.status === "queued" && event.runsOn === "computer") {
+          void runner.claimIfHere(event.threadId, event.runId)
+        }
       },
     })
     return () => socket.close()
@@ -352,6 +362,19 @@ export function Workspace(props: WorkspaceProps) {
               newConversation: () => setScreen({ kind: "home" }),
               open: setDialog,
               setPlace: (place) => setSettings((current) => ({ ...current, place })),
+              toggleContinueFromWeb: () =>
+                setSettings((current) => {
+                  const continueFromWeb = !current.continueFromWeb
+                  say(
+                    continueFromWeb
+                      ? "Messages from the web run in this folder"
+                      : "Messages from the web wait, in this folder, until you turn this back on"
+                  )
+                  void rememberWebMessages(runner.folder, continueFromWeb).catch(() =>
+                    say("Could not keep this choice for next time", "error")
+                  )
+                  return { ...current, continueFromWeb }
+                }),
               cycleEffort,
               quit: props.onExit,
             })}
@@ -545,7 +568,12 @@ function Home(
         client: connection.client,
         body: {
           title: clip(text.split("\n")[0]?.trim() || "Conversation", 72),
-          ...(settings.place === "computer" ? { runsOn: "computer" as const } : {}),
+          ...(settings.place === "computer"
+            ? {
+                runsOn: "computer" as const,
+                computer: { ...(await thisComputer()), folder: runner.folder },
+              }
+            : {}),
         },
         throwOnError: true,
       })
@@ -569,10 +597,7 @@ function Home(
         },
         throwOnError: true,
       })
-      if (created.thread.runsOn === "computer") {
-        await rememberFolder(created.thread.id, runner.folder)
-        void runner.claim(posted.run.id)
-      }
+      if (created.thread.runsOn === "computer") void runner.claim(posted.run.id)
       props.onOpen(created.thread.id)
       return true
     } catch (error) {
@@ -703,32 +728,29 @@ function ThreadView(
 
   const activeRunId = thread?.activeRunId ?? null
 
-  // The folder its turns work in on this computer; null until read.
-  const [workFolder, setWorkFolder] = useState<string | undefined | null>(null)
-  useEffect(() => {
-    void folderOf(threadId).then(setWorkFolder)
-  }, [threadId])
-  // Another of the owner's computers runs it: its folder here, if any, is where it worked before.
-  const otherComputer = thread !== null && !runsOnThisComputer(thread, props.computerId)
-  const here = workFolder === runner.folder && !otherComputer
+  // Where it runs: here, in another folder of this computer, or on another of its owner's. A thread
+  // from before folders were kept has none until it moves.
+  const place = thread?.computer
+  const otherComputer = place !== undefined && place.id !== props.computerId
+  const here = place?.id === props.computerId && place.folder === runner.folder
   // This computer runs the conversation's turns when it is the owner's, and this its folder.
-  const runsHere = onComputer && mine && here
+  const runsHere = thread !== null && runner.runsHere(thread, props.computerId)
   // Only a queued turn: a running one is another sixb's, or one whose sixb closed, which the API
-  // ends interrupted rather than running its commands again.
+  // ends interrupted rather than running its commands again. One sent from elsewhere runs here
+  // only while messages from the web do; the turns this sixb asks for it claims itself.
   const queued = runs.find((run) => run.id === activeRunId)?.status === "queued"
+  const { continueFromWeb } = props.settings
   useEffect(() => {
-    if (activeRunId && runsHere && queued) void runner.claim(activeRunId)
-  }, [activeRunId, runsHere, queued, runner])
+    if (activeRunId && runsHere && queued && continueFromWeb) void runner.claim(activeRunId)
+  }, [activeRunId, runsHere, queued, continueFromWeb, runner])
   // Its turns move to this computer, which alone claims them from now on, and to this folder.
   const moveHere = async () => {
     const { error } = await moveAgentThreadToComputer({
       client,
       path: { threadId },
-      body: { computerId: props.computerId },
+      body: { computer: { ...(await thisComputer()), folder: runner.folder } },
     })
     if (error) return props.say(errorText(error), "error")
-    await rememberFolder(threadId, runner.folder)
-    setWorkFolder(runner.folder)
     void reload()
     props.say("Its turns now run in this folder")
   }
@@ -741,6 +763,9 @@ function ThreadView(
         if (event.threadId === threadId) void reload()
       },
       onApprovalActivity: (event) => {
+        if (event.threadId === threadId) void reload()
+      },
+      onThreadMoved: (event) => {
         if (event.threadId === threadId) void reload()
       },
     })
@@ -799,12 +824,14 @@ function ThreadView(
     if (!pending || !option || deciding) return
     setDeciding(true)
     try {
-      const { error } = await decideAgentApproval({
+      const { data, error } = await decideAgentApproval({
         client,
         path: { threadId, approvalId: pending.id },
         body: { decision: option.decision, ...(option.always ? { always: true as const } : {}) },
       })
       if (error) props.say(errorText(error), "error")
+      // Its last decision resumed the turn: decided here, it runs here.
+      if (data?.run && runsHere) void runner.claim(data.run.id)
       const read = await reload()
       // "Always" raised the mode there: the thread's wins over a choice still on its way.
       if (read && option.always) onThreadRead(read, true)
@@ -831,7 +858,7 @@ function ThreadView(
     if (key.name === "up" && slash.move(-1)) return
     if (key.name === "down" && slash.move(1)) return
     if (key.name === "escape") return void stop()
-    if (key.ctrl && key.name === "f" && onComputer && mine && !here && workFolder !== null) {
+    if (key.ctrl && key.name === "f" && onComputer && mine && !here) {
       return void moveHere()
     }
     if (key.name === "pageup") scroll.current?.scrollBy(-10)
@@ -934,10 +961,12 @@ function ThreadView(
                   ? "Press esc again to stop"
                   : live?.compacting
                     ? "Condensing earlier turns"
-                    : queuedLabel(runs, activeRunId, {
+                    : activityLabel(runs, activeRunId, {
                         onComputer,
                         mine,
-                        runsHere: activeRunId !== null && runner.runs(activeRunId),
+                        here,
+                        continueFromWeb,
+                        runningHere: activeRunId !== null && runner.runs(activeRunId),
                       })
               }
             />
@@ -950,14 +979,14 @@ function ThreadView(
           <text fg={colors.amber} paddingBottom={1}>
             {"This conversation runs on its owner's computer: you can read it here."}
           </text>
-        ) : onComputer && mine && workFolder !== null && !here ? (
+        ) : onComputer && mine && !here ? (
           <text paddingBottom={1}>
             <span fg={colors.amber}>
-              {otherComputer
-                ? "It works on another computer."
-                : workFolder
-                  ? `It works in ${shortPath(workFolder, homedir(), 48)}.`
-                  : "It started on another computer."}
+              {!place
+                ? "It has no folder yet."
+                : otherComputer
+                  ? `It runs on ${clip(place.name, 40)}.`
+                  : `It works in ${shortPath(place.folder, homedir(), 48)}.`}
             </span>
             <span fg={colors.muted}>{"  Its turns run there: "}</span>
             <span fg={colors.text}>ctrl+f</span>
@@ -988,18 +1017,29 @@ function ThreadView(
   )
 }
 
-function queuedLabel(
+export function activityLabel(
   runs: readonly Run[],
   runId: string | null,
-  where: { readonly onComputer: boolean; readonly mine: boolean; readonly runsHere: boolean }
+  where: {
+    readonly onComputer: boolean
+    readonly mine: boolean
+    readonly here: boolean
+    readonly continueFromWeb: boolean
+    readonly runningHere: boolean
+  }
 ): string {
   const run = runs.find((entry) => entry.id === runId)
   if (run?.status === "queued") {
-    return where.onComputer && !where.mine ? "Waiting for its owner's computer" : "Starting"
+    if (!where.onComputer) return "Starting"
+    if (!where.mine) return "Waiting for its owner's computer"
+    if (!where.here) return "Waiting for sixb in its folder"
+    return where.continueFromWeb || where.runningHere
+      ? "Starting"
+      : "Waiting: messages from the web are off"
   }
   // Yours, running, and not here: another sixb runs it, or one that closed, whose turn ends
   // interrupted once its lease lapses.
-  if (where.onComputer && where.mine && !where.runsHere) return "Working in another sixb"
+  if (where.onComputer && where.mine && !where.runningHere) return "Working in another sixb"
   return "Working"
 }
 
@@ -1049,6 +1089,8 @@ function commandItems(input: {
   readonly newConversation: () => void
   readonly open: (dialog: Dialog) => void
   readonly setPlace: (place: Settings["place"]) => void
+  /** Whether your messages from the web, or another device, run in this folder. */
+  readonly toggleContinueFromWeb: () => void
   readonly cycleEffort: () => void
   readonly quit: () => void
 }): PaletteItem[] {
@@ -1101,6 +1143,13 @@ function commandItems(input: {
           : `Run new conversations on ${placeLabel("computer")}`,
       keys: "tab",
       run: () => input.setPlace(settings.place === "computer" ? "cloud" : "computer"),
+    },
+    {
+      id: "continue-from-web",
+      group: "Agent",
+      label: "Messages from the web",
+      detail: settings.continueFromWeb ? "run here" : "off",
+      run: input.toggleContinueFromWeb,
     },
     { id: "quit", group: "Sixb", label: "Quit", keys: "ctrl+c", run: input.quit },
   ]

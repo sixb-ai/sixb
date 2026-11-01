@@ -4,8 +4,10 @@ import {
   type AgentRunView,
   type AgentThreadView,
   type FileRef,
+  principalsEqual,
   type SixbHostView,
 } from "@sixb/core"
+import { sameComputerPlace } from "@sixb/core/internal/agent-run-storage-provider"
 import { assertConversationThread, isRetryableAgentRun } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
@@ -15,13 +17,19 @@ import {
   type AgentRunDiagnostic,
   type AgentStorage,
   AgentStorageError,
+  type AgentThreadComputer,
   type AgentThreadRecord,
   type Principal,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { type RequestAuthState, requestAuthState, requireRequestSixb } from "../auth/scope"
+import {
+  type RequestAuthState,
+  requestActor,
+  requestAuthState,
+  requireRequestSixb,
+} from "../auth/scope"
 import {
   createFileContentResponse,
   fileContentGetResponses,
@@ -73,18 +81,25 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
 const SHARING =
   "Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights; a thread that runs on its owner's computer they only read. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked."
 
-/** Threads as the API returns them, their owner and participants named by their accounts. */
+/**
+ * Threads as the API returns them to `viewer`, their owner and participants named by their
+ * accounts. Where a computer's thread runs, and whether `sixb` is open there, is its owner's alone.
+ */
 export async function serializeThreads(
   host: SixbHostView,
-  threads: readonly AgentThreadView[]
+  threads: readonly AgentThreadView[],
+  viewer: Principal
 ): Promise<ReturnType<typeof AgentThreadSchema.parse>[]> {
-  const people = await namePrincipals(
-    host,
-    threads.flatMap((thread) => [
-      thread.ownerPrincipal,
-      ...thread.participants.map((participant) => participant.principal),
-    ])
-  )
+  const [placeOf, people] = await Promise.all([
+    computerPlaces(host, threads, viewer),
+    namePrincipals(
+      host,
+      threads.flatMap((thread) => [
+        thread.ownerPrincipal,
+        ...thread.participants.map((participant) => participant.principal),
+      ])
+    ),
+  ])
   const named = (principal: Principal) => people.get(principalKey(principal)) ?? principal
 
   return threads.map((thread) =>
@@ -103,7 +118,8 @@ export async function serializeThreads(
       title: thread.title,
       sandboxParams: thread.sandboxParams,
       runsOn: thread.runsOn,
-      computerId: thread.computerId,
+      computer: placeOf(thread),
+      movedAt: thread.movedAt ? toIsoString(thread.movedAt) : undefined,
       sandboxState: thread.sandboxState && {
         name: thread.sandboxState.name,
         status: thread.sandboxState.status,
@@ -121,11 +137,36 @@ export async function serializeThreads(
 
 export async function serializeThread(
   host: SixbHostView,
-  thread: AgentThreadView
+  thread: AgentThreadView,
+  viewer: Principal
 ): Promise<ReturnType<typeof AgentThreadSchema.parse>> {
-  const [serialized] = await serializeThreads(host, [thread])
+  const [serialized] = await serializeThreads(host, [thread], viewer)
   if (!serialized) throw new Error(`[SixbServer] Could not serialize Agent thread '${thread.id}'.`)
   return serialized
+}
+
+/** Where each of the viewer's own computer threads runs, and whether its folder is open now. */
+async function computerPlaces(
+  host: SixbHostView,
+  threads: readonly AgentThreadView[],
+  viewer: Principal
+): Promise<(thread: AgentThreadView) => (AgentThreadComputer & { online: boolean }) | undefined> {
+  const owned = (thread: AgentThreadView) =>
+    thread.computer !== undefined && principalsEqual(thread.ownerPrincipal, viewer)
+  const live =
+    host.storage.agents && threads.some(owned)
+      ? await host.storage.agents.computers.listLive({
+          projectId: host.id,
+          ownerPrincipal: viewer,
+          now: new Date(),
+        })
+      : []
+  return (thread) => {
+    const computer = thread.computer
+    if (!computer || !owned(thread)) return undefined
+    const online = live.some((session) => sameComputerPlace(session.computer, computer))
+    return { ...computer, online }
+  }
 }
 
 function serializeMessage(
@@ -434,8 +475,18 @@ async function namePrincipals(
   return new Map(named)
 }
 
-function principalKey(principal: Principal): string {
+export function principalKey(principal: Principal): string {
   return `${principal.type}:${principal.id}`
+}
+
+/** A thread as reading it answers: with the permission mode its reader shows. */
+export async function serializeThreadRead(
+  host: SixbHostView,
+  sixb: ReturnType<typeof requireRequestSixb>,
+  thread: AgentThreadView
+) {
+  const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
+  return { ...(await serializeThread(host, thread, requestActor(sixb))), ...approvalMode }
 }
 
 export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
@@ -481,7 +532,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const result = await sixb.agent.threads.list(listInput)
 
           return AgentThreadListResponseSchema.parse({
-            threads: await serializeThreads(host, result.threads),
+            threads: await serializeThreads(host, result.threads, requestActor(sixb)),
             hasMore: result.hasMore,
             total: result.total,
           })
@@ -520,11 +571,12 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             ...(parsed.title === undefined ? {} : { title: parsed.title }),
             ...(parsed.sandbox === undefined ? {} : { sandbox: parsed.sandbox }),
             ...(parsed.runsOn === undefined ? {} : { runsOn: parsed.runsOn }),
+            ...(parsed.computer === undefined ? {} : { computer: parsed.computer }),
           })
 
           set.status = 201
           return CreateAgentThreadResponseSchema.parse({
-            thread: await serializeThread(host, thread),
+            thread: await serializeThread(host, thread, requestActor(sixb)),
           })
         } catch (error) {
           return handleAgentRouteError(error, set)
@@ -565,8 +617,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
-          const approvalMode = await sixb.agent.threads.getApprovalMode(thread.id)
-          return { ...(await serializeThread(host, thread)), ...approvalMode }
+          return await serializeThreadRead(host, sixb, thread)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -599,7 +650,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const parsed = AddAgentThreadParticipantsBodySchema.parse(body)
           const thread = await sixb.agent.threads.participants.add(params.threadId, parsed.users)
 
-          return serializeThread(host, thread)
+          return serializeThread(host, thread, requestActor(sixb))
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -679,7 +730,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
 
           set.status = 201
           return CreateAgentThreadResponseSchema.parse({
-            thread: await serializeThread(host, thread),
+            thread: await serializeThread(host, thread, requestActor(sixb)),
           })
         } catch (error) {
           return handleAgentRouteError(error, set)
@@ -712,7 +763,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             context.params.threadId,
             context.body
           )
-          return serializeThread(host, thread)
+          return serializeThread(host, thread, requestActor(sixb))
         } catch (error) {
           if (error instanceof AgentStorageError && error.code === "invalid_state") {
             context.set.status = 409

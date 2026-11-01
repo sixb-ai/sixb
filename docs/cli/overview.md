@@ -30,16 +30,24 @@ sixb
 | `ctrl+l` | Open a conversation. `ctrl+n` starts a new one. |
 | `ctrl+p` | Every command. Typing `/` in the composer lists them too. |
 | `esc` twice | Stop the agent. |
-| `ctrl+c` twice | Quit. |
+| `ctrl+c` | Clear what you typed. On an empty composer, press it twice to quit. |
 
 On your computer, the agent's commands run in the folder as you, with your tools and network.
 They can't read your Sixb sign-in, `~/.ssh`, or `~/.aws`, and never hold a credential: the CLI
 adds the run's own to its requests to your API. A conversation that runs on your computer takes
 messages from you alone, and works on the computer and in the folder it started in: `sixb` open
-there runs its turns, including one sent from the app, and one sent while `sixb` is closed waits
-for it. Opened from another folder or another of your computers, it says where it works; `ctrl+f`
-moves it here, and only here runs its turns from then on. Quitting, or closing the terminal,
-stops a turn running here: it ends interrupted, and runs again only if you retry it.
+there runs its turns. Opened from another folder or another of your computers, it says where it
+works; `ctrl+f` moves it here, and only here runs its turns from then on. Quitting, or closing the
+terminal, stops a turn running here: it ends interrupted, and runs again only if you retry it.
+
+In the app, such a conversation shows its computer and folder, and whether `sixb` is open there.
+A message you send from the app runs on your computer as one typed in `sixb` does, in the
+permission mode the app sends it with; while `sixb` is closed, it waits for it. **Continue in the
+cloud** moves the conversation to the cloud instead, for good: the waiting message runs there,
+and the files in the folder stay on your computer. A conversation moves only once no turn is
+running or waiting for your approval. To keep messages from the app from running in
+a folder, turn off **Messages from the web** in `ctrl+p` there: they wait until you turn it back
+on, or move the conversation to the cloud.
 
 From a script, `sixb agent` asks once and prints the answer:
 

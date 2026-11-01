@@ -6,6 +6,7 @@ import {
 } from "../transactions"
 import { SqliteAgentApprovalStore } from "./approvals"
 import { SqliteAgentContextCheckpointStore } from "./checkpoints"
+import { SqliteAgentComputerSessionStore } from "./computers"
 import { SqliteAgentMemoryStore } from "./memory"
 import { SqliteAgentMessageStore } from "./messages"
 import { SqliteAgentRunStore } from "./runs"
@@ -22,9 +23,10 @@ export interface SqliteAgentStorageOptions {
 }
 
 /**
- * SQLite-backed agent persistence: thread, run, message, context-checkpoint, memory, approval and
- * approval-mode sub-stores sharing one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
- * serializes them for single-flight and checkpoint compare-and-swap safety.
+ * SQLite-backed agent persistence: thread, run, message, context-checkpoint, memory, approval,
+ * approval-mode and computer-session sub-stores sharing one connection. Cross-table writes run in
+ * SQLite transactions; the bundled {@link SqliteStorage} serializes them for single-flight and
+ * checkpoint compare-and-swap safety.
  */
 export class SqliteAgentStorage implements AgentStorage {
   readonly threads: SqliteAgentThreadStore
@@ -34,6 +36,7 @@ export class SqliteAgentStorage implements AgentStorage {
   readonly memory: SqliteAgentMemoryStore
   readonly approvals: SqliteAgentApprovalStore
   readonly approvalModes: SqliteAgentApprovalModeStore
+  readonly computers: SqliteAgentComputerSessionStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -47,6 +50,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.memory = new SqliteAgentMemoryStore(this.connection.db)
     this.approvals = new SqliteAgentApprovalStore(this.connection.db)
     this.approvalModes = new SqliteAgentApprovalModeStore(this.connection.db)
+    this.computers = new SqliteAgentComputerSessionStore(this.connection.db)
   }
 
   close(): void {

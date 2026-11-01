@@ -16,7 +16,7 @@ import {
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import type { Elysia } from "elysia"
 import { requestActor, requireRequestSixb } from "../auth/scope"
-import { refuseOtherComputer } from "./agent-computers"
+import { computerClaiming, endLapsedComputerSessions } from "./agent-computers"
 
 // A runner outside the worker, such as one on a person's computer, runs a turn through the API:
 // it claims the turn as the person who asked for it, then reaches the turn's session with the
@@ -56,15 +56,26 @@ const SWEEP_CLAIM_MS = 60_000
 /**
  * End the runs whose runner stopped renewing them, as the worker's repair pass does: a runner on
  * a computer has no worker behind it. Several API servers may sweep at once: each run is ended
- * once, by whichever takes it over. Returns the stop.
+ * once, by whichever takes it over. Computer sessions that lapsed end too. Returns the stop.
  */
 export function startLapsedRunSweeper(host: SixbHostView): () => void {
   const sessions = agentRunSessionHost(host)
   if (!sessions) return () => {}
+  // One sweep of sessions at a time: a slow one is not joined by the next.
+  let sweepingSessions = false
   const sweep = () => {
     void endLapsedAgentRuns(sessions, { leaseMs: SWEEP_CLAIM_MS }).catch((error: unknown) => {
       console.error("[SixbServer] Could not end lapsed agent runs; retrying.", error)
     })
+    if (sweepingSessions) return
+    sweepingSessions = true
+    void endLapsedComputerSessions(host)
+      .catch((error: unknown) => {
+        console.error("[SixbServer] Could not end lapsed computer sessions; retrying.", error)
+      })
+      .finally(() => {
+        sweepingSessions = false
+      })
   }
   sweep()
   const timer = setInterval(sweep, SWEEP_INTERVAL_MS)
@@ -151,9 +162,16 @@ export function registerAgentRunnerRoutes(app: Elysia, host: SixbHostView) {
             403
           )
         }
-        const elsewhere = await refuseOtherComputer(sessions, run, context.body)
-        if (elsewhere) return answer({ error: elsewhere.error }, elsewhere.status)
-        return answer({ result: await claimAgentRunForRunner(sessions, { run, leaseExpiresAt }) })
+        const claimed = await computerClaiming(sessions, run, context.body)
+        if ("refused" in claimed)
+          return answer({ error: claimed.refused.error }, claimed.refused.status)
+        return answer({
+          result: await claimAgentRunForRunner(sessions, {
+            run,
+            leaseExpiresAt,
+            onComputer: claimed.computer,
+          }),
+        })
       } catch (error) {
         // A turn whose runner stopped ends interrupted rather than being claimed again.
         return answer(

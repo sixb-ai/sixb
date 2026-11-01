@@ -1,5 +1,6 @@
 import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import { MAX_AGENT_CONTEXT_LABEL_LENGTH } from "@sixb/core/agents/context"
+import { CONTROL_CHARACTER } from "@sixb/core/internal/agent-run-storage-provider"
 import { LANGUAGE_MODEL_TIERS } from "@sixb/core/models"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
@@ -104,6 +105,22 @@ export const AgentThreadListQuerySchema = z
   })
   .strict()
 
+/** Shown back to its owner as written, so it holds no control character. */
+const plainText = (schema: z.ZodString) =>
+  schema.refine((text) => !CONTROL_CHARACTER.test(text), "has a control character")
+
+/** Where on your computer a thread runs: the computer `sixb` is open on, and its folder there. */
+export const AgentThreadComputerInputSchema = z
+  .object({
+    /** The id `sixb` keeps for the computer, beside its sign-in. */
+    id: plainText(z.string().trim().min(1).max(200)),
+    /** What you call the computer, such as "Anthony's MacBook Pro". */
+    name: plainText(z.string().trim().min(1).max(120)),
+    /** The absolute path its turns work in. */
+    folder: plainText(z.string().min(1).max(4096)),
+  })
+  .strict()
+
 export const CreateAgentThreadBodySchema = z
   .object({
     title: z.string().trim().min(1).optional(),
@@ -111,6 +128,8 @@ export const CreateAgentThreadBodySchema = z
     sandbox: z.record(z.string(), JsonValueSchema).optional(),
     /** Run its turns on your computer, which claims them, instead of in the cloud. */
     runsOn: z.literal("computer").optional(),
+    /** The computer and folder its turns run in: required with `runsOn: "computer"`. */
+    computer: AgentThreadComputerInputSchema.optional(),
   })
   .strict()
 
@@ -155,8 +174,20 @@ export const AgentThreadSchema = z.object({
   sandboxParams: z.record(z.string(), JsonValueSchema).optional(),
   /** Its turns run on its owner's computer; absent, in the cloud. */
   runsOn: z.literal("computer").optional(),
-  /** Which of its owner's computers runs it; absent until one claims its first turn. */
-  computerId: z.string().optional(),
+  /**
+   * Where on its owner's computer it runs, and whether `sixb` is open there now: shown to its owner
+   * alone. Absent for a computer's thread from before folders were kept, until its owner moves it.
+   */
+  computer: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      folder: z.string(),
+      online: z.boolean(),
+    })
+    .optional(),
+  /** When its turns last moved to where they run now: the files earlier turns used are not here. */
+  movedAt: z.string().optional(),
   status: AgentThreadStatusSchema,
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),
@@ -183,11 +214,23 @@ export const CreateAgentThreadResponseSchema = z.object({
 })
 
 export const MoveAgentThreadToComputerBodySchema = z
-  .object({
-    /** The id `sixb` keeps for the computer, beside its sign-in. */
-    computerId: z.string().trim().min(1).max(200),
-  })
+  .object({ computer: AgentThreadComputerInputSchema })
   .strict()
+
+export const AgentComputerSessionParamsSchema = z.object({
+  sessionId: z.string().trim().min(1).max(200),
+})
+
+export const HoldAgentComputerSessionBodySchema = z
+  .object({ computer: AgentThreadComputerInputSchema })
+  .strict()
+
+export const HoldAgentComputerSessionResponseSchema = z.object({
+  /** Renew before then, or the session lapses and its threads read as offline. */
+  expiresAt: z.string(),
+  /** Queued turns of your threads on this computer, in this folder, for it to claim. */
+  waiting: z.array(z.string()),
+})
 
 export const AddAgentThreadParticipantsBodySchema = z
   .object({

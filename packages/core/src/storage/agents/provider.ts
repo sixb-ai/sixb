@@ -15,14 +15,18 @@ import type {
   AgentApprovalMode,
   AgentApprovalRecord,
   AgentApprovalStatus,
+  AgentComputerSessionRecord,
   AgentContextCheckpointRecord,
   AgentMemoryChange,
   AgentMessageRecord,
   AgentRunRecord,
+  AgentThreadComputer,
   AgentThreadParticipantRecord,
+  AgentThreadPlace,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
+  ConversationAgentRunRecord,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
@@ -233,6 +237,11 @@ export function remapArtifactIds(
 
 /** What a fork reads from its source thread, inside the provider's transaction. */
 export interface AgentThreadForkSource {
+  /** Where the source runs: a fork starts in the cloud, without the files its turns worked on. */
+  readonly workspace: {
+    readonly runsOn?: string | null
+    readonly movedAt?: Date | string | null
+  }
   /** The active run's trigger message, when a turn is running. */
   readonly triggerMessageId?: string
   /**
@@ -292,12 +301,15 @@ export function planAgentThreadFork(
     (candidate) => candidate.observedHeadSeq <= lastCopiedSeq
   )
 
+  const { runsOn, movedAt: moved } = source.workspace
+  const movedAt = moved ? new Date(moved) : runsOn === "computer" ? createdAt : undefined
   const thread: AgentThreadRecord = {
     id: input.id,
     projectId: input.projectId,
     kind: "conversation",
     ownerPrincipal: structuredClone(input.ownerPrincipal),
     ...(input.title === undefined ? {} : { title: input.title }),
+    ...(movedAt === undefined ? {} : { movedAt }),
     ...(input.sandboxParams === undefined
       ? {}
       : { sandboxParams: snapshotAgentThreadSandboxParams(input.sandboxParams) }),
@@ -432,19 +444,79 @@ export function assertRunsOn(value: unknown, subject: string, prefix = "Sixb"): 
   }
 }
 
-/** Validate the id of the computer a thread runs on: the CLI's own, a short non-blank string. */
-export function assertComputerId(value: unknown, prefix = "Sixb"): void {
-  if (typeof value !== "string" || value.trim() === "" || value.length > 200) {
+/**
+ * Validate where on a computer a thread runs: the CLI's id for the computer, its name, and the
+ * folder there. All are shown back to its owner, so none holds a control character.
+ */
+export function assertAgentThreadComputer(
+  value: unknown,
+  prefix = "Sixb"
+): asserts value is AgentThreadComputer {
+  const computer = value as Partial<AgentThreadComputer> | null
+  const fields = [
+    ["id", computer?.id, 200],
+    ["name", computer?.name, 120],
+    ["folder", computer?.folder, 4096],
+  ] as const
+  for (const [field, text, max] of fields) {
+    if (
+      typeof text !== "string" ||
+      text.trim() === "" ||
+      text.length > max ||
+      CONTROL_CHARACTER.test(text)
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] An Agent thread's computer '${field}' must be a non-blank string of at most ${max} characters, without control characters.`
+      )
+    }
+  }
+}
+
+/** A thread runs on a computer exactly when it names the computer and folder. */
+export function assertComputerPlace(runsOn: unknown, computer: unknown, prefix = "Sixb"): void {
+  assertRunsOn(runsOn, "Agent thread", prefix)
+  if (runsOn === "computer") assertAgentThreadComputer(computer, prefix)
+  else if (computer !== undefined) {
     throw new AgentStorageError(
       "invalid_input",
-      `[${prefix}] An Agent thread's 'computerId' must be a non-blank string of at most 200 characters.`
+      `[${prefix}] Only a thread that runs on a computer names one.`
     )
   }
 }
 
-/** Refuse to assign a computer to a thread that runs in the cloud, or does not exist. */
+/** Validate a computer session before a store keeps it. */
+export function assertAgentComputerSession(
+  session: AgentComputerSessionRecord,
+  prefix = "Sixb"
+): void {
+  if (typeof session.id !== "string" || session.id.trim() === "" || session.id.length > 200) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] A computer session's 'id' must be a non-blank string of at most 200 characters.`
+    )
+  }
+  if (!(session.expiresAt instanceof Date) || Number.isNaN(session.expiresAt.getTime())) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] A computer session's 'expiresAt' must be a valid date.`
+    )
+  }
+  assertAgentThreadComputer(session.computer, prefix)
+}
+
+/** C0 and C1 controls, DEL, and the marks that reorder text where a terminal or page shows it. */
+export const CONTROL_CHARACTER =
+  /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/
+
+/**
+ * Refuse to assign a computer to a thread that runs in the cloud, or does not exist, or to move one
+ * while a turn runs in its folder.
+ */
 export function assertAssignableComputer(
   thread: AgentThreadRecord | null,
+  activeRun: AgentRunRecord | null,
+  computer: AgentThreadComputer,
   id: string,
   prefix = "Sixb"
 ): asserts thread is AgentThreadRecord {
@@ -457,6 +529,102 @@ export function assertAssignableComputer(
       `[${prefix}] Agent thread '${id}' runs in the cloud: no computer runs its turns.`
     )
   }
+  if (movesComputerPlace(thread, computer)) assertNoTurnRunning(activeRun, id, prefix)
+}
+
+/**
+ * Refuse to move a thread to the cloud unless it runs on a computer and no turn runs there now. A
+ * queued turn moves with it.
+ */
+export function assertMovableToCloud(
+  thread: AgentThreadRecord | null,
+  activeRun: AgentRunRecord | null,
+  id: string,
+  prefix = "Sixb"
+): asserts thread is AgentThreadRecord {
+  if (!thread) {
+    throw new AgentStorageError("thread_not_found", `[${prefix}] Agent thread '${id}' not found.`)
+  }
+  if (thread.runsOn !== "computer") {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Agent thread '${id}' runs in the cloud already.`
+    )
+  }
+  assertNoTurnRunning(activeRun, id, prefix)
+}
+
+/** A turn works in its thread's folder until it ends: its thread moves after that. */
+function assertNoTurnRunning(activeRun: AgentRunRecord | null, id: string, prefix: string): void {
+  if (activeRun?.status === "running") {
+    throw new AgentStorageError(
+      "active_run_exists",
+      `[${prefix}] A turn of Agent thread '${id}' is running on its computer: stop it, or let it end, first.`
+    )
+  }
+}
+
+/**
+ * A turn runs where its thread runs: one asked for before the thread moved, and created after, is
+ * refused rather than left where nothing claims it.
+ */
+export function assertTurnInThreadPlace(
+  threadRunsOn: unknown,
+  spec: ConversationAgentRunSpec,
+  threadId: string,
+  prefix = "Sixb"
+): void {
+  if ((threadRunsOn ?? undefined) !== spec.runsOn) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent thread '${threadId}' moved while this turn was asked for: send it again.`
+    )
+  }
+}
+
+/** Refuse to start a computer's turn that moved to the cloud before it started. */
+export function assertStartsOnComputer(
+  run: AgentRunRecord,
+  threadPlace: AgentThreadPlace | undefined,
+  place: AgentThreadPlace,
+  prefix = "Sixb"
+): void {
+  if (run.kind !== "conversation" || run.spec?.runsOn !== "computer") {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent run '${run.id}' runs in the cloud now: no computer starts it.`
+    )
+  }
+  if (!threadPlace || !sameComputerPlace(threadPlace, place)) {
+    throw new AgentStorageError(
+      "invalid_state",
+      `[${prefix}] Agent run '${run.id}' moved to another folder or computer: it starts there.`
+    )
+  }
+}
+
+/** Whether `computer` takes a thread's turns away from the computer or folder it had. */
+export function movesComputerPlace(
+  thread: AgentThreadRecord,
+  computer: AgentThreadComputer
+): boolean {
+  // One from before folders were kept ran somewhere unknown: its first folder is a move too.
+  return !thread.computer || !sameComputerPlace(thread.computer, computer)
+}
+
+/** The queued turn of a thread that moves to the cloud, as the cloud runs it. */
+export function queuedTurnInCloud(
+  active: AgentRunRecord | null
+): ConversationAgentRunRecord | undefined {
+  if (active?.kind !== "conversation" || active.status !== "queued") return undefined
+  if (active.spec?.runsOn !== "computer") return undefined
+  const { runsOn: _runsOn, ...cloud } = active.spec
+  return { ...active, spec: cloud }
+}
+
+/** Whether two places are the same folder of the same computer, whatever they call it. */
+export function sameComputerPlace(a: AgentThreadPlace, b: AgentThreadPlace): boolean {
+  return a.id === b.id && a.folder === b.folder
 }
 
 export function isAgentApprovalMode(value: unknown): value is AgentApprovalMode {

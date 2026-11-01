@@ -1,6 +1,6 @@
 import type { AgentThreadView, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { requireRequestSixb } from "../auth/scope"
+import { requestActor, requireRequestSixb } from "../auth/scope"
 import { fileContentGetResponses, handleFileContentQueryValidationError } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -59,7 +59,7 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
             return threadNotFound(context.set)
           }
 
-          return await serializeThread(host, thread)
+          return await serializeThread(host, thread, requestActor(requireRequestSixb(context)))
         } catch (error) {
           return handleAgentRouteError(error, context.set)
         }

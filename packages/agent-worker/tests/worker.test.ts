@@ -2460,6 +2460,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2507,6 +2508,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     runs: {
       create: (input) => agents.runs.create(input),
       createSubagent: (input) => agents.runs.createSubagent(input),
@@ -2551,6 +2553,7 @@ function withObservedAgentMessageAppendStorage(
     memory: agents.memory,
     approvals: agents.approvals,
     approvalModes: agents.approvalModes,
+    computers: agents.computers,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -13240,7 +13243,11 @@ describe("agent tools act as the requester", () => {
       new RecordingSandboxFactory(),
       { projectTools: [summarizeInvoice] }
     )
-    const request = await requestAgent(sixb, { text: "Summarize inv-1.", runsOn: "computer" })
+    const request = await requestAgent(sixb, {
+      text: "Summarize inv-1.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
+    })
     const { workerHost, recorded } = recordUsage(sixb)
     const api = createSixbApi(
       new SixbServer({ host: workerHost as never, quiet: true, browser: createTestBrowserPolicy() })
@@ -13252,7 +13259,7 @@ describe("agent tools act as the requester", () => {
       apiUrl,
       runId: request.run.id,
       authorization: "",
-      computerId: "laptop",
+      computer: { id: "laptop", name: "Laptop", folder: "/work" },
       leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       fetch: send,
     })
@@ -13343,18 +13350,22 @@ describe("agent tools act as the requester", () => {
     const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [parentModel, childModel] },
     })
-    const request = await requestAgent(sixb, { text: "Delegate this.", runsOn: "computer" })
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const request = await requestAgent(sixb, {
+      text: "Delegate this.",
+      runsOn: "computer",
+      computer: { id: "laptop", name: "Laptop", folder },
+    })
     childRunId = createSubagentRunId(request.run.id, "research")
     const api = createSixbApi(
       new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
     )
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
     const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
     const opened: { workingDirectory?: string; runFiles: string }[] = []
     const runner = new ComputerRunner({
       apiUrl: "http://api.localhost",
       authorization: async () => "",
-      computerId: async () => "laptop",
+      computer: async () => ({ id: "laptop", name: "Laptop" }),
       folder,
       runFilesRoot,
       fetch: async (outgoing) => api.fetch(outgoing),
@@ -13378,10 +13389,13 @@ describe("agent tools act as the requester", () => {
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
       // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
-      // and gone once it ended.
+      // named as a cloud sandbox names them, and gone once it ended.
       expect(opened).toEqual([
-        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.id) },
-        { runFiles: join(runFilesRoot, childRunId) },
+        {
+          workingDirectory: folder,
+          runFiles: join(runFilesRoot, request.run.id, ".sixb", "agent"),
+        },
+        { runFiles: join(runFilesRoot, childRunId, ".sixb", "agent") },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
     } finally {
