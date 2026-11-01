@@ -166,7 +166,9 @@ per answer, cap it with `maxOutputTokens` on the binding, such as
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
 A conversation is summarized only near its model's limit, whatever the provider's price tiers. To
-summarize earlier, set a smaller `contextWindow` on the model definition.
+summarize earlier, set a smaller `contextWindow` on the model definition. One that resumes after an
+hour idle with 200,000 tokens or more is summarized first too: its prompt cache has expired, and
+the summary is far cheaper to read again than the whole conversation.
 
 A summary brings the conversation well under that limit, so the next turns do not summarize again.
 The latest turns stay as they are, and the agent can still read the whole conversation with
