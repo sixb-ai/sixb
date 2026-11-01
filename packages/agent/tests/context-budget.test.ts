@@ -163,6 +163,30 @@ describe("agent context budget resolution", () => {
     expect(outputs[1]).toBe(400_000 - (350_000 + 16))
   })
 
+  test("takes no measurement from a call that carried an image", async () => {
+    // Reproduce: drop the image check from measureAgentContextTokenRate; the image's 5,400-token
+    // allowance comes off the count and the call measures its text sparser than it reads.
+    const base = selection({ contextWindow: 200_000 })
+    countingAt(base.model, 2.4)
+    const samples: unknown[] = []
+    const { model } = prepareAgentModel(
+      { ...base, model: await resolveLanguageModel(base.model) },
+      (sample) => samples.push(sample)
+    )
+    const image = {
+      type: "file" as const,
+      mediaType: "image/png",
+      data: new URL("data:image/png;base64,AAAA"),
+    }
+
+    await streamAll(model, request([text(30_000), image]))
+    await streamAll(model, request([text(30_000)]))
+
+    expect(samples).toEqual([
+      { providerId: "mock", modelId: "model", bytes: 30_000, tokens: 12_500 },
+    ])
+  })
+
   test("reports what each call measured of its model's tokenizer, for the run to record", async () => {
     // Removal proof: drop the `measured` call in prepareAgentModel; the run records nothing.
     const base = selection({ contextWindow: 200_000 })

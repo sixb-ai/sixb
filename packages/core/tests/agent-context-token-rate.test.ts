@@ -5,6 +5,7 @@ import {
   calibrateAgentContextBytesPerToken,
   estimateAgentContextRequestTokens,
   measureAgentContextRequest,
+  measureAgentContextTokenRate,
   measureModelRequest,
   readAgentContextTokenRates,
   recordAgentContextTokenRate,
@@ -113,6 +114,35 @@ describe("agent context rate calibration", () => {
     expect(calibrate(2_008)).toBe(2.5)
     // Reproduce: clamp upward at twice the run's rate again; 3 bytes per token pass through.
     expect(calibrate(10_008)).toBe(2.5)
+  })
+
+  // Removal proof: drop the image check from measureAgentContextTokenRate, or the image count from
+  // measureAgentContextRequest; the screenshot's 5,400-token allowance comes off the provider's
+  // count and the thread calibrates to its text read sparser than it is.
+  test("keeps the run's rate when the call read an image", () => {
+    const withImage: AgentMessage = {
+      role: "user",
+      parts: [
+        { type: "text", text: text(30_000) },
+        {
+          type: "file",
+          fileRef: {
+            blobId: `blob_${"0".repeat(64)}`,
+            digest: `sha256:${"0".repeat(64)}`,
+            sizeBytes: 400_000,
+            fileName: "screen.png",
+            mediaType: "image/png",
+          },
+        },
+      ],
+    }
+    const size = measureAgentContextRequest({ systemPrompt: "", tools: [], messages: [withImage] })
+
+    expect(size.images).toBe(1)
+    expect(measureAgentContextTokenRate({ size, inputTokens: 14_000 })).toBeUndefined()
+    expect(
+      calibrateAgentContextBytesPerToken({ bytesPerToken: 2, size, inputTokens: 14_000 })
+    ).toBe(2)
   })
 
   // Removal proof: drop CALIBRATION_MIN_TEXT_TOKENS; a 600-byte call's overheads set the rate.

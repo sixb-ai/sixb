@@ -152,15 +152,19 @@ function outputCeilingTokens(
  * call of the thread at the reserve. Other inline files count by their encoded bytes.
  */
 function measureRequestInput(request: LanguageModelRequest): AgentContextSize {
-  const size = { ...measureModelRequest(request) }
+  const size = { ...measureModelRequest(request), images: 0 }
   for (const message of request.messages) {
     if (message.role !== "user") continue
 
     for (const part of message.content) {
       if (part.type !== "file") continue
 
-      if (part.mediaType.startsWith("image/")) size.tokens += AGENT_IMAGE_INPUT_TOKENS
-      else size.bytes += new TextEncoder().encode(part.data.href).byteLength
+      if (part.mediaType.startsWith("image/")) {
+        size.tokens += AGENT_IMAGE_INPUT_TOKENS
+        size.images += 1
+      } else {
+        size.bytes += new TextEncoder().encode(part.data.href).byteLength
+      }
     }
   }
   return size
