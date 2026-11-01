@@ -68,7 +68,7 @@ export function estimateAgentContextRequestTokens(
   input: EstimateAgentContextRequestTokensInput & { readonly bytesPerToken: number }
 ): AgentContextTokenEstimate {
   return {
-    tokens: agentContextTokens(measureAgentContextRequest(input), input.bytesPerToken),
+    tokens: agentContextSizeTokens(measureAgentContextRequest(input), input.bytesPerToken),
     estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION,
   }
 }
@@ -87,7 +87,7 @@ export function estimateAgentContextMessagesTokens(
   bytesPerToken: number
 ): AgentContextTokenEstimate {
   return {
-    tokens: agentContextTokens(measureAgentContextMessages(messages), bytesPerToken),
+    tokens: agentContextSizeTokens(measureAgentContextMessages(messages), bytesPerToken),
     estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION,
   }
 }
@@ -117,23 +117,20 @@ function measureAgentContextMessages(messages: readonly AgentMessage[]): AgentCo
 }
 
 /** Price a measured request at a tokenizer's rate. */
-function agentContextTokens(size: AgentContextSize, bytesPerToken: number): number {
+export function agentContextSizeTokens(size: AgentContextSize, bytesPerToken: number): number {
   return size.tokens + Math.ceil(size.bytes / bytesPerToken)
 }
 
 /**
- * Estimate one outgoing model request the same way as a stored conversation: the same parts, the
- * same overheads, the same rate. A file part counts by its name and media type only; what an
- * attached file costs is the caller's call.
+ * Weigh one outgoing model request the same way as a stored conversation: the same parts, the
+ * same overheads. A file part counts by its name and media type only; what an attached file costs
+ * is the caller's call.
  */
-export function estimateModelRequestTokens(
-  request: {
-    readonly messages: readonly ModelMessage[]
-    readonly tools: readonly ModelToolSpecification[]
-    readonly responseFormat?: ModelResponseFormat
-  },
-  bytesPerToken: number
-): number {
+export function measureModelRequest(request: {
+  readonly messages: readonly ModelMessage[]
+  readonly tools: readonly ModelToolSpecification[]
+  readonly responseFormat?: ModelResponseFormat
+}): AgentContextSize {
   const size = { bytes: 0, tokens: REQUEST_OVERHEAD_TOKENS }
   for (const tool of request.tools) {
     size.tokens += TOOL_OVERHEAD_TOKENS
@@ -179,7 +176,7 @@ export function estimateModelRequestTokens(
     }
   }
 
-  return agentContextTokens(size, bytesPerToken)
+  return size
 }
 
 /** Select the safe user boundary whose retained tail is closest to the configured recent budget. */

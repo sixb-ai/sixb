@@ -58,22 +58,21 @@ describe("agent context budget resolution", () => {
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
     const { model, budget } = await pinAndPrepare(base)
-    for (const bytes of [0, 360_000, 720_000]) await model.stream(request([text(bytes)]))
+    for (const bytes of [0, 450_000, 900_000]) await model.stream(request([text(bytes)]))
 
     expect(budget).toMatchObject({ reserveTokens: 16_384, inputBudgetTokens: 183_616 })
     expect(model.definition.maxOutputTokens).toBe(64_000)
     expect(outputs[0]).toBe(64_000)
-    // 360,000 bytes count as 150,000 tokens at an unknown tokenizer's 3 per token less the
-    // ceiling's quarter margin, plus a few overheads.
+    // 450,000 bytes count as 150,000 tokens at an unknown tokenizer's 3 per token, plus a few
+    // overheads.
     expect(outputs[1]).toBeGreaterThan(49_900)
     expect(outputs[1]).toBeLessThan(50_000)
     expect(outputs[2]).toBe(16_384)
   })
 
   test("estimates each call like the conversation, at the model's tokenizer rate", async () => {
-    // Removal proof: estimate the call by its serialized JSON, at a fixed two bytes per token, or
-    // without the margin; the escaped quotes double, or the Claude rate is lost, and the call asks
-    // for another output.
+    // Removal proof: estimate the call by its serialized JSON, or at a fixed two bytes per token;
+    // the escaped quotes double, or the Claude rate is lost, and the call asks for another output.
     const base = selection({
       modelId: "claude-haiku-5-5",
       contextWindow: 200_000,
@@ -83,9 +82,46 @@ describe("agent context budget resolution", () => {
     const { model } = await pinAndPrepare(base)
     await model.stream(request([{ type: "text", text: '"'.repeat(300_000) }]))
 
-    // 300,000 bytes at Claude's 2.1 per token less a quarter, plus the request's and the
-    // message's 8 tokens each.
-    expect(outputs).toEqual([200_000 - (Math.ceil(300_000 / (2.1 / 1.25)) + 16)])
+    // 300,000 bytes at Claude's 2.1 per token, plus the request's and the message's 8 tokens each.
+    expect(outputs).toEqual([200_000 - (Math.ceil(300_000 / 2.1) + 16)])
+  })
+
+  test("gives a long Claude thread the room its window leaves, at the rate its calls measure", async () => {
+    // Reproduce: size the ceiling at the family rate less a quarter, as before; the second call,
+    // about 130,000 real tokens of a 200,000 window, is then capped at the 16,384 reserve.
+    const base = selection({
+      modelId: "claude-haiku-5-5",
+      contextWindow: 200_000,
+      maxOutputTokens: 64_000,
+    })
+    const outputs: (number | undefined)[] = []
+    base.model.stream = async (request) => {
+      outputs.push(request.maxOutputTokens)
+      // This provider counts 2.4 bytes per token, as Claude measured on agent turns.
+      const bytes = request.messages.flatMap((message) =>
+        message.role === "system"
+          ? []
+          : message.content.map((part) => (part.type === "text" ? part.text.length : 0))
+      )
+      const inputTokens = Math.ceil(bytes.reduce((total, value) => total + value, 0) / 2.4)
+      return {
+        events: (async function* () {
+          yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
+        })(),
+      }
+    }
+    const { model } = await pinAndPrepare(base)
+
+    for (const bytes of [300_000, 312_000]) {
+      for await (const _event of (await model.stream(request([text(bytes)]))).events) {
+        // Read to the end, as the model loop does.
+      }
+    }
+
+    // The first call goes by Claude's family rate, the second by what the first measured: about
+    // 130,000 tokens, which leave 70,000 of the window and so the whole 64,000-token cap.
+    expect(outputs[0]).toBeGreaterThan(16_384)
+    expect(outputs[1]).toBe(64_000)
   })
 
   test("keeps a reasoning budget's reserve and rejects one the model cannot exceed", async () => {
