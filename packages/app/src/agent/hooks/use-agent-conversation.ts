@@ -56,6 +56,7 @@ import {
 } from "../model-selection"
 import { type RequesterSettings, sendWithRequesterSettings } from "../requester-settings"
 import {
+  CONTEXT_LIMIT_EXCEEDED,
   EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
   offersContinue,
@@ -806,10 +807,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const answeringForName = answeringFor ? knownName(answeringFor, thread, authors) : undefined
   const answeringName = answeringFor ? (answeringForName ?? answeringFor.id) : null
 
-  // A turn that never answered can run again, by whoever asked for it, once the sandbox works.
+  // A turn that never answered can run again, by whoever asked for it, once the sandbox works,
+  // unless it would fail the same way: a conversation too long for its model.
   const canRetry =
     !sandboxRecovery &&
-    (presentation.kind === "failed" ||
+    ((presentation.kind === "failed" && presentation.run.error?.code !== CONTEXT_LIMIT_EXCEEDED) ||
       ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
         !presentation.hasProgress)) &&
     canRetryRun(presentation.run, user)

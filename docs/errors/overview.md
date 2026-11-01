@@ -38,6 +38,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `action.run_in_progress` | Yes | A request reused the `runId` of a run that the same process is still executing. | Retry with the same `runId` once it finishes to get its outcome. |
 | `action.timeout` | No | Validation, writeback, or edits did not finish within 30 seconds, so nothing was committed. On a run's `effects`, the effects did not finish within 30 seconds of the commit. | If the Action has a writeback, check the external system before requesting a new run. Move longer work into a workflow. |
 | `agent.approval_authority_lost` | No | An approved Agent call did not run: its requester's sign-in ended before Sixb could run it, after a crash. | Ask the Agent again. |
+| `agent.context_limit_exceeded` | No | A conversation is too long for its model's context window, even once its earlier turns are summarized. | Start a new conversation, or switch to a model with a larger context window. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
 | `ai.usage_limit_exceeded` | No | An applicable AI usage limit has no capacity for another model call. | Wait until `details.resetAt`, or raise or disable the applicable limit policy. |
 | `ai.usage_limit_unavailable` | Yes | Sixb could not evaluate an applicable AI usage limit safely. | Restore complete accounting or the limit storage provider, then retry. |

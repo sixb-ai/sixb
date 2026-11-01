@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Clock3,
   type LucideIcon,
+  Plus,
   RotateCcw,
   Unplug,
 } from "lucide-react"
@@ -220,12 +221,13 @@ function TurnNotice({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" role="status">
-      <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+      {/* The icon sits on the first line of a notice that wraps: 2px centers 16px on 20px. */}
+      <p className="flex min-w-0 items-start gap-2 text-sm leading-5 text-muted-foreground">
         {Icon ? (
           <Icon
             aria-hidden="true"
             className={cn(
-              "size-4 shrink-0",
+              "mt-0.5 size-4 shrink-0",
               tone === "error" ? "text-destructive" : "text-amber-600 dark:text-amber-400"
             )}
           />
@@ -376,17 +378,35 @@ export function RunInterruptedMarker({
 export function RunFailureMarker({
   onRetry,
   retrying = false,
+  contextFull = false,
+  onNewThread,
 }: {
   onRetry?: () => void
   retrying?: boolean
+  /**
+   * The conversation is too long for its model: running it again would fail the same way, so the
+   * way on is a new thread.
+   */
+  contextFull?: boolean
+  onNewThread?: () => void
 }) {
-  const messages = useAgentMessages().transcript
+  const labels = useAgentMessages()
+  const messages = labels.transcript
   return (
     <TurnNotice
       icon={AlertTriangle}
       tone="error"
       action={
-        onRetry ? (
+        contextFull ? (
+          onNewThread ? (
+            <TurnAction
+              icon={Plus}
+              label={labels.threads.new}
+              onClick={onNewThread}
+              disabled={false}
+            />
+          ) : null
+        ) : onRetry ? (
           <TurnAction
             icon={RotateCcw}
             label={retrying ? messages.retrying : messages.retry}
@@ -396,7 +416,7 @@ export function RunFailureMarker({
         ) : null
       }
     >
-      {messages.notStarted}
+      {contextFull ? messages.contextFull : messages.notStarted}
     </TurnNotice>
   )
 }
