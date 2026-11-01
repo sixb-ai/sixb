@@ -1,11 +1,12 @@
 import { AgentDefinitionError } from "@sixb/core"
 import {
-  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   AGENT_IMAGE_INPUT_TOKENS,
   type AgentContextSize,
+  type AgentContextTokenRateSample,
   type AgentModelTokenRateSample,
   agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
+  learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
   measureModelRequest,
 } from "@sixb/core/internal/agents"
@@ -31,7 +32,10 @@ export interface AgentContextBudget {
   /** The recent work compaction keeps verbatim. */
   readonly keepRecentTokens: number
   readonly source: "model" | "fallback"
-  /** UTF-8 bytes per token the run starts from, before a thread calibrates it. */
+  /**
+   * UTF-8 bytes per token the run starts from, before a thread calibrates it: what the project's
+   * runs measured on the model (see learnedAgentContextBytesPerToken).
+   */
   readonly bytesPerToken: number
 }
 
@@ -39,10 +43,10 @@ interface AgentModelSelection {
   readonly model: LanguageModel
   readonly reasoning?: ModelReasoning
   /**
-   * What the project's runs measured on the model lately (see readAgentContextBytesPerToken);
-   * absent, the default, which errs high.
+   * What the project's runs measured of the model's tokenizer lately, newest first (see
+   * readAgentContextTokenRates); none, and the run starts from the default, which errs high.
    */
-  readonly bytesPerToken?: number
+  readonly tokenRates?: readonly AgentContextTokenRateSample[]
 }
 
 /**
@@ -73,7 +77,11 @@ export function prepareAgentModel(
     throw invalidBudget("output allowance must exceed the reasoning token budget.")
   }
 
-  // The rate the run's calls measured: the latest one the provider counted, else the run's own.
+  // The run's rate, from the project's measurements and, newest first, its own calls'.
+  const tokenRates = selection.tokenRates ?? []
+  const runTokenRates: AgentContextTokenRateSample[] = []
+  let runBytesPerToken = budget.bytesPerToken
+  // The rate the run's latest counted call measured, bounded around the run's; else the run's.
   let measuredBytesPerToken = budget.bytesPerToken
 
   return {
@@ -93,7 +101,7 @@ export function prepareAgentModel(
           maxOutputTokens: Math.min(
             request.maxOutputTokens ?? maxOutputTokens,
             outputCeilingTokens(
-              agentContextSizeTokens(size, Math.min(budget.bytesPerToken, measuredBytesPerToken)),
+              agentContextSizeTokens(size, Math.min(runBytesPerToken, measuredBytesPerToken)),
               budget,
               maxOutputTokens
             )
@@ -102,16 +110,18 @@ export function prepareAgentModel(
 
         return {
           events: withCountedInput(stream.events, (inputTokens) => {
+            const sample = measureAgentContextTokenRate({ size, inputTokens })
+            if (sample) {
+              runTokenRates.unshift(sample)
+              runBytesPerToken = learnedAgentContextBytesPerToken([...runTokenRates, ...tokenRates])
+              measured?.({ providerId: model.providerId, modelId: model.modelId, ...sample })
+            }
+
             measuredBytesPerToken = calibrateAgentContextBytesPerToken({
-              bytesPerToken: budget.bytesPerToken,
+              bytesPerToken: runBytesPerToken,
               size,
               inputTokens,
             })
-
-            const sample = measureAgentContextTokenRate({ size, inputTokens })
-            if (sample) {
-              measured?.({ providerId: model.providerId, modelId: model.modelId, ...sample })
-            }
           }),
         }
       },
@@ -121,7 +131,7 @@ export function prepareAgentModel(
 
 /**
  * A call may write whatever its input leaves of the window, up to the cap, and the reserve at
- * least. The input is weighed at the denser of the run's starting rate and the one its calls
+ * least. The input is weighed at the denser of the run's rate and the one its latest call
  * measured, so it errs high whichever way this request's content tokenizes: a call right after a
  * large tool result can read denser than the calls it was calibrated on, and with no turn to ask
  * it again, an allowance past the window's room is a refused call.
@@ -207,9 +217,9 @@ export function resolveAgentContextBudget(
     windowTokens - reserveTokens
   )
   assertPositiveSafeInteger(inputBudgetTokens, "inputBudgetTokens")
-  const bytesPerToken = selection.bytesPerToken ?? AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
+  const bytesPerToken = learnedAgentContextBytesPerToken(selection.tokenRates ?? [])
   if (!Number.isFinite(bytesPerToken) || bytesPerToken <= 0) {
-    throw invalidBudget("bytesPerToken must be a positive number.")
+    throw invalidBudget("token rates must measure a positive number of bytes per token.")
   }
   const keepRecentTokens = Math.min(20_000, Math.floor(inputBudgetTokens * 0.5))
   assertPositiveSafeInteger(keepRecentTokens, "keepRecentTokens")

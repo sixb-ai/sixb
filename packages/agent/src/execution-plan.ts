@@ -1,5 +1,10 @@
 import type { AgentReasoning, AgentSkillDefinition } from "@sixb/core"
-import type { AgentRunPlan, AgentToolSpec, SandboxModel } from "@sixb/core/internal/agents"
+import type {
+  AgentContextTokenRateSample,
+  AgentRunPlan,
+  AgentToolSpec,
+  SandboxModel,
+} from "@sixb/core/internal/agents"
 import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { LanguageModel } from "@sixb/core/models"
 import { withBuiltInSkills } from "./skills/built-in"
@@ -25,8 +30,8 @@ export interface ResolvedAgentExecutionPlan {
   readonly sandboxModels?: readonly SandboxModel[]
   /** Reference docs for the object types the run's requester can see, from their own view. */
   readonly ontologyDocs: RenderedOntologyDocs
-  /** What the project's runs measured of the model's bytes per token; absent, the default. */
-  readonly bytesPerToken?: number
+  /** What the project's runs measured of the model's tokenizer lately, newest first. */
+  readonly tokenRates?: readonly AgentContextTokenRateSample[]
 }
 
 /**
@@ -41,7 +46,7 @@ export function resolveRunPlan(
   return Object.freeze({
     model: resolved.model,
     ontologyDocs,
-    bytesPerToken: plan.bytesPerToken,
+    tokenRates: plan.tokenRates,
     ...(instructions === undefined ? {} : { instructions }),
     tools,
     skills: withBuiltInSkills(plan.skills),

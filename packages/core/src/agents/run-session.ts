@@ -45,7 +45,7 @@ import {
 } from "./authority"
 import {
   type AgentModelTokenRateSample,
-  readAgentContextBytesPerToken,
+  readAgentContextTokenRates,
   recordAgentContextTokenRate,
 } from "./context-token-rate"
 import { AgentToolPublicError } from "./errors"
@@ -567,12 +567,12 @@ export async function openAgentRunSession<TRun extends AgentRunRecord>(
         ...(propertyClearance === undefined ? {} : { propertyClearance }),
       })
 
-      const bytesPerToken = await readAgentContextBytesPerToken({
+      const tokenRates = await readAgentContextTokenRates({
         tokenRates: agents.tokenRates,
         projectId: host.projectId,
         model: { providerId: plan.model.provider, modelId: plan.model.modelId },
       })
-      return Object.freeze({ ...plan, bytesPerToken })
+      return Object.freeze({ ...plan, tokenRates })
     },
     async memory({ asOf }) {
       // Others read a shared conversation, so its runs reach no one's own memory.

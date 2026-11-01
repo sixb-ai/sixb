@@ -92,12 +92,16 @@ export {
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
 export { resolveAgentContextParts } from "./context-resolution"
-export type { AgentModelTokenRateSample } from "./context-token-rate"
+export type {
+  AgentContextTokenRateSample,
+  AgentModelTokenRateSample,
+} from "./context-token-rate"
 export {
   AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   calibrateAgentContextBytesPerToken,
+  learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
-  readAgentContextBytesPerToken,
+  readAgentContextTokenRates,
   recordAgentContextTokenRate,
 } from "./context-token-rate"
 export type {
