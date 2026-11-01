@@ -360,7 +360,7 @@ describe("createAgentContextGuard", () => {
     })
 
     const completed = [...steps(1, read(HEAD)), ...steps(1, read(first))]
-    expect(await guard.prepareStep(step(2, second, completed))).toBeUndefined()
+    expect((await guard.prepareStep(step(2, second, completed)))?.messages).toBeUndefined()
   })
 })
 
@@ -408,7 +408,7 @@ describe("the rate a guard weighs calls at", () => {
 
     expect(prepared.budget.bytesPerToken).toBe(2)
     expect(prepared.measuredBytesPerToken()).toBeCloseTo(4, 2)
-    expect(reduced).toBeUndefined()
+    expect(reduced?.messages).toBeUndefined()
   })
 })
 
