@@ -201,6 +201,8 @@ export async function prepareAgentConversationContext(
       boundary,
       ownCheckpoint,
       estimatedInputTokensBefore,
+      // Below the limit, the thread compacts because it is idle: its cache has gone cold.
+      coldCache: !overLimit,
     })
     return { ...compacted, bytesPerToken }
   } catch (error) {
@@ -271,6 +273,7 @@ export async function compactAgentConversationInTurn(
       boundary,
       ownCheckpoint: false,
       estimatedInputTokensBefore: tokens,
+      coldCache: false,
     })
   } catch (error) {
     if (!(error instanceof AgentContextCompactionError)) throw error
@@ -333,6 +336,8 @@ async function compactAgentConversation(
     readonly boundary: AgentContextCompactionBoundary | null
     readonly ownCheckpoint: boolean
     readonly estimatedInputTokensBefore: number
+    /** Whether the conversation's cache has expired: see summarize. */
+    readonly coldCache: boolean
   }
 ): Promise<PreparedAgentConversationContext> {
   const { context, session, plan, budget, run, runtime, reason, boundary, bytesPerToken } = input
@@ -448,8 +453,7 @@ async function compactAgentConversation(
       conversationRequest: input.conversationRequest,
       bytesPerToken,
       summaryTokens: Math.min(summaryTokens, budget.inputBudgetTokens - minimumContinuationTokens),
-      // Below the limit, the thread compacts because it is idle: its cache has gone cold.
-      coldCache: !overLimit,
+      coldCache: input.coldCache,
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
