@@ -75,14 +75,17 @@ export {
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
+  AgentContextSize,
   AgentContextTokenEstimate,
   EstimateAgentContextRequestTokensInput,
 } from "./context-compaction"
 export {
   AGENT_CONTEXT_ESTIMATOR_VERSION,
+  agentContextSizeTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
-  estimateModelRequestTokens,
+  measureAgentContextRequest,
+  measureModelRequest,
   selectAgentContextCompactionBoundary,
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,

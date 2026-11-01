@@ -1,13 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import {
   agentContextBytesPerToken,
+  agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
   estimateAgentContextRequestTokens,
-  estimateModelRequestTokens,
+  measureAgentContextRequest,
+  measureModelRequest,
 } from "../src/agents"
 import type { AgentMessage } from "../src/agents/message"
+import type { ModelMessage, ModelToolSpecification } from "../src/models"
 
 const text = (bytes: number) => "a".repeat(bytes)
+
+/** An outgoing request, weighed and priced as the output ceiling prices it. */
+const estimateModelRequestTokens = (
+  request: { readonly messages: ModelMessage[]; readonly tools: ModelToolSpecification[] },
+  bytesPerToken: number
+) => agentContextSizeTokens(measureModelRequest(request), bytesPerToken)
 
 describe("agent context token rate", () => {
   // Removal proof: return DEFAULT_BYTES_PER_TOKEN from agentContextBytesPerToken; Claude requests
@@ -92,7 +101,7 @@ describe("agent context rate calibration", () => {
   const calibrate = (inputTokens: number) =>
     calibrateAgentContextBytesPerToken({
       bytesPerToken: 2,
-      request: request(30_000),
+      size: measureAgentContextRequest(request(30_000)),
       inputTokens,
     })
 
@@ -117,7 +126,7 @@ describe("agent context rate calibration", () => {
     expect(
       calibrateAgentContextBytesPerToken({
         bytesPerToken: 2,
-        request: request(600),
+        size: measureAgentContextRequest(request(600)),
         inputTokens: 300,
       })
     ).toBe(2)
