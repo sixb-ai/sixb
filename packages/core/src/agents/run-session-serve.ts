@@ -2,6 +2,7 @@ import { captureSixbFailure, createSixbError, withFailureMessage } from "../erro
 import type { LanguageModelRequest } from "../models/language-model"
 import { AGENT_RUN_FAILURE_CODES, type AgentRunRecord } from "../storage/agents"
 import { AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
+import type { AgentMessagePart } from "./message"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
 import {
@@ -19,6 +20,7 @@ import {
   wireErrorStatus,
 } from "./run-session-wire"
 import { agentRunnerTokenRunId, createAgentRunnerToken, isValidAgentRunnerToken } from "./run-token"
+import { isAgentToolOutputFile } from "./tool-files"
 
 // The server side of a session a runner reaches over HTTP. Each request names the run and carries
 // its runner token, issued under the run's current execution: the request opens the run's session,
@@ -392,10 +394,26 @@ function ownMessages(
 ): Parameters<AgentRunSession["finish"]>[1] {
   return messages?.map(({ authorPrincipal: _author, ...message }) => ({
     ...message,
+    parts: message.parts.map(withSavedOutputChecked),
     projectId: run.projectId,
     threadId: run.threadId,
     runId: run.id,
   }))
+}
+
+/**
+ * A call's saved output only where it names a stored file at the path the harness gives it: every
+ * later run of the thread, or of a fork of it, writes that file at that path in its sandbox.
+ */
+function withSavedOutputChecked(part: AgentMessagePart): AgentMessagePart {
+  if (part.type !== "tool-call" || part.state !== "output-available") return part
+  if (part.outputFile === undefined || isAgentToolOutputFile(part.outputFile)) return part
+
+  console.warn(
+    `[Sixb] A runner's saved output for call '${part.toolCallId}' names no file of its own: its message keeps the output without it.`
+  )
+  const { outputFile: _outputFile, ...rest } = part
+  return rest
 }
 
 /** One model call, its events streamed back as lines of JSON as the provider sends them. */

@@ -322,7 +322,10 @@ export type { AgentToolCatalog } from "./tool-catalog"
 export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
 export {
   AGENT_FILE_MAX_BYTES,
+  AGENT_TOOL_OUTPUTS_DIRECTORY,
   agentToolFilePath,
+  agentToolOutputPath,
+  isAgentToolOutputFile,
   SANDBOX_CONTEXT_DIRECTORY,
   storeAgentToolFile,
 } from "./tool-files"

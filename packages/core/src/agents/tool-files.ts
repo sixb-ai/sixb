@@ -3,6 +3,7 @@ import { posix } from "node:path"
 import { ARTIFACT_LIMITS } from "../artifacts/limits"
 import { sniffFileMediaType } from "../blob-storage/media-type"
 import type { BlobBody, FileRef } from "../blob-storage/types"
+import { isFileRef } from "../blob-storage/validation"
 import { AgentToolPublicError } from "./errors"
 import type { AgentRunFileStore } from "./run-session"
 import type { AgentToolFilePutInput } from "./types"
@@ -221,6 +222,40 @@ export function agentToolFilePath(toolCallId: string, fileRef: FileRef, fileName
   const callKey = createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
   const digestKey = fileRef.digest.slice("sha256:".length, "sha256:".length + 12)
   return posix.join("tool-files", callKey, `${digestKey}-${fileName}`)
+}
+
+/**
+ * Where a call's output too large for the model's context is saved, relative to the context
+ * directory: the call, and the content's digest, so a call id a provider uses again names another
+ * file. `sha256` is the content's hex digest.
+ */
+export function agentToolOutputPath(toolCallId: string, sha256: string): string {
+  const call = SAFE_CALL_ID.test(toolCallId)
+    ? toolCallId
+    : createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
+  return `${AGENT_TOOL_OUTPUTS_DIRECTORY}/${call}-${sha256.slice(0, 12)}.txt`
+}
+
+/** Where saved outputs go, in the context directory. */
+export const AGENT_TOOL_OUTPUTS_DIRECTORY = "tool-outputs"
+
+const SAFE_CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
+const TOOL_OUTPUT_PATH = /^tool-outputs\/[A-Za-z0-9_-]{1,128}-([0-9a-f]{12})\.txt$/
+
+/**
+ * Whether a tool-call part's `outputFile` is one {@link agentToolOutputPath} names: a stored file,
+ * at a path of exactly that shape for its own content. A message a runner sends may say anything,
+ * and a later run writes the file at that path in its sandbox.
+ */
+export function isAgentToolOutputFile(
+  value: unknown
+): value is { readonly fileRef: FileRef; readonly path: string } {
+  if (typeof value !== "object" || value === null) return false
+
+  const { fileRef, path } = value as { readonly fileRef?: unknown; readonly path?: unknown }
+  if (!isFileRef(fileRef) || typeof path !== "string") return false
+  const digest = TOOL_OUTPUT_PATH.exec(path)?.[1]
+  return digest !== undefined && fileRef.digest.startsWith(`sha256:${digest}`)
 }
 
 function toolFileError(toolName: string, message: string): AgentToolPublicError {
