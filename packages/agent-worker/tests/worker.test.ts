@@ -15678,11 +15678,17 @@ describe("context of a child and of a workflow step", () => {
   function relayingParent(
     calls: LanguageModelRequest[],
     spawn: typeof spawnReader,
-    answers: readonly string[]
+    answers: readonly string[],
+    contextWindow = 128_000
   ) {
     return new WorkerTestModel({
-      providerId: "parent-provider",
-      modelId: "parent-model",
+      definition: {
+        kind: "language",
+        providerId: "parent-provider",
+        modelId: "parent-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow,
+      },
       stream: async (request) => {
         calls.push(request)
         const call = calls.length
@@ -15852,6 +15858,63 @@ describe("context of a child and of a workflow step", () => {
       await stopUnderFakeTime(worker)
       setSystemTime()
       jest.restoreAllMocks()
+    }
+  })
+
+  test("a child that comes back idle goes on uncompacted when what it is sent alone is large", async () => {
+    // Reproduce: give shouldCompactIdleContext `compactedTokens: 0` in preflightSubagentContext;
+    // the child then summarizes its 30,000-token run for nothing, since the 210,000 tokens it is
+    // sent stay as they are.
+    const ANSWER = `The second edition. ${"a".repeat(630_000)}`
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      contextWindow: 400_000,
+      requests: childRequests,
+      script: (request) =>
+        JSON.stringify(request.messages).includes("The second edition.")
+          ? textEvents("Read the second edition.")
+          : readChapters(2, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    // The parent relays the long answer: its own window holds it.
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER], 1_000_000)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(45_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      childRequests.splice(0)
+
+      jest.setSystemTime(new Date(Date.now() + 61 * 60_000))
+      const second = await parentTurn(sixb, "Answer it.", first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      // Idle and past 200,000 tokens, but what it is sent alone stays past them once compacted.
+      expect(estimateAgentRequestTokens(childRequests[0]!, 3)).toBeGreaterThan(200_000)
+      expect(childRequests.some(isSummaryRequest)).toBe(false)
+      expect(
+        await storage.checkpoints.getLatest({
+          projectId: PROJECT_ID,
+          threadId: second.child.threadId,
+        })
+      ).toBeNull()
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
     }
   })
 

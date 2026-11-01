@@ -17,6 +17,7 @@ import {
   type AgentThreadCompactionInput,
   compactAgentThreadInRun,
   estimateAgentConversation,
+  inRunCompactedTokens,
   shouldCompactIdleContext,
 } from "./context-compaction"
 import { childCacheLifetime, conversationPromptCaching } from "./prompt-cache"
@@ -123,21 +124,28 @@ export async function preflightSubagentContext(
   readonly bytesPerToken: number
 }> {
   const { plan, budget, threadContext } = input
-  const estimate = estimateAgentConversation({
-    plan,
-    budget,
-    threadContext,
-    ...input.estimateShape(threadContext, undefined),
-  })
+  const estimateShape = input.estimateShape(threadContext, undefined)
+  const estimate = estimateAgentConversation({ plan, budget, threadContext, ...estimateShape })
   const overLimit = shouldCompactAgentContext({
     estimatedInputTokens: estimate.tokens,
     inputBudgetTokens: budget.inputBudgetTokens,
   })
-  const idle = shouldCompactIdleContext({
-    history: threadContext.history,
-    caching: input.caching,
-    estimatedInputTokens: estimate.tokens,
-  })
+
+  // The same rule as a conversation's turn: compacting brings an idle thread under its size.
+  const idle =
+    !overLimit &&
+    shouldCompactIdleContext({
+      history: threadContext.history,
+      caching: input.caching,
+      estimatedInputTokens: estimate.tokens,
+      compactedTokens: inRunCompactedTokens({
+        plan,
+        budget,
+        threadContext,
+        estimateShape,
+        bytesPerToken: estimate.bytesPerToken,
+      }),
+    })
   if (!overLimit && !idle) return { threadContext, bytesPerToken: estimate.bytesPerToken }
 
   const compacted = await compactAgentThreadInRun({
