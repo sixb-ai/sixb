@@ -20,7 +20,8 @@ const estimateModelRequestTokens = (
 
 describe("agent context token rate", () => {
   // Removal proof: return DEFAULT_BYTES_PER_TOKEN from agentContextBytesPerToken; Claude requests
-  // are then counted at 3 bytes per token and GPT ones at half their real size.
+  // are then counted at 3 bytes per token and GPT ones at half their real size. Drop the DeepSeek
+  // family and its calls calibrate to 3.75 at most, under the 3.88 they measure.
   test.each([
     ["anthropic/claude-haiku-5.5", 2.1],
     ["claude-opus-5-5", 2.1],
@@ -28,6 +29,7 @@ describe("agent context token rate", () => {
     ["openai/gpt-6.1-terra", 4],
     ["gpt-4o-mini", 4],
     ["openai/o4-mini", 4],
+    ["deepseek/deepseek-v4.1-flash-1017", 3.1],
     ["google/gemini-3-flash", 3],
     ["mock-model", 3],
   ])("prices %s at its tokenizer family's rate", (modelId, bytesPerToken) => {
