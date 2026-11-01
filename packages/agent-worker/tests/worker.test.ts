@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   existsSync,
   mkdirSync,
@@ -71,6 +72,7 @@ import {
   type AgentRunSession,
   agentRunQueueJobId,
   agentRunTokenRunId,
+  agentToolOutputPath,
   claimAgentRunOverHttp,
   claimWorkflowAgentNode,
   createAgentRunExecutionToken,
@@ -16298,7 +16300,7 @@ describe("context of a child and of a workflow step", () => {
       const first = await parentTurn(sixb, "Have the report printed.", undefined, childRunOf)
       expect(first.child).toMatchObject({ finishReason: "awaiting_answer" })
       expect(textReadOf(childRequests[1], "child_report")).toStartWith(
-        '<tool_output_file sandboxPath=".sixb/agent/tool-outputs/child_report.txt"'
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("child_report")}"`
       )
       expect(holding()).toEqual([first.child.id])
 
@@ -16377,9 +16379,15 @@ class LargeOutputSandboxFactory extends RecordingSandboxFactory {
   }
 }
 
-/** Where a sandbox holds a call's saved output. */
+/** Where a call saved the report, relative to the context directory. */
+function reportPath(toolCallId: string): string {
+  const sha256 = createHash("sha256").update(LargeOutputSandboxFactory.REPORT).digest("hex")
+  return agentToolOutputPath(toolCallId, sha256)
+}
+
+/** Where a sandbox holds the report a call saved. */
 function savedOutputPath(sandbox: RecordingSandbox | undefined, toolCallId: string): string {
-  return join(sandbox?.workingDirectory ?? "", ".sixb/agent/tool-outputs", `${toolCallId}.txt`)
+  return join(sandbox?.workingDirectory ?? "", ".sixb/agent", reportPath(toolCallId))
 }
 
 /** What the model read of a call: its tool result's text, in the request that carried it. */
@@ -16424,7 +16432,7 @@ describe("tool outputs too large for the context", () => {
       const report = LargeOutputSandboxFactory.REPORT
       const read = textReadOf(calls[1], "report")
       expect(read).toStartWith(
-        `<tool_output_file sandboxPath=".sixb/agent/tool-outputs/report.txt" sizeBytes="${report.length}" lines="10000">`
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("report")}" sizeBytes="${report.length}" lines="10000">`
       )
       expect(read).toContain("Exit code: 0.")
       expect(Buffer.byteLength(read)).toBeLessThan(2_600)
@@ -16448,11 +16456,91 @@ describe("tool outputs too large for the context", () => {
       }
       expect(call.output).toMatchObject({ exitCode: 0, stdoutTruncated: true })
       expect(JSON.stringify(call.output).length).toBeLessThan(21_000)
-      expect(call.outputFile.path).toBe("tool-outputs/report.txt")
+      expect(call.outputFile.path).toBe(reportPath("report"))
       const blob = await sixb.blobStorage.open(call.outputFile.fileRef.blobId)
       expect(await new Response(blob).text()).toBe(report)
     } finally {
       await worker.stop()
+    }
+  })
+
+  // Reproduce: read the saved outputs before startAgentEnvironment, as createConversationAgentEnvironment
+  // once did in its Promise.all; the next turn's first call then waits on a read only it releases,
+  // and the turn never ends.
+  test("the next turn's model starts while its saved outputs are still read", async () => {
+    const calls: LanguageModelRequest[] = []
+    const read = Promise.withResolvers<void>()
+    let reading = false
+    let readingAtNextTurn = false
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) return toolCallStream("report", "bash", { command: "print-report" })
+        if (calls.length === 3) {
+          readingAtNextTurn = reading
+          read.resolve()
+          return toolCallStream("again", "bash", { command: "echo again" })
+        }
+        return answerStream(`Answer ${calls.length}.`)
+      },
+    })
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Print the report." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+      // From here, a stored output is read only once the next turn's first call has started.
+      const open = sixb.blobStorage.open.bind(sixb.blobStorage)
+      sixb.blobStorage.open = async (blobId) => {
+        reading = true
+        await read.promise
+        return open(blobId)
+      }
+
+      const second = await requestAgent(sixb, { threadId: first.run.threadId, text: "Again." })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+
+      expect(readingAtNextTurn).toBe(true)
+      const nextSandbox = sandboxes.sandboxes[1]
+      expect(nextSandbox?.readFileContents(savedOutputPath(nextSandbox, "report"))).toBe(
+        LargeOutputSandboxFactory.REPORT
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Reproduce: give ToolOutputFiles the run's fileBudget in startAgentEnvironment; the saved
+  // report then takes the bytes publish_artifact and file-returning tools count against.
+  test("never take the run's file budget, which published artifacts need", async () => {
+    const sandboxes = new LargeOutputSandboxFactory()
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const request = await requestAgent(sixb, { text: "Print the report." })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+    })
+    const environment = await createConversationAgentEnvironment(
+      await withConversationSandbox({
+        session: await runSessionOf(sixb, run),
+        context,
+        plan: executionPlanFor(sixb),
+        run,
+      })
+    )
+    try {
+      const bash = environment.turnContext.tools.find((tool) => tool.name === "bash")
+      if (!bash) throw new Error("[test] Expected the bash tool.")
+      const call = { signal: new AbortController().signal, callId: "call", toolCallId: "report" }
+      await bash.execute(bash.parseInput({ command: "print-report" }), call)
+
+      expect(environment.turnContext.outputFileOf?.("report")?.path).toBe(reportPath("report"))
+      expect(environment.runFiles.budget.reservedBytes).toBe(0)
+    } finally {
+      await environment.dispose()
     }
   })
 
@@ -16484,7 +16572,7 @@ describe("tool outputs too large for the context", () => {
 
       expect(node.status).toBe("succeeded")
       expect(textReadOf(requests[1], "step_report")).toStartWith(
-        '<tool_output_file sandboxPath=".sixb/agent/tool-outputs/step_report.txt"'
+        `<tool_output_file sandboxPath=".sixb/agent/${reportPath("step_report")}"`
       )
       const [sandbox] = sandboxes.sandboxes
       expect(sandbox?.readFileContents(savedOutputPath(sandbox, "step_report"))).toBe(
@@ -16494,7 +16582,7 @@ describe("tool outputs too large for the context", () => {
       expect(node.trace).toContainEqual(
         expect.objectContaining({
           toolCallId: "step_report",
-          outputFile: expect.objectContaining({ path: "tool-outputs/step_report.txt" }),
+          outputFile: expect.objectContaining({ path: reportPath("step_report") }),
         })
       )
     } finally {

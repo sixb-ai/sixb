@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
@@ -11,6 +12,7 @@ import {
   type Sandbox,
   type SandboxFileRecord,
 } from "@sixb/core"
+import { agentToolOutputPath } from "@sixb/core/internal/agents"
 import type { JsonValue, ModelTool, ModelToolOutput } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
 import type { AgentMessageRecord } from "@sixb/core/storage"
@@ -20,12 +22,18 @@ import { type BashToolOutput, createBashTool } from "../src/tools/bash"
 import { createReadTool, type ReadToolOutput } from "../src/tools/read"
 import { AgentFileBudget } from "../src/tools/tool-files"
 import {
-  readSavedToolOutputs,
+  restoreSavedToolOutputs,
+  savedToolOutputFiles,
   TOOL_OUTPUT_FILE_MIN_BYTES,
   ToolOutputFiles,
 } from "../src/tools/tool-outputs"
 
 const roots: string[] = []
+
+/** Where a call's output is saved, relative to the context directory, for these contents. */
+function outputPath(toolCallId: string, contents: string): string {
+  return agentToolOutputPath(toolCallId, createHash("sha256").update(contents).digest("hex"))
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -45,7 +53,7 @@ describe("tool outputs too large for the context", () => {
     const modelOutput = await bash!.toModelOutput!(output, context("call_seq"))
 
     const lines = Array.from({ length: 40_000 }, (_, index) => `${index + 1}\n`).join("")
-    const path = ".sixb/agent/tool-outputs/call_seq.txt"
+    const path = `.sixb/agent/${outputPath("call_seq", lines)}`
     expect(await readFile(join(root, path), "utf8")).toBe(lines)
 
     // The part keeps a bounded copy, and the stored file holds every byte.
@@ -53,7 +61,7 @@ describe("tool outputs too large for the context", () => {
     expect(kept).toMatchObject({ exitCode: 0, stdoutTruncated: true })
     expect(kept.stdout.length).toBeLessThanOrEqual(20_000)
     const file = files.fileOf("call_seq")
-    expect(file?.path).toBe("tool-outputs/call_seq.txt")
+    expect(file?.path).toBe(outputPath("call_seq", lines))
     expect(await new Response(await blobs.open(file!.fileRef.blobId)).text()).toBe(lines)
 
     const notice = String(modelOutput.value)
@@ -84,8 +92,12 @@ describe("tool outputs too large for the context", () => {
     const modelOutput = await tool!.toModelOutput!(output, context("call_rows"))
 
     expect(output).toBe(result)
-    const saved = await readFile(join(root, ".sixb/agent/tool-outputs/call_rows.txt"), "utf8")
-    expect(saved).toBe(`${JSON.stringify(result, null, 2)}\n`)
+    const indented = `${JSON.stringify(result, null, 2)}\n`
+    const saved = await readFile(
+      join(root, ".sixb/agent", outputPath("call_rows", indented)),
+      "utf8"
+    )
+    expect(saved).toBe(indented)
     expect(modelOutput).toMatchObject({ type: "text" })
     expect(String(modelOutput.value)).not.toContain("Exit code")
   })
@@ -101,7 +113,8 @@ describe("tool outputs too large for the context", () => {
     const save = async (toolCallId: string, stdout: string) => {
       const [bash] = files.wrap([jsonTool("bash", command(stdout))])
       await run(bash!, toolCallId)
-      return readFile(join(root, `.sixb/agent/tool-outputs/${toolCallId}.txt`), "utf8")
+      const path = files.fileOf(toolCallId)?.path ?? ""
+      return readFile(join(root, ".sixb/agent", path), "utf8")
     }
 
     expect(await save("call_compact", compact)).toBe(`${JSON.stringify({ rows }, null, 2)}\n`)
@@ -182,11 +195,7 @@ describe("tool outputs too large for the context", () => {
         },
       }),
     }
-    const files = new ToolOutputFiles({
-      sandbox: async () => failing,
-      blobStorage: blobs,
-      budget: new AgentFileBudget(),
-    })
+    const files = new ToolOutputFiles({ sandbox: async () => failing, blobStorage: blobs })
     const stdout = "z".repeat(40_000)
     const [bash] = files.wrap([
       jsonTool("bash", { exitCode: 0, stdout, stderr: "", durationMs: 1 }),
@@ -209,46 +218,139 @@ describe("tool outputs too large for the context", () => {
 })
 
 describe("saved tool outputs in a later run", () => {
-  // Reproduce: return [] from readSavedToolOutputs; nothing is written back.
-  test("are read from their stored files, newest first, as far as their budget goes", async () => {
+  // Reproduce: count every saved output in ToolOutputFiles.save with budget.reserve instead of
+  // holdContent; the third identical output then runs past the budget and is not saved.
+  test("count identical content once, and give way past their own budget", async () => {
+    const { handle, blobs } = await harness()
+    const files = new ToolOutputFiles({
+      sandbox: async () => handle,
+      blobStorage: blobs,
+      budget: new AgentFileBudget(100_000),
+    })
+    const big = (letter: string) => ({ text: letter.repeat(40_000) })
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+    try {
+      for (const [toolCallId, output] of [
+        ["same_1", big("a")],
+        ["same_2", big("a")],
+        ["same_3", big("a")],
+        ["other", big("b")],
+        ["past_budget", big("c")],
+      ] as const) {
+        const [tool] = files.wrap([jsonTool("rows", output)])
+        await run(tool!, toolCallId)
+      }
+
+      const saved = ["same_1", "same_2", "same_3", "other", "past_budget"].map(
+        (toolCallId) => files.fileOf(toolCallId) !== undefined
+      )
+      expect(saved).toEqual([true, true, true, true, false])
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // Reproduce: leave the digest out of agentToolOutputPath; the second output then overwrites
+  // the first, which a later turn's preview still names.
+  test("of a call id a provider uses again keep a file each", async () => {
+    const { root, files } = await harness()
+    for (const letter of ["a", "b"]) {
+      const [tool] = files.wrap([jsonTool("rows", { text: letter.repeat(40_000) })])
+      await run(tool!, "call_1")
+    }
+
+    const saved = await readdir(join(root, ".sixb/agent/tool-outputs"))
+    expect(saved).toHaveLength(2)
+  })
+
+  // Reproduce: drop the isAgentToolOutputFile check in savedToolOutputFiles; the escaping path is
+  // then listed, and written outside the context directory.
+  test("are listed newest first within their budget, oldest first, at the harness's paths only", async () => {
     const blobs = new InMemoryBlobStorage()
-    const stored = async (text: string) =>
-      blobs.put({
+    const stored = async (text: string, sizeBytes?: number) => {
+      const fileRef = await blobs.put({
         body: new TextEncoder().encode(text),
         fileName: "out.txt",
         mediaType: "text/plain",
       })
+      return sizeBytes === undefined ? fileRef : { ...fileRef, sizeBytes }
+    }
     // Each claims 9 MiB: three fit the 32 MiB budget, the oldest does not.
-    const claimed = async (text: string) => ({
-      ...(await stored(text)),
-      sizeBytes: 9 * 1024 * 1024,
-    })
     const parts = await Promise.all(
       [0, 1, 2, 3].map(async (index) =>
-        toolCall(`call_${index}`, await claimed(`output ${index}\n`))
+        toolCall(`call_${index}`, await stored(`output ${index}\n`, 9 * 1024 * 1024))
       )
     )
-    const gone = toolCall("call_gone", {
-      ...(await stored("gone\n")),
-      blobId: "blob_missing",
-    })
+    const escaping = toolCall("call_escaping", await stored("x\n"), "../../../home/u/.bashrc")
+
+    const files = savedToolOutputFiles([
+      message(parts.slice(0, 2)),
+      message([...parts.slice(2), escaping]),
+    ])
+
+    expect(files.map((file) => file.path)).toEqual(
+      ["call_1", "call_2", "call_3"].map((id, index) => outputPath(id, `output ${index + 1}\n`))
+    )
+  })
+
+  // Reproduce: write every listed file in restoreSavedToolOutputs; the one the sandbox holds is
+  // then written again. Read a blob whole before checking its size in readSavedFile; the
+  // understated one is then read to its end, all 100 chunks.
+  test("are written back where missing, read no further than they declare", async () => {
+    const { root, handle, blobs } = await harness()
+    const stored = async (toolCallId: string, text: string, sizeBytes?: number) => {
+      const fileRef = await blobs.put({
+        body: new TextEncoder().encode(text),
+        fileName: "out.txt",
+        mediaType: "text/plain",
+      })
+      return {
+        fileRef: sizeBytes === undefined ? fileRef : { ...fileRef, sizeBytes },
+        path: outputPath(toolCallId, text),
+      }
+    }
+    const missing = await stored("call_missing", "the whole log\n")
+    const held = await stored("call_held", "already here\n")
+    // It says 4 bytes, and streams 100 KiB.
+    const understated = await stored("call_understated", "more than it says\n", 4)
+    let pulled = 0
+    const endless = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled += 1
+          if (pulled > 100) controller.close()
+          else controller.enqueue(new Uint8Array(1_024))
+        },
+      })
+    // The sandbox holds one already, as a workspace that persists does: other bytes, same size.
+    await mkdir(join(root, ".sixb/agent/tool-outputs"), { recursive: true })
+    await writeFile(join(root, ".sixb/agent", held.path), "left as it is")
+    const opened: string[] = []
+    const open = blobs.open.bind(blobs)
+    const store = {
+      open: async (blobId: string) => {
+        opened.push(blobId)
+        return blobId === understated.fileRef.blobId ? endless() : open(blobId)
+      },
+    }
     const warn = spyOn(console, "warn").mockImplementation(() => {})
 
     try {
-      const saved = await readSavedToolOutputs({
-        messages: [message([...parts.slice(0, 2)]), message([...parts.slice(2), gone])],
-        contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
-        blobStorage: blobs,
+      await restoreSavedToolOutputs({
+        handle,
+        files: [missing, held, understated],
+        blobStorage: store,
+        signal: new AbortController().signal,
       })
 
-      expect(
-        saved.map((output) => [output.path, new TextDecoder().decode(output.contents)])
-      ).toEqual([
-        [".sixb/agent/tool-outputs/call_3.txt", "output 3\n"],
-        [".sixb/agent/tool-outputs/call_2.txt", "output 2\n"],
-        [".sixb/agent/tool-outputs/call_1.txt", "output 1\n"],
-      ])
-      // The one whose file is gone is left out, and says so.
+      const read = (path: string) => readFile(join(root, ".sixb/agent", path), "utf8")
+      expect(await read(missing.path)).toBe("the whole log\n")
+      expect(await read(held.path)).toBe("left as it is")
+      expect(await read(understated.path).catch((error) => error)).toBeInstanceOf(Error)
+      expect(pulled).toBeLessThan(5)
+      expect(opened).not.toContain(held.fileRef.blobId)
       expect(warn).toHaveBeenCalledTimes(1)
     } finally {
       warn.mockRestore()
@@ -279,7 +381,11 @@ function message(parts: AgentMessageRecord["parts"]): AgentMessageRecord {
   return { id: "msg_1", parts } as unknown as AgentMessageRecord
 }
 
-function toolCall(toolCallId: string, fileRef: FileRef): AgentMessageRecord["parts"][number] {
+function toolCall(
+  toolCallId: string,
+  fileRef: FileRef,
+  path = agentToolOutputPath(toolCallId, fileRef.digest.slice("sha256:".length))
+): AgentMessageRecord["parts"][number] {
   return {
     type: "tool-call",
     toolCallId,
@@ -288,7 +394,7 @@ function toolCall(toolCallId: string, fileRef: FileRef): AgentMessageRecord["par
     state: "output-available",
     output: {},
     modelOutput: { type: "text", value: "<tool_output_file" },
-    outputFile: { fileRef, path: `tool-outputs/${toolCallId}.txt` },
+    outputFile: { fileRef, path },
   }
 }
 
@@ -301,11 +407,7 @@ async function harness() {
     contextDirectory: SANDBOX_CONTEXT_DIRECTORY,
   }
   const blobs = new InMemoryBlobStorage()
-  const files = new ToolOutputFiles({
-    sandbox: async () => handle,
-    blobStorage: blobs,
-    budget: new AgentFileBudget(),
-  })
+  const files = new ToolOutputFiles({ sandbox: async () => handle, blobStorage: blobs })
   return { root, handle, blobs, files }
 }
 
