@@ -104,6 +104,8 @@ stays its `groups`. To add custom tools, select them with `tools: [...]` and reg
 `createSixb({ tools })`. To give it
 [skills](../models/tools-and-authorization.md#add-a-skill), list their names in
 `skills: ["invoice-review"]`. A task receives no tools and no skills unless it selects them.
+A task that has not answered after 500 model calls fails with `agent.step_limit_reached`; set
+`maxSteps` to change that limit.
 
 For a single model call that does not need tools, use an ordinary step with
 [`sixb.models.language.generate()`](../models/configuration.md#generate-a-response).

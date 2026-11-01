@@ -452,3 +452,23 @@ describe("isAgentContextPath", () => {
     expect(isAgentContextPath("scripts/seed.ts")).toBe(false)
   })
 })
+
+describe("the Agent's step limits", () => {
+  test("are kept as the project sets them, and rejected unless positive integers", async () => {
+    // Proven by removal: drop either assertMaxSteps call from resolveDefinitions.
+    const root = await projectRoot()
+    const load = (agent: { maxSteps?: number; subagentMaxSteps?: number }) =>
+      createSixb({ projectRoot: root, ontologies: [Room], agent, ...createTestRuntimeDeps() })
+
+    const sixb = await load({ maxSteps: 40, subagentMaxSteps: 80 })
+    expect(sixb.definitions.agent).toMatchObject({ maxSteps: 40, subagentMaxSteps: 80 })
+
+    const zero = await load({ maxSteps: 0 }).catch((error) => error)
+    expect(zero).toBeInstanceOf(Error)
+    expect(zero.message).toBe("[Sixb] agent.maxSteps must be a positive integer.")
+
+    const fraction = await load({ subagentMaxSteps: 2.5 }).catch((error) => error)
+    expect(fraction).toBeInstanceOf(Error)
+    expect(fraction.message).toBe("[Sixb] agent.subagentMaxSteps must be a positive integer.")
+  })
+})

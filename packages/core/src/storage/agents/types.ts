@@ -237,6 +237,7 @@ export const AGENT_RUN_FAILURE_CODES = [
   "runtime.cancelled",
   "agent.context_limit_exceeded",
   "agent.execution_failed",
+  "agent.step_limit_reached",
   "ai.usage_limit_exceeded",
   "ai.usage_limit_unavailable",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
@@ -378,6 +379,8 @@ export interface SubagentRunSpec {
   readonly reasoning?: AgentReasoning
   /** Focused task supplied by the parent Agent. */
   readonly task: string
+  /** At most this many steps per run, as its parent asked: the project's limit still applies. */
+  readonly maxSteps?: number
   /** Project tools available when the child was admitted. Runtime tools are injected separately. */
   readonly toolNames: readonly string[]
   /** The parent turn's mode, copied when the child was admitted. Absent: `auto`. */
