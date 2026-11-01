@@ -14702,7 +14702,7 @@ function chapterResults(request: LanguageModelRequest) {
 /**
  * A model with a 100,000-token window (83,616 tokens of input at most) that reads `chapters`
  * chapters, one per call, then answers. It counts each request as the estimator does at its
- * 3 bytes per token, keeps every request, and calls `reject` before answering one: what it
+ * `bytesPerToken`, 3 unless set, keeps every request, and calls `reject` before answering one: what it
  * throws, the provider rejected.
  */
 /**
@@ -14726,6 +14726,7 @@ async function seedMeasuredTokenRate(storage: AgentStorage, bytesPerToken: numbe
 function chapterReadingModel(input: {
   readonly chapters: number
   readonly requests: LanguageModelRequest[]
+  readonly bytesPerToken?: number
   readonly reject?: (request: LanguageModelRequest) => Error | undefined
 }): WorkerTestModel {
   return new WorkerTestModel({
@@ -14743,7 +14744,7 @@ function chapterReadingModel(input: {
       if (rejection) throw rejection
 
       const usage = {
-        inputTokens: estimateAgentRequestTokens(request, 3),
+        inputTokens: estimateAgentRequestTokens(request, input.bytesPerToken ?? 3),
         outputTokens: 20,
       }
       // It reads the book when asked to, and answers anything else at once.
@@ -14836,6 +14837,37 @@ describe("context within a turn", () => {
       const calls = messages[0]?.parts.filter((part) => part.type === "tool-call") ?? []
       expect(calls).toHaveLength(10)
       expect(JSON.stringify(calls)).not.toContain("was cleared")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("weighs each call of an unmeasured model at the rate its first call measured", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the contextLimits runConversationTurn hands
+    // the turn; the guard weighs the second chapter at the default 2 bytes per token, past the
+    // limit, and reduces a request that fits.
+    const requests: LanguageModelRequest[] = []
+    // A sparse tokenizer, as OpenAI's measures about 4.4, in a project no run measured it in.
+    const model = chapterReadingModel({ chapters: 2, requests, bytesPerToken: 4 })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(120_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Read the book." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      // Two chapters are about 60,000 tokens at 4 bytes per token: under the 83,616 limit.
+      expect(chapterResults(requests.at(-1)!).map((output) => output.type)).toEqual([
+        "json",
+        "json",
+      ])
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+      ).not.toContain("agent.compaction.started")
     } finally {
       await worker.stop()
     }

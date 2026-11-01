@@ -60,6 +60,12 @@ interface AgentModelSelection {
 export function prepareAgentModel(selection: AgentModelSelection): {
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
+  /**
+   * The bytes per token the run's latest counted call measured, bounded around the run's rate (the
+   * project's measurements and its own calls'), as calibration and the output ceiling read it.
+   * Undefined until a call is counted.
+   */
+  readonly measuredBytesPerToken: () => number | undefined
 } {
   const model = selection.model
   const definition = defineLanguageModel(model.definition)
@@ -82,10 +88,12 @@ export function prepareAgentModel(selection: AgentModelSelection): {
   const runTokenRates: AgentContextTokenRateSample[] = []
   let runBytesPerToken = budget.bytesPerToken
   // The rate the run's latest counted call measured, bounded around the run's; else the run's.
+  let counted = false
   let measuredBytesPerToken = budget.bytesPerToken
 
   return {
     budget,
+    measuredBytesPerToken: () => (counted ? measuredBytesPerToken : undefined),
     model: Object.freeze({
       providerId: model.providerId,
       modelId: model.modelId,
@@ -123,6 +131,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
               size,
               inputTokens,
             })
+            counted = true
           }),
         }
       },

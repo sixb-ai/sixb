@@ -54,6 +54,11 @@ export interface AgentContextGuardInput {
   readonly tools: readonly ModelToolSpecification[]
   /** The bytes per token the turn measured its history at, else the one its run started from. */
   readonly bytesPerToken?: number
+  /**
+   * What the run's latest counted call measured, around the run's rate (see prepareAgentModel):
+   * once there is one, the calls after it go by it, as the output ceiling does.
+   */
+  readonly measuredBytesPerToken?: () => number | undefined
   /** Tools whose results are never cleared. */
   readonly excludeTools?: readonly string[]
   /**
@@ -146,7 +151,11 @@ class ContextGuard {
   }
 
   private get bytesPerToken(): number {
-    return this.input.bytesPerToken ?? this.input.budget.bytesPerToken
+    return (
+      this.input.measuredBytesPerToken?.() ??
+      this.input.bytesPerToken ??
+      this.input.budget.bytesPerToken
+    )
   }
 
   async prepareStep({
