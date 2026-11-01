@@ -28,12 +28,9 @@ import {
   rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import {
-  contextWindowRejection,
-  messagesEvents,
-  messagesInput,
-} from "@sixb/model-protocols/messages"
+import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
 import { downloadModelsDev, modelsDevRateCard } from "@sixb/model-protocols/models-dev"
+import { contextWindowRejection } from "@sixb/model-protocols/responses"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
 import { anthropicOutputSchema } from "./structured-output"
 

@@ -45,6 +45,7 @@ import {
 | `responsesInput(messages, providerId)` | Serialize messages, files, tools, phases, and encrypted reasoning replay. |
 | `responsesEvents(body, signal, options)` | Assemble text/reasoning/tool events and validate terminal completion. |
 | `responsesUsage(raw)` | Preserve reported counters and raw usage; missing counters stay unknown. |
+| `contextWindowRejection({ status, code, message })` | Recognize a refusal of input too long for the model's context window, in any of the three formats. |
 
 - **Completion:** requires a terminal response event, such as `response.completed`.
 - **Interrupted responses:** retain their truncation/filter reason even after tool arguments close;
