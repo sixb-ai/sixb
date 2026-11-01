@@ -314,6 +314,8 @@ export async function prepareAgentConversationContext(input: {
       conversationRequest: input.conversationRequest,
       bytesPerToken,
       summaryTokens: Math.min(summaryTokens, budget.inputBudgetTokens - minimumContinuationTokens),
+      // Below the limit, the thread compacts because it is idle: its cache has gone cold.
+      coldCache: !overLimit,
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
@@ -541,6 +543,8 @@ async function generateCheckpointSummary(input: {
   readonly bytesPerToken: number
   /** The longest summary the continuation has room for. */
   readonly summaryTokens: number
+  /** Whether the conversation's cache has expired: see summarize. */
+  readonly coldCache: boolean
 }): Promise<string> {
   const { threadContext, summaryTokens } = input
   const retained = threadContext.retainedMessages
@@ -584,6 +588,7 @@ async function generateCheckpointSummary(input: {
       }),
       estimatedInputTokens: step.estimatedInputTokens,
       summaryTokens,
+      coldCache: input.coldCache,
     })
     summary =
       text.output.length === 0
@@ -610,6 +615,12 @@ async function summarize(input: {
   readonly instruction: string
   readonly estimatedInputTokens: number
   readonly summaryTokens: number
+  /**
+   * Whether the conversation's cache has expired. The summary then reads the history at the full
+   * price either way, and the next request starts from it: caching the history would only write
+   * it, at the long cache's price.
+   */
+  readonly coldCache: boolean
 }): Promise<{ readonly output: string; readonly cut: boolean }> {
   const { plan, budget, run, request, summaryTokens } = input
   const reasoning = summaryReasoning(plan.reasoning, summaryTokens)
@@ -637,6 +648,7 @@ async function summarize(input: {
         projectId: input.context.id,
         threadId: run.threadId,
       }),
+      ...(input.coldCache ? { caching: "off" as const } : {}),
       maxSteps: 1,
       maxOutputTokens,
       signal: input.runtime.signal,
