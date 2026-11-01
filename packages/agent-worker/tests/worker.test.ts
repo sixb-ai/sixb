@@ -15573,7 +15573,7 @@ describe("context of a child and of a workflow step", () => {
     })
   }
 
-  test("a child clears what it read before a call would cross its target, and answers", async () => {
+  test("a child clears what it read before a call would cross its limit, and answers", async () => {
     // Reproduce: install no guard in runSubagent's model loop; the child's seventh call then
     // carries six chapters of about 15,000 tokens, past the 83,616-token limit. Leave out its
     // recoverStep, and the rejected second call fails the child.
@@ -15721,7 +15721,7 @@ describe("context of a child and of a workflow step", () => {
 
   test("a child that continues its thread compacts it there, and replays it from the summary on", async () => {
     // Reproduce: skip the compaction in preflightSubagentContext; the continuation's first call
-    // then replays the whole earlier run past its target, and no checkpoint is written. Leave the
+    // then replays the whole earlier run past its limit, and no checkpoint is written. Leave the
     // task out of subagentModelMessages, and the continuation reads no task; leave its `head` out
     // of the child's estimate shape, and the checkpoint counts the continuation without its task;
     // summarize with the conversation's caching, and the summary is not read as the child's
@@ -15768,7 +15768,7 @@ describe("context of a child and of a workflow step", () => {
       await worker.start()
       const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
       expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
-      // The first run stayed under its target: nothing was cleared, nothing compacted.
+      // The first run stayed under its limit: nothing was cleared, nothing compacted.
       const firstRun = childRequests.splice(0)
       expect(JSON.stringify(firstRun)).not.toContain("was cleared")
       for (const sent of firstRun) {
@@ -15852,7 +15852,7 @@ describe("context of a child and of a workflow step", () => {
   test("a child weighs its continuation by what it replays after its run cleared results", async () => {
     // Reproduce: drop the markReducedSteps call from subagentWorkMessages; the continuation then
     // goes by the cleared call and a rate measured on it, and its first call replays every
-    // chapter, past the 83,616-token limit. Pass no `targetTokens` to the child's compaction
+    // chapter, past the 83,616-token limit. Drop `replaysReduced` from the summary's input limit
     // instead; its summary then reads that whole replay at once, past the limit too.
     const ANSWER = "The second edition."
     const parentCalls: LanguageModelRequest[] = []
