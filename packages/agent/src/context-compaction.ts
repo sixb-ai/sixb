@@ -23,7 +23,7 @@ import type {
   ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
-import { agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
+import { renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentContextBudget } from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
 import { AgentContextCompactionError } from "./errors"
@@ -93,7 +93,7 @@ export async function prepareAgentConversationContext(input: {
   const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
 
-  // The authors ride on user messages, not the system prompt; an estimate only needs their size.
+  // Who takes part is in the system prompt, and each message's author on it.
   const authors = input.conversation
     ? conversationAuthors({
         conversation: input.conversation,
@@ -113,11 +113,8 @@ export async function prepareAgentConversationContext(input: {
         instructions: plan.instructions,
         skills: plan.skills,
         ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
-        facts: agentRuntimeFacts({
-          settings: plan,
-          project: context,
-          requester: context.requester,
-        }),
+        facts: context.requester === undefined ? {} : { requester: context.requester },
+        ...(authors?.section === undefined ? {} : { conversation: authors.section }),
         ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
         ...(memory ? { memory: memory.prompt } : {}),
       }),

@@ -8,7 +8,7 @@ import {
 
 /** What the model reads of who writes in a conversation. Nothing of it is stored or shown. */
 export interface ConversationAuthors {
-  /** Who takes part, for the newest user message only; absent in a one-person conversation. */
+  /** Who takes part, for the system prompt; absent in a one-person conversation. */
   readonly section?: string
   /** The `<sixb_author>` closing each retained user message, by message id. */
   readonly byMessageId: ReadonlyMap<string, string>
@@ -32,8 +32,8 @@ export interface ConversationReaders {
  *
  * Each message's author derives from stored data, so a turn replays the bytes the previous one
  * sent. They change only when someone renames their account. The section naming who takes part
- * rides on the newest user message: on the next turn only that message, the history's tail, loses
- * it.
+ * goes in the system prompt, the same whoever sends the turn: it changes when someone joins or
+ * leaves, or is renamed.
  */
 export function conversationAuthors(input: {
   readonly conversation: ConversationReaders
@@ -71,7 +71,7 @@ export function conversationAuthors(input: {
   }
 }
 
-/** Everything the authors add to the model input, for its token estimate. */
+/** What the authors add to the user messages, for the model input's token estimate. */
 export function conversationAuthorsText(authors: ConversationAuthors): string {
-  return [authors.section ?? "", ...authors.byMessageId.values()].join("\n")
+  return [...authors.byMessageId.values()].join("\n")
 }

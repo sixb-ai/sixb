@@ -109,6 +109,7 @@ async function runTurn(
       tools: [],
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
+      projectLocale: "en",
     },
     plan: {
       instructions: "Answer clearly.",

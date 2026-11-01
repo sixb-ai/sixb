@@ -11,7 +11,7 @@ import {
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
 import { StructuredOutputError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
-import { renderWorkflowOutputFinalizerPrompt, withCurrentTime } from "./agent-prompt"
+import { renderWorkflowOutputFinalizerPrompt, sentSettings, withCurrentTime } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -129,7 +129,10 @@ export async function runWorkflowAgentNode(
         withCurrentTime(
           { role: "user", content: [{ type: "text", text: input.prompt }] },
           input.createdAt,
-          input.context.projectTimeZone
+          sentSettings(input.plan, {
+            timeZone: input.context.projectTimeZone,
+            locale: input.context.projectLocale,
+          })
         ),
       ],
       tools: input.context.tools,

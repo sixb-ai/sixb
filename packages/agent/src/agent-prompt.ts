@@ -100,6 +100,11 @@ export interface RenderAgentSystemPromptInput {
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
   readonly facts?: AgentRuntimeFacts
+  /**
+   * Who takes part in a conversation several people write in ({@link renderConversationPeople});
+   * omitted in one its owner holds alone.
+   */
+  readonly conversation?: string
   /** Models the sandbox CLI can call; omitted, the prompt does not mention them. */
   readonly sandboxModels?: readonly SandboxModel[]
   readonly memory?: AgentMemoryPromptContext
@@ -117,17 +122,21 @@ export interface AgentMemoryPromptContext {
 }
 
 /**
- * For whom the run happens: the requester, and their settings, else the project's. Time is not a
- * fact of the prompt: each user message carries its own send time instead (see
- * {@link renderCurrentTime}), so the prompt and the replayed history stay byte-stable across runs.
+ * For whom the run happens. Neither the time nor the requester's settings are facts of the prompt:
+ * each user message carries when it was sent, in its sender's time zone and locale (see
+ * {@link renderCurrentTime}), so the prompt stays byte-stable across runs and senders.
  */
 export interface AgentRuntimeFacts {
+  /** Absent when no principal started the run's chain of executions. */
+  readonly requester?: AgentRequester
+}
+
+/** The time zone and locale a user message was sent in, as its run captured them. */
+export interface SentSettings {
   /** Canonical IANA time zone. */
   readonly timeZone: string
   /** Canonical BCP 47 language tag. */
   readonly locale: string
-  /** Absent when no principal started the run's chain of executions. */
-  readonly requester?: AgentRequester
 }
 
 /** Only non-secret facts about the environment actually prepared for this run. */
@@ -178,6 +187,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
           : WORKFLOW_TASK_RULES
     ),
     promptSection("sixb_runtime_facts", input.facts && renderRuntimeFacts(input.facts)),
+    input.conversation ?? "",
     promptSection(
       "sixb_memory",
       input.memory && renderMemory(input.memory, input.mode, input.contextDirectory)
@@ -444,31 +454,22 @@ function compare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
-/**
- * The facts a run's prompt states: who requested it, when a principal did, and the time zone and
- * locale the run captured from them, else the project's.
- */
-export function agentRuntimeFacts(input: {
-  /** The settings the run captured from its requester, if any. */
-  readonly settings: { readonly timeZone?: string; readonly locale?: string }
-  readonly project: { readonly timeZone: string; readonly locale: string }
-  readonly requester: AgentRequester | undefined
-}): AgentRuntimeFacts {
-  const { settings, project, requester } = input
-
+/** The settings a run captured from its requester, else the project's. */
+export function sentSettings(
+  settings: { readonly timeZone?: string; readonly locale?: string },
+  project: SentSettings
+): SentSettings {
   return {
     timeZone: settings.timeZone ?? project.timeZone,
     locale: settings.locale ?? project.locale,
-    ...(requester === undefined ? {} : { requester }),
   }
 }
 
 function renderRuntimeFacts(facts: AgentRuntimeFacts): string {
   return [
     ...(facts.requester ? [renderRequester(facts.requester)] : []),
-    `Time zone: ${facts.timeZone}. Locale: ${facts.locale}.`,
-    "Each user message carries <sixb_current_time>: the local date and time it was sent. The latest one is the current time.",
-    "Present dates and times in this time zone, converting stored timestamps, which are usually UTC. Follow the locale's conventions for dates and numbers.",
+    "Each user message carries <sixb_current_time>: the local date and time it was sent, with its sender's time zone and locale. The latest one is the current time.",
+    "Present dates and times in the latest message's time zone, converting stored timestamps, which are usually UTC. Follow its locale's conventions for dates and numbers.",
   ].join("\n")
 }
 
@@ -577,11 +578,15 @@ function quoteMemory(contents: string): string {
 }
 
 /**
- * When a user message was sent, read in the time zone of the run that answered it. Derived from
- * stored data only — never from the clock — so a replayed message always renders the same bytes.
+ * When a user message was sent, read in the time zone of the run that answered it, with that run's
+ * time zone and locale. Derived from stored data only — never from the clock — so a replayed
+ * message always renders the same bytes.
  */
-export function renderCurrentTime(sentAt: Date, timeZone: string): string {
-  return `<sixb_current_time>${formatLocalDateTime(sentAt, timeZone)}</sixb_current_time>`
+export function renderCurrentTime(sentAt: Date, settings: SentSettings): string {
+  const timeZone = escapePromptText(settings.timeZone)
+  const locale = escapePromptText(settings.locale)
+  const local = formatLocalDateTime(sentAt, settings.timeZone)
+  return `<sixb_current_time time_zone="${timeZone}" locale="${locale}">${local}</sixb_current_time>`
 }
 
 /** Someone who writes in a conversation, as the model reads them. */
@@ -604,8 +609,8 @@ export function renderMessageAuthor(author: ConversationPerson): string {
 }
 
 /**
- * Who takes part in a shared conversation, as the newest user message carries it: in the user's
- * turn, as data, rather than in the system prompt, which stays the same for every conversation.
+ * Who takes part in a shared conversation, in its system prompt: it stays the same whoever sends a
+ * turn, and changes only with who takes part, never in front of history already cached.
  */
 export function renderConversationPeople(input: {
   readonly owner: ConversationPerson
@@ -656,9 +661,9 @@ function escapePromptText(value: string): string {
 export function withCurrentTime(
   message: Extract<ModelMessage, { role: "user" }>,
   createdAt: Date,
-  timeZone: string
+  settings: SentSettings
 ): Extract<ModelMessage, { role: "user" }> {
-  const text = `\n\n${renderCurrentTime(createdAt, timeZone)}`
+  const text = `\n\n${renderCurrentTime(createdAt, settings)}`
   return { ...message, content: [...message.content, { type: "text", text }] }
 }
 

@@ -194,7 +194,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       parts: [{ type: "text", text: id }],
     })
   /** A turn of the thread, answering `trigger`; claimed, it opens its session. */
-  const turn = async (id: string, trigger: string, timeZone?: string) => {
+  const turn = async (id: string, trigger: string, timeZone?: string, locale?: string) => {
     const executionId = await createTestAgentExecution(storage, {
       projectId: PROJECT_ID,
       runId: id,
@@ -208,6 +208,7 @@ async function seedConversation(claim: ClaimAgentRunSession) {
       spec: {
         model: { provider: "test", modelId: "test-model" },
         ...(timeZone ? { timeZone } : {}),
+        ...(locale ? { locale } : {}),
       },
     })
   }
@@ -981,10 +982,10 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
     // Guard proof: drop the `seq > afterSeq` test from readUsageAnchor; the answer the checkpoint
     // already summarized anchors the estimate.
-    test("anchors its history on the latest answer after the checkpoint, with its zone", async () => {
+    test("anchors its history on the latest answer after the checkpoint, with its settings", async () => {
       const { storage, thread, say, turn, open } = await seedConversation(claim)
       await say("msg_1", "user")
-      const first = await open(await turn("run_1", "msg_1", "Europe/Paris"))
+      const first = await open(await turn("run_1", "msg_1", "Europe/Paris", "fr-FR"))
       await say("msg_2", "assistant", "run_1")
       await storage.aiUsage.recordModelCall({
         id: "usage_1",
@@ -1008,6 +1009,7 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
 
       expect(history.messages.map((message) => message.id)).toEqual(["msg_1", "msg_2", "msg_3"])
       expect(history.sentTimeZones).toEqual({ msg_1: "Europe/Paris" })
+      expect(history.sentLocales).toEqual({ msg_1: "fr-FR" })
       expect(history.usageAnchor).toMatchObject({
         messageId: "msg_2",
         modelCall: { id: "usage_1", usage: { inputTokens: 100, outputTokens: 20 } },

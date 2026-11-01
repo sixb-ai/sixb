@@ -1,6 +1,8 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
   type AgentRunSession,
+  agentRunApprovalMode,
+  conversationThreadId,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
@@ -15,13 +17,14 @@ import {
   coerceAgentRunFinishReason,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
-import { renderCurrentTime } from "./agent-prompt"
+import { renderCurrentTime, type SentSettings, sentSettings } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
 import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
+import { childCacheLifetime, conversationPromptCaching } from "./prompt-cache"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { SubagentHistory } from "./subagent-continuation"
 import type { SubagentDelivery, SubagentInbox } from "./subagent-inbox"
@@ -69,7 +72,10 @@ export async function runSubagent(input: {
     context,
     thread,
     history: input.history,
-    timeZone: plan.timeZone ?? context.projectTimeZone,
+    settings: sentSettings(plan, {
+      timeZone: context.projectTimeZone,
+      locale: context.projectLocale,
+    }),
   })
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
@@ -79,6 +85,15 @@ export async function runSubagent(input: {
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
+    caching: conversationPromptCaching({
+      projectId: context.id,
+      threadId: conversationThreadId(thread),
+      lifetime: childCacheLifetime({
+        runsEveryCall: agentRunApprovalMode(run) === "auto",
+        // A run that continues the thread finds an earlier run's messages there.
+        continues: input.history.messages.some((message) => message.runId !== run.id),
+      }),
+    }),
     // A message from the parent comes after the step that was running when it arrived, and stays
     // in the history of every later step.
     prepareStep: async (step) => {
@@ -271,12 +286,12 @@ function subagentModelMessages(input: {
   readonly context: AgentTurnContext
   readonly thread: AgentThreadRecord
   readonly history: SubagentHistory
-  readonly timeZone: string
+  readonly settings: SentSettings
 }): ModelMessage[] {
   const { messages } = input.history
   const projections = input.context.attachmentContext
   const taskId = messages[0]?.id
-  const createdAt = renderCurrentTime(input.thread.createdAt, input.timeZone)
+  const createdAt = renderCurrentTime(input.thread.createdAt, input.settings)
 
   return toModelMessages(messages, {
     userMessageSuffix: (message) => (message.id === taskId ? createdAt : undefined),

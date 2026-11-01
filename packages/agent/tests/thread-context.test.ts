@@ -180,6 +180,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       tools: [],
       systemPrompt: "Test system prompt.",
       projectTimeZone: "UTC",
+      projectLocale: "en",
     },
     plan,
     run: seeded.run,
@@ -200,7 +201,9 @@ test("preserves the exact model history when no checkpoint exists", async () => 
   expect(conversationMessages(prompt)).toEqual(
     toModelMessages(transcript, {
       userMessageSuffix: (message) =>
-        message.role === "user" ? renderCurrentTime(message.createdAt, "UTC") : undefined,
+        message.role === "user"
+          ? renderCurrentTime(message.createdAt, { timeZone: "UTC", locale: "en" })
+          : undefined,
     })
   )
 })
@@ -219,7 +222,10 @@ test("a seeded checkpoint changes only the model input", async () => {
       role: "user",
       content: [
         { type: "text", text: "three" },
-        { type: "text", text: `\n\n${renderCurrentTime(three.createdAt, "UTC")}` },
+        {
+          type: "text",
+          text: `\n\n${renderCurrentTime(three.createdAt, { timeZone: "UTC", locale: "en" })}`,
+        },
       ],
     },
   ])

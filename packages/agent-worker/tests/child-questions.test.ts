@@ -625,6 +625,12 @@ describe("a question its parent's turn ends on", () => {
 
       // It starts from the paused child's last request and reads the answer first.
       const [last, resumed] = harness.westRequests.slice(1)
+      // Every call runs without asking, so the first run keeps the default lifetime; the run that
+      // continues it may pause again, so it asks for the long one. Guard proof: drop `continues`
+      // from childCacheLifetime.
+      const key = expect.stringMatching(/^sixb_/)
+      expect(last?.caching).toEqual({ lifetime: "default", key })
+      expect(resumed?.caching).toEqual({ lifetime: "long", key })
       const lastMessages = last?.messages ?? []
       expect(resumed?.messages.slice(0, lastMessages.length + 2)).toEqual([
         ...lastMessages,

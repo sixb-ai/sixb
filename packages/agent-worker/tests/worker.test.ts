@@ -147,6 +147,7 @@ import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
+import { conversationPromptCaching } from "../../agent/src/prompt-cache"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import { runConversationTurn } from "../../agent/src/run-conversation-turn"
 import {
@@ -7088,10 +7089,10 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
 
-    // The locale is read only to build the system prompt, after provisioning has started.
-    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "locale", {
+    // The requester is read only to build the system prompt, after provisioning has started.
+    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "requester", {
       get: () => {
-        throw new Error("locale unavailable")
+        throw new Error("requester unavailable")
       },
     })
 
@@ -7104,7 +7105,7 @@ describe("AgentWorker", () => {
           run,
         })
       )
-    ).rejects.toThrow("locale unavailable")
+    ).rejects.toThrow("requester unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
   })
@@ -7902,13 +7903,23 @@ describe("AgentWorker", () => {
           parts: [{ type: "step-start" }, { type: "text", text: "The delegated fact is 42." }],
         },
       ])
+      // Its calls share its conversation's key, with the default lifetime: it runs every call
+      // without asking and continues no paused run, so its next read is its own next step.
+      // Guard proof: drop `caching` from runSubagent's model loop.
+      expect(childCalls[0]?.caching).toEqual(
+        conversationPromptCaching({
+          projectId: PROJECT_ID,
+          threadId: requested.run.threadId,
+          lifetime: "default",
+        })
+      )
       // Its model read its thread: the task, closed by when the thread was created.
       expect(childCalls[0]?.messages.slice(1)).toEqual([
         {
           role: "user",
           content: [
             { type: "text", text: "Research the exact delegated fact." },
-            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time>/) },
+            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time [^>]*>/) },
           ],
         },
       ])
@@ -8072,16 +8083,18 @@ describe("AgentWorker", () => {
     expect(system).toContain(
       ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
     )
-    expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
+    expect(system).not.toContain("Europe/Paris")
     expect(system).toContain(
       '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
     )
     expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
     expect(system).not.toContain("Speak like a helpful teammate")
     expect(system).not.toContain("sixb memory save")
-    // The task is dated as its requester reads the time.
+    // The task is dated as its requester reads the time, in their settings.
     expect(JSON.stringify(request?.messages.at(-1))).toContain(
-      renderCurrentTime(run.createdAt, "Europe/Paris")
+      JSON.stringify(
+        renderCurrentTime(run.createdAt, { timeZone: "Europe/Paris", locale: "fr-FR" })
+      ).slice(1, -1)
     )
   })
 
@@ -11188,7 +11201,8 @@ describe("AgentWorker", () => {
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
     // first message then differs between the two runs. The clock jumps an hour between them,
-    // since the rendered time is minute-precise.
+    // since the rendered time is minute-precise. Render the time zone or locale in the system
+    // prompt again, and the third run, sent from other settings, rewrites the whole prefix.
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
       modelId: "mock-model",
@@ -11218,7 +11232,7 @@ describe("AgentWorker", () => {
         timeZone: "Asia/Kolkata",
       })
       await waitForTerminalRun(storage, second.run.id)
-      const third = await requestAgent(sixb, { text: "third", threadId })
+      const third = await requestAgent(sixb, { text: "third", threadId, locale: "fr-FR" })
       await waitForTerminalRun(storage, third.run.id)
 
       const [firstRequest, secondRequest, thirdRequest] = requests
@@ -11228,24 +11242,24 @@ describe("AgentWorker", () => {
       expect(secondRequest.messages.slice(0, firstRequest.messages.length)).toEqual([
         ...firstRequest.messages,
       ])
-      // The third run uses the project time zone, so only its system prompt differs.
-      expect(thirdRequest.messages.slice(1, secondRequest.messages.length)).toEqual(
-        secondRequest.messages.slice(1)
-      )
+      // The third run is sent in other settings, which only its own message carries.
+      expect(thirdRequest.messages.slice(0, secondRequest.messages.length)).toEqual([
+        ...secondRequest.messages,
+      ])
 
       // Each message keeps the zone of the run that answered it.
       const sent = (await listMessages(storage, threadId)).filter(
         (message) => message.role === "user"
       )
       const users = thirdRequest.messages.filter((message) => message.role === "user")
-      const sentAt = (index: number, timeZone: string) => ({
+      const sentAt = (index: number, timeZone: string, locale: string) => ({
         type: "text" as const,
-        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, timeZone)}`,
+        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, { timeZone, locale })}`,
       })
       expect(users.map((message) => message.content.at(-1))).toEqual([
-        sentAt(0, "Asia/Kolkata"),
-        sentAt(1, "Asia/Kolkata"),
-        sentAt(2, "UTC"),
+        sentAt(0, "Asia/Kolkata", "en"),
+        sentAt(1, "Asia/Kolkata", "en"),
+        sentAt(2, "UTC", "fr-FR"),
       ])
     } finally {
       setSystemTime()
@@ -11253,8 +11267,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Guard proof: drop the section or the authors from userMessageSuffix in runAgentTurn; the
-  // shared turn then cannot tell who takes part or who wrote what.
+  // Guard proof: drop the section from the conversation's system prompt, or the authors from
+  // userMessageSuffix in runAgentTurn; the shared turn then cannot tell who takes part or who
+  // wrote what. Put the section back on the newest user message, or the sender's settings in the
+  // system prompt, and the next turn no longer replays the bytes this one sent.
   test("tells the model who wrote each message of a shared thread, and stores none of it", async () => {
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
@@ -11336,7 +11352,12 @@ describe("AgentWorker", () => {
         addedBy: alice,
         maxParticipants: 50,
       })
-      const second = await requestAgentAs(sixb, bob, { text: "Why did Acme slip?", threadId })
+      const second = await requestAgentAs(sixb, bob, {
+        text: "Why did Acme slip?",
+        threadId,
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
       await terminal(second.run.id)
 
       const alone = requests[0]
@@ -11351,10 +11372,26 @@ describe("AgentWorker", () => {
 
       // Names are data: a shared thread's system prompt is the same whoever sends the turn.
       // Guard proof: drop `shared` from createAgentExecutionContext; each prompt names its sender.
-      const third = await requestAgentAs(sixb, alice, { text: "And Globex?", threadId })
+      const third = await requestAgentAs(sixb, alice, {
+        text: "And Globex?",
+        threadId,
+        timeZone: "Europe/Paris",
+        locale: "fr-FR",
+      })
       await terminal(third.run.id)
-      expect(requests.at(-1)?.messages[0]).toEqual(shared.messages[0])
-      expect(JSON.stringify(shared.messages[0])).not.toContain("usr_bob")
+      const next = requests.at(-1)
+      if (!next) throw new Error("Expected the third turn's request.")
+      // Alice's turn replays Bob's request byte for byte: its system prompt, and every message.
+      expect(next.messages.slice(0, shared.messages.length)).toEqual([...shared.messages])
+      // Each turn is read again after a pause, and names its conversation by an opaque key.
+      // Guard proof: drop `caching` from runAgentTurn's model loop.
+      expect(shared.caching).toEqual({
+        lifetime: "long",
+        key: expect.stringMatching(/^sixb_[0-9a-f]{32}$/),
+      })
+      expect(next.caching).toEqual(shared.caching)
+      expect(alone.caching).toEqual(shared.caching)
+      expect(JSON.stringify(shared.messages[0])).not.toContain("This request comes from")
 
       // So is its memory: the project's alone, never the sender's own.
       // Guard proof: pass `shared: false` to loadConversationMemory; Bob's turn shows his memory.
@@ -11381,9 +11418,12 @@ describe("AgentWorker", () => {
       expect(closings[0]).not.toContain("sixb_conversation")
       expect(closings[0]).toEndWith('<sixb_author id="usr_alice">usr_alice</sixb_author>')
 
-      // The newest message carries who takes part, then when it was sent, then who sent it.
+      // The system prompt says who takes part; each message when it was sent, then who sent it.
+      expect(system).toMatch(
+        /<\/sixb_runtime_facts>\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>/
+      )
       expect(closings[1]).toMatch(
-        /^\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>\n<sixb_current_time>[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
+        /^\n\n<sixb_current_time time_zone="America\/New_York" locale="en-US">[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
       )
 
       const stored = JSON.stringify(await listMessages(storage, threadId))
@@ -11420,9 +11460,8 @@ describe("AgentWorker", () => {
       const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
-      // The requester's settings, frozen on the run, win over the project's (UTC, en).
-      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
-      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
+      // The requester's settings are their message's, never the prompt's (see the replay test).
+      expect(capturedSystem).not.toContain("Asia/Kolkata")
       expect(capturedSystem).toContain("<sixb_mode_rules>")
       expect(capturedSystem).toContain("<sixb_runtime_context>")
       expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
@@ -11734,6 +11773,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
+        projectLocale: "en",
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
           abort.abort()
@@ -12341,6 +12381,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: staleRun,
@@ -12601,6 +12642,7 @@ describe("AgentWorker", () => {
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
+          projectLocale: "en",
         },
         plan: executionPlanFor(sixb),
         run,
@@ -12649,6 +12691,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: reclaimed,
