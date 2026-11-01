@@ -23,6 +23,7 @@ import type {
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
+  AgentTokenRateRecord,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
@@ -1060,6 +1061,31 @@ export function compareAgentMemoryPaths(left: string, right: string): number {
 /** File versions written before this time leave the history once a newer version exists. */
 export function agentMemoryHistoryCutoff(savedAt: Date): Date {
   return new Date(savedAt.getTime() - AGENT_MEMORY_HISTORY_DAYS * 24 * 60 * 60 * 1000)
+}
+
+// ── token rates ───────────────────────────────────────────────────────────────────────────────
+
+export { AGENT_TOKEN_RATE_SAMPLES } from "./types"
+
+/** Validate a measurement before a store keeps it: it comes from whichever runner ran the run. */
+export function assertAgentTokenRateRecord(input: AgentTokenRateRecord, prefix = "Sixb"): void {
+  const fail = (message: string): never => {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Agent token rate ${message}`)
+  }
+
+  for (const field of ["projectId", "providerId", "modelId", "runId"] as const) {
+    const value: unknown = input[field]
+    if (typeof value !== "string" || value.trim().length === 0) fail(`${field} must not be empty.`)
+  }
+  for (const field of ["bytes", "tokens"] as const) {
+    const value: unknown = input[field]
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+      fail(`${field} must be a positive integer.`)
+    }
+  }
+  if (!(input.measuredAt instanceof Date) || !Number.isFinite(input.measuredAt.getTime())) {
+    fail("measurement time must be a valid date.")
+  }
 }
 
 // ── approvals ─────────────────────────────────────────────────────────────────────────────────
