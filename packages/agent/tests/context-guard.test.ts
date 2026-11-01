@@ -1,0 +1,331 @@
+import { describe, expect, test } from "bun:test"
+import type { PrepareModelStepInput } from "@sixb/core/internal/agents"
+import { type ModelMessage, ModelProviderError, type ModelStep } from "@sixb/core/models"
+import { type AgentContextBudget, estimateAgentRequestTokens } from "../src/context-budget"
+import {
+  type CompactConversationBeforeTurn,
+  clearedToolResultText,
+  createAgentContextGuard,
+} from "../src/context-guard"
+
+/** A 100,000-token window: 83,616 tokens of input at most, counted at 3 bytes per token. */
+const BUDGET: AgentContextBudget = {
+  windowTokens: 100_000,
+  inputBudgetTokens: 83_616,
+  reserveTokens: 16_384,
+  source: "model",
+  bytesPerToken: 3,
+  priceTiers: [],
+}
+
+const HEAD: readonly ModelMessage[] = [
+  { role: "system", content: "You read chapters." },
+  { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+]
+
+/** One step that read a chapter: the call, then its result. */
+function readStep(index: number, bytes: number): ModelMessage[] {
+  return [
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: `call_${index}`, toolName: "read", input: { index } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          output: { type: "text", value: `chapter ${index}\n${"x".repeat(bytes)}` },
+        },
+      ],
+    },
+  ]
+}
+
+/** The steps a loop completed, without usage: the guard estimates their requests whole. */
+function steps(count: number, usage: ModelStep["usage"] = {}): ModelStep[] {
+  return Array.from({ length: count }, (_, index) => ({
+    content: [],
+    finishReason: "tool-calls",
+    usage,
+    responseId: `response_${index}`,
+    cost: { status: "unpriceable", reason: "missing-usage" },
+  }))
+}
+
+function step(
+  stepIndex: number,
+  messages: readonly ModelMessage[],
+  completed = steps(stepIndex)
+): PrepareModelStepInput {
+  return {
+    stepIndex,
+    messages,
+    steps: completed,
+    model: undefined as never,
+    signal: new AbortController().signal,
+  }
+}
+
+function outputs(messages: readonly ModelMessage[]): string[] {
+  return messages.flatMap((message) =>
+    message.role === "tool"
+      ? message.content.map((part) =>
+          typeof part.output.value === "string" ? part.output.value : ""
+        )
+      : []
+  )
+}
+
+function tokens(messages: readonly ModelMessage[]): number {
+  return estimateAgentRequestTokens({ messages, tools: [] }, BUDGET.bytesPerToken)
+}
+
+describe("createAgentContextGuard", () => {
+  // Reproduce: return undefined from ContextGuard.reduce; the request then goes out at about
+  // 80,000 tokens, past its 60,000-token target.
+  test("clears the oldest results the model read before a call that would cross the target", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    // Eight chapters of about 10,000 tokens each; the model has not read the last one yet.
+    const messages = [...HEAD, ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat()]
+
+    const prepared = await guard.prepareStep(step(8, messages))
+
+    // Oldest first, down to 60 % of the target: the steps after it read the request through.
+    const cleared = outputs(prepared?.messages ?? messages)
+    expect(cleared.slice(0, 5)).toEqual(Array(5).fill(clearedToolResultText("read")))
+    // The most recent it read stays, and so does the one it has not read.
+    expect(cleared.slice(5).every((output) => output.startsWith("chapter "))).toBe(true)
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
+  })
+
+  // Reproduce: return undefined from prepareStep at step 0; a turn whose history replays results
+  // an earlier turn cleared then sends them all again, past its 60,000-token target.
+  test("weighs a turn's first call too, from its whole request", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+    const messages = [
+      ...HEAD,
+      ...Array.from({ length: 8 }, (_, i) => readStep(i, 30_000)).flat(),
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "Read them all." }] },
+      { role: "user" as const, content: [{ type: "text" as const, text: "Thanks." }] },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toBe(clearedToolResultText("read"))
+    expect(tokens(prepared?.messages ?? messages)).toBeLessThanOrEqual(60_000)
+  })
+
+  // Reproduce: set CLEARED_AT_LEAST_SHARE to 0; the two small results are then cleared, which
+  // breaks the cache to free about 1,000 tokens of a 30,000-token target.
+  test("goes on above the target when clearing would free too little to be worth it", async () => {
+    let compactions = 0
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      targetTokens: 30_000,
+      tools: [],
+      compact: async () => {
+        compactions += 1
+        return undefined
+      },
+    })
+    await guard.prepareStep(step(0, HEAD))
+    const messages = [
+      ...HEAD,
+      ...Array.from({ length: 5 }, (_, i) => readStep(i, 1_500)).flat(),
+      ...readStep(5, 100_000),
+    ]
+
+    const prepared = await guard.prepareStep(step(6, messages))
+
+    expect(prepared).toBeUndefined()
+    // Nothing before the turn could be compacted either.
+    expect(compactions).toBe(1)
+  })
+
+  // Reproduce: skip the compact call in ContextGuard.reduce; the earlier turn then stays, and the
+  // request goes out past its target.
+  test("compacts what came before the turn, and keeps the turn's steps as they are", async () => {
+    const reasons: string[] = []
+    const summarized: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: "<sixb_thread_summary>…" }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    const compact: CompactConversationBeforeTurn = async ({ reason }) => {
+      reasons.push(reason)
+      return summarized
+    }
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      targetTokens: 50_000,
+      tools: [],
+      compact,
+    })
+    const head: ModelMessage[] = [
+      { role: "system", content: "You read chapters." },
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(90_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      { role: "user", content: [{ type: "text", text: "Read every chapter." }] },
+    ]
+    await guard.prepareStep(step(0, head))
+    const turn = Array.from({ length: 3 }, (_, i) => readStep(i, 30_000)).flat()
+
+    const prepared = await guard.prepareStep(step(3, [...head, ...turn]))
+
+    expect(reasons).toEqual(["threshold"])
+    expect(prepared?.messages).toEqual([...summarized, ...turn])
+  })
+
+  // Reproduce: drop the cutUnread call in ContextGuard.reduce; the step's 300,000 bytes then go
+  // out past the model's 83,616-token input limit.
+  test("cuts the results the model has not read to fit the hard limit", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 83_616, tools: [] })
+    await guard.prepareStep(step(0, HEAD))
+    const parallel: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [0, 1, 2].map((index) => ({
+          type: "tool-call" as const,
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          input: { index },
+        })),
+      },
+      {
+        role: "tool",
+        content: [0, 1, 2].map((index) => ({
+          type: "tool-result" as const,
+          toolCallId: `call_${index}`,
+          toolName: "read",
+          output: { type: "text" as const, value: `chapter ${index}\n${"z\n".repeat(50_000)}` },
+        })),
+      },
+    ]
+
+    const prepared = await guard.prepareStep(step(1, [...HEAD, ...parallel]))
+
+    const cut = outputs(prepared?.messages ?? [])
+    expect(cut).toHaveLength(3)
+    for (const [index, output] of cut.entries()) {
+      expect(output.startsWith(`chapter ${index}\nz\n`)).toBe(true)
+      expect(output).toContain("[Cut to fit the model's context:")
+    }
+    expect(tokens(prepared?.messages ?? [])).toBeLessThanOrEqual(BUDGET.inputBudgetTokens)
+  })
+
+  // Reproduce: measure every request whole in ContextGuard.measure; the small request then looks
+  // far under its target, though the last call read 90,000 tokens.
+  test("weighs a request from what the last call really read", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 60_000, tools: [] })
+    const messages = [...HEAD, ...Array.from({ length: 6 }, (_, i) => readStep(i, 3_000)).flat()]
+    await guard.prepareStep(step(0, HEAD))
+    for (let index = 1; index < 6; index += 1) {
+      await guard.prepareStep(step(index, messages.slice(0, HEAD.length + 2 * index)))
+    }
+
+    const prepared = await guard.prepareStep(
+      step(6, messages, steps(6, { inputTokens: 90_000, outputTokens: 10 }))
+    )
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toBe(clearedToolResultText("read"))
+  })
+
+  // Reproduce: return undefined from recoverStep whatever the error; the rejected call then fails
+  // the turn instead of being asked again compacted.
+  test("compacts a request the provider rejected as too long, and nothing else", async () => {
+    const reasons: string[] = []
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      targetTokens: 83_616,
+      tools: [],
+      compact: async ({ reason }) => {
+        reasons.push(reason)
+        return HEAD
+      },
+    })
+    const head: ModelMessage[] = [
+      ...HEAD.slice(0, 1),
+      // About 80,000 tokens by the estimate, which the provider counted past the window.
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(240_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      HEAD[1]!,
+    ]
+    await guard.prepareStep(step(0, head))
+    const messages = [...head, ...readStep(0, 3_000)]
+    const recover = (error: unknown) => guard.recoverStep({ ...step(1, messages), error })
+
+    expect(await recover(new Error("[test] The provider is down."))).toBeUndefined()
+    expect(reasons).toEqual([])
+
+    const recovered = await recover(
+      new ModelProviderError("[test] Too long.", "test", "test", {
+        status: 400,
+        reason: "context-window-exceeded",
+      })
+    )
+    expect(reasons).toEqual(["overflow"])
+    expect(recovered?.messages).toEqual([...HEAD, ...readStep(0, 3_000)])
+  })
+
+  // Reproduce: count what changed at the rejection's rate as a whole in
+  // ContextGuard.projectedTokens (`fixed + ceil((added - removed) * scale)`); the compacted
+  // request then looks about 47,000 tokens long and goes out uncut, though the provider counts its
+  // new result past the limit.
+  test("weighs a rejected request after compaction at the rate the rejection showed", async () => {
+    const guard = createAgentContextGuard({
+      budget: BUDGET,
+      targetTokens: 83_616,
+      tools: [],
+      compact: async () => HEAD,
+    })
+    const head: ModelMessage[] = [
+      HEAD[0]!,
+      { role: "user", content: [{ type: "text", text: `Earlier: ${"y".repeat(36_000)}` }] },
+      { role: "assistant", content: [{ type: "text", text: "Done earlier." }] },
+      HEAD[1]!,
+    ]
+    await guard.prepareStep(step(0, head))
+    // The last call read 12,100 tokens; its 60 KB result, 20,000 by the estimate, took the request
+    // past the 100,000-token window: the provider counts what was added about 4.4 times higher.
+    const messages = [...head, ...readStep(0, 60_000)]
+    const recovered = await guard.recoverStep({
+      ...step(1, messages, steps(1, { inputTokens: 12_100 })),
+      error: new ModelProviderError("[test] Too long.", "test", "test", {
+        reason: "context-window-exceeded",
+      }),
+    })
+
+    const sent = recovered?.messages ?? []
+    expect(outputs(sent)[0]).toContain("[Cut to fit the model's context:")
+    expect(tokens(sent) * 4.4).toBeLessThanOrEqual(BUDGET.inputBudgetTokens)
+  })
+
+  // Reproduce: ignore `usage` in recoverStep (count the rejected request at the window); an answer
+  // the window cut then sets the rate about ten times higher, and the next step clears for nothing.
+  test("rates a turn from what the provider counted when the answer filled the window", async () => {
+    const guard = createAgentContextGuard({ budget: BUDGET, targetTokens: 83_616, tools: [] })
+    const first = [...HEAD, ...readStep(0, 30_000)]
+    const second = [...first, ...readStep(1, 30_000)]
+    const read = (messages: readonly ModelMessage[]) => ({ inputTokens: tokens(messages) })
+
+    await guard.prepareStep(step(0, HEAD))
+    await guard.prepareStep(step(1, first, steps(1, read(HEAD))))
+    // The input fit: the answer is what filled the window.
+    await guard.recoverStep({
+      ...step(1, first, steps(1, read(HEAD))),
+      usage: read(first),
+      error: new ModelProviderError("[test] Window filled.", "test", "test", {
+        reason: "context-window-exceeded",
+      }),
+    })
+
+    const completed = [...steps(1, read(HEAD)), ...steps(1, read(first))]
+    expect(await guard.prepareStep(step(2, second, completed))).toBeUndefined()
+  })
+})
