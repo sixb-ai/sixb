@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
-import { reportModelCalls } from "@sixb/core/internal/model-execution"
+import { reportModelCalls, resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import type {
   JsonObject,
   LanguageModelRequest,
@@ -583,6 +583,80 @@ describe("Vercel AI Gateway provider", () => {
     // A one-shot request without an intent is sent as before.
     expect(sent[1]?.body).not.toHaveProperty("cache_ttl")
     expect(sent[1]?.headers.has("x-session-affinity")).toBe(false)
+  })
+  test("prices an Anthropic route's cache writes at the lifetime it asked for", async () => {
+    // Reproduce: return the catalog card from withAnthropicCacheWrites, or drop the 5m/1h split in
+    // normalizeUsage; an hour-long write is then priced as a five-minute one, 1.25x for 2x.
+    const tier = (low: string, high: string) => [
+      { cost: low, min: 0, max: 100_001 },
+      { cost: high, min: 100_001 },
+    ]
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async (url) => {
+        if (String(url).endsWith("/models")) {
+          return Response.json({
+            data: [
+              {
+                id: "anthropic/claude-haiku-5.5",
+                type: "language",
+                context_window: 1_000_000,
+                max_tokens: 128_000,
+                pricing: {
+                  input: "0.0000001",
+                  input_tiers: tier("0.0000001", "0.0000005"),
+                  output: "0.0000005",
+                  input_cache_read: "0.00000001",
+                  input_cache_write: "0.000000125",
+                  input_cache_write_tiers: tier("0.000000125", "0.000000625"),
+                },
+              },
+            ],
+          })
+        }
+        return sseResponse([
+          {
+            type: "response.completed",
+            response: {
+              id: "resp-1",
+              status: "completed",
+              usage: {
+                input_tokens: 50_000,
+                output_tokens: 0,
+                input_tokens_details: { cached_tokens: 0, cache_write_tokens: 50_000 },
+              },
+            },
+          },
+        ])
+      },
+    })
+    const model = await resolveLanguageModel(provider("anthropic/claude-haiku-5.5"))
+    const tools = [{ name: "lookup", description: "Look up.", inputSchema: { type: "object" } }]
+    const written = async (caching: LanguageModelRequest["caching"]) => {
+      const events = await collect((await model.stream(request({ tools, caching }))).events)
+      const finish = events.find((event) => event.type === "finish")
+      if (finish?.type !== "finish") throw new Error("Expected a finish event.")
+      return finish.usage
+    }
+
+    // Anthropic's own prices: an hour's write is twice the input, at every tier.
+    expect(model.rateCard).toMatchObject({
+      cacheWriteInput5m: { default: "0.125", tiers: [{ price: "0.125" }, { price: "0.625" }] },
+      cacheWriteInput1h: { default: "0.2", tiers: [{ price: "0.2" }, { price: "1" }] },
+    })
+    expect(model.rateCard).not.toHaveProperty("cacheWriteInput")
+    const hour = await written({ lifetime: "long", key: "thread" })
+    const minutes = await written(undefined)
+    expect(hour).toMatchObject({ cacheWrite1hInputTokens: 50_000, cacheWrite5mInputTokens: 0 })
+    expect(minutes).toMatchObject({ cacheWrite5mInputTokens: 50_000, cacheWrite1hInputTokens: 0 })
+    expect(model.costEstimator?.estimate({ usage: hour })).toMatchObject({
+      status: "rated",
+      money: { amountNanos: "10000000" },
+    })
+    expect(model.costEstimator?.estimate({ usage: minutes })).toMatchObject({
+      status: "rated",
+      money: { amountNanos: "6250000" },
+    })
   })
   test("estimates safe Gateway settings but declines routing and extra pricing dimensions", async () => {
     // Removal proof: reject every request/providerOptions object; safe settings become unpriceable.
