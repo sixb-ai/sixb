@@ -8,11 +8,11 @@ import {
   measureAgentContextTokenRate,
   measureModelRequest,
   readAgentContextTokenRates,
-  recordAgentContextTokenRate,
 } from "../src/agents"
 import {
   type AgentContextTokenRateSample,
   learnedAgentContextBytesPerToken,
+  recordAgentContextTokenRate,
 } from "../src/agents/context-token-rate"
 import type { AgentMessage } from "../src/agents/message"
 import type { ModelMessage, ModelToolSpecification } from "../src/models"
@@ -240,6 +240,15 @@ describe("a model's learned rate", () => {
     expect(learnedAgentContextBytesPerToken(samples(...usual, 9))).toBe(2.4)
     // Fewer than ten measurements: the densest stands, the safe side.
     expect(learnedAgentContextBytesPerToken(samples(2.6, 2.4, 3))).toBe(2.4)
+  })
+
+  test("stays within the band any tokenizer measures, whatever a stored measurement says", () => {
+    // Removal proof: drop the clamp from rateQuantile; one byte per billion tokens becomes the
+    // model's rate, every estimate passes the budget, and no call ever replaces it.
+    const forged = [{ bytes: 1, tokens: 1_000_000_000 }]
+
+    expect(learnedAgentContextBytesPerToken(forged)).toBe(1)
+    expect(learnedAgentContextBytesPerToken(samples(40))).toBe(8)
   })
 
   test("falls back to the default when storage cannot read, and never fails a run on a write", async () => {

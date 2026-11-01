@@ -128,6 +128,37 @@ export function agentContextSizeTokens(size: AgentContextSize, bytesPerToken: nu
 }
 
 /**
+ * What an agent's model call weighs before any tokenizer, as the conversation estimator weighs it:
+ * what its output ceiling, its guard and its measurement of the tokenizer go by.
+ *
+ * An image counts as the most a provider charges for one, never as its base64 bytes. Attachments
+ * stay in a thread's requests until compaction, so giving up on any file would cap every later
+ * call of the thread at the reserve. Other inline files count by their encoded bytes.
+ */
+export function measureAgentModelRequest(request: {
+  readonly messages: readonly ModelMessage[]
+  readonly tools: readonly ModelToolSpecification[]
+  readonly responseFormat?: ModelResponseFormat
+}): AgentContextSize {
+  const size = { ...measureModelRequest(request), images: 0 }
+  for (const message of request.messages) {
+    if (message.role !== "user") continue
+
+    for (const part of message.content) {
+      if (part.type !== "file") continue
+
+      if (part.mediaType.startsWith("image/")) {
+        size.tokens += AGENT_IMAGE_INPUT_TOKENS
+        size.images += 1
+      } else {
+        size.bytes += utf8Bytes(part.data.href)
+      }
+    }
+  }
+  return size
+}
+
+/**
  * Weigh one outgoing model request the same way as a stored conversation: the same parts, the
  * same overheads. A file part counts by its name and media type only; what an attached file costs
  * is the caller's call.

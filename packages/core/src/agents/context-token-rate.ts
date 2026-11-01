@@ -1,13 +1,20 @@
+import type { LanguageModel, LanguageModelStreamEvent } from "../models"
 import type { AgentTokenRateStore } from "../storage/agents"
-import { AGENT_TOKEN_RATE_SAMPLES } from "../storage/agents/types"
-import type { AgentContextSize } from "./context-compaction"
+import {
+  AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
+  AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
+  AGENT_TOKEN_RATE_SAMPLES,
+} from "../storage/agents/types"
+import { type AgentContextSize, measureAgentModelRequest } from "./context-compaction"
 
 /**
  * UTF-8 bytes per token of the text an agent request carries (system prompt, tool catalog,
  * messages, tool results), learned per model from the project's own runs.
  *
- * Each run records what its latest model call measured: the bytes of its request as the estimator
- * weighs them, against the input tokens the provider counted (see AgentTokenRateStore). A run's
+ * Each run keeps what its latest model call measured: the bytes of its request as the estimator
+ * weighs them, against the input tokens the provider counted (see AgentTokenRateStore). The call
+ * is measured where it is made, by the run's session (see measuringAgentContextTokenRates): a
+ * runner, which may be a person's own computer, never reports one. A run's
  * rate is a low quantile of its model's newest measurements, the project's and its own calls'
  * alike, and a thread corrects it from its own calls. A tokenizer that changes is followed within
  * a few runs, and a model no run measured yet starts on the dense side until its first call
@@ -97,15 +104,25 @@ export function calibrateAgentContextBytesPerToken(input: {
 export function learnedAgentContextBytesPerToken(
   samples: readonly AgentContextTokenRateSample[]
 ): number {
+  return rateQuantile(samples, LEARNED_RATE_QUANTILE)
+}
+
+/**
+ * Nearest rank: the smallest rate at least `quantile` of the newest measurements reach down to,
+ * within the band a tokenizer can measure (see AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN).
+ */
+function rateQuantile(samples: readonly AgentContextTokenRateSample[], quantile: number): number {
   if (samples.length === 0) return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
 
   const rates = samples
     .slice(0, AGENT_TOKEN_RATE_SAMPLES)
     .map((sample) => sample.bytes / sample.tokens)
     .sort((a, b) => a - b)
-  // Nearest rank: the smallest rate at least this share of the measurements reach down to.
-  const rank = Math.max(1, Math.ceil(rates.length * LEARNED_RATE_QUANTILE))
-  return rates[rank - 1]!
+  const rate = rates[Math.max(1, Math.ceil(rates.length * quantile)) - 1]!
+  return Math.min(
+    AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
+    Math.max(AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN, rate)
+  )
 }
 
 /**
@@ -165,4 +182,52 @@ export async function recordAgentContextTokenRate(input: {
       error
     )
   }
+}
+
+/**
+ * `model`, its calls each keeping what they measured of its tokenizer once they end: the run's
+ * latest call stands for the run (see AgentTokenRateStore.record). Best effort, as
+ * recordAgentContextTokenRate is.
+ */
+export function measuringAgentContextTokenRates(
+  model: LanguageModel,
+  run: {
+    readonly tokenRates: AgentTokenRateStore
+    readonly projectId: string
+    readonly runId: string
+  }
+): LanguageModel {
+  return {
+    ...model,
+    stream: async (request) => {
+      const size = measureAgentModelRequest(request)
+      const stream = await model.stream(request)
+      return { ...stream, events: measuredEvents(stream.events, size, model, run) }
+    },
+  }
+}
+
+/** The call's events as they come; once they end, what the provider counted is measured. */
+async function* measuredEvents(
+  events: AsyncIterable<LanguageModelStreamEvent>,
+  size: AgentContextSize,
+  model: LanguageModel,
+  run: Parameters<typeof measuringAgentContextTokenRates>[1]
+): AsyncIterable<LanguageModelStreamEvent> {
+  let inputTokens: number | undefined
+  for await (const event of events) {
+    if (event.type === "finish") inputTokens = event.usage.inputTokens
+
+    yield event
+  }
+
+  const sample =
+    inputTokens === undefined ? undefined : measureAgentContextTokenRate({ size, inputTokens })
+  if (!sample) return
+
+  await recordAgentContextTokenRate({
+    ...run,
+    sample: { providerId: model.providerId, modelId: model.modelId, ...sample },
+    measuredAt: new Date(),
+  })
 }
