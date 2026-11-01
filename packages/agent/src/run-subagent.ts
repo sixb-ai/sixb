@@ -1,8 +1,6 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
   type AgentRunSession,
-  agentRunApprovalMode,
-  conversationThreadId,
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
@@ -17,18 +15,25 @@ import {
   coerceAgentRunFinishReason,
   type SubagentRunRecord,
 } from "@sixb/core/storage"
-import { renderCurrentTime, type SentSettings, sentSettings } from "./agent-prompt"
+import { renderCurrentTime, sentSettings } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
-import { attachmentKey, toolResultAttachmentKey } from "./attachments"
 import { storeChildOutputs } from "./child-files"
+import type { AgentContextBudget } from "./context-budget"
+import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
-import { childCacheLifetime, conversationPromptCaching } from "./prompt-cache"
+import { markReducedSteps } from "./run-agent-turn"
+import type { SubagentAgentExecutionEnvironment } from "./run-environment"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
+import {
+  type SubagentThreadContext,
+  subagentContextFailure,
+  subagentModelMessages,
+  subagentPromptCaching,
+} from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import type { SubagentDelivery, SubagentInbox } from "./subagent-inbox"
-import { toolFilesStepKey } from "./tools/result-media"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentRunFiles, AgentTurnContext } from "./types"
 
@@ -49,6 +54,18 @@ export interface SubagentWork {
 export async function runSubagent(input: {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
+  /**
+   * The limits every call of the child keeps under, what its environment's preflight left of its
+   * thread, and how it compacts that thread from within.
+   */
+  readonly contextLimits: {
+    readonly budget: AgentContextBudget
+    readonly thread: SubagentThreadContext
+    readonly compactInRun?: SubagentAgentExecutionEnvironment["compactInRun"]
+    readonly bytesPerToken?: number
+    /** What the child's latest counted call measured (see prepareAgentModel). */
+    readonly measuredBytesPerToken?: () => number | undefined
+  }
   readonly run: SubagentRunRecord
   /** The child's session: its finish is fenced by the run's execution token. */
   readonly session: AgentRunSession
@@ -68,41 +85,79 @@ export async function runSubagent(input: {
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime, inbox } = input
-  const messages = subagentModelMessages({
-    context,
+  const { budget, compactInRun, bytesPerToken, measuredBytesPerToken } = input.contextLimits
+  const caching = subagentPromptCaching({
+    projectId: context.id,
     thread,
+    run,
     history: input.history,
-    settings: sentSettings(plan, {
-      timeZone: context.projectTimeZone,
-      locale: context.projectLocale,
+  })
+  const createdAt = renderCurrentTime(
+    thread.createdAt,
+    sentSettings(plan, { timeZone: context.projectTimeZone, locale: context.projectLocale })
+  )
+  const messages: ModelMessage[] = [
+    { role: "system", content: context.systemPrompt },
+    ...subagentModelMessages({
+      thread: input.contextLimits.thread,
+      ...(context.attachmentContext ? { attachmentContext: context.attachmentContext } : {}),
+      createdAt,
     }),
+  ]
+  const guard = createAgentContextGuard({
+    budget,
+    tools: context.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
+    ...(bytesPerToken === undefined ? {} : { bytesPerToken }),
+    ...(measuredBytesPerToken === undefined ? {} : { measuredBytesPerToken }),
+    ...(compactInRun
+      ? {
+          compact: async (compacting) => {
+            const request = await compactInRun(compacting)
+            return (
+              request && [
+                { role: "system" as const, content: request.systemPrompt },
+                ...request.messages,
+              ]
+            )
+          },
+        }
+      : {}),
   })
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let chunkIndex = 0
   const generation = await runModelLoop({
     model: plan.model,
-    messages: [{ role: "system", content: context.systemPrompt }, ...messages],
+    messages,
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-    caching: conversationPromptCaching({
-      projectId: context.id,
-      threadId: conversationThreadId(thread),
-      lifetime: childCacheLifetime({
-        runsEveryCall: agentRunApprovalMode(run) === "auto",
-        // A run that continues the thread finds an earlier run's messages there.
-        continues: input.history.messages.some((message) => message.runId !== run.id),
-      }),
-    }),
+    caching,
     // A message from the parent comes after the step that was running when it arrived, and stays
-    // in the history of every later step.
+    // in the history of every later step. The guard weighs the step before it: what it compacts
+    // is the history the run started from, never what the parent sent it since.
     prepareStep: async (step) => {
       const prepared = await context.prepareStep?.(step)
+      const guarded = await guard.prepareStep({
+        ...step,
+        messages: prepared?.messages ?? step.messages,
+      })
       const mail = await inbox.take(step.stepIndex)
-      if (!mail) return prepared
+      // The guard's request, when it reduced the one prepared, and the room its answer has.
+      if (!mail) return { ...prepared, ...guarded }
 
-      return { messages: [...(prepared?.messages ?? step.messages), ...toModelMessages([mail])] }
+      return {
+        ...guarded,
+        messages: [
+          ...(guarded?.messages ?? prepared?.messages ?? step.messages),
+          ...toModelMessages([mail]),
+        ],
+      }
     },
+    recoverStep: guard.recoverStep,
     // One that arrives as the child answers is read too: it writes its result again, after it.
     beforeComplete: async (_step, stepIndex) => {
       const mail = await inbox.take(stepIndex + 1, { afterAnswer: true })
@@ -116,8 +171,10 @@ export async function runSubagent(input: {
     // turn ended without answering.
     pauseAfterStep: async () =>
       inbox.deferred !== undefined || (await input.session.heldCalls.holdsRun()),
+  }).catch((error: unknown) => {
+    throw subagentContextFailure(error, run) ?? error
   })
-  const work = subagentWorkMessages(generation, run, inbox.deliveries)
+  const work = subagentWorkMessages(generation, run, inbox.deliveries, guard.reducedFromStep())
   if (input.work) input.work.messages = work
 
   return settleSubagent({
@@ -243,7 +300,9 @@ async function finishSubagent(input: {
 function subagentWorkMessages(
   generation: PausableModelLoopResult,
   run: SubagentRunRecord,
-  deliveries: readonly SubagentDelivery[]
+  deliveries: readonly SubagentDelivery[],
+  /** The first step whose request the guard reduced: it and those after it are marked so. */
+  reducedFromStep: number | undefined
 ): readonly AppendAgentMessageInput[] {
   const details = { threadId: run.threadId, runId: run.id }
   const messages: AppendAgentMessageInput[] = []
@@ -257,13 +316,21 @@ function subagentWorkMessages(
       parts,
     })
   }
-  const pushSteps = (parts: readonly AgentMessagePart[]) => {
-    if (parts.some((part) => part.type !== "step-start")) push("assistant", parts)
+  // Steps from `from` on, the ones whose request was reduced marked so.
+  const pushSteps = (parts: readonly AgentMessagePart[], from: number) => {
+    const marked = markReducedSteps(
+      parts,
+      reducedFromStep === undefined ? undefined : reducedFromStep - from
+    )
+    if (marked.some((part) => part.type !== "step-start")) push("assistant", marked)
   }
 
   let from = 0
   for (const delivery of deliveries) {
-    pushSteps(agentTraceFromModelSteps(generation.steps.slice(from, delivery.afterSteps), details))
+    pushSteps(
+      agentTraceFromModelSteps(generation.steps.slice(from, delivery.afterSteps), details),
+      from
+    )
     push("user", delivery.parts)
     from = delivery.afterSteps
   }
@@ -272,40 +339,10 @@ function subagentWorkMessages(
   pushSteps(
     generation.status === "aborted"
       ? agentTraceFromPartialModelLoop(rest, generation.partialContent, details)
-      : agentTraceFromModelSteps(rest, details)
+      : agentTraceFromModelSteps(rest, details),
+    from
   )
   return messages
-}
-
-/**
- * The child's thread as its model reads it. The task, its first message, closes with the time the
- * thread was created, so each run of the child replays the same bytes. Files a tool showed it are
- * projected again as a turn projects its own.
- */
-function subagentModelMessages(input: {
-  readonly context: AgentTurnContext
-  readonly thread: AgentThreadRecord
-  readonly history: SubagentHistory
-  readonly settings: SentSettings
-}): ModelMessage[] {
-  const { messages } = input.history
-  const projections = input.context.attachmentContext
-  const taskId = messages[0]?.id
-  const createdAt = renderCurrentTime(input.thread.createdAt, input.settings)
-
-  return toModelMessages(messages, {
-    userMessageSuffix: (message) => (message.id === taskId ? createdAt : undefined),
-    fileText: ({ message, partIndex }) =>
-      projections?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
-    fileData: ({ message, partIndex }) =>
-      projections?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
-    toolResultFileText: ({ message, partIndex, contentIndex }) =>
-      projections?.promptTextByPartKey.get(
-        toolResultAttachmentKey(message.id, partIndex, contentIndex)
-      ),
-    afterToolResults: ({ message, partIndex }) =>
-      projections?.toolFilesByStep?.get(toolFilesStepKey(message.id, partIndex)),
-  })
 }
 
 function assertSubagentCanFinalize(input: {

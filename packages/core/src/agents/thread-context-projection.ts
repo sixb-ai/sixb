@@ -10,6 +10,11 @@ export interface ProjectAgentThreadModelContextInput {
   readonly checkpoint: AgentContextCheckpointRecord | null
   /** Complete retained tail, ordered by ascending per-thread sequence. */
   readonly messages: readonly AgentMessageRecord[]
+  /**
+   * Whether the run reading the thread can print its stored messages with `sixb history`, as a
+   * conversation's turn can, for its summary to say so. A child's run cannot. True when left out.
+   */
+  readonly historyReadable?: boolean
 }
 
 /**
@@ -25,13 +30,8 @@ export function projectAgentThreadModelContext(
   if (!checkpoint) return messages
 
   assertConsistentCheckpointProjection(checkpoint, messages)
-  return [
-    {
-      role: "user",
-      parts: [{ type: "text", text: serializeThreadSummary(checkpoint.summary) }],
-    },
-    ...messages,
-  ]
+  const summary = serializeThreadSummary(checkpoint.summary, input.historyReadable ?? true)
+  return [{ role: "user", parts: [{ type: "text", text: summary }] }, ...messages]
 }
 
 function assertConsistentCheckpointProjection(
@@ -67,9 +67,12 @@ function assertConsistentCheckpointProjection(
   }
 }
 
-function serializeThreadSummary(summary: string): string {
+function serializeThreadSummary(summary: string, historyReadable: boolean): string {
+  const intro = "The earlier conversation was compacted into this continuation summary."
   return [
-    "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb history` prints them.",
+    historyReadable
+      ? `${intro} Its messages are still stored: \`sixb history\` prints them.`
+      : intro,
     "",
     "<sixb_thread_summary>",
     escapeXmlText(summary),

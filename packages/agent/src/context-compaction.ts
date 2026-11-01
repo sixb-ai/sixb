@@ -4,6 +4,7 @@ import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentThreadModelContextMessage,
   type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
@@ -27,6 +28,7 @@ import type {
   AgentContextCheckpointRecord,
   AgentMessageRecord,
   ConversationAgentRunRecord,
+  SubagentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
@@ -99,25 +101,64 @@ export type LoadConversationMemory = (
   checkpoint: { readonly createdAt: Date } | null
 ) => Promise<ConversationMemory | undefined>
 
-/** What a conversation's compaction reads and writes through, before its turn or during it. */
-interface ConversationCompactionInput {
-  readonly context: AgentExecutionContext
-  /** The turn's session: its history, the checkpoint it writes, and the records it publishes. */
+/** What a request carries besides its history, as an estimate counts it. */
+export interface AgentContextEstimateShape {
+  readonly systemPrompt: string
+  readonly tools: readonly AgentContextEstimateTool[]
+  /** Messages every request sends ahead of the history: a child's task, once summarized. */
+  readonly head?: readonly AgentThreadModelContextMessage[]
+}
+
+/** What a request of this shape weighs with `messages` as its history. */
+function estimateShapedRequest(
+  shape: AgentContextEstimateShape,
+  messages: readonly AgentThreadModelContextMessage[],
+  bytesPerToken: number
+) {
+  return estimateAgentContextRequestTokens({
+    systemPrompt: shape.systemPrompt,
+    tools: shape.tools,
+    messages: [...(shape.head ?? []), ...messages],
+    bytesPerToken,
+  })
+}
+
+/**
+ * What a thread's compaction reads and writes through, before a run or during it: a
+ * conversation's, or a child's, whose thread is its history.
+ */
+export interface AgentThreadCompactionInput {
+  readonly context: Pick<AgentExecutionContext, "id">
+  /** The run's session: its history, the checkpoint it writes, and the records it publishes. */
   readonly session: AgentRunSession
   readonly plan: ResolvedAgentExecutionPlan
+  readonly budget: AgentContextBudget
+  readonly run: ConversationAgentRunRecord | SubagentRunRecord
+  readonly runtime: AgentTurnRuntime
+  readonly loadMemory?: LoadConversationMemory
+  /** The request the run would send for a history: what its summary continues. */
+  readonly conversationRequest: BuildConversationRequest
+  /** What the run's requests carry besides a history, with the memory its prompt shows. */
+  readonly estimateShape: (
+    threadContext: LoadedAgentThreadModelContext,
+    memory: ConversationMemory | undefined
+  ) => AgentContextEstimateShape
+  /** How the run's calls are cached: the summary is read as their continuation. */
+  readonly caching: ModelCachingIntent
+}
+
+/** What a conversation's compaction reads and writes through, before its turn or during it. */
+interface ConversationCompactionInput
+  extends Omit<AgentThreadCompactionInput, "context" | "run" | "estimateShape" | "caching"> {
+  readonly context: AgentExecutionContext
+  readonly run: ConversationAgentRunRecord
   /** The ontology files listed in the conversation's prompt. */
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   /** Where the run's files go, as the prompt names them. */
   readonly contextDirectory: string
-  readonly budget: AgentContextBudget
-  readonly run: ConversationAgentRunRecord
   /** Who can read the run's thread: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
-  readonly runtime: AgentTurnRuntime
   readonly frameworkTools?: readonly ModelTool[]
-  readonly loadMemory?: LoadConversationMemory
-  /** The request the turn would send for a history: what its summary continues. */
-  readonly conversationRequest: BuildConversationRequest
 }
 
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
@@ -127,7 +168,8 @@ export async function prepareAgentConversationContext(
     readonly history: AgentTurnHistory
   }
 ): Promise<PreparedAgentConversationContext> {
-  const { context, plan, budget, run, runtime } = input
+  const { plan, budget, run, runtime } = input
+  const compaction = conversationCompaction(input)
   const initialContext = agentThreadModelContext(input.history)
   const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
@@ -152,11 +194,7 @@ export async function prepareAgentConversationContext(
   // recent work that fits the rest.
   const summaryTokens = contextSummaryTextTokens(plan, budget)
   const summaryMessageTokens = summaryTokens + SUMMARY_HEADER_TOKENS
-  const fixedTokens = estimateAgentContextRequestTokens({
-    ...estimateShape,
-    messages: [],
-    bytesPerToken,
-  }).tokens
+  const fixedTokens = estimateShapedRequest(estimateShape, [], bytesPerToken).tokens
   const aimTokens = Math.floor(budget.inputBudgetTokens * AGENT_CONTEXT_COMPACTED_SHARE)
 
   // This run's own checkpoint is already as compact as it gets.
@@ -176,11 +214,7 @@ export async function prepareAgentConversationContext(
     !overLimit &&
     shouldCompactIdleContext({
       history: input.history,
-      caching: conversationModelSettings({
-        reasoning: undefined,
-        projectId: context.id,
-        threadId: run.threadId,
-      }).caching,
+      caching: compaction.caching,
       estimatedInputTokens: estimatedInputTokensBefore,
       compactedTokens: compactedRequestTokens({
         fixedTokens,
@@ -193,7 +227,7 @@ export async function prepareAgentConversationContext(
 
   try {
     const compacted = await compactAgentConversation({
-      ...input,
+      ...compaction,
       threadContext: initialContext,
       memory,
       bytesPerToken,
@@ -214,41 +248,53 @@ export async function prepareAgentConversationContext(
   }
 }
 
+/** What compacting a thread from within the run in flight is given. */
+interface InRunCompaction {
+  /** The history the run works on: as it started, or as its compaction left it. */
+  readonly threadContext: LoadedAgentThreadModelContext
+  /** The memory the run's prompt shows. */
+  readonly memory: ConversationMemory | undefined
+  readonly reason: AgentContextCheckpointReason
+  /** Whether the thread came back idle, its cache expired: see summarize. */
+  readonly coldCache: boolean
+}
+
 /**
  * Compact the conversation before the turn in flight, from within it: everything before the
  * turn's own message is summarized, and the turn, its message and the steps it has taken, stays
  * as it is. Undefined when there is nothing before the turn to summarize, when the run already
  * compacted the thread (a run writes one checkpoint), or when the compaction failed: the turn
  * then goes on with what it has.
- *
- * Its estimates before and after weigh the same request, the history with the turn's message,
- * without the steps it keeps: what the summary replaced, not what the turn is about to send.
  */
-export async function compactAgentConversationInTurn(
-  input: ConversationCompactionInput & {
-    /** The history the turn runs on: as it started, or as its compaction left it. */
-    readonly threadContext: LoadedAgentThreadModelContext
-    /** The memory the turn's prompt shows. */
-    readonly memory: ConversationMemory | undefined
-    readonly reason: AgentContextCheckpointReason
-  }
+export function compactAgentConversationInTurn(
+  input: ConversationCompactionInput & InRunCompaction
+): Promise<PreparedAgentConversationContext | undefined> {
+  return compactAgentThreadInRun({ ...input, ...conversationCompaction(input) })
+}
+
+/**
+ * Compact a thread before the run in flight, from within it: everything before the message the
+ * run started from is summarized, and that message and the steps it took stay as they are. A
+ * conversation's turn, or a child continuing its thread. Undefined as for
+ * {@link compactAgentConversationInTurn}.
+ *
+ * Its estimates before and after weigh the same request, the history with the run's message,
+ * without the steps it keeps: what the summary replaced, not what the run is about to send.
+ */
+export async function compactAgentThreadInRun(
+  input: AgentThreadCompactionInput & InRunCompaction
 ): Promise<PreparedAgentConversationContext | undefined> {
   const { threadContext, run } = input
   if (threadContext.checkpoint?.createdByRunId === run.id) return undefined
 
-  const estimateShape = conversationEstimateShape(input, threadContext, input.memory)
+  const estimateShape = input.estimateShape(threadContext, input.memory)
   const { tokens, bytesPerToken } = estimateAgentConversation({
     plan: input.plan,
     budget: input.budget,
     threadContext,
     ...estimateShape,
   })
-  // The turn's own message starts what stays: its steps are not stored yet.
-  const boundary = selectAgentContextCompactionBoundary({
-    messages: threadContext.retainedMessages,
-    keepRecentTokens: 0,
-    bytesPerToken,
-  })
+  const boundary = inRunBoundary(threadContext, bytesPerToken)
   if (!boundary) return undefined
 
   // A summary at its longest weighs as much as an earlier history this short: nothing to gain.
@@ -273,7 +319,7 @@ export async function compactAgentConversationInTurn(
       boundary,
       ownCheckpoint: false,
       estimatedInputTokensBefore: tokens,
-      coldCache: false,
+      coldCache: input.coldCache,
     })
   } catch (error) {
     if (!(error instanceof AgentContextCompactionError)) throw error
@@ -283,12 +329,26 @@ export async function compactAgentConversationInTurn(
   }
 }
 
+/** A conversation's compaction as any thread's: its estimate's prompt, and its turns' caching. */
+function conversationCompaction(input: ConversationCompactionInput): AgentThreadCompactionInput {
+  return {
+    ...input,
+    estimateShape: (threadContext, memory) =>
+      conversationEstimateShape(input, threadContext, memory),
+    caching: conversationModelSettings({
+      reasoning: undefined,
+      projectId: input.context.id,
+      threadId: input.run.threadId,
+    }).caching,
+  }
+}
+
 /** The system prompt and tools a conversation's estimate counts, with the memory its prompt shows. */
 function conversationEstimateShape(
   input: ConversationCompactionInput,
   threadContext: LoadedAgentThreadModelContext,
   memory: ConversationMemory | undefined
-): { readonly systemPrompt: string; readonly tools: readonly AgentContextEstimateTool[] } {
+): AgentContextEstimateShape {
   const { context, plan } = input
 
   // Who takes part is in the system prompt, and each message's author on it.
@@ -328,7 +388,7 @@ function conversationEstimateShape(
  * the summary call's own accounting failure as they are.
  */
 async function compactAgentConversation(
-  input: ConversationCompactionInput & {
+  input: AgentThreadCompactionInput & {
     readonly threadContext: LoadedAgentThreadModelContext
     readonly memory: ConversationMemory | undefined
     readonly bytesPerToken: number
@@ -343,7 +403,7 @@ async function compactAgentConversation(
   const { context, session, plan, budget, run, runtime, reason, boundary, bytesPerToken } = input
   const { estimatedInputTokensBefore, memory } = input
   const initialContext = input.threadContext
-  const estimateShape = conversationEstimateShape(input, initialContext, memory)
+  const estimateShape = input.estimateShape(initialContext, memory)
   const summaryTokens = contextSummaryTextTokens(plan, budget)
 
   await session.events.publishCompactionStarted({
@@ -368,6 +428,8 @@ async function compactAgentConversation(
       )
     }
 
+    // Only a conversation's turn can print its thread's stored messages: what a summary says of them.
+    const historyReadable = run.kind === "conversation"
     const checkpointId = agentContextCheckpointId(run.id)
     const observedHeadSeq = requiredHeadSeq(initialContext.retainedMessages, run)
     const candidateBase: AgentContextCheckpointRecord = {
@@ -390,15 +452,16 @@ async function compactAgentConversation(
     // The continuation's prompt shows memory as of the new checkpoint.
     const compactedMemory = await input.loadMemory?.(candidateBase)
     runtime.assertCanContinue()
-    const compactedShape = conversationEstimateShape(input, initialContext, compactedMemory)
-    const minimumContinuationTokens = estimateAgentContextRequestTokens({
-      ...compactedShape,
-      bytesPerToken,
-      messages: projectAgentThreadModelContext({
+    const compactedShape = input.estimateShape(initialContext, compactedMemory)
+    const minimumContinuationTokens = estimateShapedRequest(
+      compactedShape,
+      projectAgentThreadModelContext({
         checkpoint: candidateBase,
         messages: boundary.retainedMessages,
+        historyReadable,
       }),
-    }).tokens
+      bytesPerToken
+    ).tokens
     if (minimumContinuationTokens >= budget.inputBudgetTokens) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
@@ -421,6 +484,7 @@ async function compactAgentConversation(
       estimateShape,
       bytesPerToken,
       summaryTokens,
+      historyReadable,
       inputLimitTokens: Math.min(
         plan.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
         budget.windowTokens - summaryTokens - requiredTokens,
@@ -436,7 +500,6 @@ async function compactAgentConversation(
     }
 
     const summary = await generateCheckpointSummary({
-      context,
       plan,
       budget,
       run,
@@ -451,20 +514,23 @@ async function compactAgentConversation(
       }),
       memory,
       conversationRequest: input.conversationRequest,
+      caching: input.caching,
       bytesPerToken,
       summaryTokens: Math.min(summaryTokens, budget.inputBudgetTokens - minimumContinuationTokens),
       coldCache: input.coldCache,
+      historyReadable,
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
-    const estimatedInputTokensAfter = estimateAgentContextRequestTokens({
-      ...compactedShape,
-      bytesPerToken,
-      messages: projectAgentThreadModelContext({
+    const estimatedInputTokensAfter = estimateShapedRequest(
+      compactedShape,
+      projectAgentThreadModelContext({
         checkpoint: candidate,
         messages: boundary.retainedMessages,
+        historyReadable,
       }),
-    }).tokens
+      bytesPerToken
+    ).tokens
     if (estimatedInputTokensAfter > budget.inputBudgetTokens) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
@@ -481,7 +547,8 @@ async function compactAgentConversation(
         candidate,
         estimatedInputTokensAfter,
         expectedPreviousCheckpointId: initialContext.checkpoint?.id ?? null,
-      })
+      }),
+      { historyReadable }
     )
     runtime.assertCanContinue()
     const checkpoint = candidate
@@ -522,7 +589,7 @@ async function compactAgentConversation(
  * that size, rather than summarize at every idle turn. A thread whose last call the session cannot
  * date (none since its checkpoint) is not compacted for it.
  */
-function shouldCompactIdleContext(input: {
+export function shouldCompactIdleContext(input: {
   readonly history: AgentTurnHistory
   readonly caching: ModelCachingIntent
   readonly estimatedInputTokens: number
@@ -534,6 +601,37 @@ function shouldCompactIdleContext(input: {
   if (Date.now() - lastCall.getTime() <= modelCacheLifetimeMs(input.caching.lifetime)) return false
 
   return input.compactedTokens < AGENT_IDLE_COMPACTION_TOKENS
+}
+
+/** Where a compaction from within a run cuts: the run's own message starts what stays. */
+function inRunBoundary(
+  threadContext: LoadedAgentThreadModelContext,
+  bytesPerToken: number
+): AgentContextCompactionBoundary | null {
+  // Its steps are not stored yet.
+  return selectAgentContextCompactionBoundary({
+    messages: threadContext.retainedMessages,
+    keepRecentTokens: 0,
+    bytesPerToken,
+  })
+}
+
+/** What a thread weighs once compacted from within its run (see compactAgentThreadInRun). */
+export function inRunCompactedTokens(input: {
+  readonly plan: ResolvedAgentExecutionPlan
+  readonly budget: AgentContextBudget
+  readonly threadContext: LoadedAgentThreadModelContext
+  readonly estimateShape: AgentContextEstimateShape
+  readonly bytesPerToken: number
+}): number {
+  const { threadContext, bytesPerToken } = input
+  return compactedRequestTokens({
+    fixedTokens: estimateShapedRequest(input.estimateShape, [], bytesPerToken).tokens,
+    summaryMessageTokens:
+      contextSummaryTextTokens(input.plan, input.budget) + SUMMARY_HEADER_TOKENS,
+    boundary: inRunBoundary(threadContext, bytesPerToken),
+    bytesPerToken,
+  })
 }
 
 /**
@@ -563,22 +661,18 @@ function compactedRequestTokens(input: {
  * the whole request is estimated at the rate the run started from. The full estimate still wins
  * when larger, as a new system prompt or tool catalog is not in the anchor.
  */
-export function estimateAgentConversation(input: {
-  readonly plan: ResolvedAgentExecutionPlan
-  readonly budget: AgentContextBudget
-  readonly threadContext: LoadedAgentThreadModelContext
-  readonly systemPrompt: string
-  readonly tools: readonly AgentContextEstimateTool[]
-}): { readonly tokens: number; readonly bytesPerToken: number } {
+export function estimateAgentConversation(
+  input: AgentContextEstimateShape & {
+    readonly plan: ResolvedAgentExecutionPlan
+    readonly budget: AgentContextBudget
+    readonly threadContext: LoadedAgentThreadModelContext
+  }
+): { readonly tokens: number; readonly bytesPerToken: number } {
   const { threadContext, budget, systemPrompt, tools } = input
+  const head = input.head ?? []
   const anchor = matchingUsageAnchor(input.plan, threadContext)
   const full = (bytesPerToken: number) =>
-    estimateAgentContextRequestTokens({
-      systemPrompt,
-      tools,
-      messages: threadContext.modelMessages,
-      bytesPerToken,
-    }).tokens
+    estimateShapedRequest(input, threadContext.modelMessages, bytesPerToken).tokens
   if (!anchor) return { tokens: full(budget.bytesPerToken), bytesPerToken: budget.bytesPerToken }
 
   // The synthetic summary leads the model messages; the retained tail follows it.
@@ -592,7 +686,11 @@ export function estimateAgentConversation(input: {
     size: measureAgentContextRequest({
       systemPrompt,
       tools,
-      messages: [...threadContext.modelMessages.slice(0, offset + anchor.index), ...answered],
+      messages: [
+        ...head,
+        ...threadContext.modelMessages.slice(0, offset + anchor.index),
+        ...answered,
+      ],
     }),
   })
 
@@ -640,8 +738,9 @@ function matchingUsageAnchor(
   return { index, inputTokens, outputTokens }
 }
 
-function contextEstimateTools(
-  specs: readonly AgentToolSpec[]
+/** Tools as an estimate counts them: their schemas serialized as they are sent. */
+export function contextEstimateTools(
+  specs: readonly Pick<AgentToolSpec, "name" | "description" | "inputSchema">[]
 ): readonly AgentContextEstimateTool[] {
   return specs.map((spec) => ({
     name: spec.name,
@@ -661,10 +760,9 @@ function contextEstimateTools(
  * each continuing from the summary the one before wrote.
  */
 async function generateCheckpointSummary(input: {
-  readonly context: AgentExecutionContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly budget: AgentContextBudget
-  readonly run: ConversationAgentRunRecord
+  readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly runtime: AgentTurnRuntime
   /** The history as the turn started, before compaction. */
   readonly threadContext: LoadedAgentThreadModelContext
@@ -677,13 +775,16 @@ async function generateCheckpointSummary(input: {
   /** The memory the history's prompt shows: as of its checkpoint, not the new one. */
   readonly memory: ConversationMemory | undefined
   readonly conversationRequest: BuildConversationRequest
+  readonly caching: ModelCachingIntent
   readonly bytesPerToken: number
   /** The longest summary the continuation has room for. */
   readonly summaryTokens: number
   /** Whether the conversation's cache has expired: see summarize. */
   readonly coldCache: boolean
+  /** Whether the run can print the thread's stored messages, for the summary to say so. */
+  readonly historyReadable: boolean
 }): Promise<string> {
-  const { threadContext, summaryTokens } = input
+  const { threadContext, summaryTokens, historyReadable } = input
   const retained = threadContext.retainedMessages
   const offset = threadContext.modelMessages.length - retained.length
   const maxBytes = Math.floor(summaryTokens * input.bytesPerToken)
@@ -700,6 +801,7 @@ async function generateCheckpointSummary(input: {
           : projectAgentThreadModelContext({
               checkpoint: input.stepCheckpoint(summary, messages),
               messages,
+              historyReadable,
             })
     let request: ConversationRequest
     try {
@@ -713,12 +815,12 @@ async function generateCheckpointSummary(input: {
     input.runtime.assertCanContinue()
 
     const text = await summarize({
-      context: input.context,
       plan: input.plan,
       budget: input.budget,
       run: input.run,
       runtime: input.runtime,
       request,
+      caching: input.caching,
       instruction: summaryInstruction({
         summaryTokens,
         ...(step.keptFrom ? { keptFrom: step.keptFrom } : {}),
@@ -729,11 +831,11 @@ async function generateCheckpointSummary(input: {
     })
     summary =
       text.output.length === 0
-        ? userMessagesSummary({ previous: summary, messages, maxBytes })
+        ? userMessagesSummary({ previous: summary, messages, maxBytes, historyReadable })
         : // A summary the output limit cut short, or longer than the room it has, is kept up to
           // its last complete line: the thread goes on from it instead of failing every turn.
           text.cut || utf8Bytes(text.output) > maxBytes
-          ? cutSummary(text.output, maxBytes)
+          ? cutSummary(text.output, maxBytes, historyReadable)
           : text.output
   }
 
@@ -743,12 +845,13 @@ async function generateCheckpointSummary(input: {
 
 /** One summary call: the conversation's request, then the instruction. */
 async function summarize(input: {
-  readonly context: AgentExecutionContext
   readonly plan: ResolvedAgentExecutionPlan
   readonly budget: AgentContextBudget
-  readonly run: ConversationAgentRunRecord
+  readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly request: ConversationRequest
+  /** The run's own: the summary continues what its calls cached. */
+  readonly caching: ModelCachingIntent
   readonly instruction: string
   readonly estimatedInputTokens: number
   readonly summaryTokens: number
@@ -780,12 +883,8 @@ async function summarize(input: {
         { role: "user", content: [{ type: "text", text: input.instruction }] },
       ],
       tools: request.tools.map(summaryTool),
-      ...conversationModelSettings({
-        reasoning: reasoning.reasoning,
-        projectId: input.context.id,
-        threadId: run.threadId,
-      }),
-      ...(input.coldCache ? { caching: "off" as const } : {}),
+      ...(reasoning.reasoning === undefined ? {} : { reasoning: reasoning.reasoning }),
+      caching: input.coldCache ? "off" : input.caching,
       maxSteps: 1,
       maxOutputTokens,
       signal: input.runtime.signal,
@@ -837,12 +936,11 @@ interface SummaryStep {
 function planSummary(input: {
   readonly threadContext: LoadedAgentThreadModelContext
   readonly boundary: AgentContextCompactionBoundary
-  readonly estimateShape: {
-    readonly systemPrompt: string
-    readonly tools: readonly AgentContextEstimateTool[]
-  }
+  readonly estimateShape: AgentContextEstimateShape
   readonly bytesPerToken: number
   readonly summaryTokens: number
+  /** Whether the run can print the thread's stored messages, for a turn cut short to say so. */
+  readonly historyReadable: boolean
   /** The most a summary request may read. */
   readonly inputLimitTokens: number
 }): readonly SummaryStep[] | undefined {
@@ -861,9 +959,9 @@ function planSummary(input: {
     )
   }
   const instructionTokens = (keptFrom?: AgentMessageRecord) =>
-    estimateAgentContextRequestTokens({
-      ...input.estimateShape,
-      messages: [
+    estimateShapedRequest(
+      input.estimateShape,
+      [
         {
           role: "user",
           parts: [
@@ -874,8 +972,8 @@ function planSummary(input: {
           ],
         },
       ],
-      bytesPerToken,
-    }).tokens
+      bytesPerToken
+    ).tokens
   // A later step reads the summary so far in place of the earlier summary and turns.
   const requestTokens = (start: number, end: number, keptFrom?: AgentMessageRecord) =>
     instructionTokens(keptFrom) +
@@ -916,6 +1014,7 @@ function planSummary(input: {
       baseTokens: requestTokens(start, start),
       inputLimitTokens: input.inputLimitTokens,
       bytesPerToken,
+      historyReadable: input.historyReadable,
     })
     if (!step) return undefined
 
@@ -936,6 +1035,7 @@ function shrunkStep(input: {
   readonly baseTokens: number
   readonly inputLimitTokens: number
   readonly bytesPerToken: number
+  readonly historyReadable: boolean
 }): SummaryStep | undefined {
   const longest = Math.max(
     0,
@@ -949,7 +1049,9 @@ function shrunkStep(input: {
   ) {
     const messages = input.messages.map((message) => ({
       ...message,
-      parts: message.parts.map((part) => cutPart(part, maxBytes, message.seq)),
+      parts: message.parts.map((part) =>
+        cutPart(part, maxBytes, input.historyReadable ? message.seq : undefined)
+      ),
     }))
     const estimatedInputTokens =
       input.baseTokens + estimateAgentContextMessagesTokens(messages, input.bytesPerToken).tokens
@@ -973,12 +1075,19 @@ function partBytes(part: AgentMessagePart): number {
   }
 }
 
-/** A text or tool result cut to `maxBytes`, saying where the whole is. */
-function cutPart(part: AgentMessagePart, maxBytes: number, seq: number): AgentMessagePart {
+/**
+ * A text or tool result cut to `maxBytes`, saying where the whole is when the run can read it: the
+ * message `seq` its history prints.
+ */
+function cutPart(
+  part: AgentMessagePart,
+  maxBytes: number,
+  seq: number | undefined
+): AgentMessagePart {
+  const note =
+    seq === undefined ? "[Cut short.]" : `[Cut short: \`sixb history ${seq}\` prints it whole.]`
   const cut = (value: string) =>
-    utf8Bytes(value) <= maxBytes
-      ? value
-      : `${upToLastLine(value, maxBytes)}\n[Cut short: \`sixb history ${seq}\` prints it whole.]`
+    utf8Bytes(value) <= maxBytes ? value : `${upToLastLine(value, maxBytes)}\n${note}`
 
   switch (part.type) {
     case "text":
@@ -1123,8 +1232,9 @@ function quoteStart(message: AgentMessageRecord): string {
 }
 
 /** A summary up to its last complete line within `maxBytes`, marked as cut short. */
-function cutSummary(text: string, maxBytes: number): string {
-  return `${upToLastLine(text, maxBytes)}\n\n[The summary was cut short here. ${HISTORY_POINTER}]`
+function cutSummary(text: string, maxBytes: number, historyReadable: boolean): string {
+  const note = historyReadable ? ` ${HISTORY_POINTER}` : ""
+  return `${upToLastLine(text, maxBytes)}\n\n[The summary was cut short here.${note}]`
 }
 
 /**
@@ -1136,9 +1246,10 @@ function userMessagesSummary(input: {
   readonly previous: string | undefined
   readonly messages: readonly AgentMessageRecord[]
   readonly maxBytes: number
+  readonly historyReadable: boolean
 }): string {
   const header = "The summary could not be written. What the user asked, newest last:"
-  const footer = HISTORY_POINTER
+  const footer = input.historyReadable ? [HISTORY_POINTER] : []
   const quotes = input.messages
     .filter((message) => message.role === "user")
     .map((message) => messageText(message).trim())
@@ -1151,7 +1262,7 @@ function userMessagesSummary(input: {
       return `> ${quoted.replaceAll("\n", "\n> ")}`
     })
 
-  let bytes = utf8Bytes(header) + utf8Bytes(footer) + 4
+  let bytes = [header, ...footer].reduce((total, line) => total + utf8Bytes(line) + 2, 0)
   const kept: string[] = []
   for (const quote of [...quotes].reverse()) {
     bytes += utf8Bytes(quote) + 2
@@ -1164,7 +1275,7 @@ function userMessagesSummary(input: {
       ? [input.previous]
       : []
 
-  return [...previous, header, ...kept, footer].join("\n\n")
+  return [...previous, header, ...kept, ...footer].join("\n\n")
 }
 
 function messageText(message: AgentMessageRecord): string {
@@ -1193,7 +1304,7 @@ function utf8Bytes(value: string): number {
 async function createCheckpoint(input: {
   readonly session: AgentRunSession
   readonly runtime: AgentTurnRuntime
-  readonly run: ConversationAgentRunRecord
+  readonly run: ConversationAgentRunRecord | SubagentRunRecord
   readonly candidate: AgentContextCheckpointRecord
   readonly estimatedInputTokensAfter: number
   readonly expectedPreviousCheckpointId: string | null
@@ -1242,7 +1353,7 @@ async function createCheckpoint(input: {
 
 function requiredHeadSeq(
   messages: readonly AgentMessageRecord[],
-  run: ConversationAgentRunRecord
+  run: ConversationAgentRunRecord | SubagentRunRecord
 ): number {
   const head = messages.at(-1)?.seq
   if (head === undefined) {
