@@ -140,7 +140,7 @@ export interface ComposerProps {
    * `/edits`, `/full`). A command is typed as the whole message and runs with Enter.
    */
   readonly commands?: readonly ComposerCommand[]
-  /** How much of its model's target the conversation uses: a ring beside the model. */
+  /** How much of its model's limit the conversation uses: a ring beside the model. */
   readonly contextMeter?: ContextMeterProps
 }
 

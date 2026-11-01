@@ -38,7 +38,11 @@ const tieredCard: ModelRateCard = {
   cacheWriteInput: price(1.25),
 }
 
-function languageModel(modelId: string, rateCard?: ModelRateCard): LanguageModel {
+function languageModel(
+  modelId: string,
+  contextWindow: number,
+  rateCard?: ModelRateCard
+): LanguageModel {
   return {
     providerId: "test",
     modelId,
@@ -46,7 +50,7 @@ function languageModel(modelId: string, rateCard?: ModelRateCard): LanguageModel
       kind: "language",
       providerId: "test",
       modelId,
-      contextWindow: 1_000_000,
+      contextWindow,
       maxOutputTokens: 128_000,
       capabilities: {},
     },
@@ -62,7 +66,9 @@ function createFixture() {
   const host = new SixbHost({
     id: projectId,
     ontology: [],
-    models: { language: [languageModel("flat"), languageModel("tiered", tieredCard)] },
+    models: {
+      language: [languageModel("flat", 200_000), languageModel("tiered", 1_000_000, tieredCard)],
+    },
     storage,
     broker: new InMemoryBroker(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -172,7 +178,7 @@ function createFixture() {
 }
 
 describe("GET /api/agent-threads/:threadId/context", () => {
-  test("measures the last call against the target of the latest turn's model", async () => {
+  test("measures the last call against the limit of the latest turn's model", async () => {
     const { storage, read, seedTurn, messagesEstimate } = createFixture()
     const turn = await seedTurn("thr_tiered", "tiered")
     await storage.aiUsage.recordModelCall({
@@ -202,19 +208,14 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       occurredAt: at(2),
     })
 
-    // Removal proof: resolve the default model instead of the latest turn's; the target becomes
-    // the flat model's window.
+    // Removal proof: resolve the default model instead of the latest turn's; the limit becomes the
+    // flat model's. A price tier changes nothing: the meter measures up to the model's limit.
     const { status, body } = await read("thr_tiered")
     expect(status).toBe(200)
     expect(body).toEqual({
       model: { provider: "test", modelId: "tiered" },
       windowTokens: 1_000_000,
       limitTokens: 1_000_000 - 16_384,
-      target: {
-        tokens: 100_000,
-        limit: "price-tier",
-        tier: { fromTokens: 100_001, priceRatio: 5 },
-      },
       // The answer the last call wrote joins what the next request reads.
       usedTokens: 39_200,
       lastCall: {
@@ -225,16 +226,15 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       },
     })
 
-    // Measured against another model, the same conversation keeps its window as the target, and
-    // what it uses is estimated: another model's counts say nothing of this one's tokenizer.
+    // Measured against another model, the same conversation has that model's limit, and what it
+    // uses is estimated: another model's counts say nothing of this one's tokenizer.
     // Removal proof: anchor on the last call whatever its model; the flat model reads 39,200.
     const flat = await read("thr_tiered", "?provider=test&modelId=flat")
     expect(flat.body).toMatchObject({
       model: { provider: "test", modelId: "flat" },
-      target: { tokens: 1_000_000 - 16_384, limit: "window" },
+      limitTokens: 200_000 - 16_384,
       usedTokens: await messagesEstimate("thr_tiered", "flat"),
     })
-    expect(flat.body.target).not.toHaveProperty("tier")
   })
 
   // Removal proof: drop the reduced-request check from `matchingAgentUsageAnchor`; the meter
@@ -269,7 +269,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
     await seedTurn("thr_reasoning", "flat", { reasoning: { budgetTokens: 20_000 } })
 
     const { body } = await read("thr_reasoning")
-    expect(body).toMatchObject({ limitTokens: 1_000_000 - 20_001 })
+    expect(body).toMatchObject({ limitTokens: 200_000 - 20_001 })
   })
 
   test("a compaction no call followed yet is measured by its own estimate", async () => {

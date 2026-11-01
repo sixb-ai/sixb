@@ -200,20 +200,13 @@ export const fr: Translation<AgentMessages> = {
   },
   contextMeter: {
     title: "Contexte",
-    label: (used, target) => `Contexte : ${used} sur ${target} jetons`,
+    label: (used, limit) => `Contexte : ${used} sur ${limit} jetons`,
     condensing: "Condensation…",
     condensingLabel: "Condensation de la conversation",
-    priceTier: (model, ratio, tier) =>
-      `${model} coûte ${ratio} au-delà de ${tier} jetons : la conversation est condensée avant.`,
-    windowPastTier: (model, limit, ratio, tier) =>
-      `Condensée près de la limite de ${limit} jetons de ${model}. Au-delà de ${tier} jetons, chaque appel coûte ${ratio}.`,
-    window: (model, limit) =>
+    limit: (model, limit) =>
       `Condensée avant d’atteindre la limite de ${limit} jetons de ${model}.`,
-    pastTier: (ratio, tier) =>
-      `Au-delà de ${tier} jetons : chaque appel coûte ${ratio} jusqu’à la prochaine condensation.`,
     thisModel: "Ce modèle",
     cached: "Lu depuis le cache",
-    limit: "Limite du modèle",
     lastCondensed: "Dernière condensation",
     justNow: "à l’instant",
     ago: (time) => `il y a ${time}`,

@@ -1062,18 +1062,6 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           return AgentThreadContextSchema.parse({
             ...use,
             model: { provider: entry.provider, modelId: entry.modelId },
-            target: {
-              tokens: use.target.tokens,
-              limit: use.target.limit,
-              ...(use.target.tier
-                ? {
-                    tier: {
-                      fromTokens: use.target.tier.fromTokens,
-                      priceRatio: use.target.tier.priceRatio,
-                    },
-                  }
-                : {}),
-            },
             ...(use.lastCall
               ? { lastCall: { ...use.lastCall, occurredAt: toIsoString(use.lastCall.occurredAt) } }
               : {}),
@@ -1103,7 +1091,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         detail: {
           summary: "Measure an agent thread's context against a model's limits",
           description:
-            "What the conversation's next request starts from, the model's target and hard limit, and the latest compaction. Read by the context meter after each turn.",
+            "What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "getAgentThreadContext",
         },

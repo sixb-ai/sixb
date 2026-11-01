@@ -13140,7 +13140,7 @@ export type ListAgentThreadMessagesResponses = {
       compaction?: {
         checkpointId: string
         /**
-         * `threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+         * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
          */
         reason: "threshold" | "overflow"
         summary: string
@@ -13985,14 +13985,6 @@ export type GetAgentThreadContextResponses = {
     }
     windowTokens: number
     limitTokens: number
-    target: {
-      tokens: number
-      limit: "price-tier" | "window"
-      tier?: {
-        fromTokens: number
-        priceRatio: number
-      }
-    }
     usedTokens?: number
     lastCall?: {
       inputTokens: number
@@ -14002,7 +13994,7 @@ export type GetAgentThreadContextResponses = {
     }
     lastCompaction?: {
       /**
-       * `threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+       * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
        */
       reason: "threshold" | "overflow"
       createdAt: string
@@ -16299,7 +16291,7 @@ export type ListObservedAgentThreadMessagesResponses = {
       compaction?: {
         checkpointId: string
         /**
-         * `threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+         * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
          */
         reason: "threshold" | "overflow"
         summary: string

@@ -1,11 +1,6 @@
 import type { LanguageModel, ModelReasoning } from "../models"
 import type { AgentContextCheckpointReason } from "../storage/agents"
-import {
-  type AgentContextTarget,
-  expectedRemainingAgentCalls,
-  resolveAgentContextBudget,
-  resolveAgentContextTarget,
-} from "./context-budget"
+import { resolveAgentContextBudget } from "./context-budget"
 import { estimateAgentContextMessagesTokens } from "./context-compaction"
 import {
   type AgentTurnHistory,
@@ -20,10 +15,8 @@ import {
  */
 export interface AgentThreadContextUse {
   readonly windowTokens: number
-  /** The hard limit: the window less the output reserve. No request crosses it. */
+  /** The window less the output reserve: no request crosses it, and compaction starts past it. */
   readonly limitTokens: number
-  /** Where the next turn keeps the context: compaction starts past it. */
-  readonly target: Pick<AgentContextTarget, "tokens" | "limit" | "tier">
   /**
    * What the next request starts from: the last call's input and the answer it wrote, as the
    * provider counted them, when the worker would anchor on that call. Otherwise an estimate: what
@@ -64,9 +57,6 @@ export async function readAgentThreadContextUse(
     model: input.model,
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
   })
-  const target = resolveAgentContextTarget(budget, {
-    expectedRemainingCalls: expectedRemainingAgentCalls(history),
-  })
 
   const call = history.usageAnchor?.modelCall
   const inputTokens = call?.usage.inputTokens
@@ -90,11 +80,6 @@ export async function readAgentThreadContextUse(
   return {
     windowTokens: budget.windowTokens,
     limitTokens: budget.inputBudgetTokens,
-    target: {
-      tokens: target.tokens,
-      limit: target.limit,
-      ...(target.tier ? { tier: target.tier } : {}),
-    },
     ...(usedTokens === undefined ? {} : { usedTokens }),
     ...(lastCall ? { lastCall } : {}),
     ...(checkpoint

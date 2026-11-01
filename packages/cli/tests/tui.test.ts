@@ -119,7 +119,7 @@ describe("a live run", () => {
 
   // Reproduce: leave `contextFull` false when a compaction starts; a turn the provider refused
   // reads "Condensing earlier turns" like any other.
-  test("tells a compaction after a refused request from one at the target", () => {
+  test("tells a compaction after a refused request from one at the limit", () => {
     const full = reduceLive(
       liveRun(RUN),
       event({ type: "agent.compaction.started", reason: "overflow", estimatedInputTokensBefore: 1 })
@@ -311,36 +311,31 @@ describe("a stored answer", () => {
 
 describe("the context in the status line", () => {
   const haiku = {
-    target: { tokens: 100_000 },
+    limitTokens: 183_616,
     usedTokens: 38_200,
     lastCall: { inputTokens: 37_000, cacheReadInputTokens: 34_040 },
   }
 
-  // Reproduce: color past a price tier too; Sonnet 4.5 at 23% of its window reads red.
-  test("reads used against the target with the cache share, and colors only by the target", () => {
+  test("reads used against the model's limit with the cache share, and colors by it", () => {
     expect(contextStatus(haiku)).toEqual({
-      text: "ctx 38k/100k · 92% cached",
-      short: "ctx 38k/100k",
+      text: "ctx 38k/184k · 92% cached",
+      short: "ctx 38k/184k",
       tone: "quiet",
     })
-    expect(contextStatus({ ...haiku, usedTokens: 85_000 })?.tone).toBe("near")
-    expect(contextStatus({ ...haiku, usedTokens: 104_000 })?.tone).toBe("over")
-    expect(contextStatus({ target: { tokens: 983_616 }, usedTokens: 230_000 })).toMatchObject({
-      text: "ctx 230k/984k",
-      tone: "quiet",
-    })
+    expect(contextStatus({ ...haiku, usedTokens: 150_000 })?.tone).toBe("near")
+    expect(contextStatus({ ...haiku, usedTokens: 190_000 })?.tone).toBe("over")
   })
 
   test("shows nothing before the first answer", () => {
-    expect(contextStatus({ target: { tokens: 100_000 } })).toBeUndefined()
+    expect(contextStatus({ limitTokens: 183_616 })).toBeUndefined()
   })
 
   // Reproduce: always return the whole text; a narrow terminal wraps the status line.
   test("drops the cache share, then itself, where the status line has no room", () => {
     const context = contextStatus(haiku)!
-    // "Cloud · Claude Haiku 5.5 · Ask first" takes 36 columns.
-    expect(fittedContextText(context, 36, 100)).toBe("ctx 38k/100k · 92% cached")
-    expect(fittedContextText(context, 36, 60)).toBe("ctx 38k/100k")
+    // "Cloud · Claude Haiku 4.5 · Ask first" takes 36 columns.
+    expect(fittedContextText(context, 36, 100)).toBe("ctx 38k/184k · 92% cached")
+    expect(fittedContextText(context, 36, 60)).toBe("ctx 38k/184k")
     expect(fittedContextText(context, 36, 45)).toBeUndefined()
   })
 })

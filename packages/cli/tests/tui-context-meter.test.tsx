@@ -76,14 +76,11 @@ function fakeApi() {
     if (path === `/api/agent-threads/${THREAD}/context`) {
       const modelId = url.searchParams.get("modelId") ?? "latest"
       contextReads.push(modelId)
+      const windowTokens = modelId === "anthropic/opus" ? 1_000_000 : 200_000
       return Response.json({
         model: { provider: "gateway", modelId: "anthropic/haiku" },
-        windowTokens: 1_000_000,
-        limitTokens: 983_616,
-        target:
-          modelId === "anthropic/opus"
-            ? { tokens: 983_616, limit: "window" }
-            : { tokens: 100_000, limit: "price-tier" },
+        windowTokens,
+        limitTokens: windowTokens - 16_384,
         usedTokens: 38_200,
         lastCall: { inputTokens: 37_000, cacheReadInputTokens: 34_040, occurredAt: "x" },
       })
@@ -194,7 +191,7 @@ describe("the context in the terminal", () => {
     const api = fakeApi()
     const screen = await openTerminal(api, 100)
     await startTurn(screen, api)
-    expect(await until(screen, (frame) => frame.includes("ctx 38k/100k · 92% cached"))).toBeTruthy()
+    expect(await until(screen, (frame) => frame.includes("ctx 38k/184k · 92% cached"))).toBeTruthy()
     const subscriptions = api.runSubscriptions()
 
     screen.mockInput.pressKey("o", { ctrl: true })
@@ -214,7 +211,7 @@ describe("the context in the terminal", () => {
     const screen = await openTerminal(api, 46)
     await startTurn(screen, api)
 
-    const frame = await until(screen, (text) => text.includes("ctx 38k/100k"))
+    const frame = await until(screen, (text) => text.includes("ctx 38k/184k"))
     expect(frame).not.toContain("cached")
   })
 })

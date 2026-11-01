@@ -328,7 +328,7 @@ export const AgentRunDiagnosticSchema = z.object({
 const AgentContextCheckpointReasonSchema = z
   .enum(["threshold", "overflow"])
   .describe(
-    "`threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+    "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
   )
 
 export const AgentMessageCompactionSchema = z.object({
@@ -488,22 +488,8 @@ export const AgentThreadContextSchema = z.object({
   /** The model the limits are this one's: the one asked for, else the latest turn's or the default. */
   model: LanguageModelRefSchema,
   windowTokens: z.number().int().positive(),
-  /** The window less the output reserve: no request crosses it. */
+  /** The window less the output reserve: past it, the conversation is condensed before a call. */
   limitTokens: z.number().int().positive(),
-  /** Past it, the conversation is condensed before the next call. */
-  target: z.object({
-    tokens: z.number().int().positive(),
-    /** `price-tier`: staying under the model's next price tier pays back. `window`: the hard limit. */
-    limit: z.enum(["price-tier", "window"]),
-    /** The model's lowest price tier that costs more, whether the target stays under it or not. */
-    tier: z
-      .object({
-        fromTokens: z.number().int().positive(),
-        /** How much dearer each call is from there. */
-        priceRatio: z.number().positive(),
-      })
-      .optional(),
-  }),
   /** What the next request starts from. Absent before the first answer. */
   usedTokens: z.number().int().nonnegative().optional(),
   /** The call the conversation's history ends with, as the provider counted it. */

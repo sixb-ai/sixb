@@ -38686,7 +38686,7 @@
                               "reason": {
                                 "type": "string",
                                 "enum": ["threshold", "overflow"],
-                                "description": "`threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                                "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
                               },
                               "summary": {
                                 "type": "string"
@@ -41263,7 +41263,7 @@
     "/api/agent-threads/{threadId}/context": {
       "get": {
         "summary": "Measure an agent thread's context against a model's limits",
-        "description": "What the conversation's next request starts from, the model's target and hard limit, and the latest compaction. Read by the context meter after each turn.",
+        "description": "What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.",
         "tags": ["Agent Threads"],
         "operationId": "getAgentThreadContext",
         "parameters": [
@@ -41328,39 +41328,6 @@
                       "exclusiveMinimum": true,
                       "minimum": 0
                     },
-                    "target": {
-                      "type": "object",
-                      "properties": {
-                        "tokens": {
-                          "type": "integer",
-                          "exclusiveMinimum": true,
-                          "minimum": 0
-                        },
-                        "limit": {
-                          "type": "string",
-                          "enum": ["price-tier", "window"]
-                        },
-                        "tier": {
-                          "type": "object",
-                          "properties": {
-                            "fromTokens": {
-                              "type": "integer",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            },
-                            "priceRatio": {
-                              "type": "number",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            }
-                          },
-                          "required": ["fromTokens", "priceRatio"],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": ["tokens", "limit"],
-                      "additionalProperties": false
-                    },
                     "usedTokens": {
                       "type": "integer",
                       "minimum": 0
@@ -41393,7 +41360,7 @@
                         "reason": {
                           "type": "string",
                           "enum": ["threshold", "overflow"],
-                          "description": "`threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                          "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
                         },
                         "createdAt": {
                           "type": "string"
@@ -41416,7 +41383,7 @@
                       "additionalProperties": false
                     }
                   },
-                  "required": ["model", "windowTokens", "limitTokens", "target"],
+                  "required": ["model", "windowTokens", "limitTokens"],
                   "additionalProperties": false
                 }
               }
@@ -47630,7 +47597,7 @@
                               "reason": {
                                 "type": "string",
                                 "enum": ["threshold", "overflow"],
-                                "description": "`threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                                "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
                               },
                               "summary": {
                                 "type": "string"
