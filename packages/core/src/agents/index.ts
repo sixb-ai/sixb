@@ -89,7 +89,6 @@ export {
   measureAgentModelRequest,
   measureModelRequest,
   selectAgentContextCompactionBoundary,
-  serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"

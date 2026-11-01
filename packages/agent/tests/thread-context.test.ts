@@ -13,7 +13,7 @@ const projectId = "project"
 const threadId = "thread"
 const summary = "The user said one and the assistant answered two."
 const serializedSummary = [
-  "The earlier conversation was compacted into this continuation summary.",
+  "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb history` prints them.",
   "",
   "<sixb_thread_summary>",
   summary,
