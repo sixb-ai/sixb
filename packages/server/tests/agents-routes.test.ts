@@ -753,6 +753,7 @@ describe("agent routes", () => {
         annotations: diagnostics,
         compaction: {
           checkpointId: checkpoint.id,
+          reason: "threshold",
           summary: checkpoint.summary,
           createdAt: checkpoint.createdAt.toISOString(),
         },

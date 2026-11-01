@@ -11,6 +11,7 @@ import {
   calibrateAgentContextBytesPerToken,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  matchingAgentUsageAnchor,
   measureAgentContextRequest,
   projectAgentThreadModelContext,
   runModelLoop,
@@ -704,38 +705,15 @@ export function estimateAgentConversation(
   return { tokens: Math.max(anchored, full(bytesPerToken)), bytesPerToken }
 }
 
-/** The anchoring call, when it is this model's and counted both input and output. */
+/** The anchoring call, when it is this model's and its counts say what the next request weighs. */
 function matchingUsageAnchor(
   plan: ResolvedAgentExecutionPlan,
   threadContext: LoadedAgentThreadModelContext
-):
-  | { readonly index: number; readonly inputTokens: number; readonly outputTokens: number }
-  | undefined {
-  const anchor = threadContext.history.usageAnchor
-  const index = anchor
-    ? threadContext.retainedMessages.findIndex((message) => message.id === anchor.messageId)
-    : -1
-  const usage = anchor?.modelCall
-  const inputTokens = usage?.usage.inputTokens
-  const outputTokens = usage?.usage.outputTokens
-  // A call whose request the turn reduced read less than its stored steps replay: it says nothing
-  // of what the next request weighs, nor of the thread's own rate.
-  const lastStep = [...(threadContext.retainedMessages[index]?.parts ?? [])]
-    .reverse()
-    .find((part) => part.type === "step-start")
-  if (lastStep?.type === "step-start" && lastStep.reducedRequest) return undefined
-  if (
-    index < 0 ||
-    usage?.providerId !== plan.model.providerId ||
-    usage.requestedModelId !== plan.model.modelId ||
-    inputTokens === undefined ||
-    inputTokens <= 0 ||
-    outputTokens === undefined ||
-    outputTokens <= 0
-  ) {
-    return undefined
-  }
-  return { index, inputTokens, outputTokens }
+) {
+  return matchingAgentUsageAnchor(
+    { usageAnchor: threadContext.history.usageAnchor, messages: threadContext.retainedMessages },
+    plan.model
+  )
 }
 
 /** Tools as an estimate counts them: their schemas serialized as they are sent. */
