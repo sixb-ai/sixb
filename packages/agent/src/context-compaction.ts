@@ -585,7 +585,7 @@ async function compactAgentConversation(
  * that size, rather than summarize at every idle turn. A thread whose last call the session cannot
  * date (none since its checkpoint) is not compacted for it.
  */
-function shouldCompactIdleContext(input: {
+export function shouldCompactIdleContext(input: {
   readonly history: AgentTurnHistory
   readonly caching: ModelCachingIntent
   readonly estimatedInputTokens: number
