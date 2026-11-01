@@ -18,6 +18,7 @@ import type {
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+import { type SavedToolOutput, TOOL_OUTPUTS_DIRECTORY } from "./tools/tool-outputs"
 
 /**
  * Where a conversation's artifacts are installed, and their manifest, relative to the context
@@ -43,6 +44,8 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly threadId?: string
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
+  /** The outputs earlier runs saved to files, under `$SIXB_TOOL_OUTPUTS_DIR`. */
+  readonly toolOutputs?: readonly SavedToolOutput[]
   readonly skills: readonly AgentSkillDefinition[]
   /** The run's ontology reference docs and scripts, by path relative to the ontology directory. */
   readonly ontologyFiles: readonly AgentProjectFile[]
@@ -68,6 +71,7 @@ export async function prepareAgentSandboxApiContext(
   const artifactsDir = join(contextDir, AGENT_ARTIFACTS_DIRECTORY)
   const artifactsManifestPath = join(contextDir, AGENT_ARTIFACTS_MANIFEST)
   const memoryDir = join(contextDir, "memory")
+  const toolOutputsDir = join(contextDir, TOOL_OUTPUTS_DIRECTORY)
   const cli = await loadSandboxCliAssets()
   // The run's commands reach the API through the sandbox's credentialed address, which adds the
   // run token on the way out: no command holds it.
@@ -152,6 +156,10 @@ export async function prepareAgentSandboxApiContext(
     ...(input.memory
       ? memoryFiles(memoryDir, join(contextDir, AGENT_MEMORY_MANIFEST), input.memory)
       : []),
+    ...(input.toolOutputs?.map((output) => ({
+      path: resolve(input.sandbox.workingDirectory, output.path),
+      contents: output.contents,
+    })) ?? []),
     // Last: a file a parent handed its child from its own copy of an artifact keeps its changes.
     ...(input.attachments?.sandboxFiles.map((file) => ({
       path: resolve(input.sandbox.workingDirectory, file.path),
@@ -172,6 +180,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_RUN_CONTEXT: runContextPath,
       SIXB_ATTACHMENTS: attachmentsManifestPath,
       SIXB_ATTACHMENT_DIR: attachmentsDir,
+      SIXB_TOOL_OUTPUTS_DIR: toolOutputsDir,
       ...(input.artifacts
         ? { SIXB_ARTIFACTS: artifactsManifestPath, SIXB_ARTIFACTS_DIR: artifactsDir }
         : {}),

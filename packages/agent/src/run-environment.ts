@@ -86,6 +86,11 @@ import {
   type SuppliesToolFiles,
 } from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
+import {
+  replayedToolOutputs,
+  type SavedToolOutput,
+  withToolOutputFiles,
+} from "./tools/tool-outputs"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -370,6 +375,7 @@ export async function createConversationAgentEnvironment(
       ...(publishing ? { publishing } : {}),
       apiBaseUrl,
       attachmentContext,
+      toolOutputs: replayedToolOutputs(messages, sandbox.contextDirectory),
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -635,6 +641,7 @@ async function startSubagentEnvironment(
     ...(publishing ? { publishing } : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
+    toolOutputs: replayedToolOutputs(threadContext.retainedMessages, sandbox.contextDirectory),
     imageBudget,
     ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
@@ -744,6 +751,8 @@ interface AgentEnvironmentSetup
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
+  /** The outputs the history saved to files, written again where their notices name them. */
+  readonly toolOutputs?: readonly SavedToolOutput[]
   /** What the history left of the request's inline image budget, which the run's steps take. */
   readonly imageBudget: InlineImageBudget
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
@@ -876,6 +885,7 @@ async function startAgentEnvironment(
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
     attachmentContext,
+    ...(input.toolOutputs ? { toolOutputs: input.toolOutputs } : {}),
     // A conversation's memory section names the memory skill; other runs never see it.
     skills: input.memory && mode === "conversation" ? [...plan.skills, MEMORY_SKILL] : plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
@@ -952,7 +962,7 @@ async function startAgentEnvironment(
       blobStorage: context.blobStorage,
       apiBaseUrl,
       attachmentContext,
-      tools,
+      tools: withToolOutputFiles(tools, resolveSandbox),
       prepareStep: mediaBridge.prepareStep,
       systemPrompt,
       projectTimeZone: context.timeZone,
@@ -1076,6 +1086,7 @@ interface ProvisionSandboxInput {
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
+  readonly toolOutputs?: readonly SavedToolOutput[]
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
   /** The conversation's artifacts, read while the sandbox starts. */
@@ -1101,6 +1112,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,
+      ...(input.toolOutputs ? { toolOutputs: input.toolOutputs } : {}),
       skills,
       ontologyFiles,
       ...(input.artifacts ? { artifacts: await input.artifacts } : {}),
