@@ -568,8 +568,10 @@ export type AgentConversationTurn = AgentConversationTurnActions &
         readonly runId: string
         /** The answer has waited in the queue longer than usual. */
         readonly waitingLonger: boolean
-        /** Earlier turns are being condensed before the answer starts. */
+        /** Earlier turns are being condensed before the answer starts, or to let it go on. */
         readonly compacting: boolean
+        /** The condensing follows a request the provider refused as too long. */
+        readonly contextFull: boolean
         /** The answer's live stream dropped and is reconnecting. */
         readonly reconnecting: boolean
         /** Who asked for the answer, when it is someone other than the reader. */
@@ -593,6 +595,7 @@ export interface ConversationTurnInput extends AgentConversationTurnActions {
   readonly activeRunId: string | null
   readonly waitingLonger: boolean
   readonly compacting: boolean
+  readonly contextFull: boolean
   readonly reconnecting: boolean
   readonly answeringFor: AgentConversationAuthor | null
 }
@@ -620,6 +623,7 @@ export function conversationTurn(input: ConversationTurnInput): AgentConversatio
         // Set while the wait is the queue's, before the run starts.
         waitingLonger: presentation.queuedRun !== null && input.waitingLonger,
         compacting: input.compacting,
+        contextFull: input.compacting && input.contextFull,
         reconnecting: input.reconnecting,
         answeringFor: input.answeringFor,
       }
@@ -662,6 +666,7 @@ export const READ_ONLY_TURN = {
   continuing: false,
   waitingLonger: false,
   compacting: false,
+  contextFull: false,
   reconnecting: false,
   answeringFor: null,
 } as const satisfies Omit<ConversationTurnInput, "presentation" | "activeRunId">
