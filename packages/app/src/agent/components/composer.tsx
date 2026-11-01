@@ -66,6 +66,7 @@ import {
   COMPOSER_CHIP_THUMB_CLASS_NAME,
   ContextChips,
 } from "./context-chips"
+import { ContextMeter, type ContextMeterProps } from "./context-meter"
 import { ContextPicker } from "./context-picker"
 import { DictationBar } from "./dictation-bar"
 
@@ -139,6 +140,8 @@ export interface ComposerProps {
    * `/edits`, `/full`). A command is typed as the whole message and runs with Enter.
    */
   readonly commands?: readonly ComposerCommand[]
+  /** How much of its model's target the conversation uses: a ring beside the model. */
+  readonly contextMeter?: ContextMeterProps
 }
 
 type ComposerAttachment =
@@ -217,6 +220,7 @@ export function Composer({
   awaitingApproval = false,
   dictation,
   commands = [],
+  contextMeter,
 }: ComposerProps) {
   const agentMessages = useAgentMessages()
   const messages = agentMessages.composer
@@ -938,6 +942,7 @@ export function Composer({
               />
             ) : (
               <>
+                {contextMeter ? <ContextMeter {...contextMeter} /> : null}
                 <ComposerSettings
                   models={models}
                   selectedModel={selectedModel}
