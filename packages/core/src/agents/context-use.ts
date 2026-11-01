@@ -1,13 +1,14 @@
 import type { LanguageModel, ModelReasoning } from "../models"
 import type { AgentContextCheckpointReason } from "../storage/agents"
-import { resolveAgentContextBudget } from "./context-budget"
+import { type AgentContextBudget, resolveAgentContextBudget } from "./context-budget"
 import { estimateAgentContextMessagesTokens } from "./context-compaction"
+import { estimateAgentThreadRequest } from "./context-request"
 import {
   type AgentTurnHistory,
   type AgentTurnHistoryHost,
-  matchingAgentUsageAnchor,
   readAgentThreadHistory,
 } from "./run-turn"
+import { projectAgentThreadModelContext } from "./thread-context-projection"
 
 /**
  * What a thread's context weighs against a model's limits, as its next turn would see them: what
@@ -18,10 +19,9 @@ export interface AgentThreadContextUse {
   /** The window less the output reserve: no request crosses it, and compaction starts past it. */
   readonly limitTokens: number
   /**
-   * What the next request starts from: the last call's input and the answer it wrote, as the
-   * provider counted them, when the worker would anchor on that call. Otherwise an estimate: what
-   * the latest compaction left and the messages after it, without the system prompt and tools of a
-   * conversation never condensed. Absent before the thread's first answer.
+   * What the next request weighs, as the worker estimates it before a turn (see
+   * estimateAgentThreadRequest), with the system prompt and tools the latest compaction counted:
+   * the API cannot render them. Absent before the thread's first answer.
    */
   readonly usedTokens?: number
   /** The latest call the thread's history ends with, as the provider counted it. */
@@ -74,7 +74,7 @@ export async function readAgentThreadContextUse(
         }
       : undefined
 
-  const usedTokens = contextUsedTokens(history, input.model, budget.bytesPerToken)
+  const usedTokens = contextUsedTokens(history, input.model, budget)
   const checkpoint = history.checkpoint
 
   return {
@@ -96,29 +96,36 @@ export async function readAgentThreadContextUse(
 }
 
 /**
- * What the next request to `model` starts from. The call the history ends with counts it when
- * the worker would anchor on that call too: its input and the answer it wrote. Otherwise it is
- * estimated: what the latest compaction left, and the messages after the head it saw. Undefined
- * before the first answer.
+ * What the next request to `model` weighs: the worker's estimate, without the system prompt and
+ * tools it renders, and at least what the latest compaction left and the messages after the head
+ * it saw, which counts them as of then. Undefined before the first answer.
  */
 function contextUsedTokens(
   history: Pick<AgentTurnHistory, "checkpoint" | "messages" | "usageAnchor">,
   model: LanguageModel,
-  bytesPerToken: number
+  budget: Pick<AgentContextBudget, "bytesPerToken" | "typicalBytesPerToken">
 ): number | undefined {
-  const anchor = matchingAgentUsageAnchor(history, model)
-  if (anchor) return anchor.inputTokens + anchor.outputTokens
+  const { checkpoint, messages } = history
+  if (!checkpoint && !messages.some((message) => message.role === "assistant")) return undefined
 
-  const checkpoint = history.checkpoint
-  if (!checkpoint && !history.messages.some((message) => message.role === "assistant")) {
-    return undefined
-  }
+  const estimate = estimateAgentThreadRequest({
+    usageAnchor: history.usageAnchor,
+    retainedMessages: messages,
+    modelMessages: projectAgentThreadModelContext({ checkpoint, messages }),
+    model,
+    bytesPerToken: budget.bytesPerToken,
+    ...(budget.typicalBytesPerToken === undefined
+      ? {}
+      : { typicalBytesPerToken: budget.typicalBytesPerToken }),
+    systemPrompt: "",
+    tools: [],
+  })
+  if (!checkpoint) return estimate.tokens
 
-  const after = history.messages.filter(
-    (message) => message.seq > (checkpoint?.observedHeadSeq ?? 0)
-  )
-  return (
-    (checkpoint?.estimatedInputTokensAfter ?? 0) +
-    estimateAgentContextMessagesTokens(after, bytesPerToken).tokens
+  const after = messages.filter((message) => message.seq > checkpoint.observedHeadSeq)
+  return Math.max(
+    estimate.tokens,
+    checkpoint.estimatedInputTokensAfter +
+      estimateAgentContextMessagesTokens(after, estimate.bytesPerToken).tokens
   )
 }
