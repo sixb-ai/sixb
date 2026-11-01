@@ -218,6 +218,9 @@ export async function prepareAgentConversationContext(
  * as it is. Undefined when there is nothing before the turn to summarize, when the run already
  * compacted the thread (a run writes one checkpoint), or when the compaction failed: the turn
  * then goes on with what it has.
+ *
+ * Its estimates before and after weigh the same request, the history with the turn's message,
+ * without the steps it keeps: what the summary replaced, not what the turn is about to send.
  */
 export async function compactAgentConversationInTurn(
   input: ConversationCompactionInput & {
@@ -226,15 +229,13 @@ export async function compactAgentConversationInTurn(
     /** The memory the turn's prompt shows. */
     readonly memory: ConversationMemory | undefined
     readonly reason: AgentContextCheckpointReason
-    /** What the turn's next request weighs, as the turn measured it. */
-    readonly estimatedInputTokens: number
   }
 ): Promise<PreparedAgentConversationContext | undefined> {
   const { threadContext, run } = input
   if (threadContext.checkpoint?.createdByRunId === run.id) return undefined
 
   const estimateShape = conversationEstimateShape(input, threadContext, input.memory)
-  const { bytesPerToken } = estimateAgentConversation({
+  const { tokens, bytesPerToken } = estimateAgentConversation({
     plan: input.plan,
     budget: input.budget,
     threadContext,
@@ -269,7 +270,7 @@ export async function compactAgentConversationInTurn(
       bytesPerToken,
       boundary,
       ownCheckpoint: false,
-      estimatedInputTokensBefore: input.estimatedInputTokens,
+      estimatedInputTokensBefore: tokens,
     })
   } catch (error) {
     if (!(error instanceof AgentContextCompactionError)) throw error
