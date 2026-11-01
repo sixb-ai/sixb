@@ -177,6 +177,17 @@ The latest turns stay as they are, and the agent can still read the whole conver
 [`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
 larger window.
 
+The same limit holds within a turn, before each model call, as tool results pile up:
+
+- the oldest tool results the agent has read are cleared in one batch, the most recent kept; a
+  short note in their place tells the agent to run the tool again if it needs one back;
+- if that is not enough, the turns before the current one are summarized, and the turn goes on;
+- results too large to fit the window at all are cut, each saying how much was left out.
+
+The conversation shown to users and `sixb history` keep every result whole. A provider that
+rejects a call as too long for the window gets it again once, summarized, and the turn goes on. A
+turn that fails keeps the steps it completed, and can be continued.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies
