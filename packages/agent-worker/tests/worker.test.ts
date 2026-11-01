@@ -4359,45 +4359,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("goes on above a price tier when compacting cannot bring it under", async () => {
-    // Reproduce: return `unchanged` in prepareAgentConversationContext only when no boundary
-    // exists; the turn then summarizes the short turn before for nothing, as would every turn
-    // after it while the long request stays.
-    const price = (base: string, above: string) => ({
-      default: base,
-      tiers: [{ minTokens: 30_001, price: above }],
-    })
-    const model = Object.assign(answerModel(), {
-      rateCard: {
-        currency: "USD",
-        input: price("1", "5"),
-        output: price("5", "25"),
-        cacheReadInput: price("0.1", "0.5"),
-      } satisfies ModelRateCard,
-    })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const first = await requestAgent(sixb, { text: "Hello." })
-      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
-
-      // The request alone is past the tier, far below the 111,616-token hard limit.
-      const long = await requestAgent(sixb, {
-        threadId: first.run.threadId,
-        text: `Read this: ${"y".repeat(150_000)}`,
-      })
-      const run = await waitForTerminalRun(storage, long.run.id)
-      expect(run.status).toBe("succeeded")
-      expect(
-        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
-      ).not.toContain("agent.compaction.started")
-    } finally {
-      await worker.stop()
-    }
-  })
-
   test("counts a thread at the bytes per token its own calls measured", async () => {
     // Reproduce: estimate prepareAgentConversationContext at budget.bytesPerToken instead of
     // agentConversationBytesPerToken; the second turn then compacts at the project's rate.
@@ -5094,9 +5055,9 @@ describe("AgentWorker", () => {
   })
 
   test("compacts a small window once, then grows into the room it left", async () => {
-    // Reproduce: select the boundary with target.keepRecentTokens alone in
-    // prepareAgentConversationContext, with no aim under the target; each compaction then keeps
-    // half the target as it is, and the turns after it compact again one after another.
+    // Reproduce: select the boundary with budget.keepRecentTokens alone in
+    // prepareAgentConversationContext, with no aim under the limit; each compaction then keeps
+    // half the limit as it is, and the turns after it compact again one after another.
     const requests: LanguageModelRequest[] = []
     const model = measuredConversationModel({
       contextWindow: 20_000,
@@ -5132,7 +5093,7 @@ describe("AgentWorker", () => {
         compacted.push(names.includes("agent.compaction.completed"))
       }
 
-      // A 17,952-token target: compaction leaves at most 60 % of it, room for the next turn and
+      // A 17,952-token limit: compaction leaves at most 60 % of it, room for the next turn and
       // more, so no turn compacts right after the one that did.
       expect(compacted.filter(Boolean)).toHaveLength(2)
       expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)

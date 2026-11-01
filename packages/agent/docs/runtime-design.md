@@ -118,13 +118,13 @@ turn N's last request sent, on every storage:
 
 ## Compacting a conversation
 
-A turn's preflight (`context-compaction.ts`) compacts once the estimate crosses the model's target
-(see `context-budget.ts`):
+A turn's preflight (`context-compaction.ts`) compacts once the estimate crosses the model's limit,
+its window less the output reserve (see `context-budget.ts`):
 
-- **It aims at 60 % of the target**: the system prompt and tools, the summary at its longest, and
-  the recent turns that fit the rest stay; the next turns grow into the room left. A context whose
-  prompt and newest request alone exceed the target goes on above it; only the hard limit fails a
-  turn, as `agent.context_limit_exceeded`, which the app and the TUI show without a retry.
+- **It aims at 60 % of the limit**: the system prompt and tools, the summary at its longest, and
+  the recent turns that fit the rest stay; the next turns grow into the room left. A context that
+  does not fit even compacted fails the turn as `agent.context_limit_exceeded`, which the app and
+  the TUI show without a retry.
 - **The summary continues the cached request.** The environment builds it as the turn would
   (`BuildConversationRequest`): the previous turn's request, with the same system prompt, tools,
   reasoning and cache intent, then one `<sixb_summary_request>` message. Changing thinking, effort
