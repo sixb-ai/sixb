@@ -44,6 +44,7 @@ import type {
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
 } from "@sixb/core/storage"
+import { objectPartitionName } from "../objects/partitions"
 import type { SQLClient } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import { lockAdvisoryKeys, runPgRepeatableReadTransaction } from "../transactions"
@@ -269,7 +270,16 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       committedAt: commit.committedAt,
       ...(session.plan ? {} : { uniqueWork: session.uniqueWork }),
     })
-    session.changedObjects = applied.objectWrites
+    // Below this no type can reach the statistics threshold, so the work table stays unread.
+    if (applied.objectWrites >= STATISTICS_MINIMUM_CHANGES) {
+      session.changedObjects = await this.writer.stagedObjectWritesByType({
+        workTable: session.workTable,
+        workId: session.workId,
+        projectId: commit.projectId,
+        commitId: commit.id,
+        committedAt: commit.committedAt,
+      })
+    }
     session.changedLinks = applied.linkWrites
     session.changedUniqueValues = applied.uniqueValueWrites
     session.appliedEventCount = applied.eventCount
@@ -285,7 +295,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
     // The next sparse projection must see the distribution of a newly published bulk load.
     // With empty/stale statistics, a link lookup can scan every edge sharing its target.
-    await refreshMaterializedStatistics(this.sql, "objects", session.changedObjects)
+    await refreshObjectStatistics(this.sql, session.changedObjects)
     await refreshMaterializedStatistics(this.sql, "links", session.changedLinks)
     await refreshMaterializedStatistics(
       this.sql,
@@ -773,18 +783,65 @@ function databaseCount(value: number | string | undefined): number {
   return Number(value ?? 0)
 }
 
+const STATISTICS_MINIMUM_CHANGES = 1_000
+
 /** Keep the first bulk publication queryable without analyzing every small subsequent delta.
  * Expression indexes make full ANALYZE expensive. Only a substantial current publication
  * forces synchronous work. Autovacuum accumulates smaller writes separately; its modification
  * count can still include a previous transaction's manually analyzed writes at this point. */
 async function refreshMaterializedStatistics(
   sql: SQLClient,
-  table: "objects" | "links" | "object_unique_values",
+  table: string,
   changed: number
 ): Promise<void> {
-  if (changed < 1_000) return
+  if (changed < STATISTICS_MINIMUM_CHANGES) return
   const [state] = await sql<{ rows: number }[]>`
     SELECT reltuples AS rows FROM pg_class WHERE oid=${table}::regclass`
-  if (!state || state.rows <= 0 || changed >= Math.max(10_000, state.rows * 0.1))
+  // At least doubling a small table changes its distribution, however few rows that took.
+  if (
+    !state ||
+    state.rows <= 0 ||
+    changed >= state.rows ||
+    changed >= Math.max(10_000, state.rows * 0.1)
+  )
     await sql.unsafe(`ANALYZE ${table}`)
+}
+
+/**
+ * A substantial publication refreshes the parent too, as it always has: autovacuum never analyzes a
+ * partitioned parent, and its statistics plan queries that read across types. A smaller one only
+ * refreshes partitions it changed substantially, which autovacuum may not reach before the next
+ * projection. A routine update must not: ANALYZE over a partition's expression statistics takes
+ * seconds, and a thousand changed rows in ten thousand took five times as long with it.
+ */
+async function refreshObjectStatistics(
+  sql: SQLClient,
+  changes: ReadonlyMap<string, number>
+): Promise<void> {
+  const total = [...changes.values()].reduce((sum, changed) => sum + changed, 0)
+  if (total < STATISTICS_MINIMUM_CHANGES) return
+
+  const [parent] = await sql<{ rows: number }[]>`
+    SELECT reltuples AS rows FROM pg_class WHERE oid = 'objects'::regclass`
+  if (!parent || parent.rows <= 0 || total >= Math.max(10_000, parent.rows * 0.1)) {
+    await sql.unsafe("ANALYZE objects")
+    return
+  }
+  for (const [objectTypeId, changed] of changes) {
+    if (changed < STATISTICS_MINIMUM_CHANGES) continue
+    await refreshMaterializedStatistics(
+      sql,
+      await objectStatisticsTable(sql, objectTypeId),
+      changed
+    )
+  }
+}
+
+/** A type's rows are in its partition, or in the default until its first preparation. */
+async function objectStatisticsTable(sql: SQLClient, objectTypeId: string): Promise<string> {
+  const partition = objectPartitionName(objectTypeId)
+  const [row] = await sql<
+    { found: string | null }[]
+  >`SELECT to_regclass(${partition})::text AS found`
+  return row?.found ? partition : "objects_default"
 }

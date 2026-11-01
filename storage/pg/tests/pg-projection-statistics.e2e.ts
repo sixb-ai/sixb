@@ -126,7 +126,7 @@ test("a published bulk load leaves selective statistics for the next sparse proj
   const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(
-      "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects SET (autovacuum_enabled=false); ANALYZE links"
+      "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects_default SET (autovacuum_enabled=false); ANALYZE links"
     )
     const Device = defineObjectType({
       id: "Device",
@@ -173,14 +173,14 @@ test("a published bulk load leaves selective statistics for the next sparse proj
     expect(seen[0]).toBeLessThan(500)
     // Guard removal: restore unconditional ANALYZE for every >=1000-object publication.
     // The added small batch then changes reltuples, proving it repeated full statistics work.
-    const [before] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects'::regclass`
+    const [before] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects_default'::regclass`
     await fixture.seed({
       objects: Array.from({ length: 1000 }, (_, i) => ({
         ref: { objectTypeId: "Device", primaryId: `additional-${i}` },
         properties: { id: `additional-${i}` },
       })),
     })
-    const [after] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects'::regclass`
+    const [after] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects_default'::regclass`
     expect(Number(before!.reltuples)).toBeGreaterThan(0)
     expect(after!.reltuples).toBe(before!.reltuples)
   } finally {
@@ -305,3 +305,60 @@ async function devicePublisher(storage: PostgresStorage) {
     })
   }
 }
+
+// Removal proof: analyze a table whenever a tenth of it changes. A routine 1,000-row update of a
+// 10,000-row type then runs a full ANALYZE in the commit path, which made them five times slower.
+test("a routine update leaves statistics alone, and doubling a small type refreshes them", async () => {
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
+  try {
+    await sql.unsafe("ALTER TABLE objects_default SET (autovacuum_enabled=false)")
+    const Device = defineObjectType({
+      id: "Device",
+      name: "Device",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("batch", "string"),
+      ],
+    })
+    const fixture = createMaterializerTestFixture({
+      projectId: "p",
+      ontology: new OntologyRegistry({ sources: [Device] }),
+      storage,
+    })
+    const seed = (prefix: string, batch: string, from: number, count: number) =>
+      fixture.seed({
+        objects: Array.from({ length: count }, (_, i) => ({
+          ref: { objectTypeId: "Device", primaryId: `${prefix}-${from + i}` },
+          properties: { id: `${prefix}-${from + i}`, batch },
+        })),
+      })
+    const analyzes = async () =>
+      Number(
+        (
+          await sql`
+            SELECT analyze_count FROM pg_stat_all_tables
+            WHERE relid = 'objects_default'::regclass`
+        )[0]?.analyze_count
+      )
+
+    await seed("d", "first", 0, 10_000)
+    const seeded = await analyzes()
+    expect(seeded).toBeGreaterThan(0)
+
+    // Exactly a tenth of the table, which used to clear the threshold.
+    await seed("d", "update", 0, 1_000)
+    expect(await analyzes()).toBe(seeded)
+
+    // More rows than it has, in one publication under the absolute floor.
+    await sql.unsafe("TRUNCATE objects_default CASCADE")
+    await seed("small", "second", 0, 1_000)
+    await sql.unsafe("ANALYZE objects_default")
+    const small = await analyzes()
+    await seed("more", "third", 0, 1_500)
+    expect(await analyzes()).toBe(small + 1)
+  } finally {
+    await sql.end()
+    await disposeTestStorage(storage)
+  }
+}, 60_000)
