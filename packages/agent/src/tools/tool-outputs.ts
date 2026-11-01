@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto"
 import { posix } from "node:path"
 import type { AgentToolResult } from "@sixb/core"
-import { isAgentToolResult } from "@sixb/core/internal/agents"
+import {
+  AGENT_FILE_MAX_BYTES,
+  type AgentRunFileStore,
+  type AgentToolCallFile,
+  isAgentToolResult,
+} from "@sixb/core/internal/agents"
 import {
   assertJsonValue,
   type JsonValue,
@@ -11,8 +16,9 @@ import {
 } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import type { AgentSandboxHandle } from "../sandbox-handle"
-import { BASH_TOOL_SPEC } from "./bash"
+import { BASH_TOOL_SPEC, keptCommandOutput } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
+import type { AgentFileBudget } from "./tool-files"
 import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 
 /**
@@ -43,102 +49,180 @@ const REPLAYED_OUTPUTS_MAX_BYTES = 32 * 1024 * 1024
 const FILE_READERS: ReadonlySet<string> = new Set([READ_TOOL_SPEC.name, VIEW_FILE_TOOL_SPEC.name])
 
 const NOTICE_TAG = "tool_output_file"
+const NOTICE_OPENING = new RegExp(`^<${NOTICE_TAG} sandboxPath="([^"]*)"`)
 
-/** A saved output: its path as the agent names it, and its text. */
+/** An output a history saved, to write again: its path as the agent names it, and its bytes. */
 export interface SavedToolOutput {
   readonly path: string
-  readonly contents: string
+  readonly contents: Uint8Array
+}
+
+/** A saved output, between its call's execution and the preview the model reads of it. */
+interface SavedCall {
+  readonly file: AgentToolCallFile
+  readonly sandboxPath: string
+  contents?: string
 }
 
 /**
- * The run's tools, each saving an output too large for the context to a file in the sandbox and
- * giving the model a preview with its path instead. The stored output stays whole, and what the
- * model read is stored beside it as the call's `modelOutput`: later turns replay those bytes, and
- * write the file again from the output ({@link replayedToolOutputs}).
+ * The run's tools, each saving an output too large for the context: stored as a file of its run,
+ * like a tool's own files, and copied into the sandbox at `tool-outputs/<call id>.txt`. The model
+ * reads a preview with that path; the call's message part keeps a bounded copy of the output and
+ * the stored file as its `outputFile` ({@link fileOf}), which every later run copies back
+ * ({@link readSavedToolOutputs}). Saving that fails leaves the output as the part keeps it.
  */
-export function withToolOutputFiles(
-  tools: readonly ModelTool[],
-  sandbox: () => Promise<AgentSandboxHandle>
-): ModelTool[] {
-  return tools.map((tool) => (FILE_READERS.has(tool.name) ? tool : savingOutput(tool, sandbox)))
-}
+export class ToolOutputFiles {
+  readonly #saved = new Map<string, SavedCall>()
 
-function savingOutput(tool: ModelTool, sandbox: () => Promise<AgentSandboxHandle>): ModelTool {
-  const project = (output: JsonValue, context: ModelToolExecutionContext) =>
-    tool.toModelOutput ? tool.toModelOutput(output, context) : defaultModelOutput(output)
+  constructor(
+    private readonly input: {
+      readonly sandbox: () => Promise<AgentSandboxHandle>
+      readonly blobStorage: Pick<AgentRunFileStore, "put">
+      /** Shared with every other file the run stores. */
+      readonly budget: AgentFileBudget
+    }
+  ) {}
 
-  return {
-    ...tool,
-    async toModelOutput(output, context) {
-      const contents = savedOutputText(tool.name, output)
-      if (contents === undefined) return project(output, context)
-
-      let path: string
-      try {
-        const handle = await sandbox()
-        context.signal.throwIfAborted()
-        path = toolOutputPath(handle.contextDirectory, context.toolCallId)
-        await handle.sandbox.writeFiles([
-          { path: posix.resolve(handle.sandbox.workingDirectory, path), contents },
-        ])
-      } catch (error) {
-        context.signal.throwIfAborted()
-        // Losing the output would be worse than a large result: the context guard cuts it if needed.
-        console.warn(
-          `[SixbAgent] Could not save a ${tool.name} output to a file, so the model reads it whole:`,
-          error
-        )
-        return project(output, context)
-      }
-
-      const notice = toolOutputNotice({ toolName: tool.name, output, path, contents })
-      if (!isAgentToolResult(output)) return { type: "text", value: notice }
-
-      // A file-aware result keeps its files, which its tool projects after the notice.
-      const noticed: unknown = withText(output, notice)
-      assertJsonValue(noticed)
-      return project(noticed, context)
-    },
+  wrap(tools: readonly ModelTool[]): ModelTool[] {
+    return tools.map((tool) => (FILE_READERS.has(tool.name) ? tool : this.saving(tool)))
   }
-}
 
-/**
- * The outputs a history saved, to write again where their notices named them, newest first
- * within {@link REPLAYED_OUTPUTS_MAX_BYTES}. Each file is derived from the stored output as the
- * call derived it, and only where the stored notice names that very file.
- */
-export function replayedToolOutputs(
-  messages: readonly AgentMessageRecord[],
-  contextDirectory: string
-): SavedToolOutput[] {
-  const saved: SavedToolOutput[] = []
-  let bytes = 0
+  /** The stored file of a call whose output was saved, for its message part. */
+  fileOf(toolCallId: string): AgentToolCallFile | undefined {
+    return this.#saved.get(toolCallId)?.file
+  }
 
-  for (const message of [...messages].reverse()) {
-    for (const part of [...message.parts].reverse()) {
-      if (part.type !== "tool-call" || part.state !== "output-available") continue
-      const read = part.modelOutput?.type === "text" ? part.modelOutput.value : ""
-      if (!read.startsWith(`<${NOTICE_TAG} `)) continue
+  private saving(tool: ModelTool): ModelTool {
+    const project = (output: JsonValue, context: ModelToolExecutionContext) =>
+      tool.toModelOutput ? tool.toModelOutput(output, context) : defaultModelOutput(output)
 
-      const contents = savedOutputText(part.toolName, part.output)
-      if (contents === undefined) continue
-      const path = toolOutputPath(contextDirectory, part.toolCallId)
-      if (!read.startsWith(noticeOpening(path, contents))) continue
+    return {
+      ...tool,
+      execute: async (input, context) => {
+        const output = await tool.execute(input, context)
+        const contents = savedOutputText(tool.name, output)
+        if (contents === undefined) return output
 
-      bytes += utf8Bytes(contents)
-      if (bytes > REPLAYED_OUTPUTS_MAX_BYTES) return saved
-      saved.push({ path, contents })
+        try {
+          this.#saved.set(context.toolCallId, await this.save(tool.name, contents, context))
+        } catch (error) {
+          context.signal.throwIfAborted()
+          console.warn(
+            `[SixbAgent] Could not save a ${tool.name} output to a file, so the model reads what its message keeps:`,
+            error
+          )
+        }
+        return keptOutput(tool.name, output)
+      },
+      toModelOutput: async (output, context) => {
+        const saved = this.#saved.get(context.toolCallId)
+        if (saved?.contents === undefined) return project(output, context)
+
+        const notice = toolOutputNotice({
+          toolName: tool.name,
+          output,
+          path: saved.sandboxPath,
+          contents: saved.contents,
+        })
+        saved.contents = undefined
+        if (!isAgentToolResult(output)) return { type: "text", value: notice }
+
+        // A file-aware result keeps its files, which its tool projects after the notice.
+        const noticed: unknown = withText(output, notice)
+        assertJsonValue(noticed)
+        return project(noticed, context)
+      },
     }
   }
-  return saved
+
+  private async save(
+    toolName: string,
+    contents: string,
+    context: ModelToolExecutionContext
+  ): Promise<SavedCall> {
+    const bytes = new TextEncoder().encode(contents)
+    if (bytes.byteLength > AGENT_FILE_MAX_BYTES) {
+      throw new Error(`the output exceeds the ${AGENT_FILE_MAX_BYTES}-byte file limit`)
+    }
+    const reservation = this.input.budget.reserve(bytes.byteLength, toolName)
+
+    try {
+      const path = toolOutputPath(context.toolCallId)
+      const fileRef = await this.input.blobStorage.put({
+        body: bytes,
+        expectedSizeBytes: bytes.byteLength,
+        signal: context.signal,
+        fileName: posix.basename(path),
+        mediaType: "text/plain",
+      })
+
+      const handle = await this.input.sandbox()
+      context.signal.throwIfAborted()
+      const sandboxPath = posix.join(handle.contextDirectory, path)
+      await handle.sandbox.writeFiles([
+        { path: posix.resolve(handle.sandbox.workingDirectory, sandboxPath), contents: bytes },
+      ])
+      return { file: { fileRef, path }, sandboxPath, contents }
+    } catch (error) {
+      reservation.release()
+      throw error
+    }
+  }
 }
 
-/** Where a call's output is saved, as the agent names it: one file per call, by its id. */
-export function toolOutputPath(contextDirectory: string, toolCallId: string): string {
+/**
+ * The outputs a history saved, read from their stored files to write again where their previews
+ * named them, newest first within {@link REPLAYED_OUTPUTS_MAX_BYTES}. One whose file cannot be
+ * read is left out: the message keeps a bounded copy of it.
+ */
+export async function readSavedToolOutputs(input: {
+  readonly messages: readonly AgentMessageRecord[]
+  readonly contextDirectory: string
+  readonly blobStorage: Pick<AgentRunFileStore, "open">
+  readonly signal?: AbortSignal
+}): Promise<SavedToolOutput[]> {
+  const files: AgentToolCallFile[] = []
+  let bytes = 0
+
+  newest: for (const message of [...input.messages].reverse()) {
+    for (const part of [...message.parts].reverse()) {
+      if (part.type !== "tool-call" || part.state !== "output-available") continue
+      if (!part.outputFile) continue
+
+      bytes += part.outputFile.fileRef.sizeBytes
+      if (bytes > REPLAYED_OUTPUTS_MAX_BYTES) break newest
+      files.push(part.outputFile)
+    }
+  }
+
+  const read = await Promise.all(
+    files.map(async (file): Promise<SavedToolOutput | undefined> => {
+      input.signal?.throwIfAborted()
+      try {
+        const stream = await input.blobStorage.open(file.fileRef.blobId)
+        const contents = new Uint8Array(await new Response(stream).arrayBuffer())
+        return { path: posix.join(input.contextDirectory, file.path), contents }
+      } catch (error) {
+        input.signal?.throwIfAborted()
+        console.warn(`[SixbAgent] Could not read the saved tool output ${file.path}:`, error)
+        return undefined
+      }
+    })
+  )
+  return read.filter((output) => output !== undefined)
+}
+
+/** The path a tool result's text names when it is the preview of a saved output. */
+export function savedToolOutputPath(text: string): string | undefined {
+  return NOTICE_OPENING.exec(text)?.[1]
+}
+
+/** Where a call's output is saved, relative to the context directory: one file per call. */
+function toolOutputPath(toolCallId: string): string {
   const name = /^[A-Za-z0-9_-]{1,128}$/.test(toolCallId)
     ? toolCallId
     : createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
-  return posix.join(contextDirectory, TOOL_OUTPUTS_DIRECTORY, `${name}.txt`)
+  return posix.join(TOOL_OUTPUTS_DIRECTORY, `${name}.txt`)
 }
 
 /** The file an output too large for the context is saved to, or undefined when it fits. */
@@ -147,6 +231,18 @@ function savedOutputText(toolName: string, output: JsonValue): string | undefine
 
   const text = outputText(toolName, output)
   return text.endsWith("\n") ? text : `${text}\n`
+}
+
+/**
+ * What the message part keeps of a saved output: a command's streams bounded, as the app shows
+ * them. Any other tool's output is its author's contract, saved and streamed as it returned it.
+ */
+function keptOutput(toolName: string, output: JsonValue): JsonValue {
+  if (toolName !== BASH_TOOL_SPEC.name || !isCommandOutput(output)) return output
+
+  const kept: unknown = keptCommandOutput(output)
+  assertJsonValue(kept)
+  return kept
 }
 
 /**
@@ -172,14 +268,12 @@ function outputText(toolName: string, output: JsonValue): string {
   if (isAgentToolResult(output)) return indentedJsonText(resultText(output))
   if (typeof output === "string") return indentedJsonText(output)
 
-  // Sorted, so the file a later run writes from a `jsonb` copy holds the same bytes.
-  return JSON.stringify(output, (_key, value: unknown) => sortedKeys(value), 2)
+  return JSON.stringify(output, null, 2)
 }
 
 /**
  * What the model reads in place of an output saved to a file: where it is, how large, how to read
- * it, and a preview. Derived from the call alone: a later run that writes the file again finds the
- * same opening.
+ * it, and a preview.
  */
 function toolOutputNotice(input: {
   readonly toolName: string
@@ -197,9 +291,10 @@ function toolOutputNotice(input: {
     input.toolName === BASH_TOOL_SPEC.name && isCommandOutput(input.output)
       ? [`Exit code: ${input.output.exitCode}${input.output.timedOut ? " (timed out)" : ""}.`]
       : []
+  const lines = input.contents.split("\n").length - 1
 
   return [
-    noticeOpening(input.path, input.contents),
+    `<${NOTICE_TAG} sandboxPath="${input.path}" sizeBytes="${bytes.byteLength}" lines="${lines}">`,
     "This output is too large for the context: the whole of it is in this file. Read it in pieces with the read tool (offset, limit), or search it with grep.",
     ...exit,
     "",
@@ -214,11 +309,6 @@ function toolOutputNotice(input: {
         ]),
     `</${NOTICE_TAG}>`,
   ].join("\n")
-}
-
-function noticeOpening(path: string, contents: string): string {
-  const lines = contents.split("\n").length - 1
-  return `<${NOTICE_TAG} sandboxPath="${path}" sizeBytes="${utf8Bytes(contents)}" lines="${lines}">`
 }
 
 /** Where the first `maxBytes` end, at a line's end when one is in their second half. */
@@ -285,6 +375,7 @@ interface CommandOutput {
   readonly exitCode: number
   readonly stdout: string
   readonly stderr: string
+  readonly durationMs: number
   readonly timedOut?: boolean
 }
 
@@ -295,17 +386,9 @@ function isCommandOutput(output: JsonValue): output is JsonValue & CommandOutput
     !Array.isArray(output) &&
     typeof output.exitCode === "number" &&
     typeof output.stdout === "string" &&
-    typeof output.stderr === "string"
+    typeof output.stderr === "string" &&
+    typeof output.durationMs === "number"
   )
-}
-
-function sortedKeys(value: unknown): unknown {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return value
-
-  const record = value as Record<string, unknown>
-  const sorted: Record<string, unknown> = {}
-  for (const key of Object.keys(record).sort()) sorted[key] = record[key]
-  return sorted
 }
 
 function utf8Bytes(text: string): number {

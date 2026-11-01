@@ -123,36 +123,54 @@ type ToolOutcome =
       readonly state: "output-available"
       readonly output: JsonValue
       readonly modelOutput?: AgentToolModelOutput
+      readonly outputFile?: AgentToolCallFile
     }
   | { readonly state: "output-error"; readonly errorText: string }
+
+/** The stored file of a call whose output was too large for the context (`outputFileOf`). */
+export type AgentToolOutputFileOf = (toolCallId: string) => AgentToolCallFile | undefined
 
 /** Project validated model-loop steps into Sixb's durable trace contract. */
 export function agentTraceFromModelSteps(
   steps: readonly ModelStep[],
-  errorDetails?: AgentErrorDetails
+  errorDetails?: AgentErrorDetails,
+  outputFileOf?: AgentToolOutputFileOf
 ): readonly AgentMessagePart[] {
-  return steps.flatMap((step) => tracePartsFromModelContent(step.content, errorDetails))
+  return steps.flatMap((step) =>
+    tracePartsFromModelContent(step.content, { errorDetails, outputFileOf })
+  )
 }
 
 /** Convert an aborted model loop, retaining only coherent content from its in-flight step. */
 export function agentTraceFromPartialModelLoop(
   steps: readonly ModelStep[],
   partialContent: readonly ModelAssistantPart[],
-  errorDetails?: AgentErrorDetails
+  errorDetails?: AgentErrorDetails,
+  outputFileOf?: AgentToolOutputFileOf
 ): readonly AgentMessagePart[] {
   return [
-    ...agentTraceFromModelSteps(steps, errorDetails),
+    ...agentTraceFromModelSteps(steps, errorDetails, outputFileOf),
     ...(partialContent.length === 0
       ? []
-      : tracePartsFromModelContent(partialContent, errorDetails, "Tool execution was cancelled.")),
+      : tracePartsFromModelContent(partialContent, {
+          errorDetails,
+          outputFileOf,
+          missingToolResultText: "Tool execution was cancelled.",
+        })),
   ]
 }
 
 function tracePartsFromModelContent(
   content: readonly ModelAssistantPart[],
-  errorDetails?: AgentErrorDetails,
-  missingToolResultText = "Tool call did not produce a result."
+  options: {
+    readonly errorDetails?: AgentErrorDetails
+    readonly outputFileOf?: AgentToolOutputFileOf
+    readonly missingToolResultText?: string
+  }
 ): AgentMessagePart[] {
+  const { errorDetails, outputFileOf } = options
+  const missingToolResultText =
+    options.missingToolResultText ?? "Tool call did not produce a result."
   const results = new Map(
     content.filter((part) => part.type === "tool-result").map((part) => [part.toolCallId, part])
   )
@@ -190,7 +208,11 @@ function tracePartsFromModelContent(
                 ? {}
                 : { providerExecuted: part.providerExecuted }),
               ...(part.providerData === undefined ? {} : { providerMetadata: part.providerData }),
-              ...toolOutcome(results.get(part.toolCallId), missingToolResultText),
+              ...toolOutcome(
+                results.get(part.toolCallId),
+                missingToolResultText,
+                outputFileOf?.(part.toolCallId)
+              ),
             },
           ]
         }
@@ -205,13 +227,14 @@ function tracePartsFromModelContent(
 
 function toolOutcome(
   result: ModelToolResultPart | undefined,
-  missingResultText: string
+  missingResultText: string,
+  outputFile: AgentToolCallFile | undefined
 ): ToolOutcome {
   if (!result) return { state: "output-error", errorText: missingResultText }
   const { output } = result
 
   // The tool projected its output for the model: the trace keeps both, and later turns replay
-  // what the model read, byte for byte.
+  // what the model read, byte for byte. An output saved to a file keeps it as well.
   if (result.originalOutput !== undefined) {
     return {
       state: "output-available",
@@ -221,6 +244,7 @@ function toolOutcome(
         : output.type === "json"
           ? { modelOutput: { type: "json", value: output.value } }
           : {}),
+      ...(outputFile === undefined ? {} : { outputFile }),
     }
   }
 

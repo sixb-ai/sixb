@@ -22,7 +22,11 @@ import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
+import {
+  type AgentToolOutputFileOf,
+  agentTraceFromModelSteps,
+  agentTraceFromPartialModelLoop,
+} from "./model-adapters"
 import { markReducedSteps } from "./run-agent-turn"
 import type { SubagentAgentExecutionEnvironment } from "./run-environment"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -174,7 +178,13 @@ export async function runSubagent(input: {
   }).catch((error: unknown) => {
     throw subagentContextFailure(error, run) ?? error
   })
-  const work = subagentWorkMessages(generation, run, inbox.deliveries, guard.reducedFromStep())
+  const work = subagentWorkMessages(
+    generation,
+    run,
+    inbox.deliveries,
+    guard.reducedFromStep(),
+    context.outputFileOf
+  )
   if (input.work) input.work.messages = work
 
   return settleSubagent({
@@ -302,7 +312,8 @@ function subagentWorkMessages(
   run: SubagentRunRecord,
   deliveries: readonly SubagentDelivery[],
   /** The first step whose request the guard reduced: it and those after it are marked so. */
-  reducedFromStep: number | undefined
+  reducedFromStep: number | undefined,
+  outputFileOf: AgentToolOutputFileOf | undefined
 ): readonly AppendAgentMessageInput[] {
   const details = { threadId: run.threadId, runId: run.id }
   const messages: AppendAgentMessageInput[] = []
@@ -328,7 +339,11 @@ function subagentWorkMessages(
   let from = 0
   for (const delivery of deliveries) {
     pushSteps(
-      agentTraceFromModelSteps(generation.steps.slice(from, delivery.afterSteps), details),
+      agentTraceFromModelSteps(
+        generation.steps.slice(from, delivery.afterSteps),
+        details,
+        outputFileOf
+      ),
       from
     )
     push("user", delivery.parts)
@@ -338,8 +353,8 @@ function subagentWorkMessages(
   const rest = generation.steps.slice(from)
   pushSteps(
     generation.status === "aborted"
-      ? agentTraceFromPartialModelLoop(rest, generation.partialContent, details)
-      : agentTraceFromModelSteps(rest, details),
+      ? agentTraceFromPartialModelLoop(rest, generation.partialContent, details, outputFileOf)
+      : agentTraceFromModelSteps(rest, details, outputFileOf),
     from
   )
   return messages
