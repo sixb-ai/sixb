@@ -21,6 +21,7 @@ export class RequestDiagnostics {
       retryAfterMs: error.retryAfterMs,
       code: error.code === undefined ? undefined : this.text(error.code),
       requestId: error.requestId === undefined ? undefined : this.text(error.requestId),
+      reason: error.reason,
     })
   }
 

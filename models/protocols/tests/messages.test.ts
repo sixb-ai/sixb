@@ -315,6 +315,55 @@ test.each([
   })
 })
 
+// Reproduce: drop contextWindowExceeded from the message_stop finish; a turn then takes an answer
+// the window cut for one the output limit cut, and never compacts and asks again.
+test("says the context window, not the output limit, stopped a message", async () => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        { type: "message_start", message: { id: "msg" } },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "model_context_window_exceeded" },
+          usage: { input_tokens: 199_000, output_tokens: 1_000 },
+        },
+        { type: "message_stop" },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  expect(events.at(-1)).toMatchObject({
+    type: "finish",
+    finishReason: "length",
+    rawFinishReason: "model_context_window_exceeded",
+    contextWindowExceeded: true,
+    usage: { inputTokens: 199_000, outputTokens: 1_000 },
+  })
+})
+
+test("names a stream error about the context window as one", async () => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            message: "prompt is too long: 215000 tokens > 200000 maximum",
+          },
+        },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  const overflow = events.find((event) => event.type === "error")
+  expect(overflow?.type === "error" ? overflow.error : undefined).toMatchObject({
+    reason: "context-window-exceeded",
+  })
+})
+
 const malformedStreams: [JsonObject[], string][] = [
   [[], "Provider stream ended without a terminal message event."],
   [

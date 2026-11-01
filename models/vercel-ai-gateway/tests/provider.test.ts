@@ -1574,6 +1574,38 @@ describe("Vercel AI Gateway provider", () => {
     }
   })
 
+  // Reproduce: drop contextWindowRejection from providerHttpError; the rejection then carries no
+  // reason, and an agent turn fails instead of compacting and asking again.
+  test("names a request too long for the model's context window", async () => {
+    const rejecting = (message: string) =>
+      createVercelGateway({
+        maxRetries: 0,
+        fetch: async () =>
+          Response.json(
+            { error: { type: "invalid_request_error", message } },
+            { status: 400, headers: { "x-request-id": "gateway-overflow" } }
+          ),
+      })("openai/gpt-4o-mini")
+
+    const overflow = await rejecting("Your input exceeds the context window of this model")
+      .stream(request())
+      .catch((error: unknown) => error)
+    expect(overflow).toBeInstanceOf(ModelProviderError)
+    expect(overflow).toMatchObject({
+      status: 400,
+      reason: "context-window-exceeded",
+      retryable: false,
+      requestId: "gateway-overflow",
+    })
+
+    const other = await rejecting("Invalid tool schema")
+      .stream(request())
+      .catch((error: unknown) => error)
+    expect(other).toBeInstanceOf(ModelProviderError)
+    expect(other).toMatchObject({ status: 400 })
+    expect((other as ModelProviderError).reason).toBeUndefined()
+  })
+
   test("retries retryable pre-stream gateway responses", async () => {
     let attempts = 0
     const model = createVercelGateway({
