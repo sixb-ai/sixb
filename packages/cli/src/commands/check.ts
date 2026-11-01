@@ -1,4 +1,5 @@
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { assertDeclaredEnv } from "../lib/env-config"
 import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
@@ -16,6 +17,9 @@ export interface CheckOptions {
 
 export async function runCheck(options: CheckOptions = {}) {
   const entry = resolve(options.entry ?? "sixb.config.ts")
+  // First, so a missing variable is named instead of surfacing as whatever reading it breaks.
+  await assertDeclaredEnv(dirname(entry))
+
   const sixb = await withTask("check", "Generating types", async (task) => {
     await generateProjectTypes({ entry })
     task.step("Loading project")
