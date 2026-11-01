@@ -2496,6 +2496,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
   return {
     ...storage,
     agents: wrapAgents(agents),
+    tokenRates: agents.tokenRates,
     transaction: (run, options) =>
       storage.transaction((tx) => {
         const agents = tx.agents
@@ -2543,6 +2544,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
         return run({
           ...tx,
           ...(agents ? { agents: wrapAgents(agents) } : {}),
+    tokenRates: agents.tokenRates,
         })
       }, options),
   }
@@ -2587,6 +2589,7 @@ function withObservedAgentMessageAppendStorage(
   }
 }
 
+    tokenRates: agents.tokenRates,
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
 function hangingModel(onStart?: () => void): WorkerTestModel {
   return new WorkerTestModel({

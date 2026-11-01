@@ -122,6 +122,8 @@ export type {
   AgentThreadSandboxState,
   AgentThreadStatus,
   AgentThreadStore,
+  AgentTokenRateRecord,
+  AgentTokenRateStore,
   AppendAgentMessageInput,
   AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,

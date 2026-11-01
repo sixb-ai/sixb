@@ -22,6 +22,7 @@ import {
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
   assertAgentRunFinishPayload,
+  assertAgentTokenRateRecord,
   assertAssignableComputer,
   assertAwaitingApprovalFinish,
   assertComputerId,
@@ -70,6 +71,8 @@ import type {
   AgentThreadRecord,
   AgentThreadSandboxState,
   AgentThreadStore,
+  AgentTokenRateRecord,
+  AgentTokenRateStore,
   AppendAgentMessageInput,
   AssignAgentThreadComputerInput,
   ConfirmAgentRunExecutionOwnershipInput,
@@ -112,7 +115,7 @@ import type {
   SubagentRunRecord,
   TransitionAgentThreadSandboxInput,
 } from "./types"
-import { AGENT_RUN_FAILURE_CODES } from "./types"
+import { AGENT_RUN_FAILURE_CODES, AGENT_TOKEN_RATE_SAMPLES } from "./types"
 
 function normalizeFailure(
   failure: SixbFailure<AgentRunFailureCode> | undefined
@@ -175,6 +178,8 @@ interface AgentStoreState {
   readonly approvals: Map<string, AgentApprovalRecord>
   /** By `[projectId, principal]` for a default, `[projectId, threadId, principal]` for a thread. */
   readonly approvalModes: Map<string, AgentApprovalMode>
+  /** By `[projectId, runId]`. */
+  readonly tokenRates: Map<string, AgentTokenRateRecord>
 }
 
 /** A memory repo as its two SQL tables hold it: revisions, and the file versions each wrote. */
@@ -194,6 +199,7 @@ export interface InMemoryAgentStorageSnapshot {
   readonly memory: Map<string, StoredAgentMemoryRepo>
   readonly approvals: Map<string, AgentApprovalRecord>
   readonly approvalModes: Map<string, AgentApprovalMode>
+  readonly tokenRates: Map<string, AgentTokenRateRecord>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -1589,6 +1595,51 @@ function threadModeKey(input: {
   return JSON.stringify([input.projectId, input.threadId, input.principal.type, input.principal.id])
 }
 
+// ── token rates ───────────────────────────────────────────────────────────────────────────────
+
+class InMemoryAgentTokenRateStore implements AgentTokenRateStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async record(input: AgentTokenRateRecord): Promise<void> {
+    assertAgentTokenRateRecord(input)
+
+    this.state.tokenRates.set(JSON.stringify([input.projectId, input.runId]), { ...input })
+
+    const dropped = this.ofModel(input).slice(AGENT_TOKEN_RATE_SAMPLES)
+    for (const record of dropped) {
+      this.state.tokenRates.delete(JSON.stringify([record.projectId, record.runId]))
+    }
+  }
+
+  async listLatest(input: {
+    readonly projectId: string
+    readonly providerId: string
+    readonly modelId: string
+  }): Promise<readonly AgentTokenRateRecord[]> {
+    return this.ofModel(input)
+      .slice(0, AGENT_TOKEN_RATE_SAMPLES)
+      .map((record) => ({ ...record }))
+  }
+
+  /** Newest first, then by run id, descending: the order every provider keeps and lists. */
+  private ofModel(model: {
+    readonly projectId: string
+    readonly providerId: string
+    readonly modelId: string
+  }): AgentTokenRateRecord[] {
+    return [...this.state.tokenRates.values()]
+      .filter(
+        (record) =>
+          record.projectId === model.projectId &&
+          record.providerId === model.providerId &&
+          record.modelId === model.modelId
+      )
+      .sort((left, right) =>
+        compareByDate(left.measuredAt, right.measuredAt, left.runId, right.runId, "desc")
+      )
+  }
+}
+
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
@@ -1599,6 +1650,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     memory: new Map(),
     approvals: new Map(),
     approvalModes: new Map(),
+    tokenRates: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
@@ -1608,6 +1660,7 @@ export class InMemoryAgentStorage implements AgentStorage {
   readonly memory: InMemoryAgentMemoryStore
   readonly approvals: InMemoryAgentApprovalStore
   readonly approvalModes: InMemoryAgentApprovalModeStore
+  readonly tokenRates: InMemoryAgentTokenRateStore
 
   constructor(executions: ExecutionStorage) {
     this.threads = new InMemoryAgentThreadStore(this.state)
@@ -1617,6 +1670,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     this.memory = new InMemoryAgentMemoryStore(this.state)
     this.approvals = new InMemoryAgentApprovalStore(this.state)
     this.approvalModes = new InMemoryAgentApprovalModeStore(this.state)
+    this.tokenRates = new InMemoryAgentTokenRateStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -1629,6 +1683,7 @@ export class InMemoryAgentStorage implements AgentStorage {
       memory: structuredClone(this.state.memory),
       approvals: structuredClone(this.state.approvals),
       approvalModes: structuredClone(this.state.approvalModes),
+      tokenRates: structuredClone(this.state.tokenRates),
     }
   }
 
@@ -1641,6 +1696,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.memory, snapshot.memory)
     replace(this.state.approvals, snapshot.approvals)
     replace(this.state.approvalModes, snapshot.approvalModes)
+    replace(this.state.tokenRates, snapshot.tokenRates)
   }
 }
 
