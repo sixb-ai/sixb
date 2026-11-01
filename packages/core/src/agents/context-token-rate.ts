@@ -14,11 +14,14 @@ import { type AgentContextSize, measureAgentModelRequest } from "./context-compa
  * Each run keeps what its latest model call measured: the bytes of its request as the estimator
  * weighs them, against the input tokens the provider counted (see AgentTokenRateStore). The call
  * is measured where it is made, by the run's session (see measuringAgentContextTokenRates): a
- * runner, which may be a person's own computer, never reports one. A run's
- * rate is a low quantile of its model's newest measurements, the project's and its own calls'
- * alike, and a thread corrects it from its own calls. A tokenizer that changes is followed within
- * a few runs, and a model no run measured yet starts on the dense side until its first call
+ * runner, which may be a person's own computer, never reports one. A run's rate is the median of
+ * its model's newest measurements, the project's and its own calls' alike, and a thread corrects
+ * it from its own calls. A model no run measured yet starts on the dense side until its first call
  * counts: an underestimate is the costly error, as it crosses the window unseen.
+ *
+ * The median, not a low quantile: how dense a run reads is a property of its content as much as of
+ * the tokenizer. A few runs full of base64 would set a low quantile, and every later thread on the
+ * model would start twice too high; a turn's own dense content is the in-turn guard's to measure.
  */
 
 /** Denser than every tokenizer measured on agent turns, so an unmeasured model's estimate errs high. */
@@ -28,21 +31,13 @@ export const AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN = 2
 const CALIBRATION_MIN_TEXT_TOKENS = 1_000
 
 /**
- * How far a thread's measured rate may move. Down is the safe side and goes to half the rate its
- * run started from. Up only a quarter above what the model typically measures: stored bytes the
- * provider bills for less (replayed reasoning, provider state) raise the measured rate, and an
- * estimate too low crosses the window unseen.
+ * How far a thread's measured rate may move from the rate its run started from. Down is the safe
+ * side and goes to half. Up only a quarter: stored bytes the provider bills for less (replayed
+ * reasoning, provider state) raise the measured rate, and an estimate too low crosses the window
+ * unseen.
  */
 const CALIBRATION_MIN_FACTOR = 0.5
 const CALIBRATION_MAX_FACTOR = 1.25
-
-/**
- * The quantile of a model's recent measurements its runs start from, low so the estimate errs
- * high. Of the 20 a model keeps, it is the second densest: no number of odd sparse runs moves it,
- * and one odd dense run barely does. A denser tokenizer takes over from its second run, a sparser
- * one from its 19th, overestimated meanwhile. Under ten measurements, it is the densest.
- */
-const LEARNED_RATE_QUANTILE = 0.1
 
 /** One request's text against the tokens its provider counted for that text. */
 export interface AgentContextTokenRateSample {
@@ -77,62 +72,44 @@ export function measureAgentContextTokenRate(input: {
 }
 
 /**
- * The rate a thread's own traffic shows, at least half the rate its run started from and at most a
- * quarter above the model's typical one (`typicalBytesPerToken`, else the starting rate). What the
- * provider counted that the measure misses (tool-result images, one-off notes) lowers the rate,
- * the safe side; what it holds that the provider bills for less raises it, so the rise is bounded
- * tighter than the fall. Bounding the rise by the typical rate, not the dense starting one, keeps
- * a few dense runs of the project from capping every thread below what it reads.
+ * The rate a thread's own traffic shows, bounded around the rate its run started from. What the
+ * provider counted that the measure misses (tool-result images, one-off notes) lowers the rate, the
+ * safe side; what it holds that the provider bills for less raises it, so the rise is bounded
+ * tighter than the fall.
  */
 export function calibrateAgentContextBytesPerToken(input: {
   readonly bytesPerToken: number
-  readonly typicalBytesPerToken?: number
   readonly size: AgentContextSize
   readonly inputTokens: number
 }): number {
   const sample = measureAgentContextTokenRate(input)
   if (!sample) return input.bytesPerToken
 
-  const typical = input.typicalBytesPerToken ?? input.bytesPerToken
   return Math.min(
-    typical * CALIBRATION_MAX_FACTOR,
+    input.bytesPerToken * CALIBRATION_MAX_FACTOR,
     Math.max(input.bytesPerToken * CALIBRATION_MIN_FACTOR, sample.bytes / sample.tokens)
   )
 }
 
 /**
- * A run's rate: a low quantile of its model's newest measurements, newest first, else the default.
- * A run puts its own calls' in front of the project's, so its first call sets the rate of a model
- * no run measured, and barely moves a model's 20.
+ * A run's rate: the median of its model's newest measurements, newest first, else the default,
+ * within the band a tokenizer can measure (see AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN). Of an even
+ * count, the denser of the middle two. A run puts its own calls' in front of the project's, so its
+ * first call sets the rate of a model no run measured, and barely moves a model's 20.
+ *
+ * Of 20, up to nine dense runs leave it where the others are. A tokenizer that changes takes over
+ * from its 10th run when it reads denser, its 11th when sparser.
  */
 export function learnedAgentContextBytesPerToken(
   samples: readonly AgentContextTokenRateSample[]
 ): number {
-  return rateQuantile(samples, LEARNED_RATE_QUANTILE)
-}
-
-/**
- * What the model typically measures: the median of the same measurements, else the default. A
- * thread's calibration rises at most a quarter above it.
- */
-export function typicalAgentContextBytesPerToken(
-  samples: readonly AgentContextTokenRateSample[]
-): number {
-  return rateQuantile(samples, 0.5)
-}
-
-/**
- * Nearest rank: the smallest rate at least `quantile` of the newest measurements reach down to,
- * within the band a tokenizer can measure (see AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN).
- */
-function rateQuantile(samples: readonly AgentContextTokenRateSample[], quantile: number): number {
   if (samples.length === 0) return AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
 
   const rates = samples
     .slice(0, AGENT_TOKEN_RATE_SAMPLES)
     .map((sample) => sample.bytes / sample.tokens)
     .sort((a, b) => a - b)
-  const rate = rates[Math.max(1, Math.ceil(rates.length * quantile)) - 1]!
+  const rate = rates[Math.ceil(rates.length / 2) - 1]!
   return Math.min(
     AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN,
     Math.max(AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN, rate)

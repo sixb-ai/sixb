@@ -319,8 +319,8 @@ describe("agent conversation token rate", () => {
     expect(rate({ inputTokens: 12_526 })).toBe(2.4)
   })
 
-  // Reproduce: bound the thread's rise by budget.bytesPerToken again (leave typicalBytesPerToken
-  // out of estimateAgentConversation's calibration); the thread is then counted at 1.5.
+  // Reproduce: start a run from the 10th percentile of its model's measurements again; the run
+  // starts at 1.2, and its thread, which reads 2.4, is counted at 1.5.
   test("is not capped by a few dense runs of the project", () => {
     // Two base64-heavy runs at 1.2 bytes per token among eighteen English ones at 2.4.
     const tokenRates = [
@@ -330,7 +330,7 @@ describe("agent conversation token rate", () => {
     ]
     const dense = prepareAgentModel({ model, tokenRates }).budget
 
-    expect(dense.bytesPerToken).toBe(1.2)
+    expect(dense.bytesPerToken).toBe(2.4)
     // The thread reads 2.4, as the project's usual runs do.
     expect(rate({ inputTokens: 12_526 }, dense)).toBe(2.4)
   })
