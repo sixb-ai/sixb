@@ -294,7 +294,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
     expect(body).toMatchObject({ lastCall: { inputTokens: 60_000 } })
   })
 
-  // Removal proof: resolve the budget without the bytes per token readAgentThreadContextUse reads;
+  // Removal proof: resolve the budget without the token rates readAgentThreadContextUse reads;
   // the meter then counts at the default 2 while the worker's turn starts from the measured 4.
   test("counts at the bytes per token the model's runs measured, as the next turn starts from", async () => {
     const { storage, read, seedTurn, messagesEstimate } = createFixture()

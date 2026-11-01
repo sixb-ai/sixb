@@ -3,7 +3,7 @@ import type { AgentContextCheckpointReason } from "../storage/agents"
 import { type AgentContextBudget, resolveAgentContextBudget } from "./context-budget"
 import { estimateAgentContextMessagesTokens } from "./context-compaction"
 import { estimateAgentThreadRequest } from "./context-request"
-import { readAgentContextBytesPerToken } from "./context-token-rate"
+import { readAgentContextTokenRates } from "./context-token-rate"
 import {
   type AgentTurnHistory,
   type AgentTurnHistoryHost,
@@ -54,7 +54,7 @@ export async function readAgentThreadContextUse(
   }
 ): Promise<AgentThreadContextUse> {
   const history = await readAgentThreadHistory(host, input.threadId)
-  const bytesPerToken = await readAgentContextBytesPerToken({
+  const tokenRates = await readAgentContextTokenRates({
     tokenRates: host.storage.agents.tokenRates,
     projectId: host.projectId,
     model: input.model,
@@ -62,7 +62,7 @@ export async function readAgentThreadContextUse(
   const budget = resolveAgentContextBudget({
     model: input.model,
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-    bytesPerToken,
+    tokenRates,
   })
 
   const call = history.usageAnchor?.modelCall
