@@ -22,7 +22,11 @@ export type {
   AiModelCallGroupFragment,
   AiModelCallGroupRow,
 } from "./groups"
-export { aiModelCallGroupFragmentFromRow, buildAiModelCallGroupsFromFragments } from "./groups"
+export {
+  aiModelCallGroupFragmentFromRow,
+  buildAiModelCallGroupsFromFragments,
+  normalizeAiModelCallGroupSort,
+} from "./groups"
 export {
   aiModelCallCostMatchesUsage,
   normalizeAiModelCallCostRecord,

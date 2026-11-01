@@ -17,6 +17,14 @@ const signedIn: GetAuthSessionResponse = {
     displayName: "Alex Rivera",
     groupIds: ["admins"],
   },
+  access: {
+    console: true,
+    logs: true,
+    members: true,
+    serviceAccounts: true,
+    usage: true,
+    activity: true,
+  },
   session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
 }
 

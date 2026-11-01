@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   isMultiTypeLink,
   ontologyGraphLinkTargets,
-} from "../src/pages/ontology/lib/ontology-graph-links"
+} from "../src/pages/console/ontology/lib/ontology-graph-links"
 
 const typeIds = new Set(["suggestion", "account", "transaction", "document"])
 

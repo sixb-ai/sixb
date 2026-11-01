@@ -99,7 +99,7 @@ They come with the built-in pages. Project-authored pages win by exact path: def
 
 With them comes a home page at `/` (`HomePage` from `@sixb/app/pages`), served until the project adds `app/page.tsx`. It starts a conversation that continues on `/agents/:threadId`, and shows the app's name when `GET /api/agent` finds no agent the caller may use.
 
-Settings comes the same way: `/settings` and its pages (`personal`, `developers`, `members`, `service-accounts`). Built-in sections are listed in `src/sections/catalog.ts`, which the build reads for routes and the browser reads for navigation. A section page draws its section's pages as tabs unless a `SectionNav` is mounted, which registers itself before paint so the tabs never flash. The project's `visibility` export reaches the browser through the generated runtime's namespace import of `app/layout.tsx` and `SectionsProvider`; the build validates it while it loads the layout for `metadata`. Shared links get no sections.
+Settings comes the same way: `/settings` and its pages (`personal`, `developers`, `members`, `service-accounts`). Built-in sections are listed in `src/sections/catalog.ts`, which the build reads for routes and the browser reads for navigation. A section page draws its section's pages as tabs unless a `SectionNav` is mounted, which registers itself before paint so the tabs never flash. Who opens what comes from the session: the server reports `access` (the Console for `can.observe(project.console)`, each Settings project page for the policy or grant behind it) and `resolveOpenSections` reads it. Shared links get no sections.
 
 The built-in agent pages and the agent components both live in `@sixb/app` (`src/agent/`). A framework-owned `framework.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way. With a Tailwind `app/globals.css`, the framework's sources and `src/agent/agent.css` join the app's own build instead.
 
@@ -276,7 +276,7 @@ Two entries, split by where the code runs:
 
 | Entry | Runs in | Exports |
 | --- | --- | --- |
-| `@sixb/app` | The browser, and Bun when the build imports `app/layout.tsx` | `AppMetadata`, `publicEnv`, the auth experience props, `AppVisibility`, the shell (`AppShell`, `AppShellProvider`, `Brand`, `NavItems`, `SectionNav`, `UserMenu`), `useCurrentUser`, `useSignOut` and `useSections`, and the agent components, context and hooks |
+| `@sixb/app` | The browser, and Bun when the build imports `app/layout.tsx` | `AppMetadata`, `publicEnv`, the auth experience props, the shell (`AppShell`, `AppShellProvider`, `Brand`, `NavItems`, `SectionNav`, `UserMenu`), `useCurrentUser`, `useSignOut` and `useSections`, and the agent components, context and hooks |
 | `@sixb/app/server` | Bun only, for the `sixb` CLI | `createCustomApp(options)` |
 
 The generated entry also imports `@sixb/app/pages` (the built-in agent, Home and section pages,

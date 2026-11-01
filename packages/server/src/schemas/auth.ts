@@ -102,6 +102,12 @@ export const AuthMemberCapabilitiesSchema = z.object({
 
 export const AuthMemberSchema = AuthManagedMemberSchema.extend({
   capabilities: AuthMemberCapabilitiesSchema,
+  lastActiveAt: z
+    .string()
+    .optional()
+    .describe(
+      "Their latest session's last request, or its sign-in; absent if they never signed in"
+    ),
 })
 
 export const GetAuthAccessManagementOptionsResponseSchema = z.object({
@@ -293,6 +299,19 @@ export const AuthSessionResponseSchema = z.union([
       displayName: z.string().optional(),
       avatarUrl: z.string().optional(),
       groupIds: z.array(z.string()),
+    }),
+    /** The Console, and the Settings pages about the project, this person may open. */
+    access: z.object({
+      members: z
+        .boolean()
+        .describe("Members: a membership policy lets them invite, assign groups or suspend"),
+      serviceAccounts: z
+        .boolean()
+        .describe("Service accounts: a membership policy lets them manage them"),
+      usage: z.boolean().describe("Usage: they hold can.observe(agent.usage)"),
+      activity: z.boolean().describe("Activity: they hold can.observe(project.activity)"),
+      console: z.boolean().describe("The Console: they hold can.observe(project.console)"),
+      logs: z.boolean().describe("Console › Logs: they hold can.observe(project.logs)"),
     }),
     session: z.object({
       id: z.string(),

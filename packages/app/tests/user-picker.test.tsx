@@ -3,7 +3,7 @@ import { client } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { UserPicker, useMemberSearch } from "../src/pages/ontology/components/user-picker"
+import { UserPicker, useMemberSearch } from "../src/pages/console/ontology/components/user-picker"
 import { installDom } from "./helpers/dom"
 
 installDom([

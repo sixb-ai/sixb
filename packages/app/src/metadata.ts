@@ -4,7 +4,6 @@ import { createRequire } from "node:module"
 import { dirname, extname, join, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { agentToolViews } from "./agent/tool-views/define"
-import { sectionIds } from "./sections/catalog"
 
 export interface AppMetadata {
   title?: string
@@ -134,12 +133,9 @@ async function loadConfiguredMetadata(layoutPath: string): Promise<AppMetadata> 
     url.searchParams.set("sixb-metadata", sourceHash)
     const layoutModule = (await import(url.href)) as {
       readonly metadata?: unknown
-      readonly visibility?: unknown
       readonly toolViews?: unknown
     }
-    // The browser reads `visibility` and `toolViews` itself; checking them here makes a mistake
-    // fail the build.
-    validateVisibility(layoutModule.visibility, layoutPath)
+    // The browser reads `toolViews` itself; checking it here makes a mistake fail the build.
     agentToolViews(
       layoutModule.toolViews,
       (detail) => new Error(`[SixbCustomApp] Invalid toolViews in ${layoutPath}: ${detail}`)
@@ -176,34 +172,6 @@ function validateMetadata(metadata: AppMetadata, layoutPath: string): void {
     const value = metadata[field]
     if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
       throw metadataError(layoutPath, `metadata.${field} must be a non-empty string when provided`)
-    }
-  }
-}
-
-function validateVisibility(visibility: unknown, layoutPath: string): void {
-  if (visibility === undefined) return
-  const fail = (detail: string) =>
-    new Error(`[SixbCustomApp] Invalid visibility in ${layoutPath}: ${detail}`)
-  if (typeof visibility !== "object" || visibility === null || Array.isArray(visibility)) {
-    throw fail("the named visibility export must be an object")
-  }
-  for (const [section, groups] of Object.entries(visibility)) {
-    if (!(sectionIds as readonly string[]).includes(section)) {
-      throw fail(`'${section}' is not a built-in section. Sections: ${sectionIds.join(", ")}.`)
-    }
-    const valid =
-      Array.isArray(groups) &&
-      groups.every(
-        (group) =>
-          typeof group === "object" &&
-          group !== null &&
-          (group as { readonly kind?: unknown }).kind === "group" &&
-          typeof (group as { readonly id?: unknown }).id === "string"
-      )
-    if (!valid) {
-      throw fail(
-        `visibility.${section} must be a list of groups from defineGroup, imported from @sixb/core/security`
-      )
     }
   }
 }

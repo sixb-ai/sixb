@@ -21,8 +21,8 @@ import {
   type PropertyLineage,
   resolutionOf,
   upstreamSteps,
-} from "../src/pages/ontology/lineage/model"
-import { PropertiesPanel } from "../src/pages/ontology/lineage/properties-panel"
+} from "../src/pages/console/ontology/lineage/model"
+import { PropertiesPanel } from "../src/pages/console/ontology/lineage/properties-panel"
 import { installDom } from "./helpers/dom"
 
 installDom([
@@ -196,7 +196,7 @@ function renderProperties(shownLineage: ObjectLineage | null = lineage) {
 
   const page = (pageLineage: ObjectLineage | null) => (
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={undefined}>
+      <SectionsProvider>
         <MemoryRouter>
           <PropertiesPanel
             title="Properties"
@@ -317,10 +317,10 @@ describe("a property's source", () => {
     expect(panel.getByText("Alice Martin")).toBeDefined()
     expect(panel.getByText("new").closest("del")).not.toBeNull()
     expect(panel.getByRole("link", { name: "Crm cases" }).getAttribute("href")).toBe(
-      "/data/projections/crm-cases"
+      "/console/projections/crm-cases"
     )
     expect(panel.getByRole("link", { name: "View action run" }).getAttribute("href")).toBe(
-      "/observability/runs/actions/run_7"
+      "/console/actions/runs/run_7"
     )
     expect(panel.queryByText(/you can’t see/)).toBeNull()
   })
@@ -369,18 +369,18 @@ describe("a property's source", () => {
     const panel = await explain(view, /^Severity/)
 
     expect(panel.getByRole("link", { name: "crm.cases" }).getAttribute("href")).toBe(
-      "/data/datasets/crm.cases?version=ducklake%3A84"
+      "/console/datasets/crm.cases?version=ducklake%3A84"
     )
     expect(panel.getByText("severity")).toBeDefined()
     expect(panel.getByRole("link", { name: "Cases" }).getAttribute("href")).toBe(
-      "/data/pipelines/cases?run=pip_run_3"
+      "/console/pipelines/cases?run=pip_run_3"
     )
     expect(panel.getByText("priority")).toBeDefined()
     expect(panel.queryByText("raw.weather")).toBeNull()
     expect(panel.getByText("No longer stored")).toBeDefined()
     // The farthest version shown expired, so its dataset opens at its latest version.
     expect(panel.getByRole("link", { name: "More upstream" }).getAttribute("href")).toBe(
-      "/data/datasets/raw.accounts"
+      "/console/datasets/raw.accounts"
     )
   })
 

@@ -6,7 +6,7 @@ import {
   layoutOntologyOverviewGraph,
   routeOntologyGraph,
   routeOntologyOverviewGraph,
-} from "../src/pages/ontology/lib/ontology-graph-layout"
+} from "../src/pages/console/ontology/lib/ontology-graph-layout"
 
 const NODE_WIDTH = 216
 const NODE_HEIGHT = 82

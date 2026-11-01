@@ -8,6 +8,7 @@ export const project: ProjectReference = Object.freeze({
   kind: "project",
   logs: Object.freeze({ kind: "logs" }),
   activity: Object.freeze({ kind: "activity" }),
+  console: Object.freeze({ kind: "console" }),
   users: Object.freeze({ kind: "users" }),
   models: Object.freeze({ kind: "models" }),
 })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core/blob-storage"
-import { buildWorkflowInput } from "../src/pages/ontology/workflows/run-input-form"
+import { buildWorkflowInput } from "../src/pages/console/ontology/workflows/run-input-form"
 
 const fileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

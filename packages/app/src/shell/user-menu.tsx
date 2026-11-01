@@ -37,7 +37,7 @@ export interface UserMenuItemProps {
 }
 
 /**
- * The signed-in person, Artifacts and the built-in sections they may open, such as Data and
+ * The signed-in person, Artifacts and the built-in sections they may open, the Console and
  * Settings, theme switching and sign-out, at the foot of any sidebar. With sign-in off it is the
  * way into the sections.
  */

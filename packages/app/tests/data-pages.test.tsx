@@ -22,9 +22,9 @@ import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-libra
 import { type ReactNode, useLayoutEffect } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SyncButton } from "../src"
-import { DataConnectorPage, DataDatasetPage, SectionsProvider } from "../src/pages"
-import { DatasetCell, datasetColumnNames } from "../src/pages/data/datasets"
-import { projectionRunsPollInterval } from "../src/pages/data/projections"
+import { ConsoleConnectorPage, ConsoleDatasetPage, SectionsProvider } from "../src/pages"
+import { DatasetCell, datasetColumnNames } from "../src/pages/console/data/datasets"
+import { projectionRunsPollInterval } from "../src/pages/console/data/projections"
 import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
 
@@ -98,11 +98,11 @@ function renderPage(
   for (const [key, value] of options.data ?? []) queryClient.setQueryData(key, value)
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <SectionsProvider visibility={undefined}>
+      <SectionsProvider>
         <MemoryRouter initialEntries={[options.path]}>
           <Routes>
-            <Route path="/data/connectors/:connectorId" element={ui} />
-            <Route path="/data/datasets/:datasetId" element={ui} />
+            <Route path="/console/connectors/:connectorId" element={ui} />
+            <Route path="/console/datasets/:datasetId" element={ui} />
             <Route path="*" element={ui} />
           </Routes>
         </MemoryRouter>
@@ -178,8 +178,8 @@ test("a detail page says Not found for a 404 alone", async () => {
     [503, "Could not load", "Storage is unavailable."],
   ] as const) {
     answerWith(() => Response.json({ error: "Storage is unavailable." }, { status }))
-    const { view } = renderPage(<DataConnectorPage />, {
-      path: "/data/connectors/github",
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/github",
       data: [[listSyncsQueryKey(), []]],
     })
     expect(await view.findByRole("heading", { level: 1, name: heading })).toBeDefined()
@@ -211,8 +211,8 @@ describe("a connector's webhooks", () => {
   // Removal proof: drop `enabled` from the deliveries query and the request goes out; render the
   // sections without the `webhooks.length > 0` check and they show.
   test("stay hidden, deliveries unrequested, on a connector without any", () => {
-    const { view, queryClient } = renderPage(<DataConnectorPage />, {
-      path: "/data/connectors/github",
+    const { view, queryClient } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/github",
       data: [
         [getConnectorQueryKey({ path: { connectorId: "github" } }), connector],
         [listSyncsQueryKey(), []],
@@ -225,8 +225,8 @@ describe("a connector's webhooks", () => {
   })
 
   test("show their full address", () => {
-    const { view } = renderPage(<DataConnectorPage />, {
-      path: "/data/connectors/github",
+    const { view } = renderPage(<ConsoleConnectorPage />, {
+      path: "/console/connectors/github",
       data: [
         [
           getConnectorQueryKey({ path: { connectorId: "github" } }),
@@ -362,8 +362,8 @@ describe("a dataset version's details", () => {
   })
   const path = { datasetId: "service-cases" }
   const openDetails = async (version: Partial<ListDatasetRowsResponse["version"]>) => {
-    const { view } = renderPage(<DataDatasetPage />, {
-      path: "/data/datasets/service-cases",
+    const { view } = renderPage(<ConsoleDatasetPage />, {
+      path: "/console/datasets/service-cases",
       data: [
         [getDatasetQueryKey({ path }), dataset],
         [listDatasetVersionsQueryKey({ path }), { versions: [], count: 0 }],
@@ -384,13 +384,13 @@ describe("a dataset version's details", () => {
     // "Written by" names the pipeline too; the version's producer opens the run that wrote it.
     const pipelineLinks = within(sheet).getAllByRole("link", { name: "Controls" })
     expect(pipelineLinks.map((link) => link.getAttribute("href"))).toEqual([
-      "/data/pipelines/controls",
-      "/data/pipelines/controls?run=run_7",
+      "/console/pipelines/controls",
+      "/console/pipelines/controls?run=run_7",
     ])
     expect(within(sheet).getByText("Join cases")).toBeDefined()
 
     const input = within(sheet).getByRole("link", { name: /raw-cases/ })
-    expect(input.getAttribute("href")).toBe("/data/datasets/raw-cases?version=ducklake%3A80")
+    expect(input.getAttribute("href")).toBe("/console/datasets/raw-cases?version=ducklake%3A80")
   })
 
   // Removal proof: swap `targetPipelineIds` and `sourcePipelineIds` back in DatasetDetail.

@@ -62,28 +62,16 @@ export function removeMemoryEntry(contents: string, entry: MemoryEntry): string 
   return lines.join("\n")
 }
 
-/**
- * The note with a new entry after its last one before any later section, so it lands in the list
- * it belongs to; in a note with no entry yet, under its title.
- */
-export function addMemoryEntry(contents: string, text: string, today: string): string {
-  const insert = entryLine(text, today)
-  if (contents.trim() === "") return `${insert}\n`
-  const lines = contents.replace(/\n+$/, "").split("\n")
-  const entries = memoryEntries(contents)
-  const firstSection = lines.findIndex((line) => /^#{2,6}[ \t]/.test(line))
-  const last =
-    [...entries].reverse().find((entry) => firstSection === -1 || entry.line < firstSection) ??
-    entries.at(-1)
-  if (last) {
-    lines.splice(last.line + 1, 0, insert)
-    return `${lines.join("\n")}\n`
-  }
-  if (!/^#[ \t]/.test(lines[0] ?? "")) return `${[insert, ...lines].join("\n")}\n`
-  let after = 1
-  while (lines[after]?.trim() === "") after += 1
-  const rest = after < lines.length ? ["", ...lines.slice(after)] : []
-  return `${[lines[0], "", insert, ...rest].join("\n")}\n`
+/** The note with a new entry right after line `after`, such as a section's last entry or heading. */
+export function insertMemoryEntry(
+  contents: string,
+  after: number,
+  text: string,
+  today: string
+): string {
+  const lines = contents.split("\n")
+  lines.splice(after + 1, 0, entryLine(text, today))
+  return lines.join("\n")
 }
 
 /** An entry as the agent writes it. */

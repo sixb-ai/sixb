@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core/blob-storage"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import { type WorkflowNode, workflowNodeIoSchemas } from "../src/pages/ontology/workflows/utils"
+import {
+  type WorkflowNode,
+  workflowNodeIoSchemas,
+} from "../src/pages/console/ontology/workflows/utils"
 import { ValuePanel, valueSchema } from "../src/pages/values"
 
 const fileRef: FileRef = {

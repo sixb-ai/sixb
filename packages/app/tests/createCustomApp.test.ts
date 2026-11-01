@@ -765,9 +765,9 @@ describe("createCustomApp.dev", () => {
             exportName: "ThreadsPage",
           },
           {
-            path: "/observability/logs",
+            path: "/console/logs",
             moduleSpecifier: "@sixb/app/pages",
-            exportName: "ObservabilityLogsPage",
+            exportName: "ConsoleLogsPage",
             recordsActivity: false,
           },
         ],
@@ -775,7 +775,7 @@ describe("createCustomApp.dev", () => {
     )
     const manifest = await readFile(manifestPath, "utf-8")
 
-    expect(manifest).toContain('"/observability/logs"')
+    expect(manifest).toContain('"/console/logs"')
     expect(recordedRoutePaths(manifest)).toEqual(["/", "/threads"])
   })
 
@@ -931,11 +931,7 @@ describe("createCustomApp.dev", () => {
     )
     await writeFile(
       join(tempRoot, "app", "layout.tsx"),
-      [
-        'export const visibility = { settings: [{ kind: "group", id: "admins" }] }',
-        "export default function RootLayout({ children }) { return children }",
-        "",
-      ].join("\n")
+      "export default function RootLayout({ children }) { return children }\n"
     )
     const app = await createCustomApp({
       rootDir: tempRoot,
@@ -960,16 +956,16 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage1) },')
       // The project's app/page.tsx owns the root, so the built-in home stays out.
       expect(manifest).not.toContain("HomePage")
-      for (const page of [
-        "SettingsIndexPage",
-        "SettingsPersonalPage",
-        "SettingsMemoryPage",
-        "SettingsServiceAccountsPage",
-      ]) {
+      for (const page of ["SettingsIndexPage", "SettingsPersonalPage", "SettingsMemoryPage"]) {
         expect(manifest).toContain(`import { ${page} as BuiltInPage`)
       }
-      // Data's pages come with one page per item below each list.
-      for (const page of ["DataIndexPage", "DataConnectorsPage", "DataSyncsPage", "DataSyncPage"]) {
+      // The Console's pages come with one page per item below each list.
+      for (const page of [
+        "ConsoleIndexPage",
+        "ConsoleConnectorsPage",
+        "ConsoleSyncsPage",
+        "ConsoleSyncPage",
+      ]) {
         expect(manifest).toContain(`import { ${page} as BuiltInPage`)
       }
       expect(manifest).toContain('":syncId"')
@@ -987,7 +983,7 @@ describe("createCustomApp.dev", () => {
       expect(recorded).not.toContain("/agents/:threadId")
       expect(manifest).toContain('"/agents/:threadId"')
       expect(recorded).toContain("/objects/:objectTypeId/:primaryId")
-      for (const path of ["/settings", "/settings/personal", "/observability/activity"]) {
+      for (const path of ["/settings", "/settings/personal", "/settings/activity"]) {
         expect(recorded).not.toContain(path)
         expect(manifest).toContain(`"${path}"`)
       }
@@ -997,12 +993,11 @@ describe("createCustomApp.dev", () => {
         "utf-8"
       )
       expect(runtime).toContain('import "./framework.css"')
-      // The layout's visibility export reaches the sections.
+      // The layout wraps the sections, which shared links leave out.
       expect(runtime).toContain(
         'import RootLayout, * as rootLayoutModule from "../../app/layout.tsx"'
       )
-      expect(runtime).toContain('Reflect.get(rootLayoutModule, "visibility")')
-      expect(runtime).toContain("<SectionsProvider visibility={visibility} enabled={!basename}>")
+      expect(runtime).toContain("<SectionsProvider enabled={!basename}>")
     } finally {
       await server.stop()
     }
@@ -1037,7 +1032,7 @@ describe("createCustomApp.dev", () => {
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
         "utf-8"
       )
-      expect(runtime).toContain('import { AppShell, type AppVisibility } from "@sixb/app"')
+      expect(runtime).toContain('import { AppShell } from "@sixb/app"')
       expect(runtime).toContain("<AppShell>")
       expect(runtime).not.toContain("RootLayout")
     } finally {

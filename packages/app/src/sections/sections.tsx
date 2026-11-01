@@ -1,6 +1,4 @@
-import type { GroupDefinition } from "@sixb/core"
 import {
-  Activity,
   Bolt,
   Box,
   Braces,
@@ -9,7 +7,6 @@ import {
   ChartNoAxesCombined,
   Database,
   GitBranch,
-  History,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -18,8 +15,7 @@ import {
   RefreshCw,
   ScrollText,
   Settings,
-  Shapes,
-  ShieldCheck,
+  SquareTerminal,
   UserRound,
   UsersRound,
   Workflow,
@@ -35,21 +31,15 @@ import {
 } from "react"
 import { useLocation } from "react-router-dom"
 import { useAppMessages } from "../locale"
-import { type CurrentUser, useCurrentUser } from "../session"
+import { useCurrentUser, useSessionAccess } from "../session"
 import { isCurrentItem, type NavEntry, type NavItem } from "../shell/nav-items"
 import {
   type AppSectionId,
+  type SectionAccess,
   type SectionDefinition,
   type SectionPageDefinition,
   sectionCatalog,
 } from "./catalog"
-
-/**
- * Who sees each built-in section, exported from `app/layout.tsx`. A section left out is open to
- * every signed-in person; `[]` hides it from everyone. It hides screens and protects no data: each
- * page's API still checks the person's own permissions.
- */
-export type AppVisibility = { readonly [Section in AppSectionId]?: readonly GroupDefinition[] }
 
 /** A built-in section with the pages this person may open, for drawing navigation. */
 export interface AppSection {
@@ -62,29 +52,19 @@ export interface AppSection {
   readonly pages: readonly NavEntry[]
 }
 
-interface SectionsContextValue {
-  readonly enabled: boolean
-  readonly visibility: AppVisibility | undefined
-}
-
 // Off until the generated app says its built-in section pages exist, so a shell rendered
 // anywhere else never links to pages that are not there.
-const SectionsContext = createContext<SectionsContextValue>({
-  enabled: false,
-  visibility: undefined,
-})
+const SectionsContext = createContext(false)
 
 export interface SectionsProviderProps {
-  readonly visibility: AppVisibility | undefined
   /** Shared links open one page under a grant, so they get no sections. */
   readonly enabled?: boolean
   readonly children: ReactNode
 }
 
-/** Carries the project's `visibility` export to every section part. Rendered by the generated app. */
-export function SectionsProvider({ visibility, enabled = true, children }: SectionsProviderProps) {
-  const value = useMemo(() => ({ enabled, visibility }), [enabled, visibility])
-  return <SectionsContext.Provider value={value}>{children}</SectionsContext.Provider>
+/** Says the built-in section pages exist. Rendered by the generated app. */
+export function SectionsProvider({ enabled = true, children }: SectionsProviderProps) {
+  return <SectionsContext.Provider value={enabled}>{children}</SectionsContext.Provider>
 }
 
 export interface OpenSection {
@@ -94,47 +74,50 @@ export interface OpenSection {
 
 /**
  * The sections and pages one person may open. Without a signed-in person (auth off) every section
- * that does not need one is open; `visibility` only narrows what a signed-in person sees.
+ * that does not need one is open, all its pages included. Signed in, a section or page that
+ * `requires` something opens when the session's `access` allows any of it. Hiding a screen
+ * protects no data: each page's API still checks the person's own grants.
  */
 export function resolveOpenSections(input: {
-  readonly user: Pick<CurrentUser, "groupIds"> | null
-  readonly visibility: AppVisibility | undefined
+  readonly signedIn: boolean
+  readonly access: Readonly<Record<SectionAccess, boolean>> | null
   readonly enabled: boolean
 }): readonly OpenSection[] {
   if (!input.enabled) return []
   return sectionCatalog.flatMap((definition) => {
-    if (definition.requiresUser && !input.user) return []
-    const admitted = !input.user || admits(input.visibility?.[definition.id], input.user.groupIds)
-    const pages = definition.pages.filter((page) => page.always === true || admitted)
+    if (definition.requiresUser && !input.signedIn) return []
+    const allows = (requires: readonly SectionAccess[] | undefined) =>
+      !input.signedIn || !requires || requires.some((need) => input.access?.[need] === true)
+    if (!allows(definition.requires)) return []
+    const pages = definition.pages.filter((page) => allows(page.requires))
     return pages.length > 0 ? [{ definition, pages }] : []
   })
 }
 
-function admits(groups: readonly GroupDefinition[] | undefined, groupIds: readonly string[]) {
-  if (groups === undefined) return true
-  return groups.some((group) => groupIds.includes(group.id))
+/** Whether this person may open a section, such as the Console a page links into. */
+export function useSectionOpen(section: AppSectionId): boolean {
+  return useOpenSections().some((open) => open.definition.id === section)
 }
 
 /** Whether this app draws its sections; shared links open one page and get none. */
 export function useSectionsEnabled(): boolean {
-  return useContext(SectionsContext).enabled
+  return useContext(SectionsContext)
 }
 
 /** The sections this person may open, internal shape. */
 export function useOpenSections(): readonly OpenSection[] {
-  const { enabled, visibility } = useContext(SectionsContext)
-  const user = useCurrentUser()
+  const enabled = useContext(SectionsContext)
+  const signedIn = useCurrentUser() !== null
+  const access = useSessionAccess()
   return useMemo(
-    () => resolveOpenSections({ user, visibility, enabled }),
-    [user, visibility, enabled]
+    () => resolveOpenSections({ signedIn, access, enabled }),
+    [signedIn, access, enabled]
   )
 }
 
 const sectionIcons: Record<AppSectionId, ComponentType<{ readonly className?: string }>> = {
+  console: SquareTerminal,
   settings: Settings,
-  data: Database,
-  observability: Activity,
-  ontology: Shapes,
 }
 
 const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> = {
@@ -142,15 +125,13 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   developers: Braces,
   memory: Brain,
   members: UsersRound,
-  "service-accounts": ShieldCheck,
   connectors: Cable,
   syncs: RefreshCw,
   datasets: Database,
   pipelines: Workflow,
   projections: Layers,
-  runs: History,
   logs: ScrollText,
-  "ai-usage": ChartNoAxesCombined,
+  usage: ChartNoAxesCombined,
   activity: MousePointerClick,
   "object-types": LayoutGrid,
   objects: Box,
@@ -162,7 +143,7 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
 
 /**
  * The built-in sections this person may open, with their pages, for a shell drawn by hand. Each
- * holds only the pages the project's `visibility` lets this person see.
+ * holds only the pages this person may open.
  */
 export function useSections(): readonly AppSection[] {
   const open = useOpenSections()
@@ -204,11 +185,6 @@ export function useSections(): readonly AppSection[] {
       }),
     [open, messages]
   )
-}
-
-/** Whether this person may open a built-in section, so a page can link to its pages. */
-export function useSectionOpen(id: AppSectionId): boolean {
-  return useSections().some((section) => section.id === id)
 }
 
 /**

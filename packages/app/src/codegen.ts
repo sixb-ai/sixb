@@ -499,8 +499,8 @@ export async function generateAppEntry(
     .map((path) => `import ${JSON.stringify(relativeTo(generatedDir, path))}`)
     .join("\n")
   const sections = options.sections ?? false
-  // The namespace import reads the optional `visibility` and `toolViews` exports without naming
-  // them, so a layout that leaves them out still bundles without a missing-export warning.
+  // The namespace import reads the optional `toolViews` export without naming it, so a layout that
+  // leaves it out still bundles without a missing-export warning.
   const layoutImport = hasLayout
     ? `import RootLayout, * as rootLayoutModule from ${JSON.stringify(layoutRel)}\n`
     : ""
@@ -516,17 +516,9 @@ export async function generateAppEntry(
   // section. Pages without a layout keep rendering bare, as they did before the built-in pages.
   const defaultShell = sections && !hasLayout && !options.projectPages
   const sectionsImport = sections
-    ? `import ${defaultShell ? "{ AppShell, type AppVisibility }" : "type { AppVisibility }"} from "@sixb/app"\nimport { SectionsProvider } from "@sixb/app/pages"\n`
+    ? `${defaultShell ? 'import { AppShell } from "@sixb/app"\n' : ""}import { SectionsProvider } from "@sixb/app/pages"\n`
     : ""
-  // Who sees each built-in section, from the project's app/layout.tsx.
-  const sectionsSetup = !sections
-    ? ""
-    : hasLayout
-      ? `const visibility = Reflect.get(rootLayoutModule, "visibility") as AppVisibility | undefined`
-      : "const visibility = undefined"
-  const sectionsStart = sections
-    ? `<SectionsProvider visibility={visibility} enabled={!basename}>`
-    : ""
+  const sectionsStart = sections ? "<SectionsProvider enabled={!basename}>" : ""
   const sectionsEnd = sections ? "</SectionsProvider>" : ""
   const layoutWrapperStart = hasLayout
     ? "<AgentToolViewsProvider views={toolViews}><RootLayout>"
@@ -963,7 +955,6 @@ function RoutedErrorBoundary({
 }
 
 const appRoutes = [...routes, { path: "*", element: <NotFoundView /> }]
-${sectionsSetup}
 ${toolViewsSetup}
 
 const routePatterns = routePaths.map((path) => ({ path }))

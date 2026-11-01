@@ -156,9 +156,14 @@ export function PersonAvatar({
   readonly name?: string
   readonly email: string
   readonly avatarUrl?: string
-  readonly size?: "md" | "lg"
+  readonly size?: "sm" | "md" | "lg"
 }) {
-  const className = size === "lg" ? "size-12 text-base" : "size-9 text-[0.8125rem]"
+  const className =
+    size === "lg"
+      ? "size-12 text-base"
+      : size === "sm"
+        ? "size-6 text-[0.625rem]"
+        : "size-9 text-[0.8125rem]"
   // A picture that does not load, such as one the app's content policy blocks, shows the initials.
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null)
 
@@ -322,14 +327,14 @@ export function GroupChips({
   }
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-1">
+    <span className="inline-flex flex-wrap items-center gap-1.5">
       {groupIds.map((groupId) => {
         const managed = managedGroupIds.includes(groupId)
         return (
           <span
             key={groupId}
             title={managed ? messages.managedGroupHint : undefined}
-            className="inline-flex h-5 items-center gap-1 rounded-md bg-muted px-1.5 text-[0.6875rem] font-medium whitespace-nowrap text-foreground/75"
+            className="inline-flex h-6 items-center gap-1 rounded-[7px] bg-muted px-[9px] text-[0.78rem] whitespace-nowrap text-foreground/85"
           >
             {managed ? <Link2 className="size-3 text-muted-foreground" /> : null}
             {groupLabel(groupsById.get(groupId) ?? { id: groupId })}

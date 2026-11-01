@@ -241,19 +241,9 @@ export function SettingsIndexPage() {
   return <SectionIndex section="settings" />
 }
 
-/** `/data` opens the first Data page this person may see. */
-export function DataIndexPage() {
-  return <SectionIndex section="data" />
-}
-
-/** `/observability` opens the first Observability page this person may see. */
-export function ObservabilityIndexPage() {
-  return <SectionIndex section="observability" />
-}
-
-/** `/ontology` opens the first Ontology page this person may see. */
-export function OntologyIndexPage() {
-  return <SectionIndex section="ontology" />
+/** `/console` opens the first Console page this person may see. */
+export function ConsoleIndexPage() {
+  return <SectionIndex section="console" />
 }
 
 /**

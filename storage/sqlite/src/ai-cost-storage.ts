@@ -28,6 +28,12 @@ import {
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import {
+  SQLITE_SOURCE_KIND,
+  SQLITE_SOURCE_WORKFLOW,
+  sqliteAccountingFilter,
+  sqliteAccountingFilterParameters,
+} from "./ai-accounting-filters"
 import { listAiModelCallGroups } from "./ai-cost-groups"
 import { requestedReasoningFromRow } from "./ai-usage-storage"
 import { isUniqueConstraintError } from "./storage-errors"
@@ -96,6 +102,8 @@ export class SqliteAiCostStorage implements AiCostStorage {
         query.providerId ?? null,
         query.modelId ?? null,
         query.modelId ?? null,
+        ...sqliteAccountingFilterParameters(query),
+        input.bucket,
         input.bucket
       ) as AggregateRow[]
     return buildAiAccountingOverviewFromFragments(input, rows.map(aggregateFragmentFromRow))
@@ -176,13 +184,34 @@ const SQLITE_ACCOUNTING_LIST_FILTER = `
       ELSE 'unvalued'
     END
   )
+  AND ${sqliteAccountingFilter({
+    kind: "usage.model_kind",
+    sourceKind: SQLITE_SOURCE_KIND,
+    sourceWorkflow: SQLITE_SOURCE_WORKFLOW,
+    userId: "execution.requested_by_user_id",
+    serviceAccountId: "execution.requested_by_service_account_id",
+  })}
+`
+
+const SQLITE_ACCOUNTING_LIST_JOINS = `
+  JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
+  LEFT JOIN agent_runs AS direct_agent
+    ON direct_agent.project_id = usage.project_id
+    AND direct_agent.execution_id = usage.execution_id
+  LEFT JOIN workflow_agent_node_runs AS workflow_agent
+    ON workflow_agent.project_id = usage.project_id
+    AND workflow_agent.execution_id = usage.execution_id
+  LEFT JOIN workflow_node_runs AS workflow_node
+    ON workflow_node.project_id = workflow_agent.project_id
+    AND workflow_node.id = workflow_agent.node_run_id
+  LEFT JOIN ai_model_call_valuations AS cost
+    ON cost.project_id = usage.project_id AND cost.usage_record_id = usage.id
 `
 
 const SQLITE_ACCOUNTING_LIST_COUNT_SQL = `
   SELECT CAST(COUNT(*) AS TEXT) AS total
   FROM ai_model_call_usage AS usage
-  LEFT JOIN ai_model_call_valuations AS cost
-    ON cost.project_id = usage.project_id AND cost.usage_record_id = usage.id
+  ${SQLITE_ACCOUNTING_LIST_JOINS}
   WHERE ${SQLITE_ACCOUNTING_LIST_FILTER}
 `
 
@@ -218,18 +247,7 @@ const SQLITE_ACCOUNTING_LIST_PAGE_SQL = `
     cost.details AS cost_details,
     cost.rated_at AS cost_rated_at
   FROM ai_model_call_usage AS usage
-  JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
-  LEFT JOIN agent_runs AS direct_agent
-    ON direct_agent.project_id = usage.project_id
-    AND direct_agent.execution_id = usage.execution_id
-  LEFT JOIN workflow_agent_node_runs AS workflow_agent
-    ON workflow_agent.project_id = usage.project_id
-    AND workflow_agent.execution_id = usage.execution_id
-  LEFT JOIN workflow_node_runs AS workflow_node
-    ON workflow_node.project_id = workflow_agent.project_id
-    AND workflow_node.id = workflow_agent.node_run_id
-  LEFT JOIN ai_model_call_valuations AS cost
-    ON cost.project_id = usage.project_id AND cost.usage_record_id = usage.id
+  ${SQLITE_ACCOUNTING_LIST_JOINS}
   WHERE ${SQLITE_ACCOUNTING_LIST_FILTER}
   ORDER BY usage.occurred_at DESC, usage.id ASC
   LIMIT ? OFFSET ?
@@ -269,7 +287,10 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
         ELSE 'unvalued'
       END AS valuation_status,
       CASE WHEN cost.status = 'rated' THEN cost.currency ELSE NULL END AS amount_currency,
-      CASE WHEN cost.status = 'rated' THEN cost.amount_nanos ELSE NULL END AS amount_nanos
+      CASE WHEN cost.status = 'rated' THEN cost.amount_nanos ELSE NULL END AS amount_nanos,
+      execution.requested_by_user_id AS requester_user_id,
+      execution.requested_by_service_account_id AS requester_service_account_id,
+      ${SQLITE_SOURCE_KIND} AS source_kind
     FROM ai_model_call_usage AS usage
     JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
     LEFT JOIN agent_runs AS direct_agent
@@ -286,10 +307,19 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     WHERE usage.project_id = ? AND usage.occurred_at >= ? AND usage.occurred_at < ?
       AND (? IS NULL OR usage.provider_id = ?)
       AND (? IS NULL OR usage.requested_model_id = ?)
+  ), filtered AS (
+    SELECT * FROM classified
+    WHERE ${sqliteAccountingFilter({
+      kind: "model_kind",
+      sourceKind: "source_kind",
+      sourceWorkflow: "attribution_workflow_id",
+      userId: "requester_user_id",
+      serviceAccountId: "requester_service_account_id",
+    })}
   ), expanded AS (
     SELECT 'totals' AS dimension, NULL AS key_1, NULL AS key_2, NULL AS key_3, NULL AS bucket_start,
-      classified.*
-    FROM classified
+      filtered.*
+    FROM filtered
     UNION ALL
     SELECT 'series', NULL, NULL, NULL,
       CASE ?
@@ -301,18 +331,39 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
           printf('-%d days', (CAST(strftime('%w', occurred_at) AS INTEGER) + 6) % 7)
         )
       END,
-      classified.*
-    FROM classified
+      filtered.*
+    FROM filtered
     UNION ALL
-    SELECT 'model', provider_id, requested_model_id, NULL, NULL, classified.* FROM classified
+    SELECT 'modelSeries', provider_id, requested_model_id, NULL,
+      CASE ?
+        WHEN 'hour' THEN strftime('%Y-%m-%dT%H:00:00.000Z', occurred_at)
+        WHEN 'day' THEN strftime('%Y-%m-%dT00:00:00.000Z', occurred_at)
+        ELSE strftime(
+          '%Y-%m-%dT00:00:00.000Z',
+          occurred_at,
+          printf('-%d days', (CAST(strftime('%w', occurred_at) AS INTEGER) + 6) % 7)
+        )
+      END,
+      filtered.*
+    FROM filtered
     UNION ALL
-    SELECT 'kind', model_kind, NULL, NULL, NULL, classified.* FROM classified
+    SELECT 'model', provider_id, requested_model_id, NULL, NULL, filtered.* FROM filtered
     UNION ALL
-    SELECT 'agent', attribution_agent_kind, attribution_workflow_id, attribution_agent_step_id, NULL, classified.*
-    FROM classified WHERE attribution_agent_kind IS NOT NULL
+    SELECT 'person',
+      CASE
+        WHEN requester_user_id IS NOT NULL THEN 'user'
+        WHEN requester_service_account_id IS NOT NULL THEN 'serviceAccount'
+      END,
+      COALESCE(requester_user_id, requester_service_account_id), NULL, NULL, filtered.*
+    FROM filtered
     UNION ALL
-    SELECT 'workflow', attribution_workflow_id, NULL, NULL, NULL, classified.*
-    FROM classified WHERE attribution_workflow_id IS NOT NULL
+    SELECT 'kind', model_kind, NULL, NULL, NULL, filtered.* FROM filtered
+    UNION ALL
+    SELECT 'agent', attribution_agent_kind, attribution_workflow_id, attribution_agent_step_id, NULL, filtered.*
+    FROM filtered WHERE attribution_agent_kind IS NOT NULL
+    UNION ALL
+    SELECT 'workflow', attribution_workflow_id, NULL, NULL, NULL, filtered.*
+    FROM filtered WHERE attribution_workflow_id IS NOT NULL
   )
   SELECT dimension,
     key_1,
@@ -377,6 +428,7 @@ function accountingListFilterParameters(
     query.executionId ?? null,
     query.valuationStatus ?? null,
     query.valuationStatus ?? null,
+    ...sqliteAccountingFilterParameters(query),
   ]
 }
 
@@ -505,20 +557,30 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
   const dimensionKeys =
     row.dimension === "model"
       ? { providerId: required(row.key_1), modelId: required(row.key_2) }
-      : row.dimension === "kind"
-        ? withModelKind(aiAccountingModelKind(row.key_1))
-        : row.dimension === "agent"
-          ? {
-              agentKind: required(row.key_1) as "agent" | "workflowAgent",
-              ...(row.key_1 === "workflowAgent"
-                ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
-                : {}),
-            }
-          : row.dimension === "workflow"
-            ? { workflowId: required(row.key_1) }
-            : row.dimension === "series"
-              ? { start: new Date(required(row.bucket_start)) }
-              : {}
+      : row.dimension === "modelSeries"
+        ? {
+            providerId: required(row.key_1),
+            modelId: required(row.key_2),
+            start: new Date(required(row.bucket_start)),
+          }
+        : row.dimension === "person"
+          ? row.key_1 && row.key_2
+            ? { requesterType: row.key_1 as "user" | "serviceAccount", requesterId: row.key_2 }
+            : {}
+          : row.dimension === "kind"
+            ? withModelKind(aiAccountingModelKind(row.key_1))
+            : row.dimension === "agent"
+              ? {
+                  agentKind: required(row.key_1) as "agent" | "workflowAgent",
+                  ...(row.key_1 === "workflowAgent"
+                    ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
+                    : {}),
+                }
+              : row.dimension === "workflow"
+                ? { workflowId: required(row.key_1) }
+                : row.dimension === "series"
+                  ? { start: new Date(required(row.bucket_start)) }
+                  : {}
   return {
     dimension: row.dimension,
     ...dimensionKeys,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
-  addMemoryEntry,
+  insertMemoryEntry,
   memoryBlocks,
   memoryEntries,
   removeMemoryEntry,
@@ -47,19 +47,17 @@ describe("a note's memories", () => {
     )
   })
 
-  test("take a new one after the last before any later section, dated today", () => {
-    expect(addMemoryEntry(note, "Prefers euros", "2026-10-21")).toBe(
+  test("take a new one at the end of its section, dated today, as one line", () => {
+    // After the section's last entry, so it lands in the list it belongs to.
+    expect(insertMemoryEntry(note, 3, "Prefers euros", "2026-10-21")).toBe(
       note.replace(
         "- Works on the Lyon office's accounts\n",
         "- Works on the Lyon office's accounts\n- Prefers euros (added 2026-10-21)\n"
       )
     )
-    // A starter has no entry yet: the first goes under its title.
-    expect(addMemoryEntry("# Memory\n\n", "Prefers euros", "2026-10-21")).toBe(
-      "# Memory\n\n- Prefers euros (added 2026-10-21)\n"
-    )
-    expect(addMemoryEntry("", "Prefers euros", "2026-10-21")).toBe(
-      "- Prefers euros (added 2026-10-21)\n"
+    // A section with no entry yet takes it under its heading; a line break in it is a space.
+    expect(insertMemoryEntry("# Memory\n\n## Index\n", 2, "Prefers\neuros", "2026-10-21")).toBe(
+      "# Memory\n\n## Index\n- Prefers euros (added 2026-10-21)\n"
     )
   })
 })

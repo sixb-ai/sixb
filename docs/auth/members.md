@@ -123,7 +123,7 @@ Choose the credential that matches the caller:
 | Personal access token | Your own scripts or tools, using a subset of your groups. |
 | Service-account token | Unattended jobs or external systems with an independent identity. |
 
-Manage credentials in your app's **Settings › Developers** and **Settings › Service accounts**, or through the [CLI](../cli/overview.md#tokens-and-service-accounts). Tokens are shown only when created. Save them in your secret manager and revoke them when no longer needed.
+Manage credentials in your app's **Settings › Developers** and **Settings › Members › Service accounts**, or through the [CLI](../cli/overview.md#tokens-and-service-accounts). Tokens are shown only when created. Save them in your secret manager and revoke them when no longer needed.
 
 Creating a token requires signing in, in the app or with `sixb login`. A personal access token can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own.
 
