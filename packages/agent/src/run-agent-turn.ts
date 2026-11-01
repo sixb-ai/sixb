@@ -6,11 +6,12 @@ import {
   runModelLoop,
 } from "@sixb/core/internal/agents"
 import { isAbortError } from "@sixb/core/internal/workers"
-import { type ModelMessage, ModelProviderError } from "@sixb/core/models"
+import { type ModelMessage, ModelProviderError, type ModelStep } from "@sixb/core/models"
 import {
   type AgentRunDiagnostic,
   type AgentRunFinishReason,
   type AgentRunRecord,
+  type AppendAgentMessageInput,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -61,6 +62,11 @@ export interface RunAgentTurnInput {
     readonly bytesPerToken?: number
     readonly compactInTurn?: ConversationAgentExecutionEnvironment["compactInTurn"]
   }
+  /**
+   * Handed the answer so far after each step that completed, as the message the turn would
+   * append: a turn that fails then records it with its failure, and keeps that work.
+   */
+  readonly onWork?: (message: AppendAgentMessageInput) => void
 }
 
 /**
@@ -172,6 +178,27 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       }
     : context.prepareStep
 
+  // The answer so far, as one message whatever step it is at.
+  const workMessageId = createAgentMessageId()
+  const finishedSteps: ModelStep[] = []
+  const recordStep = (step: ModelStep) => {
+    finishedSteps.push(step)
+    input.onWork?.({
+      id: workMessageId,
+      projectId,
+      threadId: run.threadId,
+      runId,
+      role: "assistant",
+      parts: markReducedSteps(
+        agentTraceFromModelSteps(finishedSteps, { threadId: run.threadId, runId }),
+        guard?.reducedFromStep()
+      ),
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
+    })
+  }
+
   try {
     let chunkIndex = 0
     let result: PausableModelLoopResult
@@ -187,6 +214,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         }),
         ...(prepareStep === undefined ? {} : { prepareStep }),
         ...(guard ? { recoverStep: guard.recoverStep } : {}),
+        onStepEnd: recordStep,
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined
           ? {}

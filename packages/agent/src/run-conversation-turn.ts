@@ -12,6 +12,7 @@ import type {
   AgentRunRecord,
   AgentThreadParticipantRecord,
   AgentThreadRecord,
+  AppendAgentMessageInput,
   ConversationAgentRunRecord,
   ExecutionRecord,
   SubagentRunRecord,
@@ -82,6 +83,8 @@ export async function runConversationTurn(input: {
   let environment: ConversationAgentExecutionEnvironment | null = null
   let runtime: AgentTurnRuntime | null = null
   let delegation: SubagentCoordinator | undefined
+  // The answer so far: a turn that fails keeps the steps it completed.
+  let work: AppendAgentMessageInput | undefined
   // A user cancel joins the turn's abort sources, so it stops the model stream as a shutdown does.
   const turnSignal = AbortSignal.any([signal, session.cancelled])
 
@@ -148,6 +151,9 @@ export async function runConversationTurn(input: {
           ? {}
           : { bytesPerToken: environment.bytesPerToken }),
       },
+      onWork: (message) => {
+        work = message
+      },
     })
   } catch (caughtError) {
     let error = caughtError
@@ -177,7 +183,8 @@ export async function runConversationTurn(input: {
     const finalized = await recordFate(
       session,
       aborted ? "cancelled" : "failed",
-      interrupted ? new AgentTurnInterruptedError(run.id) : error
+      interrupted ? new AgentTurnInterruptedError(run.id) : error,
+      !aborted && work ? [work] : undefined
     )
     if (finalized) {
       if (finalized.run.status === "failed") {
