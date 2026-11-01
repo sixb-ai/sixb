@@ -1,9 +1,11 @@
 import { stableJsonStringify } from "../json"
 import type { AgentMessageRecord } from "../storage/agents/types"
-import { AGENT_CONTINUATION_INSTRUCTION } from "./adapters"
+import { AGENT_CONTINUATION_INSTRUCTION, agentMessageSteps } from "./adapters"
 import { agentMailInstruction } from "./agent-mail"
 import { approvalOutcomeInstruction } from "./approval-outcome"
+import { AGENT_IMAGE_INPUT_TOKENS, AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 import type { AgentMessage, AgentMessagePart } from "./message"
+import { isAgentToolResult } from "./tool-result"
 
 export const AGENT_CONTEXT_ESTIMATOR_VERSION = 1 as const
 
@@ -12,7 +14,6 @@ const REQUEST_OVERHEAD_TOKENS = 8
 const MESSAGE_OVERHEAD_TOKENS = 8
 const TOOL_OVERHEAD_TOKENS = 16
 const STEP_OVERHEAD_TOKENS = 2
-const IMAGE_ALLOWANCE_TOKENS = 1_200
 const FILE_TEXT_INLINE_MAX_BYTES = 50 * 1024
 const FILE_TEXT_INLINE_TOTAL_MAX_BYTES = 200 * 1024
 const TOOL_RESULT_SUMMARY_MAX_CHARS = 2_000
@@ -72,14 +73,29 @@ export function estimateAgentContextRequestTokens(
   }
 }
 
-/** Estimate message-only growth after a provider-usage anchor. */
+/**
+ * Estimate message-only growth after a provider-usage anchor. Every user message the history keeps
+ * sends its files inline, each message within its own text budget, until compaction summarizes it,
+ * and so do the images its tools returned after each step.
+ *
+ * Images count up to the request's image limit. Its byte limit is left out: an image's encoded
+ * size is known only once it is projected, and counting more images is the side that cannot
+ * overflow.
+ */
 export function estimateAgentContextMessagesTokens(
   messages: readonly AgentMessage[]
 ): AgentContextTokenEstimate {
-  const attachments = { textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES }
+  const images = { remaining: AGENT_INLINE_IMAGE_LIMITS.maxImages }
   let tokens = 0
   for (const message of messages) {
-    tokens += estimateMessageTokens(message, attachments)
+    tokens += estimateMessageTokens(
+      message,
+      {
+        textBytesRemaining: FILE_TEXT_INLINE_TOTAL_MAX_BYTES,
+      },
+      images
+    )
+    if (message.role === "assistant") tokens += toolImageTokens(message, images)
   }
   return { tokens, estimatorVersion: AGENT_CONTEXT_ESTIMATOR_VERSION }
 }
@@ -135,7 +151,8 @@ export function serializeAgentMessagesForSummary(messages: readonly AgentMessage
 
 function estimateMessageTokens(
   message: AgentMessage,
-  attachments: { textBytesRemaining: number }
+  attachments: { textBytesRemaining: number },
+  images: { remaining: number }
 ): number {
   let tokens = MESSAGE_OVERHEAD_TOKENS
   for (const part of message.parts) {
@@ -167,9 +184,7 @@ function estimateMessageTokens(
           TOOL_OVERHEAD_TOKENS +
           textTokens(part.toolName) +
           textTokens(stableJsonStringify(part.input)) +
-          (part.state === "output-available"
-            ? textTokens(stableJsonStringify(part.output))
-            : textTokens(part.errorText))
+          toolOutputTokens(part)
         break
       case "file": {
         const file = part.fileRef
@@ -180,7 +195,7 @@ function estimateMessageTokens(
         )
         if (message.role !== "assistant") {
           if (looksLikeImage(file.mediaType, file.fileName)) {
-            tokens += IMAGE_ALLOWANCE_TOKENS
+            tokens += imageTokens(images)
           } else {
             const inlineBytes = Math.min(
               file.sizeBytes,
@@ -267,6 +282,48 @@ function truncateToolResult(value: string): string {
 function looksLikeImage(mediaType: string | undefined, fileName: string | undefined): boolean {
   if (mediaType?.toLowerCase().startsWith("image/")) return true
   return /\.(?:avif|gif|jpe?g|png|webp)$/i.test(fileName ?? "")
+}
+
+/**
+ * The images each step's calls returned, once each, as the message after the step inlines them.
+ * Every call counts, whether or not its tool's images reach the model: the side that cannot
+ * overflow.
+ */
+function toolImageTokens(message: AgentMessage, images: { remaining: number }): number {
+  let tokens = 0
+  for (const step of agentMessageSteps(message)) {
+    const seen = new Set<string>()
+    for (const { part } of step.localToolCalls) {
+      if (part.state !== "output-available" || !isAgentToolResult(part.output)) continue
+
+      for (const content of part.output.content) {
+        if (content.type !== "file") continue
+        if (!looksLikeImage(content.fileRef.mediaType, content.fileRef.fileName)) continue
+
+        const identity = `${content.fileRef.digest}:${content.fileRef.sizeBytes}`
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        tokens += imageTokens(images)
+      }
+    }
+  }
+  return tokens
+}
+
+/** One more inline image, while the request takes any. */
+function imageTokens(images: { remaining: number }): number {
+  if (images.remaining === 0) return 0
+
+  images.remaining -= 1
+  return AGENT_IMAGE_INPUT_TOKENS
+}
+
+/** What the model reads of a call's outcome: the output its tool projected, when it stored one. */
+function toolOutputTokens(part: Extract<AgentMessagePart, { readonly type: "tool-call" }>): number {
+  if (part.state === "output-error") return textTokens(part.errorText)
+  if (part.modelOutput?.type === "text") return textTokens(part.modelOutput.value)
+  if (part.modelOutput) return textTokens(stableJsonStringify(part.modelOutput.value))
+  return textTokens(stableJsonStringify(part.output))
 }
 
 function textTokens(value: string): number {

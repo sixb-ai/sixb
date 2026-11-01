@@ -119,7 +119,11 @@ function projectModelTool(
 }
 
 type ToolOutcome =
-  | { readonly state: "output-available"; readonly output: JsonValue }
+  | {
+      readonly state: "output-available"
+      readonly output: JsonValue
+      readonly modelOutput?: AgentToolModelOutput
+    }
   | { readonly state: "output-error"; readonly errorText: string }
 
 /** Project validated model-loop steps into Sixb's durable trace contract. */
@@ -204,10 +208,22 @@ function toolOutcome(
   missingResultText: string
 ): ToolOutcome {
   if (!result) return { state: "output-error", errorText: missingResultText }
-  if (result.originalOutput !== undefined) {
-    return { state: "output-available", output: result.originalOutput }
-  }
   const { output } = result
+
+  // The tool projected its output for the model: the trace keeps both, and later turns replay
+  // what the model read, byte for byte.
+  if (result.originalOutput !== undefined) {
+    return {
+      state: "output-available",
+      output: result.originalOutput,
+      ...(output.type === "text"
+        ? { modelOutput: { type: "text", value: output.value } }
+        : output.type === "json"
+          ? { modelOutput: { type: "json", value: output.value } }
+          : {}),
+    }
+  }
+
   switch (output.type) {
     case "text":
     case "json":

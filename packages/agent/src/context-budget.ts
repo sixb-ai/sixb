@@ -1,4 +1,5 @@
 import { AgentDefinitionError } from "@sixb/core"
+import { AGENT_IMAGE_INPUT_TOKENS } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
   type LanguageModel,
@@ -69,8 +70,7 @@ export function prepareAgentModel(selection: AgentModelSelection): {
 
 /**
  * A call may write whatever its input leaves of the window, up to the cap. Compaction keeps the
- * input within its budget, so the reserve is always left, and it is all a call gets when its input
- * cannot be estimated.
+ * input within its budget, so the reserve is always left.
  */
 function outputCeilingTokens(
   request: LanguageModelRequest,
@@ -78,23 +78,36 @@ function outputCeilingTokens(
   capTokens: number
 ): number {
   const inputTokens = estimateRequestInputTokens(request)
-  if (inputTokens === undefined) return budget.reserveTokens
   return Math.min(capTokens, Math.max(budget.reserveTokens, budget.windowTokens - inputTokens))
 }
 
 /**
  * Serialized bytes at two per token. Gateway tokenizers measured from 2.8 (Hindi on GLM) to 12
  * bytes per token, and an underestimate is the costly side: whenever the window bounds the ceiling,
- * any input it misses overflows providers that reject input plus output beyond the window. Attached
- * files have no byte-to-token rate.
+ * any input it misses overflows providers that reject input plus output beyond the window.
+ *
+ * An image counts as the most a provider charges for one, never as its base64 bytes. Attachments
+ * stay in a thread's requests until compaction, so giving up on any file would cap every later
+ * call of the thread at the reserve. Other inline files count by their encoded bytes.
  */
-function estimateRequestInputTokens(request: LanguageModelRequest): number | undefined {
-  const hasFile = request.messages.some(
-    (message) => message.role === "user" && message.content.some((part) => part.type === "file")
-  )
-  if (hasFile) return undefined
-  const serialized = JSON.stringify([request.messages, request.tools, request.responseFormat])
-  return Math.ceil(new TextEncoder().encode(serialized).byteLength / 2)
+function estimateRequestInputTokens(request: LanguageModelRequest): number {
+  let imageTokens = 0
+  const messages = request.messages.map((message) => {
+    if (message.role !== "user") return message
+
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (part.type !== "file" || !part.mediaType.startsWith("image/")) return part
+
+        imageTokens += AGENT_IMAGE_INPUT_TOKENS
+        return { ...part, data: "image" }
+      }),
+    }
+  })
+
+  const serialized = JSON.stringify([messages, request.tools, request.responseFormat])
+  return Math.ceil(new TextEncoder().encode(serialized).byteLength / 2) + imageTokens
 }
 
 /** The most one call may write: the binding's limit, capped at the model maximum. */

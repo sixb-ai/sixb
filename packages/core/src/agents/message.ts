@@ -137,7 +137,18 @@ export interface AgentProviderStatePart {
  */
 export type AgentToolCallPart = AgentToolCallBase &
   (
-    | { readonly state: "output-available"; readonly output: JsonValue }
+    | {
+        readonly state: "output-available"
+        readonly output: JsonValue
+        /**
+         * What the model read of `output`, when its tool projected it into something else (a
+         * summary, a file's excerpt): later turns replay these bytes instead of projecting `output`
+         * again. Internal to the runtime; the HTTP API leaves it out.
+         */
+        readonly modelOutput?:
+          | { readonly type: "text"; readonly value: string }
+          | { readonly type: "json"; readonly value: JsonValue }
+      }
     | { readonly state: "output-error"; readonly errorText: string }
   )
 

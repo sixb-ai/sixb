@@ -30,6 +30,7 @@ import {
   defineObjectType,
   defineRole,
   defineWorkflow,
+  type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -176,6 +177,7 @@ import type {
 import { workflowStepTools } from "../src/workflow-node-execution"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
+import { expectReplayedPrefix, withJsonbKeyOrder } from "./replay-bytes"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -7377,7 +7379,6 @@ describe("AgentWorker", () => {
       const durableJson = JSON.stringify(messages)
       expect(durableJson).not.toContain("data:image")
       expect(durableJson).not.toContain("iVBORw0KGgo")
-      expect(durableJson).not.toContain(published.sandboxPath)
 
       const livePromptJson = JSON.stringify(livePrompt)
       expect(livePromptJson).toContain("generated.png")
@@ -7406,6 +7407,13 @@ describe("AgentWorker", () => {
       // The native contract retains originalOutput for durable tracing, separately from model output.
       const modelOutputs = liveToolResults.map((part: { output: unknown }) => part.output)
       expect(JSON.stringify(modelOutputs)).not.toContain('"type":"file"')
+      // The trace keeps what the model read, which names the file where later turns find it.
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === createImage.name
+        )
+      ).toMatchObject({ modelOutput: modelOutputs[0] })
+      expect(JSON.stringify(modelOutputs[0])).toContain(published.sandboxPath)
       if (typeof Bun.Image === "function") {
         expect(
           livePromptMessages.some(
@@ -7435,19 +7443,17 @@ describe("AgentWorker", () => {
       const replayRun = await waitForTerminalRun(storage, followup.run.id)
       expect(replayRun.status).toBe("succeeded")
 
+      // The next turn reads the call as the first did, the image after it included, and finds the
+      // file at the path it named.
       const replayPromptJson = JSON.stringify(replayPrompt)
-      expect(replayPromptJson).toContain("generated.png")
-      expect(replayPromptJson).toContain(
-        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
-      )
+      expect(replayPromptJson).toContain(JSON.stringify(modelOutputs[0]))
       if (typeof Bun.Image === "function") {
-        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+        expect(replayPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
       }
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.some(
           (file) =>
-            file.path.includes(".sixb/agent/attachments/") &&
-            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
+            file.path.endsWith(published?.sandboxPath ?? "-") &&
             Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
         )
       ).toBe(true)
@@ -7474,11 +7480,12 @@ describe("AgentWorker", () => {
           content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
         },
       })
+      // Viewing it again reuses the file the turn materialized: it stores no copy.
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
           file.path.includes(".sixb/agent/tool-files/")
         )
-      ).toHaveLength(0)
+      ).toHaveLength(1)
     } finally {
       await worker.stop()
     }
@@ -8343,7 +8350,8 @@ describe("AgentWorker", () => {
         ],
       })
 
-      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result.
+      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result, at the path the
+      // result named: the turn replays it as the model read it.
       const next = await requestAgent(sixb, {
         threadId: requested.run.threadId,
         text: "Show the chart.",
@@ -8368,7 +8376,7 @@ describe("AgentWorker", () => {
         (entry) => entry.logicalPath === "acme-review/margins.png"
       )
       expect(chart?.fileName).toBe("acme-review-margins.png")
-      expect(chart?.sandboxPath).toStartWith(".sixb/agent/attachments/")
+      expect(chart?.sandboxPath).toBe(".sixb/agent/children/acme-review/margins.png")
       expect(
         nextSandbox.files.get(join(nextSandbox.workingDirectory, chart?.sandboxPath ?? ""))
       ).toEqual(TEST_PNG_BYTES)
@@ -13504,6 +13512,192 @@ describe("agent tools act as the requester", () => {
       expect(run.error?.code).toBe("agent.execution_failed")
       expect(callIds).toHaveLength(2)
       expect(agentCalls).toBe(1)
+    } finally {
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
+    }
+  })
+})
+
+/** A recording sandbox whose `read` finds the same two lines in any file. */
+class ReadingSandboxFactory extends RecordingSandboxFactory {
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const sandbox = (await super.create(options)) as RecordingSandbox
+    const runCommand = sandbox.runCommand.bind(sandbox)
+    sandbox.runCommand = async (command, args = [], commandOptions = {}) =>
+      command === "bash" && args.includes("sixb-read")
+        ? {
+            exitCode: 0,
+            stdout: Buffer.from("quarter,revenue\nQ3,1100\n").toString("base64"),
+            stderr: "",
+            durationMs: 1,
+          }
+        : runCommand(command, args, commandOptions)
+    return sandbox
+  }
+}
+
+function toolCallsStream(calls: readonly [string, string, Record<string, unknown>][]) {
+  return stream([
+    { type: "stream-start", warnings: [] },
+    ...calls.map(([toolCallId, toolName, input]) => ({
+      type: "tool-call" as const,
+      toolCallId,
+      toolName,
+      input: JSON.stringify(input),
+    })),
+    finish("tool-calls"),
+  ])
+}
+
+describe("a later turn's request", () => {
+  // How each guard is proven, by removing it and watching this test fail:
+  // - serialize tool JSON with JSON.stringify in models/protocols (responses, messages): the bash
+  //   and read outputs, reordered by the jsonb double, print other bytes;
+  // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: view_file,
+  //   create_image, publish_artifact and wait_agent replay another text;
+  // - return no images from replayToolFiles: the images after a step vanish;
+  // - inline only the newest user message's files in fileWorkItems: the attachments turn into
+  //   metadata on the next turn.
+  test("starts with every byte the turn before it sent last, on a storage that reorders keys", async () => {
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "child-provider",
+      modelId: "child-model",
+      stream: async (options) =>
+        options.messages.some((message) => message.role === "tool")
+          ? answerStream("Acme's margin fell to 12%; the chart is in out/.")
+          : toolCallStream("chart", "bash", { command: "write-child-outputs" }),
+    })
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      capabilities: { inputMediaTypes: ["image/png"], localTools: true, parallelToolCalls: true },
+      stream: async (options) => {
+        parentCalls.push(options)
+        switch (parentCalls.length) {
+          case 1:
+            return toolCallsStream([
+              ["draft", "bash", { command: "write-q3-review" }],
+              ["image", "bash", { command: "create-view-image" }],
+              ["read", "read", { path: "reports/q3.csv", offset: 1, limit: 20 }],
+            ])
+          case 2:
+            return toolCallsStream([
+              ["view-doc", "view_file", { path: "work/q3-review/document.md" }],
+              ["view-image", "view_file", { path: "scratch/bash-image.png" }],
+              ["create", "create_image", {}],
+            ])
+          case 3:
+            return toolCallStream("publish", "publish_artifact", {
+              path: "work/q3-review",
+              kind: "document",
+              title: "Q3 review",
+            })
+          case 4:
+            return toolCallStream("spawn", "spawn_agent", {
+              key: "acme-review",
+              task: "Chart Acme's margins.",
+              model: { provider: childModel.providerId, modelId: childModel.modelId },
+            })
+          case 5:
+            return toolCallStream("wait", "wait_agent", { runIds: [childRunId] })
+          case 7:
+            return toolCallStream("again", "bash", { command: "echo again" })
+          default:
+            return answerStream(`Answer ${parentCalls.length}.`)
+        }
+      },
+    })
+    const createImage = defineAgentTool("create_image")
+      .description("Create a test image.")
+      .input({})
+      .run(async ({ files }) => {
+        const image = await files.put({
+          body: TEST_PNG_BYTES,
+          fileName: "generated.png",
+          mediaType: "image/png",
+        })
+        return {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: "Created an image." },
+            { type: "file", fileRef: image.fileRef },
+          ],
+        } satisfies AgentToolResult
+      })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new ReadingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      agentTools: [createImage],
+    })
+    const storage = agentStorageOf(sixb)
+    const csv = await sixb.blobStorage.put({
+      body: new TextEncoder().encode(ACME_CSV),
+      fileName: "acme.csv",
+      mediaType: "text/csv",
+    })
+    const png = await sixb.blobStorage.put({
+      body: TEST_PNG_BYTES,
+      fileName: "logo.png",
+      mediaType: "image/png",
+    })
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      let threadId: string | undefined
+      const turn = async (text: string, attachments: FileRef[] = []) => {
+        const requested = await requestAgent(sixb, {
+          ...(threadId === undefined ? {} : { threadId }),
+          text,
+          ...(attachments.length === 0 ? {} : { attachments }),
+        })
+        threadId = requested.run.threadId
+        childRunId ||= createSubagentRunId(requested.run.id, "acme-review")
+
+        const run = await underFakeTime(() => terminalRun(storage, requested.run.id), text)
+        expect(run.status).toBe("succeeded")
+      }
+      await turn("Review Q3 with these.", [csv, png])
+      await turn("Thanks.")
+      await turn("No.")
+
+      expect(parentCalls).toHaveLength(9)
+      expectReplayedPrefix(parentCalls[5], parentCalls[6], parentModel.providerId)
+      expectReplayedPrefix(parentCalls[7], parentCalls[8], parentModel.providerId)
+
+      // What the replayed prefix holds, so the comparison covers each case.
+      const replayed = JSON.stringify(parentCalls[6]?.messages)
+      for (const text of [
+        "quarter,revenue,margin",
+        '"startLine":1',
+        '<tool_file name=\\"document.md\\"',
+        "<sixb_tool_files",
+        "Created an image.",
+        'Published \\"Q3 review\\"',
+        "children/acme-review/margins.png",
+      ]) {
+        expect(replayed).toContain(text)
+      }
+      if (typeof Bun.Image === "function") {
+        expect(replayed).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+
+      // The double did reorder what the turn stored, as Postgres would.
+      const stored = (await listMessages(storage, threadId ?? "")).flatMap(
+        (message) => message.parts
+      )
+      const bash = stored.find((part) => part.type === "tool-call" && part.toolCallId === "draft")
+      if (bash?.type !== "tool-call" || bash.state !== "output-available" || !bash.output) {
+        throw new Error("Expected the stored bash output.")
+      }
+      expect(Object.keys(bash.output)[0]).toBe("stderr")
     } finally {
       await stopUnderFakeTime(worker)
       jest.useRealTimers()

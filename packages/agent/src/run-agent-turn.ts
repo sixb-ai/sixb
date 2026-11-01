@@ -22,6 +22,7 @@ import { userMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
+import { toolFilesStepKey } from "./tools/result-media"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
@@ -115,6 +116,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ? attachmentContext?.promptTextByPartKey.get(
             toolResultAttachmentKey(message.id, partIndex, contentIndex)
           )
+        : undefined,
+    afterToolResults: ({ message, partIndex }) =>
+      message.id
+        ? attachmentContext?.toolFilesByStep?.get(toolFilesStepKey(message.id, partIndex))
         : undefined,
   })
 

@@ -275,7 +275,7 @@ describe("owned model adapters", () => {
   })
 
   test("preserves normalized metadata, signed replay state, and original tool output", () => {
-    // Regression proof: drop originalOutput or providerData from trace projection.
+    // Regression proof: drop originalOutput, modelOutput or providerData from trace projection.
     const normalized = { anthropic: { signature: "signed", caller: { toolName: "search" } } }
     const providerData: ProviderData = normalized
     const content: ModelAssistantPart[] = [
@@ -315,6 +315,7 @@ describe("owned model adapters", () => {
         providerMetadata: normalized,
         state: "output-available",
         output: { hits: 2 },
+        modelOutput: { type: "text", value: "projected for model" },
       },
     ])
     expect(toModelMessages([{ role: "assistant", parts: trace }])).toEqual([
@@ -336,7 +337,7 @@ describe("owned model adapters", () => {
             type: "tool-result",
             toolCallId: "call-1",
             toolName: "tool-search",
-            output: { type: "json", value: { hits: 2 } },
+            output: { type: "text", value: "projected for model" },
           },
         ],
       },

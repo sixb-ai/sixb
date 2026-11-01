@@ -5,10 +5,11 @@ import {
   type ModelToolOutput,
   type ProviderData,
 } from "@sixb/core/models"
-import { object } from "../json"
+import { canonicalJson, canonicalJsonStringify, object } from "../json"
 
 const IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const THINKING_BLOCK_TYPES = ["thinking", "redacted_thinking"]
+const TOOL_USE_BLOCK_TYPES = ["tool_use", "server_tool_use"]
 
 /** Serialize portable messages and the calling provider's native signed/opaque blocks. */
 export function messagesInput(
@@ -54,13 +55,13 @@ export function messagesInput(
       if (part.type === "provider-state") {
         if (part.providerId === providerId) {
           const block = object(part.data)?.block
-          if (isJsonObject(block)) content.push(block)
+          if (isJsonObject(block)) content.push(canonicalToolUse(block))
         }
         continue
       }
       const raw = providerBlock(part.providerData, providerId)
       if (raw) {
-        content.push(raw)
+        content.push(canonicalToolUse(raw))
       } else if (part.type === "text") {
         content.push({ type: "text", text: part.text })
       } else if (part.type === "tool-call") {
@@ -68,7 +69,7 @@ export function messagesInput(
           type: "tool_use",
           id: part.toolCallId,
           name: part.toolName,
-          input: part.input,
+          input: canonicalJson(part.input),
         })
       } else if (part.type === "tool-result" && part.providerExecuted) {
         content.push({
@@ -85,6 +86,15 @@ export function messagesInput(
     if (content.length > 0) mapped.push({ role: "assistant", content })
   }
   return { system, messages: coalesceRoles(mapped) }
+}
+
+/**
+ * A tool call's input as an object with sorted keys: Messages renders it in the order the body
+ * holds it, and the stored block comes back from Postgres `jsonb` in another order than live.
+ */
+function canonicalToolUse(block: JsonObject): JsonObject {
+  if (!TOOL_USE_BLOCK_TYPES.includes(String(block.type)) || block.input === undefined) return block
+  return { ...block, input: canonicalJson(block.input) }
 }
 
 function coalesceRoles(messages: readonly JsonObject[]): JsonObject[] {
@@ -141,5 +151,5 @@ function providerBlock(data: ProviderData | undefined, providerId: string): Json
 function toolOutputText(output: ModelToolOutput): string {
   return output.type === "text" || output.type === "error-text"
     ? output.value
-    : JSON.stringify(output.value)
+    : canonicalJsonStringify(output.value)
 }

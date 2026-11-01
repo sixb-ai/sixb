@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import type { JsonObject, ModelAssistantPart } from "@sixb/core/models"
+import type { JsonObject, ModelAssistantPart, ModelMessage } from "@sixb/core/models"
 import { responsesEvents, responsesInput, responsesUsage } from "../src/responses"
 
 function stream(events: readonly JsonObject[]): ReadableStream<Uint8Array> {
@@ -223,5 +223,52 @@ test("does not replay reasoning an answer cut short ended on", () => {
     functionCall,
     { type: "function_call_output", call_id: "call", output: "ok" },
     go,
+  ])
+})
+
+// Removal proof: serialize JSON tool outputs and synthesized arguments with JSON.stringify in
+// responses/input.ts; the replay from Postgres `jsonb` key order prints other bytes.
+test("serializes JSON tool outputs and synthesized arguments the same whatever their key order", () => {
+  const turn = (output: JsonObject, input: JsonObject): ModelMessage[] => [
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "call", toolName: "read", input }],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call",
+          toolName: "read",
+          output: { type: "json", value: output },
+        },
+      ],
+    },
+  ]
+  const live = turn(
+    { path: "a.ts", content: "x", startLine: 1, endLine: 2, truncated: false },
+    { path: "a.ts", offset: 1, limit: 2 }
+  )
+  const fromJsonb = turn(
+    { path: "a.ts", content: "x", endLine: 2, startLine: 1, truncated: false },
+    { path: "a.ts", limit: 2, offset: 1 }
+  )
+
+  expect(JSON.stringify(responsesInput(fromJsonb, "test"))).toBe(
+    JSON.stringify(responsesInput(live, "test"))
+  )
+  expect(responsesInput(live, "test")).toEqual([
+    {
+      type: "function_call",
+      call_id: "call",
+      name: "read",
+      arguments: '{"limit":2,"offset":1,"path":"a.ts"}',
+    },
+    {
+      type: "function_call_output",
+      call_id: "call",
+      output: '{"content":"x","endLine":2,"path":"a.ts","startLine":1,"truncated":false}',
+    },
   ])
 })

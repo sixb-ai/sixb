@@ -90,19 +90,33 @@ describe("agent context budget resolution", () => {
     ).rejects.toThrow("reasoning")
   })
 
-  test("gives a call with an attached file only the reserve", async () => {
-    // Removal proof: estimate the file by its serialized URL; the call asks for 64,000 tokens an
-    // image or document may not leave.
+  test("counts an attached image at its provider ceiling, never capping the call at the reserve", async () => {
+    // Removal proof: return undefined from estimateRequestInputTokens when a user message holds a
+    // file; every call of a thread with an attachment asks for the 16,384-token reserve.
     const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 })
     const outputs = recordOutputs(base.model)
     const { model } = await pinAndPrepare(base)
-    await model.stream(
-      request([
-        { type: "file", data: new URL("https://example.com/a.png"), mediaType: "image/png" },
-      ])
-    )
+    const image = (bytes: number): ModelFilePart => ({
+      type: "file",
+      data: new URL(`data:image/png;base64,${"A".repeat(bytes)}`),
+      mediaType: "image/png",
+    })
+    const pdf: ModelFilePart = {
+      type: "file",
+      data: new URL(`data:application/pdf;base64,${"A".repeat(400_000)}`),
+      mediaType: "application/pdf",
+    }
 
-    expect(outputs).toEqual([16_384])
+    // A 4 MB image counts as 5,400 tokens, not 2,000,000; 30 of them as 162,000.
+    await model.stream(request([image(4_000_000)]))
+    await model.stream(request(Array.from({ length: 30 }, () => image(10))))
+    // A document counts by its encoded bytes.
+    await model.stream(request([pdf]))
+
+    expect(outputs[0]).toBe(64_000)
+    expect(outputs[1]).toBeGreaterThan(37_000)
+    expect(outputs[1]).toBeLessThan(38_000)
+    expect(outputs[2]).toBe(16_384)
   })
 
   test("pins custom metadata and clamps execution to its resolved output ceiling", async () => {

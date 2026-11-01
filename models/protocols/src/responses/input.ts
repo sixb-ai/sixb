@@ -6,7 +6,7 @@ import {
   type ModelToolOutput,
   type ProviderData,
 } from "@sixb/core/models"
-import { object, string } from "../json"
+import { canonicalJsonStringify, object, string } from "../json"
 
 /** Serialize portable content and only the calling provider's ordered replay state. */
 export function responsesInput(messages: readonly ModelMessage[], providerId: string): JsonValue[] {
@@ -79,7 +79,7 @@ export function responsesInput(messages: readonly ModelMessage[], providerId: st
           type: "function_call",
           call_id: part.toolCallId,
           name: part.toolName,
-          arguments: JSON.stringify(part.input),
+          arguments: canonicalJsonStringify(part.input),
         })
       } else if (part.type === "tool-result" && part.providerExecuted) {
         flushAssistantText()
@@ -123,5 +123,5 @@ function providerItem(data: ProviderData | undefined, providerId: string): JsonO
 function toolOutputText(output: ModelToolOutput): string {
   return output.type === "text" || output.type === "error-text"
     ? output.value
-    : JSON.stringify(output.value)
+    : canonicalJsonStringify(output.value)
 }

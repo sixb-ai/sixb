@@ -453,7 +453,7 @@ describe("agent system prompt", () => {
     const child = renderPrompt({ mode: "subagent", skills: [] })
 
     expect(parent).toContain(
-      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait_agent's result, which lists where each file is: under .sixb/agent/children/<key>/ this turn, then in $SIXB_ATTACHMENTS, which keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes is in $SIXB_ARTIFACTS once wait_agent returns, unless it says otherwise."
+      "Hand a child the files it needs with spawn_agent's files, paths in your sandbox. What it writes to out/ comes back with wait_agent's result, which lists where each file is: under .sixb/agent/children/<key>/, where later turns find it too while $SIXB_ATTACHMENTS lists it: it keeps the conversation's latest 50 tool files, by their logicalPath <key>/<path>. What a child publishes is in $SIXB_ARTIFACTS once wait_agent returns, unless it says otherwise."
     )
     expect(child).toContain(
       "The files your parent handed you are where your task lists them. Write the files it needs back to out/: they come back to it when you finish, at most 50 files of 25.0MB, 100.0MB in all; past that, none does."
@@ -626,7 +626,9 @@ describe("agent system prompt", () => {
       "Read a file at /tmp/sixb-agent/run_1/ontology/<path in the tree>, for example /tmp/sixb-agent/run_1/ontology/billing/invoice.md."
     )
     expect(prompt).toContain("\n/tmp/sixb-agent/run_1/ontology/\n└── billing/")
-    expect(prompt).toContain("under /tmp/sixb-agent/run_1/children/<key>/ this turn")
+    expect(prompt).toContain(
+      "under /tmp/sixb-agent/run_1/children/<key>/, where later turns find it too"
+    )
     expect(prompt).toContain(
       "You have a memory from earlier conversations under /tmp/sixb-agent/run_1/memory/ ($SIXB_MEMORY_DIR):"
     )
