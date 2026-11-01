@@ -177,6 +177,10 @@ The latest turns stay as they are, and the agent can still read the whole conver
 [`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
 larger window.
 
+A tool result over 30 KB reaches the agent as a short preview, and the whole of it as a file in
+its sandbox, which it reads in pieces or searches; later turns find the file at the same path. A
+command keeps up to about 1 MB of each of its output streams.
+
 The same limit holds within a turn, before each model call, as tool results pile up:
 
 - right before the limit, the oldest tool results the agent has read are cleared in one batch
