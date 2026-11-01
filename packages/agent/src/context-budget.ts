@@ -1,4 +1,5 @@
 import { AgentDefinitionError } from "@sixb/core"
+import { AGENT_IMAGE_INPUT_TOKENS } from "@sixb/core/internal/agents"
 import {
   defineLanguageModel,
   type LanguageModel,
@@ -8,11 +9,6 @@ import {
 } from "@sixb/core/models"
 
 const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
-/**
- * The most an image the agent sends can count as input. Sixb sends none above 2,000 × 2,000 px,
- * which is 5,334 tokens at Anthropic's 750 px per token; other providers count it as less.
- */
-const IMAGE_INPUT_TOKENS = 6_000
 
 export interface AgentContextBudget {
   readonly windowTokens: number
@@ -104,7 +100,7 @@ function estimateRequestInputTokens(request: LanguageModelRequest): number {
       content: message.content.map((part) => {
         if (part.type !== "file" || !part.mediaType.startsWith("image/")) return part
 
-        imageTokens += IMAGE_INPUT_TOKENS
+        imageTokens += AGENT_IMAGE_INPUT_TOKENS
         return { ...part, data: "image" }
       }),
     }

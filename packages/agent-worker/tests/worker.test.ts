@@ -13556,7 +13556,7 @@ describe("a later turn's request", () => {
   //   and read outputs, reordered by the jsonb double, print other bytes;
   // - drop the stored modelOutput branch from toModelMessages' toolResultOutput: view_file,
   //   create_image, publish_artifact and wait_agent replay another text;
-  // - return no message from replayToolFileMessages: the images after a step vanish;
+  // - return no images from replayToolFiles: the images after a step vanish;
   // - inline only the newest user message's files in fileWorkItems: the attachments turn into
   //   metadata on the next turn.
   test("starts with every byte the turn before it sent last, on a storage that reorders keys", async () => {

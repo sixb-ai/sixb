@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  AGENT_IMAGE_INPUT_TOKENS,
   type AgentThreadModelContextMessage,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -92,6 +93,55 @@ describe("agent context token estimation", () => {
 
     expect(one).toBeGreaterThan(12_800)
     expect(files(6)).toBeGreaterThanOrEqual(6 * one - 6)
+  })
+
+  // Removal proofs: drop toolImageTokens from estimateAgentContextMessagesTokens, and 30 viewed
+  // screenshots count as their file references alone; drop the image limit, and 150 count beyond
+  // the 100 a request inlines.
+  test("counts each image a request inlines, its tools' included, up to the request's limit", () => {
+    const image = (index: number) => ({
+      blobId: `blob_${index}`,
+      digest: `sha256:${index}`,
+      sizeBytes: 300_000,
+      fileName: `shot-${index}.png`,
+      mediaType: "image/png",
+    })
+    const viewed = (seq: number, count: number): AgentMessageRecord => ({
+      ...message(seq, "assistant", ""),
+      parts: [
+        { type: "step-start" },
+        ...Array.from({ length: count }, (_, index) => ({
+          type: "tool-call" as const,
+          toolCallId: `view-${seq}-${index}`,
+          toolName: "view_file",
+          input: {},
+          state: "output-available" as const,
+          output: {
+            kind: "agentToolResult",
+            // The same image twice in one step reaches the model once.
+            content: [
+              { type: "file", fileRef: image(seq * 1_000 + index) },
+              { type: "file", fileRef: image(seq * 1_000 + index) },
+            ],
+          },
+          modelOutput: { type: "text" as const, value: "viewed" },
+        })),
+      ],
+    })
+    const bare = (seq: number, count: number): AgentMessageRecord => ({
+      ...viewed(seq, count),
+      parts: viewed(seq, count).parts.map((part) =>
+        part.type === "tool-call" ? { ...part, output: "viewed" } : part
+      ),
+    })
+    const extra = (messages: AgentMessageRecord[], without: AgentMessageRecord[]) =>
+      estimateAgentContextMessagesTokens(messages).tokens -
+      estimateAgentContextMessagesTokens(without).tokens
+
+    expect(extra([viewed(2, 30)], [bare(2, 30)])).toBe(30 * AGENT_IMAGE_INPUT_TOKENS)
+    expect(extra([viewed(2, 75), viewed(4, 75)], [bare(2, 75), bare(4, 75)])).toBe(
+      100 * AGENT_IMAGE_INPUT_TOKENS
+    )
   })
 
   // Removal proof: count stableJsonStringify(part.output) for every call; the publish summary the

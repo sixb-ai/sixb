@@ -107,15 +107,15 @@ describe("agent context budget resolution", () => {
       mediaType: "application/pdf",
     }
 
-    // A 4 MB image counts as 6,000 tokens, not 2,000,000; 30 of them as 180,000.
+    // A 4 MB image counts as 5,400 tokens, not 2,000,000; 30 of them as 162,000.
     await model.stream(request([image(4_000_000)]))
     await model.stream(request(Array.from({ length: 30 }, () => image(10))))
     // A document counts by its encoded bytes.
     await model.stream(request([pdf]))
 
     expect(outputs[0]).toBe(64_000)
-    expect(outputs[1]).toBeGreaterThan(19_000)
-    expect(outputs[1]).toBeLessThan(20_000)
+    expect(outputs[1]).toBeGreaterThan(37_000)
+    expect(outputs[1]).toBeLessThan(38_000)
     expect(outputs[2]).toBe(16_384)
   })
 

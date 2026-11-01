@@ -2,9 +2,13 @@ import { describe, expect, test } from "bun:test"
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
 import type { LanguageModel, ModelMessage } from "@sixb/core/models"
+import type { AgentMessageRecord } from "@sixb/core/storage"
+import type { PendingAttachmentImage, PreparedAgentAttachmentContext } from "../src/attachments"
+import { InlineImageBudget, projectInOrder } from "../src/inline-images"
 import {
   AgentToolResultMediaBridge,
-  replayToolFileMessages,
+  allocateInlineImages,
+  replayToolFiles,
   toolFilesStepKey,
 } from "../src/tools/result-media"
 import { WorkerTestModel } from "./worker-model-fixture"
@@ -18,6 +22,7 @@ describe("agent tool-result media bridge", () => {
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
       suppliesToolFiles: () => true,
+      inlineImages: new InlineImageBudget(),
       sandboxPathForFileRef: () => "/workspace/.sixb/agent/tool-files/generated.png",
       projectFile: async () => ({
         promptText: "projected",
@@ -32,7 +37,6 @@ describe("agent tool-result media bridge", () => {
     const projected = await bridge.toModelOutput({
       output: richImageResult(fileRef),
       signal,
-      toolCallId: "image-call-1",
     })
 
     expect(projected.type).toBe("text")
@@ -75,6 +79,7 @@ describe("agent tool-result media bridge", () => {
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
       suppliesToolFiles: () => true,
+      inlineImages: new InlineImageBudget(),
       sandboxPathForFileRef: () => "/workspace/generated.png",
       projectFile: async () => {
         projections += 1
@@ -84,7 +89,6 @@ describe("agent tool-result media bridge", () => {
     const projected = await bridge.toModelOutput({
       output: richImageResult(fileRef),
       signal: new AbortController().signal,
-      toolCallId: "image-call-2",
     })
 
     await expect(
@@ -106,6 +110,7 @@ describe("agent tool-result media bridge", () => {
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
       suppliesToolFiles: () => true,
+      inlineImages: new InlineImageBudget(),
       projectFile: async () => {
         projections += 1
         return {
@@ -145,6 +150,7 @@ describe("agent tool-result media bridge", () => {
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
       suppliesToolFiles: (toolName) => toolName !== "wait_agent",
+      inlineImages: new InlineImageBudget(),
       projectFile: async ({ fileRef }) => ({
         promptText: "projected",
         modelFileData: {
@@ -172,7 +178,7 @@ describe("agent tool-result media bridge", () => {
     ])
   })
 
-  // Removal proof: return an empty map from replayToolFileMessages; the stored step loses the
+  // Removal proof: return an empty map from replayToolFiles; the stored step loses the
   // images that followed it live, and the request after it shifts.
   test("derives the same message again from the stored step", async () => {
     const blobStorage = new InMemoryBlobStorage()
@@ -189,7 +195,10 @@ describe("agent tool-result media bridge", () => {
         },
       }),
     }
-    const bridge = new AgentToolResultMediaBridge(input)
+    const bridge = new AgentToolResultMediaBridge({
+      ...input,
+      inlineImages: new InlineImageBudget(),
+    })
     const output = richImageResult(fileRef)
     const live = await prepareBridge(
       bridge,
@@ -197,41 +206,23 @@ describe("agent tool-result media bridge", () => {
       stepWith([{ toolCallId: "make-1", toolName: "make", output }])
     )
 
-    const replayed = await replayToolFileMessages({
+    const messages = [
+      storedStep("assistant-1", [{ toolCallId: "make-1", toolName: "make", output }]),
+    ]
+    const replayed = await allocateInlineImages({
       ...input,
-      supportsImages: true,
+      messages,
+      attachments: attachmentsOf([]),
+      toolFiles: replayToolFiles({ ...input, supportsImages: true, messages }),
+      budget: new InlineImageBudget(),
       signal: new AbortController().signal,
-      messages: [
-        {
-          id: "assistant-1",
-          projectId: "project",
-          threadId: "thread",
-          runId: "run",
-          role: "assistant",
-          seq: 2,
-          contentVersion: 2,
-          createdAt: new Date(0),
-          parts: [
-            { type: "step-start" },
-            { type: "text", text: "Making it." },
-            {
-              type: "tool-call",
-              toolCallId: "make-1",
-              toolName: "make",
-              input: {},
-              state: "output-available",
-              output,
-            },
-            { type: "step-start" },
-            { type: "text", text: "Done." },
-          ],
-        },
-      ],
     })
 
     const liveMessage = live?.messages?.at(-1)
     if (!liveMessage) throw new Error("Expected the step's images after it.")
-    expect([...replayed.entries()]).toEqual([[toolFilesStepKey("assistant-1", 2), liveMessage]])
+    expect([...(replayed.toolFilesByStep ?? new Map()).entries()]).toEqual([
+      [toolFilesStepKey("assistant-1", 2), liveMessage],
+    ])
   })
 
   // Reproduce the first row by dropping readBlobBytes's abort listener, and the second by dropping
@@ -287,7 +278,11 @@ describe("agent tool-result media bridge", () => {
         return stalled
       },
     }
-    const bridge = new AgentToolResultMediaBridge({ blobStorage, suppliesToolFiles: () => true })
+    const bridge = new AgentToolResultMediaBridge({
+      blobStorage,
+      suppliesToolFiles: () => true,
+      inlineImages: new InlineImageBudget(),
+    })
 
     const projection = bridge.prepareStep({
       stepIndex: 1,
@@ -306,6 +301,253 @@ describe("agent tool-result media bridge", () => {
     expect(streamCancelled).toBe(true)
   })
 })
+
+describe("a request's inline image budget", () => {
+  // Removal proofs: drop the byte or the image limit from InlineImageBudget.take, or let a refusal
+  // leave it open; an image past the limit goes in, or a later smaller one does.
+  test("holds 16 MiB of encoded images and 100 images, and closes at the first that does not fit", () => {
+    const budget = new InlineImageBudget()
+
+    expect(budget.take(dataUrl(10 * MiB))).toBe(true)
+    expect(budget.take(dataUrl(7 * MiB))).toBe(false)
+    expect(budget.closed).toBe(true)
+    expect(budget.take(dataUrl(10))).toBe(false)
+
+    const count = new InlineImageBudget()
+    const taken = Array.from({ length: 101 }, () => count.take(dataUrl(10)))
+    expect(taken.filter(Boolean)).toHaveLength(100)
+  })
+
+  // Removal proofs: skip budget.take in decideAttachment, and the attachments past the budget go
+  // inline anyway; skip it in decideToolFile, and the live step inlines an image past the budget.
+  test("keeps each image's decision from its own turn on, live and on replay", async () => {
+    const blobStorage = new InMemoryBlobStorage()
+    const shot = await storeImage(blobStorage, "shot.png")
+    const chart = await storeImage(blobStorage, "chart.png", Uint8Array.of(1, 2, 3))
+    const sizes: Record<string, number> = {
+      "shot.png": Math.floor(0.5 * MiB),
+      "chart.png": Math.floor(0.6 * MiB),
+    }
+    const input = {
+      blobStorage,
+      suppliesToolFiles: () => true,
+      projectFile: async ({ fileRef }: { readonly fileRef: FileRef }) => ({
+        promptText: "projected",
+        modelFileData: {
+          data: dataUrl(sizes[fileRef.fileName ?? ""] ?? 0),
+          mediaType: "image/png",
+          ...(fileRef.fileName === undefined ? {} : { filename: fileRef.fileName }),
+        },
+      }),
+    }
+    const output = (fileRef: FileRef) => richImageResult(fileRef)
+    const step = [
+      { toolCallId: "shot", output: output(shot) },
+      { toolCallId: "chart", output: output(chart) },
+    ]
+    const thread = [
+      userImages("user-1", 5 * MiB, 5 * MiB, 5 * MiB),
+      storedStep("assistant-2", step),
+      userImages("user-3", Math.floor(0.4 * MiB)),
+      record("assistant-4", "assistant", [{ type: "text", text: "Seen." }]),
+      userImages("user-5", 1 * MiB),
+    ]
+    const turn = async (messages: readonly AgentMessageRecord[]) => {
+      const budget = new InlineImageBudget()
+      const context = await allocateInlineImages({
+        ...input,
+        messages,
+        attachments: attachmentsOf(messages),
+        toolFiles: replayToolFiles({ ...input, supportsImages: true, messages }),
+        budget,
+        signal: new AbortController().signal,
+      })
+      return { budget, context }
+    }
+
+    // Live: the turn answering user-1 runs the step on what the attachments left.
+    const first = await turn(thread.slice(0, 1))
+    const bridge = new AgentToolResultMediaBridge({ ...input, inlineImages: first.budget })
+    const live = (await prepareBridge(bridge, imageModel(), stepWith(step)))?.messages?.at(-1)
+    if (live?.role !== "user") throw new Error("Expected the step's images after it.")
+    expect(live.content.map((part) => part.type)).toEqual(["text", "file", "text"])
+    expect(JSON.stringify(live.content.at(-1))).toContain("Images not inlined: chart.png")
+
+    // Every later turn takes the same decisions, and decides a new image once, when it comes.
+    const later = await turn(thread.slice(0, 3))
+    const last = await turn(thread)
+    for (const { context } of [later, last]) {
+      expect(context.toolFilesByStep?.get(toolFilesStepKey("assistant-2", 2))).toEqual(live)
+      expect([...context.modelFileDataByPartKey.keys()]).toEqual([
+        "user-1:0",
+        "user-1:1",
+        "user-1:2",
+      ])
+      // The budget closed at the chart: a smaller image after it stays out too.
+      expect(context.promptTextByPartKey.get("user-3:0")).toBe("user-3:0 budget")
+    }
+    expect(last.context.promptTextByPartKey.get("user-5:0")).toBe("user-5:0 budget")
+  })
+
+  // Removal proofs: project every image before deciding any (drop the closed check in
+  // projectInOrder), and the images past the budget are projected too; await each projection
+  // before starting the next, and only one runs at a time.
+  test("projects a few images at a time, decides them in order, and none once it closes", async () => {
+    const settled: string[] = []
+    let running = 0
+    let mostRunning = 0
+    const projected: number[] = []
+    const items = Array.from({ length: 20 }, (_, index) => index)
+    const budget = new InlineImageBudget()
+
+    await projectInOrder({
+      items,
+      budget,
+      project: async (index) => {
+        projected.push(index)
+        running += 1
+        mostRunning = Math.max(mostRunning, running)
+        // Later images finish first: decisions still follow the items' order.
+        for (let tick = 0; tick <= (20 - index) % 4; tick += 1) await Promise.resolve()
+        running -= 1
+        return dataUrl(index === 5 ? 17 * MiB : 1_000)
+      },
+      decide: (index, data) => {
+        settled.push(`${index}:${data === undefined ? "skipped" : budget.take(data)}`)
+      },
+    })
+
+    expect(settled.slice(0, 6)).toEqual([
+      "0:true",
+      "1:true",
+      "2:true",
+      "3:true",
+      "4:true",
+      "5:false",
+    ])
+    expect(settled.slice(6)).toEqual(items.slice(6).map((index) => `${index}:skipped`))
+    expect(mostRunning).toBe(4)
+    expect(Math.max(...projected)).toBeLessThan(9)
+  })
+})
+
+const MiB = 1024 * 1024
+
+/** A data URL of exactly `bytes` characters. */
+function dataUrl(bytes: number): URL {
+  const prefix = "data:image/png;base64,"
+  return new URL(`${prefix}${"A".repeat(Math.max(0, bytes - prefix.length))}`)
+}
+
+function record(
+  id: string,
+  role: AgentMessageRecord["role"],
+  parts: AgentMessageRecord["parts"]
+): AgentMessageRecord {
+  return {
+    id,
+    projectId: "project",
+    threadId: "thread",
+    runId: role === "assistant" ? `run-${id}` : null,
+    role,
+    seq: Number(id.replace(/\D/g, "")),
+    contentVersion: 2,
+    createdAt: new Date(0),
+    parts,
+  }
+}
+
+/** A user message with one image per size, each encoded to a data URL of that many bytes. */
+function userImages(id: string, ...sizes: number[]): AgentMessageRecord {
+  return record(
+    id,
+    "user",
+    sizes.map((size, index) => ({
+      type: "file" as const,
+      fileRef: {
+        blobId: `blob_${id}_${index}`,
+        digest: `sha256:${id}${index}`,
+        sizeBytes: size,
+        fileName: `${id}-${index}.png`,
+        mediaType: "image/png",
+      },
+    }))
+  )
+}
+
+/**
+ * The attachments a thread's user images project to, each inline at its size when projected. Each
+ * reads as `<key> <outcome>`.
+ */
+function attachmentsOf(messages: readonly AgentMessageRecord[]): PreparedAgentAttachmentContext {
+  const entries = messages.flatMap((message) =>
+    message.parts.flatMap((part, partIndex) =>
+      part.type === "file" && message.role === "user"
+        ? [
+            {
+              key: `${message.id}:${partIndex}`,
+              messageId: message.id,
+              partIndex,
+              fileRef: part.fileRef,
+              fileName: part.fileRef.fileName ?? "image.png",
+              mediaType: "image/png",
+              sizeBytes: part.fileRef.sizeBytes,
+              contentPath: `/parts/${partIndex}/fileRef`,
+              contentUrl: `http://sixb.test/${message.id}/${partIndex}`,
+              inlineDisposition: "metadata-only" as const,
+              notes: [],
+            },
+          ]
+        : []
+    )
+  )
+  const pendingImages = new Map(
+    entries.map((entry): [string, PendingAttachmentImage] => [
+      entry.key,
+      {
+        project: async () => ({
+          kind: "inline",
+          data: { data: dataUrl(entry.sizeBytes), mediaType: "image/png" },
+          notes: [],
+        }),
+        settle: (outcome) => ({
+          entry,
+          promptText: `${entry.key} ${outcome.kind}`,
+          ...(outcome.kind === "inline" ? { modelFileData: outcome.data } : {}),
+        }),
+      },
+    ])
+  )
+  return {
+    entries,
+    promptTextByPartKey: new Map(entries.map((entry) => [entry.key, `${entry.key} pending`])),
+    modelFileDataByPartKey: new Map(),
+    sandboxFiles: [],
+    manifestJson: JSON.stringify({ projectId: "project", attachments: [] }),
+    pendingImages,
+  }
+}
+
+/** A stored assistant message holding one step that ran these calls. */
+function storedStep(
+  id: string,
+  results: readonly { toolCallId: string; toolName?: string; output: JsonValue }[]
+): AgentMessageRecord {
+  return record(id, "assistant", [
+    { type: "step-start" },
+    { type: "text", text: "Making it." },
+    ...results.map(({ toolCallId, toolName = "make", output }) => ({
+      type: "tool-call" as const,
+      toolCallId,
+      toolName,
+      input: {},
+      state: "output-available" as const,
+      output,
+    })),
+    { type: "step-start" },
+    { type: "text", text: "Done." },
+  ])
+}
 
 function richImageResult(fileRef: FileRef): JsonValue {
   return {
