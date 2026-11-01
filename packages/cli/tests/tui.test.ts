@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentRunStreamEvent } from "@sixb/client"
-import { duration, friendlyPath, runFailureText, shortPath, toolLine } from "../src/tui/format"
+import {
+  contextStatus,
+  duration,
+  fittedContextText,
+  friendlyPath,
+  runFailureText,
+  shortPath,
+  toolLine,
+} from "../src/tui/format"
 import { liveRun, type Part, reduceLive, type StoredMessage, shownMessage } from "../src/tui/parts"
 import { type LanguageModel, messageSelection, modelLabel } from "../src/tui/settings"
 import { pickSlash, slashMatches } from "../src/tui/slash"
@@ -107,6 +115,26 @@ describe("a live run", () => {
       { kind: "text", text: "Reading." },
       { kind: "text", text: "The answer." },
     ])
+  })
+
+  // Reproduce: leave `contextFull` false when a compaction starts; a turn the provider refused
+  // reads "Condensing earlier turns" like any other.
+  test("tells a compaction after a refused request from one at the target", () => {
+    const full = reduceLive(
+      liveRun(RUN),
+      event({ type: "agent.compaction.started", reason: "overflow", estimatedInputTokensBefore: 1 })
+    )
+    expect(full).toMatchObject({ compacting: true, contextFull: true })
+
+    const threshold = reduceLive(
+      liveRun(RUN),
+      event({
+        type: "agent.compaction.started",
+        reason: "threshold",
+        estimatedInputTokensBefore: 1,
+      })
+    )
+    expect(threshold).toMatchObject({ compacting: true, contextFull: false })
   })
 
   test("follows a call from its input to its output", () => {
@@ -246,6 +274,74 @@ describe("slash commands", () => {
     expect(picked("what does /model do?")).toBeUndefined()
     expect(picked("/x")).toBeUndefined()
     expect(slashMatches(commands, "/m").map((command) => command.name)).toEqual(["model"])
+  })
+})
+
+describe("a stored answer", () => {
+  // Reproduce: drop `compaction` from shownMessage; the transcript never says it was condensed.
+  test("says its run condensed the conversation, and when it was because the context was full", () => {
+    const answer = (reason?: "threshold" | "overflow"): StoredMessage => ({
+      id: "msg_answer",
+      projectId: "p",
+      threadId: "thr",
+      runId: RUN,
+      role: "assistant",
+      seq: 4,
+      parts: [{ type: "text", text: "Done." }],
+      annotations: [],
+      ...(reason
+        ? {
+            compaction: {
+              checkpointId: "ctx",
+              reason,
+              summary: "Earlier.",
+              createdAt: "2026-11-01T09:00:00.000Z",
+            },
+          }
+        : {}),
+      contentVersion: 1,
+      createdAt: "2026-11-01T09:00:01.000Z",
+    })
+
+    expect(shownMessage(answer("threshold"))?.compaction).toEqual({ contextFull: false })
+    expect(shownMessage(answer("overflow"))?.compaction).toEqual({ contextFull: true })
+    expect(shownMessage(answer())).not.toHaveProperty("compaction")
+  })
+})
+
+describe("the context in the status line", () => {
+  const haiku = {
+    target: { tokens: 100_000 },
+    usedTokens: 38_200,
+    lastCall: { inputTokens: 37_000, cacheReadInputTokens: 34_040 },
+  }
+
+  // Reproduce: color past a price tier too; Sonnet 4.5 at 23% of its window reads red.
+  test("reads used against the target with the cache share, and colors only by the target", () => {
+    expect(contextStatus(haiku)).toEqual({
+      text: "ctx 38k/100k · 92% cached",
+      short: "ctx 38k/100k",
+      tone: "quiet",
+    })
+    expect(contextStatus({ ...haiku, usedTokens: 85_000 })?.tone).toBe("near")
+    expect(contextStatus({ ...haiku, usedTokens: 104_000 })?.tone).toBe("over")
+    expect(contextStatus({ target: { tokens: 983_616 }, usedTokens: 230_000 })).toMatchObject({
+      text: "ctx 230k/984k",
+      tone: "quiet",
+    })
+  })
+
+  test("shows nothing before the first answer", () => {
+    expect(contextStatus({ target: { tokens: 100_000 } })).toBeUndefined()
+  })
+
+  // Reproduce: always return the whole text; a narrow terminal wraps the status line.
+  test("drops the cache share, then itself, where the status line has no room", () => {
+    const context = contextStatus(haiku)!
+    // "Cloud · Claude Haiku 5.5 · Ask first" takes 36 columns.
+    expect(fittedContextText(context, 36, 100)).toBe("ctx 38k/100k · 92% cached")
+    expect(fittedContextText(context, 36, 60)).toBe("ctx 38k/100k")
+    expect(fittedContextText(context, 36, 45)).toBeUndefined()
   })
 })
 
