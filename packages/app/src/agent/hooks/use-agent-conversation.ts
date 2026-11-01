@@ -6,6 +6,8 @@ import {
   getAgentOptions,
   getAgentPreferencesOptions,
   getAgentPreferencesQueryKey,
+  getAgentThreadContextOptions,
+  getAgentThreadContextQueryKey,
   getAgentThreadOptions,
   getAgentThreadQueryKey,
   listAgentApprovalsQueryKey,
@@ -138,6 +140,7 @@ export type ConversationComposerProps = Pick<
   | "onApprovalModeChange"
   | "awaitingApproval"
   | "dictation"
+  | "contextMeter"
 >
 
 export type AgentConversation = ReturnType<typeof useAgentConversation>
@@ -265,6 +268,23 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
   const latestRun = runs[0] ?? null
 
+  // Measured against the model the next message goes to; on Auto, the latest turn's.
+  const meteredModel = modelSelection.auto ? undefined : selectedModel
+  const contextQuery = useQuery({
+    ...getAgentThreadContextOptions({
+      path: { threadId: threadId ?? "" },
+      query: meteredModel ? { provider: meteredModel.provider, modelId: meteredModel.modelId } : {},
+    }),
+    enabled: threadId !== null,
+    // Turns and compactions invalidate it; nothing else changes it.
+    staleTime: 5 * 60_000,
+    // Another model's limits keep the meter in place until they arrive; another thread's never do.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[0].path.threadId === threadId ? previous : undefined,
+    // A meter that cannot be read is left out: it never stands in the way of the conversation.
+    retry: false,
+  })
+
   const approvalsQuery = useQuery({
     ...listAgentThreadApprovalsOptions({
       path: { threadId: threadId ?? "" },
@@ -329,6 +349,17 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       ? selectActiveRunId({ pendingRun, threadActiveRunId: thread?.activeRunId ?? null, latestRun })
       : null
   const { live, run: streamRun, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  // A compaction that ended changed what the conversation weighs: measure it again.
+  const wasCompactingRef = useRef(false)
+  useEffect(() => {
+    const ended = wasCompactingRef.current && !live.compacting
+    wasCompactingRef.current = live.compacting
+    if (!ended || threadId === null) return
+
+    void queryClient.invalidateQueries({
+      queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
+    })
+  }, [live.compacting, threadId, queryClient])
   const finalizedMessageInDurable =
     live.finalizedMessageId !== null &&
     savedMessages.some((message) => message.id === live.finalizedMessageId)
@@ -590,6 +621,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
       queryClient.invalidateQueries({
         queryKey: listAgentThreadApprovalsQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: getAgentThreadContextQueryKey({ path: { threadId } }),
       }),
     ])
 
@@ -976,6 +1010,11 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     onApprovalModeChange: setApprovalMode,
     awaitingApproval,
     dictation: projectDictation(modelsQuery.data),
+    contextMeter: {
+      context: threadId !== null ? contextQuery.data : undefined,
+      modelName: meteredModelName(models, contextQuery.data?.model),
+      condensing: live.compacting,
+    },
   }
 
   const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
@@ -1063,6 +1102,16 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
 
 /** Why a turn did not start or stop, or the mode did not change. */
 type TurnFailure = AgentConversationSendError["code"]
+
+/** The picker's name for the model a conversation's context is measured against. */
+function meteredModelName(
+  models: readonly LanguageModel[],
+  ref: { readonly provider: string; readonly modelId: string } | undefined
+): string | undefined {
+  if (!ref) return undefined
+  return models.find((model) => model.provider === ref.provider && model.modelId === ref.modelId)
+    ?.name
+}
 
 /** Why a decision did not go through. Once the call ran, the decision stands and never throws. */
 function decisionFailure(error: unknown): AgentApprovalDecisionFailure {
