@@ -18,7 +18,7 @@ export interface AgentThreadRequestEstimateInput {
   /** The history as the model reads it: the checkpoint's summary, then the retained messages. */
   readonly modelMessages: readonly AgentThreadModelContextMessage[]
   readonly model: { readonly providerId: string; readonly modelId: string }
-  /** The model's tokenizer family's bytes per token, which the anchor calibrates. */
+  /** The bytes per token the run starts from, which the anchor calibrates. */
   readonly bytesPerToken: number
   /** What the request carries besides the history. */
   readonly systemPrompt: string
