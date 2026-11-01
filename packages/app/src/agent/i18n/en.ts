@@ -213,6 +213,9 @@ export const en = {
     condensed: "Condensed conversation",
     condensing: "Condensing earlier conversation…",
     condensingLabel: "Agent is condensing earlier conversation",
+    /** The provider refused a request as too long: the turn condensed the conversation, then went on. */
+    condensedFull: "Context was full — condensed and continued",
+    condensingFull: "Context is full — condensing to continue…",
     working: "Agent is working",
     thinking: "Thinking",
     takingLonger: "Taking a little longer",

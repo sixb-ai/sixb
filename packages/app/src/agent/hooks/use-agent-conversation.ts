@@ -849,6 +849,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     continuing: continuingThreadId !== null && continuingThreadId === threadId,
     waitingLonger,
     compacting: live.compacting,
+    contextFull: live.contextFull,
     reconnecting: live.active && reconnecting,
     answeringFor: answeringFor
       ? {
