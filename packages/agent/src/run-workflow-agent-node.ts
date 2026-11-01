@@ -1,5 +1,5 @@
 import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
-import { runModelLoop } from "@sixb/core/internal/agents"
+import { type AgentContextBudget, runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -16,7 +16,6 @@ import {
 } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { renderWorkflowOutputFinalizerPrompt, sentSettings, withCurrentTime } from "./agent-prompt"
-import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"

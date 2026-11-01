@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "@sixb/core/internal/agents"
+import { resolveAgentContextBudget } from "@sixb/core/internal/agents"
 import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
@@ -10,7 +10,8 @@ import {
   type ModelFilePart,
   type ModelTextPart,
 } from "@sixb/core/models"
-import { prepareAgentModel, resolveAgentContextBudget } from "../src/context-budget"
+import { AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN } from "../../core/src/agents/context-token-rate"
+import { prepareAgentModel } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 function selection(limits: Partial<LanguageModelDefinition> = {}, maxOutputTokens?: number) {

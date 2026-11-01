@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import {
-  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   agentContextSizeTokens,
   calibrateAgentContextBytesPerToken,
   estimateAgentContextRequestTokens,
-  measureAgentContextRequest,
   measureAgentContextTokenRate,
   measureModelRequest,
   readAgentContextTokenRates,
 } from "../src/agents"
+import { measureAgentContextRequest } from "../src/agents/context-compaction"
 import {
+  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   type AgentContextTokenRateSample,
   learnedAgentContextBytesPerToken,
   recordAgentContextTokenRate,

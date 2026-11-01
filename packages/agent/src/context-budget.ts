@@ -20,14 +20,6 @@ import {
   type LanguageModelStreamEvent,
 } from "@sixb/core/models"
 
-export type { AgentContextBudget } from "@sixb/core/internal/agents"
-export {
-  AGENT_CONTEXT_COMPACTED_SHARE,
-  AGENT_IDLE_COMPACTION_TOKENS,
-  contextSummaryOutputTokens,
-  resolveAgentContextBudget,
-} from "@sixb/core/internal/agents"
-
 /**
  * Derive the model's input and output budgets from its definition, and cap each call's output to
  * them. The model comes pinned: whoever hands it over resolved it once for the run.
@@ -55,7 +47,9 @@ export function prepareAgentModel(selection: AgentModelSelection): {
     typeof selection.reasoning === "object" &&
     selection.reasoning.budgetTokens >= maxOutputTokens
   ) {
-    throw invalidBudget("output allowance must exceed the reasoning token budget.")
+    throw new AgentDefinitionError(
+      "[SixbAgent] Agent context output allowance must exceed the reasoning token budget."
+    )
   }
 
   // The run's rate, from the project's measurements and, newest first, its own calls'.
@@ -179,8 +173,4 @@ async function* withCountedInput(
 
     yield event
   }
-}
-
-function invalidBudget(message: string): AgentDefinitionError {
-  return new AgentDefinitionError(`[SixbAgent] Agent context ${message}`)
 }

@@ -97,7 +97,6 @@ export {
   agentContextSizeTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
-  measureAgentContextRequest,
   measureAgentModelRequest,
   measureModelRequest,
   selectAgentContextCompactionBoundary,
@@ -109,7 +108,6 @@ export { estimateAgentThreadRequest } from "./context-request"
 export { resolveAgentContextParts } from "./context-resolution"
 export type { AgentContextTokenRateSample } from "./context-token-rate"
 export {
-  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   calibrateAgentContextBytesPerToken,
   learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
@@ -293,7 +291,6 @@ export type {
   AgentTurnContext,
   AgentTurnHistory,
 } from "./run-turn"
-export { matchingAgentUsageAnchor } from "./run-turn"
 export type {
   AgentDefinitions,
   AgentDefinitionsInput,
