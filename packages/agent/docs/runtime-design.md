@@ -127,8 +127,10 @@ its window less the output reserve (see `context-budget.ts`):
   the TUI show without a retry.
 - **An idle thread compacts below the limit** when its last model call is older than the cache its
   calls ask for (`modelCacheLifetimeMs`: an hour for a conversation) and it weighs at least
-  `AGENT_IDLE_COMPACTION_TOKENS`: the next call rewrites the cache anyway. One that compaction
-  cannot bring under that size, or whose compaction fails, goes on as it is.
+  `AGENT_IDLE_COMPACTION_TOKENS`, when compacting brings it under that size
+  (`shouldCompactIdleContext`): the next call rewrites the cache anyway. Its summary is sent without
+  caching, as the next request starts from the summary. One whose compaction fails goes on as it
+  is.
 - **The summary continues the cached request.** The environment builds it as the turn would
   (`BuildConversationRequest`): the previous turn's request, with the same system prompt, tools,
   reasoning and cache intent, then one `<sixb_summary_request>` message. Changing thinking, effort

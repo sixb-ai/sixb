@@ -4392,7 +4392,7 @@ describe("AgentWorker", () => {
         run,
         checkpoint: await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId }),
         records: await listRunStreamRecords(sixb.broker, run.id),
-        summaries: requests.filter(isSummaryRequest).length,
+        summaries: requests.filter(isSummaryRequest),
       }
     } finally {
       setSystemTime()
@@ -4438,12 +4438,16 @@ describe("AgentWorker", () => {
     const { run, checkpoint, summaries } = await idleConversationTurn(input)
 
     expect(run.status).toBe("succeeded")
-    expect(summaries).toBe(input.compacts ? 1 : 0)
+    expect(summaries).toHaveLength(input.compacts ? 1 : 0)
     if (!input.compacts) {
       expect(checkpoint).toBeNull()
       return
     }
 
+    // Its cache has gone cold: the summary reads the history without writing it to a cache the
+    // next request, which starts from the summary, would never read.
+    // Reproduce: send the summary with the conversation's caching whatever the path, in summarize.
+    expect(summaries[0]?.caching).toBe("off")
     expect(checkpoint?.reason).toBe("threshold")
     expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThanOrEqual(200_000)
     expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(383_616)
@@ -4464,7 +4468,7 @@ describe("AgentWorker", () => {
       })
 
       expect(run.status).toBe("succeeded")
-      expect(summaries).toBe(1)
+      expect(summaries).toHaveLength(1)
       expect(checkpoint).toBeNull()
       expect(
         records.find((record) => record.name === "agent.compaction.failed")?.payload
