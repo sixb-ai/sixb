@@ -156,6 +156,7 @@ export type {
   PausableModelLoopResult,
   PrepareModelStepInput,
   PrepareModelStepResult,
+  RecoverModelStepInput,
   RunModelLoopInput,
 } from "./model-loop"
 export { runModelLoop } from "./model-loop"
