@@ -57,6 +57,7 @@ function translateAgentExecutionError(
     isSixbError(error) &&
     (error.code === "internal.unexpected" ||
       error.code === "agent.execution_failed" ||
+      error.code === "agent.step_limit_reached" ||
       error.code === "ai.usage_limit_exceeded" ||
       error.code === "ai.usage_limit_unavailable")
   ) {

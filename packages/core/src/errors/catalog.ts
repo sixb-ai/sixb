@@ -48,6 +48,11 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Agent execution failed.",
     retryable: false,
   },
+  // Not retryable: the same task runs into the same limit. Whoever started the run decides.
+  "agent.step_limit_reached": {
+    publicMessage: "The agent reached its step limit before finishing.",
+    retryable: false,
+  },
   "ai.usage_limit_exceeded": {
     publicMessage: "AI usage limit exceeded.",
     retryable: false,

@@ -78,6 +78,7 @@ export async function runSubagent(input: {
     messages: [{ role: "system", content: context.systemPrompt }, ...messages],
     tools: context.tools,
     ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
+    ...(plan.maxSteps === undefined ? {} : { maxSteps: plan.maxSteps }),
     // A message from the parent comes after the step that was running when it arrived, and stays
     // in the history of every later step.
     prepareStep: async (step) => {
@@ -140,6 +141,21 @@ async function settleSubagent(
   }
   if (generation.status === "paused" || asked) {
     return finishSubagent({ ...input, finishReason: "awaiting_answer" })
+  }
+
+  // Nobody watches a child: its limit ends it, and its parent decides what next. What it wrote
+  // stays in its thread, and its parent's wait reads the last of it.
+  if (generation.stepLimitReached) {
+    const steps = generation.steps.length
+    const remedy = "Spawn it again with a narrower task, or do the rest yourself."
+    throw withFailureMessage(
+      createSixbError(
+        "agent.step_limit_reached",
+        `[SixbAgent] Subagent run '${run.id}' stopped after ${steps} steps before finishing its task. ${remedy}`,
+        { details: { parentRunId: run.parentRunId, runId: run.id } }
+      ),
+      `The subagent stopped after ${steps} steps before finishing its task. ${remedy}`
+    )
   }
 
   // The parent would read a cut-short answer as complete: it gets the cause instead.

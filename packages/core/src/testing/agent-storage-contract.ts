@@ -1651,6 +1651,29 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("keeps the step limit a child was spawned with, and rejects one that is no limit", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const spec = { ...subagentInput("parent_token").spec, maxSteps: 20 }
+
+        await createSubagent(storage, fixture, { spec })
+        expect((await storage.runs.getById({ projectId, id: "child_1" }))?.spec).toEqual(spec)
+
+        // Proven by removal: drop the maxSteps check from assertCreateSubagentRunInput.
+        for (const maxSteps of [0, 2.5]) {
+          await expectAgentError(
+            createSubagent(storage, fixture, {
+              id: "child_2",
+              executionId: "test_agent_execution:child_2",
+              spawnKey: `invalid-${maxSteps}`,
+              spec: { ...spec, maxSteps },
+            }),
+            "invalid_input"
+          )
+        }
+      })
+    })
+
     test("enforces the active-child limit atomically", async () => {
       await withStorage(async (storage, fixture) => {
         await createRunningParent(storage, fixture)

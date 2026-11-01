@@ -1046,6 +1046,42 @@ describe("runModelLoop", () => {
     expect(asked).toBe(0)
   })
 
+  // Removal proof: drop `stepLimitReached` from the loop's last return; the first expectation fails.
+  test("says it stopped at the step limit only when the model had not answered", async () => {
+    const toolCall: LanguageModelStreamEvent[] = [
+      { type: "stream-start" },
+      { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"again"}' },
+      finish("tool-calls"),
+    ]
+    const answer: LanguageModelStreamEvent[] = [
+      { type: "stream-start" },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "done" },
+      { type: "text-end", id: "t" },
+      finish(),
+    ]
+
+    const stopped = await runModelLoop({
+      model: modelFromCalls([toolCall, toolCall, answer]),
+      messages: [],
+      tools: [echo],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+    })
+    expect(stopped).toMatchObject({ status: "completed", stepLimitReached: true })
+    expect(stopped.steps).toHaveLength(2)
+
+    const answered = await runModelLoop({
+      model: modelFromCalls([toolCall, answer]),
+      messages: [],
+      tools: [echo],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+    })
+    expect(answered).toMatchObject({ status: "completed", output: "done" })
+    expect(answered).not.toHaveProperty("stepLimitReached")
+  })
+
   test("returns coherent partial text when aborted mid-stream", async () => {
     const abort = new AbortController()
     const model = new MockLanguageModel({

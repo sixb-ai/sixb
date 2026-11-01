@@ -267,6 +267,8 @@ export type {
   AgentSkillCatalog,
   AgentSkillDefinition,
 } from "./skills"
+export type { AgentOptions } from "./step-limits"
+export { UNATTENDED_AGENT_MAX_STEPS } from "./step-limits"
 export type {
   AgentCompactionFailureCode,
   AgentRunControlStreamId,

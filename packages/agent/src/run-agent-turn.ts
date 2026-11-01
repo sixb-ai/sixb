@@ -169,6 +169,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ],
         tools,
         ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
+        ...(plan.maxSteps === undefined ? {} : { maxSteps: plan.maxSteps }),
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined
@@ -235,9 +236,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ? "awaiting_approval"
         : (coerceAgentRunFinishReason(result.finishReason) ?? "unknown")
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
-    const diagnostics = [outputLimitDiagnostic(finishReason)].filter(
-      (diagnostic) => diagnostic !== undefined
-    )
+    const diagnostics = [
+      outputLimitDiagnostic(finishReason),
+      finishReason === "awaiting_approval" ? undefined : stepLimitDiagnostic(result),
+    ].filter((diagnostic) => diagnostic !== undefined)
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -299,6 +301,20 @@ function outputLimitDiagnostic(finishReason: AgentRunFinishReason): AgentRunDiag
     severity: "warning",
     scope: "run",
     message: "The model reached its output limit before finishing the answer.",
+  }
+}
+
+/**
+ * A turn the project's `maxSteps` stopped keeps its work as its answer, and says so: Continue starts
+ * a turn that goes on from it, as a retry would only stop at the same place.
+ */
+function stepLimitDiagnostic(result: PausableModelLoopResult): AgentRunDiagnostic | undefined {
+  if (result.status !== "completed" || !result.stepLimitReached) return undefined
+  return {
+    code: "step_limit_reached",
+    severity: "warning",
+    scope: "run",
+    message: "The agent reached its step limit before producing a final answer.",
   }
 }
 
