@@ -6,15 +6,9 @@ import {
   type LanguageModelRequest,
   ModelCatalogUnavailableError,
   type ModelFilePart,
-  type ModelRateCard,
   type ModelTextPart,
 } from "@sixb/core/models"
-import {
-  expectedRemainingAgentCalls,
-  prepareAgentModel,
-  resolveAgentContextBudget,
-  resolveAgentContextTarget,
-} from "../src/context-budget"
+import { prepareAgentModel, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 function selection(limits: Partial<LanguageModelDefinition> = {}, maxOutputTokens?: number) {
@@ -227,24 +221,29 @@ describe("agent context budget resolution", () => {
       limits: "separate context and input limits",
       definition: { contextWindow: 1_050_000, maxInputTokens: 922_000 },
       budget: { windowTokens: 1_050_000, inputBudgetTokens: 922_000, source: "model" },
-      keepRecentTokens: 20_000,
     },
     {
       limits: "only an input limit, which it treats as a conservative window",
       definition: { maxInputTokens: 32_000 },
-      budget: { windowTokens: 32_000, inputBudgetTokens: 24_000, reserveTokens: 8_000 },
-      keepRecentTokens: 12_000,
+      budget: {
+        windowTokens: 32_000,
+        inputBudgetTokens: 24_000,
+        reserveTokens: 8_000,
+        keepRecentTokens: 12_000,
+      },
     },
     {
       limits: "no model limit, which falls back to 128k",
       definition: {},
       budget: { windowTokens: 128_000, inputBudgetTokens: 111_616, source: "fallback" },
-      keepRecentTokens: 20_000,
     },
-  ] as const)("derives the budget from $limits", ({ definition, budget, keepRecentTokens }) => {
-    const resolved = resolveAgentContextBudget(selection(definition))
-    expect(resolved).toMatchObject({ reserveTokens: 16_384, source: "model", ...budget })
-    expect(resolveAgentContextTarget(resolved).keepRecentTokens).toBe(keepRecentTokens)
+  ] as const)("derives the budget from $limits", ({ definition, budget }) => {
+    expect(resolveAgentContextBudget(selection(definition))).toMatchObject({
+      reserveTokens: 16_384,
+      keepRecentTokens: 20_000,
+      source: "model",
+      ...budget,
+    })
   })
 
   test("rejects reasoning budgets that exhaust the context window", () => {
@@ -349,144 +348,5 @@ describe("agent context budget resolution", () => {
     const invalid = selection()
     Object.assign(invalid.model, { definition: { ...invalid.model.definition, contextWindow: -1 } })
     await expect(pinAndPrepare(invalid)).rejects.toThrow()
-  })
-})
-
-/** An Anthropic-shaped card (cache reads 0.1×, writes 1.25×, output 5×) whose every meter rises. */
-function tieredCard(input: {
-  readonly ratio: number
-  readonly fromTokens?: number
-  readonly oneHourWrites?: boolean
-}): ModelRateCard {
-  const price = (base: number) => ({
-    default: String(base),
-    tiers: [{ minTokens: input.fromTokens ?? 200_001, price: String(base * input.ratio) }],
-  })
-  return {
-    currency: "USD",
-    input: price(1),
-    output: price(5),
-    cacheReadInput: price(0.1),
-    ...(input.oneHourWrites
-      ? { cacheWriteInput5m: price(1.25), cacheWriteInput1h: price(2) }
-      : { cacheWriteInput: price(1.25) }),
-  }
-}
-
-function priced(
-  rateCard: ModelRateCard | undefined,
-  limits: Partial<LanguageModelDefinition> = {}
-) {
-  const base = selection({ contextWindow: 1_000_000, maxOutputTokens: 128_000, ...limits })
-  return { model: Object.assign(base.model, rateCard ? { rateCard } : {}) }
-}
-
-describe("agent context soft limit", () => {
-  test("keeps the window when no price tier rises", () => {
-    for (const card of [undefined, { currency: "USD", input: "4", output: "20" } as const]) {
-      const budget = resolveAgentContextBudget(priced(card))
-      expect(budget.priceTiers).toEqual([])
-      expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 1_000 })).toEqual({
-        tokens: 983_616,
-        limit: "window",
-        expectedRemainingCalls: 1_000,
-        keepRecentTokens: 20_000,
-      })
-    }
-  })
-
-  // Removal proof: drop the rising-price check in contextPriceTiers; compacting to 60 % is always
-  // cheaper in the long run, so a long enough thread stops at Gemini 3 Flash's 200k "tier".
-  test("ignores a tier that bills the same price", () => {
-    const budget = resolveAgentContextBudget(priced(tieredCard({ ratio: 1 })))
-
-    expect(budget.priceTiers).toEqual([])
-    expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 1_000 }).limit).toBe(
-      "window"
-    )
-  })
-
-  // Removal proof: compare breakEvenCalls with FRESH_THREAD_EXPECTED_CALLS alone (ignore the
-  // expectation); the ×1.2 tier then never applies, however long the thread.
-  test("stays under a ×1.2 tier only once enough calls remain to pay compaction back", () => {
-    const budget = resolveAgentContextBudget(priced(tieredCard({ ratio: 1.2 })))
-    const [tier] = budget.priceTiers
-
-    expect(tier?.fromTokens).toBe(200_001)
-    expect(tier?.priceRatio).toBeCloseTo(1.2)
-    expect(tier?.breakEvenCalls).toBeCloseTo(32.58, 2)
-    expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 32 })).toMatchObject({
-      tokens: 983_616,
-      limit: "window",
-      tier,
-    })
-    expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 33 })).toMatchObject({
-      tokens: 200_000,
-      limit: "price-tier",
-      tier,
-    })
-  })
-
-  // Removal proof: set FRESH_THREAD_EXPECTED_CALLS to 0; a fresh thread then crosses Haiku 5.5's
-  // ×5 tier, which pays back after 4.9 calls.
-  test("assumes a fresh thread makes 8 more calls", () => {
-    const fivefold = resolveAgentContextBudget(
-      priced(tieredCard({ ratio: 5, fromTokens: 100_001 }))
-    )
-    const doubled = resolveAgentContextBudget(priced(tieredCard({ ratio: 2 })))
-
-    expect(fivefold.priceTiers[0]?.breakEvenCalls).toBeCloseTo(4.91, 2)
-    expect(resolveAgentContextTarget(fivefold)).toMatchObject({
-      tokens: 100_000,
-      limit: "price-tier",
-      expectedRemainingCalls: 8,
-    })
-    // While the summary is a one-shot request, a ×2 tier takes 14 calls to repay.
-    expect(doubled.priceTiers[0]?.breakEvenCalls).toBeCloseTo(13.96, 2)
-    expect(resolveAgentContextTarget(doubled)).toMatchObject({ limit: "window" })
-  })
-
-  // Removal proof: price writes at cacheWriteInput5m first; the one-hour premium no longer counts
-  // and a fresh thread compacts before a tier it may not stay long enough to repay.
-  test("prices the rewrite at the one-hour cache write a conversation pays", () => {
-    const budget = resolveAgentContextBudget(priced(tieredCard({ ratio: 2, oneHourWrites: true })))
-
-    expect(budget.priceTiers[0]?.breakEvenCalls).toBeCloseTo(17.18, 2)
-    expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 14 }).limit).toBe("window")
-    expect(resolveAgentContextTarget(budget, { expectedRemainingCalls: 18 }).limit).toBe(
-      "price-tier"
-    )
-  })
-
-  // Removal proof: drop the `<= inputBudgetTokens` bound on tier boundaries; an 80k window
-  // targets a 100k tier it can never reach.
-  test("lets a project's contextWindow decide which tiers count", () => {
-    const haiku = tieredCard({ ratio: 5, fromTokens: 100_001 })
-    const roomy = resolveAgentContextBudget(priced(haiku, { contextWindow: 150_000 }))
-    const small = resolveAgentContextBudget(priced(haiku, { contextWindow: 80_000 }))
-
-    expect(resolveAgentContextTarget(roomy)).toMatchObject({ tokens: 100_000, limit: "price-tier" })
-    expect(small.priceTiers).toEqual([])
-    expect(resolveAgentContextTarget(small)).toMatchObject({ tokens: 63_616, limit: "window" })
-  })
-
-  test("expects as many turns again as a thread has had, each as long as its average", () => {
-    const answer = (steps: number) => ({
-      role: "assistant",
-      parts: Array.from({ length: steps }, () => ({ type: "step-start" })),
-    })
-    const user = { role: "user", parts: [{ type: "text" }] }
-    const turns = [user, answer(4), user, answer(4), user, answer(4), user]
-
-    expect(expectedRemainingAgentCalls({ checkpoint: null, messages: [user] })).toBeUndefined()
-    expect(expectedRemainingAgentCalls({ checkpoint: null, messages: turns })).toBe(16)
-    // Five summarized turns before the checkpoint: 4 steps × (8 turns + this one).
-    expect(
-      expectedRemainingAgentCalls({ checkpoint: { summarizedThroughSeq: 10 }, messages: turns })
-    ).toBe(36)
-    // An answer stored without step markers is one call.
-    expect(
-      expectedRemainingAgentCalls({ checkpoint: null, messages: [user, answer(0), user] })
-    ).toBe(2)
   })
 })

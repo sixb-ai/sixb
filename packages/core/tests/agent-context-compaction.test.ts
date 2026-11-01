@@ -176,11 +176,15 @@ describe("agent context token estimation", () => {
     ).toBeLessThan(100)
   })
 
-  test("compacts only above the context target", () => {
-    const targetTokens = 8_000
-    expect(shouldCompactAgentContext({ targetTokens, estimatedInputTokens: 7_999 })).toBe(false)
-    expect(shouldCompactAgentContext({ targetTokens, estimatedInputTokens: 8_000 })).toBe(false)
-    expect(shouldCompactAgentContext({ targetTokens, estimatedInputTokens: 8_001 })).toBe(true)
+  test("compacts only above the reserved input budget", () => {
+    const inputBudgetTokens = 8_000
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 7_999 })).toBe(
+      false
+    )
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 8_000 })).toBe(
+      false
+    )
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 8_001 })).toBe(true)
   })
 
   test("counts the system prompt and every tool definition on top of the messages", () => {

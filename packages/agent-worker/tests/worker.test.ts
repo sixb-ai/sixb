@@ -4195,121 +4195,43 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("compacts below a price tier the window would cross", async () => {
-    // Reproduce: compare the estimate with budget.inputBudgetTokens instead of target.tokens in
-    // prepareAgentConversationContext; a tiered model then compacts only near its window.
+  test("lets a thread past a price tier grow to its model's limit", async () => {
+    // Reproduce: compact before the first price tier that repays a compaction within a fresh
+    // thread's 8 expected calls, as the budget's former soft limit did; Haiku 5.5's ×5 tier at
+    // 100,000 tokens repays one within 6, and the thread is summarized far below its limit.
     const summaryPrompts: LanguageModelRequest["messages"][] = []
-    const tiered = (rateCard: ModelRateCard) =>
-      Object.assign(
-        compactingAnswerModel({
-          captureSummaryPrompt: (prompt) => summaryPrompts.push(prompt),
-          captureAnswerPrompt: () => {},
-        }),
-        { rateCard }
-      )
-    const price = (base: string, above: string) => ({
-      default: base,
-      tiers: [{ minTokens: 30_001, price: above }],
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const haiku = (base: number) => ({
+      default: String(base),
+      tiers: [{ minTokens: 100_001, price: String(base * 5) }],
     })
-    // About 48,000 estimated tokens: past a 30,000-token tier, far below the 111,616 hard limit.
-    const run = async (threadId: string, model: WorkerTestModel) => {
-      const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
-      const storage = agentStorageOf(sixb)
-      await storage.threads.create({
-        id: threadId,
-        projectId: PROJECT_ID,
-        ownerPrincipal: REQUESTER,
-      })
-      for (let index = 0; index < 5; index += 1) {
-        await seedCompletedConversationTurn({
-          sixb,
-          threadId,
-          index,
-          text: `${`tier-turn-${index}-`}${"x".repeat(12_000)}`,
-        })
-      }
-      const worker = new AgentWorker(sixb, workerOptions())
-      await worker.start()
-      try {
-        const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Continue." })
-        expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("succeeded")
-        return await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
-      } finally {
-        await worker.stop()
-      }
-    }
-
-    const flat = await run(
-      "flat_price_thread",
-      tiered({ currency: "USD", input: "1", output: "5", cacheReadInput: "0.1" })
-    )
-    expect(flat).toBeNull()
-    expect(summaryPrompts).toHaveLength(0)
-
-    const checkpoint = await run(
-      "tiered_price_thread",
-      tiered({
+    const answering = compactingAnswerModel({
+      captureSummaryPrompt: (prompt) => summaryPrompts.push(prompt),
+      captureAnswerPrompt: (prompt) => answerPrompts.push(prompt),
+    })
+    const model = Object.assign(answering, {
+      definition: { ...answering.definition, contextWindow: 200_000 },
+      rateCard: {
         currency: "USD",
-        input: price("1", "5"),
-        output: price("5", "25"),
-        cacheReadInput: price("0.1", "0.5"),
-        cacheWriteInput: price("1.25", "6.25"),
-      })
-    )
-    expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThan(30_000)
-    expect(checkpoint?.estimatedInputTokensBefore).toBeLessThan(111_616)
-    expect(summaryPrompts).toHaveLength(1)
-  })
-
-  test("answers uncompacted when compaction below the hard limit fails", async () => {
-    // Reproduce: throw compactionError whatever the estimate at the end of
-    // prepareAgentConversationContext; a failed summary past a 30,000-token tier then fails a turn
-    // that fits the 111,616-token hard limit.
-    let answers = 0
-    const price = (base: string, above: string) => ({
-      default: base,
-      tiers: [{ minTokens: 30_001, price: above }],
+        input: haiku(1),
+        output: haiku(5),
+        cacheReadInput: haiku(0.1),
+        cacheWriteInput: haiku(1.25),
+      } satisfies ModelRateCard,
     })
-    const model = Object.assign(
-      new WorkerTestModel({
-        modelId: "mock-model",
-        stream: async (request) => {
-          if (request.tools.length === 0) {
-            return stream([
-              { type: "stream-start" },
-              { type: "text-start", id: "summary" },
-              { type: "text-delta", id: "summary", delta: "## Goal\nPartial summary" },
-              { type: "text-end", id: "summary" },
-              finish("length"),
-            ])
-          }
-          answers += 1
-          return answerStream("Answered.")
-        },
-      }),
-      {
-        rateCard: {
-          currency: "USD",
-          input: price("1", "5"),
-          output: price("5", "25"),
-          cacheReadInput: price("0.1", "0.5"),
-          cacheWriteInput: price("1.25", "6.25"),
-        } satisfies ModelRateCard,
-      }
-    )
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
     const storage = agentStorageOf(sixb)
-    const threadId = "failed_tier_compaction_thread"
+    const threadId = "tiered_price_thread"
     await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // About 128,000 estimated tokens: past the tier, far below the hard limit.
     for (let index = 0; index < 5; index += 1) {
       await seedCompletedConversationTurn({
         sixb,
         threadId,
         index,
-        text: `${`failed-tier-turn-${index}-`}${"x".repeat(12_000)}`,
+        text: `tier-turn-${index}-${"x".repeat(36_000)}`,
       })
     }
-    const warn = spyOn(console, "warn").mockImplementation(() => {})
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
@@ -4317,48 +4239,10 @@ describe("AgentWorker", () => {
       const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
-      expect(answers).toBe(1)
-      await expect(
-        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
-      ).resolves.toBeNull()
-      const records = await listRunStreamRecords(sixb.broker, run.id)
-      expect(
-        records.find((record) => record.name === "agent.compaction.failed")?.payload
-      ).toMatchObject({ errorCode: "summary_failed" })
-      expect(String(warn.mock.calls[0]?.[0])).toContain("goes on uncompacted")
-    } finally {
-      await worker.stop()
-      warn.mockRestore()
-    }
-  })
-
-  test("goes on above a price tier when nothing older can be compacted", async () => {
-    // Reproduce: drop the `!boundary && estimate <= inputBudgetTokens` return in
-    // prepareAgentConversationContext; a first message past the tier then fails the turn with
-    // context_limit_exceeded although it fits the window.
-    const price = (base: string, above: string) => ({
-      default: base,
-      tiers: [{ minTokens: 30_001, price: above }],
-    })
-    const model = Object.assign(answerModel(), {
-      rateCard: {
-        currency: "USD",
-        input: price("1", "5"),
-        output: price("5", "25"),
-        cacheReadInput: price("0.1", "0.5"),
-      } satisfies ModelRateCard,
-    })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, { text: `Read this: ${"y".repeat(150_000)}` })
-      const run = await waitForTerminalRun(storage, request.run.id)
-      expect(run.status).toBe("succeeded")
-      expect(
-        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
-      ).not.toContain("agent.compaction.started")
+      expect(summaryPrompts).toHaveLength(0)
+      // 300,000 bytes are 100,000 tokens at the 3 bytes per token of an unknown tokenizer.
+      expect(JSON.stringify(answerPrompts[0]).length).toBeGreaterThan(300_000)
+      expect(await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })).toBeNull()
     } finally {
       await worker.stop()
     }
@@ -11209,9 +11093,9 @@ describe("AgentWorker", () => {
             windowTokens: 8_000,
             inputBudgetTokens: 4_000,
             reserveTokens: 2_000,
+            keepRecentTokens: 1_000,
             source: "model",
             bytesPerToken: 4,
-            priceTiers: [],
           },
           run,
           runtime,

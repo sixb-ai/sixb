@@ -6,7 +6,7 @@ import {
 /**
  * UTF-8 bytes per token of the text an agent request carries (system prompt, tool catalog,
  * messages, tool results), by tokenizer family, on the low side: an underestimate is the costly
- * error, as it crosses a price tier or the window unseen.
+ * error, as it crosses the window unseen.
  *
  * Measured on logged Gateway requests (content bytes as the estimator counts them / provider
  * `input_tokens`): Claude (Haiku 5.5) 2.14–2.69 on agent turns, OpenAI (gpt-6.1-terra,
@@ -29,7 +29,7 @@ const CALIBRATION_MIN_TEXT_TOKENS = 1_000
 /**
  * How far a thread's measured rate may move from its family's. Down is the safe side and goes to
  * half. Up only a quarter: stored bytes the provider bills for less (replayed reasoning, provider
- * state) raise the measured rate, and an estimate too low crosses a tier or the window unseen.
+ * state) raise the measured rate, and an estimate too low crosses the window unseen.
  */
 const CALIBRATION_MIN_FACTOR = 0.5
 const CALIBRATION_MAX_FACTOR = 1.25
