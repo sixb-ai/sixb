@@ -536,17 +536,62 @@ function resolveExpansions(query: ObjectQuery, ctx: ExpansionResolutionContext):
         ...query,
         inputs: query.inputs.map((input) => resolveExpansions(input, ctx)),
       }
+    case "traverse": {
+      const { endpointObjectTypeIds: _authored, ...traverse } = query
+      const endpoints = resolveLinkEndpoints(
+        traverse,
+        safeResultShape(query.input, ctx.ontology),
+        ctx.ontology
+      )
+      return {
+        ...traverse,
+        input: resolveExpansions(query.input, ctx),
+        ...(endpoints ? { endpointObjectTypeIds: endpoints } : {}),
+      }
+    }
     case "filter":
     case "text":
     case "vector":
     case "rerank":
-    case "traverse":
     case "sort":
     case "limit":
     case "page":
     case "project":
       return { ...query, input: resolveExpansions(query.input, ctx) }
   }
+}
+
+// The object types a link can reach from these parents. A provider may only look there, so this
+// must name every stored endpoint: subtypes count, a wildcard link names nothing, and an
+// unresolved parent leaves the provider scanning every type, as it would without this.
+function resolveLinkEndpoints(
+  link: Pick<ObjectExpansion, "linkId" | "direction" | "sourceObjectTypeId">,
+  parentShape: ObjectQueryResultShape,
+  ontology: OntologyRegistry
+): readonly string[] | undefined {
+  const withSubtypes = (ids: readonly string[]) => [
+    ...new Set(ids.flatMap((id) => [id, ...ontology.listSubTypes(id)])),
+  ]
+  if (link.direction === "incoming") {
+    if (link.sourceObjectTypeId !== undefined) return [link.sourceObjectTypeId]
+    const declaring = ontology
+      .listObjectTypes()
+      .filter((type) => type.links.some((candidate) => candidate.id === link.linkId))
+      .map((type) => type.id)
+    return declaring.length > 0 ? withSubtypes(declaring) : undefined
+  }
+  if (parentShape.objectTypeIds.length === 0) return undefined
+
+  const targets: string[] = []
+  for (const parentId of withSubtypes(parentShape.objectTypeIds)) {
+    const declared = ontology
+      .getObjectTypeById(parentId)
+      ?.links.find((candidate) => candidate.id === link.linkId)?.targetObjectTypeId
+    if (declared === undefined) continue
+    if (declared === "*") return undefined
+    targets.push(...(Array.isArray(declared) ? declared : [declared]))
+  }
+  return targets.length > 0 ? withSubtypes(targets) : undefined
 }
 
 function annotateExpansion(
@@ -560,9 +605,14 @@ function annotateExpansion(
   // `effectiveExpansionFanout`). Always defined afterwards, so the compiler need
   // not re-derive the cap.
   const limit = effectiveExpansionFanout(expansion.limit, ctx.maxExpansionFanout)
-  const base: ObjectExpansion = cardinality
-    ? { ...expansion, cardinality, limit }
-    : { ...expansion, limit }
+  const { endpointObjectTypeIds: _authored, ...authored } = expansion
+  const endpoints = resolveLinkEndpoints(expansion, parentShape, ctx.ontology)
+  const base: ObjectExpansion = {
+    ...authored,
+    ...(cardinality ? { cardinality } : {}),
+    limit,
+    ...(endpoints ? { endpointObjectTypeIds: endpoints } : {}),
+  }
 
   if (!expansion.expand || expansion.expand.length === 0) return base
 

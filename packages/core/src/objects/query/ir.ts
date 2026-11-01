@@ -103,6 +103,14 @@ export interface ObjectQueryTraverse {
    * from the link token's owner type.
    */
   sourceObjectTypeId?: string
+  /**
+   * Every object type the traversal can reach, subtypes included.
+   *
+   * Core-resolved, never authored: the core executor fills this from the ontology before provider
+   * pushdown, so a provider can restrict the endpoint scan. Absent when the ontology cannot name
+   * them, as with a wildcard link.
+   */
+  endpointObjectTypeIds?: readonly string[]
 }
 
 /** Explicit server-side reordering of a bounded vector candidate set. */
@@ -169,6 +177,12 @@ export interface ObjectExpansion {
   direction: ObjectQueryDirection
   /** Constrains an incoming expansion to one source object type (see traverse). */
   sourceObjectTypeId?: string
+  /**
+   * Every object type this expansion can hydrate, subtypes included.
+   *
+   * Core-resolved, never authored (see {@link ObjectQueryTraverse.endpointObjectTypeIds}).
+   */
+  endpointObjectTypeIds?: readonly string[]
   /** Bounds a "many" expansion to the top-N links per parent. */
   limit?: number
   /** Deterministic ordering for a bounded "many" expansion, against the target type. */

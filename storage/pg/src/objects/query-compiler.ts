@@ -5,6 +5,7 @@ import {
   type ObjectQueryPredicate,
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
+  type ObjectQueryTraverse,
   type QueryScalarKind,
 } from "@sixb/core"
 import {
@@ -395,14 +396,7 @@ function compileObjectQueryInternal(
     case "page":
       return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
-      return compileTraversal(
-        projectId,
-        query.input,
-        query.linkId,
-        query.direction,
-        query.sourceObjectTypeId,
-        ctx
-      )
+      return compileTraversal(projectId, query, ctx)
     case "set":
       return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
@@ -794,13 +788,10 @@ function compilePage(
 
 function compileTraversal(
   projectId: string,
-  inputQuery: ObjectQuery,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: ObjectQueryTraverse,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, {
+  const input = compileObjectQueryInternal(projectId, traversal.input, {
     ...exactContext(ctx),
     unordered: true,
     startPredicate: undefined,
@@ -809,9 +800,7 @@ function compileTraversal(
   const relation = compileTraversalRelation(
     projectId,
     input,
-    linkId,
-    direction,
-    sourceObjectTypeId,
+    traversal,
     ctx.source,
     ctx.correlatedTraversal,
     ctx.startPredicate
@@ -833,21 +822,27 @@ function compileTraversal(
 function compileTraversalRelation(
   projectId: string,
   input: CompiledAggregateSource,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: Pick<
+    ObjectQueryTraverse,
+    "linkId" | "direction" | "sourceObjectTypeId" | "endpointObjectTypeIds"
+  >,
   source: PgObjectQuerySource,
   correlated = false,
   endpointPredicate?: string
 ): CompiledAggregateSource {
-  const incoming = direction === "incoming"
+  const incoming = traversal.direction === "incoming"
   const parent = incoming ? "target" : "source"
   const endpoint = incoming ? "source" : "target"
-  const constrainedType = incoming ? sourceObjectTypeId : undefined
+  const endpointType = compileEndpointTypes(
+    "selected",
+    incoming && traversal.sourceObjectTypeId !== undefined
+      ? [traversal.sourceObjectTypeId]
+      : traversal.endpointObjectTypeIds
+  )
   return {
     sql: `FROM ${source.objectsTable} AS selected
       WHERE selected.project_id = ?
-      ${constrainedType === undefined ? "" : "AND selected.object_type_id = ?"}
+      ${endpointType.sql}
       ${endpointPredicate ? `AND (${endpointPredicate})` : ""}
       AND EXISTS (
         SELECT 1 FROM (${input.sql}) AS input
@@ -861,13 +856,23 @@ function compileTraversalRelation(
           AND edge.link_id = ?
           ${correlated ? "OFFSET 0" : ""}
       )`,
-    args: [
-      projectId,
-      ...(constrainedType === undefined ? [] : [constrainedType]),
-      ...input.args,
-      linkId,
-    ],
+    args: [projectId, ...endpointType.args, ...input.args, traversal.linkId],
   }
+}
+
+/** Names the types a link can reach, so PostgreSQL looks only at their rows and their indexes. */
+function compileEndpointTypes(
+  alias: string,
+  objectTypeIds: readonly string[] | undefined
+): CompiledPredicate {
+  if (!objectTypeIds?.length) return { sql: "", args: [] }
+
+  return objectTypeIds.length === 1
+    ? { sql: `AND ${alias}.object_type_id = ?`, args: [objectTypeIds[0]] }
+    : {
+        sql: `AND ${alias}.object_type_id IN (${objectTypeIds.map(() => "?").join(", ")})`,
+        args: [...objectTypeIds],
+      }
 }
 
 /** Only a bounded page benefits from choosing an ordered, correlated endpoint scan. */
@@ -1026,7 +1031,8 @@ function compileExpansionValue(
     `${parentId} = ${parent.id}`,
     `${edge}.link_id = ?::text`,
   ]
-  const whereArgs: unknown[] = [expansion.linkId]
+  const endpointType = compileEndpointTypes(target, expansion.endpointObjectTypeIds)
+  const whereArgs: unknown[] = [...endpointType.args, expansion.linkId]
   if (incoming && expansion.sourceObjectTypeId !== undefined) {
     whereParts.push(`${edge}.source_type_id = ?::text`)
     whereArgs.push(expansion.sourceObjectTypeId)
@@ -1038,6 +1044,7 @@ function compileExpansionValue(
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
+     ${endpointType.sql}
     WHERE ${whereParts.join(" AND ")}
   `
 
@@ -1256,14 +1263,7 @@ function compileAggregateSource(
       )
     }
     case "traverse":
-      return compileAggregateTraversal(
-        projectId,
-        query.input,
-        query.linkId,
-        query.direction,
-        query.sourceObjectTypeId,
-        source
-      )
+      return compileAggregateTraversal(projectId, query, source)
     case "set":
       return compileAggregateSet(projectId, query.op, query.inputs, source)
     case "sort":
@@ -1353,13 +1353,11 @@ function compileAggregateWhere(
 
 function compileAggregateTraversal(
   projectId: string,
-  inputQuery: ObjectQuery,
-  linkId: string,
-  direction: "outgoing" | "incoming",
-  sourceObjectTypeId: string | undefined,
+  traversal: ObjectQueryTraverse,
   source: PgObjectQuerySource
 ): CompiledAggregateSource {
-  const input = compileAggregateSource(projectId, inputQuery, source)
+  const { linkId, direction, sourceObjectTypeId } = traversal
+  const input = compileAggregateSource(projectId, traversal.input, source)
   if (direction === "incoming" && sourceObjectTypeId !== undefined) {
     // Deduplicate endpoint identities before fetching objects. Bounded arrays let PostgreSQL
     // visit primary keys in groups instead of doing one random B-tree descent per edge.
@@ -1383,14 +1381,7 @@ function compileAggregateTraversal(
       args: [...input.args, linkId, sourceObjectTypeId, projectId, sourceObjectTypeId],
     }
   }
-  const relation = compileTraversalRelation(
-    projectId,
-    input,
-    linkId,
-    direction,
-    sourceObjectTypeId,
-    source
-  )
+  const relation = compileTraversalRelation(projectId, input, traversal, source)
   return {
     sql: `SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties ${relation.sql}`,
     args: relation.args,

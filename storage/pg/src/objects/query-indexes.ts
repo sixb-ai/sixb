@@ -367,8 +367,13 @@ export async function findPgSortIndexBound(
   let objectTypeId: string | undefined
   if (input.kind === "start" && !input.includeSubtypes) {
     objectTypeId = input.objectTypeId
-  } else if (input.kind === "traverse" && input.direction === "incoming") {
-    objectTypeId = input.sourceObjectTypeId
+  } else if (input.kind === "traverse") {
+    objectTypeId =
+      input.endpointObjectTypeIds?.length === 1
+        ? input.endpointObjectTypeIds[0]
+        : input.direction === "incoming"
+          ? input.sourceObjectTypeId
+          : undefined
   }
 
   if (!objectTypeId || !fields?.length || fields.some((field) => field.kind !== "property"))
