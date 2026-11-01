@@ -233,6 +233,7 @@ export async function executeWorkflowAgentNode(
       agentStepId: node.agentStep.id,
       plan,
       budget: prepared.budget,
+      measuredBytesPerToken: prepared.measuredBytesPerToken,
       agentStep: node.agentStep,
       workflowId: workflow.id,
       workflowRunId: nodeRun.workflowRunId,

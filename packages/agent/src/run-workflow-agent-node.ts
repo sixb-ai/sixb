@@ -31,6 +31,8 @@ export interface RunWorkflowAgentNodeInput {
   readonly plan: ResolvedAgentExecutionPlan
   /** The limits of the step's model, which every call of its research keeps under. */
   readonly budget: AgentContextBudget
+  /** What the step's latest counted call measured (see prepareAgentModel). */
+  readonly measuredBytesPerToken?: () => number | undefined
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
   readonly workflowRunId: string
@@ -138,6 +140,9 @@ export async function runWorkflowAgentNode(
         description: tool.description,
         inputSchema: tool.inputSchema,
       })),
+      ...(input.measuredBytesPerToken === undefined
+        ? {}
+        : { measuredBytesPerToken: input.measuredBytesPerToken }),
     })
     const { prepareStep } = input.context
     const research = await runModelLoop({

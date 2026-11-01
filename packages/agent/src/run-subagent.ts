@@ -63,6 +63,8 @@ export async function runSubagent(input: {
     readonly thread: SubagentThreadContext
     readonly compactInRun?: SubagentAgentExecutionEnvironment["compactInRun"]
     readonly bytesPerToken?: number
+    /** What the child's latest counted call measured (see prepareAgentModel). */
+    readonly measuredBytesPerToken?: () => number | undefined
   }
   readonly run: SubagentRunRecord
   /** The child's session: its finish is fenced by the run's execution token. */
@@ -83,7 +85,7 @@ export async function runSubagent(input: {
   readonly inbox: SubagentInbox
 }): Promise<SubagentRunRecord> {
   const { context, plan, run, thread, runtime, inbox } = input
-  const { budget, compactInRun, bytesPerToken } = input.contextLimits
+  const { budget, compactInRun, bytesPerToken, measuredBytesPerToken } = input.contextLimits
   const caching = subagentPromptCaching({
     projectId: context.id,
     thread,
@@ -110,6 +112,7 @@ export async function runSubagent(input: {
       inputSchema: tool.inputSchema,
     })),
     ...(bytesPerToken === undefined ? {} : { bytesPerToken }),
+    ...(measuredBytesPerToken === undefined ? {} : { measuredBytesPerToken }),
     ...(compactInRun
       ? {
           compact: async (compacting) => {
