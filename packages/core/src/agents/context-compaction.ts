@@ -20,7 +20,6 @@ const TOOL_OVERHEAD_TOKENS = 16
 const STEP_OVERHEAD_TOKENS = 2
 const FILE_TEXT_INLINE_MAX_BYTES = 50 * 1024
 const FILE_TEXT_INLINE_TOTAL_MAX_BYTES = 200 * 1024
-const TOOL_RESULT_SUMMARY_MAX_CHARS = 2_000
 
 export interface AgentContextEstimateTool {
   readonly name: string
@@ -216,7 +215,12 @@ export function measureModelRequest(request: {
   return size
 }
 
-/** Select the safe user boundary whose retained tail is closest to the configured recent budget. */
+/**
+ * Select the user boundary that keeps the most recent work within `keepRecentTokens`: the oldest
+ * user message whose turn, and everything after it, fit; else the newest one, whose turn is always
+ * kept. The tail never grows past the allowance to land closer to it, so a compaction ends where
+ * it aims and the next turn does not compact again.
+ */
 export function selectAgentContextCompactionBoundary(input: {
   readonly messages: readonly AgentMessageRecord[]
   readonly keepRecentTokens: number
@@ -226,20 +230,15 @@ export function selectAgentContextCompactionBoundary(input: {
 
   let retainedTokens = 0
   let boundaryIndex: number | null = null
-  let closestDistance = Number.POSITIVE_INFINITY
   for (let index = input.messages.length - 1; index > 0; index -= 1) {
     retainedTokens += estimateAgentContextMessagesTokens(
       [input.messages[index]!],
       input.bytesPerToken
     ).tokens
     if (input.messages[index]?.role !== "user") continue
+    if (boundaryIndex !== null && retainedTokens > input.keepRecentTokens) break
 
-    const distance = Math.abs(input.keepRecentTokens - retainedTokens)
-    if (distance <= closestDistance) {
-      boundaryIndex = index
-      closestDistance = distance
-    }
-    if (retainedTokens >= input.keepRecentTokens) break
+    boundaryIndex = index
   }
 
   if (boundaryIndex === null) return null
@@ -251,22 +250,6 @@ export function selectAgentContextCompactionBoundary(input: {
     retainedMessages: input.messages.slice(boundaryIndex),
     summarizedThroughSeq,
   }
-}
-
-/** Serialize durable conversation content as escaped quoted data for the summary model. */
-export function serializeAgentMessagesForSummary(messages: readonly AgentMessageRecord[]): string {
-  const lines = ["<sixb_conversation_history>"]
-  for (const message of messages) {
-    lines.push(
-      `  <message id="${escapeXml(message.id)}" seq="${message.seq}" role="${message.role}">`
-    )
-    message.parts.forEach((part, partIndex) => {
-      lines.push(...serializeSummaryPart(message, part, partIndex))
-    })
-    lines.push("  </message>")
-  }
-  lines.push("</sixb_conversation_history>")
-  return lines.join("\n")
 }
 
 function measureMessage(
@@ -333,72 +316,6 @@ function measureMessage(
   }
 }
 
-function serializeSummaryPart(
-  message: AgentMessageRecord,
-  part: AgentMessagePart,
-  partIndex: number
-): string[] {
-  const indent = "    "
-  switch (part.type) {
-    case "text":
-      return [`${indent}<text>${escapeXml(part.text)}</text>`]
-    case "reasoning":
-    case "provider-state":
-    case "step-start":
-      return []
-    case "continuation":
-      return [`${indent}<continuation_request />`]
-    case "approval-outcome":
-      return [`${indent}${escapeXml(approvalOutcomeInstruction(part))}`]
-    case "mail":
-      return [`${indent}${escapeXml(agentMailInstruction(part))}`]
-    case "context":
-      return part.context.kind === "object"
-        ? [
-            `${indent}<object_context origin="${part.origin}" object_type_id="${escapeXml(part.context.ref.objectTypeId)}" primary_id="${escapeXml(part.context.ref.primaryId)}" />`,
-          ]
-        : [
-            `${indent}<app_context origin="${part.origin}" id="${escapeXml(part.context.id)}" label="${escapeXml(part.context.label)}">`,
-            `${indent}  <description>${escapeXml(part.context.description)}</description>`,
-            `${indent}  <value format="json">${escapeXml(stableJsonStringify(part.context.value))}</value>`,
-            `${indent}</app_context>`,
-          ]
-    case "file": {
-      const file = part.fileRef
-      const attributes = [
-        `message_id="${escapeXml(message.id)}"`,
-        `part_index="${partIndex}"`,
-        `blob_id="${escapeXml(file.blobId)}"`,
-        `digest="${escapeXml(file.digest)}"`,
-        `size_bytes="${file.sizeBytes}"`,
-        ...(file.fileName === undefined ? [] : [`file_name="${escapeXml(file.fileName)}"`]),
-        ...(file.mediaType === undefined ? [] : [`media_type="${escapeXml(file.mediaType)}"`]),
-        ...(file.logicalPath === undefined
-          ? []
-          : [`logical_path="${escapeXml(file.logicalPath)}"`]),
-      ]
-      return [`${indent}<file ${attributes.join(" ")} />`]
-    }
-    case "tool-call": {
-      const output =
-        part.state === "output-available"
-          ? truncateToolResult(stableJsonStringify(part.output))
-          : truncateToolResult(part.errorText)
-      return [
-        `${indent}<tool_call id="${escapeXml(part.toolCallId)}" name="${escapeXml(part.toolName)}" state="${part.state}">`,
-        `${indent}  <input format="json">${escapeXml(stableJsonStringify(part.input))}</input>`,
-        `${indent}  <result>${escapeXml(output)}</result>`,
-        `${indent}</tool_call>`,
-      ]
-    }
-  }
-}
-
-function truncateToolResult(value: string): string {
-  if (value.length <= TOOL_RESULT_SUMMARY_MAX_CHARS) return value
-  return `${value.slice(0, TOOL_RESULT_SUMMARY_MAX_CHARS)}\n[truncated ${value.length - TOOL_RESULT_SUMMARY_MAX_CHARS} characters]`
-}
-
 function looksLikeImage(mediaType: string | undefined, fileName: string | undefined): boolean {
   if (mediaType?.toLowerCase().startsWith("image/")) return true
   return /\.(?:avif|gif|jpe?g|png|webp)$/i.test(fileName ?? "")
@@ -448,13 +365,4 @@ function toolOutputBytes(part: Extract<AgentMessagePart, { readonly type: "tool-
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;")
 }

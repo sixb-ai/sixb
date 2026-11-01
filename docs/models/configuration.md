@@ -168,6 +168,12 @@ A chat answer cut short by this limit says so and can be continued; an AI workfl
 A conversation is summarized only near its model's limit, whatever the provider's price tiers. To
 summarize earlier, set a smaller `contextWindow` on the model definition.
 
+A summary brings the conversation well under that limit, so the next turns do not summarize again.
+The latest turns stay as they are, and the agent can still read the whole conversation with
+`sixb history`. A conversation that does not fit even summarized fails with
+[`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
+larger window.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies

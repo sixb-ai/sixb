@@ -19,6 +19,9 @@ import {
 
 const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
 
+/** What compaction brings the context down to, as a share of the limit it crossed. */
+export const AGENT_CONTEXT_COMPACTED_SHARE = 0.6
+
 /**
  * The model's input limit: `inputBudgetTokens`, the window less the output reserve, which no call
  * crosses. Compaction starts past it.

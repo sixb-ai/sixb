@@ -6,7 +6,6 @@ import {
   estimateAgentContextRequestTokens,
   projectAgentThreadModelContext,
   selectAgentContextCompactionBoundary,
-  serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "../src/agents"
 import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
@@ -28,8 +27,8 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
 }
 
 describe("agent context token estimation", () => {
-  test("counts opaque provider state without exposing it to summary generation", () => {
-    // Regression proof: remove provider-state from either switch in context-compaction.ts.
+  test("counts opaque provider state", () => {
+    // Regression proof: remove provider-state from the switch in context-compaction.ts.
     const base = message(2, "assistant", "answer")
     const withState: AgentMessageRecord = {
       ...base,
@@ -41,12 +40,9 @@ describe("agent context token estimation", () => {
     expect(estimateAgentContextMessagesTokens([withState], bytesPerToken).tokens).toBeGreaterThan(
       estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
     )
-    expect(serializeAgentMessagesForSummary([withState])).toBe(
-      serializeAgentMessagesForSummary([base])
-    )
   })
-  test("counts and summarizes how a held call ended as the model reads it", () => {
-    // Regression proof: drop approval-outcome from either switch in context-compaction.ts.
+  test("counts how a held call ended as the model reads it", () => {
+    // Regression proof: drop approval-outcome from the switch in context-compaction.ts.
     const base = message(3, "user", "Thanks")
     const withOutcome: AgentMessageRecord = {
       ...base,
@@ -63,9 +59,6 @@ describe("agent context token estimation", () => {
 
     expect(estimateAgentContextMessagesTokens([withOutcome], bytesPerToken).tokens).toBeGreaterThan(
       estimateAgentContextMessagesTokens([base], bytesPerToken).tokens
-    )
-    expect(serializeAgentMessagesForSummary([withOutcome])).toContain(
-      "The user denied `workflows start send-reminders`. It did not run."
     )
   })
   // Removal proof: share one text budget across the messages, as the estimator once did; the
@@ -205,6 +198,12 @@ describe("agent context token estimation", () => {
 })
 
 describe("agent context compaction boundary", () => {
+  // The selector weighs one message at a time.
+  const tailTokens = (tail: readonly AgentMessageRecord[]) =>
+    tail.reduce(
+      (total, turn) => total + estimateAgentContextMessagesTokens([turn], bytesPerToken).tokens,
+      0
+    )
   const turns = [
     message(1, "user", "old question"),
     message(2, "assistant", "old answer"),
@@ -215,16 +214,24 @@ describe("agent context compaction boundary", () => {
 
   test.each([
     {
-      label: "retains the triggering user turn and starts only at a user boundary",
+      label: "keeps the recent turns that fit and starts only at a user boundary",
       messages: turns,
-      // The selector weighs one message at a time.
-      keepRecentTokens: turns
-        .slice(3)
-        .reduce(
-          (total, turn) => total + estimateAgentContextMessagesTokens([turn], bytesPerToken).tokens,
-          0
-        ),
+      keepRecentTokens: tailTokens(turns.slice(2)),
       expected: { summarizedThroughSeq: 2, summarized: [1, 2], retained: [3, 4, 5] },
+    },
+    {
+      // Regression proof: select the boundary closest to keepRecentTokens, as the selector once
+      // did; it keeps [3, 4, 5], one token past the allowance, and the next turn compacts again.
+      label: "never keeps more than the allowance to land closer to it",
+      messages: turns,
+      keepRecentTokens: tailTokens(turns.slice(2)) - 1,
+      expected: { summarizedThroughSeq: 4, summarized: [1, 2, 3, 4], retained: [5] },
+    },
+    {
+      label: "keeps the triggering user turn even when it does not fit",
+      messages: turns,
+      keepRecentTokens: 0,
+      expected: { summarizedThroughSeq: 4, summarized: [1, 2, 3, 4], retained: [5] },
     },
     {
       label: "returns null when no complete older turn can be removed",
@@ -260,44 +267,6 @@ describe("agent context compaction boundary", () => {
   })
 })
 
-describe("agent summary serialization", () => {
-  test("quotes durable content, omits reasoning, bounds tool results, and preserves file handles", () => {
-    const record: AgentMessageRecord = {
-      ...message(2, "assistant", "Result <ready>"),
-      parts: [
-        { type: "reasoning", text: "private speculation" },
-        {
-          type: "tool-call",
-          toolCallId: "call_1",
-          toolName: "lookup",
-          input: { id: "quote_1" },
-          state: "output-available",
-          output: { text: "x".repeat(2_100) },
-        },
-        {
-          type: "file",
-          fileRef: {
-            blobId: "blob_abc",
-            digest: `sha256:${"a".repeat(64)}`,
-            sizeBytes: 42,
-            fileName: "quote.pdf",
-            mediaType: "application/pdf",
-          },
-        },
-        { type: "text", text: "Result <ready>" },
-      ],
-    }
-    const serialized = serializeAgentMessagesForSummary([record])
-
-    expect(serialized).not.toContain("private speculation")
-    expect(serialized).toContain('<tool_call id="call_1" name="lookup"')
-    expect(serialized).toContain("[truncated ")
-    expect(serialized).toContain('message_id="message_2" part_index="2"')
-    expect(serialized).toContain('blob_id="blob_abc"')
-    expect(serialized).toContain("Result &lt;ready&gt;")
-  })
-})
-
 describe("agent thread model-context projection", () => {
   const checkpoint: AgentContextCheckpointRecord = {
     id: "checkpoint_1",
@@ -305,7 +274,7 @@ describe("agent thread model-context projection", () => {
     threadId: "thread",
     createdByRunId: "run_2",
     reason: "threshold",
-    summary: "User chose <priority> & asked to continue.",
+    summary: 'User chose <priority> & asked to "continue".',
     summaryFormatVersion: 1,
     summarizedThroughSeq: 2,
     observedHeadSeq: 3,
@@ -321,7 +290,9 @@ describe("agent thread model-context projection", () => {
     expect(projectAgentThreadModelContext({ checkpoint: null, messages })).toBe(messages)
   })
 
-  test("prepends one escaped user-role summary to the retained tail", () => {
+  test("prepends one user-role summary to the retained tail, its text escaped as text", () => {
+    // Regression proof: escape quotes in serializeThreadSummary; the model then reads &quot;
+    // wherever the summary quotes the user, and writes it back into the next summary.
     const retained = [message(3, "user", "three"), message(4, "assistant", "four")]
     const projected = projectAgentThreadModelContext({ checkpoint, messages: retained })
 
@@ -333,10 +304,10 @@ describe("agent thread model-context projection", () => {
         {
           type: "text",
           text: [
-            "The earlier conversation was compacted into this continuation summary.",
+            "The earlier conversation was compacted into this continuation summary. Its messages are still stored: `sixb history` prints them.",
             "",
             "<sixb_thread_summary>",
-            "User chose &lt;priority&gt; &amp; asked to continue.",
+            'User chose &lt;priority&gt; &amp; asked to "continue".',
             "</sixb_thread_summary>",
           ].join("\n"),
         },
