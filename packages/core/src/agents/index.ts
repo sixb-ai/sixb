@@ -76,6 +76,15 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
   normalizeAgentContextEntries,
 } from "./context/entries"
+export type { AgentContextBudget, AgentModelSelection } from "./context-budget"
+export {
+  AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
+  agentOutputCapTokens,
+  contextSummaryOutputTokens,
+  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+  resolveAgentContextBudget,
+} from "./context-budget"
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
