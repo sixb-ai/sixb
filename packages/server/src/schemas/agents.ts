@@ -325,8 +325,15 @@ export const AgentRunDiagnosticSchema = z.object({
   message: z.string(),
 })
 
+const AgentContextCheckpointReasonSchema = z
+  .enum(["threshold", "overflow"])
+  .describe(
+    "`threshold`: the conversation reached its model's target. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+  )
+
 export const AgentMessageCompactionSchema = z.object({
   checkpointId: z.string(),
+  reason: AgentContextCheckpointReasonSchema,
   summary: z.string(),
   createdAt: z.string(),
 })
@@ -469,6 +476,53 @@ export const DecideAgentApprovalResponseSchema = z.object({
 
 export const RetryAgentRunResponseSchema = z.object({
   run: AgentRunSchema,
+})
+
+export const AgentThreadContextQuerySchema = z.object({
+  /** The model to measure the conversation against, with `modelId`. Omitted: its latest turn's. */
+  provider: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+})
+
+export const AgentThreadContextSchema = z.object({
+  /** The model the limits are this one's: the one asked for, else the latest turn's or the default. */
+  model: LanguageModelRefSchema,
+  windowTokens: z.number().int().positive(),
+  /** The window less the output reserve: no request crosses it. */
+  limitTokens: z.number().int().positive(),
+  /** Past it, the conversation is condensed before the next call. */
+  target: z.object({
+    tokens: z.number().int().positive(),
+    /** `price-tier`: staying under the model's next price tier pays back. `window`: the hard limit. */
+    limit: z.enum(["price-tier", "window"]),
+    /** The model's lowest price tier that costs more, whether the target stays under it or not. */
+    tier: z
+      .object({
+        fromTokens: z.number().int().positive(),
+        /** How much dearer each call is from there. */
+        priceRatio: z.number().positive(),
+      })
+      .optional(),
+  }),
+  /** What the next request starts from. Absent before the first answer. */
+  usedTokens: z.number().int().nonnegative().optional(),
+  /** The call the conversation's history ends with, as the provider counted it. */
+  lastCall: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative().optional(),
+      cacheReadInputTokens: z.number().int().nonnegative().optional(),
+      occurredAt: z.string(),
+    })
+    .optional(),
+  lastCompaction: z
+    .object({
+      reason: AgentContextCheckpointReasonSchema,
+      createdAt: z.string(),
+      estimatedInputTokensBefore: z.number().int().nonnegative(),
+      estimatedInputTokensAfter: z.number().int().nonnegative(),
+    })
+    .optional(),
 })
 
 export const AgentRunListQuerySchema = z.object({
