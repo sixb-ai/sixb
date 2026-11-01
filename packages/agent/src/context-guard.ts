@@ -25,6 +25,7 @@ import {
   agentOutputRoomTokens,
   estimateAgentRequestTokens,
 } from "./context-budget"
+import { savedToolOutputPath } from "./tools/tool-outputs"
 
 /**
  * The most recent tool result the model has read always stays. Clearing goes oldest first, in one
@@ -125,9 +126,20 @@ export function createAgentContextGuard(input: AgentContextGuardInput): AgentCon
   }
 }
 
-/** A cleared tool result's note: the same bytes whenever it replaces that tool's result. */
-export function clearedToolResultText(toolName: string): string {
-  return `[This ${toolName} result was cleared to fit the model's context. Call the tool again to see it, unless running it again would repeat a change.]`
+/**
+ * A cleared tool result's note: the same bytes whenever it replaces that tool's result. A result
+ * saved to a file points at the file, which holds the whole of it, rather than at the call.
+ */
+export function clearedToolResultText(toolName: string, savedPath?: string): string {
+  return savedPath === undefined
+    ? `[This ${toolName} result was cleared to fit the model's context. Call the tool again to see it, unless running it again would repeat a change.]`
+    : `[This ${toolName} result was cleared to fit the model's context. Its whole output is in ${savedPath}: read it again from there.]`
+}
+
+/** The note that replaces a result the guard clears. */
+function clearedNote(part: ModelToolResultPart): string {
+  const text = part.output.type === "text" ? part.output.value : ""
+  return clearedToolResultText(part.toolName, savedToolOutputPath(text))
 }
 
 class ContextGuard {
@@ -451,7 +463,7 @@ class ContextGuard {
 
         if (this.needed(calls, part.toolCallId)) continue
 
-        const placeholder = utf8Bytes(clearedToolResultText(part.toolName))
+        const placeholder = utf8Bytes(clearedNote(part))
         candidates.push({
           message: index,
           part: partIndex,
@@ -480,7 +492,7 @@ class ContextGuard {
       calls: chosenCalls,
       messages: replaceToolResults(messages, chosen, (part) => ({
         ...withoutOriginalOutput(part),
-        output: { type: "text", value: clearedToolResultText(part.toolName) },
+        output: { type: "text", value: clearedNote(part) },
       })),
     }
   }
