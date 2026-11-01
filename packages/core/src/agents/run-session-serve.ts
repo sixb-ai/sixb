@@ -1,5 +1,7 @@
+import { captureSixbFailure, createSixbError, withFailureMessage } from "../errors/internal"
 import type { LanguageModelRequest } from "../models/language-model"
-import type { AgentRunRecord } from "../storage/agents"
+import { AGENT_RUN_FAILURE_CODES, type AgentRunRecord } from "../storage/agents"
+import { AGENT_INLINE_IMAGE_LIMITS } from "./inline-images"
 import { AgentExecutionLostError, AgentRunRefusedError } from "./run-fence"
 import { agentRunLeaseLapsed, endInterruptedAgentRun } from "./run-liveness"
 import {
@@ -25,6 +27,16 @@ import { agentRunnerTokenRunId, createAgentRunnerToken, isValidAgentRunnerToken 
 //
 // The run token its sandbox's commands call the API with never reaches it: they would finish the
 // run, write its messages and call its models as its runner.
+
+/**
+ * The most a runner sends its run's session in one request. The largest is a model call: up to
+ * `AGENT_INLINE_IMAGE_LIMITS.maxBytes` (16 MiB) of encoded images, and text up to the model's
+ * window, which 2,000,000 tokens at about 5 bytes each (OpenAI's tokenizer measures 4.4 to 4.7)
+ * bring to 10 MB, doubled for the wire's JSON escaping: about 36 MiB, so 40 MiB. A run's end,
+ * which carries the steps it kept, and a file it stores (25 MiB at most) fit within it too.
+ */
+export const AGENT_RUN_SESSION_BODY_MAX_BYTES =
+  AGENT_INLINE_IMAGE_LIMITS.maxBytes + 24 * 1024 * 1024
 
 type Operation = (
   session: AgentRunSession,
@@ -108,16 +120,22 @@ const OPERATIONS: Readonly<Record<string, Operation>> = {
 /**
  * Answer a request a runner sends its run's session. Returns null for a path that is none of the
  * session's, for the host to route as it would.
+ *
+ * The session reads the body itself, within {@link AGENT_RUN_SESSION_BODY_MAX_BYTES}, once the
+ * runner is admitted: a host that caps request bodies for everyone else lifts its cap then, in
+ * `admitted`.
  */
 export async function serveAgentRunSession(
   host: AgentRunSessionHost,
-  request: Request
+  request: Request,
+  options: { readonly admitted?: () => void } = {}
 ): Promise<Response | null> {
   const target = parseAgentRunSessionPath(new URL(request.url).pathname)
   if (!target) return null
 
   const admitted = await admitRunner(host, request, target.runId)
   if (admitted instanceof Response) return admitted
+  options.admitted?.()
   if (!(await stopRecorded(host, admitted))) {
     return serveOperation(host, admitted, target.operation, request)
   }
@@ -180,9 +198,15 @@ async function serveOperation(
         404
       )
     }
-    const { args } = decodeWireValue(await request.text()) as { args?: readonly unknown[] }
+    const { args } = decodeWireValue(await readBodyText(request)) as {
+      args?: readonly unknown[]
+    }
     return json({ result: await run(session, args ?? [], request.signal) })
   } catch (error) {
+    // No stream was returned to close the session when it ends.
+    streaming = false
+    if (error instanceof SessionBodyTooLargeError) return await failTooLarge(session, operation)
+
     const wire = encodeWireError(error)
     return json({ error: wire }, wireErrorStatus(wire))
   } finally {
@@ -254,7 +278,7 @@ async function claimChild(
   session: AgentRunSession,
   request: Request
 ): Promise<Response> {
-  const { args } = decodeWireValue(await request.text()) as { args?: readonly unknown[] }
+  const { args } = decodeWireValue(await readBodyText(request)) as { args?: readonly unknown[] }
   const [childRunId, leaseExpiresAt] = (args ?? []) as [string, string]
   const child = await session.children.get(childRunId)
   if (child?.kind !== "subagent" || child.parentRunId !== session.run.id) {
@@ -376,7 +400,7 @@ function ownMessages(
 
 /** One model call, its events streamed back as lines of JSON as the provider sends them. */
 async function streamModelCall(session: AgentRunSession, request: Request): Promise<Response> {
-  const { ref, call } = decodeWireValue(await request.text()) as {
+  const { ref, call } = decodeWireValue(await readBodyText(request)) as {
     ref: Parameters<AgentRunSession["models"]["language"]>[0]
     call: Omit<LanguageModelRequest, "signal">
   }
@@ -413,7 +437,7 @@ async function streamModelCall(session: AgentRunSession, request: Request): Prom
 
 /** Live records, in the order the runner sent them. Best effort, as in process. */
 async function publishEvents(session: AgentRunSession, request: Request): Promise<Response> {
-  const { events } = decodeWireValue(await request.text()) as {
+  const { events } = decodeWireValue(await readBodyText(request)) as {
     events: readonly { readonly method: string; readonly input: unknown }[]
   }
   const sink = session.events as unknown as Record<string, (input: unknown) => Promise<void>>
@@ -448,7 +472,7 @@ async function putFile(session: AgentRunSession, request: Request): Promise<Resp
   const url = new URL(request.url)
   const size = url.searchParams.get("size")
   const fileRef = await session.files.put({
-    body: new Uint8Array(await request.arrayBuffer()),
+    body: await readBody(request),
     ...(size === null ? {} : { expectedSizeBytes: Number(size) }),
     ...optionalParam(url, "fileName"),
     ...optionalParam(url, "mediaType"),
@@ -469,6 +493,78 @@ async function openFile(session: AgentRunSession, request: Request): Promise<Res
 function optionalParam(url: URL, name: string): Record<string, string> {
   const value = url.searchParams.get(name)
   return value === null ? {} : { [name]: value }
+}
+
+/** A body past {@link AGENT_RUN_SESSION_BODY_MAX_BYTES}, refused while it streams in. */
+class SessionBodyTooLargeError extends Error {
+  readonly name = "SessionBodyTooLargeError"
+}
+
+/** The request's body, read up to {@link AGENT_RUN_SESSION_BODY_MAX_BYTES}. */
+async function readBody(request: Request): Promise<Uint8Array<ArrayBuffer>> {
+  const declared = Number(request.headers.get("content-length") ?? Number.NaN)
+  if (declared > AGENT_RUN_SESSION_BODY_MAX_BYTES) throw new SessionBodyTooLargeError()
+  if (!request.body) return new Uint8Array()
+
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for await (const chunk of request.body) {
+    total += chunk.byteLength
+    if (total > AGENT_RUN_SESSION_BODY_MAX_BYTES) throw new SessionBodyTooLargeError()
+
+    chunks.push(chunk)
+  }
+
+  const body = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return body
+}
+
+async function readBodyText(request: Request): Promise<string> {
+  return new TextDecoder().decode(await readBody(request))
+}
+
+/**
+ * Fail the run whose runner sent its session more than it reads: the runner could not record
+ * that end itself, as the end it would send carries the same work, and the run would wait for the
+ * sweep with no reason given. The runner learns its run is no longer its own.
+ */
+async function failTooLarge(session: AgentRunSession, operation: string): Promise<Response> {
+  const { run } = session
+  const megabytes = AGENT_RUN_SESSION_BODY_MAX_BYTES / (1024 * 1024)
+  const completedAt = new Date()
+  const error = captureSixbFailure(
+    withFailureMessage(
+      createSixbError(
+        "agent.execution_failed",
+        `[Sixb] Agent run '${run.id}' sent its session more than ${megabytes} MiB in one request (${operation}).`
+      ),
+      `The conversation grew past the ${megabytes} MiB a computer run can send at once. Start a new conversation, or ask for less in one message.`
+    ),
+    {
+      allowedCodes: AGENT_RUN_FAILURE_CODES,
+      defaultCode: "agent.execution_failed",
+      details:
+        run.kind === "conversation"
+          ? { runId: run.id, threadId: run.threadId }
+          : { parentRunId: run.parentRunId, runId: run.id },
+      at: completedAt,
+    }
+  )
+
+  try {
+    const ended = await session.finish({ status: "failed", error, completedAt })
+    await session.events.publishRunFinished(ended)
+  } catch (failure) {
+    if (!(failure instanceof AgentExecutionLostError)) throw failure
+  }
+
+  const wire = encodeWireError(new AgentExecutionLostError(run.id))
+  return json({ error: wire }, wireErrorStatus(wire))
 }
 
 function json(body: unknown, status = 200): Response {
