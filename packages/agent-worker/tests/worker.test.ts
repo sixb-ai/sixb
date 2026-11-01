@@ -7377,7 +7377,6 @@ describe("AgentWorker", () => {
       const durableJson = JSON.stringify(messages)
       expect(durableJson).not.toContain("data:image")
       expect(durableJson).not.toContain("iVBORw0KGgo")
-      expect(durableJson).not.toContain(published.sandboxPath)
 
       const livePromptJson = JSON.stringify(livePrompt)
       expect(livePromptJson).toContain("generated.png")
@@ -7406,6 +7405,13 @@ describe("AgentWorker", () => {
       // The native contract retains originalOutput for durable tracing, separately from model output.
       const modelOutputs = liveToolResults.map((part: { output: unknown }) => part.output)
       expect(JSON.stringify(modelOutputs)).not.toContain('"type":"file"')
+      // The trace keeps what the model read, which names the file where later turns find it.
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === createImage.name
+        )
+      ).toMatchObject({ modelOutput: modelOutputs[0] })
+      expect(JSON.stringify(modelOutputs[0])).toContain(published.sandboxPath)
       if (typeof Bun.Image === "function") {
         expect(
           livePromptMessages.some(
@@ -7435,19 +7441,17 @@ describe("AgentWorker", () => {
       const replayRun = await waitForTerminalRun(storage, followup.run.id)
       expect(replayRun.status).toBe("succeeded")
 
+      // The next turn reads the call as the first did, the image after it included, and finds the
+      // file at the path it named.
       const replayPromptJson = JSON.stringify(replayPrompt)
-      expect(replayPromptJson).toContain("generated.png")
-      expect(replayPromptJson).toContain(
-        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
-      )
+      expect(replayPromptJson).toContain(JSON.stringify(modelOutputs[0]))
       if (typeof Bun.Image === "function") {
-        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+        expect(replayPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
       }
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.some(
           (file) =>
-            file.path.includes(".sixb/agent/attachments/") &&
-            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
+            file.path.endsWith(published?.sandboxPath ?? "-") &&
             Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
         )
       ).toBe(true)
@@ -7474,11 +7478,12 @@ describe("AgentWorker", () => {
           content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
         },
       })
+      // Viewing it again reuses the file the turn materialized: it stores no copy.
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
           file.path.includes(".sixb/agent/tool-files/")
         )
-      ).toHaveLength(0)
+      ).toHaveLength(1)
     } finally {
       await worker.stop()
     }
@@ -8343,7 +8348,8 @@ describe("AgentWorker", () => {
         ],
       })
 
-      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result.
+      // A later turn finds them in $SIXB_ATTACHMENTS, as files of that result, at the path the
+      // result named: the turn replays it as the model read it.
       const next = await requestAgent(sixb, {
         threadId: requested.run.threadId,
         text: "Show the chart.",
@@ -8368,7 +8374,7 @@ describe("AgentWorker", () => {
         (entry) => entry.logicalPath === "acme-review/margins.png"
       )
       expect(chart?.fileName).toBe("acme-review-margins.png")
-      expect(chart?.sandboxPath).toStartWith(".sixb/agent/attachments/")
+      expect(chart?.sandboxPath).toBe(".sixb/agent/children/acme-review/margins.png")
       expect(
         nextSandbox.files.get(join(nextSandbox.workingDirectory, chart?.sandboxPath ?? ""))
       ).toEqual(TEST_PNG_BYTES)

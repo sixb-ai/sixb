@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole, FileRef } from "../src"
-import { toModelMessages } from "../src/agents"
+import { agentMessageSteps, toModelMessages } from "../src/agents"
 
 function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }
@@ -300,6 +300,129 @@ describe("toModelMessages", () => {
         ],
       },
     ])
+  })
+
+  // Removal proof: drop the storedModelOutput branch in toolResultOutput; the call replays its
+  // durable output, a JSON object and file metadata, instead of the text the model read.
+  test("replays the model output a call stored, not a new projection of its output", () => {
+    const call = (modelOutput: unknown) =>
+      ({
+        type: "tool-call",
+        toolCallId: "publish",
+        toolName: "publish_artifact",
+        input: {},
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: "Published." },
+            { type: "file", fileRef },
+          ],
+        },
+        modelOutput,
+      }) as AgentMessagePart
+    const replayed = (modelOutput: unknown) =>
+      toModelMessages([sixbMessage("assistant", [call(modelOutput)])], {
+        toolResultFileText: () => "<attachment />",
+      })[1]
+
+    expect(replayed({ type: "text", value: 'Published "Plan" as artifact art_1.' })).toEqual({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "publish",
+          toolName: "publish_artifact",
+          output: { type: "text", value: 'Published "Plan" as artifact art_1.' },
+        },
+      ],
+    })
+    expect(replayed({ type: "json", value: { b: 1, a: 2 } })).toMatchObject({
+      content: [{ output: { type: "json", value: { b: 1, a: 2 } } }],
+    })
+
+    // A shape the loop would not have sent is ignored: the call projects its output as before.
+    for (const invalid of [
+      undefined,
+      null,
+      { type: "text", value: 1 },
+      { type: "error-text", value: "x" },
+    ]) {
+      expect(replayed(invalid)).toMatchObject({
+        content: [{ output: { type: "text", value: "Published.\n<attachment />" } }],
+      })
+    }
+  })
+
+  // Removal proofs: keep a provider-executed call in localToolCalls, and the step's tool message
+  // is named by a call it does not replay; keep empty steps, and a step-start pair yields one.
+  test("splits a stored message into steps and names each by its first local call", () => {
+    const call = (toolCallId: string, providerExecuted?: true): AgentMessagePart => ({
+      type: "tool-call",
+      toolCallId,
+      toolName: "search",
+      input: {},
+      ...(providerExecuted ? { providerExecuted } : {}),
+      state: "output-available",
+      output: "found",
+    })
+    const steps = agentMessageSteps({
+      parts: [
+        { type: "step-start" },
+        { type: "step-start" },
+        call("web", true),
+        call("local"),
+        { type: "step-start" },
+        { type: "text", text: "Done." },
+      ],
+    })
+
+    expect(steps.map((step) => step.parts.map(({ partIndex }) => partIndex))).toEqual([[2, 3], [5]])
+    expect(steps.map((step) => step.localToolCalls.map(({ partIndex }) => partIndex))).toEqual([
+      [3],
+      [],
+    ])
+  })
+
+  // Removal proof: drop the afterToolResults call in appendAssistantModelMessages; the replayed
+  // step loses the message that followed its results.
+  test("replays what followed a step's tool results right after them", () => {
+    const call = (toolCallId: string): AgentMessagePart => ({
+      type: "tool-call",
+      toolCallId,
+      toolName: "view_file",
+      input: {},
+      state: "output-available",
+      output: "viewed",
+    })
+    const asked: number[] = []
+    const result = toModelMessages(
+      [
+        sixbMessage("assistant", [
+          { type: "step-start" },
+          { type: "text", text: "Looking." },
+          call("a"),
+          call("b"),
+          { type: "step-start" },
+          { type: "text", text: "Done." },
+        ]),
+      ],
+      {
+        afterToolResults: ({ partIndex }) => {
+          asked.push(partIndex)
+          return { role: "user", content: [{ type: "text", text: `files after ${partIndex}` }] }
+        },
+      }
+    )
+
+    expect(asked).toEqual([2])
+    expect(result.map((message) => message.role)).toEqual([
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+    ])
+    expect(result[2]).toEqual({ role: "user", content: [{ type: "text", text: "files after 2" }] })
   })
 
   test("keeps provider-executed tool results inline in the assistant message", () => {

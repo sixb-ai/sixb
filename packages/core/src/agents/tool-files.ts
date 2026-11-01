@@ -72,7 +72,7 @@ export async function storeAgentToolFile(input: {
     mediaType,
   })
   signal.throwIfAborted()
-  return { fileRef, path: toolFilePath(input.toolCallId, fileRef, fileName), bytes }
+  return { fileRef, path: agentToolFilePath(input.toolCallId, fileRef, fileName), bytes }
 }
 
 async function readFileBody(input: {
@@ -213,8 +213,11 @@ const SIGNATURE_REQUIRED_MEDIA_TYPES = new Set([
   "image/webp",
 ])
 
-/** Where a tool's file goes in the context directory, as the agent names it. */
-function toolFilePath(toolCallId: string, fileRef: FileRef, fileName: string): string {
+/**
+ * Where a tool's file goes in the context directory, as the agent names it: derived from the call
+ * and the file only, so a later turn materializes it at the path the call's output showed.
+ */
+export function agentToolFilePath(toolCallId: string, fileRef: FileRef, fileName: string): string {
   const callKey = createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
   const digestKey = fileRef.digest.slice("sha256:".length, "sha256:".length + 12)
   return posix.join("tool-files", callKey, `${digestKey}-${fileName}`)

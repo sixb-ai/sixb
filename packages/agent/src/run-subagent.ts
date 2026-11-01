@@ -25,6 +25,7 @@ import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./mode
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { SubagentHistory } from "./subagent-continuation"
 import type { SubagentDelivery, SubagentInbox } from "./subagent-inbox"
+import { toolFilesStepKey } from "./tools/result-media"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentRunFiles, AgentTurnContext } from "./types"
 
@@ -287,6 +288,8 @@ function subagentModelMessages(input: {
       projections?.promptTextByPartKey.get(
         toolResultAttachmentKey(message.id, partIndex, contentIndex)
       ),
+    afterToolResults: ({ message, partIndex }) =>
+      projections?.toolFilesByStep?.get(toolFilesStepKey(message.id, partIndex)),
   })
 }
 

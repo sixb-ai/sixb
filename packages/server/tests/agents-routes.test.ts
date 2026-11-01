@@ -773,6 +773,40 @@ describe("agent routes", () => {
     expect(await runResponse.json()).toMatchObject({ diagnostics })
   })
 
+  // Removal proof: add `modelOutput` to AgentToolCallOutputSchema, or let it pass through; the
+  // runtime's replay bytes, sandbox paths included, reach API clients.
+  test("leaves out what the model read of a tool's output", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thr-model-output",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const call = {
+      type: "tool-call" as const,
+      toolCallId: "call-publish",
+      toolName: "publish_artifact",
+      input: {},
+      state: "output-available" as const,
+      output: { artifactId: "art_1", version: 1 },
+    }
+    await storage.agents.messages.append({
+      id: "msg-model-output",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: null,
+      role: "assistant",
+      parts: [{ ...call, modelOutput: { type: "text", value: "Published as art_1." } }],
+    })
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
+    )
+    const body = (await response.json()) as { messages: { parts: unknown[] }[] }
+
+    expect(body.messages[0]?.parts).toEqual([call])
+  })
+
   test("returns 409 when posting to a thread with an active run", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({

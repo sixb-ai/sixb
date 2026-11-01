@@ -1,4 +1,4 @@
-import type { JsonValue } from "../json"
+import { isJsonValue, type JsonValue } from "../json"
 import type {
   ModelAssistantPart,
   ModelFilePart,
@@ -69,15 +69,24 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
   readonly toolResultFileText?: (
     input: AgentToolResultFileResolverInput<TMessage>
   ) => string | undefined
+  /**
+   * Input that followed a step's tool results when it ran, such as the images those tools
+   * returned, so a replay sends it again in the same place. `partIndex` is the step's first local
+   * tool call.
+   */
+  readonly afterToolResults?: (input: {
+    readonly message: TMessage
+    readonly partIndex: number
+  }) => ModelMessage | undefined
 }
 
 /**
  * Project durable messages into Sixb model messages. Assistant parts are grouped
  * into blocks at each `step-start`; each nonempty block yields one `assistant` message plus, for any
  * non-provider-executed tool calls, one `tool` message. Provider-executed tool results stay inline
- * in the assistant message. Without a tool registry, a string output maps to `text` and anything
- * else to `json`; this is the documented fidelity scope (a tool's custom `toModelOutput` is not
- * reproduced). Assistant file attachments are not projected as assistant-authored text.
+ * in the assistant message. A call whose tool projected its output for the model replays the
+ * stored `modelOutput`, the bytes the model read; otherwise a string output maps to `text` and
+ * anything else to `json`. Assistant file attachments are not projected as assistant-authored text.
  */
 export function toModelMessages<TMessage extends AgentMessage>(
   messages: readonly TMessage[],
@@ -180,22 +189,53 @@ function userModelMessage<TMessage extends AgentMessage>(
   return { role: "user", content }
 }
 
+/** One step of a stored assistant message: its parts between two `step-start`s. */
+export interface AgentMessageStep {
+  readonly parts: readonly { readonly part: AgentMessagePart; readonly partIndex: number }[]
+  /**
+   * The calls the runtime ran, not the provider, in order: one `tool` message replays their
+   * results, and the first one's part index names that message.
+   */
+  readonly localToolCalls: readonly {
+    readonly part: AgentToolCallPart
+    readonly partIndex: number
+  }[]
+}
+
+/** A stored assistant message's nonempty steps, as {@link toModelMessages} replays them. */
+export function agentMessageSteps(message: Pick<AgentMessage, "parts">): AgentMessageStep[] {
+  const steps: AgentMessageStep[] = []
+  let parts: AgentMessageStep["parts"][number][] = []
+  const flush = () => {
+    if (parts.length === 0) return
+
+    const localToolCalls = parts.flatMap(({ part, partIndex }) =>
+      part.type === "tool-call" && part.providerExecuted !== true ? [{ part, partIndex }] : []
+    )
+    steps.push({ parts, localToolCalls })
+    parts = []
+  }
+
+  message.parts.forEach((part, partIndex) => {
+    if (part.type === "step-start") {
+      flush()
+    } else {
+      parts.push({ part, partIndex })
+    }
+  })
+  flush()
+  return steps
+}
+
 function appendAssistantModelMessages<TMessage extends AgentMessage>(
   result: ModelMessage[],
   message: TMessage,
   options: ToModelMessagesOptions<TMessage>
 ): void {
-  let block: Array<{ readonly part: AgentMessagePart; readonly partIndex: number }> = []
-  const flush = (): void => {
-    if (block.length === 0) {
-      return
-    }
-    const current = block
-    block = []
-
+  for (const step of agentMessageSteps(message)) {
     const content: ModelAssistantPart[] = []
     const toolResults: ModelToolResultPart[] = []
-    for (const { part, partIndex } of current) {
+    for (const { part, partIndex } of step.parts) {
       if (part.type === "text" || part.type === "reasoning") {
         content.push({
           type: part.type,
@@ -219,19 +259,14 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
     }
     if (content.length > 0) result.push({ role: "assistant", content })
 
-    if (toolResults.length > 0) {
+    const first = step.localToolCalls[0]
+    if (toolResults.length > 0 && first) {
       result.push({ role: "tool", content: toolResults })
+
+      const followUp = options.afterToolResults?.({ message, partIndex: first.partIndex })
+      if (followUp) result.push(followUp)
     }
   }
-
-  message.parts.forEach((part, partIndex) => {
-    if (part.type === "step-start") {
-      flush()
-    } else {
-      block.push({ part, partIndex })
-    }
-  })
-  flush()
 }
 
 function toolCallModelPart(part: AgentToolCallPart): ModelToolCallPart {
@@ -274,6 +309,11 @@ function toolResultOutput<TMessage extends AgentMessage>(
       ? { type: "error-json", value: part.errorText }
       : { type: "error-text", value: part.errorText }
   }
+
+  // What the model read when the tool ran: projecting `output` again would send other bytes.
+  const modelOutput = storedModelOutput(part.modelOutput)
+  if (modelOutput) return modelOutput
+
   if (isAgentToolResult(part.output)) {
     const value: string[] = []
     part.output.content.forEach((contentPart, contentIndex) => {
@@ -296,6 +336,16 @@ function toolResultOutput<TMessage extends AgentMessage>(
   return typeof part.output === "string"
     ? { type: "text", value: part.output }
     : { type: "json", value: part.output }
+}
+
+/** A stored model output in a shape the model loop accepts, or undefined to project `output`. */
+function storedModelOutput(value: unknown): ModelToolOutput | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+
+  const { type, value: content } = value as { readonly type?: unknown; readonly value?: unknown }
+  if (type === "text" && typeof content === "string") return { type, value: content }
+  if (type === "json" && isJsonValue(content)) return { type, value: content }
+  return undefined
 }
 
 function toolResultFileFallbackText(part: AgentToolFileContent): string {

@@ -7,10 +7,11 @@ export {
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
+  AgentMessageStep,
   AgentToolResultFileResolverInput,
   ToModelMessagesOptions,
 } from "./adapters"
-export { toModelMessages } from "./adapters"
+export { agentMessageSteps, toModelMessages } from "./adapters"
 export type { AgentApprovalResume } from "./approval-continuation"
 export { resumeDecidedAgentTurn } from "./approval-continuation"
 export { getAgentApprovalExecutor } from "./approval-executor"
@@ -302,6 +303,7 @@ export type { AgentToolCatalog } from "./tool-catalog"
 export type { AgentToolCallFile, StoredAgentToolFile } from "./tool-files"
 export {
   AGENT_FILE_MAX_BYTES,
+  agentToolFilePath,
   SANDBOX_CONTEXT_DIRECTORY,
   storeAgentToolFile,
 } from "./tool-files"
