@@ -1,7 +1,10 @@
-import type {
-  PrepareModelStepInput,
-  PrepareModelStepResult,
-  RecoverModelStepInput,
+import {
+  AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
+  measureAgentContextTokenRate,
+  measureAgentModelRequest,
+  type PrepareModelStepInput,
+  type PrepareModelStepResult,
+  type RecoverModelStepInput,
 } from "@sixb/core/internal/agents"
 import {
   type ModelMessage,
@@ -145,9 +148,52 @@ class ContextGuard {
    */
   private readonly reducedCalls = new Map<string, Set<string>>()
   private readonly excluded: ReadonlySet<string>
+  /**
+   * The densest rate the provider showed for what one of this turn's steps added: the tokens it
+   * counted past the call before, against the bytes the step added to that call's request.
+   */
+  private densestAdded: number | undefined
 
   constructor(private readonly input: AgentContextGuardInput) {
     this.excluded = new Set(input.excludeTools ?? [])
+  }
+
+  /**
+   * The rate what a turn adds is weighed at before the provider counts it: the run's, or denser
+   * once a step of this turn showed it. A result of base64 or random identifiers reads three times
+   * denser than prose, and its next ones are weighed as it was counted, not as the run reads.
+   */
+  private get addedBytesPerToken(): number {
+    return Math.min(this.bytesPerToken, this.densestAdded ?? Number.POSITIVE_INFINITY)
+  }
+
+  /**
+   * Learn what the last step added weighs, from the provider's counts of the last two calls:
+   * only when the last call's request kept every message of the one before it, so the difference
+   * is what the step added, and when that is enough to tell (see measureAgentContextTokenRate).
+   */
+  private learn(steps: readonly ModelStep[]): void {
+    const read = steps.at(-1)?.usage.inputTokens
+    const readBefore = steps.at(-2)?.usage.inputTokens
+    const sent = this.sent.get(steps.length - 1)
+    const sentBefore = this.sent.get(steps.length - 2)
+    if (!read || !readBefore || !sent || !sentBefore) return
+
+    const kept = new Set(sent)
+    if (sentBefore.some((message) => !kept.has(message))) return
+
+    const before = new Set(sentBefore)
+    const added = sent.filter((message) => !before.has(message))
+    const size = measureAgentModelRequest({ messages: added, tools: [] })
+    const bare = measureAgentModelRequest({ messages: [], tools: [] })
+    const sample = measureAgentContextTokenRate({
+      size: { ...size, bytes: size.bytes - bare.bytes, tokens: size.tokens - bare.tokens },
+      inputTokens: read - readBefore,
+    })
+    if (!sample) return
+
+    const rate = Math.max(AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN, sample.bytes / sample.tokens)
+    this.densestAdded = Math.min(this.densestAdded ?? rate, rate)
   }
 
   private get bytesPerToken(): number {
@@ -164,6 +210,7 @@ class ContextGuard {
     steps,
   }: PrepareModelStepInput): Promise<PrepareModelStepResult | undefined> {
     this.headLength ??= messages.length
+    this.learn(steps)
 
     // The growth since the last call is what the estimate may miss. The first call has none to
     // go by: its whole request is estimated, at the rate the thread measured, as its preflight
@@ -434,7 +481,9 @@ class ContextGuard {
   /**
    * What the last call read, then the unscaled estimates of the messages its request held that
    * `messages` no longer do, and of those it adds. Messages are compared by identity: the loop
-   * keeps the ones it sends again, and a message cleared or compacted is a new one.
+   * keeps the ones it sends again, and a message cleared or compacted is a new one. What it adds
+   * weighs at the rate what the turn adds is (see addedBytesPerToken), what it removes at the
+   * run's: the provider counted it already, and subtracting too little is the safe side.
    */
   private measure(
     messages: readonly ModelMessage[],
@@ -448,9 +497,20 @@ class ContextGuard {
 
     const before = new Set(sent)
     const after = new Set(messages)
-    const weigh = (list: readonly ModelMessage[], kept: ReadonlySet<ModelMessage>) =>
-      list.reduce((total, message) => total + (kept.has(message) ? 0 : this.weight(message)), 0)
-    return { fixed: read, removed: weigh(sent, after), added: weigh(messages, before) }
+    const weigh = (
+      list: readonly ModelMessage[],
+      kept: ReadonlySet<ModelMessage>,
+      bytesPerToken: number
+    ) =>
+      list.reduce(
+        (total, message) => total + (kept.has(message) ? 0 : this.weight(message, bytesPerToken)),
+        0
+      )
+    return {
+      fixed: read,
+      removed: weigh(sent, after, this.bytesPerToken),
+      added: weigh(messages, before, this.addedBytesPerToken),
+    }
   }
 
   /** The messages of the last request the provider counted, which their real tokens include. */
@@ -464,17 +524,23 @@ class ContextGuard {
     return estimateAgentRequestTokens({ messages, tools: this.input.tools }, this.bytesPerToken)
   }
 
-  /** One message's estimate, without the request's own overhead. */
-  private weight(message: ModelMessage): number {
+  /** One message's estimate at `bytesPerToken`, without the request's own overhead. */
+  private weight(message: ModelMessage, bytesPerToken: number): number {
     return (
-      estimateAgentRequestTokens({ messages: [message], tools: [] }, this.bytesPerToken) -
-      estimateAgentRequestTokens({ messages: [], tools: [] }, this.bytesPerToken)
+      estimateAgentRequestTokens({ messages: [message], tools: [] }, bytesPerToken) -
+      estimateAgentRequestTokens({ messages: [], tools: [] }, bytesPerToken)
     )
   }
 
-  /** `bytes` as tokens: at the scaled rate when the provider has not counted them yet. */
+  /**
+   * `bytes` as tokens: at the scaled rate of what the turn adds when the provider has not counted
+   * them yet, else at the run's.
+   */
   private tokensOf(bytes: number, added: boolean): number {
-    return Math.max(0, Math.ceil((bytes / this.bytesPerToken) * (added ? this.scale : 1)))
+    const tokens = added
+      ? (bytes / this.addedBytesPerToken) * this.scale
+      : bytes / this.bytesPerToken
+    return Math.max(0, Math.ceil(tokens))
   }
 }
 

@@ -4,7 +4,10 @@ export {
   sandboxCredentialIssue,
   staticSandboxRecipe,
 } from "../sandboxes/configuration"
-export { AGENT_TOKEN_RATE_SAMPLES } from "../storage/agents/types"
+export {
+  AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN,
+  AGENT_TOKEN_RATE_SAMPLES,
+} from "../storage/agents/types"
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
