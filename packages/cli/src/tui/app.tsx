@@ -28,6 +28,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Logo } from "./brand"
 import type { Connection } from "./connection"
+import { ContextPanel } from "./context"
 import { conversationsIn, folderOf, rememberFolder } from "./folders"
 import { type ContextUse, contextStatus, fittedContextText, shortPath } from "./format"
 import { Palette, type PaletteItem } from "./palette"
@@ -673,7 +674,20 @@ function ThreadView(
   const [live, setLive] = useState<LiveRun | null>(null)
   const [stopArmed, setStopArmed] = useState(false)
   const [typed, setTyped] = useState("")
-  const slash = useSlashMenu(props.slashCommands, typed)
+  const [contextOpen, setContextOpen] = useState(false)
+  // A conversation adds what only it can show: what it uses of its model's context.
+  const slashCommands = useMemo(
+    () => [
+      ...props.slashCommands,
+      {
+        name: "context",
+        description: "What the conversation uses of the model's context",
+        run: () => setContextOpen(true),
+      },
+    ],
+    [props.slashCommands]
+  )
+  const slash = useSlashMenu(slashCommands, typed)
   const scroll = useRef<ScrollBoxRenderable>(null)
 
   const mine = thread !== null && owns(connection, thread)
@@ -846,7 +860,7 @@ function ThreadView(
   }
 
   useKeyboard((key: KeyEvent) => {
-    if (props.dialogOpen) return
+    if (props.dialogOpen || contextOpen) return
     if (pending && !key.ctrl && !key.meta) {
       const settled = Date.now() - shownAt.current > APPROVAL_GRACE_MS
       if (key.name === "left" || key.name === "up") {
@@ -1025,7 +1039,7 @@ function ThreadView(
         <SlashMenu colors={colors} menu={slash} above={8} />
         <Composer
           colors={colors}
-          focused={!props.dialogOpen && !pending && !elsewhere}
+          focused={!props.dialogOpen && !contextOpen && !pending && !elsewhere}
           onChange={setTyped}
           accent={pending ? colors.amber : undefined}
           placeholder={pending ? "Decide on the request above first" : "Ask anything…"}
@@ -1042,6 +1056,16 @@ function ThreadView(
           </text>
         </box>
       </box>
+      {contextOpen ? (
+        <ContextPanel
+          colors={colors}
+          context={context}
+          {...(context?.model
+            ? { modelName: modelNames.get(`${context.model.provider}:${context.model.modelId}`) }
+            : {})}
+          onClose={() => setContextOpen(false)}
+        />
+      ) : null}
     </box>
   )
 }
