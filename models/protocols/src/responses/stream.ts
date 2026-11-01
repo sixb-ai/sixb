@@ -8,6 +8,7 @@ import {
   type ModelUsage,
   type ProviderData,
 } from "@sixb/core/models"
+import { contextWindowRejection } from "../context-window"
 import { integer, object, string } from "../json"
 import { decodeServerSentEvents } from "../sse"
 import { responsesUsage } from "./usage"
@@ -343,6 +344,10 @@ class ResponseState {
               ? { code: string(error?.code) || string(error?.type) }
               : {}),
             ...(this.options.requestId === undefined ? {} : { requestId: this.options.requestId }),
+            ...contextWindowRejection({
+              code: string(error?.code) || string(error?.type),
+              message: string(error?.message),
+            }),
           }
         ),
       })

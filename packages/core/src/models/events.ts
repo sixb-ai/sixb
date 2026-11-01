@@ -124,6 +124,11 @@ export type LanguageModelStreamEvent =
       readonly type: "finish"
       readonly finishReason: ModelFinishReason
       readonly rawFinishReason?: string
+      /**
+       * The model's context window, not its output limit, stopped a `length` response: the
+       * request left the answer less room than it asked for. A shorter request may answer.
+       */
+      readonly contextWindowExceeded?: boolean
       readonly usage: ModelUsage
       readonly providerData?: ProviderData
       readonly reportedCost?: ModelReportedCost
