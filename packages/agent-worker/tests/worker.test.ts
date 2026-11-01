@@ -15386,9 +15386,14 @@ describe("context within a turn", () => {
       },
     })
     // Four chapters of about 14,000 tokens each: more than the 45,000-token limit together.
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      projectTools: [chapterTool(42_000)],
-    })
+    const sixb = buildSixb(
+      model,
+      new InMemoryBroker(),
+      new ToolOutputWritesFailingSandboxFactory(),
+      {
+        projectTools: [chapterTool(42_000)],
+      }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
