@@ -14793,6 +14793,84 @@ function contextWindowRejection(): ModelProviderError {
   )
 }
 
+/** How many dumps denseDumpModel asks for before it answers. */
+const DENSE_DUMPS = 5
+
+/**
+ * What a provider counts of a request whose tool results are base64: prose at 3 bytes per token,
+ * as the run measured, and base64 at about 1.33, as most tokenizers read it.
+ */
+function denseCount(request: LanguageModelRequest): number {
+  const dense = (JSON.stringify(request.messages).match(/[A-Za-z0-9+/]{1000,}/g) ?? []).reduce(
+    (total, run) => total + run.length,
+    0
+  )
+  return estimateAgentRequestTokens(request, 3) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
+}
+
+/** Base64 of 6,000 random bytes, as `head -c 6000 /dev/urandom | base64` prints it, by number. */
+const dumpTool = defineAgentTool("dump")
+  .description("Dump random bytes.")
+  .input({ number: "string" })
+  .run(({ input }) => {
+    const raw = new Uint8Array(6_000)
+    let state = Number(input.number) * 2_654_435_761
+    for (let index = 0; index < raw.length; index++) {
+      state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
+      raw[index] = state >>> 24
+    }
+    return { dump: Buffer.from(raw).toString("base64") }
+  })
+
+/**
+ * A model with a 65,536-token window that may write up to 60,000 tokens, counting as denseCount
+ * does: it dumps DENSE_DUMPS times, then answers, as text or as the step's structured output.
+ */
+function denseDumpModel(requests: LanguageModelRequest[]): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: {
+        inputMediaTypes: [],
+        localTools: true,
+        parallelToolCalls: true,
+        nativeStructuredOutput: true,
+      },
+      contextWindow: 65_536,
+      maxOutputTokens: 60_000,
+    },
+    stream: async (request) => {
+      requests.push(request)
+      const usage = { inputTokens: denseCount(request), outputTokens: 20 }
+      const dumps = requests.filter((sent) => !sent.responseFormat).length
+      if (request.responseFormat || dumps > DENSE_DUMPS) {
+        const text = request.responseFormat
+          ? JSON.stringify({ answer: "Dumped", confidence: 0.9 })
+          : "Dumped them all."
+        return stream([
+          { type: "stream-start" },
+          { type: "text-start", id: "text" },
+          { type: "text-delta", id: "text", delta: text },
+          { type: "text-end", id: "text" },
+          { type: "finish", finishReason: "stop", usage },
+        ])
+      }
+      return stream([
+        { type: "stream-start" },
+        {
+          type: "tool-call",
+          toolCallId: `dump_${dumps}`,
+          toolName: "dump",
+          input: JSON.stringify({ number: String(dumps) }),
+        },
+        { type: "finish", finishReason: "tool-calls", usage },
+      ])
+    },
+  })
+}
+
 describe("context within a turn", () => {
   const HARD_LIMIT_TOKENS = 83_616
 
@@ -15181,66 +15259,12 @@ describe("context within a turn", () => {
     // is then sized from the output ceiling's own estimate, at the 3 bytes per token the run reads
     // prose at, and input and answer pass the 65,536-token window.
     const requests: LanguageModelRequest[] = []
-    const DUMPS = 5
-    /** Base64 runs of a request: its tokenizer reads them at about 1.33 bytes a token. */
-    const counted = (request: LanguageModelRequest) => {
-      const dense = (JSON.stringify(request.messages).match(/[A-Za-z0-9+/]{1000,}/g) ?? []).reduce(
-        (total, run) => total + run.length,
-        0
-      )
-      return (
-        estimateAgentRequestTokens(request, 3) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
-      )
-    }
-    const model = new WorkerTestModel({
-      definition: {
-        kind: "language",
-        providerId: "mock",
-        modelId: "mock-model",
-        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
-        contextWindow: 65_536,
-        maxOutputTokens: 60_000,
-      },
-      stream: async (request) => {
-        requests.push(request)
-        const usage = { inputTokens: counted(request), outputTokens: 20 }
-        if (requests.length > DUMPS) {
-          return stream([
-            { type: "stream-start" },
-            { type: "text-start", id: "text" },
-            { type: "text-delta", id: "text", delta: "Dumped them all." },
-            { type: "text-end", id: "text" },
-            { type: "finish", finishReason: "stop", usage },
-          ])
-        }
-        return stream([
-          { type: "stream-start" },
-          {
-            type: "tool-call",
-            toolCallId: `dump_${requests.length}`,
-            toolName: "dump",
-            input: JSON.stringify({ number: String(requests.length) }),
-          },
-          { type: "finish", finishReason: "tool-calls", usage },
-        ])
-      },
-    })
-    // Base64 of 6,000 random bytes each, as `head -c 6000 /dev/urandom | base64` prints it.
-    const dump = defineAgentTool("dump")
-      .description("Dump random bytes.")
-      .input({ number: "string" })
-      .run(({ input }) => {
-        const raw = new Uint8Array(6_000)
-        let state = Number(input.number) * 2_654_435_761
-        for (let index = 0; index < raw.length; index++) {
-          state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
-          raw[index] = state >>> 24
-        }
-        return { dump: Buffer.from(raw).toString("base64") }
-      })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      projectTools: [dump],
-    })
+    const sixb = buildSixb(
+      denseDumpModel(requests),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [dumpTool] }
+    )
     const storage = agentStorageOf(sixb)
     await seedMeasuredTokenRate(storage, 3)
     const worker = new AgentWorker(sixb, workerOptions())
@@ -15250,9 +15274,9 @@ describe("context within a turn", () => {
       const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
-      expect(requests).toHaveLength(DUMPS + 1)
+      expect(requests).toHaveLength(DENSE_DUMPS + 1)
       for (const sent of requests) {
-        expect(counted(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
+        expect(denseCount(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
       }
     } finally {
       await worker.stop()
@@ -16091,6 +16115,31 @@ describe("context of a child and of a workflow step", () => {
     } finally {
       await stopUnderFakeTime(worker)
       setSystemTime()
+    }
+  })
+
+  test("a workflow step leaves its answer room within the window on a dense turn", async () => {
+    // Reproduce: keep only the guard's messages in runWorkflowAgentNode's prepareStep, as before
+    // the guard sized answers; each call's answer is then sized from the output ceiling's own
+    // estimate, and input and answer pass the 65,536-token window.
+    const requests: LanguageModelRequest[] = []
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: denseDumpModel(requests),
+      tools: [dumpTool],
+      runId: "workflow-dense-run",
+    })
+    await seedMeasuredTokenRate(agentStorageOf(sixb), 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      for (const sent of requests.filter((request) => !request.responseFormat)) {
+        expect(denseCount(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
+      }
+    } finally {
+      await worker.stop()
     }
   })
 

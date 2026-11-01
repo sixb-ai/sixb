@@ -169,7 +169,8 @@ export async function runWorkflowAgentNode(
           ...step,
           messages: prepared?.messages ?? step.messages,
         })
-        return guarded ?? prepared
+        // The guard's request, when it reduced the one prepared, and the room its answer has.
+        return { ...prepared, ...guarded }
       },
       recoverStep: guard.recoverStep,
       signal: abortSignal,
