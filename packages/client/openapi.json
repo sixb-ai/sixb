@@ -37620,6 +37620,14 @@
         "summary": "List agent thread messages",
         "tags": ["Agent Threads"],
         "operationId": "listAgentThreadMessages",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "threadId",
