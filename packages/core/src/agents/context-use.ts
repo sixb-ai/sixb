@@ -3,6 +3,7 @@ import type { AgentContextCheckpointReason } from "../storage/agents"
 import { type AgentContextBudget, resolveAgentContextBudget } from "./context-budget"
 import { estimateAgentContextMessagesTokens } from "./context-compaction"
 import { estimateAgentThreadRequest } from "./context-request"
+import { readAgentContextBytesPerToken } from "./context-token-rate"
 import {
   type AgentTurnHistory,
   type AgentTurnHistoryHost,
@@ -42,7 +43,7 @@ export interface AgentThreadContextUse {
 /**
  * Read a thread's context use for `model`: its history as a turn reads it, the call that history
  * ends with, and the model's limits resolved as the worker resolves them for a turn run with
- * `reasoning`.
+ * `reasoning`, from the bytes per token a turn's plan would start from.
  */
 export async function readAgentThreadContextUse(
   host: AgentTurnHistoryHost,
@@ -53,9 +54,15 @@ export async function readAgentThreadContextUse(
   }
 ): Promise<AgentThreadContextUse> {
   const history = await readAgentThreadHistory(host, input.threadId)
+  const bytesPerToken = await readAgentContextBytesPerToken({
+    tokenRates: host.storage.agents.tokenRates,
+    projectId: host.projectId,
+    model: input.model,
+  })
   const budget = resolveAgentContextBudget({
     model: input.model,
     ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+    bytesPerToken,
   })
 
   const call = history.usageAnchor?.modelCall
