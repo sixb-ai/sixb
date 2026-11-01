@@ -1191,6 +1191,14 @@ export const AGENT_MEMORY_HISTORY_DAYS = 90
 export const AGENT_TOKEN_RATE_SAMPLES = 20
 
 /**
+ * The band of bytes per token a measurement may show. Every tokenizer measured on agent turns
+ * reads 2.1 to 4.7; a value outside is a broken measurement, and a single one would set its
+ * model's rate for the whole project.
+ */
+export const AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN = 1
+export const AGENT_TOKEN_RATE_MAX_BYTES_PER_TOKEN = 8
+
+/**
  * One run's measurement of its model's tokenizer: the UTF-8 bytes of a request's text, as the
  * Agent's context estimator weighs them, against the text tokens the provider counted for it.
  */

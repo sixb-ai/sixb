@@ -123,13 +123,18 @@ export function runAgentTokenRateStorageContractSuite<
       })
     })
 
-    test("rejects a measurement without tokens, bytes or a model", async () => {
+    // Removal proof: drop the band check from assertAgentTokenRateRecord; a sample of one byte per
+    // billion tokens is kept, and becomes its model's rate.
+    test("rejects a measurement without tokens, bytes or a model, or past any tokenizer", async () => {
       await withRates(async (rates, storage) => {
         for (const input of [
           sample(1, { tokens: 0 }),
           sample(1, { bytes: -5 }),
           sample(1, { bytes: 1.5 }),
           { ...sample(1), modelId: " " },
+          // Outside every tokenizer's band: a broken measurement, which would set the model's rate.
+          sample(1, { bytes: 1, tokens: 1_000_000_000 }),
+          sample(1, { bytes: 900_000, tokens: 100_000 }),
         ]) {
           const rejected = await rates.record(input).catch((error: unknown) => error)
           expect(rejected).toBeInstanceOf(AgentStorageError)
