@@ -139,6 +139,8 @@ export type {
   LanguageModelProvider,
   LanguageModelRequest,
   LanguageModelStream,
+  ModelCaching,
+  ModelCachingIntent,
   ModelCapabilities,
   ModelProvider,
   ModelReasoning,

@@ -58,9 +58,10 @@ configuration:
 
 One-shot requests, with no tools and no earlier answer, such as compaction summaries and
 `generate()`, stay uncached: nothing reads their prefix again, and a cache write costs 1.25x input.
-Pass `caching: "auto"` to cache one anyway, or `caching: "off"` to send no breakpoints. The
-five-minute TTL suits agent steps and Sixb's model routing, which treats a thread's cache as warm
-for five minutes. A `cache_control` in the binding's `request`, as above, sets the TTL for every
+Pass `caching: "auto"` to cache one anyway, or `caching: "off"` to send no breakpoints. Agent
+steps keep the five-minute TTL, except a chat turn's: the user's next message can come after a
+pause, so its breakpoints ask for an hour (a one-hour write costs 2x input, and only what the step
+adds is written). A `cache_control` in the binding's `request`, as above, sets the TTL for every
 breakpoint, since Anthropic requires longer TTLs first.
 
 `reasoning` is the level Sixb applies when the model runs without an explicit choice; Sixb checks

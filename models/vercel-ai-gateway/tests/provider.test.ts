@@ -562,6 +562,28 @@ describe("Vercel AI Gateway provider", () => {
     expect(bodies).toHaveLength(2)
     expect(() => provider("openai/gpt-5", { maxOutputTokens: 0 })).toThrow("positive safe integer")
   })
+  test("sends a conversation's cache lifetime and affinity on the wire", async () => {
+    // Regression proof: build the request headers without gatewayPromptCaching's affinity header.
+    const sent: { body: Record<string, unknown>; headers: Headers }[] = []
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async (_url, init) => {
+        sent.push({ body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers) })
+        return sseResponse([])
+      },
+    })
+    const model = provider("anthropic/claude-opus-5.5")
+    const tools = [{ name: "lookup", description: "Look up.", inputSchema: { type: "object" } }]
+    await model.stream(request({ tools, caching: { lifetime: "long", key: "sixb_conversation" } }))
+    await model.stream(request())
+
+    expect(sent[0]?.body).toMatchObject({ caching: "auto", cache_ttl: "1h" })
+    expect(sent[0]?.headers.get("x-session-affinity")).toBe("sixb_conversation")
+    expect(sent[0]?.headers.get("authorization")).toBe("Bearer test")
+    // A one-shot request without an intent is sent as before.
+    expect(sent[1]?.body).not.toHaveProperty("cache_ttl")
+    expect(sent[1]?.headers.has("x-session-affinity")).toBe(false)
+  })
   test("estimates safe Gateway settings but declines routing and extra pricing dimensions", async () => {
     // Removal proof: reject every request/providerOptions object; safe settings become unpriceable.
     const provider = createVercelGateway({
