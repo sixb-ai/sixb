@@ -3,6 +3,7 @@ import type { Principal } from "@sixb/core"
 import {
   type AgentRunArtifacts,
   type AgentRunSession,
+  type AgentToolCallFile,
   type AgentTurnHistory,
   conversationThreadId,
   subagentSandboxFiles,
@@ -86,7 +87,11 @@ import {
   type SuppliesToolFiles,
 } from "./tools/result-media"
 import { AgentFileBudget, createAgentToolFiles, installAgentToolFiles } from "./tools/tool-files"
-import { readSavedToolOutputs, type SavedToolOutput, ToolOutputFiles } from "./tools/tool-outputs"
+import {
+  restoreSavedToolOutputs,
+  savedToolOutputFiles,
+  ToolOutputFiles,
+} from "./tools/tool-outputs"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentRunFiles, AgentTurnContext } from "./types"
@@ -349,15 +354,9 @@ export async function createConversationAgentEnvironment(
     const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
     const messages = threadContext.retainedMessages
     const conversation = authorsOf(messages)
-    const [{ attachmentContext, imageBudget }, memory, toolOutputs] = await Promise.all([
+    const [{ attachmentContext, imageBudget }, memory] = await Promise.all([
       prepareFiles(messages),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
-      readSavedToolOutputs({
-        messages,
-        contextDirectory: sandbox.contextDirectory,
-        blobStorage: context.blobStorage,
-        signal: sandboxSignal,
-      }),
     ])
     environment = await startAgentEnvironment({
       mode: "conversation",
@@ -377,7 +376,7 @@ export async function createConversationAgentEnvironment(
       ...(publishing ? { publishing } : {}),
       apiBaseUrl,
       attachmentContext,
-      toolOutputs,
+      toolOutputs: savedToolOutputFiles(messages),
       imageBudget,
       ontologyDocs,
       frameworkTools: input.frameworkTools,
@@ -627,15 +626,7 @@ async function startSubagentEnvironment(
     ? await preflightSubagentContext({ ...compaction, threadContext: initial.threadContext })
     : undefined
   const threadContext = prepared?.threadContext ?? initial.threadContext
-  const [{ attachmentContext, imageBudget }, toolOutputs] = await Promise.all([
-    prepareFiles(threadContext.retainedMessages),
-    readSavedToolOutputs({
-      messages: threadContext.retainedMessages,
-      contextDirectory: sandbox.contextDirectory,
-      blobStorage: context.blobStorage,
-      signal,
-    }),
-  ])
+  const { attachmentContext, imageBudget } = await prepareFiles(threadContext.retainedMessages)
 
   const environment = await startAgentEnvironment({
     mode: "subagent",
@@ -651,7 +642,7 @@ async function startSubagentEnvironment(
     ...(publishing ? { publishing } : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
-    toolOutputs,
+    toolOutputs: savedToolOutputFiles(threadContext.retainedMessages),
     imageBudget,
     ontologyDocs: plan.ontologyDocs,
     ...(memory ? { memory } : {}),
@@ -761,8 +752,11 @@ interface AgentEnvironmentSetup
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  /** The outputs the history saved to files, written again where their previews name them. */
-  readonly toolOutputs?: readonly SavedToolOutput[]
+  /**
+   * The outputs the history saved to files, which provisioning writes back where their previews
+   * name them: read from the store while the model starts, unless the sandbox holds them.
+   */
+  readonly toolOutputs?: readonly AgentToolCallFile[]
   /** What the history left of the request's inline image budget, which the run's steps take. */
   readonly imageBudget: InlineImageBudget
   /** Installed under `$SIXB_ONTOLOGY_DIR`; a workflow step's prompt does not list them. */
@@ -857,10 +851,10 @@ async function startAgentEnvironment(
     })
   )
   const resolveSandbox = () => ready
+  // Its own budget: saving outputs never takes what published artifacts and tool files need.
   const toolOutputFiles = new ToolOutputFiles({
     sandbox: resolveSandbox,
     blobStorage: context.blobStorage,
-    budget: fileBudget,
   })
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
@@ -901,6 +895,7 @@ async function startAgentEnvironment(
     apiBaseUrl,
     attachmentContext,
     ...(input.toolOutputs ? { toolOutputs: input.toolOutputs } : {}),
+    ...(input.sandboxSignal ? { signal: input.sandboxSignal } : {}),
     // A conversation's memory section names the memory skill; other runs never see it.
     skills: input.memory && mode === "conversation" ? [...plan.skills, MEMORY_SKILL] : plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
@@ -1102,7 +1097,9 @@ interface ProvisionSandboxInput {
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  readonly toolOutputs?: readonly SavedToolOutput[]
+  readonly toolOutputs?: readonly AgentToolCallFile[]
+  /** Stops reading the saved outputs it writes back. */
+  readonly signal?: AbortSignal
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
   /** The conversation's artifacts, read while the sandbox starts. */
@@ -1128,7 +1125,6 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,
-      ...(input.toolOutputs ? { toolOutputs: input.toolOutputs } : {}),
       skills,
       ontologyFiles,
       ...(input.artifacts ? { artifacts: await input.artifacts } : {}),
@@ -1139,7 +1135,23 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<Provision
       env: apiContext.env,
       projectId: context.id,
     })
-    return { ...acquired, contextDirectory, env: { ...acquired.env, ...apiContext.env } }
+    const provisioned = {
+      ...acquired,
+      contextDirectory,
+      env: { ...acquired.env, ...apiContext.env },
+    }
+
+    // Best effort: an output not written back is still in its message, cut, and in the store.
+    await restoreSavedToolOutputs({
+      handle: provisioned,
+      files: input.toolOutputs ?? [],
+      blobStorage: context.blobStorage,
+      signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+    }).catch((error: unknown) => {
+      input.signal?.throwIfAborted()
+      console.warn("[SixbAgent] Could not write the saved tool outputs back:", error)
+    })
+    return provisioned
   } catch (error) {
     // Give back a half-provisioned sandbox before propagating to the awaiter.
     await input.sandbox.release?.(acquired).catch(() => {})
