@@ -2604,6 +2604,47 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("checkpoints a child's own thread, never its conversation", async () => {
+      // Removal proof: refuse every run but a conversation's in assertAgentContextCheckpointAuthority;
+      // the child's checkpoint is then rejected with `invalid_input`.
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({ projectId, id: "child_1", execution: execution("child_token") })
+        for (const [id, role] of [
+          ["child_m2", "assistant"],
+          ["child_m3", "user"],
+        ] as const) {
+          await storage.messages.append({
+            id,
+            projectId,
+            threadId: "thread_child_1",
+            runId: "child_1",
+            role,
+            parts: [{ type: "text", text: id }],
+          })
+        }
+        const childCheckpoint = checkpointInput({
+          threadId: "thread_child_1",
+          createdByRunId: "child_1",
+          executionToken: "child_token",
+        })
+
+        await expectAgentError(
+          storage.checkpoints.create({ ...childCheckpoint, threadId: "parent_thread" }),
+          "invalid_input"
+        )
+        await expect(storage.checkpoints.create(childCheckpoint)).resolves.toMatchObject({
+          threadId: "thread_child_1",
+          createdByRunId: "child_1",
+          summarizedThroughSeq: 2,
+        })
+        await expect(
+          storage.checkpoints.getLatest({ projectId, threadId: "thread_child_1" })
+        ).resolves.toMatchObject({ id: "checkpoint_1" })
+      })
+    })
+
     test("rolls back a checkpoint with its containing storage transaction", async () => {
       await withStorage(async (storage, fixture) => {
         await prepareCheckpointCandidate(storage, fixture)
