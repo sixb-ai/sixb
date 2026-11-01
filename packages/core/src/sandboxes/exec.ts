@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises"
 import type { CommandResult } from "./sandbox"
 
 export interface ExecOptions {
@@ -43,6 +44,17 @@ export async function exec(options: ExecOptions): Promise<CommandResult> {
       detached: true,
     })
   } catch (error) {
+    // A missing or non-directory cwd fails the spawn with an error that names the program, as if
+    // the program were missing: name the directory instead, so whoever chose it can fix it.
+    if (!(await isDirectory(options.cwd))) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `[Sandbox] working directory '${options.cwd}' does not exist or is not a directory`,
+        durationMs: Date.now() - start,
+      }
+    }
+
     return {
       exitCode: 127,
       stdout: "",
@@ -107,4 +119,11 @@ export async function exec(options: ExecOptions): Promise<CommandResult> {
     durationMs: Date.now() - start,
     ...(timedOut ? { timedOut: true } : {}),
   }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  return stat(path).then(
+    (entry) => entry.isDirectory(),
+    () => false
+  )
 }
