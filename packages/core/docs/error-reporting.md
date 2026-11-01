@@ -208,7 +208,7 @@ Each boundary exposes only the codes it can persist.
 | --- | --- |
 | Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Sync run | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled`, `sync.execution_failed` |
-| Agent execution | `agent.execution_failed`, `ai.usage_limit_exceeded`, `ai.usage_limit_unavailable`, `internal.unexpected`, `runtime.cancelled` |
+| Agent execution | `agent.context_limit_exceeded`, `agent.execution_failed`, `ai.usage_limit_exceeded`, `ai.usage_limit_unavailable`, `internal.unexpected`, `runtime.cancelled` |
 | Connector connection run | `connector.adapter_invalid`, `connector.authorization_invalid`, `connector.authorization_required`, `connector.credentials_unavailable`, `connector.not_found`, `connector.operation_conflict`, `connector.operation_in_progress`, `connector.provider_failed`, `connector.provider_unavailable`, `internal.unexpected` |
 | Projection run | `internal.unexpected`, `projection.execution_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Pipeline run or step | `internal.unexpected`, `pipeline.step_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
