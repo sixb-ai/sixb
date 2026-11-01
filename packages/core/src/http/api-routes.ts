@@ -435,6 +435,15 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // The Agent reads its own conversation with `sixb history`, the turns compaction summarized
+  // included: a run token reaches only its run's thread.
+  {
+    operationId: "listAgentThreadMessages",
+    method: "GET",
+    path: "/api/agent-threads/:threadId/messages",
+    accessToken: true,
+    agentApi: true,
+  },
   {
     operationId: "getAgentMessageFileContent",
     method: "GET",

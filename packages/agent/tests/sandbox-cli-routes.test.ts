@@ -53,6 +53,7 @@ const CLI_API_ROUTES = [
   "GET /api/pipeline-runs/:runId",
   "GET /api/agent-memory/:repo",
   "POST /api/agent-memory/:repo/revisions",
+  "GET /api/agent-threads/:threadId/messages",
 ] as const
 
 const ARTIFACTS_THROUGH_THE_RUNNER =

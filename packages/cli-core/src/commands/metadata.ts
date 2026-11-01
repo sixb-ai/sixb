@@ -204,6 +204,13 @@ optionally under filters; k bounds the ranked matches and results carry a score.
 export const GROUP_HELP = {
   status: "Usage: sixb status",
   context: "Usage: sixb context",
+  history: `Usage:
+  sixb history [--offset <n>] [--limit <1-${CLI_LIMITS.history.maximum}>]
+  sixb history <seq>
+
+Prints this conversation's messages as text, oldest first, including those summarized when it
+was compacted: what was said, the files sent, and each tool call with its result. A page holds
+${CLI_LIMITS.history.default} messages by default and cuts long text; \`sixb history <seq>\` prints one message whole.`,
   project: "Usage: sixb project show",
   ontology: `Usage:
   sixb ontology list [--full]
