@@ -218,6 +218,14 @@ function compact(value: unknown): string {
   return json && json.length > 160 ? `${json.slice(0, 157)}…` : (json ?? "")
 }
 
+/** Why a run failed, in a line; a conversation too long for its model says how to go on. */
+export function runFailureText(error: { readonly code: string; readonly message: string }): string {
+  if (error.code === "agent.context_limit_exceeded") {
+    return "This conversation is too long for the model: /new starts another, /model picks a larger one."
+  }
+  return error.message
+}
+
 /** `1m 04s`, `12.4s`, `820ms`. */
 export function duration(ms: number): string {
   if (ms < 1_000) return `${Math.round(ms)}ms`

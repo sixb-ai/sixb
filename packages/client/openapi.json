@@ -1320,6 +1320,7 @@
                 "enum": [
                   "internal.unexpected",
                   "runtime.cancelled",
+                  "agent.context_limit_exceeded",
                   "agent.execution_failed",
                   "ai.usage_limit_exceeded",
                   "ai.usage_limit_unavailable"
@@ -1557,6 +1558,7 @@
                 "enum": [
                   "internal.unexpected",
                   "runtime.cancelled",
+                  "agent.context_limit_exceeded",
                   "agent.execution_failed",
                   "ai.usage_limit_exceeded",
                   "ai.usage_limit_unavailable"
@@ -25294,6 +25296,7 @@
                                               "action.run_in_progress",
                                               "action.timeout",
                                               "agent.approval_authority_lost",
+                                              "agent.context_limit_exceeded",
                                               "agent.execution_failed",
                                               "ai.usage_limit_exceeded",
                                               "ai.usage_limit_unavailable",
@@ -25916,6 +25919,7 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
+                            "agent.context_limit_exceeded",
                             "agent.execution_failed",
                             "ai.usage_limit_exceeded",
                             "ai.usage_limit_unavailable"
@@ -33171,6 +33175,7 @@
                         "action.run_in_progress",
                         "action.timeout",
                         "agent.approval_authority_lost",
+                        "agent.context_limit_exceeded",
                         "agent.execution_failed",
                         "ai.usage_limit_exceeded",
                         "ai.usage_limit_unavailable",
@@ -37974,6 +37979,7 @@
                                                     "action.run_in_progress",
                                                     "action.timeout",
                                                     "agent.approval_authority_lost",
+                                                    "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -39646,6 +39652,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "agent.context_limit_exceeded",
                                 "agent.execution_failed",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
@@ -40441,6 +40448,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "agent.context_limit_exceeded",
                                 "agent.execution_failed",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
@@ -40930,6 +40938,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "agent.context_limit_exceeded",
                                 "agent.execution_failed",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
@@ -41482,6 +41491,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "agent.context_limit_exceeded",
                                   "agent.execution_failed",
                                   "ai.usage_limit_exceeded",
                                   "ai.usage_limit_unavailable"
@@ -41915,6 +41925,7 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
+                            "agent.context_limit_exceeded",
                             "agent.execution_failed",
                             "ai.usage_limit_exceeded",
                             "ai.usage_limit_unavailable"
@@ -42348,6 +42359,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "agent.context_limit_exceeded",
                                 "agent.execution_failed",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
@@ -44204,6 +44216,7 @@
                                           "action.run_in_progress",
                                           "action.timeout",
                                           "agent.approval_authority_lost",
+                                          "agent.context_limit_exceeded",
                                           "agent.execution_failed",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -44827,6 +44840,7 @@
                                         "action.run_in_progress",
                                         "action.timeout",
                                         "agent.approval_authority_lost",
+                                        "agent.context_limit_exceeded",
                                         "agent.execution_failed",
                                         "ai.usage_limit_exceeded",
                                         "ai.usage_limit_unavailable",
@@ -45203,6 +45217,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "agent.context_limit_exceeded",
                                 "agent.execution_failed",
                                 "ai.usage_limit_exceeded",
                                 "ai.usage_limit_unavailable"
@@ -45794,6 +45809,7 @@
                                           "action.run_in_progress",
                                           "action.timeout",
                                           "agent.approval_authority_lost",
+                                          "agent.context_limit_exceeded",
                                           "agent.execution_failed",
                                           "ai.usage_limit_exceeded",
                                           "ai.usage_limit_unavailable",
@@ -46629,6 +46645,7 @@
                                                     "action.run_in_progress",
                                                     "action.timeout",
                                                     "agent.approval_authority_lost",
+                                                    "agent.context_limit_exceeded",
                                                     "agent.execution_failed",
                                                     "ai.usage_limit_exceeded",
                                                     "ai.usage_limit_unavailable",
@@ -47847,6 +47864,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "agent.context_limit_exceeded",
                                   "agent.execution_failed",
                                   "ai.usage_limit_exceeded",
                                   "ai.usage_limit_unavailable"

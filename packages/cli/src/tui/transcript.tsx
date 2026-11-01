@@ -3,7 +3,7 @@ import { CodeRenderable, type MarkdownOptions, type SyntaxStyle } from "@opentui
 import { useRenderer } from "@opentui/react"
 import type { ListAgentThreadApprovalsResponses, ListAgentThreadRunsResponses } from "@sixb/client"
 import { useEffect, useState } from "react"
-import { duration, friendlyPath, plural, type ToolLine, toolLine } from "./format"
+import { duration, friendlyPath, plural, runFailureText, type ToolLine, toolLine } from "./format"
 import { steadyMarkdown } from "./markdown"
 import {
   type ApprovalOutcome,
@@ -483,7 +483,7 @@ function RunMeta({
         <span fg={run.status === "failed" ? colors.red : colors.amber}>{` · ${ended}`}</span>
       ) : null}
       {run.status === "failed" && run.error ? (
-        <span fg={colors.faint}>{`  ${run.error.message}`}</span>
+        <span fg={colors.faint}>{`  ${runFailureText(run.error)}`}</span>
       ) : null}
     </text>
   )

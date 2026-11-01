@@ -470,6 +470,7 @@ export type AgentChild = {
     code:
       | "internal.unexpected"
       | "runtime.cancelled"
+      | "agent.context_limit_exceeded"
       | "agent.execution_failed"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
@@ -560,6 +561,7 @@ export type AgentChildRun = {
     code:
       | "internal.unexpected"
       | "runtime.cancelled"
+      | "agent.context_limit_exceeded"
       | "agent.execution_failed"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
@@ -8506,6 +8508,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                     | "action.run_in_progress"
                     | "action.timeout"
                     | "agent.approval_authority_lost"
+                    | "agent.context_limit_exceeded"
                     | "agent.execution_failed"
                     | "ai.usage_limit_exceeded"
                     | "ai.usage_limit_unavailable"
@@ -8766,6 +8769,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
       code:
         | "internal.unexpected"
         | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
         | "agent.execution_failed"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
@@ -11101,6 +11105,7 @@ export type RequestActionErrors = {
       | "action.run_in_progress"
       | "action.timeout"
       | "agent.approval_authority_lost"
+      | "agent.context_limit_exceeded"
       | "agent.execution_failed"
       | "ai.usage_limit_exceeded"
       | "ai.usage_limit_unavailable"
@@ -12858,6 +12863,7 @@ export type ListAgentThreadMessagesResponses = {
                       | "action.run_in_progress"
                       | "action.timeout"
                       | "agent.approval_authority_lost"
+                      | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -13376,6 +13382,7 @@ export type PostAgentThreadMessageResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -13661,6 +13668,7 @@ export type CancelAgentRunResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -13863,6 +13871,7 @@ export type RetryAgentRunResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -14032,6 +14041,7 @@ export type ListAgentThreadRunsResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -14198,6 +14208,7 @@ export type GetAgentRunResponses = {
       code:
         | "internal.unexpected"
         | "runtime.cancelled"
+        | "agent.context_limit_exceeded"
         | "agent.execution_failed"
         | "ai.usage_limit_exceeded"
         | "ai.usage_limit_unavailable"
@@ -14376,6 +14387,7 @@ export type CancelAgentRunByIdResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -15018,6 +15030,7 @@ export type ListAgentThreadApprovalsResponses = {
                 | "action.run_in_progress"
                 | "action.timeout"
                 | "agent.approval_authority_lost"
+                | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -15251,6 +15264,7 @@ export type DecideAgentApprovalResponses = {
                 | "action.run_in_progress"
                 | "action.timeout"
                 | "agent.approval_authority_lost"
+                | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -15407,6 +15421,7 @@ export type DecideAgentApprovalResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"
@@ -15587,6 +15602,7 @@ export type ListAgentApprovalsResponses = {
                 | "action.run_in_progress"
                 | "action.timeout"
                 | "agent.approval_authority_lost"
+                | "agent.context_limit_exceeded"
                 | "agent.execution_failed"
                 | "ai.usage_limit_exceeded"
                 | "ai.usage_limit_unavailable"
@@ -15907,6 +15923,7 @@ export type ListObservedAgentThreadMessagesResponses = {
                       | "action.run_in_progress"
                       | "action.timeout"
                       | "agent.approval_authority_lost"
+                      | "agent.context_limit_exceeded"
                       | "agent.execution_failed"
                       | "ai.usage_limit_exceeded"
                       | "ai.usage_limit_unavailable"
@@ -16388,6 +16405,7 @@ export type ListObservedAgentThreadRunsResponses = {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
+          | "agent.context_limit_exceeded"
           | "agent.execution_failed"
           | "ai.usage_limit_exceeded"
           | "ai.usage_limit_unavailable"

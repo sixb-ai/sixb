@@ -229,6 +229,8 @@ export const en = {
     retry: "Retry",
     retrying: "Retrying…",
     notStarted: "I couldn’t get a response started.",
+    contextFull:
+      "This conversation is too long for this model. Start a new thread, or pick a model with a larger context.",
     notFinished: "I couldn’t finish that response.",
     interrupted: "The response was interrupted before it finished.",
     reconnecting: "Connection lost — reconnecting…",

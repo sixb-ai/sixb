@@ -162,6 +162,33 @@ test("an answer that failed mid-stream says so on its reply, not as a failed tur
   expect(html).not.toContain("I couldn’t get a response started.")
 })
 
+test("a conversation too long for its model offers a new thread in place of Retry", () => {
+  // Removal proof: drop `onNewThread` from the Transcript in ConversationPanel; the notice then
+  // offers no way on.
+  const tooLong: AgentRun = {
+    ...interruptedRun,
+    status: "failed",
+    finishReason: undefined,
+    error: {
+      code: "agent.context_limit_exceeded",
+      message: "This conversation is too long for the model's context window.",
+      retryable: false,
+      at: "2026-10-12T10:00:01.000Z",
+    },
+  }
+  const transcript = conversation({
+    messages: [question],
+    presentation: { kind: "failed", run: tooLong },
+  })
+  const html = renderPanel({}, { threadId: "thread", ...transcript, onRetry: noop })
+
+  expect(html).toContain(
+    "This conversation is too long for this model. Start a new thread, or pick a model with a larger context."
+  )
+  expect(html).toContain("New thread</button>")
+  expect(html).not.toContain("Retry")
+})
+
 test("offers Continue on the newest answer that stopped short, not on older ones", () => {
   // Removal proof: pass onContinue to every TranscriptMessage; the older notice offers it too.
   const answer = (id: string, code: AgentMessage["annotations"][number]["code"]): AgentMessage => ({
