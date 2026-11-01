@@ -13,6 +13,11 @@ export type ObjectQueryProviderOperation =
 export interface ObjectQueryPlan {
   mode: ObjectQueryPlanMode
   query: ObjectQuery
+  /**
+   * Every object type the query reads: where it starts, and what it traverses or expands. A client
+   * refreshes a cached result when one of these changes. The core executor fills this in.
+   */
+  readObjectTypeIds?: readonly string[]
   providerIssues: readonly ObjectQueryPlanningIssue[]
   fallbackIssues: readonly ObjectQueryPlanningIssue[]
   issues: readonly ObjectQueryPlanningIssue[]

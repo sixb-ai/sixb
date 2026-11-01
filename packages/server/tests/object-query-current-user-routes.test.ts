@@ -36,6 +36,10 @@ const Task = defineObjectType({
       nullable: true,
       query: { searchable: true, filterable: true },
     }),
+    prop("status", "string", {
+      nullable: true,
+      query: { searchable: true, filterable: true, facet: true },
+    }),
   ],
 })
 
@@ -146,5 +150,33 @@ describe("POST /api/objects/query with currentUser()", () => {
     const reports = await seedToken(storage, { type: "serviceAccount", id: "svc_reports" })
     expect(await ids(await query(reports, "eq"))).toEqual([])
     expect(await ids(await query(reports, "neq"))).toEqual(["t1", "t2", "t3"])
+  })
+
+  test("every query route names the types it reads", async () => {
+    const { app, storage } = await createApp()
+    const token = await seedToken(storage, { type: "user", id: "usr_alice" })
+    const post = async (route: string, body: object) => {
+      const response = await app.fetch(
+        new Request(`http://localhost/api/objects/query${route}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            query: { kind: "start", objectTypeId: Task.id },
+            ...body,
+          }),
+        })
+      )
+      expect(response.status).toBe(200)
+      return (await response.json()) as { plan: { readObjectTypeIds: string[] } }
+    }
+
+    for (const [route, body] of [
+      ["", {}],
+      ["/count", {}],
+      ["/exists", {}],
+      ["/facets", { facets: [{ propertyId: "status", limit: 5 }] }],
+    ] as const) {
+      expect((await post(route, body)).plan.readObjectTypeIds).toEqual([Task.id])
+    }
   })
 })
