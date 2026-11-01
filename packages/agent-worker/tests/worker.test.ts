@@ -15175,6 +15175,89 @@ describe("context within a turn", () => {
     }
   })
 
+  test("leaves a dense turn under its limit room for an answer within the window, call after call", async () => {
+    // Reproduce: return the room only past the limit from ContextGuard.sending; each call's answer
+    // is then sized from the output ceiling's own estimate, at the 3 bytes per token the run reads
+    // prose at, and input and answer pass the 65,536-token window.
+    const requests: LanguageModelRequest[] = []
+    const DUMPS = 5
+    /** Base64 runs of a request: its tokenizer reads them at about 1.33 bytes a token. */
+    const counted = (request: LanguageModelRequest) => {
+      const dense = (JSON.stringify(request.messages).match(/[A-Za-z0-9+/]{1000,}/g) ?? []).reduce(
+        (total, run) => total + run.length,
+        0
+      )
+      return (
+        estimateAgentRequestTokens(request, 3) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
+      )
+    }
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+        contextWindow: 65_536,
+        maxOutputTokens: 60_000,
+      },
+      stream: async (request) => {
+        requests.push(request)
+        const usage = { inputTokens: counted(request), outputTokens: 20 }
+        if (requests.length > DUMPS) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "text" },
+            { type: "text-delta", id: "text", delta: "Dumped them all." },
+            { type: "text-end", id: "text" },
+            { type: "finish", finishReason: "stop", usage },
+          ])
+        }
+        return stream([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: `dump_${requests.length}`,
+            toolName: "dump",
+            input: JSON.stringify({ number: String(requests.length) }),
+          },
+          { type: "finish", finishReason: "tool-calls", usage },
+        ])
+      },
+    })
+    // Base64 of 6,000 random bytes each, as `head -c 6000 /dev/urandom | base64` prints it.
+    const dump = defineAgentTool("dump")
+      .description("Dump random bytes.")
+      .input({ number: "string" })
+      .run(({ input }) => {
+        const raw = new Uint8Array(6_000)
+        let state = Number(input.number) * 2_654_435_761
+        for (let index = 0; index < raw.length; index++) {
+          state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
+          raw[index] = state >>> 24
+        }
+        return { dump: Buffer.from(raw).toString("base64") }
+      })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [dump],
+    })
+    const storage = agentStorageOf(sixb)
+    await seedMeasuredTokenRate(storage, 3)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "Dump five times." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests).toHaveLength(DUMPS + 1)
+      for (const sent of requests) {
+        expect(counted(sent) + (sent.maxOutputTokens ?? 0)).toBeLessThanOrEqual(65_536)
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("ends a turn whose working set leaves no room for an answer, sending nothing past it", async () => {
     // Reproduce: send the request past the limit whatever the room (drop the throw from
     // ContextGuard.sending, or the step's maxOutputTokens from runModelLoop's callModel); this

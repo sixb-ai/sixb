@@ -223,7 +223,10 @@ class ContextGuard {
         : undefined
 
     this.record(stepIndex, reduced ?? messages)
-    return this.sending(reduced, reduced ? this.weighed(reduced, steps) : tokens, model)
+    const sent = reduced ?? messages
+    return this.sending(reduced, reduced ? this.weighed(sent, steps) : tokens, model, {
+      heaviest: this.heaviest(sent, steps),
+    })
   }
 
   async recoverStep({
@@ -259,7 +262,10 @@ class ContextGuard {
     if (!reduced) return undefined
 
     this.record(stepIndex, reduced)
-    return this.sending(reduced, this.weighed(reduced, steps), model, "asked again")
+    return this.sending(reduced, this.weighed(reduced, steps), model, {
+      heaviest: this.heaviest(reduced, steps),
+      askedAgain: true,
+    })
   }
 
   /**
@@ -274,29 +280,59 @@ class ContextGuard {
   }
 
   /**
-   * The step's request as it goes out. Within the limit, as it is. Past it, nothing more could be
-   * reduced: its answer gets only the room its input leaves of the window, so input and answer
-   * still fit it, and a request left less than an answer is worth (see agentMinimumAnswerTokens)
-   * is not sent: it fails as the provider's refusal would, which ends the turn with the context
-   * error rather than a call cut off at once.
+   * The most a request may weigh: what the last call read, less what was removed, and what was
+   * added since at one byte a token, the densest any tokenizer reads. Without a call to go by, what
+   * it weighs.
+   */
+  private heaviest(messages: readonly ModelMessage[], steps: readonly ModelStep[]): number {
+    const { fixed, removed, added } = this.measure(
+      messages,
+      steps,
+      AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN
+    )
+    return fixed > 0
+      ? fixed - removed + Math.ceil(added * this.scale)
+      : this.weighed(messages, steps)
+  }
+
+  /**
+   * The step's request as it goes out, with the room its answer has: what its input leaves of the
+   * window, the one measure the model's output ceiling sizes an answer by too (the step's
+   * allowance is the smaller of the two). The guard's is the better weight: anchored on what the
+   * provider counted, and at the density the turn's additions showed.
+   *
+   * Within the limit, the room is sized for the most the input may weigh short of the limit: what
+   * the turn added since the last call, at one byte a token, so a first dense result whose density
+   * the turn has not measured yet still leaves input and answer within the window. The reserve
+   * stays its least, as the limit guarantees it.
+   *
+   * Past the limit, nothing more could be reduced: its answer gets only the room its input leaves,
+   * and a request left less than an answer is worth (see agentMinimumAnswerTokens) is not sent: it
+   * fails as the provider's refusal would, which ends the turn with the context error rather than a
+   * call cut off at once.
    */
   private sending(
     reduced: readonly ModelMessage[] | undefined,
     tokens: number,
     model: LanguageModel,
-    attempt: "first" | "asked again" = "first"
-  ): PrepareModelStepResult | undefined {
+    weight: { readonly heaviest: number; readonly askedAgain?: boolean }
+  ): PrepareModelStepResult {
     const { budget } = this.input
-    if (tokens <= budget.inputBudgetTokens) return reduced ? { messages: reduced } : undefined
+    const messages = reduced ? { messages: reduced } : {}
+    if (tokens <= budget.inputBudgetTokens) {
+      const atMost = Math.max(tokens, Math.min(weight.heaviest, budget.inputBudgetTokens))
+      return {
+        ...messages,
+        maxOutputTokens: agentOutputRoomTokens(atMost, budget, Number.POSITIVE_INFINITY),
+      }
+    }
 
     const room = agentOutputRoomTokens(tokens, budget, Number.POSITIVE_INFINITY)
     const minimum = agentMinimumAnswerTokens(budget)
     // A call the provider refused is asked again once, whatever the guard weighs it at: after a
     // refusal, what it weighs leans on the window as the least the provider counted, and the
     // provider's own count of the reduced request decides.
-    if (attempt === "asked again" && room < minimum) {
-      return { ...(reduced ? { messages: reduced } : {}), maxOutputTokens: minimum }
-    }
+    if (weight.askedAgain && room < minimum) return { ...messages, maxOutputTokens: minimum }
     if (room < minimum) {
       throw new ModelProviderError(
         `[SixbAgent] The request leaves no room in the model's ${budget.windowTokens.toLocaleString("en-US")}-token context window for an answer, and nothing more of it can be cleared or summarized.`,
@@ -305,7 +341,7 @@ class ContextGuard {
         { reason: "context-window-exceeded" }
       )
     }
-    return { ...(reduced ? { messages: reduced } : {}), maxOutputTokens: room }
+    return { ...messages, maxOutputTokens: room }
   }
 
   /** The request a step sends, and from which step on the requests are reduced. */
@@ -544,7 +580,8 @@ class ContextGuard {
    */
   private measure(
     messages: readonly ModelMessage[],
-    steps: readonly ModelStep[]
+    steps: readonly ModelStep[],
+    addedBytesPerToken = this.addedBytesPerToken
   ): { readonly fixed: number; readonly removed: number; readonly added: number } {
     const read = steps.at(-1)?.usage.inputTokens
     const sent = this.sent.get(steps.length - 1)
@@ -566,7 +603,7 @@ class ContextGuard {
     return {
       fixed: read,
       removed: weigh(sent, after, this.bytesPerToken),
-      added: weigh(messages, before, this.addedBytesPerToken),
+      added: weigh(messages, before, addedBytesPerToken),
     }
   }
 
