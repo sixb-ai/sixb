@@ -74,6 +74,8 @@ const ACTION_HOST_SERVICES: ReadonlySet<DeployServiceName> = new Set(["api", "wo
 export interface DeployReleaseOptions {
   /** The Bun version the project runs on, from its `packageManager` or the running Bun. */
   readonly bunVersion: string
+  /** Whether a deploy writes the target's `.env` from the project's source. */
+  readonly envFromSource?: boolean
 }
 
 export function buildDeployRelease(
@@ -98,6 +100,7 @@ export function buildDeployRelease(
     bunVersion: options.bunVersion,
     env,
     steps: {
+      ...(options.envFromSource ? { env: sixb("env", "pull", "--env", "prod") } : {}),
       build: [sixb("build")],
       // The order `docs/deployment` gives. `check` probes every provider, so a broker or queue
       // the services cannot reach fails the deploy instead of passing for healthy; it needs the

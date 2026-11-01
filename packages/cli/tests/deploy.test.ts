@@ -130,6 +130,7 @@ describe("deploy release", () => {
     expect(commandLine(built, "app")).toBe("sixb app --host 127.0.0.1 --port 3001")
     expect(commandLine(built, "rules")).toBe("sixb rules --no-migrate")
     expect(commandLine(built, "workers")).toBe("sixb worker-group --no-migrate")
+    // No `env` step: a project without a source keeps its own `.env`.
     expect(built.steps).toEqual({
       build: [{ program: "sixb", args: ["build"] }],
       beforeStart: [
@@ -173,6 +174,15 @@ describe("deploy release", () => {
     for (const step of [...built.steps.build, ...built.steps.beforeStart]) {
       expect(parseCliArgs(step.args).kind).toBe("command")
     }
+    const envStep = buildDeployRelease(
+      { name: "northline", domain: "example.com", target },
+      { bunVersion: "1.4.2", envFromSource: true }
+    ).steps.env
+    // The target adds the flag that says where its token is.
+    expect(parseCliArgs([...(envStep?.args ?? []), "--token-file", "/t"])).toMatchObject({
+      kind: "command",
+      id: "env:pull",
+    })
     expect(commandLine(built, "workers")).toBe(
       "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8 --no-migrate"
     )
@@ -350,7 +360,8 @@ export default {
       context.report({ type: "step", index: 0, status: "done" })
       context.report({ type: "step", index: 1, status: "running" })
       context.report({ type: "output", line: "compiling the runtime" })
-      record({ name: context.name, bunVersion: release.bunVersion, commit: source.commit, ref: source.ref, archives, deployedBy: context.deployedBy })
+      if (process.env.DEPLOY_KEPT_ENV) context.report({ type: "output", line: "▲ Kept the current .env · prod" })
+      record({ name: context.name, bunVersion: release.bunVersion, commit: source.commit, ref: source.ref, archives, deployedBy: context.deployedBy, envStep: release.steps.env })
       if (process.env.DEPLOY_FAIL) throw new Error("the build broke")
       context.report({ type: "step", index: 1, status: "done" })
     },
@@ -373,7 +384,7 @@ export default {
       ]
     },
     async setup(release, context) {
-      record({ setup: context.name, admin: context.admin ?? null, key: context.key ?? null })
+      record({ setup: context.name, admin: context.admin ?? null, key: context.key ?? null, envToken: await context.createEnvToken?.() })
       context.write("setting up the test server")
     },
     access: {
@@ -501,6 +512,102 @@ export default {
     })
     expect((deployed?.archives as { bytes: number }[])[0]?.bytes).toBeGreaterThan(0)
     expect(deployed?.deployedBy).toBeTruthy()
+  })
+
+  describe("with a source for the project's values", () => {
+    const envConfig = `
+      const source = {
+        names: async () => [],
+        read: async () => ({}),
+        write: async () => {},
+        createServerToken: async (env, label) => env + " token: " + label,
+      }
+      export default { source, vars: {} }
+    `
+
+    async function projectWithSource(): Promise<{ root: string; recordPath: string }> {
+      const root = await repository({
+        "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
+        "sixb.deploy.ts": recordingConfig,
+        "sixb.env.ts": envConfig,
+      })
+      return { root, recordPath: join(await tempDir(), "record.jsonl") }
+    }
+
+    test("a deploy pulls the server's .env", async () => {
+      const { root, recordPath } = await projectWithSource()
+
+      const result = await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploy({ cwd: root }))
+
+      expect(result.error).toBeUndefined()
+      expect((await records(recordPath))[1]?.envStep).toEqual({
+        program: "sixb",
+        args: ["env", "pull", "--env", "prod"],
+      })
+    })
+
+    // Reproduce: remove `keptEnv` from the completed view. In a terminal, step output is cleared when
+    // the next step starts, so a deploy on stale values then ends with a plain "deployed".
+    test("a deploy that kept the server's .env says so when it ends", async () => {
+      const { root, recordPath } = await projectWithSource()
+
+      const result = await deploy({ DEPLOY_RECORD: recordPath, DEPLOY_KEPT_ENV: "1" }, () =>
+        runDeploy({ cwd: root })
+      )
+
+      expect(result.output).toContain("northline deployed")
+      expect(result.output.replace(/\s+/g, " ")).toContain("runs on the server's current .env")
+    })
+
+    test("a deploy that updated .env doesn't warn", async () => {
+      const { root, recordPath } = await projectWithSource()
+
+      const result = await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploy({ cwd: root }))
+
+      expect(result.output).not.toContain("current .env")
+    })
+
+    test("a dry run shows the pull", async () => {
+      const { root, recordPath } = await projectWithSource()
+
+      const result = await deploy({ DEPLOY_RECORD: recordPath }, () =>
+        runDeploy({ cwd: root, dryRun: true })
+      )
+
+      expect(result.output).toContain("sixb env pull --env prod")
+    })
+
+    // Reproduce: pass `envFromSource` alone in runDeploy. Rolling back to a commit from before the
+    // project had sixb.env.ts then fails at the pull, which that commit has nothing to run with.
+    test("a commit from before the project had a source keeps its .env", async () => {
+      const { root, recordPath } = await project()
+      await writeFile(join(root, "sixb.env.ts"), envConfig)
+      await git(root, "add", ".")
+      await git(root, "commit", "-m", "Add a source")
+
+      const result = await deploy({ DEPLOY_RECORD: recordPath }, () =>
+        runDeploy({ cwd: root, ref: "HEAD~1" })
+      )
+
+      expect(result.error).toBeUndefined()
+      expect((await records(recordPath))[1]?.envStep).toBeUndefined()
+    })
+
+    test("setup can create the server's read-only prod token", async () => {
+      const { root, recordPath } = await projectWithSource()
+
+      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
+
+      expect((await records(recordPath))[0]?.envToken).toStartWith("prod token: sixb-northline-")
+    })
+
+    test("a project without a source has no token to create", async () => {
+      const { root, recordPath } = await readOnlyProject()
+
+      await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploySetup({ cwd: root }))
+
+      expect((await records(recordPath))[0]?.envToken).toBeUndefined()
+    })
   })
 
   test("names the step that failed, with its output", async () => {

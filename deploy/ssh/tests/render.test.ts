@@ -173,6 +173,46 @@ describe("deploy script", () => {
     ])
   })
 
+  describe("with a source for the project's values", () => {
+    const { labels, script } = renderDeployScript({
+      release: {
+        ...release,
+        steps: {
+          ...release.steps,
+          env: { program: "sixb", args: ["env", "pull", "--env", "prod"] },
+        },
+      },
+      layout,
+      incoming: "/home/sixb/northline/deploy/incoming/abc.123",
+      record: {
+        commit: "abc",
+        ref: "main",
+        deployedAt: "2026-09-30T12:00:00.000Z",
+        deployedBy: "ci",
+      },
+    })
+
+    // The services are still up here, so a pull that fails leaves the running release alone.
+    test("pulls .env once dependencies are in, before the build and any stop", () => {
+      const at = (label: string) => labels.indexOf(label)
+
+      expect(at("sixb env pull --env prod")).toBe(at("Install dependencies") + 1)
+      expect(at("sixb build")).toBeGreaterThan(at("sixb env pull --env prod"))
+      expect(at("Stop services")).toBeGreaterThan(at("sixb env pull --env prod"))
+    })
+
+    test("gives only that step the path to its token", () => {
+      const uses = script.split("\n").filter((line) => line.includes("env-token"))
+
+      expect(uses).toHaveLength(1)
+      expect(uses[0]).toEndWith(`'prod' --token-file '/home/sixb/northline/env-token'`)
+    })
+  })
+
+  test("runs no pull for a project that keeps its own .env", () => {
+    expect(deployScript.labels.some((label) => label.includes("env pull"))).toBe(false)
+  })
+
   test("holds the lock, keeps standard input closed, and waits for the API", () => {
     const { script } = deployScript
     expect(script).toContain(`exec 9>'${layout.lock}'`)

@@ -21,6 +21,8 @@ export interface EnvSource {
   ): Promise<Readonly<Record<string, string>>>
   /** Creates or updates these values, and leaves the rest alone. */
   write(env: EnvName, values: Readonly<Record<string, string>>): Promise<void>
+  /** Creates a read-only token for `env` alone, so a server can `read` it. */
+  createServerToken(env: EnvName, label: string): Promise<string>
 }
 
 /** The source could not answer: an outage, not a refusal. A retry may succeed unchanged. */

@@ -30,6 +30,7 @@ Each deployment lives in its deploy user's home:
 
 ```
 ~/<name>/code      the deployed commit, with the project's .env
+~/<name>/env-token the token a deploy pulls .env with, if the project has a source
 ~/<name>/deploy    the lock, uploads, file list, release record, process manifest, and ctl
 ~/<name>/run       process state and logs
 ~/.sixb/bun/<v>    Bun, shared by the user's projects on the same version

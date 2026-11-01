@@ -2,6 +2,7 @@ import { resolve4, resolve6 } from "node:dns/promises"
 import { isIP } from "node:net"
 import { posix } from "node:path"
 import type { DeployCheck, DeployRelease } from "@sixb/core/deploy"
+import { ENV_TOKEN_FILE } from "./layout"
 import { shellQuote } from "./shell"
 import type { RemoteShell } from "./transport"
 
@@ -9,6 +10,8 @@ export const CHECK_MARKER = "__SIXB_CHECK__"
 
 /** The tools a deploy runs on the server. */
 const TOOLS = ["git", "curl", "unzip", "tar", "flock", "sha256sum", "caddy"]
+
+export const ENV_TOKEN_CHECK = "project.env-token"
 
 type Status = DeployCheck["status"]
 
@@ -20,8 +23,11 @@ export function renderCheckScript(input: {
   readonly name: string
   readonly projectPath: string
   readonly ports: readonly { readonly service: string; readonly port: number }[]
+  /** A deploy writes `.env` from the project's source, so what it needs is the token instead. */
+  readonly envFromSource?: boolean
 }): string {
   const project = posix.join(input.name, "code", input.projectPath)
+  const envToken = posix.join(input.name, ENV_TOKEN_FILE)
   return [
     `emit() { printf '${CHECK_MARKER}\\t%s\\t%s\\t%s\\n' "$1" "$2" "$(printf '%s' "$3" | tr '\\t\\n' '  ')"; }`,
     `project="$HOME"/${shellQuote(project)}`,
@@ -62,9 +68,18 @@ export function renderCheckScript(input: {
     '  emit server.admin-api ok "not on localhost:2019"',
     "fi",
     "",
-    'if [ ! -f "$project/.env" ]; then emit project.env manual "$project/.env does not exist"',
-    'elif [ "$(stat -c %a "$project/.env")" != 600 ]; then emit project.env fixable "$project/.env is readable by others (mode $(stat -c %a "$project/.env"))"',
-    'else emit project.env ok "$project/.env"; fi',
+    ...(input.envFromSource
+      ? [
+          `token="$HOME"/${shellQuote(envToken)}`,
+          `if [ ! -s "$token" ]; then emit ${ENV_TOKEN_CHECK} fixable "$token has no token"`,
+          `elif [ "$(stat -c %a "$token")" != 600 ]; then emit ${ENV_TOKEN_CHECK} fixable "$token is readable by others (mode $(stat -c %a "$token"))"`,
+          `else emit ${ENV_TOKEN_CHECK} ok "$token"; fi`,
+        ]
+      : [
+          'if [ ! -f "$project/.env" ]; then emit project.env manual "$project/.env does not exist"',
+          'elif [ "$(stat -c %a "$project/.env")" != 600 ]; then emit project.env fixable "$project/.env is readable by others (mode $(stat -c %a "$project/.env"))"',
+          'else emit project.env ok "$project/.env"; fi',
+        ]),
     "",
     ...input.ports.flatMap(({ service, port }) => [
       `if ss -ltnH "sport = :${port}" 2> /dev/null | grep -q .; then`,
@@ -157,6 +172,7 @@ const LABELS: Readonly<Record<string, string>> = {
   "server.admin-api": "Caddy admin API",
   "server.disk": "Disk space",
   "project.env": ".env",
+  [ENV_TOKEN_CHECK]: "Source token",
 }
 
 function describe(
