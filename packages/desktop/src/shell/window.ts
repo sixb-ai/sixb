@@ -31,6 +31,19 @@ export function isAppUrl(config: ShellConfig, url: string): boolean {
  */
 export const WINDOW_BACKGROUND = { light: "#fafafa", dark: "#0a0a0a" } as const
 
+/**
+ * What the window's page runs with. The page is remote: it gets no Node and a world apart from the
+ * preload's, on every platform, and reaches the shell only through what the preload exposes.
+ */
+export function pageWebPreferences(preload: string) {
+  return { sandbox: true, contextIsolation: true, nodeIntegration: false, preload }
+}
+
+/** Only macOS draws window controls over the page; elsewhere the title bar stays. */
+export function hasHiddenTitleBar(platform: NodeJS.Platform): boolean {
+  return platform === "darwin"
+}
+
 /** The band at the top of a window without a title bar where macOS draws the window controls. */
 export const CONTROLS_HEIGHT_PX = 36
 
@@ -70,42 +83,3 @@ export const HIDDEN_TITLE_BAR_CSS = [
   ].join(",")}{-webkit-app-region:no-drag}`,
   `[data-slot="sidebar-inner"]{padding-top:calc(${CONTROLS_HEIGHT_PX}px - 0.5rem)}`,
 ].join("")
-
-/**
- * The preload of a window without a title bar: runs in every page before the page's own scripts.
- *
- * It marks `<html>` the moment the element exists, so an app can read the mark on its first
- * render, and adds the drag handle once there is a body to hold it. Written to a file by
- * `writeDesktopApp`, which is why it is source text and not a function.
- */
-export const HIDDEN_TITLE_BAR_PRELOAD = `(() => {
-  const mark = () => {
-    const root = document.documentElement
-    if (!root) return false
-    root.dataset.sixbDesktop = "inset"
-    root.style.setProperty("--sixb-desktop-controls-height", "${CONTROLS_HEIGHT_PX}px")
-    return true
-  }
-  if (!mark()) {
-    const observer = new MutationObserver(() => {
-      if (mark()) observer.disconnect()
-    })
-    observer.observe(document, { childList: true })
-  }
-
-  const addHandle = () => {
-    if (!document.body || document.getElementById("sixb-desktop-drag")) return
-    const handle = document.createElement("div")
-    handle.id = "sixb-desktop-drag"
-    handle.setAttribute("aria-hidden", "true")
-    // First in the body, not last: the draggable area is built in document order, so a control
-    // is only cut out of it if it comes after the handle.
-    document.body.prepend(handle)
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", addHandle, { once: true })
-  } else {
-    addHandle()
-  }
-})()
-`

@@ -5,7 +5,7 @@ import {
   nextNavigationStep,
   type ShellConfig,
 } from "../src/shell/navigation"
-import { HIDDEN_TITLE_BAR_PRELOAD, isAppUrl, mayNavigate } from "../src/shell/window"
+import { isAppUrl, mayNavigate } from "../src/shell/window"
 
 const config: ShellConfig = {
   name: "Acme Orders",
@@ -84,16 +84,6 @@ describe("shell navigation", () => {
     ]) {
       expect(mayNavigate(config, url), url).toBe(false)
     }
-  })
-
-  test("ships a title-bar preload the window can parse", () => {
-    // The script is written to a file as source, so a typo in it would otherwise surface only
-    // as a window that cannot be dragged.
-    expect(() => new Function(HIDDEN_TITLE_BAR_PRELOAD)).not.toThrow()
-    expect(HIDDEN_TITLE_BAR_PRELOAD).toContain('id = "sixb-desktop-drag"')
-    // Appended instead, the handle comes after the page's controls in document order and
-    // re-covers the gaps cut for them: buttons under it stop taking clicks.
-    expect(HIDDEN_TITLE_BAR_PRELOAD).toContain("document.body.prepend(handle)")
   })
 
   test("grants device permissions to the app's own frames only", () => {

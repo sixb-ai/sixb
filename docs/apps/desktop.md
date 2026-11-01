@@ -5,7 +5,8 @@ app people open in the browser. Sixb builds it with [Electron](https://www.elect
 the app already declares, so there is nothing new to configure.
 
 The desktop app opens your deployed app; it does not contain it. Every deploy reaches desktop users
-as it reaches the browser, and you rebuild the desktop app only to change its name or icon.
+as it reaches the browser. You rebuild the desktop app to change its name or icon, or to pick up a
+new version of `@sixb/desktop`.
 
 ## Add it
 
@@ -105,6 +106,26 @@ it and a strip across the top to drag the window by. The default `AppShell` side
 the controls. Another layout can read `html[data-sixb-desktop]` and the
 `--sixb-desktop-controls-height` variable. A clickable element in the strip other than a link,
 button or form control needs `-webkit-app-region: no-drag`.
+
+## Check for the desktop app in your code
+
+`useDesktop` tells your app where it is running, from the first render:
+
+```tsx
+import { useDesktop } from "@sixb/client/hooks"
+
+function SearchHint() {
+  const desktop = useDesktop()
+  return <kbd>{desktop?.platform === "darwin" ? "⌘K" : "Ctrl K"}</kbd>
+}
+```
+
+It returns `null` in a browser, and in a desktop app built before this hook existed, so treat `null`
+as "use the browser's behavior". Every deploy reaches installed apps without a rebuild, which means
+your code can run inside a desktop app older than itself.
+
+Use it to decide what to show, not what to allow: a page can set the value it reads. Enforce
+permissions on your API, as you do for the browser.
 
 ## Limitations
 
