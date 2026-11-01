@@ -13986,6 +13986,23 @@ export type GetAgentThreadContextResponses = {
     windowTokens: number
     limitTokens: number
     usedTokens?: number
+    parts?: Array<{
+      /**
+       * `system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images.
+       */
+      part:
+        | "system"
+        | "instructions"
+        | "memory"
+        | "skills"
+        | "ontology"
+        | "tools"
+        | "summary"
+        | "messages"
+        | "toolResults"
+        | "files"
+      tokens: number
+    }>
     lastCall?: {
       inputTokens: number
       outputTokens?: number

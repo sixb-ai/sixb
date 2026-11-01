@@ -41332,6 +41332,37 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "parts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "part": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "instructions",
+                              "memory",
+                              "skills",
+                              "ontology",
+                              "tools",
+                              "summary",
+                              "messages",
+                              "toolResults",
+                              "files"
+                            ],
+                            "description": "`system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images."
+                          },
+                          "tokens": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0
+                          }
+                        },
+                        "required": ["part", "tokens"],
+                        "additionalProperties": false
+                      }
+                    },
                     "lastCall": {
                       "type": "object",
                       "properties": {

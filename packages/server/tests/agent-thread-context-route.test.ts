@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { LanguageModel } from "@sixb/core"
+import type { AgentMessagePart, AgentStepRequestSize, LanguageModel } from "@sixb/core"
 import {
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -83,6 +83,10 @@ function createFixture() {
       /** Screenshots the user message attaches. */
       readonly screenshots?: number
       readonly reasoning?: ConversationAgentRunSpec["reasoning"]
+      /** What the answer's last step recorded of the request it sent. */
+      readonly request?: AgentStepRequestSize
+      /** The answer's parts after its steps. */
+      readonly answerParts?: readonly AgentMessagePart[]
     } = {}
   ) {
     await storage.agents.threads.create({
@@ -154,7 +158,12 @@ function createFixture() {
         role: "assistant",
         parts: [
           { type: "step-start" },
-          options.reduced ? { type: "step-start", reducedRequest: true } : { type: "step-start" },
+          {
+            type: "step-start",
+            ...(options.reduced ? { reducedRequest: true } : {}),
+            ...(options.request ? { request: options.request } : {}),
+          },
+          ...(options.answerParts ?? []),
           { type: "text", text: "It holds three packages." },
         ],
       })
@@ -225,6 +234,8 @@ describe("GET /api/agent-threads/:threadId/context", () => {
       limitTokens: 1_000_000 - 16_384,
       // The answer the last call wrote joins what the next request reads.
       usedTokens: 39_200,
+      // Its steps recorded nothing: the stored history alone splits it.
+      parts: [{ part: "messages", tokens: 39_200 }],
       lastCall: {
         inputTokens: 38_000,
         outputTokens: 1_200,
@@ -380,4 +391,109 @@ describe("GET /api/agent-threads/:threadId/context", () => {
     expect((await read("thr_fresh", "?provider=test&modelId=unknown")).status).toBe(404)
     expect((await read("thr_fresh", "?provider=test")).status).toBe(400)
   })
+
+  // Removal proof: measure the request without the fixed size the latest step recorded, as the
+  // meter once did; it then reads the messages alone, about 9,000 tokens short.
+  test("counts the prompt and tools the latest step sent, and splits the total by part", async () => {
+    const { storage, read, seedTurn } = createFixture()
+    await seedTurn("thr_recorded", "large", {
+      request: RECORDED_REQUEST,
+      answerParts: [memoryRead("- Prefers bar charts")],
+    })
+
+    const { body } = await read("thr_recorded")
+    const { messages } = await storage.agents.messages.list({
+      projectId,
+      threadId: "thr_recorded",
+      order: "asc",
+    })
+    const records: readonly AgentMessageRecord[] = messages
+    expect(body.usedTokens).toBe(
+      estimateAgentContextRequestTokens({
+        systemPrompt: "x".repeat(16_000 + 600 + 1_400),
+        tools: Array.from({ length: 12 }, () => ({
+          name: "",
+          description: "",
+          inputSchema: "y".repeat(1_000),
+        })),
+        messages: records,
+        bytesPerToken: AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
+      }).tokens
+    )
+
+    const parts = body.parts as { part: string; tokens: number }[]
+    expect(parts.map(({ part }) => part)).toEqual([
+      "system",
+      "instructions",
+      "memory",
+      "tools",
+      "messages",
+    ])
+    expect(parts.reduce((sum, { tokens }) => sum + tokens, 0)).toBe(body.usedTokens as number)
+    // The memory file the agent read counts with the memory index in its prompt.
+    const share = (name: string) => parts.find(({ part }) => part === name)!.tokens
+    expect(share("memory")).toBeGreaterThan(share("instructions") * 2)
+  })
+
+  // Removal proof: keep the compaction's own estimate as a floor when the steps recorded their
+  // request; the meter then reads 41,000 and more, which the compaction's starting rate overstates.
+  test("counts a condensed conversation as its next request sends it: the summary and what it kept", async () => {
+    const { storage, read, seedTurn } = createFixture()
+    const turn = await seedTurn("thr_kept", "large", {
+      earlier: true,
+      request: RECORDED_REQUEST,
+      answerParts: [{ type: "text", text: "A long answer. ".repeat(2_000) }],
+    })
+    const before = await read("thr_kept")
+    const beforeParts = before.body.parts as { part: string; tokens: number }[]
+    expect(beforeParts.map(({ part }) => part)).not.toContain("summary")
+
+    // Condensed through the earlier exchange, the latest turn kept.
+    await storage.agents.checkpoints.create({
+      projectId,
+      id: "checkpoint_kept",
+      threadId: "thr_kept",
+      createdByRunId: turn.runId,
+      expectedPreviousCheckpointId: null,
+      expectedHeadSeq: 4,
+      executionToken: turn.token,
+      reason: "threshold",
+      summary: "The user asked to read the repository. ".repeat(40),
+      summaryFormatVersion: 1,
+      summarizedThroughSeq: 2,
+      observedHeadSeq: 4,
+      estimatedInputTokensBefore: 131_000,
+      estimatedInputTokensAfter: 41_000,
+      summaryModelId: "large",
+      createdAt: at(3),
+    })
+
+    const after = await read("thr_kept")
+    const afterParts = after.body.parts as { part: string; tokens: number }[]
+    expect(after.body.usedTokens).toBeLessThan(41_000)
+    expect(afterParts.map(({ part }) => part)).toContain("summary")
+    expect(afterParts.reduce((sum, { tokens }) => sum + tokens, 0)).toBe(
+      after.body.usedTokens as number
+    )
+  })
 })
+
+/** What a conversation's step sent besides its history: a prompt of 18 KB and twelve tools. */
+const RECORDED_REQUEST: AgentStepRequestSize = {
+  system: { system: 16_000, instructions: 600, memory: 1_400 },
+  tools: { count: 12, bytes: 12_000 },
+  history: {},
+  contextDirectory: ".sixb/agent",
+}
+
+/** A read of the user's memory file, as an answer's step stores it. */
+function memoryRead(output: string): AgentMessagePart {
+  return {
+    type: "tool-call",
+    toolCallId: "read_memory",
+    toolName: "read",
+    input: { path: ".sixb/agent/memory/user/topics.md" },
+    state: "output-available",
+    output: output.repeat(100),
+  }
+}

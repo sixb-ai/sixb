@@ -156,28 +156,52 @@ describe("measureAgentContextHistory", () => {
 })
 
 describe("apportionAgentContextTokens", () => {
-  test("splits the counted total by size, images at their own count, and adds up to it exactly", () => {
+  // Removal proof: scale every part to the total by its weight; the prompt then takes a share of
+  // what dense tool results weigh past their bytes, and grows with each one after it.
+  test("keeps the prompt at the model's typical rate, and gives the history the rest", () => {
     const parts = apportionAgentContextTokens({
-      totalTokens: 10_001,
-      bytes: { system: 8_000, tools: 4_000, messages: 4_000, files: 0 },
+      totalTokens: 30_001,
+      prompt: { system: 16_000, tools: 8_000 },
+      promptBytesPerToken: 4,
+      // Dense output, which a thread measured at 2 bytes per token.
+      history: { messages: 4_000, toolResults: 36_000 },
       images: 1,
-      bytesPerToken: 4,
+      bytesPerToken: 2,
     })
+    const share = (part: string) => parts.find((each) => each.part === part)?.tokens
 
-    expect(parts.map(({ part }) => part)).toEqual(["system", "tools", "messages", "files"])
-    expect(parts.reduce((total, { tokens }) => total + tokens, 0)).toBe(10_001)
-    // The image weighs its own count against the text's 4,000 tokens.
-    const share = (part: string) => parts.find((each) => each.part === part)!.tokens
-    expect(share("files") / share("tools")).toBeCloseTo(AGENT_IMAGE_INPUT_TOKENS / 1_000, 2)
+    expect(parts.map(({ part }) => part)).toEqual([
+      "system",
+      "tools",
+      "messages",
+      "toolResults",
+      "files",
+    ])
+    expect(share("system")).toBe(4_000)
+    expect(share("tools")).toBe(2_000)
+    expect(parts.reduce((total, { tokens }) => total + tokens, 0)).toBe(30_001)
+    // The image weighs its own count against the messages' 2,000 tokens.
+    expect(share("files")! / share("messages")!).toBeCloseTo(AGENT_IMAGE_INPUT_TOKENS / 2_000, 2)
   })
 
-  test("splits nothing without a total or without sizes", () => {
+  test("scales a prompt that outweighs the total down to it, and splits nothing without sizes", () => {
+    const prompt = apportionAgentContextTokens({
+      totalTokens: 1_000,
+      prompt: { system: 6_000, tools: 2_000 },
+      promptBytesPerToken: 4,
+      history: { messages: 400 },
+      bytesPerToken: 4,
+    })
+    expect(prompt).toEqual([
+      { part: "system", tokens: 750 },
+      { part: "tools", tokens: 250 },
+    ])
+
+    const none = { prompt: {}, promptBytesPerToken: 4, history: {}, bytesPerToken: 4 }
+    expect(apportionAgentContextTokens({ ...none, totalTokens: 100 })).toEqual([])
     expect(
-      apportionAgentContextTokens({ totalTokens: 0, bytes: { system: 10 }, bytesPerToken: 4 })
+      apportionAgentContextTokens({ ...none, totalTokens: 0, history: { messages: 10 } })
     ).toEqual([])
-    expect(apportionAgentContextTokens({ totalTokens: 100, bytes: {}, bytesPerToken: 4 })).toEqual(
-      []
-    )
   })
 })
 
