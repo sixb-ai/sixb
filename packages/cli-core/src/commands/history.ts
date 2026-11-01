@@ -16,6 +16,7 @@ const PAGE_TEXT_CHARS = 4_000
 const PAGE_TOOL_CHARS = 1_000
 
 interface StoredMessage {
+  readonly id?: string
   readonly seq: number
   readonly role: string
   readonly createdAt?: string
@@ -102,7 +103,40 @@ function renderMessage(
     toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS,
   }
 
-  return [`── ${heading}`, ...message.parts.flatMap((part) => renderPart(part, bounds))].join("\n")
+  return [
+    `── ${heading}`,
+    ...message.parts.flatMap((part, index) => [
+      ...renderPart(part, bounds),
+      ...renderOutputFile(part, message, index),
+    ]),
+  ].join("\n")
+}
+
+/**
+ * Where a call's whole output is, when it was too large for the context and its part keeps a
+ * bounded copy: in the sandbox while the conversation still shows the call, which every run
+ * writes back, and through the message's file route whatever happened since.
+ */
+function renderOutputFile(
+  part: Record<string, unknown>,
+  message: StoredMessage,
+  index: number
+): string[] {
+  const file = part.type === "tool-call" ? record(part.outputFile) : undefined
+  const fileRef = record(file?.fileRef)
+  if (typeof file?.path !== "string" || typeof fileRef?.sizeBytes !== "number") return []
+
+  const contextDir = process.env.SIXB_CONTEXT_DIR
+  const path = contextDir ? `${contextDir.replace(/\/$/, "")}/${file.path}` : file.path
+  const apiBaseUrl = process.env.SIXB_API_BASE_URL
+  const threadId = process.env.SIXB_THREAD_ID
+  const download =
+    apiBaseUrl && threadId && message.id
+      ? `; else: sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(threadId)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>`
+      : ""
+  return [
+    `  [whole output, ${fileRef.sizeBytes.toLocaleString("en-US")} bytes: ${path}, written back to the sandbox at each run while the conversation shows this call${download}]`,
+  ]
 }
 
 function renderPart(
