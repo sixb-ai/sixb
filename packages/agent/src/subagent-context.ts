@@ -48,7 +48,7 @@ export function subagentThreadContext(history: SubagentHistory): SubagentThreadC
 
   return {
     ...(task ? { task } : {}),
-    threadContext: agentThreadModelContext({ ...history, messages }),
+    threadContext: agentThreadModelContext({ ...history, messages }, { historyReadable: false }),
   }
 }
 
