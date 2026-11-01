@@ -48,6 +48,53 @@ export interface AgentStepStartPart {
    * the provider counted less for it than replaying the stored steps sends.
    */
   readonly reducedRequest?: true
+  /** What the step's request carried, part by part, as the turn sent it. */
+  readonly request?: AgentStepRequestSize
+}
+
+/**
+ * The parts a request is made of, as a context meter shows them: Sixb's own prompt, the project's
+ * `SIXB.md`, memory, skills and ontology (their index in the prompt and the files the agent read),
+ * the tool definitions, the summary of a condensed conversation, its messages, the other tool
+ * results, and attachments and images.
+ */
+export type AgentContextPartName =
+  | "system"
+  | "instructions"
+  | "memory"
+  | "skills"
+  | "ontology"
+  | "tools"
+  | "summary"
+  | "messages"
+  | "toolResults"
+  | "files"
+
+/** The parts of the system prompt. */
+export type AgentSystemPromptPartName = Extract<
+  AgentContextPartName,
+  "system" | "instructions" | "memory" | "skills" | "ontology"
+>
+
+/** The parts of the history: a file the agent read counts with what it is. */
+export type AgentHistoryPartName = Extract<
+  AgentContextPartName,
+  "summary" | "messages" | "toolResults" | "files" | "memory" | "skills" | "ontology"
+>
+
+/** UTF-8 bytes by part; a part the request did not carry is left out. */
+export type AgentContextPartBytes<TPart extends AgentContextPartName> = {
+  readonly [Part in TPart]?: number
+}
+
+/** A step's request as sent: UTF-8 bytes by part, and the images apart, which count by the image. */
+export interface AgentStepRequestSize {
+  readonly system: AgentContextPartBytes<AgentSystemPromptPartName>
+  readonly tools: { readonly count: number; readonly bytes: number }
+  readonly history: AgentContextPartBytes<AgentHistoryPartName>
+  readonly images?: number
+  /** Where the run's context files were, which its reads were attributed by. */
+  readonly contextDirectory?: string
 }
 
 /** A blob-backed file attached to a user message or produced by an agent/tool. */

@@ -103,6 +103,8 @@ export {
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
+export type { AgentSystemPromptSize } from "./context-parts"
+export { measureAgentStepRequest } from "./context-parts"
 export type { AgentThreadRequestEstimateInput } from "./context-request"
 export { estimateAgentThreadRequest } from "./context-request"
 export { resolveAgentContextParts } from "./context-resolution"
@@ -151,8 +153,11 @@ export {
   type AgentApprovalCaller,
   type AgentApprovalCallSummary,
   type AgentApprovalOutcomePart,
+  type AgentContextPartBytes,
+  type AgentContextPartName,
   type AgentContinuationPart,
   type AgentFilePart,
+  type AgentHistoryPartName,
   type AgentMailPart,
   type AgentMessage,
   type AgentMessagePart,
@@ -160,7 +165,9 @@ export {
   type AgentMessageRole,
   type AgentProviderStatePart,
   type AgentReasoningPart,
+  type AgentStepRequestSize,
   type AgentStepStartPart,
+  type AgentSystemPromptPartName,
   type AgentTextPart,
   type AgentToolCallPart,
   type AgentToolCallState,

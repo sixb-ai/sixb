@@ -176,7 +176,7 @@ test("a turn stopped after its model's last step keeps its answer over HTTP, as 
     status: "cancelled",
     answer: [
       [
-        { type: "step-start" },
+        expect.objectContaining({ type: "step-start" }),
         expect.objectContaining({ type: "text", text: "Three invoices are open." }),
       ],
     ],
