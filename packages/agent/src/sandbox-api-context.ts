@@ -18,7 +18,7 @@ import type {
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
-import { type SavedToolOutput, TOOL_OUTPUTS_DIRECTORY } from "./tools/tool-outputs"
+import { TOOL_OUTPUTS_DIRECTORY } from "./tools/tool-outputs"
 
 /**
  * Where a conversation's artifacts are installed, and their manifest, relative to the context
@@ -44,8 +44,6 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly threadId?: string
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
-  /** The outputs earlier runs saved to files, under `$SIXB_TOOL_OUTPUTS_DIR`. */
-  readonly toolOutputs?: readonly SavedToolOutput[]
   readonly skills: readonly AgentSkillDefinition[]
   /** The run's ontology reference docs and scripts, by path relative to the ontology directory. */
   readonly ontologyFiles: readonly AgentProjectFile[]
@@ -156,10 +154,6 @@ export async function prepareAgentSandboxApiContext(
     ...(input.memory
       ? memoryFiles(memoryDir, join(contextDir, AGENT_MEMORY_MANIFEST), input.memory)
       : []),
-    ...(input.toolOutputs?.map((output) => ({
-      path: resolve(input.sandbox.workingDirectory, output.path),
-      contents: output.contents,
-    })) ?? []),
     // Last: a file a parent handed its child from its own copy of an artifact keeps its changes.
     ...(input.attachments?.sandboxFiles.map((file) => ({
       path: resolve(input.sandbox.workingDirectory, file.path),

@@ -3,8 +3,11 @@ import { posix } from "node:path"
 import type { AgentToolResult } from "@sixb/core"
 import {
   AGENT_FILE_MAX_BYTES,
+  AGENT_TOOL_OUTPUTS_DIRECTORY,
   type AgentRunFileStore,
   type AgentToolCallFile,
+  agentToolOutputPath,
+  isAgentToolOutputFile,
   isAgentToolResult,
 } from "@sixb/core/internal/agents"
 import {
@@ -15,10 +18,11 @@ import {
   type ModelToolOutput,
 } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
-import type { AgentSandboxHandle } from "../sandbox-handle"
+import { listSandboxFiles } from "../sandbox-files"
+import { type AgentSandboxHandle, contextPath } from "../sandbox-handle"
 import { BASH_TOOL_SPEC, keptCommandOutput } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
-import type { AgentFileBudget } from "./tool-files"
+import { AgentFileBudget } from "./tool-files"
 import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 
 /**
@@ -30,7 +34,7 @@ import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 export const TOOL_OUTPUT_FILE_MIN_BYTES = 30 * 1024
 
 /** Where saved outputs go, in the context directory: `$SIXB_TOOL_OUTPUTS_DIR`. */
-export const TOOL_OUTPUTS_DIRECTORY = "tool-outputs"
+export const TOOL_OUTPUTS_DIRECTORY = AGENT_TOOL_OUTPUTS_DIRECTORY
 
 /**
  * The preview: the head, where a listing or a document starts, and the tail, where a command's
@@ -40,22 +44,30 @@ const PREVIEW_HEAD_BYTES = 1_536
 const PREVIEW_TAIL_BYTES = 512
 
 /**
+ * What one run may save, apart from the run's file budget that published artifacts and
+ * file-returning tools take: saving gives way first, its outputs left to the copy their message
+ * keeps. Identical outputs count once.
+ */
+export const TOOL_OUTPUTS_MAX_BYTES = 64 * 1024 * 1024
+
+/**
  * What a run writes again of the outputs its history saved, newest first: a blank sandbox, or a
  * computer's, starts without them.
  */
-const REPLAYED_OUTPUTS_MAX_BYTES = 32 * 1024 * 1024
+const RESTORED_OUTPUTS_MAX_BYTES = 32 * 1024 * 1024
+
+/** How many stored outputs a run reads at once to write them back. */
+const RESTORED_OUTPUTS_CONCURRENCY = 4
+
+/** Past this many files in the sandbox's directory, the rest are written back whether held. */
+const LISTED_OUTPUTS_MAX_FILES = 1_000
+const LIST_TIMEOUT_MS = 30_000
 
 /** The readers: they page through files themselves, so their output is never saved to another. */
 const FILE_READERS: ReadonlySet<string> = new Set([READ_TOOL_SPEC.name, VIEW_FILE_TOOL_SPEC.name])
 
 const NOTICE_TAG = "tool_output_file"
 const NOTICE_OPENING = new RegExp(`^<${NOTICE_TAG} sandboxPath="([^"]*)"`)
-
-/** An output a history saved, to write again: its path as the agent names it, and its bytes. */
-export interface SavedToolOutput {
-  readonly path: string
-  readonly contents: Uint8Array
-}
 
 /** A saved output, between its call's execution and the preview the model reads of it. */
 interface SavedCall {
@@ -66,22 +78,25 @@ interface SavedCall {
 
 /**
  * The run's tools, each saving an output too large for the context: stored as a file of its run,
- * like a tool's own files, and copied into the sandbox at `tool-outputs/<call id>.txt`. The model
- * reads a preview with that path; the call's message part keeps a bounded copy of the output and
- * the stored file as its `outputFile` ({@link fileOf}), which every later run copies back
- * ({@link readSavedToolOutputs}). Saving that fails leaves the output as the part keeps it.
+ * like a tool's own files, and copied into the sandbox at `tool-outputs/<call id>-<digest>.txt`.
+ * The model reads a preview with that path; the call's message part keeps a bounded copy of the
+ * output and the stored file as its `outputFile` ({@link fileOf}), which every later run writes
+ * back ({@link restoreSavedToolOutputs}). Saving that fails leaves the output as the part keeps it.
  */
 export class ToolOutputFiles {
   readonly #saved = new Map<string, SavedCall>()
+  readonly #budget: AgentFileBudget
 
   constructor(
     private readonly input: {
       readonly sandbox: () => Promise<AgentSandboxHandle>
       readonly blobStorage: Pick<AgentRunFileStore, "put">
-      /** Shared with every other file the run stores. */
-      readonly budget: AgentFileBudget
+      /** Test seam; production holds {@link TOOL_OUTPUTS_MAX_BYTES}, never the run's own budget. */
+      readonly budget?: AgentFileBudget
     }
-  ) {}
+  ) {
+    this.#budget = input.budget ?? new AgentFileBudget(TOOL_OUTPUTS_MAX_BYTES)
+  }
 
   wrap(tools: readonly ModelTool[]): ModelTool[] {
     return tools.map((tool) => (FILE_READERS.has(tool.name) ? tool : this.saving(tool)))
@@ -144,10 +159,11 @@ export class ToolOutputFiles {
     if (bytes.byteLength > AGENT_FILE_MAX_BYTES) {
       throw new Error(`the output exceeds the ${AGENT_FILE_MAX_BYTES}-byte file limit`)
     }
-    const reservation = this.input.budget.reserve(bytes.byteLength, toolName)
+    const sha256 = createHash("sha256").update(bytes).digest("hex")
+    this.#budget.holdContent(`sha256:${sha256}`, bytes.byteLength, toolName)
 
     try {
-      const path = toolOutputPath(context.toolCallId)
+      const path = agentToolOutputPath(context.toolCallId, sha256)
       const fileRef = await this.input.blobStorage.put({
         body: bytes,
         expectedSizeBytes: bytes.byteLength,
@@ -164,65 +180,118 @@ export class ToolOutputFiles {
       ])
       return { file: { fileRef, path }, sandboxPath, contents }
     } catch (error) {
-      reservation.release()
+      this.#budget.releaseContent(`sha256:${sha256}`)
       throw error
     }
   }
 }
 
 /**
- * The outputs a history saved, read from their stored files to write again where their previews
- * named them, newest first within {@link REPLAYED_OUTPUTS_MAX_BYTES}. One whose file cannot be
- * read is left out: the message keeps a bounded copy of it.
+ * The outputs a history saved, to write back: the newest within
+ * {@link RESTORED_OUTPUTS_MAX_BYTES}, by the size they declare, listed oldest first so that a
+ * later one at the same path is written last. Only a file of the shape the harness names is: the
+ * stored messages are a runner's, or a fork's copy of them.
  */
-export async function readSavedToolOutputs(input: {
-  readonly messages: readonly AgentMessageRecord[]
-  readonly contextDirectory: string
-  readonly blobStorage: Pick<AgentRunFileStore, "open">
-  readonly signal?: AbortSignal
-}): Promise<SavedToolOutput[]> {
+export function savedToolOutputFiles(messages: readonly AgentMessageRecord[]): AgentToolCallFile[] {
   const files: AgentToolCallFile[] = []
   let bytes = 0
 
-  newest: for (const message of [...input.messages].reverse()) {
+  newest: for (const message of [...messages].reverse()) {
     for (const part of [...message.parts].reverse()) {
       if (part.type !== "tool-call" || part.state !== "output-available") continue
-      if (!part.outputFile) continue
+      if (!isAgentToolOutputFile(part.outputFile)) continue
 
       bytes += part.outputFile.fileRef.sizeBytes
-      if (bytes > REPLAYED_OUTPUTS_MAX_BYTES) break newest
+      if (bytes > RESTORED_OUTPUTS_MAX_BYTES) break newest
       files.push(part.outputFile)
     }
   }
+  return files.reverse()
+}
 
-  const read = await Promise.all(
-    files.map(async (file): Promise<SavedToolOutput | undefined> => {
-      input.signal?.throwIfAborted()
-      try {
-        const stream = await input.blobStorage.open(file.fileRef.blobId)
-        const contents = new Uint8Array(await new Response(stream).arrayBuffer())
-        return { path: posix.join(input.contextDirectory, file.path), contents }
-      } catch (error) {
-        input.signal?.throwIfAborted()
-        console.warn(`[SixbAgent] Could not read the saved tool output ${file.path}:`, error)
-        return undefined
-      }
-    })
+/**
+ * Write the saved outputs back into a run's sandbox: those it does not hold already, as a
+ * workspace that persists does, read from the store a few at a time, oldest first. A file is read
+ * no further than the size it declares, so the bytes read stay within what
+ * {@link savedToolOutputFiles} counted; one that cannot be read, or holds more, is left out.
+ */
+export async function restoreSavedToolOutputs(input: {
+  readonly handle: AgentSandboxHandle
+  readonly files: readonly AgentToolCallFile[]
+  readonly blobStorage: Pick<AgentRunFileStore, "open">
+  readonly signal: AbortSignal
+}): Promise<void> {
+  const { handle, signal } = input
+  if (input.files.length === 0) return
+
+  const directory = contextPath(handle, TOOL_OUTPUTS_DIRECTORY)
+  const listing = await listSandboxFiles(handle, {
+    directory,
+    maxFiles: LISTED_OUTPUTS_MAX_FILES,
+    signal,
+    timeoutMs: LIST_TIMEOUT_MS,
+  })
+  const held = new Map(listing.files.map((file) => [file.relativePath, file.sizeBytes]))
+  const missing = input.files.filter(
+    (file) => held.get(posix.basename(file.path)) !== file.fileRef.sizeBytes
   )
-  return read.filter((output) => output !== undefined)
+
+  const read: (Uint8Array | undefined)[] = new Array(missing.length)
+  let next = 0
+  const reader = async () => {
+    while (next < missing.length) {
+      const index = next++
+      const file = missing[index]
+      if (file) read[index] = await readSavedFile(input.blobStorage, file, signal)
+    }
+  }
+  await Promise.all(Array.from({ length: RESTORED_OUTPUTS_CONCURRENCY }, reader))
+
+  signal.throwIfAborted()
+  const records = missing.flatMap((file, index) => {
+    const contents = read[index]
+    return contents ? [{ path: posix.join(directory, posix.basename(file.path)), contents }] : []
+  })
+  if (records.length > 0) await handle.sandbox.writeFiles(records)
+}
+
+/** A stored output's bytes, read no further than its declared size; undefined when it differs. */
+async function readSavedFile(
+  blobStorage: Pick<AgentRunFileStore, "open">,
+  file: AgentToolCallFile,
+  signal: AbortSignal
+): Promise<Uint8Array | undefined> {
+  const maxBytes = file.fileRef.sizeBytes
+  try {
+    const reader = (await blobStorage.open(file.fileRef.blobId)).getReader()
+    const bytes = new Uint8Array(maxBytes)
+    let length = 0
+    try {
+      while (true) {
+        signal.throwIfAborted()
+        const { done, value } = await reader.read()
+        if (done) break
+        if (length + value.byteLength > maxBytes) {
+          throw new Error(`it holds more than the ${maxBytes} bytes it declares`)
+        }
+        bytes.set(value, length)
+        length += value.byteLength
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+    if (length !== maxBytes) throw new Error(`it holds ${length} bytes, not ${maxBytes}`)
+    return bytes
+  } catch (error) {
+    signal.throwIfAborted()
+    console.warn(`[SixbAgent] Could not write back the saved tool output ${file.path}:`, error)
+    return undefined
+  }
 }
 
 /** The path a tool result's text names when it is the preview of a saved output. */
 export function savedToolOutputPath(text: string): string | undefined {
   return NOTICE_OPENING.exec(text)?.[1]
-}
-
-/** Where a call's output is saved, relative to the context directory: one file per call. */
-function toolOutputPath(toolCallId: string): string {
-  const name = /^[A-Za-z0-9_-]{1,128}$/.test(toolCallId)
-    ? toolCallId
-    : createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
-  return posix.join(TOOL_OUTPUTS_DIRECTORY, `${name}.txt`)
 }
 
 /** The file an output too large for the context is saved to, or undefined when it fits. */

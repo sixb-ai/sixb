@@ -109,15 +109,19 @@ turn N's last request sent, on every storage:
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
   rebuilt from the stored trace by the same functions (`replayToolFiles`).
 - **An output too large for the context is saved to a file** ([tool-outputs.ts](../src/tools/tool-outputs.ts)).
-  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (the run's
-  blob store, counted in its file budget) and copied to `tool-outputs/<call id>.txt` of the context
-  directory; the model reads a preview with that path, the call's `modelOutput`. The tool-call part
-  names the stored file as `outputFile`, which the message's file route serves to the thread's
-  readers, and keeps a bounded copy as `output`: a command's streams cut to 20,000 characters, any
-  other tool's output as it returned it. Each run copies its history's saved files back, newest
-  first within a budget, as a blank sandbox or a computer's starts without them. `read` and
-  `view_file` page by themselves and are never saved; a sandbox or store that cannot take the file
-  leaves the model the part's copy. A cleared preview points at the file.
+  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (its blob
+  store, within `TOOL_OUTPUTS_MAX_BYTES` of its own, identical content counted once: saving gives
+  way before published artifacts and tool files do) and copied to
+  `tool-outputs/<call id>-<digest>.txt` of the context directory; the model reads a preview with
+  that path, the call's `modelOutput`. The tool-call part names the stored file as `outputFile`,
+  which the message's file route serves to the thread's readers, and keeps a bounded copy as
+  `output`: a command's streams cut to 20,000 characters, any other tool's output as it returned
+  it. A runner's `outputFile` is kept only at exactly that path for its own content
+  (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
+  history's saved files back while the model starts: those the sandbox lacks, newest within a
+  budget, read a few at a time and no further than their declared size, written oldest first.
+  `read` and `view_file` page by themselves and are never saved; a sandbox or store that cannot
+  take the file leaves the model the part's copy. A cleared preview points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
