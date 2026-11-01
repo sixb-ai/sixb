@@ -490,7 +490,7 @@ export const AgentThreadContextSchema = z.object({
   windowTokens: z.number().int().positive(),
   /** The window less the output reserve: past it, the conversation is condensed before a call. */
   limitTokens: z.number().int().positive(),
-  /** What the next request starts from. Absent before the first answer. */
+  /** What the next request weighs, as the worker estimates it. Absent before the first answer. */
   usedTokens: z.number().int().nonnegative().optional(),
   /** The call the conversation's history ends with, as the provider counted it. */
   lastCall: z
