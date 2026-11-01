@@ -168,7 +168,8 @@ export async function prepareAgentConversationContext(
     readonly history: AgentTurnHistory
   }
 ): Promise<PreparedAgentConversationContext> {
-  const { context, plan, budget, run, runtime } = input
+  const { plan, budget, run, runtime } = input
+  const compaction = conversationCompaction(input)
   const initialContext = agentThreadModelContext(input.history)
   const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
@@ -213,11 +214,7 @@ export async function prepareAgentConversationContext(
     !overLimit &&
     shouldCompactIdleContext({
       history: input.history,
-      caching: conversationModelSettings({
-        reasoning: undefined,
-        projectId: context.id,
-        threadId: run.threadId,
-      }).caching,
+      caching: compaction.caching,
       estimatedInputTokens: estimatedInputTokensBefore,
       compactedTokens: compactedRequestTokens({
         fixedTokens,
@@ -230,7 +227,7 @@ export async function prepareAgentConversationContext(
 
   try {
     const compacted = await compactAgentConversation({
-      ...conversationCompaction(input),
+      ...compaction,
       threadContext: initialContext,
       memory,
       bytesPerToken,

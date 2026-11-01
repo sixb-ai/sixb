@@ -13,7 +13,6 @@ import {
   type PreparedAgentAttachmentContext,
   toolResultAttachmentKey,
 } from "./attachments"
-import { expectedRemainingAgentCalls, resolveAgentContextTarget } from "./context-budget"
 import {
   type AgentThreadCompactionInput,
   compactAgentThreadInRun,
@@ -24,7 +23,7 @@ import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { toolFilesStepKey } from "./tools/result-media"
 
-// A child keeps its calls under its model's target as a conversation's turn does (see
+// A child keeps its calls under its model's limit as a conversation's turn does (see
 // createAgentContextGuard): its thread is its history, its task apart. Every request opens with
 // the task as it was sent, then the thread: from its latest checkpoint's summary once it has one.
 // A run that continues the thread compacts what came before the message it started from, on the
@@ -111,8 +110,8 @@ export function subagentPromptCaching(input: {
 }
 
 /**
- * Weigh a child's thread before its first call, and compact it when it crosses the target: what
- * the run then starts from, and the bytes per token the thread was measured at.
+ * Weigh a child's thread before its first call, and compact it when it crosses the model's limit:
+ * what the run then starts from, and the bytes per token the thread was measured at.
  */
 export async function preflightSubagentContext(
   input: AgentThreadCompactionInput & { readonly threadContext: LoadedAgentThreadModelContext }
@@ -121,9 +120,6 @@ export async function preflightSubagentContext(
   readonly bytesPerToken: number
 }> {
   const { plan, budget, threadContext } = input
-  const target = resolveAgentContextTarget(budget, {
-    expectedRemainingCalls: expectedRemainingAgentCalls(threadContext.history),
-  })
   const estimate = estimateAgentConversation({
     plan,
     budget,
@@ -133,7 +129,7 @@ export async function preflightSubagentContext(
   if (
     !shouldCompactAgentContext({
       estimatedInputTokens: estimate.tokens,
-      targetTokens: target.tokens,
+      inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
     return { threadContext, bytesPerToken: estimate.bytesPerToken }
@@ -143,8 +139,6 @@ export async function preflightSubagentContext(
     ...input,
     memory: undefined,
     reason: "threshold",
-    estimatedInputTokens: estimate.tokens,
-    targetTokens: target.tokens,
   })
   return {
     threadContext: compacted?.threadContext ?? threadContext,

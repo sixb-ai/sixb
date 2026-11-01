@@ -16,7 +16,7 @@ import {
 } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { renderWorkflowOutputFinalizerPrompt, sentSettings, withCurrentTime } from "./agent-prompt"
-import { type AgentContextBudget, resolveAgentContextTarget } from "./context-budget"
+import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
@@ -128,12 +128,11 @@ export async function runWorkflowAgentNode(
     })
     phase = "agent-loop"
     // A step's history is its own run, which starts from its prompt: nothing comes before it to
-    // summarize, so its calls stay under the target by clearing what it read (see
-    // createAgentContextGuard), and past the hard limit by cutting what it has not.
+    // summarize, so its calls stay under the model's limit by clearing what it read (see
+    // createAgentContextGuard), and past it by cutting what it has not.
     const { tools } = input.context
     const guard = createAgentContextGuard({
       budget: input.budget,
-      targetTokens: resolveAgentContextTarget(input.budget).tokens,
       tools: tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
