@@ -11,6 +11,7 @@ import type { RenderedOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
+  AgentMessageRecord,
   AgentThreadRecord,
   ConversationAgentRunRecord,
   SubagentRunRecord,
@@ -33,8 +34,13 @@ import {
 } from "./attachments"
 import { prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
-import { type LoadConversationMemory, prepareAgentConversationContext } from "./context-compaction"
+import {
+  type BuildConversationRequest,
+  type LoadConversationMemory,
+  prepareAgentConversationContext,
+} from "./context-compaction"
 import { type ConversationMemory, loadConversationMemory } from "./conversation-memory"
+import { conversationModelMessages } from "./conversation-messages"
 import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { InlineImageBudget } from "./inline-images"
@@ -53,6 +59,7 @@ import { MEMORY_SKILL } from "./skills/built-in"
 import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashTool } from "./tools/bash"
+import { agentModelToolSpecs } from "./tools/model-spec"
 import { createReadTool } from "./tools/read"
 import {
   AgentToolResultMediaBridge,
@@ -171,6 +178,14 @@ export async function createConversationAgentEnvironment(
     onFailure: (error) => failure.abort(error),
   })
   let environment: AgentExecutionEnvironment | undefined
+  // A workspace the prompt describes is acquired once: by the summary that continues the turn's
+  // prompt when the turn compacts, else when the environment starts.
+  let acquisition: Promise<AcquiredRunSandbox> | undefined
+  let provisioning = false
+  const acquire = () => {
+    acquisition ??= sandbox.acquire()
+    return acquisition
+  }
   // The prompt shows memory as of the thread's start or its latest compaction (see
   // loadConversationMemory).
   const threadCreatedAt = input.thread?.createdAt ?? run.createdAt
@@ -179,6 +194,83 @@ export async function createConversationAgentEnvironment(
       session: input.session,
       asOf: checkpoint?.createdAt ?? threadCreatedAt,
     })
+  const publishing =
+    input.thread && run.execution
+      ? {
+          artifacts: input.session.artifacts,
+          threadId: input.thread.id,
+          owner: input.thread.ownerPrincipal,
+        }
+      : undefined
+
+  // What a history's files make of the request: its attachments and the images its tools showed,
+  // within one request's inline image budget, the history first.
+  const prepareFiles = async (messages: readonly AgentMessageRecord[]) => {
+    const inlineImages = await modelSupportsInlineImages(plan.model)
+    const attachments = await prepareAgentAttachments({
+      projectId: context.id,
+      threadId: run.threadId,
+      messages,
+      blobStorage: context.blobStorage,
+      apiBaseUrl,
+      contextDirectory: sandbox.contextDirectory,
+      inlineImages,
+      signal: sandboxSignal,
+    })
+
+    const imageBudget = new InlineImageBudget()
+    const attachmentContext = await allocateInlineImages({
+      messages,
+      attachments,
+      toolFiles: replayToolFiles({
+        messages,
+        suppliesToolFiles: suppliesToolFiles(plan),
+        supportsImages: inlineImages,
+      }),
+      budget: imageBudget,
+      blobStorage: context.blobStorage,
+      signal: sandboxSignal,
+    })
+    return { attachmentContext, imageBudget }
+  }
+  const authorsOf = (messages: readonly AgentMessageRecord[]) =>
+    input.conversation
+      ? conversationAuthors({ conversation: input.conversation, messages }).section
+      : undefined
+
+  // The request this turn's calls would send for a history, built as the environment and
+  // runAgentTurn build it: the summary continues it, so the provider reads it from its cache.
+  const conversationRequest: BuildConversationRequest = async ({ threadContext, memory }) => {
+    const { attachmentContext } = await prepareFiles(threadContext.retainedMessages)
+    const workspace = sandbox.waitBeforeModel
+      ? await waitForAbort(acquire(), sandboxSignal)
+      : undefined
+    const conversation = authorsOf(threadContext.retainedMessages)
+
+    return {
+      systemPrompt: renderEnvironmentSystemPrompt({
+        mode: "conversation",
+        sandbox,
+        context,
+        plan,
+        ontologyDocs: plan.ontologyDocs,
+        ...(workspace ? { workspace } : {}),
+        ...(conversation === undefined ? {} : { conversation }),
+        ...(memory ? { memory } : {}),
+      }),
+      tools: [
+        ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined }),
+        ...(input.frameworkTools ?? []),
+      ],
+      messages: conversationModelMessages({
+        threadContext,
+        attachmentContext,
+        ...(input.conversation ? { conversation: input.conversation } : {}),
+        project: { timeZone: context.timeZone, locale: context.locale },
+      }),
+    }
+  }
+
   try {
     const { ontologyDocs } = plan
     // Resolve application access before any compaction model call. Once acquired, this
@@ -204,45 +296,24 @@ export async function createConversationAgentEnvironment(
           },
           frameworkTools: input.frameworkTools,
           loadMemory,
+          conversationRequest,
         })
       : undefined
     const threadContext = prepared?.threadContext ?? agentThreadModelContext(input.history)
     const messages = threadContext.retainedMessages
-    const conversation = input.conversation
-      ? conversationAuthors({ conversation: input.conversation, messages }).section
-      : undefined
-    const [inlineImages, memory] = await Promise.all([
-      modelSupportsInlineImages(plan.model),
+    const conversation = authorsOf(messages)
+    const [{ attachmentContext, imageBudget }, memory] = await Promise.all([
+      prepareFiles(messages),
       prepared ? prepared.memory : loadMemory(threadContext.checkpoint),
     ])
-    const attachments = await prepareAgentAttachments({
-      projectId: context.id,
-      threadId: run.threadId,
-      messages,
-      blobStorage: context.blobStorage,
-      apiBaseUrl,
-      contextDirectory: sandbox.contextDirectory,
-      inlineImages,
-      signal: sandboxSignal,
-    })
-
-    // The history takes the request's inline image budget first; the run's steps, what is left.
-    const imageBudget = new InlineImageBudget()
-    const attachmentContext = await allocateInlineImages({
-      messages,
-      attachments,
-      toolFiles: replayToolFiles({
-        messages,
-        suppliesToolFiles: suppliesToolFiles(plan),
-        supportsImages: inlineImages,
-      }),
-      budget: imageBudget,
-      blobStorage: context.blobStorage,
-      signal: sandboxSignal,
-    })
     environment = await startAgentEnvironment({
       mode: "conversation",
       sandbox,
+      // From here the environment gives back what it acquires.
+      acquire: () => {
+        provisioning = true
+        return acquire()
+      },
       sandboxSignal,
       failureSignal: failure.signal,
       context,
@@ -250,15 +321,7 @@ export async function createConversationAgentEnvironment(
       runId: run.id,
       threadId: run.threadId,
       callTool: (call, options) => input.session.callTool(call, options),
-      ...(input.thread && run.execution
-        ? {
-            publishing: {
-              artifacts: input.session.artifacts,
-              threadId: input.thread.id,
-              owner: input.thread.ownerPrincipal,
-            },
-          }
-        : {}),
+      ...(publishing ? { publishing } : {}),
       apiBaseUrl,
       attachmentContext,
       imageBudget,
@@ -275,7 +338,9 @@ export async function createConversationAgentEnvironment(
     try {
       if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
     } finally {
-      await environment?.dispose()
+      // A workspace the summary acquired goes back as the environment would have given it.
+      if (environment) await environment.dispose()
+      else if (acquisition && !provisioning) await releaseAcquisition(sandbox, acquisition)
     }
     throw error
   }
@@ -457,6 +522,8 @@ export async function createWorkflowAgentNodeEnvironment(
 interface AgentEnvironmentSetup
   extends Omit<CreateAgentEnvironmentInput, "signal" | "openSandbox"> {
   readonly sandbox: RunSandbox
+  /** How provisioning acquires the sandbox, when the run may have acquired it already. */
+  readonly acquire?: () => Promise<AcquiredRunSandbox>
   /**
    * Run end or environment failure: stops waiting for a sandbox the first model call needs, and
    * stops reading the artifacts it installs.
@@ -599,6 +666,7 @@ async function startAgentEnvironment(
 
   ready = provisionSandbox({
     sandbox,
+    ...(input.acquire ? { acquire: input.acquire } : {}),
     context,
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
@@ -628,21 +696,15 @@ async function startAgentEnvironment(
       ? await waitForAbort(ready, input.sandboxSignal)
       : undefined
 
-    systemPrompt = renderAgentSystemPrompt({
+    systemPrompt = renderEnvironmentSystemPrompt({
       mode,
-      contextDirectory: sandbox.contextDirectory,
-      instructions: plan.instructions,
-      skills: plan.skills,
-      // Workflow prompts are kept lean: their steps get the files without the index.
-      ...(mode !== "workflow-task" && input.ontologyDocs
-        ? { ontologyIndex: input.ontologyDocs.index }
-        : {}),
-      sandboxResetAt: workspace?.resetAt,
-      workspace: workspace?.promptContext,
-      facts: context.requester === undefined ? {} : { requester: context.requester },
+      sandbox,
+      context,
+      plan,
+      ...(input.ontologyDocs ? { ontologyDocs: input.ontologyDocs } : {}),
+      ...(workspace ? { workspace } : {}),
       ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
-      ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
-      ...(input.memory ? { memory: input.memory.prompt } : {}),
+      ...(input.memory ? { memory: input.memory } : {}),
     })
   } catch (error) {
     // Provisioning has started: give back what it acquires, or the sandbox outlives the run.
@@ -695,6 +757,56 @@ async function startAgentEnvironment(
     },
     dispose,
   }
+}
+
+/**
+ * A run's system prompt, from its plan and what its sandbox tells it: the environment renders it,
+ * and so does the summary that continues a conversation's prompt.
+ */
+function renderEnvironmentSystemPrompt(input: {
+  readonly mode: AgentExecutionMode
+  readonly sandbox: RunSandbox
+  readonly context: AgentExecutionContext
+  readonly plan: ResolvedAgentExecutionPlan
+  readonly ontologyDocs?: RenderedOntologyDocs
+  /** The acquired workspace, when the prompt describes it. */
+  readonly workspace?: Pick<AcquiredRunSandbox, "promptContext" | "resetAt">
+  readonly conversation?: string
+  readonly memory?: ConversationMemory
+}): string {
+  const { mode, plan, workspace } = input
+  const { requester } = input.context
+
+  return renderAgentSystemPrompt({
+    mode,
+    contextDirectory: input.sandbox.contextDirectory,
+    instructions: plan.instructions,
+    skills: plan.skills,
+    // Workflow prompts are kept lean: their steps get the files without the index.
+    ...(mode !== "workflow-task" && input.ontologyDocs
+      ? { ontologyIndex: input.ontologyDocs.index }
+      : {}),
+    sandboxResetAt: workspace?.resetAt,
+    workspace: workspace?.promptContext,
+    facts: requester === undefined ? {} : { requester },
+    ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
+    ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
+    ...(input.memory ? { memory: input.memory.prompt } : {}),
+  })
+}
+
+/** Give back a sandbox acquired for a run whose environment never started. */
+async function releaseAcquisition(
+  sandbox: RunSandbox,
+  acquisition: Promise<AcquiredRunSandbox>
+): Promise<void> {
+  // A failed acquisition gave back what it held.
+  const acquired = await acquisition.catch(() => undefined)
+  if (!acquired || !sandbox.release) return
+
+  await sandbox.release(acquired).catch((error) => {
+    console.error("[SixbAgent] Could not release agent run sandbox:", error)
+  })
 }
 
 /** An absolute sandbox path relative to the working directory when it is inside it. */
@@ -754,6 +866,7 @@ function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentConte
 
 interface ProvisionSandboxInput {
   readonly sandbox: RunSandbox
+  readonly acquire?: () => Promise<AcquiredRunSandbox>
   readonly context: AgentExecutionContext
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
@@ -771,7 +884,7 @@ type ProvisionedRunSandbox = AcquiredRunSandbox & AgentSandboxHandle
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<ProvisionedRunSandbox> {
   const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
-  const acquired = await input.sandbox.acquire()
+  const acquired = await (input.acquire?.() ?? input.sandbox.acquire())
   const { sandbox } = acquired
   const { contextDirectory } = input.sandbox
   try {

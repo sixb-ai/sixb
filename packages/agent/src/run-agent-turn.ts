@@ -4,7 +4,6 @@ import {
   createAgentMessageId,
   type PausableModelLoopResult,
   runModelLoop,
-  toModelMessages,
 } from "@sixb/core/internal/agents"
 import { isAbortError } from "@sixb/core/internal/workers"
 import {
@@ -14,16 +13,13 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
-import { attachmentKey, toolResultAttachmentKey } from "./attachments"
+import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { type ConversationReaders, conversationAuthors } from "./message-authors"
-import { userMessageTimes } from "./message-times"
+import type { ConversationReaders } from "./message-authors"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
-import { conversationPromptCaching } from "./prompt-cache"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
-import { toolFilesStepKey } from "./tools/result-media"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
@@ -79,45 +75,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const { id: projectId, tools } = context
   const runId = run.id
 
-  const { threadContext } = input
-  const { attachmentContext } = context
-  const sentTimes = userMessageTimes(threadContext.history, {
-    timeZone: context.projectTimeZone,
-    locale: context.projectLocale,
-  })
-  const authors = input.conversation
-    ? conversationAuthors({
-        conversation: input.conversation,
-        messages: threadContext.retainedMessages,
-      })
-    : undefined
-  const modelMessages = toModelMessages(threadContext.modelMessages, {
-    // When, then who wrote it: `<sixb_author>` stays the message's last tag. Who takes part is in
-    // the system prompt, so no message changes when the next one comes.
-    userMessageSuffix: (message) => {
-      if (!message.id) return undefined
-
-      const closing = [sentTimes.get(message.id), authors?.byMessageId.get(message.id)]
-      return closing.filter(Boolean).join("\n") || undefined
-    },
-    fileText: ({ message, partIndex }) =>
-      message.id
-        ? attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex))
-        : undefined,
-    fileData: ({ message, partIndex }) =>
-      message.id
-        ? attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex))
-        : undefined,
-    toolResultFileText: ({ message, partIndex, contentIndex }) =>
-      message.id
-        ? attachmentContext?.promptTextByPartKey.get(
-            toolResultAttachmentKey(message.id, partIndex, contentIndex)
-          )
-        : undefined,
-    afterToolResults: ({ message, partIndex }) =>
-      message.id
-        ? attachmentContext?.toolFilesByStep?.get(toolFilesStepKey(message.id, partIndex))
-        : undefined,
+  const modelMessages = conversationModelMessages({
+    threadContext: input.threadContext,
+    ...(context.attachmentContext ? { attachmentContext: context.attachmentContext } : {}),
+    ...(input.conversation ? { conversation: input.conversation } : {}),
+    project: { timeZone: context.projectTimeZone, locale: context.projectLocale },
   })
 
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
@@ -170,8 +132,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
             : []),
         ],
         tools,
-        ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-        caching: conversationPromptCaching({ projectId, threadId: run.threadId, lifetime: "long" }),
+        ...conversationModelSettings({
+          reasoning: plan.reasoning,
+          projectId,
+          threadId: run.threadId,
+        }),
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined

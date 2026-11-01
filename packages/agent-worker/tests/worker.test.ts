@@ -145,6 +145,7 @@ import {
 } from "../../agent/src/artifacts/materialize"
 import { prepareAgentAttachments } from "../../agent/src/attachments"
 import { storeChildOutputs } from "../../agent/src/child-files"
+import { prepareAgentModel } from "../../agent/src/context-budget"
 import * as conversationPreparation from "../../agent/src/context-compaction"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
@@ -156,7 +157,11 @@ import {
   createSubagentEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "../../agent/src/run-environment"
-import { SANDBOX_CONTEXT_DIRECTORY } from "../../agent/src/run-sandbox"
+import {
+  type AcquiredRunSandbox,
+  type RunSandbox,
+  SANDBOX_CONTEXT_DIRECTORY,
+} from "../../agent/src/run-sandbox"
 import { SubagentCoordinator } from "../../agent/src/subagent-tools"
 import { AgentFileBudget } from "../../agent/src/tools/tool-files"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
@@ -574,7 +579,7 @@ function compactingAnswerModel(input: {
     ...(input.provider === undefined ? {} : { providerId: input.provider }),
     modelId: input.modelId ?? "mock-model",
     stream: async (options) => {
-      if (options.tools.length > 0) {
+      if (!isSummaryRequest(options)) {
         input.captureAnswerPrompt(options.messages)
         input.captureAnswerReasoning?.(options.reasoning)
         return stream([
@@ -585,7 +590,6 @@ function compactingAnswerModel(input: {
           { type: "finish", finishReason: "stop", usage: COMPACTION_USAGE },
         ])
       }
-      expect(options.tools).toEqual([])
       expect(options.maxOutputTokens).toBeGreaterThan(0)
       input.captureSummaryPrompt(options.messages)
       input.captureSummaryReasoning?.(options.reasoning)
@@ -624,11 +628,87 @@ function compactingAnswerModel(input: {
   })
 }
 
+/**
+ * A conversation model with a small window that counts its input at 3 bytes per token, as the
+ * estimator does for it, and keeps every request. It answers each turn with `answer` and writes
+ * `summary(request)` when asked to compact.
+ */
+function measuredConversationModel(input: {
+  readonly contextWindow: number
+  readonly maxOutputTokens: number
+  readonly answer: string
+  readonly summary: (request: LanguageModelRequest) => string
+  readonly requests: LanguageModelRequest[]
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: "mock",
+      modelId: "mock-model",
+      capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+      contextWindow: input.contextWindow,
+      maxOutputTokens: input.maxOutputTokens,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      const text = isSummaryRequest(request) ? input.summary(request) : input.answer
+      // What it reads: the texts, as the estimator weighs them, and the tool catalog.
+      const read = request.messages.flatMap((message) =>
+        message.role === "system"
+          ? [message.content]
+          : message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      )
+      const bytes = new TextEncoder().encode(JSON.stringify([read, request.tools]))
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: text },
+        { type: "text-end", id: "text" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: {
+            inputTokens: Math.ceil(bytes.byteLength / 3),
+            outputTokens: Math.ceil(text.length / 3),
+          },
+        },
+      ])
+    },
+  })
+}
+
+/** The summary a request carries from the thread's latest checkpoint. */
+function previousSummary(request: LanguageModelRequest): string | undefined {
+  for (const message of request.messages) {
+    if (message.role !== "user") continue
+
+    for (const part of message.content) {
+      const match =
+        part.type === "text"
+          ? /<sixb_thread_summary>\n([\s\S]*)\n<\/sixb_thread_summary>/.exec(part.text)
+          : null
+      if (match) return match[1]
+    }
+  }
+  return undefined
+}
+
+/** The call that compacts a conversation: its last message asks for the summary. */
+function isSummaryRequest(request: LanguageModelRequest): boolean {
+  const last = request.messages.at(-1)
+  return (
+    last?.role === "user" &&
+    last.content.some(
+      (part) => part.type === "text" && part.text.startsWith("<sixb_summary_request>")
+    )
+  )
+}
+
 function lengthLimitedSummaryModel(onAnswerCall: () => void): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (request) => {
-      if (request.maxOutputTokens !== undefined)
+      if (isSummaryRequest(request))
         return stream([
           { type: "stream-start" },
           { type: "text-start", id: "summary" },
@@ -637,7 +717,13 @@ function lengthLimitedSummaryModel(onAnswerCall: () => void): WorkerTestModel {
           finish("length"),
         ])
       onAnswerCall()
-      return stream([finish("stop")])
+      return stream([
+        { type: "stream-start" },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Went on." },
+        { type: "text-end", id: "answer" },
+        finish("stop"),
+      ])
     },
   })
 }
@@ -4214,7 +4300,8 @@ describe("AgentWorker", () => {
         createdByRunId: run.id,
         summaryModelId: modelId,
       })
-      expect(summaryPrompts).toHaveLength(1)
+      // About 40,000 tokens of history, past the 32,768-token window: read in several steps.
+      expect(summaryPrompts.length).toBeGreaterThan(1)
     } finally {
       await worker.stop()
     }
@@ -4267,6 +4354,45 @@ describe("AgentWorker", () => {
       // 200,000 bytes are 100,000 tokens at the 2 bytes per token of a model no run measured yet.
       expect(JSON.stringify(answerPrompts[0]).length).toBeGreaterThan(200_000)
       expect(await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("goes on above a price tier when compacting cannot bring it under", async () => {
+    // Reproduce: return `unchanged` in prepareAgentConversationContext only when no boundary
+    // exists; the turn then summarizes the short turn before for nothing, as would every turn
+    // after it while the long request stays.
+    const price = (base: string, above: string) => ({
+      default: base,
+      tiers: [{ minTokens: 30_001, price: above }],
+    })
+    const model = Object.assign(answerModel(), {
+      rateCard: {
+        currency: "USD",
+        input: price("1", "5"),
+        output: price("5", "25"),
+        cacheReadInput: price("0.1", "0.5"),
+      } satisfies ModelRateCard,
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Hello." })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      // The request alone is past the tier, far below the 111,616-token hard limit.
+      const long = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: `Read this: ${"y".repeat(150_000)}`,
+      })
+      const run = await waitForTerminalRun(storage, long.run.id)
+      expect(run.status).toBe("succeeded")
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+      ).not.toContain("agent.compaction.started")
     } finally {
       await worker.stop()
     }
@@ -4443,7 +4569,9 @@ describe("AgentWorker", () => {
         undefined,
         checkpoint?.summarizedThroughSeq,
       ])
-      expect(blobStats).toEqual([])
+      // The summary reads the attachment the turns before sent; the continuation, which no longer
+      // holds its message, does not.
+      expect(blobStats).toEqual([`blob_${"0".repeat(64)}`])
 
       const summaryPrompt = summaryPrompts[0]
       const answerPrompt = answerPrompts[0]
@@ -4472,7 +4600,7 @@ describe("AgentWorker", () => {
           projectId: PROJECT_ID,
           executionId: run.executionId,
         })
-      ).resolves.toMatchObject({ modelCallCount: 2 })
+      ).resolves.toMatchObject({ modelCallCount: 3 })
       // Regression proof: omit onModelCallEnd in generateCheckpointSummary and this row disappears.
       const accounting = await sixb.storage.aiCosts?.listModelCalls({
         projectId: PROJECT_ID,
@@ -4487,7 +4615,8 @@ describe("AgentWorker", () => {
         usage: {
           responseId: "compaction-summary-response",
           responseModelId: "served-summary-model",
-          requestedReasoning: "none",
+          // As the turn reasons: thinking is part of the prefix the provider caches.
+          requestedReasoning: "high",
           rawUsage: COMPACTION_USAGE.raw,
         },
         cost: { status: "unpriceable", reason: "missingRateCard" },
@@ -4527,10 +4656,12 @@ describe("AgentWorker", () => {
       expect(secondCheckpoint?.summarizedThroughSeq).toBeGreaterThan(
         checkpoint?.summarizedThroughSeq ?? Number.POSITIVE_INFINITY
       )
-      expect(summaryPrompts).toHaveLength(2)
-      expect(JSON.stringify(summaryPrompts[1])).toContain("<sixb_previous_summary>")
-      expect(JSON.stringify(summaryPrompts[1])).toContain("Continue the durable test conversation")
-      expect(summaryReasoning).toEqual(["none", "none"])
+      // About 148,000 tokens of history, past the 128,000-token window: the first compaction
+      // reads it in two steps, the second in one, from the summary the first wrote.
+      expect(summaryPrompts).toHaveLength(3)
+      expect(JSON.stringify(summaryPrompts[2])).toContain("<sixb_thread_summary>")
+      expect(JSON.stringify(summaryPrompts[2])).toContain("Continue the durable test conversation")
+      expect(summaryReasoning).toEqual(["high", "high", undefined])
       expect(answerPrompts).toHaveLength(2)
       expect(answerReasoning).toEqual(["high", undefined])
       expect(await listMessages(storage, threadId)).toHaveLength(16)
@@ -4750,10 +4881,67 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Regression proof: remove the summary-request budget check; the smaller model gets called.
   test.each([
-    ["summary input budget", { contextWindow: 32_768 }, "Continue."],
-    ["summary input budget", { contextWindow: 128_000, maxInputTokens: 20_000 }, "Continue."],
+    ["its window", { contextWindow: 32_768 }],
+    ["its input limit", { contextWindow: 128_000, maxInputTokens: 20_000 }],
+  ] as const)("summarizes a history past a smaller model's %s, cut to what it reads", async (_limit, limits) => {
+    // Reproduce: return undefined from planSummary instead of shrinkStep; the switch then fails
+    // the turn with agent.context_limit_exceeded although the new request fits.
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
+    const large = answerModel()
+    const smallAnswer = compactingAnswerModel({
+      provider: "mock",
+      modelId: "small",
+      captureSummaryPrompt: (prompt) => summaryPrompts.push(prompt),
+      captureAnswerPrompt: () => {},
+    })
+    const small: LanguageModel = {
+      providerId: "mock",
+      modelId: "small",
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "small",
+        capabilities: {},
+        ...limits,
+      },
+      stream: (request) => smallAnswer.stream(request),
+    }
+    const sixb = buildSixb(large, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [large, small] },
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, {
+        text: `Long historical input. ${"x".repeat(160_000)}`,
+      })
+      expect((await waitForTerminalRun(storage, first.run.id)).status).toBe("succeeded")
+
+      const next = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: "Continue.",
+        model: { provider: small.providerId, modelId: small.modelId },
+      })
+      expect((await waitForTerminalRun(storage, next.run.id)).status).toBe("succeeded")
+      expect(
+        await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: first.run.threadId })
+      ).toMatchObject({ createdByRunId: next.run.id, summaryModelId: "small" })
+
+      // The first turn read whole would not fit: the summary read its start and where the rest is.
+      const read = JSON.stringify(summaryPrompts)
+      expect(summaryPrompts).toHaveLength(1)
+      expect(read).toContain("Long historical input.")
+      expect(read).not.toContain("x".repeat(100_000))
+      expect(read).toContain("prints it whole")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove the pre-billing continuation check; the smaller model gets called.
+  test.each([
     ["retained turn and tools", { contextWindow: 32_768 }, "x".repeat(160_000)],
   ] as const)("rejects an unsafe model switch exceeding %s", async (reason, limits, continuation) => {
     const large = answerModel()
@@ -4812,6 +5000,14 @@ describe("AgentWorker", () => {
       )
       expect(failed.spec?.model).toEqual({ provider: small.providerId, modelId: small.modelId })
       expect(smallCalls).toBe(0)
+      // Reproduce: drop the context_limit_exceeded case from translateAgentExecutionError; the
+      // run then fails as "Agent execution failed.", which a retry repeats as it is.
+      expect(failed.error).toMatchObject({
+        code: "agent.context_limit_exceeded",
+        message:
+          "This conversation is too long for the model's context window. Start a new conversation, or switch to a model with a larger context window.",
+        retryable: false,
+      })
       await reporter.flush()
       expect(reportedErrors).toHaveLength(1)
       expect(reportedErrors[0]?.message).toContain(reason)
@@ -4897,7 +5093,330 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects a length-limited summary without creating a checkpoint or calling the agent", async () => {
+  test("compacts a small window once, then grows into the room it left", async () => {
+    // Reproduce: select the boundary with target.keepRecentTokens alone in
+    // prepareAgentConversationContext, with no aim under the target; each compaction then keeps
+    // half the target as it is, and the turns after it compact again one after another.
+    const requests: LanguageModelRequest[] = []
+    const model = measuredConversationModel({
+      contextWindow: 20_000,
+      maxOutputTokens: 2_048,
+      answer: `Answered. ${"a".repeat(300)}`,
+      // Each summary repeats the last one and adds to it, as a chained summary grew.
+      summary: (request) => `${previousSummary(request) ?? "## Goal"}\n${"s".repeat(2_000)}`,
+      requests,
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    await worker.start()
+    try {
+      let threadId: string | undefined
+      const runIds: string[] = []
+      const compacted: boolean[] = []
+      for (let turn = 0; turn < 18; turn += 1) {
+        const requested = await requestAgent(sixb, {
+          ...(threadId === undefined ? {} : { threadId }),
+          text: `Turn ${turn}. ${"u".repeat(3_000)}`,
+          reasoning: "high",
+        })
+        threadId = requested.run.threadId
+        runIds.push(requested.run.id)
+        expect((await waitForTerminalRun(storage, requested.run.id)).status).toBe("succeeded")
+        const names = (await listRunStreamRecords(sixb.broker, requested.run.id)).map(
+          (record) => record.name
+        )
+        compacted.push(names.includes("agent.compaction.completed"))
+      }
+
+      // A 17,952-token target: compaction leaves at most 60 % of it, room for the next turn and
+      // more, so no turn compacts right after the one that did.
+      expect(compacted.filter(Boolean)).toHaveLength(2)
+      expect(compacted.some((now, turn) => now && compacted[turn - 1])).toBe(false)
+      const checkpoints = await storage.checkpoints.getByRunIds({
+        projectId: PROJECT_ID,
+        threadId: threadId!,
+        runIds,
+      })
+      expect(checkpoints).toHaveLength(compacted.filter(Boolean).length)
+      for (const checkpoint of checkpoints) {
+        expect(checkpoint.estimatedInputTokensAfter).toBeLessThanOrEqual(Math.floor(17_952 * 0.6))
+        // Written anew within its allowance of 1,024 tokens, never grown from the last.
+        expect(new TextEncoder().encode(checkpoint.summary).byteLength).toBeLessThanOrEqual(3_072)
+      }
+      expect(checkpoints.at(-1)?.summary).toContain("The summary was cut short here.")
+      expect(checkpoints.at(-1)?.summary).not.toContain("s".repeat(4_000))
+
+      // Each summary continues the request the turn before sent, byte for byte, with its tools,
+      // reasoning and cache intent, then asks for the summary.
+      const summaries = requests.flatMap((request, index) =>
+        isSummaryRequest(request) ? [index] : []
+      )
+      expect(summaries).toHaveLength(checkpoints.length)
+      for (const index of summaries) {
+        const previous = requests[index - 1]!
+        const summary = requests[index]!
+        expectReplayedPrefix(previous, summary, model.providerId)
+        expect(summary.messages).toHaveLength(previous.messages.length + 2)
+        expect(summary.tools).toEqual(previous.tools)
+        expect([summary.reasoning, summary.caching]).toEqual(["high", previous.caching])
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("keeps a summary from the model that answered with a tool call", async () => {
+    // Reproduce: return the answer's text in summarize() whatever its tool calls; the preamble
+    // then becomes the whole summary of the conversation.
+    let answerCalls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        if (isSummaryRequest(request)) {
+          return stream([
+            { type: "stream-start" },
+            { type: "text-start", id: "preamble" },
+            { type: "text-delta", id: "preamble", delta: "I'll read the history first." },
+            { type: "text-end", id: "preamble" },
+            {
+              type: "tool-call",
+              toolCallId: "history",
+              toolName: "bash",
+              input: JSON.stringify({ command: "sixb history" }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        answerCalls += 1
+        return answerStream("Went on.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const threadId = "tool_call_summary_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 2; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`tool-turn-${index}-`}${"x".repeat(84_000)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Go on." })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("succeeded")
+      expect(answerCalls).toBe(1)
+
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.summary).toStartWith("The summary could not be written.")
+      expect(checkpoint?.summary).toContain("> historical user 1: tool-turn-1-")
+      expect(checkpoint?.summary).not.toContain("I'll read the history first.")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("leaves a reasoning budget its room beside a summary near the window", async () => {
+    // Reproduce: subtract the summary alone from the window for planSummary's input limit; the
+    // summary of the whole conversation then asks for fewer output tokens than its thinking
+    // budget, which providers reject, and the turn fails above its hard limit.
+    const budgetTokens = 6_000
+    const summaries: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "mock-model",
+        capabilities: {
+          inputMediaTypes: [],
+          localTools: true,
+          parallelToolCalls: true,
+          reasoning: { canDisable: true, budgetTokens: {} },
+        },
+        contextWindow: 40_000,
+        maxOutputTokens: 8_192,
+      },
+      stream: async (request) => {
+        if (!isSummaryRequest(request)) return answerStream("Went on.")
+
+        summaries.push(request)
+        if ((request.maxOutputTokens ?? 0) <= budgetTokens) {
+          throw new Error("[test] max_tokens must be greater than thinking.budget_tokens.")
+        }
+        return answerStream("## Goal\nGo on.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {})
+    const storage = agentStorageOf(sixb)
+    const threadId = "reasoning_room_thread"
+    // About 34,500 tokens, past the 31,808-token hard limit: the whole conversation fits the
+    // window beside the summary, not beside its thinking budget too.
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    for (let index = 0; index < 4; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`room-turn-${index}-`}${"x".repeat(10_300)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        threadId,
+        text: "Go on.",
+        reasoning: { budgetTokens },
+      })
+      const run = await waitForTerminalRun(storage, request.run.id)
+      expect(run.status).toBe("succeeded")
+      expect(summaries.every((summary) => (summary.maxOutputTokens ?? 0) > budgetTokens)).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  describe("a workspace the summary acquires", () => {
+    /**
+     * A folder the prompt describes, as on a computer: the summary acquires it, and the
+     * environment's provisioning takes that acquisition over.
+     */
+    function folder(acquire?: () => Promise<AcquiredRunSandbox>) {
+      const sandbox = new RecordingSandbox("folder")
+      const released: AcquiredRunSandbox[] = []
+      let acquisitions = 0
+      const runSandbox: RunSandbox = {
+        waitBeforeModel: true,
+        contextDirectory: "/run-files",
+        acquire: async () => {
+          acquisitions += 1
+          return acquire
+            ? acquire()
+            : { sandbox, promptContext: { workingDirectory: "/work", retention: "computer" } }
+        },
+        release: async (acquired) => {
+          released.push(acquired)
+        },
+      }
+      return { sandbox, runSandbox, released, acquisitions: () => acquisitions }
+    }
+
+    /** A conversation past its 17,952-token hard limit, whose environment compacts it. */
+    async function compactingEnvironment(input: {
+      readonly summary: () => Promise<ReturnType<typeof stream>>
+      readonly runSandbox: RunSandbox
+    }) {
+      const model = new WorkerTestModel({
+        definition: {
+          kind: "language",
+          providerId: "mock",
+          modelId: "mock-model",
+          capabilities: { inputMediaTypes: [], localTools: true, parallelToolCalls: true },
+          contextWindow: 20_000,
+          maxOutputTokens: 2_048,
+        },
+        stream: (request) =>
+          isSummaryRequest(request) ? input.summary() : Promise.resolve(answerStream("Done")),
+      })
+      const host = buildSixb(model)
+      const storage = agentStorageOf(host)
+      const threadId = "folder_compaction_thread"
+      await storage.threads.create({
+        id: threadId,
+        projectId: PROJECT_ID,
+        ownerPrincipal: REQUESTER,
+      })
+      for (let index = 0; index < 3; index += 1) {
+        await seedCompletedConversationTurn({
+          sixb: host,
+          threadId,
+          index,
+          text: `${`folder-turn-${index}-`}${"x".repeat(12_000)}`,
+        })
+      }
+      const requested = await requestAgentAs(host, REQUESTER, { threadId, text: "Go on." })
+      const run = await reserveRequestedRun(host, requested)
+      const prepared = prepareAgentModel(executionPlanFor(host))
+      const runtime = createAgentTurnRuntime({ signal: new AbortController().signal })
+      try {
+        return await createConversationAgentEnvironment({
+          ...(await withConversationSandbox({
+            session: await runSessionOf(host, run),
+            context: await buildAgentWorkerContext(host),
+            plan: { ...executionPlanFor(host), model: prepared.model },
+            run,
+          })),
+          openSandbox: async () => ({ sandbox: input.runSandbox }),
+          preflight: { budget: prepared.budget, runtime },
+        }).catch((error: unknown) => error)
+      } finally {
+        runtime.dispose()
+      }
+    }
+
+    test("goes back when the summary fails", async () => {
+      // Reproduce: drop releaseAcquisition from createConversationAgentEnvironment's catch; the
+      // folder then stays held by a run that ended, and the thread's next turn waits on it.
+      const workspace = folder()
+      const error = await compactingEnvironment({
+        summary: async () => {
+          throw new Error("[test] The provider is down.")
+        },
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toMatchObject({ code: "summary_failed" })
+      expect(workspace.acquisitions()).toBe(1)
+      expect(workspace.released.map((acquired) => acquired.sandbox)).toEqual([workspace.sandbox])
+    })
+
+    test("goes back once when its provisioning fails", async () => {
+      // Reproduce: drop `!provisioning` from releaseAcquisition's guard in
+      // createConversationAgentEnvironment; the folder provisioning already gave back is
+      // released a second time.
+      const workspace = folder()
+      workspace.sandbox.writeFiles = async () => {
+        throw new Error("[test] file transport failed")
+      }
+      const error = await compactingEnvironment({
+        summary: async () => answerStream("## Goal\nGo on."),
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toMatchObject({ message: "[test] file transport failed" })
+      expect(workspace.acquisitions()).toBe(1)
+      expect(workspace.released).toHaveLength(1)
+    })
+
+    test("fails as the workspace failed when it cannot be acquired", async () => {
+      // Reproduce: let normalizeCompactionError wrap ConversationRequestFailure as any other
+      // error; the held folder then reads as a checkpoint_failed compaction.
+      const held = new Error("[test] Another run of this thread holds its files.")
+      const workspace = folder(async () => {
+        throw held
+      })
+      const error = await compactingEnvironment({
+        summary: async () => answerStream("## Goal\nGo on."),
+        runSandbox: workspace.runSandbox,
+      })
+
+      expect(error).toBe(held)
+      expect(workspace.released).toEqual([])
+    })
+  })
+
+  test("keeps a summary its output limit cut short, and the thread goes on", async () => {
+    // Reproduce: throw summary_failed when the summary call finishes with "length", as compaction
+    // once did; the turn then fails, and so does every later one, on the same summary.
     let answerCalls = 0
     const sixb = buildSixb(
       lengthLimitedSummaryModel(() => {
@@ -4908,7 +5427,7 @@ describe("AgentWorker", () => {
       {}
     )
     const storage = agentStorageOf(sixb)
-    const threadId = "failed_compaction_thread"
+    const threadId = "cut_summary_thread"
     await storage.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
@@ -4919,46 +5438,28 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`failed-turn-${index}-`}${"x".repeat(56_000)}`,
+        text: `${`cut-turn-${index}-`}${"x".repeat(56_000)}`,
       })
     }
 
     const worker = new AgentWorker(sixb, workerOptions())
-    const originalConsoleError = console.error
-    console.error = () => {}
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
         threadId,
-        text: "This should not run after a partial summary.",
+        text: "Go on from a summary cut short.",
       })
       const run = await waitForTerminalRun(storage, request.run.id)
-      expect(run.status).toBe("failed")
-      expect(answerCalls).toBe(0)
-      await expect(
-        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
-      ).resolves.toBeNull()
-      expect(await listMessages(storage, threadId)).toHaveLength(5)
-      await expect(
-        aiUsageStorageOf(sixb).summarizeExecution({
-          projectId: PROJECT_ID,
-          executionId: run.executionId,
-        })
-      ).resolves.toMatchObject({ modelCallCount: 1 })
+      expect(run.status).toBe("succeeded")
+      expect(answerCalls).toBe(1)
 
-      const records = await listRunStreamRecords(sixb.broker, run.id)
-      expect(records.map((record) => record.name)).toEqual([
-        "agent.run.started",
-        "agent.compaction.started",
-        "agent.compaction.failed",
-        "agent.run.finished",
-      ])
-      expect(
-        records.find((record) => record.name === "agent.compaction.failed")?.payload
-      ).toMatchObject({ errorCode: "summary_failed", reason: "threshold" })
+      // Its unfinished last line goes, and the summary says where the rest is.
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.summary).toBe(
+        "## Goal\n\n[The summary was cut short here. `sixb history` prints the earlier conversation.]"
+      )
     } finally {
       await worker.stop()
-      console.error = originalConsoleError
     }
   })
 
@@ -11166,6 +11667,9 @@ describe("AgentWorker", () => {
           },
           run,
           runtime,
+          conversationRequest: () => {
+            throw new Error("[test] The estimate alone decides.")
+          },
         })
       } finally {
         session.close()
