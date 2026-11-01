@@ -13,7 +13,6 @@ import {
   type AgentContextTokenRateSample,
   learnedAgentContextBytesPerToken,
   recordAgentContextTokenRate,
-  typicalAgentContextBytesPerToken,
 } from "../src/agents/context-token-rate"
 import type { AgentMessage } from "../src/agents/message"
 import type { ModelMessage, ModelToolSpecification } from "../src/models"
@@ -120,32 +119,6 @@ describe("agent context rate calibration", () => {
   // Removal proof: drop the image check from measureAgentContextTokenRate, or the image count from
   // measureAgentContextRequest; the screenshot's 5,400-token allowance comes off the provider's
   // count and the thread calibrates to its text read sparser than it is.
-  // Reproduce: bound the rise by bytesPerToken again in calibrateAgentContextBytesPerToken; two
-  // dense runs of the project set the starting rate at 1.2, and an English thread reading 2.4 is
-  // counted at 1.5, 60 % over.
-  test("lets a thread rise a quarter above what its model typically measures", () => {
-    const size = measureAgentContextRequest(request(30_000))
-
-    // 30,000 bytes over 12,500 text tokens: 2.4, as the project's usual runs read.
-    expect(
-      calibrateAgentContextBytesPerToken({
-        bytesPerToken: 1.2,
-        typicalBytesPerToken: 2.4,
-        size,
-        inputTokens: 12_508,
-      })
-    ).toBe(2.4)
-    // Never past a quarter above it: 3 bytes per token, not the 6 a call might show.
-    expect(
-      calibrateAgentContextBytesPerToken({
-        bytesPerToken: 1.2,
-        typicalBytesPerToken: 2.4,
-        size,
-        inputTokens: 5_008,
-      })
-    ).toBe(3)
-  })
-
   test("keeps the run's rate when the call read an image", () => {
     const withImage: AgentMessage = {
       role: "user",
@@ -242,50 +215,42 @@ describe("a model's learned rate", () => {
     ).toEqual([])
   })
 
-  test("follows a denser tokenizer from its second run, a sparser one within the window", async () => {
-    // Reproduce: set LEARNED_RATE_QUANTILE to 0.5; the denser tokenizer takes ten runs to show.
+  test("follows a tokenizer that changes from its 10th run when denser, its 11th when sparser", async () => {
+    // Reproduce: take the 10th percentile again (the second densest of 20); the denser tokenizer
+    // then takes over from its second run.
     const denser = project()
     for (let index = 0; index < 20; index++) await recordRun(denser, 4.4)
-    await recordRun(denser, 2.2)
+    for (let index = 0; index < 9; index++) await recordRun(denser, 2.2)
     expect(await learned(denser)).toBe(4.4)
     await recordRun(denser, 2.2)
     expect(await learned(denser)).toBe(2.2)
 
     const sparser = project()
     for (let index = 0; index < 20; index++) await recordRun(sparser, 2.2)
-    for (let index = 0; index < 18; index++) await recordRun(sparser, 4.4)
+    for (let index = 0; index < 10; index++) await recordRun(sparser, 4.4)
     expect(await learned(sparser)).toBe(2.2)
     await recordRun(sparser, 4.4)
     expect(await learned(sparser)).toBe(4.4)
   })
 
-  test("is moved by no single odd run, dense or sparse", () => {
-    // Reproduce: take the lowest measurement (quantile 0); the dense outlier sets the rate.
-    const usual = Array.from({ length: 19 }, () => 2.4)
+  test("is not moved by a few runs whose content reads dense, nor by an odd sparse one", () => {
+    // Reproduce: take the 10th percentile again; five base64-heavy runs among fifteen of prose
+    // then set the rate at 1.2, and every later thread on the model starts twice too high.
+    const usual = Array.from({ length: 15 }, () => 2.4)
 
-    expect(learnedAgentContextBytesPerToken(samples(...usual, 1.1))).toBe(2.4)
-    expect(learnedAgentContextBytesPerToken(samples(...usual, 9))).toBe(2.4)
-    // Fewer than ten measurements: the densest stands, the safe side.
-    expect(learnedAgentContextBytesPerToken(samples(2.6, 2.4, 3))).toBe(2.4)
-  })
-
-  test("takes the median as what the model typically measures, past two dense runs", () => {
-    // Removal proof: return the learned quantile from typicalAgentContextBytesPerToken; the two
-    // dense runs then set the typical rate too.
-    const usual = Array.from({ length: 18 }, () => 2.4)
-
-    expect(learnedAgentContextBytesPerToken(samples(1.2, 1.2, ...usual))).toBe(1.2)
-    expect(typicalAgentContextBytesPerToken(samples(1.2, 1.2, ...usual))).toBe(2.4)
-    expect(typicalAgentContextBytesPerToken([])).toBe(AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN)
+    expect(learnedAgentContextBytesPerToken(samples(1.2, 1.2, 1.2, 1.2, 1.2, ...usual))).toBe(2.4)
+    expect(learnedAgentContextBytesPerToken(samples(9, ...usual, 2.4, 2.4, 2.4, 2.4))).toBe(2.4)
+    // Of an even count, the denser of the middle two: the safe side.
+    expect(learnedAgentContextBytesPerToken(samples(2.6, 2.4, 3, 3.2))).toBe(2.6)
   })
 
   test("stays within the band any tokenizer measures, whatever a stored measurement says", () => {
-    // Removal proof: drop the clamp from rateQuantile; one byte per billion tokens becomes the
-    // model's rate, every estimate passes the budget, and no call ever replaces it.
+    // Removal proof: drop the clamp from learnedAgentContextBytesPerToken; one byte per billion
+    // tokens becomes the model's rate, every estimate passes the budget, and no call replaces it.
     const forged = [{ bytes: 1, tokens: 1_000_000_000 }]
 
     expect(learnedAgentContextBytesPerToken(forged)).toBe(1)
-    expect(typicalAgentContextBytesPerToken(samples(40))).toBe(8)
+    expect(learnedAgentContextBytesPerToken(samples(40))).toBe(8)
   })
 
   test("falls back to the default when storage cannot read, and never fails a run on a write", async () => {
