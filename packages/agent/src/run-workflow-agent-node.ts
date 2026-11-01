@@ -9,9 +9,15 @@ import {
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
-import { StructuredOutputError, UnsupportedModelFeatureError } from "@sixb/core/models"
+import {
+  ModelProviderError,
+  StructuredOutputError,
+  UnsupportedModelFeatureError,
+} from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { renderWorkflowOutputFinalizerPrompt, sentSettings, withCurrentTime } from "./agent-prompt"
+import { type AgentContextBudget, resolveAgentContextTarget } from "./context-budget"
+import { createAgentContextGuard } from "./context-guard"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -23,6 +29,8 @@ export interface RunWorkflowAgentNodeInput {
   readonly context: AgentTurnContext
   readonly agentStepId: string
   readonly plan: ResolvedAgentExecutionPlan
+  /** The limits of the step's model, which every call of its research keeps under. */
+  readonly budget: AgentContextBudget
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
   readonly workflowRunId: string
@@ -119,6 +127,20 @@ export async function runWorkflowAgentNode(
       schema: outputSchema,
     })
     phase = "agent-loop"
+    // A step's history is its own run, which starts from its prompt: nothing comes before it to
+    // summarize, so its calls stay under the target by clearing what it read (see
+    // createAgentContextGuard), and past the hard limit by cutting what it has not.
+    const { tools } = input.context
+    const guard = createAgentContextGuard({
+      budget: input.budget,
+      targetTokens: resolveAgentContextTarget(input.budget).tokens,
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    })
+    const { prepareStep } = input.context
     const research = await runModelLoop({
       model: input.plan.model,
       messages: [
@@ -135,15 +157,23 @@ export async function runWorkflowAgentNode(
           })
         ),
       ],
-      tools: input.context.tools,
+      tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
-      ...(input.context.prepareStep === undefined
-        ? {}
-        : { prepareStep: input.context.prepareStep }),
+      prepareStep: async (step) => {
+        const prepared = await prepareStep?.(step)
+        const guarded = await guard.prepareStep({
+          ...step,
+          messages: prepared?.messages ?? step.messages,
+        })
+        return guarded ?? prepared
+      },
+      recoverStep: guard.recoverStep,
       signal: abortSignal,
       onStepEnd: (step) => {
         completedSteps.push(step)
       },
+    }).catch((error: unknown) => {
+      throw workflowContextFailure(error, input.agentStepId, traceDetails) ?? error
     })
     throwIfEnvironmentFailed()
     if (research.status === "aborted") {
@@ -270,4 +300,28 @@ export async function runWorkflowAgentNode(
       cause,
     })
   }
+}
+
+/**
+ * The failure of a step whose call its guard reduced and the provider still refused as too long
+ * for the window. Undefined for any other error.
+ */
+function workflowContextFailure(
+  error: unknown,
+  agentStepId: string,
+  details: Readonly<Record<string, string>>
+): Error | undefined {
+  if (!(error instanceof ModelProviderError) || error.reason !== "context-window-exceeded") {
+    return undefined
+  }
+
+  const remedy = "Narrow the step's prompt, or bind a model with a larger context window."
+  return withFailureMessage(
+    createSixbError(
+      "agent.execution_failed",
+      `[SixbAgent] Workflow agent step '${agentStepId}' still exceeds its model's context window after its context was reduced. ${remedy}`,
+      { cause: error, details }
+    ),
+    `The step's context exceeds its model's context window, even reduced. ${remedy}`
+  )
 }

@@ -4,6 +4,7 @@ import {
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentThreadModelContextMessage,
   type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
@@ -101,9 +102,25 @@ export type LoadConversationMemory = (
 ) => Promise<ConversationMemory | undefined>
 
 /** What a request carries besides its history, as an estimate counts it. */
-interface AgentContextEstimateShape {
+export interface AgentContextEstimateShape {
   readonly systemPrompt: string
   readonly tools: readonly AgentContextEstimateTool[]
+  /** Messages every request sends ahead of the history: a child's task, once summarized. */
+  readonly head?: readonly AgentThreadModelContextMessage[]
+}
+
+/** What a request of this shape weighs with `messages` as its history. */
+function estimateShapedRequest(
+  shape: AgentContextEstimateShape,
+  messages: readonly AgentThreadModelContextMessage[],
+  bytesPerToken: number
+) {
+  return estimateAgentContextRequestTokens({
+    systemPrompt: shape.systemPrompt,
+    tools: shape.tools,
+    messages: [...(shape.head ?? []), ...messages],
+    bytesPerToken,
+  })
 }
 
 /**
@@ -176,11 +193,7 @@ export async function prepareAgentConversationContext(
   // recent work that fits the rest.
   const summaryTokens = contextSummaryTextTokens(plan, budget)
   const summaryMessageTokens = summaryTokens + SUMMARY_HEADER_TOKENS
-  const fixedTokens = estimateAgentContextRequestTokens({
-    ...estimateShape,
-    messages: [],
-    bytesPerToken,
-  }).tokens
+  const fixedTokens = estimateShapedRequest(estimateShape, [], bytesPerToken).tokens
   const aimTokens = Math.floor(budget.inputBudgetTokens * AGENT_CONTEXT_COMPACTED_SHARE)
 
   // This run's own checkpoint is already as compact as it gets.
@@ -444,14 +457,14 @@ async function compactAgentConversation(
     const compactedMemory = await input.loadMemory?.(candidateBase)
     runtime.assertCanContinue()
     const compactedShape = input.estimateShape(initialContext, compactedMemory)
-    const minimumContinuationTokens = estimateAgentContextRequestTokens({
-      ...compactedShape,
-      bytesPerToken,
-      messages: projectAgentThreadModelContext({
+    const minimumContinuationTokens = estimateShapedRequest(
+      compactedShape,
+      projectAgentThreadModelContext({
         checkpoint: candidateBase,
         messages: boundary.retainedMessages,
       }),
-    }).tokens
+      bytesPerToken
+    ).tokens
     if (minimumContinuationTokens >= budget.inputBudgetTokens) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
@@ -510,14 +523,14 @@ async function compactAgentConversation(
     })
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
-    const estimatedInputTokensAfter = estimateAgentContextRequestTokens({
-      ...compactedShape,
-      bytesPerToken,
-      messages: projectAgentThreadModelContext({
+    const estimatedInputTokensAfter = estimateShapedRequest(
+      compactedShape,
+      projectAgentThreadModelContext({
         checkpoint: candidate,
         messages: boundary.retainedMessages,
       }),
-    }).tokens
+      bytesPerToken
+    ).tokens
     if (estimatedInputTokensAfter > budget.inputBudgetTokens) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
@@ -616,22 +629,18 @@ function compactedRequestTokens(input: {
  * the whole request is estimated at the rate the run started from. The full estimate still wins
  * when larger, as a new system prompt or tool catalog is not in the anchor.
  */
-export function estimateAgentConversation(input: {
-  readonly plan: ResolvedAgentExecutionPlan
-  readonly budget: AgentContextBudget
-  readonly threadContext: LoadedAgentThreadModelContext
-  readonly systemPrompt: string
-  readonly tools: readonly AgentContextEstimateTool[]
-}): { readonly tokens: number; readonly bytesPerToken: number } {
+export function estimateAgentConversation(
+  input: AgentContextEstimateShape & {
+    readonly plan: ResolvedAgentExecutionPlan
+    readonly budget: AgentContextBudget
+    readonly threadContext: LoadedAgentThreadModelContext
+  }
+): { readonly tokens: number; readonly bytesPerToken: number } {
   const { threadContext, budget, systemPrompt, tools } = input
+  const head = input.head ?? []
   const anchor = matchingUsageAnchor(input.plan, threadContext)
   const full = (bytesPerToken: number) =>
-    estimateAgentContextRequestTokens({
-      systemPrompt,
-      tools,
-      messages: threadContext.modelMessages,
-      bytesPerToken,
-    }).tokens
+    estimateShapedRequest(input, threadContext.modelMessages, bytesPerToken).tokens
   if (!anchor) return { tokens: full(budget.bytesPerToken), bytesPerToken: budget.bytesPerToken }
 
   // The synthetic summary leads the model messages; the retained tail follows it.
@@ -645,7 +654,11 @@ export function estimateAgentConversation(input: {
     size: measureAgentContextRequest({
       systemPrompt,
       tools,
-      messages: [...threadContext.modelMessages.slice(0, offset + anchor.index), ...answered],
+      messages: [
+        ...head,
+        ...threadContext.modelMessages.slice(0, offset + anchor.index),
+        ...answered,
+      ],
     }),
   })
 
@@ -888,10 +901,7 @@ interface SummaryStep {
 function planSummary(input: {
   readonly threadContext: LoadedAgentThreadModelContext
   readonly boundary: AgentContextCompactionBoundary
-  readonly estimateShape: {
-    readonly systemPrompt: string
-    readonly tools: readonly AgentContextEstimateTool[]
-  }
+  readonly estimateShape: AgentContextEstimateShape
   readonly bytesPerToken: number
   readonly summaryTokens: number
   /** The most a summary request may read. */
@@ -912,9 +922,9 @@ function planSummary(input: {
     )
   }
   const instructionTokens = (keptFrom?: AgentMessageRecord) =>
-    estimateAgentContextRequestTokens({
-      ...input.estimateShape,
-      messages: [
+    estimateShapedRequest(
+      input.estimateShape,
+      [
         {
           role: "user",
           parts: [
@@ -925,8 +935,8 @@ function planSummary(input: {
           ],
         },
       ],
-      bytesPerToken,
-    }).tokens
+      bytesPerToken
+    ).tokens
   // A later step reads the summary so far in place of the earlier summary and turns.
   const requestTokens = (start: number, end: number, keptFrom?: AgentMessageRecord) =>
     instructionTokens(keptFrom) +
