@@ -82,12 +82,17 @@ export {
   AGENT_CONTEXT_ESTIMATOR_VERSION,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  estimateModelRequestTokens,
   selectAgentContextCompactionBoundary,
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
 export { resolveAgentContextParts } from "./context-resolution"
+export {
+  agentContextBytesPerToken,
+  calibrateAgentContextBytesPerToken,
+} from "./context-token-rate"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
