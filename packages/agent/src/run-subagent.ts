@@ -18,11 +18,7 @@ import {
 import { renderCurrentTime, sentSettings } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
 import { storeChildOutputs } from "./child-files"
-import {
-  type AgentContextBudget,
-  expectedRemainingAgentCalls,
-  resolveAgentContextTarget,
-} from "./context-budget"
+import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -108,9 +104,6 @@ export async function runSubagent(input: {
   ]
   const guard = createAgentContextGuard({
     budget,
-    targetTokens: resolveAgentContextTarget(budget, {
-      expectedRemainingCalls: expectedRemainingAgentCalls(input.history),
-    }).tokens,
     tools: context.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,

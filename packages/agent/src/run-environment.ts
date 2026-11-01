@@ -193,8 +193,6 @@ export interface SubagentAgentExecutionEnvironment extends AgentExecutionEnviron
    */
   readonly compactInRun?: (input: {
     readonly reason: AgentContextCheckpointReason
-    readonly estimatedInputTokens: number
-    readonly targetTokens: number
   }) => Promise<ConversationRequest | undefined>
   /** The bytes per token the preflight measured the thread at, which the run's calls go by. */
   readonly bytesPerToken?: number
@@ -647,14 +645,12 @@ async function startSubagentEnvironment(
   // The run compacts from within at most once: a run writes one checkpoint.
   const compactInRun: SubagentAgentExecutionEnvironment["compactInRun"] =
     compaction &&
-    (async ({ reason, estimatedInputTokens, targetTokens }) => {
+    (async ({ reason }) => {
       const compacted = await compactAgentThreadInRun({
         ...compaction,
         threadContext,
         memory: undefined,
         reason,
-        estimatedInputTokens,
-        targetTokens,
       })
       return (
         compacted && childRequest({ threadContext: compacted.threadContext, memory: undefined })
