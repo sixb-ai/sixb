@@ -43,8 +43,6 @@ const CUT_MIN_BYTES = 512
 /** What a turn's requests start with in place of the turn's history, once it compacted. */
 export type CompactConversationBeforeTurn = (input: {
   readonly reason: AgentContextCheckpointReason
-  /** What the request the turn is about to send weighs. */
-  readonly estimatedInputTokens: number
 }) => Promise<readonly ModelMessage[] | undefined>
 
 export interface AgentContextGuardInput {
@@ -233,7 +231,7 @@ class ContextGuard {
     let currentTokens = tokens
     if (this.input.compact && !this.compacted) {
       this.compacted = true
-      const head = await this.input.compact({ reason, estimatedInputTokens: tokens })
+      const head = await this.input.compact({ reason })
       if (head) {
         current = [...head, ...messages.slice(this.headLength)]
         this.headLength = head.length
