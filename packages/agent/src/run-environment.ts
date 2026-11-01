@@ -19,7 +19,12 @@ import type {
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
-import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
+import {
+  type AgentExecutionMode,
+  renderAgentSystemPrompt,
+  renderCurrentTime,
+  sentSettings,
+} from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import {
   type InstalledArtifacts,
@@ -36,9 +41,12 @@ import {
 import { prepareHandedFiles } from "./child-files"
 import type { AgentContextBudget } from "./context-budget"
 import {
+  type AgentThreadCompactionInput,
   type BuildConversationRequest,
   type ConversationRequest,
   compactAgentConversationInTurn,
+  compactAgentThreadInRun,
+  contextEstimateTools,
   type LoadConversationMemory,
   prepareAgentConversationContext,
 } from "./context-compaction"
@@ -59,6 +67,13 @@ import {
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { MEMORY_SKILL } from "./skills/built-in"
+import {
+  preflightSubagentContext,
+  type SubagentThreadContext,
+  subagentModelMessages,
+  subagentPromptCaching,
+  subagentThreadContext,
+} from "./subagent-context"
 import type { SubagentHistory } from "./subagent-continuation"
 import { agentThreadModelContext, type LoadedAgentThreadModelContext } from "./thread-context"
 import { createBashTool } from "./tools/bash"
@@ -164,6 +179,25 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
   readonly history: SubagentHistory
   /** Framework-owned tools of a child: `ask_parent`. */
   readonly frameworkTools?: readonly ModelTool[]
+  /** Weigh the thread before the first call, and compact it on the child's thread when needed. */
+  readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
+}
+
+export interface SubagentAgentExecutionEnvironment extends AgentExecutionEnvironment {
+  /** The thread the child runs on: as it started, or as its compaction left it. */
+  readonly thread: SubagentThreadContext
+  /**
+   * Compact the thread before the run from within it, once: the request the run's calls then
+   * start with. Undefined when it could not. Only a child whose environment ran its preflight has
+   * it.
+   */
+  readonly compactInRun?: (input: {
+    readonly reason: AgentContextCheckpointReason
+    readonly estimatedInputTokens: number
+    readonly targetTokens: number
+  }) => Promise<ConversationRequest | undefined>
+  /** The bytes per token the preflight measured the thread at, which the run's calls go by. */
+  readonly bytesPerToken?: number
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -392,20 +426,42 @@ export async function createConversationAgentEnvironment(
  */
 export async function createSubagentEnvironment(
   input: CreateSubagentEnvironmentInput
-): Promise<AgentExecutionEnvironment> {
+): Promise<SubagentAgentExecutionEnvironment> {
   // A child's workspace is blank, so it has no source credentials to lose.
   const { sandbox, resumed = false } = await input.openSandbox({
     signal: input.signal ?? NEVER_ABORTED_SIGNAL,
     onFailure: () => {},
   })
+  // A workspace the prompt describes is acquired once: by the summary that continues the child's
+  // prompt when it compacts, else when the environment starts.
+  let acquisition: Promise<AcquiredRunSandbox> | undefined
+  let provisioning = false
+  const acquire = () => {
+    acquisition ??= sandbox.acquire()
+    return acquisition
+  }
 
   try {
-    return await startSubagentEnvironment({ ...input, sandbox, resumed })
+    return await startSubagentEnvironment({
+      ...input,
+      sandbox,
+      resumed,
+      acquireBeforeStart: acquire,
+      acquire: () => {
+        provisioning = true
+        return acquire()
+      },
+    })
   } catch (error) {
     // Preparation failed before the worker got this environment: the child ends here, so its
     // workspace goes, as the worker's failure path would destroy it. A lost execution must touch
     // nothing.
-    if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.({ discard: true })
+    try {
+      if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.({ discard: true })
+    } finally {
+      // A workspace the summary acquired goes back as the environment would have given it.
+      if (acquisition && !provisioning) await releaseAcquisition(sandbox, acquisition)
+    }
     throw error
   }
 }
@@ -415,14 +471,18 @@ async function startSubagentEnvironment(
     readonly sandbox: RunSandbox
     /** Whether the sandbox is the workspace the paused run left: it holds its files already. */
     readonly resumed: boolean
+    /** How the summary acquires the workspace its prompt describes, before the environment. */
+    readonly acquireBeforeStart: () => Promise<AcquiredRunSandbox>
+    /** How provisioning acquires it, which from then gives it back. */
+    readonly acquire: () => Promise<AcquiredRunSandbox>
   }
-): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run, conversation, sandbox, resumed } = input
+): Promise<SubagentAgentExecutionEnvironment> {
+  const { context, plan, run, conversation, sandbox, resumed, preflight } = input
+  const signal = input.signal ?? NEVER_ABORTED_SIGNAL
   // Still listed, as handed over, but never copied over what the child made of them.
   const files = resumed ? (run.spec.files ?? []) : subagentSandboxFiles(run, input.history.paused)
-  const history = input.history.messages
   const inlineImages = modelSupportsInlineImages(plan.model)
-  const [memory, handedContext, historyContext] = await Promise.all([
+  const [memory, handedContext] = await Promise.all([
     // As of the thread's start, as a conversation's: each run of the child reads the same memory.
     loadConversationMemory({ session: input.session, asOf: input.thread.createdAt }),
     files.length
@@ -436,40 +496,136 @@ async function startSubagentEnvironment(
           signal: input.signal,
         })
       : emptyAttachmentContext(context.id),
-    history.length && context.apiBaseUrl
-      ? prepareAgentAttachments({
-          projectId: context.id,
-          // Its messages are its thread's, so their files are read there.
-          threadId: input.thread.id,
-          messages: history,
-          blobStorage: context.blobStorage,
-          apiBaseUrl: context.apiBaseUrl,
-          contextDirectory: sandbox.contextDirectory,
-          inlineImages,
-          signal: input.signal,
-        })
-      : undefined,
   ])
+  const publishing = conversation
+    ? {
+        artifacts: input.session.artifacts,
+        threadId: conversation.id,
+        owner: conversation.ownerPrincipal,
+      }
+    : undefined
 
-  const imageBudget = new InlineImageBudget()
-  const attachmentContext = await allocateInlineImages({
-    messages: history,
-    attachments: historyContext
-      ? mergeAttachmentContexts(handedContext, historyContext)
-      : handedContext,
-    toolFiles: replayToolFiles({
-      messages: history,
-      suppliesToolFiles: suppliesToolFiles(plan),
-      supportsImages: inlineImages,
-    }),
-    budget: imageBudget,
-    blobStorage: context.blobStorage,
-    signal: input.signal ?? NEVER_ABORTED_SIGNAL,
+  // What a history's files make of the request: the handed files, its attachments and the images
+  // its tools showed, within one request's inline image budget, the history first.
+  const prepareFiles = async (messages: readonly AgentMessageRecord[]) => {
+    const historyContext =
+      messages.length && context.apiBaseUrl
+        ? await prepareAgentAttachments({
+            projectId: context.id,
+            // Its messages are its thread's, so their files are read there.
+            threadId: input.thread.id,
+            messages,
+            blobStorage: context.blobStorage,
+            apiBaseUrl: context.apiBaseUrl,
+            contextDirectory: sandbox.contextDirectory,
+            inlineImages,
+            signal: input.signal,
+          })
+        : undefined
+
+    const imageBudget = new InlineImageBudget()
+    const attachmentContext = await allocateInlineImages({
+      messages,
+      attachments: historyContext
+        ? mergeAttachmentContexts(handedContext, historyContext)
+        : handedContext,
+      toolFiles: replayToolFiles({
+        messages,
+        suppliesToolFiles: suppliesToolFiles(plan),
+        supportsImages: inlineImages,
+      }),
+      budget: imageBudget,
+      blobStorage: context.blobStorage,
+      signal,
+    })
+    return { attachmentContext, imageBudget }
+  }
+
+  // The request the child's calls would send for a history, built as the environment and
+  // runSubagent build it: the summary continues it, so the provider reads it from its cache.
+  const createdAt = renderCurrentTime(
+    input.thread.createdAt,
+    sentSettings(plan, { timeZone: context.timeZone, locale: context.locale })
+  )
+  const initial = subagentThreadContext(input.history)
+  const task = initial.task
+  const threadOf = (threadContext: LoadedAgentThreadModelContext): SubagentThreadContext => ({
+    ...(task ? { task } : {}),
+    threadContext,
   })
+  const tools = [
+    ...agentModelToolSpecs(plan.tools, { publishes: publishing !== undefined }),
+    ...(input.frameworkTools ?? []),
+  ]
+  const childRequest: BuildConversationRequest = async ({ threadContext }) => {
+    const { attachmentContext } = await prepareFiles(threadContext.retainedMessages)
+    const workspace = sandbox.waitBeforeModel
+      ? await waitForAbort(input.acquireBeforeStart(), input.signal)
+      : undefined
 
-  return startAgentEnvironment({
+    return {
+      systemPrompt: renderEnvironmentSystemPrompt({
+        mode: "subagent",
+        sandbox,
+        context,
+        plan,
+        ontologyDocs: plan.ontologyDocs,
+        ...(workspace ? { workspace } : {}),
+        ...(memory ? { memory } : {}),
+      }),
+      tools,
+      messages: subagentModelMessages({
+        thread: threadOf(threadContext),
+        attachmentContext,
+        createdAt,
+      }),
+    }
+  }
+
+  // What the child's estimates count besides the thread: its prompt, its tools, and the task
+  // every request opens with.
+  const estimateShape = {
+    systemPrompt: renderEnvironmentSystemPrompt({
+      mode: "subagent",
+      sandbox,
+      context,
+      plan,
+      ontologyDocs: plan.ontologyDocs,
+      ...(memory ? { memory } : {}),
+    }),
+    tools: contextEstimateTools(tools),
+    ...(task ? { head: [task] } : {}),
+  }
+  // What the child's compaction reads and writes through, before the run or during it.
+  const compaction: AgentThreadCompactionInput | undefined = preflight && {
+    context,
+    session: input.session,
+    plan,
+    budget: preflight.budget,
+    run,
+    runtime: preflight.runtime,
+    // No `loadMemory`: a child's prompt shows memory as of its thread's start, whatever it
+    // compacted, so its summary and its calls send the same prompt.
+    conversationRequest: childRequest,
+    estimateShape: () => estimateShape,
+    caching: subagentPromptCaching({
+      projectId: context.id,
+      thread: input.thread,
+      run,
+      history: input.history,
+    }),
+  }
+  // Compacted before its files are read: the inline image budget goes to what the run sends.
+  const prepared = compaction
+    ? await preflightSubagentContext({ ...compaction, threadContext: initial.threadContext })
+    : undefined
+  const threadContext = prepared?.threadContext ?? initial.threadContext
+  const { attachmentContext, imageBudget } = await prepareFiles(threadContext.retainedMessages)
+
+  const environment = await startAgentEnvironment({
     mode: "subagent",
     sandbox,
+    acquire: input.acquire,
     sandboxSignal: input.signal,
     context,
     plan,
@@ -477,15 +633,7 @@ async function startSubagentEnvironment(
     parentRunId: run.parentRunId,
     threadId: conversationThreadId(input.thread),
     callTool: (call, options) => input.session.callTool(call, options),
-    ...(conversation
-      ? {
-          publishing: {
-            artifacts: input.session.artifacts,
-            threadId: conversation.id,
-            owner: conversation.ownerPrincipal,
-          },
-        }
-      : {}),
+    ...(publishing ? { publishing } : {}),
     apiBaseUrl: context.apiBaseUrl,
     attachmentContext,
     imageBudget,
@@ -495,6 +643,29 @@ async function startSubagentEnvironment(
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
     onDetachedTeardown: input.onDetachedTeardown,
   })
+
+  // The run compacts from within at most once: a run writes one checkpoint.
+  const compactInRun: SubagentAgentExecutionEnvironment["compactInRun"] =
+    compaction &&
+    (async ({ reason, estimatedInputTokens, targetTokens }) => {
+      const compacted = await compactAgentThreadInRun({
+        ...compaction,
+        threadContext,
+        memory: undefined,
+        reason,
+        estimatedInputTokens,
+        targetTokens,
+      })
+      return (
+        compacted && childRequest({ threadContext: compacted.threadContext, memory: undefined })
+      )
+    })
+  return {
+    ...environment,
+    thread: threadOf(threadContext),
+    ...(compactInRun ? { compactInRun } : {}),
+    ...(prepared ? { bytesPerToken: prepared.bytesPerToken } : {}),
+  }
 }
 
 /** Build the same tool/sandbox environment for a fresh, headless workflow task. */

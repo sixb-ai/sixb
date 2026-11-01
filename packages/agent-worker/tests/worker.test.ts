@@ -164,6 +164,7 @@ import {
   SANDBOX_CONTEXT_DIRECTORY,
 } from "../../agent/src/run-sandbox"
 import { SubagentCoordinator } from "../../agent/src/subagent-tools"
+import * as toolResultMedia from "../../agent/src/tools/result-media"
 import { AgentFileBudget } from "../../agent/src/tools/tool-files"
 import { createAgentTurnRuntime } from "../../agent/src/turn-runtime"
 import type { AgentRunFiles } from "../../agent/src/types"
@@ -15439,6 +15440,512 @@ describe("context within a turn", () => {
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({ id: checkpoint?.id })
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+/**
+ * A 100,000-token window (83,616 tokens of input at most) as `chapterReadingModel` has, under
+ * other ids, answering each call as `script` says. It reports each request as the estimator counts
+ * it at 3 bytes per token, keeps every request, and calls `reject` first: what it throws, the
+ * provider rejected. A summary request is answered with a summary.
+ */
+function scriptedWindowModel(input: {
+  readonly providerId: string
+  readonly modelId: string
+  readonly requests: LanguageModelRequest[]
+  readonly script: (request: LanguageModelRequest) => readonly WorkerTestStreamEvent[]
+  readonly reject?: (request: LanguageModelRequest) => Error | undefined
+  /**
+   * Each call a second after the one before it: under fake time, calls would share a timestamp,
+   * and the latest of a run, which a later run's estimate anchors on, would be any of them.
+   */
+  readonly tick?: boolean
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    definition: {
+      kind: "language",
+      providerId: input.providerId,
+      modelId: input.modelId,
+      capabilities: {
+        inputMediaTypes: [],
+        localTools: true,
+        parallelToolCalls: true,
+        nativeStructuredOutput: true,
+      },
+      contextWindow: 100_000,
+      maxOutputTokens: 16_384,
+    },
+    stream: async (request) => {
+      input.requests.push(request)
+      if (input.tick) setSystemTime(new Date(Date.now() + 1_000))
+      const rejection = isSummaryRequest(request) ? undefined : input.reject?.(request)
+      if (rejection) throw rejection
+
+      const usage = { inputTokens: estimateAgentRequestTokens(request, 3), outputTokens: 20 }
+      const events = isSummaryRequest(request)
+        ? textEvents("## Goal\nRead the book.")
+        : input.script(request)
+      const finishReason = events.some((event) => event.type === "tool-call")
+        ? "tool-calls"
+        : "stop"
+      return stream([
+        { type: "stream-start", warnings: [] },
+        ...events,
+        { type: "finish", finishReason, usage },
+      ])
+    },
+  })
+}
+
+function textEvents(text: string): WorkerTestStreamEvent[] {
+  return [
+    { type: "text-start", id: "text" },
+    { type: "text-delta", id: "text", delta: text },
+    { type: "text-end", id: "text" },
+  ]
+}
+
+function toolCallEvent(
+  toolCallId: string,
+  toolName: string,
+  input: unknown
+): WorkerTestStreamEvent {
+  return { type: "tool-call", toolCallId, toolName, input: JSON.stringify(input) }
+}
+
+/** The next chapter a request has not read yet, then `then` once it read `chapters`. */
+function readChapters(chapters: number, then: () => readonly WorkerTestStreamEvent[]) {
+  return (request: LanguageModelRequest): readonly WorkerTestStreamEvent[] => {
+    const read = chapterResults(request).length
+    return read < chapters
+      ? [toolCallEvent(`chapter_${read}`, "chapter", { number: String(read) })]
+      : then()
+  }
+}
+
+/** What a tool answered the model, by its call id, from the model's next request. */
+function toolAnswer(request: LanguageModelRequest | undefined, toolCallId: string): unknown {
+  for (const message of request?.messages ?? []) {
+    if (message.role !== "tool") continue
+
+    for (const part of message.content) {
+      if (part.toolCallId !== toolCallId) continue
+      if (part.output.type === "json") return part.output.value
+      if (part.output.type === "text") {
+        try {
+          return JSON.parse(part.output.value)
+        } catch {
+          return part.output.value
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function spawnedRunId(request: LanguageModelRequest | undefined): string {
+  const spawned = toolAnswer(request, "spawn") as { readonly runId?: string } | undefined
+  if (!spawned?.runId) throw new Error("[test] Expected the spawned child's run id.")
+  return spawned.runId
+}
+
+describe("context of a child and of a workflow step", () => {
+  const HARD_LIMIT_TOKENS = 83_616
+  const CHILD = { provider: "child-provider", modelId: "child-model" }
+  const spawnReader = { key: "reader", task: "Read the book.", model: CHILD }
+
+  /** A parent that spawns the reader, waits for it, and answers with what it got. */
+  function readerParent(calls: LanguageModelRequest[]) {
+    return new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        calls.push(request)
+        if (calls.length === 1) return toolCallStream("spawn", "spawn_agent", spawnReader)
+        if (calls.length === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(request)] })
+        }
+        return answerStream("The reader is done.")
+      },
+    })
+  }
+
+  test("a child clears what it read before a call would cross its target, and answers", async () => {
+    // Reproduce: install no guard in runSubagent's model loop; the child's seventh call then
+    // carries six chapters of about 15,000 tokens, past the 83,616-token limit. Leave out its
+    // recoverStep, and the rejected second call fails the child.
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    let rejected = 0
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      script: readChapters(6, () => textEvents("Read them all.")),
+      // The estimate missed what the provider counted on the second call, once.
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || rejected > 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(45_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // wait_agent polls the child: drive that with fake time.
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      const run = await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(run.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      expect(toolAnswer(parentCalls[2], "wait")).toMatchObject({
+        results: [{ status: "succeeded", text: "Read them all." }],
+      })
+      for (const sent of childRequests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The oldest chapters were cleared; the most recent it read stays, and the one it has not.
+      const cleared = { type: "text" as const, value: clearedToolResultText("chapter") }
+      const last = chapterResults(childRequests.at(-1)!)
+      expect(last).toHaveLength(6)
+      expect(last.slice(0, 2)).toEqual([cleared, cleared])
+      expect(last.slice(-2)).not.toContainEqual(cleared)
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  test("a child the provider still refuses fails with what its parent can do about it", async () => {
+    // Reproduce: drop the subagentContextFailure catch in runSubagent; the parent then reads the
+    // provider's own words, which say nothing of what to do.
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: [],
+      script: readChapters(2, () => textEvents("Read them all.")),
+      reject: (request) =>
+        chapterResults(request).length > 0 ? contextWindowRejection() : undefined,
+    })
+    const parentModel = readerParent(parentCalls)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(3_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const requested = await requestAgent(sixb, { text: "Have the book read." })
+      await underFakeTime(() => terminalRun(storage, requested.run.id), "parent")
+
+      expect(toolAnswer(parentCalls[2], "wait")).toMatchObject({
+        results: [
+          {
+            status: "failed",
+            error: {
+              code: "agent.execution_failed",
+              message: expect.stringContaining(
+                "Spawn it again with a narrower task, or a model with a larger context window."
+              ),
+            },
+          },
+        ],
+      })
+    } finally {
+      await stopUnderFakeTime(worker)
+    }
+  })
+
+  /**
+   * A parent that spawns the reader, then relays the user's answers: its first turn asks the user
+   * the reader's question, and each later one messages the reader the next of `answers`.
+   */
+  function relayingParent(
+    calls: LanguageModelRequest[],
+    spawn: typeof spawnReader,
+    answers: readonly string[]
+  ) {
+    return new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async (request) => {
+        calls.push(request)
+        const call = calls.length
+        // Three calls a turn: spawn or answer, wait, then the turn's answer.
+        const turn = Math.floor((call - 1) / 3)
+        if (call === 1) return toolCallStream("spawn", "spawn_agent", spawn)
+        if (call % 3 === 1) {
+          return toolCallStream("answer", "message_agent", {
+            key: spawn.key,
+            text: answers[turn - 1] ?? "",
+          })
+        }
+        if (call % 3 === 2) {
+          return toolCallStream("wait", "wait_agent", { runIds: [spawnedRunId(calls[1])] })
+        }
+        return answerStream("The reader asks something.")
+      },
+    })
+  }
+
+  /** Run one turn of the parent's thread to its end, and the child run it left. */
+  async function parentTurn(
+    sixb: TestSixb,
+    text: string,
+    threadId: string | undefined,
+    childRunOf: (runId: string) => string
+  ) {
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { ...(threadId ? { threadId } : {}), text })
+    const run = await underFakeTime(() => terminalRun(storage, requested.run.id), text)
+    expect(run.status).toBe("succeeded")
+    const child = await storage.runs.getById({
+      projectId: PROJECT_ID,
+      id: childRunOf(requested.run.id),
+    })
+    if (child?.kind !== "subagent") throw new Error("[test] Expected the turn's child run.")
+    return { run, child }
+  }
+
+  test("a child that continues its thread compacts it there, and replays it from the summary on", async () => {
+    // Reproduce: skip the compaction in preflightSubagentContext; the continuation's first call
+    // then replays the whole earlier run past its target, and no checkpoint is written. Leave the
+    // task out of subagentModelMessages, and the continuation reads no task; leave its `head` out
+    // of the child's estimate shape, and the checkpoint counts the continuation without its task;
+    // summarize with the conversation's caching, and the summary is not read as the child's
+    // continuation; read the thread's files before the compaction in startSubagentEnvironment, and
+    // the run spends its inline image budget on a history it does not send.
+    const ANSWERS = ["The second edition.", "In English."]
+    const spawn = { ...spawnReader, task: `Read the book. ${"t".repeat(30_000)}` }
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      tick: true,
+      script: (request) => {
+        const text = JSON.stringify(request.messages)
+        if (text.includes(ANSWERS[1]!)) return textEvents("Read the second edition, in English.")
+        // The continuation reads one more chapter, after the summary, then asks again.
+        if (text.includes(ANSWERS[0]!)) {
+          return chapterResults(request).length === 0
+            ? [toolCallEvent("chapter_extra", "chapter", { number: "extra" })]
+            : [toolCallEvent("ask_again", "ask_parent", { question: "Which language?" })]
+        }
+        // The first run reads nine chapters, then asks, its notes before the question.
+        return readChapters(9, () => [
+          ...textEvents(`Notes so far: ${"n".repeat(30_000)}`),
+          toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+        ])(request)
+      },
+    })
+    const parentModel = relayingParent(parentCalls, spawn, ANSWERS)
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(21_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(
+      withStorage(sixb, withJsonbKeyOrder(sixb.storage)),
+      workerOptions()
+    )
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawn.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      // The first run stayed under its target: nothing was cleared, nothing compacted.
+      const firstRun = childRequests.splice(0)
+      expect(JSON.stringify(firstRun)).not.toContain("was cleared")
+      for (const sent of firstRun) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+
+      const { threadId } = first.run
+      // Which histories the run's files are read for: the summary's, and the environment's.
+      const allocate = toolResultMedia.allocateInlineImages
+      const allocated: string[][] = []
+      spyOn(toolResultMedia, "allocateInlineImages").mockImplementation((input) => {
+        allocated.push(input.messages.map((message) => message.id))
+        return allocate(input)
+      })
+      const second = await parentTurn(sixb, ANSWERS[0]!, threadId, childRunOf)
+      const continued = second.child
+      expect(continued).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+
+      // The checkpoint is the child's, on its own thread, through the run's trigger.
+      const trigger = await storage.messages.getById({
+        projectId: PROJECT_ID,
+        id: continued.triggerMessageId,
+      })
+      const checkpoint = await storage.checkpoints.getLatest({
+        projectId: PROJECT_ID,
+        threadId: continued.threadId,
+      })
+      expect(checkpoint).toMatchObject({
+        createdByRunId: continued.id,
+        reason: "threshold",
+        summarizedThroughSeq: (trigger?.seq ?? 0) - 1,
+      })
+      const started = (await listRunStreamRecords(sixb.broker, continued.id)).find(
+        (record) => record.name === "agent.compaction.started"
+      )
+      expect(started?.payload).toMatchObject({ reason: "threshold" })
+      // The environment spent the inline image budget on what the run sends, from the trigger on,
+      // as a later run reading the checkpoint does.
+      expect(allocated.at(-1)).toEqual([continued.triggerMessageId])
+
+      // The summary continues what the paused run last sent, as the continuation caches it.
+      const secondRun = childRequests.splice(0)
+      const [summary, resumed, after] = secondRun
+      expect(summary && isSummaryRequest(summary)).toBe(true)
+      expectReplayedPrefix(firstRun.at(-1), summary, CHILD.provider)
+      expect(summary?.caching).toEqual(resumed?.caching)
+      expect(resumed?.caching).toEqual({ lifetime: "long", key: expect.stringMatching(/^sixb_/) })
+
+      // It goes on from the task, the summary and the answer, and its next call extends that.
+      const text = (index: number) => JSON.stringify(resumed?.messages[index] ?? null)
+      expect(text(1)).toContain(spawn.task)
+      expect(previousSummary(resumed!)).toBe("## Goal\nRead the book.")
+      expect(text(3)).toContain(ANSWERS[0])
+      expect(chapterResults(resumed!)).toHaveLength(0)
+      expectReplayedPrefix(resumed, after, CHILD.provider)
+      // The summary reads the cached prefix whole, within the window less its own output.
+      for (const sent of secondRun.filter((sent) => !isSummaryRequest(sent))) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      // The checkpoint weighed what the continuation sends, its task of 10,000 tokens included.
+      expect(checkpoint?.estimatedInputTokensAfter).toBeGreaterThan(
+        estimateAgentRequestTokens(resumed!, 3) - 2_000
+      )
+
+      // The run after it reads the thread from the checkpoint: it replays what the last one sent.
+      const third = await parentTurn(sixb, ANSWERS[1]!, threadId, childRunOf)
+      expect(third.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition, in English." },
+      })
+      const [replayed] = childRequests.splice(0)
+      expect(replayed && isSummaryRequest(replayed)).toBe(false)
+      expectReplayedPrefix(secondRun.at(-1), replayed, CHILD.provider)
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+      jest.restoreAllMocks()
+    }
+  })
+
+  test("a child weighs its continuation by what it replays after its run cleared results", async () => {
+    // Reproduce: drop the markReducedSteps call from subagentWorkMessages; the continuation then
+    // goes by the cleared call and a rate measured on it, and its first call replays every
+    // chapter, past the 83,616-token limit. Pass no `targetTokens` to the child's compaction
+    // instead; its summary then reads that whole replay at once, past the limit too.
+    const ANSWER = "The second edition."
+    const parentCalls: LanguageModelRequest[] = []
+    const childRequests: LanguageModelRequest[] = []
+    const childModel = scriptedWindowModel({
+      ...{ providerId: CHILD.provider, modelId: CHILD.modelId },
+      requests: childRequests,
+      tick: true,
+      script: (request) =>
+        JSON.stringify(request.messages).includes(ANSWER)
+          ? textEvents("Read the second edition.")
+          : readChapters(6, () => [
+              toolCallEvent("ask", "ask_parent", { question: "Which edition?" }),
+            ])(request),
+    })
+    const parentModel = relayingParent(parentCalls, spawnReader, [ANSWER])
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+      projectTools: [chapterTool(42_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    const childRunOf = (runId: string) => createSubagentRunId(runId, spawnReader.key)
+
+    jest.useFakeTimers()
+    try {
+      await worker.start()
+      const first = await parentTurn(sixb, "Have the book read.", undefined, childRunOf)
+      expect(first.child).toMatchObject({ status: "succeeded", finishReason: "awaiting_answer" })
+      // The run cleared chapters before its last calls, which its stored steps keep whole.
+      expect(JSON.stringify(childRequests.splice(0))).toContain("was cleared")
+
+      const second = await parentTurn(sixb, ANSWER, first.run.threadId, childRunOf)
+
+      expect(second.child).toMatchObject({
+        status: "succeeded",
+        result: { text: "Read the second edition." },
+      })
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: second.child.threadId })
+      ).resolves.toMatchObject({ createdByRunId: second.child.id })
+      expect(childRequests.some(isSummaryRequest)).toBe(true)
+      for (const sent of childRequests) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+    } finally {
+      await stopUnderFakeTime(worker)
+      setSystemTime()
+    }
+  })
+
+  test("a workflow step clears what it read and asks a rejected call again, then answers", async () => {
+    // Reproduce: install no guard in runWorkflowAgentNode's research loop; its seventh call then
+    // carries six chapters past the 83,616-token limit. Leave out its recoverStep, and the
+    // rejected second call fails the step.
+    const requests: LanguageModelRequest[] = []
+    let rejected = 0
+    const model = scriptedWindowModel({
+      providerId: "mock",
+      modelId: "mock-model",
+      requests,
+      script: (request) =>
+        request.responseFormat
+          ? textEvents(JSON.stringify({ answer: "Project Alpha", confidence: 0.9 }))
+          : readChapters(6, () => textEvents("Project Alpha, from the book."))(request),
+      reject: (request) => {
+        if (chapterResults(request).length !== 1 || rejected > 0) return undefined
+        rejected += 1
+        return contextWindowRejection()
+      },
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      tools: [chapterTool(45_000)],
+      runId: "workflow-context-run",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), { label: "node" })
+
+      expect(node.status).toBe("succeeded")
+      expect(rejected).toBe(1)
+      const research = requests.filter((request) => !request.responseFormat)
+      expect(research).toHaveLength(8)
+      for (const sent of research) {
+        expect(estimateAgentRequestTokens(sent, 3)).toBeLessThanOrEqual(HARD_LIMIT_TOKENS)
+      }
+      const last = chapterResults(research.at(-1)!)
+      expect(last.slice(0, 2)).toEqual([
+        { type: "text", value: clearedToolResultText("chapter") },
+        { type: "text", value: clearedToolResultText("chapter") },
+      ])
     } finally {
       await worker.stop()
     }
