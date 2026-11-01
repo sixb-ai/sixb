@@ -4,8 +4,10 @@ import { linkEndpointObjectTypeIds } from "@sixb/core/internal/query"
 import type { ReservedSQL, SQL, SQLClient } from "../pg-client"
 import { isConnectionLost } from "../storage-errors"
 import { withReservedPgConnection } from "../transactions"
+import { ensureObjectPartition, objectPartitionName } from "./partitions"
 import { lockPgPreparation } from "./preparation-lock"
 import { isTextScalarKind } from "./query-compiler"
+import { identifier, literal } from "./sql-text"
 
 export interface PgObjectQueryIndexScope {
   readonly projectId: string
@@ -40,7 +42,7 @@ export async function ensurePgObjectQueryIndexes(
   indexes: readonly PgObjectQueryIndex[]
 ): Promise<readonly string[]> {
   const definitions = indexes.map((index) => ({
-    table: index.kind === "incomingLinks" ? "links" : "objects",
+    table: index.kind === "incomingLinks" ? "links" : objectPartitionName(index.objectTypeId),
     expression: compileIndex(index),
     index,
   }))
@@ -63,6 +65,11 @@ export async function ensurePgObjectQueryIndexes(
     try {
       // One concurrent build per table, across definitions and across processes.
       await lockPgPreparation(connection, `${schema}.objects.query-indexes`)
+      for (const objectTypeId of new Set(
+        indexes.flatMap((index) => (index.kind === "incomingLinks" ? [] : [index.objectTypeId]))
+      )) {
+        await ensureObjectPartition(connection, schema, objectTypeId)
+      }
       for (const definition of definitions) {
         names.push(await createQueryIndex(connection, schema, definition))
       }
@@ -84,16 +91,14 @@ async function createQueryIndex(
   schema: string,
   definition: { table: string; expression: string; index: PgObjectQueryIndex }
 ): Promise<string> {
+  // A partition's name stands for its type, which an index's expression no longer names.
+  const { table } = definition
   const name = `sixb_query_${createHash("sha256")
-    .update(
-      definition.table === "objects"
-        ? definition.expression
-        : `${definition.table}:${definition.expression}`
-    )
+    .update(`${table}:${definition.expression}`)
     .digest("hex")
     .slice(0, 32)}`
   await connection.unsafe(
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${identifier(schema)}.${identifier(definition.table)} ${definition.expression}`
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(name)} ON ${identifier(schema)}.${identifier(table)} ${definition.expression}`
   )
   const [index] = await connection<{ valid: boolean }[]>`
     SELECT i.indisvalid AS valid FROM pg_index i
@@ -108,9 +113,8 @@ async function createQueryIndex(
     await connection.unsafe(
       `COMMENT ON INDEX ${identifier(schema)}.${identifier(name)} IS ${literal(JSON.stringify(definition.index))}`
     )
-    const scope = `project_id = ${literal(definition.index.projectId)} AND object_type_id = ${literal(definition.index.objectTypeId)}`
     await connection.unsafe(
-      `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(`${name}_overflow`)} ON ${identifier(schema)}.objects (primary_id) WHERE ${scope} AND NOT (${sortIndexBound(definition.index)})`
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${identifier(`${name}_overflow`)} ON ${identifier(schema)}.${identifier(table)} (primary_id) WHERE project_id = ${literal(definition.index.projectId)} AND NOT (${sortIndexBound(definition.index)})`
     )
 
     // The same definition under another name is an earlier generation of this index, built
@@ -137,27 +141,42 @@ async function ensureExpressionStatistics(
   schema: string,
   indexes: readonly PgObjectQueryIndex[]
 ): Promise<void> {
-  let statisticsChanged = false
   // Partial-index statistics do not describe expressions for the whole table. Without
   // expression statistics JSON's default selectivity can turn a 4M-row view into an
-  // estimated 125-row sort, even when the right ordered index exists.
-  const expressions = new Set(indexes.flatMap(statisticsExpressions))
-  for (const expression of expressions) {
-    const name = `sixb_query_stats_${createHash("sha256").update(expression).digest("hex").slice(0, 24)}`
-    const [existing] = await connection`
-      SELECT 1 FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid = s.stxnamespace
-      WHERE n.nspname = ${schema} AND s.stxname = ${name}`
-    if (existing) continue
-    await connection.unsafe(
-      `CREATE STATISTICS ${identifier(schema)}.${identifier(name)} ON project_id, object_type_id, ${expression} FROM ${identifier(schema)}.objects`
-    )
-    statisticsChanged = true
+  // estimated 125-row sort, even when the right ordered index exists. PostgreSQL plans a pruned
+  // query with its partition's statistics, so they live there, and ANALYZE stays per type.
+  const expressionsByType = new Map<string, Set<string>>()
+  for (const index of indexes) {
+    if (index.kind === "incomingLinks") continue
+    const expressions = expressionsByType.get(index.objectTypeId) ?? new Set<string>()
+    for (const expression of statisticsExpressions(index)) expressions.add(expression)
+    expressionsByType.set(index.objectTypeId, expressions)
   }
-  if (statisticsChanged) await connection.unsafe(`ANALYZE ${identifier(schema)}.objects`)
+
+  for (const [objectTypeId, expressions] of expressionsByType) {
+    const partition = `${identifier(schema)}.${identifier(objectPartitionName(objectTypeId))}`
+    let statisticsChanged = false
+    for (const expression of expressions) {
+      const name = `sixb_query_stats_${createHash("sha256")
+        .update(`${objectTypeId}:${expression}`)
+        .digest("hex")
+        .slice(0, 24)}`
+      const [existing] = await connection`
+        SELECT 1 FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid = s.stxnamespace
+        WHERE n.nspname = ${schema} AND s.stxname = ${name}`
+      if (existing) continue
+      await connection.unsafe(
+        `CREATE STATISTICS ${identifier(schema)}.${identifier(name)} ON project_id, ${expression} FROM ${partition}`
+      )
+      statisticsChanged = true
+    }
+    if (statisticsChanged) await connection.unsafe(`ANALYZE ${partition}`)
+  }
 }
 
-function statisticsExpressions(index: PgObjectQueryIndex): string[] {
-  if (index.kind === "incomingLinks") return []
+function statisticsExpressions(
+  index: Exclude<PgObjectQueryIndex, { kind: "incomingLinks" }>
+): string[] {
   const equality = new Set(Object.keys(index.where ?? {}))
   if (index.kind === "filter") for (const property of index.properties) equality.add(property)
   if (index.kind === "sort") for (const property of index.equality ?? []) equality.add(property)
@@ -178,10 +197,7 @@ function compileIndex(index: PgObjectQueryIndex): string {
       throw new Error("[SixbPg] Incoming link indexes do not accept object property conditions")
     return `(target_id, link_id, source_type_id, source_id) INCLUDE (project_id, target_type_id) WHERE project_id = ${literal(index.projectId)} AND target_type_id = ${literal(index.objectTypeId)}`
   }
-  const predicate = [
-    `project_id = ${literal(index.projectId)}`,
-    `object_type_id = ${literal(index.objectTypeId)}`,
-  ]
+  const predicate = [`project_id = ${literal(index.projectId)}`]
   for (const [propertyId, value] of Object.entries(index.where ?? {}).sort(([a], [b]) =>
     a.localeCompare(b)
   )) {
@@ -247,16 +263,6 @@ function sortValue(field: Extract<PgObjectQueryIndex, { kind: "sort" }>["fields"
   return `(NULLIF(properties -> ${literal(field.propertyId)}, 'null'::jsonb))`
 }
 
-function literal(value: string): string {
-  if (value.includes("\0"))
-    throw new Error("[SixbPg] Query index names and values cannot contain NUL")
-  return `E'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`
-}
-
-function identifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`
-}
-
 /** Keep complete B-tree entries below PostgreSQL's page limit, without constraining valid data.
  * Ordered reads merge a small indexed page with the exact overflow page. */
 export function sortIndexBound(index: Extract<PgObjectQueryIndex, { kind: "sort" }>): string {
@@ -314,8 +320,8 @@ async function readPgSortIndexes(sql: SQLClient): Promise<readonly PgSortIndex[]
     JOIN pg_class c ON c.oid = i.indexrelid
     JOIN pg_description d
       ON d.objoid = c.oid AND d.classoid = 'pg_class'::regclass AND d.objsubid = 0
-    WHERE i.indrelid = 'objects'::regclass AND i.indisvalid
-      AND c.relname LIKE 'sixb_query_%'
+    WHERE i.indrelid IN (SELECT inhrelid FROM pg_inherits WHERE inhparent = 'objects'::regclass)
+      AND i.indisvalid AND c.relname LIKE 'sixb_query_%'
   `
   const indexes: PgSortIndex[] = []
   for (const row of rows) {

@@ -191,7 +191,7 @@ for (const mode of ["baseline", "prepared"] as const) {
       console.log(JSON.stringify({ mode, ...point }))
     }
     const [size] =
-      await sql`SELECT pg_database_size(current_database()) AS database_bytes,pg_total_relation_size('objects') AS object_bytes`
+      await sql`SELECT pg_database_size(current_database()) AS database_bytes,(SELECT sum(pg_total_relation_size(relid))::bigint FROM pg_partition_tree('objects')) AS object_bytes`
     const statements = process.env.QUERY_BENCH_PROFILE
       ? await sql`SELECT calls,total_exec_time,rows,left(query,1000) AS query FROM public.pg_stat_statements ORDER BY total_exec_time DESC LIMIT 12`
       : []

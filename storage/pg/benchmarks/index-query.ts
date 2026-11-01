@@ -43,6 +43,8 @@ for (const objectTypeId of ["City", "User"])
   )
 await sql.unsafe("VACUUM (ANALYZE) objects")
 await sql.unsafe("VACUUM (ANALYZE) links")
-console.log(await sql`SELECT pg_size_pretty(pg_total_relation_size('objects')) AS objects`)
+console.log(
+  await sql`SELECT pg_size_pretty((SELECT sum(pg_total_relation_size(relid))::bigint FROM pg_partition_tree('objects'))) AS objects`
+)
 await sql.end()
 await pg.close()
