@@ -139,6 +139,7 @@ export async function runConversationTurn(input: {
       children: await delegation.turnChildren(),
       contextLimits: {
         budget: prepared.model.budget,
+        measuredBytesPerToken: prepared.model.measuredBytesPerToken,
         ...(environment.compactInTurn ? { compactInTurn: environment.compactInTurn } : {}),
         ...(environment.bytesPerToken === undefined
           ? {}

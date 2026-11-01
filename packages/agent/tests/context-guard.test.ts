@@ -1,12 +1,23 @@
 import { describe, expect, test } from "bun:test"
 import type { PrepareModelStepInput } from "@sixb/core/internal/agents"
-import { type ModelMessage, ModelProviderError, type ModelStep } from "@sixb/core/models"
-import { type AgentContextBudget, estimateAgentRequestTokens } from "../src/context-budget"
+import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
+import {
+  defineLanguageModel,
+  type ModelMessage,
+  ModelProviderError,
+  type ModelStep,
+} from "@sixb/core/models"
+import {
+  type AgentContextBudget,
+  estimateAgentRequestTokens,
+  prepareAgentModel,
+} from "../src/context-budget"
 import {
   type CompactConversationBeforeTurn,
   clearedToolResultText,
   createAgentContextGuard,
 } from "../src/context-guard"
+import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 /** A model whose input stops at `inputBudgetTokens`, counted at 3 bytes per token. */
 function limited(inputBudgetTokens: number): AgentContextBudget {
@@ -349,5 +360,53 @@ describe("createAgentContextGuard", () => {
 
     const completed = [...steps(1, read(HEAD)), ...steps(1, read(first))]
     expect(await guard.prepareStep(step(2, second, completed))).toBeUndefined()
+  })
+})
+
+describe("the rate a guard weighs calls at", () => {
+  test("follows the first call an unmeasured model counted", async () => {
+    // Reproduce: leave measuredBytesPerToken out of the guard's rate in ContextGuard; the call is
+    // weighed at the default 2 bytes per token, 120,000 tokens, and its chapter cleared.
+    const counting = new WorkerTestModel({
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "mock",
+        modelId: "sparse",
+        capabilities: {},
+        contextWindow: 100_000,
+        maxOutputTokens: 16_384,
+      }),
+      // A sparse tokenizer: 4 bytes per token, as OpenAI's measures about 4.4.
+      stream: async (request) =>
+        testStream([
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: { inputTokens: estimateAgentRequestTokens(request, 4), outputTokens: 10 },
+          },
+        ]),
+    })
+    const prepared = prepareAgentModel({ model: await resolveLanguageModel(counting) })
+    const first = await prepared.model.stream({
+      callId: "first",
+      tools: [],
+      messages: [...HEAD, ...readStep(0, 100_000)],
+      signal: new AbortController().signal,
+    })
+    for await (const _event of first.events) {
+      // Each event is read, as the model loop reads them.
+    }
+
+    const guard = createAgentContextGuard({
+      budget: prepared.budget,
+      tools: [],
+      measuredBytesPerToken: prepared.measuredBytesPerToken,
+    })
+    // 240,000 bytes: 60,000 tokens at the 4 the first call measured, under the 83,616 limit.
+    const reduced = await guard.prepareStep(step(0, [...HEAD, ...readStep(1, 240_000)]))
+
+    expect(prepared.budget.bytesPerToken).toBe(2)
+    expect(prepared.measuredBytesPerToken()).toBeCloseTo(4, 2)
+    expect(reduced).toBeUndefined()
   })
 })
