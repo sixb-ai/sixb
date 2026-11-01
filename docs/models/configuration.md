@@ -165,6 +165,18 @@ per answer, cap it with `maxOutputTokens` on the binding, such as
 `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
+Older turns are also summarized before a conversation crosses a price tier, when summarizing costs
+less than re-reading the whole conversation at the higher price for the calls it is likely to make
+next. Sixb reads the tiers from the provider's prices; there is nothing to configure.
+
+| Model | Prices | Summarized before |
+|---|---|---|
+| Claude Haiku 5.5 | ×5 above 100,000 prompt tokens | 100,000 tokens |
+| Claude Sonnet 4.5, Gemini 2.5 Pro | ×2 above 200,000 | 200,000 tokens, once a conversation has gone on long enough to repay it |
+| Claude Opus 5.5 | one price for the whole window | its window, less the answer's room |
+
+A `contextWindow` set on a model definition still bounds the conversation, whatever the tiers.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies
