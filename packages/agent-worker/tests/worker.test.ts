@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
@@ -13385,15 +13393,190 @@ describe("agent tools act as the requester", () => {
       expect(
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
-      // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
-      // and gone once it ended.
+      // The turn in the user's folder, the child in one of its own; each thread's files
+      // elsewhere, and gone once its run ended.
       expect(opened).toEqual([
-        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.id) },
-        { runFiles: join(runFilesRoot, childRunId) },
+        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.threadId) },
+        {
+          runFiles: join(runFilesRoot, createSubagentThreadId(request.run.id, "research")),
+        },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
     } finally {
       jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Every sixb opened in a folder shares the computer's files directories: a thread's next turn
+  // can start in one while the last turn's release, in another, still removes the directory.
+  // Regression proof: resolve holdRunFiles without its lock; the next turn opens while the last
+  // one is torn down, whose removal then takes the next turn's files with it.
+  test("two sixb on one computer hold a thread's files directory one run at a time", async () => {
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ]),
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const events: string[] = []
+    let releaseTeardown = () => {}
+    const teardown = new Promise<void>((resolve) => {
+      releaseTeardown = resolve
+    })
+    const runner = (name: string, opened: (runFiles: string) => Sandbox) =>
+      new ComputerRunner({
+        apiUrl: "http://api.localhost",
+        authorization: async () => "",
+        computerId: async () => "laptop",
+        folder,
+        runFilesRoot,
+        fetch: async (outgoing) => api.fetch(outgoing),
+        openSandbox: async ({ runFiles }) => {
+          events.push(`${name} opened`)
+          return opened(runFiles)
+        },
+      })
+    // The first sixb's teardown is slow; the second leaves a file in the thread's directory.
+    const first = runner("first", () => {
+      const sandbox = new RecordingSandbox("first")
+      sandbox.destroy = async () => {
+        events.push("first tearing down")
+        await teardown
+        events.push("first torn down")
+      }
+      return sandbox
+    })
+    const second = runner("second", (runFiles) => {
+      writeFileSync(join(runFiles, "provisioned.txt"), "for the second turn")
+      const sandbox = new RecordingSandbox("second")
+      sandbox.destroy = async () => {
+        events.push(existsSync(join(runFiles, "provisioned.txt")) ? "files kept" : "files lost")
+      }
+      return sandbox
+    })
+
+    jest.useFakeTimers()
+    try {
+      const one = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const ranOne = first.runTurn(one.run.id, new AbortController().signal)
+      // Its end is written before its sandbox is given back.
+      await underFakeTime(
+        async () =>
+          events.includes("first tearing down") && terminalRun(agentStorageOf(sixb), one.run.id),
+        "the first turn's end"
+      )
+
+      const two = await requestAgent(sixb, {
+        text: "Second.",
+        threadId: one.run.threadId,
+        runsOn: "computer",
+      })
+      const ranTwo = second.runTurn(two.run.id, new AbortController().signal)
+      // The second turn gets this long to open where it would, while the first one is torn down.
+      for (let step = 0; step < 400 && !events.includes("second opened"); step += 1) {
+        await realLoopTurn()
+        jest.advanceTimersByTime(100)
+      }
+      releaseTeardown()
+      expect(await ranOne).toBe(true)
+      await underFakeTime(() => terminalRun(agentStorageOf(sixb), two.run.id), "the second turn")
+      expect(await ranTwo).toBe(true)
+
+      expect(events).toEqual([
+        "first opened",
+        "first tearing down",
+        "first torn down",
+        "second opened",
+        "files kept",
+      ])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+    } finally {
+      releaseTeardown()
+      jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Regression proof: key the runner's files directory by run id again; the second turn's system
+  // prompt names other skill, ontology and memory paths, so its first call reads no cache.
+  test("a computer's turns of one thread name the same files, so their prompt stays cached", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const opened: string[] = []
+    const leftovers: string[][] = []
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computerId: async () => "laptop",
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async ({ runFiles }) => {
+        opened.push(runFiles)
+        leftovers.push(readdirSync(runFiles))
+        return new RecordingSandbox(`computer-${opened.length}`)
+      },
+    })
+
+    try {
+      const first = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const { threadId } = first.run
+      // What a crashed run left behind is gone before the next one starts.
+      mkdirSync(join(runFilesRoot, threadId, "attachments"), { recursive: true })
+      writeFileSync(join(runFilesRoot, threadId, "attachments", "stale.txt"), "stale")
+      expect(await runner.runTurn(first.run.id, new AbortController().signal)).toBe(true)
+
+      const second = await requestAgent(sixb, { text: "Second.", threadId, runsOn: "computer" })
+      expect(await runner.runTurn(second.run.id, new AbortController().signal)).toBe(true)
+      await runner.drain()
+
+      for (const runId of [first.run.id, second.run.id]) {
+        expect(await terminalRun(agentStorageOf(sixb), runId)).toMatchObject({
+          status: "succeeded",
+        })
+      }
+      expect(opened).toEqual([join(runFilesRoot, threadId), join(runFilesRoot, threadId)])
+      expect(leftovers).toEqual([[], []])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+
+      const [one, two] = requests
+      if (!one || !two) throw new Error("Expected two model requests.")
+      expect(systemPromptOf(one.messages)).toContain(join(runFilesRoot, threadId, "skills"))
+      expect(two.messages[0]).toEqual(one.messages[0])
+      expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
+    } finally {
       rmSync(folder, { recursive: true, force: true })
       rmSync(runFilesRoot, { recursive: true, force: true })
     }
