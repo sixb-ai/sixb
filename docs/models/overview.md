@@ -411,7 +411,7 @@ Before showing the conversation, handle `conversation.agentLoading`, `conversati
 | `Transcript` | The messages, the streaming reply, retry or continue after a run stops early, a card for each call waiting for approval, and a line for the sub-agents of each reply |
 | `AgentMessageBody` | An agent reply's content, drawn as the built-in chat draws it |
 | `AgentToolPart` | One tool call: your `toolViews`, else Sixb's view, else a row to inspect it |
-| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, and the [dictation](#dictation) microphone |
+| `Composer` | Text, attachments (picked, dropped or pasted), `@` context, [slash commands](#slash-commands), one chip for the model (Auto with tiers) and the permissions, the [dictation](#dictation) microphone, and the context meter: how much of the model's limit the conversation uses (`contextMeter`, which `useAgentConversation` fills) |
 | `AgentThreads` | Every thread the person can open, to search and open one; the body of `/threads` |
 | `ThreadsButton` | A header button to your list of threads, counting those waiting for the person |
 | `ThreadArtifactsMenu` | The artifacts a thread produced |
