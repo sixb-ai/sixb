@@ -309,7 +309,11 @@ export class ChildRunner {
       ...(requester === undefined ? {} : { requester }),
       blobStorage: session.files,
     }
-    const history = { messages: child.messages, ...(child.paused ? { paused: child.paused } : {}) }
+    const history = {
+      ...child.history,
+      ...(child.task ? { task: child.task } : {}),
+      ...(child.paused ? { paused: child.paused } : {}),
+    }
     return { context, execution, thread, conversation: child.conversation, plan, history }
   }
 }

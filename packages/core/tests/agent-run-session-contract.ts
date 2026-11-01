@@ -570,6 +570,65 @@ export function describeAgentRunSessionContract(claim: ClaimAgentRunSession): vo
       second.close()
     })
 
+    // Guard proof: read every message of the child's thread in readChildContext; its history then
+    // starts with the messages its checkpoint summarized, and no task is kept beside it.
+    test("gives a child its thread from its latest checkpoint, with the task it summarized", async () => {
+      const { host, storage, run } = await seedAgentRun()
+      const parent = await claim(host, { run, leaseExpiresAt: LEASE })
+      if (!parent) throw new Error("Expected the run to be claimed.")
+      const child = await claim(host, {
+        run: await spawnChild(storage, parent),
+        leaseExpiresAt: LEASE,
+      })
+      if (!child) throw new Error("Expected the child to be claimed.")
+      const { threadId } = child.run
+      for (const [id, role] of [
+        ["child-work", "assistant"],
+        ["child-mail", "user"],
+      ] as const) {
+        await storage.agents.messages.append({
+          id,
+          projectId: PROJECT_ID,
+          threadId,
+          runId: child.run.id,
+          role,
+          parts: [{ type: "text", text: id }],
+        })
+      }
+      const before = await child.context()
+      await child.checkpoint({
+        id: "ckpt-child",
+        threadId,
+        expectedPreviousCheckpointId: null,
+        expectedHeadSeq: 3,
+        reason: "threshold",
+        summary: "The child read the west.",
+        summaryFormatVersion: 1,
+        summarizedThroughSeq: 2,
+        observedHeadSeq: 3,
+        estimatedInputTokensBefore: 10,
+        estimatedInputTokensAfter: 5,
+        summaryModelId: "test-model",
+      })
+
+      const after = await child.context()
+
+      if (before.kind !== "subagent" || after.kind !== "subagent") {
+        throw new Error("Expected a child's context.")
+      }
+      expect(before.history.messages.map((message) => message.id)).toEqual([
+        `${child.run.id}-task`,
+        "child-work",
+        "child-mail",
+      ])
+      expect(before.task).toBeUndefined()
+      expect(after.history.checkpoint?.id).toBe("ckpt-child")
+      expect(after.history.messages.map((message) => message.id)).toEqual(["child-mail"])
+      expect(after.task).toMatchObject({ id: `${child.run.id}-task`, seq: 1 })
+      parent.close()
+      child.close()
+    })
+
     // Guard proof: drop the scope checks from agentRunThreads and agentRunChildren; the turn reads
     // the other conversation's message, thread and run.
     test("reads only its own conversation: its thread, its children's, and their runs", async () => {

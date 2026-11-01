@@ -891,7 +891,8 @@ export function assertAgentContextCheckpointAuthority(input: {
       `[${prefix}] Agent thread '${create.threadId}' not found for project '${create.projectId}'.`
     )
   }
-  if (run.kind !== "conversation" || run.threadId !== create.threadId) {
+  // A conversation's turn checkpoints its conversation, a child its own thread.
+  if (run.threadId !== create.threadId) {
     throw new AgentStorageError(
       "invalid_input",
       `[${prefix}] Agent run '${run.id}' does not belong to thread '${create.threadId}'.`
