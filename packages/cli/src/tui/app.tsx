@@ -15,6 +15,7 @@ import {
   decideAgentApproval,
   type GetAgentThreadResponses,
   getAgentThread,
+  getAgentThreadContext,
   listAgentThreadApprovals,
   listAgentThreadMessages,
   listAgentThreadRuns,
@@ -27,8 +28,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Logo } from "./brand"
 import type { Connection } from "./connection"
+import { ContextPanel } from "./context"
 import { conversationsIn, folderOf, rememberFolder } from "./folders"
-import { shortPath } from "./format"
+import { type ContextUse, contextStatus, fittedContextText, shortPath } from "./format"
 import { Palette, type PaletteItem } from "./palette"
 import { type LiveRun, liveRun, reduceLive, type ShownMessage, shownMessage } from "./parts"
 import { type LocalRunner, owns, runsOnThisComputer } from "./runner"
@@ -668,16 +670,54 @@ function ThreadView(
   const [messages, setMessages] = useState<readonly ShownMessage[]>([])
   const [runs, setRuns] = useState<readonly Run[]>([])
   const [approvals, setApprovals] = useState<readonly Approval[]>([])
+  const [context, setContext] = useState<ContextUse | null>(null)
   const [live, setLive] = useState<LiveRun | null>(null)
   const [stopArmed, setStopArmed] = useState(false)
   const [typed, setTyped] = useState("")
-  const slash = useSlashMenu(props.slashCommands, typed)
+  const [contextOpen, setContextOpen] = useState(false)
+  // A conversation adds what only it can show: what it uses of its model's context.
+  const slashCommands = useMemo(
+    () => [
+      ...props.slashCommands,
+      {
+        name: "context",
+        description: "What the conversation uses of the model's context",
+        run: () => setContextOpen(true),
+      },
+    ],
+    [props.slashCommands]
+  )
+  const slash = useSlashMenu(slashCommands, typed)
   const scroll = useRef<ScrollBoxRenderable>(null)
 
   const mine = thread !== null && owns(connection, thread)
   const onComputer = thread?.runsOn === "computer"
 
   const { onThreadRead } = props
+  // Measured against the model the next message goes to; without a choice, the latest turn's.
+  const metered = messageSelection(models, settings).model
+  const meteredProvider = metered?.provider
+  const meteredModelId = metered?.modelId
+  const readContext = useCallback(async () => {
+    const { data } = await getAgentThreadContext({
+      client,
+      path: { threadId },
+      query:
+        meteredProvider && meteredModelId
+          ? { provider: meteredProvider, modelId: meteredModelId }
+          : {},
+    })
+    // A meter that cannot be read is left out.
+    setContext(data ?? null)
+  }, [client, threadId, meteredProvider, meteredModelId])
+  // Another model is measured at once, and `reload` stays the same: the streams it keeps open
+  // would replay their run from the start if it changed.
+  const readContextRef = useRef(readContext)
+  readContextRef.current = readContext
+  useEffect(() => {
+    void readContext()
+  }, [readContext])
+
   const reload = useCallback(async () => {
     const [threadResult, messageResult, runResult, approvalResult] = await Promise.all([
       getAgentThread({ client, path: { threadId } }),
@@ -688,6 +728,7 @@ function ThreadView(
       }),
       listAgentThreadRuns({ client, path: { threadId }, query: { limit: "200", order: "asc" } }),
       listAgentThreadApprovals({ client, path: { threadId }, query: { status: "pending" } }),
+      readContextRef.current(),
     ])
     if (threadResult.data) {
       setThread(threadResult.data)
@@ -758,7 +799,12 @@ function ThreadView(
         setLive((current) =>
           reduceLive(current?.runId === activeRunId ? current : liveRun(activeRunId), event)
         )
-        if (event.type === "agent.message.finalized" || event.type === "agent.run.finished")
+        // A compaction that ended changed what the conversation weighs: the meter reads it again.
+        if (
+          event.type === "agent.message.finalized" ||
+          event.type === "agent.run.finished" ||
+          event.type === "agent.compaction.completed"
+        )
           void reload()
       },
     })
@@ -814,7 +860,7 @@ function ThreadView(
   }
 
   useKeyboard((key: KeyEvent) => {
-    if (props.dialogOpen) return
+    if (props.dialogOpen || contextOpen) return
     if (pending && !key.ctrl && !key.meta) {
       const settled = Date.now() - shownAt.current > APPROVAL_GRACE_MS
       if (key.name === "left" || key.name === "up") {
@@ -877,6 +923,30 @@ function ThreadView(
     [models]
   )
   const elsewhere = onComputer && thread && !mine
+  const place = props.status(onComputer ? placeLabel("computer") : placeLabel("cloud"))
+  // The context ends the status line in what room it leaves: the panel's border and padding, and
+  // the screen's, take nine columns.
+  const meter = context ? contextStatus(context) : undefined
+  const placeColumns = place.reduce(
+    (total, item, index) => total + item.text.length + (index > 0 ? 3 : 0),
+    0
+  )
+  const meterText = meter ? fittedContextText(meter, placeColumns, width - 9) : undefined
+  const statusLine: StatusItem[] =
+    meter && meterText
+      ? [
+          ...place,
+          {
+            text: meterText,
+            color:
+              meter.tone === "over"
+                ? colors.red
+                : meter.tone === "near"
+                  ? colors.amber
+                  : colors.muted,
+          },
+        ]
+      : place
   const runningSince = runs.find((run) => run.id === activeRunId)?.startedAt
 
   return (
@@ -933,7 +1003,9 @@ function ThreadView(
                 stopArmed
                   ? "Press esc again to stop"
                   : live?.compacting
-                    ? "Condensing earlier turns"
+                    ? live.contextFull
+                      ? "Context is full — condensing to continue"
+                      : "Condensing earlier turns"
                     : queuedLabel(runs, activeRunId, {
                         onComputer,
                         mine,
@@ -967,11 +1039,11 @@ function ThreadView(
         <SlashMenu colors={colors} menu={slash} above={8} />
         <Composer
           colors={colors}
-          focused={!props.dialogOpen && !pending && !elsewhere}
+          focused={!props.dialogOpen && !contextOpen && !pending && !elsewhere}
           onChange={setTyped}
           accent={pending ? colors.amber : undefined}
           placeholder={pending ? "Decide on the request above first" : "Ask anything…"}
-          status={props.status(onComputer ? placeLabel("computer") : placeLabel("cloud"))}
+          status={statusLine}
           onSubmit={send}
         />
         <box flexDirection="row" justifyContent="space-between" paddingTop={1}>
@@ -984,6 +1056,16 @@ function ThreadView(
           </text>
         </box>
       </box>
+      {contextOpen ? (
+        <ContextPanel
+          colors={colors}
+          context={context}
+          {...(context?.model
+            ? { modelName: modelNames.get(`${context.model.provider}:${context.model.modelId}`) }
+            : {})}
+          onClose={() => setContextOpen(false)}
+        />
+      ) : null}
     </box>
   )
 }

@@ -1,17 +1,21 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
+  AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
+  type AgentContextBudget,
   type AgentContextCompactionBoundary,
   type AgentContextEstimateTool,
   AgentExecutionLostError,
   type AgentRunSession,
+  type AgentSystemPromptSize,
   type AgentThreadModelContextMessage,
   type AgentToolSpec,
   type AgentTurnHistory,
   agentContextCheckpointId,
-  calibrateAgentContextBytesPerToken,
+  contextSummaryOutputTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
-  measureAgentContextRequest,
+  estimateAgentThreadRequest,
   projectAgentThreadModelContext,
   runModelLoop,
   selectAgentContextCompactionBoundary,
@@ -32,12 +36,6 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
-import {
-  AGENT_CONTEXT_COMPACTED_SHARE,
-  AGENT_IDLE_COMPACTION_TOKENS,
-  type AgentContextBudget,
-  contextSummaryOutputTokens,
-} from "./context-budget"
 import type { ConversationMemory } from "./conversation-memory"
 import { conversationModelSettings } from "./conversation-messages"
 import { AgentContextCompactionError } from "./errors"
@@ -75,6 +73,8 @@ const SHRUNK_PART_MIN_BYTES = 1_024
 /** What a turn's model calls start with: the prefix a summary of the conversation continues. */
 export interface ConversationRequest {
   readonly systemPrompt: string
+  /** The same prompt with each section's bytes, when the environment rendered it. */
+  readonly systemPromptSize?: AgentSystemPromptSize
   readonly tools: readonly Pick<ModelTool, "name" | "description" | "inputSchema">[]
   readonly messages: readonly ModelMessage[]
 }
@@ -655,11 +655,8 @@ function compactedRequestTokens(input: {
 
 /**
  * The conversation's next request as the model will count it, and the bytes per token it was
- * counted at. The session found the model call that ended the latest assistant message after the
- * checkpoint: when it is this model's, its real tokens anchor the estimate, and the input it
- * carried (everything before that answer's last step) measures the thread's own rate. Otherwise
- * the whole request is estimated at the rate the run started from. The full estimate still wins
- * when larger, as a new system prompt or tool catalog is not in the anchor.
+ * counted at (see estimateAgentThreadRequest): the run's history, at the rate its run started
+ * from, with the system prompt and tools its requests send.
  */
 export function estimateAgentConversation(
   input: AgentContextEstimateShape & {
@@ -668,74 +665,17 @@ export function estimateAgentConversation(
     readonly threadContext: LoadedAgentThreadModelContext
   }
 ): { readonly tokens: number; readonly bytesPerToken: number } {
-  const { threadContext, budget, systemPrompt, tools } = input
-  const head = input.head ?? []
-  const anchor = matchingUsageAnchor(input.plan, threadContext)
-  const full = (bytesPerToken: number) =>
-    estimateShapedRequest(input, threadContext.modelMessages, bytesPerToken).tokens
-  if (!anchor) return { tokens: full(budget.bytesPerToken), bytesPerToken: budget.bytesPerToken }
-
-  // The synthetic summary leads the model messages; the retained tail follows it.
-  const offset = threadContext.modelMessages.length - threadContext.retainedMessages.length
-  const answer = threadContext.retainedMessages[anchor.index]!
-  const lastStep = answer.parts.map((part) => part.type).lastIndexOf("step-start")
-  const answered = lastStep > 0 ? [{ ...answer, parts: answer.parts.slice(0, lastStep) }] : []
-  const bytesPerToken = calibrateAgentContextBytesPerToken({
-    bytesPerToken: budget.bytesPerToken,
-    inputTokens: anchor.inputTokens,
-    size: measureAgentContextRequest({
-      systemPrompt,
-      tools,
-      messages: [
-        ...head,
-        ...threadContext.modelMessages.slice(0, offset + anchor.index),
-        ...answered,
-      ],
-    }),
+  const { threadContext } = input
+  return estimateAgentThreadRequest({
+    usageAnchor: threadContext.history.usageAnchor,
+    retainedMessages: threadContext.retainedMessages,
+    modelMessages: threadContext.modelMessages,
+    model: input.plan.model,
+    bytesPerToken: input.budget.bytesPerToken,
+    systemPrompt: input.systemPrompt,
+    tools: input.tools,
+    ...(input.head ? { head: input.head } : {}),
   })
-
-  const anchored =
-    anchor.inputTokens +
-    anchor.outputTokens +
-    estimateAgentContextMessagesTokens(
-      threadContext.retainedMessages.slice(anchor.index + 1),
-      bytesPerToken
-    ).tokens
-  return { tokens: Math.max(anchored, full(bytesPerToken)), bytesPerToken }
-}
-
-/** The anchoring call, when it is this model's and counted both input and output. */
-function matchingUsageAnchor(
-  plan: ResolvedAgentExecutionPlan,
-  threadContext: LoadedAgentThreadModelContext
-):
-  | { readonly index: number; readonly inputTokens: number; readonly outputTokens: number }
-  | undefined {
-  const anchor = threadContext.history.usageAnchor
-  const index = anchor
-    ? threadContext.retainedMessages.findIndex((message) => message.id === anchor.messageId)
-    : -1
-  const usage = anchor?.modelCall
-  const inputTokens = usage?.usage.inputTokens
-  const outputTokens = usage?.usage.outputTokens
-  // A call whose request the turn reduced read less than its stored steps replay: it says nothing
-  // of what the next request weighs, nor of the thread's own rate.
-  const lastStep = [...(threadContext.retainedMessages[index]?.parts ?? [])]
-    .reverse()
-    .find((part) => part.type === "step-start")
-  if (lastStep?.type === "step-start" && lastStep.reducedRequest) return undefined
-  if (
-    index < 0 ||
-    usage?.providerId !== plan.model.providerId ||
-    usage.requestedModelId !== plan.model.modelId ||
-    inputTokens === undefined ||
-    inputTokens <= 0 ||
-    outputTokens === undefined ||
-    outputTokens <= 0
-  ) {
-    return undefined
-  }
-  return { index, inputTokens, outputTokens }
 }
 
 /** Tools as an estimate counts them: their schemas serialized as they are sent. */

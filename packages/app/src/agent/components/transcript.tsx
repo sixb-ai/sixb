@@ -242,13 +242,13 @@ function TranscriptView({
               // A turn that compacts from within says so under what it has streamed.
               turn.kind === "responding" && turn.compacting ? (
                 <MessageScrollerItem messageId="compacting">
-                  <CompactionMarker />
+                  <CompactionMarker contextFull={turn.contextFull} />
                 </MessageScrollerItem>
               ) : null
             ) : showThinking && turn.kind === "responding" ? (
               <MessageScrollerItem messageId="thinking" scrollAnchor={anchoredKey === THINKING}>
                 {turn.compacting ? (
-                  <CompactionMarker />
+                  <CompactionMarker contextFull={turn.contextFull} />
                 ) : (
                   <ThinkingMarker takingLonger={turn.waitingLonger} />
                 )}

@@ -148,6 +148,32 @@ describe("liveRunReducer", () => {
     expect(failed.compacting).toBe(false)
   })
 
+  // Reproduce: leave `contextFull` false on `agent.compaction.started`; a turn the provider
+  // refused condenses with the ordinary marker.
+  test("a compaction after the provider refused a request is the context being full", () => {
+    const full = liveRunReducer(createLiveRunState("run"), {
+      type: "event",
+      event: event({
+        type: "agent.compaction.started",
+        reason: "overflow",
+        estimatedInputTokensBefore: 131_000,
+      }),
+    })
+    expect(full).toMatchObject({ compacting: true, contextFull: true })
+
+    const completed = liveRunReducer(full, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.completed",
+        reason: "overflow",
+        checkpointId: "agt_ctx_run",
+        estimatedInputTokensBefore: 131_000,
+        estimatedInputTokensAfter: 41_000,
+      }),
+    })
+    expect(completed).toMatchObject({ compacting: false, contextFull: false })
+  })
+
   test("reasoning streams until it ends", () => {
     const streaming = reduceChunks([
       { type: "reasoning-start", id: "r" },

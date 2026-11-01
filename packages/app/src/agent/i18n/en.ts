@@ -209,10 +209,44 @@ export const en = {
     hours: (hours: number) => `${hours}h`,
     days: (days: number) => `${days}d`,
   },
+  /** The meter beside the model: how much of its limit the conversation uses. */
+  contextMeter: {
+    title: "Context",
+    label: (used: string, limit: string) => `Context: ${used} of ${limit} tokens`,
+    condensing: "Condensing…",
+    condensingLabel: "Condensing the conversation",
+    limit: (limit: string) => `Earlier messages are condensed as it nears ${limit}\u00a0tokens.`,
+    near: "Almost full: earlier messages will be condensed soon.",
+    over: "Full: earlier messages are condensed before the next answer.",
+    /** What the meter calls a model it cannot name. */
+    thisModel: "This model",
+    breakdown: "What the conversation uses",
+    parts: {
+      system: "Sixb instructions",
+      instructions: "Project instructions",
+      memory: "Memory",
+      skills: "Skills",
+      ontology: "Ontology",
+      tools: "Tools",
+      summary: "Summary of earlier messages",
+      messages: "Messages",
+      toolResults: "Tool results",
+      files: "Files and images",
+    },
+    free: "Free space",
+    reserved: "Kept for the answer",
+    cached: "Read from cache",
+    lastCondensed: "Last condensed",
+    justNow: "just now",
+    ago: (time: string) => `${time} ago`,
+  },
   transcript: {
     condensed: "Condensed conversation",
     condensing: "Condensing earlier conversation…",
     condensingLabel: "Agent is condensing earlier conversation",
+    /** The provider refused a request as too long: the turn condensed the conversation, then went on. */
+    condensedFull: "Context was full — condensed and continued",
+    condensingFull: "Context is full — condensing to continue…",
     working: "Agent is working",
     thinking: "Thinking",
     takingLonger: "Taking a little longer",
@@ -245,6 +279,10 @@ export const en = {
     unknown: "Something went wrong during this response.",
   } satisfies Record<AgentRunDiagnosticCode | "unknown", string>,
   activity: {
+    /** Under a call whose output was saved as a file: it opens the whole output. */
+    fullOutput: "Full output",
+    /** The saved output's name in the viewer: `bash output.txt`. */
+    savedOutputName: (tool: string, extension: string) => `${tool} output${extension}`,
     thinking: "Thinking",
     working: "Working",
     workingThroughIt: "Working through it",

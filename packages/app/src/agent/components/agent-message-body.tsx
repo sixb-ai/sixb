@@ -8,7 +8,7 @@ import {
 import type { NormalizedPart } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
 import { ProjectToolView, useAgentToolView } from "../tool-views/registry"
-import { AssistantBody, BuiltInToolRow } from "./message-parts"
+import { AssistantBody, BuiltInToolRow, SavedOutputLink } from "./message-parts"
 
 export interface AgentMessageBodyProps {
   /** A reply from `conversation.messages`. A user message draws nothing. */
@@ -50,7 +50,17 @@ export interface AgentToolPartProps {
 export function AgentToolPart({ part }: AgentToolPartProps) {
   const tool = useMemo(() => normalizedTool(part), [part])
   const view = useAgentToolView(tool.toolName)
-  if (!view) return <BuiltInToolRow tool={tool} />
+  const row = view ? (
+    <ProjectToolView view={view} tool={tool} fallback={<BuiltInToolRow tool={tool} />} />
+  ) : (
+    <BuiltInToolRow tool={tool} />
+  )
+  if (!tool.outputFile) return row
 
-  return <ProjectToolView view={view} tool={tool} fallback={<BuiltInToolRow tool={tool} />} />
+  return (
+    <div className="min-w-0">
+      {row}
+      <SavedOutputLink file={tool.outputFile} toolName={tool.toolName} />
+    </div>
+  )
 }

@@ -38683,6 +38683,11 @@
                               "checkpointId": {
                                 "type": "string"
                               },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["threshold", "overflow"],
+                                "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                              },
                               "summary": {
                                 "type": "string"
                               },
@@ -38690,7 +38695,7 @@
                                 "type": "string"
                               }
                             },
-                            "required": ["checkpointId", "summary", "createdAt"],
+                            "required": ["checkpointId", "reason", "summary", "createdAt"],
                             "additionalProperties": false
                           },
                           "metadata": {
@@ -41230,6 +41235,240 @@
                     }
                   },
                   "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/context": {
+      "get": {
+        "summary": "Measure an agent thread's context against a model's limits",
+        "description": "What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.",
+        "tags": ["Agent Threads"],
+        "operationId": "getAgentThreadContext",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "modelId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "windowTokens": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "limitTokens": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "usedTokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "parts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "part": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "instructions",
+                              "memory",
+                              "skills",
+                              "ontology",
+                              "tools",
+                              "summary",
+                              "messages",
+                              "toolResults",
+                              "files"
+                            ],
+                            "description": "`system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images."
+                          },
+                          "tokens": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0
+                          }
+                        },
+                        "required": ["part", "tokens"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lastCall": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "occurredAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["inputTokens", "occurredAt"],
+                      "additionalProperties": false
+                    },
+                    "lastCompaction": {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "type": "string",
+                          "enum": ["threshold", "overflow"],
+                          "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "estimatedInputTokensBefore": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "estimatedInputTokensAfter": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "createdAt",
+                        "estimatedInputTokensBefore",
+                        "estimatedInputTokensAfter"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["model", "windowTokens", "limitTokens"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
                   "additionalProperties": false
                 }
               }
@@ -47386,6 +47625,11 @@
                               "checkpointId": {
                                 "type": "string"
                               },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["threshold", "overflow"],
+                                "description": "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+                              },
                               "summary": {
                                 "type": "string"
                               },
@@ -47393,7 +47637,7 @@
                                 "type": "string"
                               }
                             },
-                            "required": ["checkpointId", "summary", "createdAt"],
+                            "required": ["checkpointId", "reason", "summary", "createdAt"],
                             "additionalProperties": false
                           },
                           "metadata": {

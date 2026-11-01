@@ -76,6 +76,15 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
   normalizeAgentContextEntries,
 } from "./context/entries"
+export type { AgentContextBudget, AgentModelSelection } from "./context-budget"
+export {
+  AGENT_CONTEXT_COMPACTED_SHARE,
+  AGENT_IDLE_COMPACTION_TOKENS,
+  agentOutputCapTokens,
+  contextSummaryOutputTokens,
+  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+  resolveAgentContextBudget,
+} from "./context-budget"
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
@@ -88,23 +97,27 @@ export {
   agentContextSizeTokens,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
-  measureAgentContextRequest,
   measureAgentModelRequest,
   measureModelRequest,
   selectAgentContextCompactionBoundary,
   shouldCompactAgentContext,
 } from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
+export type { AgentSystemPromptSize } from "./context-parts"
+export { measureAgentStepRequest } from "./context-parts"
+export type { AgentThreadRequestEstimateInput } from "./context-request"
+export { estimateAgentThreadRequest } from "./context-request"
 export { resolveAgentContextParts } from "./context-resolution"
 export type { AgentContextTokenRateSample } from "./context-token-rate"
 export {
-  AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
   calibrateAgentContextBytesPerToken,
   learnedAgentContextBytesPerToken,
   measureAgentContextTokenRate,
   measuringAgentContextTokenRates,
   readAgentContextTokenRates,
 } from "./context-token-rate"
+export type { AgentThreadContextUse } from "./context-use"
+export { readAgentThreadContextUse } from "./context-use"
 export type {
   AgentRunDispatchFailure,
   DispatchedAgentRun,
@@ -140,8 +153,11 @@ export {
   type AgentApprovalCaller,
   type AgentApprovalCallSummary,
   type AgentApprovalOutcomePart,
+  type AgentContextPartBytes,
+  type AgentContextPartName,
   type AgentContinuationPart,
   type AgentFilePart,
+  type AgentHistoryPartName,
   type AgentMailPart,
   type AgentMessage,
   type AgentMessagePart,
@@ -149,7 +165,9 @@ export {
   type AgentMessageRole,
   type AgentProviderStatePart,
   type AgentReasoningPart,
+  type AgentStepRequestSize,
   type AgentStepStartPart,
+  type AgentSystemPromptPartName,
   type AgentTextPart,
   type AgentToolCallPart,
   type AgentToolCallState,

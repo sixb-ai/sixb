@@ -13139,6 +13139,10 @@ export type ListAgentThreadMessagesResponses = {
       }>
       compaction?: {
         checkpointId: string
+        /**
+         * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+         */
+        reason: "threshold" | "overflow"
         summary: string
         createdAt: string
       }
@@ -13926,6 +13930,99 @@ export type RetryAgentRunResponses = {
 }
 
 export type RetryAgentRunResponse = RetryAgentRunResponses[keyof RetryAgentRunResponses]
+
+export type GetAgentThreadContextData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    provider?: string
+    modelId?: string
+  }
+  url: "/api/agent-threads/{threadId}/context"
+}
+
+export type GetAgentThreadContextErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetAgentThreadContextError =
+  GetAgentThreadContextErrors[keyof GetAgentThreadContextErrors]
+
+export type GetAgentThreadContextResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    model: {
+      provider: string
+      modelId: string
+    }
+    windowTokens: number
+    limitTokens: number
+    usedTokens?: number
+    parts?: Array<{
+      /**
+       * `system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images.
+       */
+      part:
+        | "system"
+        | "instructions"
+        | "memory"
+        | "skills"
+        | "ontology"
+        | "tools"
+        | "summary"
+        | "messages"
+        | "toolResults"
+        | "files"
+      tokens: number
+    }>
+    lastCall?: {
+      inputTokens: number
+      outputTokens?: number
+      cacheReadInputTokens?: number
+      occurredAt: string
+    }
+    lastCompaction?: {
+      /**
+       * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+       */
+      reason: "threshold" | "overflow"
+      createdAt: string
+      estimatedInputTokensBefore: number
+      estimatedInputTokensAfter: number
+    }
+  }
+}
+
+export type GetAgentThreadContextResponse =
+  GetAgentThreadContextResponses[keyof GetAgentThreadContextResponses]
 
 export type ListAgentThreadRunsData = {
   body?: never
@@ -16210,6 +16307,10 @@ export type ListObservedAgentThreadMessagesResponses = {
       }>
       compaction?: {
         checkpointId: string
+        /**
+         * `threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed.
+         */
+        reason: "threshold" | "overflow"
         summary: string
         createdAt: string
       }

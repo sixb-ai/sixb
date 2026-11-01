@@ -33,11 +33,15 @@ const responding = {
 // has streamed then shows no sign of it.
 test("a turn that compacts after it streamed says so under its reply", () => {
   const queryClient = new QueryClient()
-  const render = (compacting: boolean) =>
+  const render = (compacting: boolean, contextFull = false) =>
     renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <Transcript threadId="thread" messages={[reply]} turn={{ ...responding, compacting }} />
+          <Transcript
+            threadId="thread"
+            messages={[reply]}
+            turn={{ ...responding, compacting, contextFull }}
+          />
         </MemoryRouter>
       </QueryClientProvider>
     )
@@ -45,6 +49,10 @@ test("a turn that compacts after it streamed says so under its reply", () => {
   try {
     expect(render(true)).toContain("Condensing earlier conversation…")
     expect(render(false)).not.toContain("Condensing earlier conversation…")
+
+    // Reproduce: drop `contextFull` from the marker; a refused request condenses like any other.
+    expect(render(true, true)).toContain("Context is full — condensing to continue…")
+    expect(render(true, true)).not.toContain("Condensing earlier conversation…")
   } finally {
     queryClient.clear()
   }

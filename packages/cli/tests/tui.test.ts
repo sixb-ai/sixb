@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentRunStreamEvent } from "@sixb/client"
-import { duration, friendlyPath, runFailureText, shortPath, toolLine } from "../src/tui/format"
+import {
+  contextBreakdown,
+  contextStatus,
+  duration,
+  fittedContextText,
+  friendlyPath,
+  runFailureText,
+  shortPath,
+  toolLine,
+} from "../src/tui/format"
 import { liveRun, type Part, reduceLive, type StoredMessage, shownMessage } from "../src/tui/parts"
 import { type LanguageModel, messageSelection, modelLabel } from "../src/tui/settings"
 import { pickSlash, slashMatches } from "../src/tui/slash"
@@ -107,6 +116,26 @@ describe("a live run", () => {
       { kind: "text", text: "Reading." },
       { kind: "text", text: "The answer." },
     ])
+  })
+
+  // Reproduce: leave `contextFull` false when a compaction starts; a turn the provider refused
+  // reads "Condensing earlier turns" like any other.
+  test("tells a compaction after a refused request from one at the limit", () => {
+    const full = reduceLive(
+      liveRun(RUN),
+      event({ type: "agent.compaction.started", reason: "overflow", estimatedInputTokensBefore: 1 })
+    )
+    expect(full).toMatchObject({ compacting: true, contextFull: true })
+
+    const threshold = reduceLive(
+      liveRun(RUN),
+      event({
+        type: "agent.compaction.started",
+        reason: "threshold",
+        estimatedInputTokensBefore: 1,
+      })
+    )
+    expect(threshold).toMatchObject({ compacting: true, contextFull: false })
   })
 
   test("follows a call from its input to its output", () => {
@@ -246,6 +275,121 @@ describe("slash commands", () => {
     expect(picked("what does /model do?")).toBeUndefined()
     expect(picked("/x")).toBeUndefined()
     expect(slashMatches(commands, "/m").map((command) => command.name)).toEqual(["model"])
+  })
+})
+
+describe("a stored answer", () => {
+  // Reproduce: drop `compaction` from shownMessage; the transcript never says it was condensed.
+  test("says its run condensed the conversation, and when it was because the context was full", () => {
+    const answer = (reason?: "threshold" | "overflow"): StoredMessage => ({
+      id: "msg_answer",
+      projectId: "p",
+      threadId: "thr",
+      runId: RUN,
+      role: "assistant",
+      seq: 4,
+      parts: [{ type: "text", text: "Done." }],
+      annotations: [],
+      ...(reason
+        ? {
+            compaction: {
+              checkpointId: "ctx",
+              reason,
+              summary: "Earlier.",
+              createdAt: "2026-11-01T09:00:00.000Z",
+            },
+          }
+        : {}),
+      contentVersion: 1,
+      createdAt: "2026-11-01T09:00:01.000Z",
+    })
+
+    expect(shownMessage(answer("threshold"))?.compaction).toEqual({ contextFull: false })
+    expect(shownMessage(answer("overflow"))?.compaction).toEqual({ contextFull: true })
+    expect(shownMessage(answer())).not.toHaveProperty("compaction")
+  })
+})
+
+describe("the context in the status line", () => {
+  const haiku = {
+    limitTokens: 183_616,
+    usedTokens: 38_200,
+    lastCall: { inputTokens: 37_000, cacheReadInputTokens: 34_040 },
+  }
+
+  test("reads used against the model's limit with the cache share, and colors by it", () => {
+    expect(contextStatus(haiku)).toEqual({
+      text: "ctx 38k/184k · 92% cached",
+      short: "ctx 38k/184k",
+      shortest: "ctx 21%",
+      tone: "quiet",
+    })
+    expect(contextStatus({ ...haiku, usedTokens: 150_000 })?.tone).toBe("near")
+    expect(contextStatus({ ...haiku, usedTokens: 190_000 })?.tone).toBe("over")
+  })
+
+  test("shows nothing before the first answer", () => {
+    expect(contextStatus({ limitTokens: 183_616 })).toBeUndefined()
+  })
+
+  // Reproduce: always return the whole text; a narrow terminal wraps the status line.
+  test("drops the cache share, then the counts, then itself, where the status line has no room", () => {
+    const context = contextStatus(haiku)!
+    // "Cloud · Claude Haiku 4.5 · Ask first" takes 36 columns.
+    expect(fittedContextText(context, 36, 100)).toBe("ctx 38k/184k · 92% cached")
+    expect(fittedContextText(context, 36, 60)).toBe("ctx 38k/184k")
+    expect(fittedContextText(context, 36, 50)).toBe("ctx 21%")
+    expect(fittedContextText(context, 36, 45)).toBeUndefined()
+  })
+})
+
+describe("/context", () => {
+  // Removal proof: leave the answer's room out of contextBreakdown; the bar no longer spans the
+  // model's window, and the room kept for the answer reads 0.
+  test("lays the window out as one bar, then each part with its share", () => {
+    const breakdown = contextBreakdown(
+      {
+        windowTokens: 65_536,
+        limitTokens: 49_152,
+        usedTokens: 43_900,
+        parts: [
+          { part: "system", tokens: 8_300 },
+          { part: "tools", tokens: 5_700 },
+          { part: "summary", tokens: 1_700 },
+          { part: "messages", tokens: 11_000 },
+          { part: "toolResults", tokens: 17_200 },
+        ],
+        lastCall: { inputTokens: 43_000, cacheReadInputTokens: 40_000 },
+        lastCompaction: {
+          createdAt: "2026-11-01T09:48:00.000Z",
+          estimatedInputTokensBefore: 53_900,
+          estimatedInputTokensAfter: 17_200,
+        },
+      },
+      { bar: 50, row: 20 },
+      Date.parse("2026-11-01T10:00:00.000Z")
+    )!
+
+    expect(breakdown.headline).toBe("44k of 49k tokens")
+    expect(breakdown.share).toBe("89%")
+    expect(breakdown.warning).toBe("Almost full: earlier messages are condensed soon.")
+    // 43,900 used, 5,252 free and 16,384 kept: 33, 4 and 13 of 50 tiles.
+    expect(breakdown.bar).toEqual({ used: 33, free: 4, reserved: 13 })
+    expect(
+      breakdown.rows.map((row) => [row.label, row.tokens, row.share ?? "", row.tiles])
+    ).toEqual([
+      ["Sixb instructions", "8.3k", "19%", 4],
+      ["Tools", "5.7k", "13%", 3],
+      ["Earlier summary", "1.7k", "4%", 1],
+      ["Messages", "11k", "25%", 5],
+      ["Tool results", "17k", "39%", 8],
+      ["Free space", "5.3k", "", 0],
+      ["Kept for the answer", "16k", "", 0],
+    ])
+    expect(breakdown.notes).toEqual([
+      "Condensed 12m ago · 54k → 17k",
+      "93% of the last call read from cache",
+    ])
   })
 })
 

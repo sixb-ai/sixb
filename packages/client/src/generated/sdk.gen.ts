@@ -154,6 +154,9 @@ import type {
   GetAgentRunData,
   GetAgentRunErrors,
   GetAgentRunResponses,
+  GetAgentThreadContextData,
+  GetAgentThreadContextErrors,
+  GetAgentThreadContextResponses,
   GetAgentThreadData,
   GetAgentThreadErrors,
   GetAgentThreadResponses,
@@ -3118,6 +3121,24 @@ export const retryAgentRun = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/runs/{runId}/retry",
+    ...options,
+  })
+
+/**
+ * Measure an agent thread's context against a model's limits
+ *
+ * What the conversation's next request starts from, the model's limit, and the latest compaction. Read by the context meter after each turn.
+ */
+export const getAgentThreadContext = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentThreadContextData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAgentThreadContextResponses,
+    GetAgentThreadContextErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/context",
     ...options,
   })
 

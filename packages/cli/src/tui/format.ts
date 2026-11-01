@@ -226,6 +226,215 @@ export function runFailureText(error: { readonly code: string; readonly message:
   return error.message
 }
 
+/** A part of what a conversation uses, as the API names it. */
+export type ContextPartName =
+  | "system"
+  | "instructions"
+  | "memory"
+  | "skills"
+  | "ontology"
+  | "tools"
+  | "summary"
+  | "messages"
+  | "toolResults"
+  | "files"
+
+/** What the status line and `/context` need of a conversation's context against its limits. */
+export interface ContextUse {
+  /** The model the limits are this one's. */
+  readonly model?: { readonly provider: string; readonly modelId: string }
+  readonly windowTokens?: number
+  readonly limitTokens: number
+  readonly usedTokens?: number
+  readonly parts?: readonly { readonly part: ContextPartName; readonly tokens: number }[]
+  readonly lastCall?: { readonly inputTokens: number; readonly cacheReadInputTokens?: number }
+  readonly lastCompaction?: {
+    readonly createdAt: string
+    readonly estimatedInputTokensBefore: number
+    readonly estimatedInputTokensAfter: number
+  }
+}
+
+/** How full the context is: amber from 80% of the model's limit, red past it. */
+export type ContextTone = "quiet" | "near" | "over"
+
+function contextTone(used: number, limit: number): ContextTone {
+  const share = used / limit
+  return share > 1 ? "over" : share >= 0.8 ? "near" : "quiet"
+}
+
+/**
+ * The context as the status line shows it, `ctx 38k/100k · 92% cached`, then shorter where room is
+ * short: `ctx 38k/100k`, then `ctx 21%`. Undefined before the first answer.
+ */
+export function contextStatus(context: ContextUse):
+  | {
+      readonly text: string
+      readonly short: string
+      readonly shortest: string
+      readonly tone: ContextTone
+    }
+  | undefined {
+  const used = context.usedTokens
+  if (used === undefined) return undefined
+
+  const call = context.lastCall
+  const cached =
+    call?.cacheReadInputTokens !== undefined && call.inputTokens > 0
+      ? ` · ${Math.round((call.cacheReadInputTokens / call.inputTokens) * 100)}% cached`
+      : ""
+  const short = `ctx ${tokenCount(used)}/${tokenCount(context.limitTokens)}`
+
+  return {
+    text: `${short}${cached}`,
+    short,
+    shortest: `ctx ${Math.round((used / context.limitTokens) * 100)}%`,
+    tone: contextTone(used, context.limitTokens),
+  }
+}
+
+/**
+ * What of the context fits at the end of a status line whose items take `columns` of `room`: it
+ * whole, without the cache share, its share alone, or nothing, so the line never wraps.
+ */
+export function fittedContextText(
+  context: { readonly text: string; readonly short: string; readonly shortest: string },
+  columns: number,
+  room: number
+): string | undefined {
+  const separator = columns > 0 ? 3 : 0
+  return [context.text, context.short, context.shortest].find(
+    (text) => columns + separator + text.length <= room
+  )
+}
+
+const CONTEXT_PART_LABELS: Readonly<Record<ContextPartName, string>> = {
+  system: "Sixb instructions",
+  instructions: "Project instructions",
+  memory: "Memory",
+  skills: "Skills",
+  ontology: "Ontology",
+  tools: "Tools",
+  summary: "Earlier summary",
+  messages: "Messages",
+  toolResults: "Tool results",
+  files: "Files and images",
+}
+
+/** One row of `/context`: a part, the room left, or the room kept for the answer. */
+export interface ContextRow {
+  readonly label: string
+  readonly tokens: string
+  /** Its share of what the conversation uses; none for the room left or kept. */
+  readonly share?: string
+  /** A part's tiles: its share of what the conversation uses, out of the row's. */
+  readonly tiles: number
+  readonly kind: "part" | "free" | "reserved"
+}
+
+/**
+ * What `/context` shows: the use against the limit, the window as one bar of `columns.bar` tiles
+ * (used, free, kept for the answer), then a row per part with its share in up to `columns.row`
+ * tiles, the room left and the room kept for the answer, and when it was last condensed.
+ * Undefined before the first answer.
+ */
+export function contextBreakdown(
+  context: ContextUse,
+  columns: { readonly bar: number; readonly row: number },
+  now = Date.now()
+):
+  | {
+      readonly headline: string
+      readonly share: string
+      readonly tone: ContextTone
+      /** What a conversation near or past its limit is about to go through. */
+      readonly warning?: string
+      readonly bar: { readonly used: number; readonly free: number; readonly reserved: number }
+      readonly rows: readonly ContextRow[]
+      readonly notes: readonly string[]
+    }
+  | undefined {
+  const used = context.usedTokens
+  if (used === undefined) return undefined
+
+  const window = context.windowTokens ?? context.limitTokens
+  const reserved = Math.max(0, window - context.limitTokens)
+  const free = Math.max(0, context.limitTokens - used)
+  const span = Math.max(window, used + reserved)
+  const scaled = (tokens: number, room: number) =>
+    tokens <= 0 ? 0 : Math.max(1, Math.round((tokens / span) * room))
+
+  // The bar's three runs fill it exactly: rounding gives its error to the room left.
+  const usedTiles = Math.min(columns.bar, scaled(used, columns.bar))
+  const reservedTiles = Math.min(columns.bar - usedTiles, scaled(reserved, columns.bar))
+  const percent = (share: number) =>
+    share > 0 && share < 0.01 ? "<1%" : `${Math.round(share * 100)}%`
+
+  const parts = (context.parts ?? []).map(
+    ({ part, tokens }): ContextRow => ({
+      label: CONTEXT_PART_LABELS[part],
+      tokens: tokenCount(tokens),
+      share: percent(used > 0 ? tokens / used : 0),
+      tiles: used > 0 ? Math.max(1, Math.round((tokens / used) * columns.row)) : 0,
+      kind: "part",
+    })
+  )
+  const call = context.lastCall
+  const compaction = context.lastCompaction
+  const tone = contextTone(used, context.limitTokens)
+
+  return {
+    headline: `${tokenCount(used)} of ${tokenCount(context.limitTokens)} tokens`,
+    share: percent(used / context.limitTokens),
+    tone,
+    ...(tone === "near"
+      ? { warning: "Almost full: earlier messages are condensed soon." }
+      : tone === "over"
+        ? { warning: "Full: earlier messages are condensed next turn." }
+        : {}),
+    bar: {
+      used: usedTiles,
+      free: columns.bar - usedTiles - reservedTiles,
+      reserved: reservedTiles,
+    },
+    rows: [
+      ...parts,
+      { label: "Free space", tokens: tokenCount(free), tiles: 0, kind: "free" },
+      { label: "Kept for the answer", tokens: tokenCount(reserved), tiles: 0, kind: "reserved" },
+    ],
+    notes: [
+      ...(compaction
+        ? [
+            `Condensed ${ago(Date.parse(compaction.createdAt), now)} · ${tokenCount(compaction.estimatedInputTokensBefore)} → ${tokenCount(compaction.estimatedInputTokensAfter)}`,
+          ]
+        : []),
+      ...(call?.cacheReadInputTokens !== undefined && call.inputTokens > 0
+        ? [
+            `${percent(call.cacheReadInputTokens / call.inputTokens)} of the last call read from cache`,
+          ]
+        : []),
+    ],
+  }
+}
+
+/** `just now`, `12m ago`, `3h ago`, `2d ago`. */
+function ago(then: number, now: number): string {
+  const minutes = Math.round((now - then) / 60_000)
+  if (!Number.isFinite(minutes) || minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
+/** `950`, `9.5k`, `38k`, `984k`, `1.2M`. */
+function tokenCount(tokens: number): string {
+  if (tokens < 1_000) return String(Math.round(tokens))
+  if (tokens < 10_000) return `${Math.round(tokens / 100) / 10}k`
+  if (tokens < 999_500) return `${Math.round(tokens / 1_000)}k`
+  return `${Math.round(tokens / 100_000) / 10}M`
+}
+
 /** `1m 04s`, `12.4s`, `820ms`. */
 export function duration(ms: number): string {
   if (ms < 1_000) return `${Math.round(ms)}ms`

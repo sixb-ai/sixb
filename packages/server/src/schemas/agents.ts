@@ -325,8 +325,15 @@ export const AgentRunDiagnosticSchema = z.object({
   message: z.string(),
 })
 
+const AgentContextCheckpointReasonSchema = z
+  .enum(["threshold", "overflow"])
+  .describe(
+    "`threshold`: the conversation reached its model's limit, or came back large after its cache expired. `overflow`: the provider refused a request as too long, and the turn went on condensed."
+  )
+
 export const AgentMessageCompactionSchema = z.object({
   checkpointId: z.string(),
+  reason: AgentContextCheckpointReasonSchema,
   summary: z.string(),
   createdAt: z.string(),
 })
@@ -469,6 +476,66 @@ export const DecideAgentApprovalResponseSchema = z.object({
 
 export const RetryAgentRunResponseSchema = z.object({
   run: AgentRunSchema,
+})
+
+export const AgentThreadContextQuerySchema = z.object({
+  /** The model to measure the conversation against, with `modelId`. Omitted: its latest turn's. */
+  provider: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+})
+
+export const AgentThreadContextSchema = z.object({
+  /** The model the limits are this one's: the one asked for, else the latest turn's or the default. */
+  model: LanguageModelRefSchema,
+  windowTokens: z.number().int().positive(),
+  /** The window less the output reserve: past it, the conversation is condensed before a call. */
+  limitTokens: z.number().int().positive(),
+  /** What the next request weighs, as the worker estimates it. Absent before the first answer. */
+  usedTokens: z.number().int().nonnegative().optional(),
+  /**
+   * `usedTokens` by part, in a fixed order: the prompt's parts, the tools, then the history's.
+   * They add up to `usedTokens`, which is counted; the split is an estimate by each part's size.
+   */
+  parts: z
+    .array(
+      z.object({
+        part: z
+          .enum([
+            "system",
+            "instructions",
+            "memory",
+            "skills",
+            "ontology",
+            "tools",
+            "summary",
+            "messages",
+            "toolResults",
+            "files",
+          ])
+          .describe(
+            "`system`: Sixb's own prompt. `instructions`: the project's SIXB.md. `memory`, `skills`, `ontology`: their index in the prompt and the files the agent read. `tools`: the tool definitions. `summary`: what a condensed conversation keeps of its earlier part. `messages`: the conversation's text. `toolResults`: every other tool result. `files`: attachments and images."
+          ),
+        tokens: z.number().int().positive(),
+      })
+    )
+    .optional(),
+  /** The call the conversation's history ends with, as the provider counted it. */
+  lastCall: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative().optional(),
+      cacheReadInputTokens: z.number().int().nonnegative().optional(),
+      occurredAt: z.string(),
+    })
+    .optional(),
+  lastCompaction: z
+    .object({
+      reason: AgentContextCheckpointReasonSchema,
+      createdAt: z.string(),
+      estimatedInputTokensBefore: z.number().int().nonnegative(),
+      estimatedInputTokensAfter: z.number().int().nonnegative(),
+    })
+    .optional(),
 })
 
 export const AgentRunListQuerySchema = z.object({

@@ -1,5 +1,6 @@
 import type { AgentMessagePart } from "@sixb/core"
 import {
+  type AgentContextBudget,
   type AgentRunSession,
   createAgentMessageId,
   type PausableModelLoopResult,
@@ -18,7 +19,6 @@ import {
 import { renderCurrentTime, sentSettings } from "./agent-prompt"
 import { unansweredQuestion } from "./ask-parent-tool"
 import { storeChildOutputs } from "./child-files"
-import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import { throwIfExecutionLost } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"

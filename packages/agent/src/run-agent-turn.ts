@@ -1,8 +1,12 @@
-import type { AgentMessage, AgentMessagePart } from "@sixb/core"
+import type { AgentMessage, AgentMessagePart, AgentStepRequestSize } from "@sixb/core"
 import {
+  type AgentContextBudget,
   type AgentRunSession,
   createAgentMessageId,
+  measureAgentStepRequest,
   type PausableModelLoopResult,
+  type PrepareModelStepInput,
+  type RecoverModelStepInput,
   runModelLoop,
 } from "@sixb/core/internal/agents"
 import { isAbortError } from "@sixb/core/internal/workers"
@@ -15,7 +19,6 @@ import {
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
-import type { AgentContextBudget } from "./context-budget"
 import { createAgentContextGuard } from "./context-guard"
 import { conversationModelMessages, conversationModelSettings } from "./conversation-messages"
 import { AgentContextCompactionError, throwIfExecutionLost } from "./errors"
@@ -147,6 +150,21 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ]
       : []),
   ]
+  // What each step's request carried, as it was sent, for its step-start to record. The prompt's
+  // sections are known for the prompt the turn rendered, then for the one its compaction rendered.
+  const stepRequests: AgentStepRequestSize[] = []
+  let systemPromptSize = context.systemPromptSize
+  const recordRequest = (stepIndex: number, messages: readonly ModelMessage[]) => {
+    stepRequests[stepIndex] = measureAgentStepRequest({
+      messages,
+      tools,
+      ...(systemPromptSize ? { systemPrompt: systemPromptSize } : {}),
+      ...(context.contextDirectory === undefined
+        ? {}
+        : { contextDirectory: context.contextDirectory }),
+    })
+  }
+
   const limits = input.contextLimits
   const compactInTurn = limits?.compactInTurn
   const guard =
@@ -166,12 +184,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ? {
             compact: async (compaction) => {
               const request = await compactInTurn(compaction)
+              if (request) systemPromptSize = request.systemPromptSize
               return request && requestHead(request.systemPrompt, request.messages)
             },
           }
         : {}),
     })
-  const prepareStep = guard
+  const guardedStep = guard
     ? async (step: Parameters<typeof guard.prepareStep>[0]) => {
         const prepared = await context.prepareStep?.(step)
         const guarded = await guard.prepareStep({
@@ -182,6 +201,18 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         return { ...prepared, ...guarded }
       }
     : context.prepareStep
+  const prepareStep = async (step: PrepareModelStepInput) => {
+    const prepared = await guardedStep?.(step)
+    recordRequest(step.stepIndex, prepared?.messages ?? step.messages)
+    return prepared
+  }
+  const recoverStep =
+    guard &&
+    (async (step: RecoverModelStepInput) => {
+      const recovered = await guard.recoverStep(step)
+      if (recovered?.messages) recordRequest(step.stepIndex, recovered.messages)
+      return recovered
+    })
 
   // The answer so far, as one message whatever step it is at.
   const workMessageId = createAgentMessageId()
@@ -194,13 +225,16 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       threadId: run.threadId,
       runId,
       role: "assistant",
-      parts: markReducedSteps(
-        agentTraceFromModelSteps(
-          finishedSteps,
-          { threadId: run.threadId, runId },
-          context.outputFileOf
+      parts: recordStepRequests(
+        markReducedSteps(
+          agentTraceFromModelSteps(
+            finishedSteps,
+            { threadId: run.threadId, runId },
+            context.outputFileOf
+          ),
+          guard?.reducedFromStep()
         ),
-        guard?.reducedFromStep()
+        stepRequests
       ),
       ...(context.authorPrincipal === undefined
         ? {}
@@ -221,8 +255,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           projectId,
           threadId: run.threadId,
         }),
-        ...(prepareStep === undefined ? {} : { prepareStep }),
-        ...(guard ? { recoverStep: guard.recoverStep } : {}),
+        prepareStep,
+        ...(recoverStep ? { recoverStep } : {}),
         onStepEnd: recordStep,
         // A child's question the model has not read comes before its answer ends the turn.
         ...(input.children === undefined
@@ -260,20 +294,23 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw error
     }
 
-    interruptedParts = markReducedSteps(
-      result.status === "aborted"
-        ? agentTraceFromPartialModelLoop(
-            result.steps,
-            result.partialContent,
-            { threadId: run.threadId, runId },
-            context.outputFileOf
-          )
-        : agentTraceFromModelSteps(
-            result.steps,
-            { threadId: run.threadId, runId },
-            context.outputFileOf
-          ),
-      guard?.reducedFromStep()
+    interruptedParts = recordStepRequests(
+      markReducedSteps(
+        result.status === "aborted"
+          ? agentTraceFromPartialModelLoop(
+              result.steps,
+              result.partialContent,
+              { threadId: run.threadId, runId },
+              context.outputFileOf
+            )
+          : agentTraceFromModelSteps(
+              result.steps,
+              { threadId: run.threadId, runId },
+              context.outputFileOf
+            ),
+        guard?.reducedFromStep()
+      ),
+      stepRequests
     )
 
     const interruptedAfterModel = await finalizeIfInterrupted()
@@ -367,6 +404,24 @@ export function markReducedSteps(
 
     step += 1
     return step >= fromStep ? { type: "step-start", reducedRequest: true } : part
+  })
+}
+
+/**
+ * Record on each step-start what its request carried, by step: the next turn's context meter
+ * reads the system prompt and tools the latest one sent.
+ */
+export function recordStepRequests(
+  parts: readonly AgentMessagePart[],
+  requests: readonly (AgentStepRequestSize | undefined)[]
+): readonly AgentMessagePart[] {
+  let step = -1
+  return parts.map((part) => {
+    if (part.type !== "step-start") return part
+
+    step += 1
+    const request = requests[step]
+    return request ? { ...part, request } : part
   })
 }
 
