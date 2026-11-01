@@ -1180,9 +1180,8 @@ describe("a paused child, once its requester decides", () => {
       expect(viewed).toBe(String(toolOutput(paused, "view")))
       expect(viewed).toContain('<tool_file name="summary.md"')
       expect(sandboxPath).toStartWith(".sixb/agent/tool-files/")
-      expect(harness.sandboxes.some((sandbox) => sandboxPath && sandbox.has(sandboxPath))).toBe(
-        true
-      )
+      // The paused child's sandbox held it there, and the continuation's holds it there again.
+      expect(harness.sandboxes.filter((sandbox) => sandbox.has(sandboxPath))).toHaveLength(2)
     } finally {
       await settle(harness.worker.stop(), "worker stop")
     }
