@@ -41,6 +41,11 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
   write costs 1.25x input and nothing would read it. Set per-call `caching: "off"` to disable
   caching, or `"auto"` to cache a one-shot request. A `caching` set in `providerOptions.gateway` or
   `request`, or an OpenAI `promptCacheOptions`, replaces this policy. Usage reports cache writes.
+- **Cache lifetime and affinity:** a chat turn, read again after the user's next message, asks for
+  the one-hour cache (`cache_ttl: "1h"`; a model without one keeps its default, with a warning).
+  Its steps and its sub-agents' send the conversation's opaque key as `x-session-affinity`, which
+  keeps them on the upstream holding their cache. A `cache_ttl` in `request`, or an
+  `x-session-affinity` in `headers`, wins.
 - **Output limits:** the strictest per-call, configured, or model limit wins, for agents too.
 - **Retries:** `429` and `5xx` responses are retried before streaming starts. Configure
   `maxRetries` and `maxRetryDelayMs` on `createVercelGateway`.

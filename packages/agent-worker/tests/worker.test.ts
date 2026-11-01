@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ChildRunner, ComputerRunner, runApiCredential } from "@sixb/agent"
@@ -139,6 +147,7 @@ import { storeChildOutputs } from "../../agent/src/child-files"
 import * as conversationPreparation from "../../agent/src/context-compaction"
 import { resolveRunPlan } from "../../agent/src/execution-plan"
 import { FamilyMailbox } from "../../agent/src/family-mailbox"
+import { conversationPromptCaching } from "../../agent/src/prompt-cache"
 import { stoppedByWorker } from "../../agent/src/run-agent-turn"
 import { runConversationTurn } from "../../agent/src/run-conversation-turn"
 import {
@@ -7080,10 +7089,10 @@ describe("AgentWorker", () => {
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
 
-    // The locale is read only to build the system prompt, after provisioning has started.
-    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "locale", {
+    // The requester is read only to build the system prompt, after provisioning has started.
+    const failing: AgentRunnerContext = Object.defineProperty({ ...context }, "requester", {
       get: () => {
-        throw new Error("locale unavailable")
+        throw new Error("requester unavailable")
       },
     })
 
@@ -7096,7 +7105,7 @@ describe("AgentWorker", () => {
           run,
         })
       )
-    ).rejects.toThrow("locale unavailable")
+    ).rejects.toThrow("requester unavailable")
 
     await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
   })
@@ -7894,13 +7903,23 @@ describe("AgentWorker", () => {
           parts: [{ type: "step-start" }, { type: "text", text: "The delegated fact is 42." }],
         },
       ])
+      // Its calls share its conversation's key, with the default lifetime: it runs every call
+      // without asking and continues no paused run, so its next read is its own next step.
+      // Guard proof: drop `caching` from runSubagent's model loop.
+      expect(childCalls[0]?.caching).toEqual(
+        conversationPromptCaching({
+          projectId: PROJECT_ID,
+          threadId: requested.run.threadId,
+          lifetime: "default",
+        })
+      )
       // Its model read its thread: the task, closed by when the thread was created.
       expect(childCalls[0]?.messages.slice(1)).toEqual([
         {
           role: "user",
           content: [
             { type: "text", text: "Research the exact delegated fact." },
-            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time>/) },
+            { type: "text", text: expect.stringMatching(/^\n\n<sixb_current_time [^>]*>/) },
           ],
         },
       ])
@@ -8064,16 +8083,18 @@ describe("AgentWorker", () => {
     expect(system).toContain(
       ["└── rooms/", "    └── meeting-room.md  MeetingRoom: A bookable meeting room."].join("\n")
     )
-    expect(system).toContain("Time zone: Europe/Paris. Locale: fr-FR.")
+    expect(system).not.toContain("Europe/Paris")
     expect(system).toContain(
       '<memory repo="project">\n# Ours\n- Quarters start in February\n</memory>'
     )
     expect(system).toContain("It is read-only for you: only the parent Agent saves to it.")
     expect(system).not.toContain("Speak like a helpful teammate")
     expect(system).not.toContain("sixb memory save")
-    // The task is dated as its requester reads the time.
+    // The task is dated as its requester reads the time, in their settings.
     expect(JSON.stringify(request?.messages.at(-1))).toContain(
-      renderCurrentTime(run.createdAt, "Europe/Paris")
+      JSON.stringify(
+        renderCurrentTime(run.createdAt, { timeZone: "Europe/Paris", locale: "fr-FR" })
+      ).slice(1, -1)
     )
   })
 
@@ -11180,7 +11201,8 @@ describe("AgentWorker", () => {
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
     // first message then differs between the two runs. The clock jumps an hour between them,
-    // since the rendered time is minute-precise.
+    // since the rendered time is minute-precise. Render the time zone or locale in the system
+    // prompt again, and the third run, sent from other settings, rewrites the whole prefix.
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
       modelId: "mock-model",
@@ -11210,7 +11232,7 @@ describe("AgentWorker", () => {
         timeZone: "Asia/Kolkata",
       })
       await waitForTerminalRun(storage, second.run.id)
-      const third = await requestAgent(sixb, { text: "third", threadId })
+      const third = await requestAgent(sixb, { text: "third", threadId, locale: "fr-FR" })
       await waitForTerminalRun(storage, third.run.id)
 
       const [firstRequest, secondRequest, thirdRequest] = requests
@@ -11220,24 +11242,24 @@ describe("AgentWorker", () => {
       expect(secondRequest.messages.slice(0, firstRequest.messages.length)).toEqual([
         ...firstRequest.messages,
       ])
-      // The third run uses the project time zone, so only its system prompt differs.
-      expect(thirdRequest.messages.slice(1, secondRequest.messages.length)).toEqual(
-        secondRequest.messages.slice(1)
-      )
+      // The third run is sent in other settings, which only its own message carries.
+      expect(thirdRequest.messages.slice(0, secondRequest.messages.length)).toEqual([
+        ...secondRequest.messages,
+      ])
 
       // Each message keeps the zone of the run that answered it.
       const sent = (await listMessages(storage, threadId)).filter(
         (message) => message.role === "user"
       )
       const users = thirdRequest.messages.filter((message) => message.role === "user")
-      const sentAt = (index: number, timeZone: string) => ({
+      const sentAt = (index: number, timeZone: string, locale: string) => ({
         type: "text" as const,
-        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, timeZone)}`,
+        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, { timeZone, locale })}`,
       })
       expect(users.map((message) => message.content.at(-1))).toEqual([
-        sentAt(0, "Asia/Kolkata"),
-        sentAt(1, "Asia/Kolkata"),
-        sentAt(2, "UTC"),
+        sentAt(0, "Asia/Kolkata", "en"),
+        sentAt(1, "Asia/Kolkata", "en"),
+        sentAt(2, "UTC", "fr-FR"),
       ])
     } finally {
       setSystemTime()
@@ -11245,8 +11267,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Guard proof: drop the section or the authors from userMessageSuffix in runAgentTurn; the
-  // shared turn then cannot tell who takes part or who wrote what.
+  // Guard proof: drop the section from the conversation's system prompt, or the authors from
+  // userMessageSuffix in runAgentTurn; the shared turn then cannot tell who takes part or who
+  // wrote what. Put the section back on the newest user message, or the sender's settings in the
+  // system prompt, and the next turn no longer replays the bytes this one sent.
   test("tells the model who wrote each message of a shared thread, and stores none of it", async () => {
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
@@ -11328,7 +11352,12 @@ describe("AgentWorker", () => {
         addedBy: alice,
         maxParticipants: 50,
       })
-      const second = await requestAgentAs(sixb, bob, { text: "Why did Acme slip?", threadId })
+      const second = await requestAgentAs(sixb, bob, {
+        text: "Why did Acme slip?",
+        threadId,
+        timeZone: "America/New_York",
+        locale: "en-US",
+      })
       await terminal(second.run.id)
 
       const alone = requests[0]
@@ -11343,10 +11372,26 @@ describe("AgentWorker", () => {
 
       // Names are data: a shared thread's system prompt is the same whoever sends the turn.
       // Guard proof: drop `shared` from createAgentExecutionContext; each prompt names its sender.
-      const third = await requestAgentAs(sixb, alice, { text: "And Globex?", threadId })
+      const third = await requestAgentAs(sixb, alice, {
+        text: "And Globex?",
+        threadId,
+        timeZone: "Europe/Paris",
+        locale: "fr-FR",
+      })
       await terminal(third.run.id)
-      expect(requests.at(-1)?.messages[0]).toEqual(shared.messages[0])
-      expect(JSON.stringify(shared.messages[0])).not.toContain("usr_bob")
+      const next = requests.at(-1)
+      if (!next) throw new Error("Expected the third turn's request.")
+      // Alice's turn replays Bob's request byte for byte: its system prompt, and every message.
+      expect(next.messages.slice(0, shared.messages.length)).toEqual([...shared.messages])
+      // Each turn is read again after a pause, and names its conversation by an opaque key.
+      // Guard proof: drop `caching` from runAgentTurn's model loop.
+      expect(shared.caching).toEqual({
+        lifetime: "long",
+        key: expect.stringMatching(/^sixb_[0-9a-f]{32}$/),
+      })
+      expect(next.caching).toEqual(shared.caching)
+      expect(alone.caching).toEqual(shared.caching)
+      expect(JSON.stringify(shared.messages[0])).not.toContain("This request comes from")
 
       // So is its memory: the project's alone, never the sender's own.
       // Guard proof: pass `shared: false` to loadConversationMemory; Bob's turn shows his memory.
@@ -11373,9 +11418,12 @@ describe("AgentWorker", () => {
       expect(closings[0]).not.toContain("sixb_conversation")
       expect(closings[0]).toEndWith('<sixb_author id="usr_alice">usr_alice</sixb_author>')
 
-      // The newest message carries who takes part, then when it was sent, then who sent it.
+      // The system prompt says who takes part; each message when it was sent, then who sent it.
+      expect(system).toMatch(
+        /<\/sixb_runtime_facts>\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>/
+      )
       expect(closings[1]).toMatch(
-        /^\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>\n<sixb_current_time>[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
+        /^\n\n<sixb_current_time time_zone="America\/New_York" locale="en-US">[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
       )
 
       const stored = JSON.stringify(await listMessages(storage, threadId))
@@ -11412,9 +11460,8 @@ describe("AgentWorker", () => {
       const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
-      // The requester's settings, frozen on the run, win over the project's (UTC, en).
-      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
-      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
+      // The requester's settings are their message's, never the prompt's (see the replay test).
+      expect(capturedSystem).not.toContain("Asia/Kolkata")
       expect(capturedSystem).toContain("<sixb_mode_rules>")
       expect(capturedSystem).toContain("<sixb_runtime_context>")
       expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
@@ -11726,6 +11773,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: "Test system prompt.",
         projectTimeZone: "UTC",
+        projectLocale: "en",
         prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
           if (stepIndex !== 1) return
           abort.abort()
@@ -12333,6 +12381,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: staleRun,
@@ -12593,6 +12642,7 @@ describe("AgentWorker", () => {
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
           projectTimeZone: "UTC",
+          projectLocale: "en",
         },
         plan: executionPlanFor(sixb),
         run,
@@ -12641,6 +12691,7 @@ describe("AgentWorker", () => {
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
         projectTimeZone: "UTC",
+        projectLocale: "en",
       },
       plan: executionPlanFor(sixb),
       run: reclaimed,
@@ -13385,15 +13436,190 @@ describe("agent tools act as the requester", () => {
       expect(
         await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: childRunId })
       ).toMatchObject({ status: "succeeded", result: { text: "The delegated fact is 42." } })
-      // The turn in the user's folder, the child in one of its own; each run's files elsewhere,
-      // and gone once it ended.
+      // The turn in the user's folder, the child in one of its own; each thread's files
+      // elsewhere, and gone once its run ended.
       expect(opened).toEqual([
-        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.id) },
-        { runFiles: join(runFilesRoot, childRunId) },
+        { workingDirectory: folder, runFiles: join(runFilesRoot, request.run.threadId) },
+        {
+          runFiles: join(runFilesRoot, createSubagentThreadId(request.run.id, "research")),
+        },
       ])
       expect(readdirSync(runFilesRoot)).toEqual([])
     } finally {
       jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Every sixb opened in a folder shares the computer's files directories: a thread's next turn
+  // can start in one while the last turn's release, in another, still removes the directory.
+  // Regression proof: resolve holdRunFiles without its lock; the next turn opens while the last
+  // one is torn down, whose removal then takes the next turn's files with it.
+  test("two sixb on one computer hold a thread's files directory one run at a time", async () => {
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ]),
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const events: string[] = []
+    let releaseTeardown = () => {}
+    const teardown = new Promise<void>((resolve) => {
+      releaseTeardown = resolve
+    })
+    const runner = (name: string, opened: (runFiles: string) => Sandbox) =>
+      new ComputerRunner({
+        apiUrl: "http://api.localhost",
+        authorization: async () => "",
+        computerId: async () => "laptop",
+        folder,
+        runFilesRoot,
+        fetch: async (outgoing) => api.fetch(outgoing),
+        openSandbox: async ({ runFiles }) => {
+          events.push(`${name} opened`)
+          return opened(runFiles)
+        },
+      })
+    // The first sixb's teardown is slow; the second leaves a file in the thread's directory.
+    const first = runner("first", () => {
+      const sandbox = new RecordingSandbox("first")
+      sandbox.destroy = async () => {
+        events.push("first tearing down")
+        await teardown
+        events.push("first torn down")
+      }
+      return sandbox
+    })
+    const second = runner("second", (runFiles) => {
+      writeFileSync(join(runFiles, "provisioned.txt"), "for the second turn")
+      const sandbox = new RecordingSandbox("second")
+      sandbox.destroy = async () => {
+        events.push(existsSync(join(runFiles, "provisioned.txt")) ? "files kept" : "files lost")
+      }
+      return sandbox
+    })
+
+    jest.useFakeTimers()
+    try {
+      const one = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const ranOne = first.runTurn(one.run.id, new AbortController().signal)
+      // Its end is written before its sandbox is given back.
+      await underFakeTime(
+        async () =>
+          events.includes("first tearing down") && terminalRun(agentStorageOf(sixb), one.run.id),
+        "the first turn's end"
+      )
+
+      const two = await requestAgent(sixb, {
+        text: "Second.",
+        threadId: one.run.threadId,
+        runsOn: "computer",
+      })
+      const ranTwo = second.runTurn(two.run.id, new AbortController().signal)
+      // The second turn gets this long to open where it would, while the first one is torn down.
+      for (let step = 0; step < 400 && !events.includes("second opened"); step += 1) {
+        await realLoopTurn()
+        jest.advanceTimersByTime(100)
+      }
+      releaseTeardown()
+      expect(await ranOne).toBe(true)
+      await underFakeTime(() => terminalRun(agentStorageOf(sixb), two.run.id), "the second turn")
+      expect(await ranTwo).toBe(true)
+
+      expect(events).toEqual([
+        "first opened",
+        "first tearing down",
+        "first torn down",
+        "second opened",
+        "files kept",
+      ])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+    } finally {
+      releaseTeardown()
+      jest.useRealTimers()
+      rmSync(folder, { recursive: true, force: true })
+      rmSync(runFilesRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Regression proof: key the runner's files directory by run id again; the second turn's system
+  // prompt names other skill, ontology and memory paths, so its first call reads no cache.
+  test("a computer's turns of one thread name the same files, so their prompt stays cached", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const api = createSixbApi(
+      new SixbServer({ host: sixb as never, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-folder-")))
+    const runFilesRoot = realpathSync(mkdtempSync(join(tmpdir(), "sixb-computer-runs-")))
+    const opened: string[] = []
+    const leftovers: string[][] = []
+    const runner = new ComputerRunner({
+      apiUrl: "http://api.localhost",
+      authorization: async () => "",
+      computerId: async () => "laptop",
+      folder,
+      runFilesRoot,
+      fetch: async (outgoing) => api.fetch(outgoing),
+      openSandbox: async ({ runFiles }) => {
+        opened.push(runFiles)
+        leftovers.push(readdirSync(runFiles))
+        return new RecordingSandbox(`computer-${opened.length}`)
+      },
+    })
+
+    try {
+      const first = await requestAgent(sixb, { text: "First.", runsOn: "computer" })
+      const { threadId } = first.run
+      // What a crashed run left behind is gone before the next one starts.
+      mkdirSync(join(runFilesRoot, threadId, "attachments"), { recursive: true })
+      writeFileSync(join(runFilesRoot, threadId, "attachments", "stale.txt"), "stale")
+      expect(await runner.runTurn(first.run.id, new AbortController().signal)).toBe(true)
+
+      const second = await requestAgent(sixb, { text: "Second.", threadId, runsOn: "computer" })
+      expect(await runner.runTurn(second.run.id, new AbortController().signal)).toBe(true)
+      await runner.drain()
+
+      for (const runId of [first.run.id, second.run.id]) {
+        expect(await terminalRun(agentStorageOf(sixb), runId)).toMatchObject({
+          status: "succeeded",
+        })
+      }
+      expect(opened).toEqual([join(runFilesRoot, threadId), join(runFilesRoot, threadId)])
+      expect(leftovers).toEqual([[], []])
+      expect(readdirSync(runFilesRoot)).toEqual([])
+
+      const [one, two] = requests
+      if (!one || !two) throw new Error("Expected two model requests.")
+      expect(systemPromptOf(one.messages)).toContain(join(runFilesRoot, threadId, "skills"))
+      expect(two.messages[0]).toEqual(one.messages[0])
+      expect(two.messages.slice(0, one.messages.length)).toEqual([...one.messages])
+    } finally {
       rmSync(folder, { recursive: true, force: true })
       rmSync(runFilesRoot, { recursive: true, force: true })
     }

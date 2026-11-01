@@ -50,8 +50,9 @@ export interface AgentTurnContext {
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string
-  /** Time zone of runs that captured none, used to date their user messages. */
+  /** Time zone and locale of runs that captured none, used to date their user messages. */
   readonly projectTimeZone: string
+  readonly projectLocale: string
   /** Prepared by the run's environment, which materializes the files in its context directory. */
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**

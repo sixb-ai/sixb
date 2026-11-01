@@ -29,6 +29,7 @@ import {
   type ModelReasoningLevel,
   type ModelReportedCost,
   type ModelResponseFormat,
+  type ModelTokenPrice,
   type ModelUsage,
   modelReasoningSupportIssue,
   type RerankingModel,
@@ -787,7 +788,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
           ? { ...pricing, output: "0", output_tiers: [] }
           : pricing
       )
-      if (id && card) rateCards.set(id, card)
+      if (id && card) rateCards.set(id, withAnthropicCacheWrites(id, card))
     }
     this.transcriptionRates.clear()
     for (const [id, rate] of transcriptionRates) this.transcriptionRates.set(id, rate)
@@ -890,6 +891,41 @@ function gatewayReasoningCapabilities(
     ...(canDisable ? { canDisable: true } : {}),
     ...(efforts.length === 0 ? {} : { efforts }),
   }
+}
+
+/**
+ * Anthropic bills a cache write by its lifetime: the catalog's price is the five-minute one, and an
+ * hour costs twice the base input at every tier. Conversations ask for the hour, as Anthropic
+ * direct cards already price it.
+ */
+function withAnthropicCacheWrites(modelId: string, card: ModelRateCard): ModelRateCard {
+  if (!modelId.startsWith("anthropic/") || card.cacheWriteInput === undefined || !card.input) {
+    return card
+  }
+
+  const { cacheWriteInput, ...rest } = card
+  return {
+    ...rest,
+    cacheWriteInput5m: cacheWriteInput,
+    cacheWriteInput1h: doubledPrice(card.input),
+  }
+}
+
+function doubledPrice(price: ModelTokenPrice): ModelTokenPrice {
+  if (typeof price === "string") return doubledDecimal(price)
+  return {
+    default: doubledDecimal(price.default),
+    tiers: price.tiers.map((tier) => ({ ...tier, price: doubledDecimal(tier.price) })),
+  }
+}
+
+/** Twice a decimal string, exactly. */
+function doubledDecimal(value: string): string {
+  const [whole = "0", fraction = ""] = value.split(".")
+  const digits = (BigInt(`${whole}${fraction}`) * 2n).toString().padStart(fraction.length + 1, "0")
+  const point = digits.length - fraction.length
+  const doubledFraction = digits.slice(point).replace(/0+$/, "")
+  return doubledFraction ? `${digits.slice(0, point)}.${doubledFraction}` : digits.slice(0, point)
 }
 
 function modelRateCard(raw: JsonObject | undefined): ModelRateCard | undefined {
@@ -1104,7 +1140,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     const prepared = await this.prepareRequest(request)
     const init: RequestInit = {
       method: "POST",
-      headers: this.headers(),
+      headers: prepared.headers,
       body: JSON.stringify(prepared.body),
       signal: request.signal,
     }
@@ -1138,7 +1174,13 @@ class VercelGatewayLanguageModel implements LanguageModel {
         requestId: requestId ?? undefined,
         errorPrefix: "[SixbVercelGateway]",
         providerIds: gatewayProviderIds,
-        usage: normalizeUsage,
+        usage: (raw) =>
+          normalizeUsage(raw, {
+            // An Anthropic route writes every breakpoint at the lifetime the request asked for.
+            ...(this.modelId.startsWith("anthropic/")
+              ? { cacheTtl: prepared.body.cache_ttl === "1h" ? "1h" : "5m" }
+              : {}),
+          }),
         finishMetadata: (response) => {
           const metadata = gatewayMetadata(response)
           const reportedCost = gatewayReportedCost(metadata)
@@ -1162,6 +1204,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
 
   private async prepareRequest(request: LanguageModelRequest): Promise<{
     readonly body: JsonObject
+    readonly headers: Readonly<Record<string, string>>
   }> {
     const extra = this.options.request ?? {}
     if (
@@ -1204,15 +1247,22 @@ class VercelGatewayLanguageModel implements LanguageModel {
         strict: isStrictGatewaySchema(tool.inputSchema),
       })),
     ]
-    const { body: caching, providerOptions } = gatewayPromptCaching({
+    const headers = this.headers()
+    const {
+      body: caching,
+      providerOptions,
+      headers: affinity,
+    } = gatewayPromptCaching({
       modelId: this.modelId,
       providerOptions: this.options.providerOptions,
       request: extra,
       caching: request.caching,
       messages: request.messages,
       localTools: request.tools.length,
+      headers,
     })
     return {
+      headers: { ...headers, ...affinity },
       body: {
         ...extra,
         ...caching,
@@ -1305,7 +1355,10 @@ function gatewayReasoningRequest(
   return { reasoning: { effort: reasoning } }
 }
 
-function normalizeUsage(raw: JsonObject | undefined): ModelUsage {
+function normalizeUsage(
+  raw: JsonObject | undefined,
+  options: { readonly cacheTtl?: "5m" | "1h" } = {}
+): ModelUsage {
   if (!raw) return {}
   const usage = responsesUsage(raw)
   const { inputTokens, outputTokens, reasoningOutputTokens: reasoning } = usage
@@ -1322,6 +1375,12 @@ function normalizeUsage(raw: JsonObject | undefined): ModelUsage {
       : { uncachedInputTokens: Math.max(0, inputTokens - cached - (written ?? 0)) }),
     ...(cached === undefined ? {} : { cacheReadInputTokens: cached }),
     ...(written === undefined ? {} : { cacheWriteInputTokens: written }),
+    ...(written === undefined || options.cacheTtl === undefined
+      ? {}
+      : {
+          cacheWrite5mInputTokens: options.cacheTtl === "5m" ? written : 0,
+          cacheWrite1hInputTokens: options.cacheTtl === "1h" ? written : 0,
+        }),
     ...(outputTokens === undefined
       ? {}
       : { textOutputTokens: Math.max(0, outputTokens - (reasoning ?? 0)) }),

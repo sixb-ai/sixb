@@ -23,6 +23,7 @@ test("caches agent steps and anchors the system prompt as top-level Gateway fiel
   expect(caching()).toEqual({
     body: { caching: "auto", cache_anchor_items: 1 },
     providerOptions: undefined,
+    headers: {},
   })
   expect(caching({ localTools: 0, messages: [system, system, user, answer, user] }).body).toEqual({
     caching: "auto",
@@ -51,7 +52,7 @@ test.each([
   ],
 ] as const)("writes no cache for a one-shot request on %s", (_name, modelId, providerOptions) => {
   // Regression proof: cache every request; compaction summaries and generate() pay 1.25x input.
-  expect(caching({ modelId, localTools: 0 })).toEqual({ body: {}, providerOptions })
+  expect(caching({ modelId, localTools: 0 })).toEqual({ body: {}, providerOptions, headers: {} })
 })
 
 test("follows the request's caching choice", () => {
@@ -59,7 +60,11 @@ test("follows the request's caching choice", () => {
     caching: "auto",
     cache_anchor_items: 1,
   })
-  expect(caching({ caching: "off" })).toEqual({ body: {}, providerOptions: undefined })
+  expect(caching({ caching: "off" })).toEqual({
+    body: {},
+    providerOptions: undefined,
+    headers: {},
+  })
   expect(caching({ modelId: "openai/gpt-6-astra", caching: "off" }).providerOptions).toEqual({
     openai: { promptCacheOptions: { mode: "explicit" } },
   })
@@ -76,5 +81,46 @@ test.each([
     request,
     localTools: 0,
   })
-  expect(result).toEqual({ body: {}, providerOptions })
+  expect(result).toEqual({ body: {}, providerOptions, headers: {} })
+})
+
+test("asks for the hour-long cache only for a long-lived prompt it caches", () => {
+  // Regression proof: drop `cache_ttl` from gatewayPromptCaching; a reply after 5 minutes rewrites
+  // the whole conversation.
+  expect(caching({ caching: { lifetime: "long" } }).body).toEqual({
+    caching: "auto",
+    cache_anchor_items: 1,
+    cache_ttl: "1h",
+  })
+  expect(caching({ caching: { lifetime: "default" } }).body).toEqual({
+    caching: "auto",
+    cache_anchor_items: 1,
+  })
+
+  // An intent caches what an absent choice would: a one-shot request still writes nothing.
+  expect(caching({ caching: { lifetime: "long" }, localTools: 0 })).toEqual(
+    caching({ localTools: 0 })
+  )
+})
+
+test.each([
+  ["its own TTL", undefined, { cache_ttl: "5m" }, { caching: "auto", cache_anchor_items: 1 }],
+  ["its caching request field", undefined, { caching: "auto" }, {}],
+  ["its Gateway caching option", { gateway: { caching: "off" } }, {}, {}],
+] as const)("leaves the cache lifetime to a project that sets %s", (_name, providerOptions, request, body) => {
+  expect(caching({ caching: { lifetime: "long" }, providerOptions, request }).body).toEqual(body)
+})
+
+test("names the conversation in the session affinity header, unless the project does", () => {
+  // Regression proof: return no headers from gatewayPromptCaching; a conversation's steps spread
+  // over upstreams that do not hold its cache.
+  const key = "sixb_9f2c1e"
+  expect(caching({ caching: { key } }).headers).toEqual({ "x-session-affinity": key })
+  expect(caching({ caching: { key }, localTools: 0 }).headers).toEqual({
+    "x-session-affinity": key,
+  })
+  expect(caching({ caching: { key }, headers: { "X-Session-Affinity": "mine" } }).headers).toEqual(
+    {}
+  )
+  expect(caching({ caching: "auto" }).headers).toEqual({})
 })

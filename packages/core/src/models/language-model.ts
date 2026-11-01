@@ -69,10 +69,33 @@ export interface LanguageModelRequest {
   readonly reasoning?: ModelReasoning
   /** Per-call output ceiling; providers must not exceed a stricter configured model limit. */
   readonly maxOutputTokens?: number
-  /** Disable automatic prompt caching without overriding explicit provider configuration. */
-  readonly caching?: "auto" | "off"
+  /**
+   * How the provider caches the request's prompt, never over explicit provider configuration.
+   * Absent, it caches what it expects to be read again.
+   */
+  readonly caching?: ModelCaching
   readonly responseFormat?: ModelResponseFormat
   readonly signal: AbortSignal
+}
+
+/**
+ * `"off"` caches nothing and `"auto"` caches the request even when it is read once. An intent
+ * caches what an absent choice would, and says how the prompt is read again: each provider
+ * translates it, or ignores what it has no equivalent for.
+ */
+export type ModelCaching = "auto" | "off" | ModelCachingIntent
+
+export interface ModelCachingIntent {
+  /**
+   * `"long"`: the prompt is read again after a human pause, as by a conversation's next turn, so
+   * its cache should outlive the provider's default lifetime. `"default"` keeps that lifetime.
+   */
+  readonly lifetime?: "default" | "long"
+  /**
+   * An opaque id the requests that share a prompt prefix share, such as one conversation's, for a
+   * provider that routes them to where that prefix is cached. Never personal data.
+   */
+  readonly key?: string
 }
 
 export interface LanguageModelStream {
