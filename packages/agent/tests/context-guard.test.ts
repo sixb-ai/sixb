@@ -410,3 +410,108 @@ describe("the rate a guard weighs calls at", () => {
     expect(reduced).toBeUndefined()
   })
 })
+
+describe("what a turn adds", () => {
+  /** A window of 65,536 tokens: 49,152 of input at most, the run reading prose at 3 bytes a token. */
+  const SMALL = {
+    windowTokens: 65_536,
+    inputBudgetTokens: 49_152,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
+    source: "model",
+    bytesPerToken: 3,
+  } satisfies AgentContextBudget
+
+  /** `bytes` of base64, as `head -c N /dev/urandom | base64` prints it, the same on every run. */
+  function base64(bytes: number): string {
+    const raw = new Uint8Array(Math.ceil((bytes * 3) / 4))
+    let state = 0x2545f491
+    for (let index = 0; index < raw.length; index++) {
+      state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0
+      raw[index] = state >>> 24
+    }
+    return Buffer.from(raw).toString("base64").slice(0, bytes)
+  }
+
+  const isBase64 = (text: string) => text.length > 1_000 && /^[A-Za-z0-9+/=]+$/.test(text)
+
+  /**
+   * What a provider counts: the request as the estimator weighs prose, at 3 bytes per token,
+   * except base64, which its tokenizer reads at about 1.33 bytes a token, as DeepSeek's and most do.
+   */
+  function counted(messages: readonly ModelMessage[]): number {
+    const dense = outputs(messages)
+      .filter(isBase64)
+      .reduce((total, text) => total + text.length, 0)
+    return tokens(messages) - Math.floor(dense / 3) + Math.ceil(dense / 1.33)
+  }
+
+  /** One step: the call, then its result. */
+  function resultStep(index: number, output: string): ModelMessage[] {
+    return [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: `call_${index}`, toolName: "bash", input: { index } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: `call_${index}`,
+            toolName: "bash",
+            output: { type: "text", value: output },
+          },
+        ],
+      },
+    ]
+  }
+
+  /**
+   * A turn whose steps return `results` in order, as the model loop drives the guard: each call
+   * counted by the provider before the next is prepared. What each call carried, as counted.
+   */
+  async function runTurn(results: readonly string[]): Promise<number[]> {
+    const guard = createAgentContextGuard({ budget: SMALL, tools: [] })
+    const completed: ModelStep[] = []
+    const sentCounts: number[] = []
+    let messages: readonly ModelMessage[] = HEAD
+    for (let index = 0; index <= results.length; index++) {
+      const prepared = await guard.prepareStep(step(index, messages, completed))
+      const sent = prepared?.messages ?? messages
+      sentCounts.push(counted(sent))
+      if (index === results.length) break
+
+      completed.push({ ...steps(1)[0]!, usage: { inputTokens: sentCounts.at(-1)! } })
+      messages = [...sent, ...resultStep(index, results[index]!)]
+    }
+    return sentCounts
+  }
+
+  // Reproduce: weigh what a turn adds at the run's rate alone (return this.bytesPerToken from
+  // ContextGuard.addedBytesPerToken); its base64 is weighed at 3 bytes a token while the provider
+  // counts 1.33, and the tenth call goes out at 49,968 tokens, past the 49,152 limit.
+  test("never lets a call pass the limit when the turn adds content denser than the run's", async () => {
+    // A note of prose, then base64 dumps of about 6,000 real tokens each.
+    const counts = await runTurn([
+      "word ".repeat(800),
+      ...Array.from({ length: 9 }, () => base64(8_000)),
+    ])
+
+    expect(Math.max(...counts)).toBeLessThanOrEqual(SMALL.inputBudgetTokens)
+  })
+
+  test("leaves a prose turn past 70 % of its limit as it is", async () => {
+    // Reproduce: weigh what a turn adds at one byte a token, the densest any tokenizer reads
+    // (return AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN from ContextGuard.addedBytesPerToken); this turn
+    // then clears at about 70 % of its limit, though every call fits.
+    // Results of 16 KB of prose, about 5,300 tokens each.
+    const counts = await runTurn(Array.from({ length: 7 }, () => "word ".repeat(3_200)))
+
+    // The last call carries about 76 % of the limit, and nothing was cleared on the way.
+    expect(counts.at(-1)! / SMALL.inputBudgetTokens).toBeGreaterThan(0.75)
+    expect(counts).toEqual([...counts].sort((a, b) => a - b))
+  })
+})
