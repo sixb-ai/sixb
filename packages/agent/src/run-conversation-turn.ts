@@ -233,7 +233,7 @@ async function prepareConversationTurn(
     },
     execution,
     context,
-    model: prepareAgentModel(plan, (sample) => session.noteTokenRate(sample)),
+    model: prepareAgentModel(plan),
     history: turn.history,
   }
 }

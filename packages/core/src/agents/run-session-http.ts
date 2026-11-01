@@ -5,7 +5,6 @@ import type {
   ConversationAgentRunRecord,
   SubagentRunRecord,
 } from "../storage/agents"
-import type { AgentModelTokenRateSample } from "./context-token-rate"
 import type { StreamSink } from "./run-events"
 import { AgentExecutionLostError } from "./run-fence"
 import type { AgentRunSession } from "./run-session"
@@ -84,8 +83,6 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     )
 
   const models = new Map<string, Promise<LanguageModel>>()
-  // What its calls measured goes with its end, as an in-process session records it.
-  let tokenRate: AgentModelTokenRateSample | undefined
   const sink = batchedEvents(async (batch) => {
     try {
       await result(
@@ -150,12 +147,9 @@ export function createHttpAgentRunSession<TRun extends AgentRunRecord>(
     async finish(outcome, messages) {
       // What it streamed goes first; the server announces the end it records.
       await sink.flush()
-      const finished = await call<AgentRunRecord>("finish", [outcome, messages, tokenRate])
+      const finished = await call<AgentRunRecord>("finish", [outcome, messages])
       sink.end()
       return finished
-    },
-    noteTokenRate(sample) {
-      tokenRate = sample
     },
     assertOwned: () => call("assertOwned"),
     plan: () => call("plan"),

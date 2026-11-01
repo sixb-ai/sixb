@@ -131,7 +131,7 @@ describe("agent context budget resolution", () => {
 
     expect(budget.bytesPerToken).toBe(AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN)
     expect(() =>
-      resolveAgentContextBudget({ ...selection(), tokenRates: [{ bytes: 0, tokens: 10_000 }] })
+      resolveAgentContextBudget({ ...selection(), tokenRates: [{ bytes: 0, tokens: 0 }] })
     ).toThrow("token rates must measure a positive number of bytes per token")
   })
 
@@ -161,60 +161,6 @@ describe("agent context budget resolution", () => {
 
     // 840,000 bytes at the project's 2.4 per token, plus the 16 overhead tokens.
     expect(outputs[1]).toBe(400_000 - (350_000 + 16))
-  })
-
-  test("takes no measurement from a call that carried an image", async () => {
-    // Reproduce: drop the image check from measureAgentContextTokenRate; the image's 5,400-token
-    // allowance comes off the count and the call measures its text sparser than it reads.
-    const base = selection({ contextWindow: 200_000 })
-    countingAt(base.model, 2.4)
-    const samples: unknown[] = []
-    const { model } = prepareAgentModel(
-      { ...base, model: await resolveLanguageModel(base.model) },
-      (sample) => samples.push(sample)
-    )
-    const image = {
-      type: "file" as const,
-      mediaType: "image/png",
-      data: new URL("data:image/png;base64,AAAA"),
-    }
-
-    await streamAll(model, request([text(30_000), image]))
-    await streamAll(model, request([text(30_000)]))
-
-    expect(samples).toEqual([
-      { providerId: "mock", modelId: "model", bytes: 30_000, tokens: 12_500 },
-    ])
-  })
-
-  test("reports what each call measured of its model's tokenizer, for the run to record", async () => {
-    // Removal proof: drop the `measured` call in prepareAgentModel; the run records nothing.
-    const base = selection({ contextWindow: 200_000 })
-    base.model.stream = async (request) => {
-      const bytes = JSON.stringify(request.messages).length
-      // The first call is too small to tell; the second counts 2.4 bytes per token.
-      const inputTokens = bytes < 10_000 ? 100 : Math.ceil(30_000 / 2.4) + 16
-      return {
-        events: (async function* () {
-          yield { type: "finish", finishReason: "stop", usage: { inputTokens, outputTokens: 10 } }
-        })(),
-      }
-    }
-    const samples: unknown[] = []
-    const { model } = prepareAgentModel(
-      { ...base, model: await resolveLanguageModel(base.model) },
-      (sample) => samples.push(sample)
-    )
-
-    for (const bytes of [200, 30_000]) {
-      for await (const _event of (await model.stream(request([text(bytes)]))).events) {
-        // Read to the end, as the model loop does.
-      }
-    }
-
-    expect(samples).toEqual([
-      { providerId: "mock", modelId: "model", bytes: 30_000, tokens: 12_500 },
-    ])
   })
 
   test("gives a long thread on an Anthropic model the room its window leaves", async () => {
