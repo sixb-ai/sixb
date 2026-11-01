@@ -292,12 +292,7 @@ export async function compactAgentThreadInRun(
     threadContext,
     ...estimateShape,
   })
-  // The turn's own message starts what stays: its steps are not stored yet.
-  const boundary = selectAgentContextCompactionBoundary({
-    messages: threadContext.retainedMessages,
-    keepRecentTokens: 0,
-    bytesPerToken,
-  })
+  const boundary = inRunBoundary(threadContext, bytesPerToken)
   if (!boundary) return undefined
 
   // A summary at its longest weighs as much as an earlier history this short: nothing to gain.
@@ -604,6 +599,37 @@ export function shouldCompactIdleContext(input: {
   if (Date.now() - lastCall.getTime() <= modelCacheLifetimeMs(input.caching.lifetime)) return false
 
   return input.compactedTokens < AGENT_IDLE_COMPACTION_TOKENS
+}
+
+/** Where a compaction from within a run cuts: the run's own message starts what stays. */
+function inRunBoundary(
+  threadContext: LoadedAgentThreadModelContext,
+  bytesPerToken: number
+): AgentContextCompactionBoundary | null {
+  // Its steps are not stored yet.
+  return selectAgentContextCompactionBoundary({
+    messages: threadContext.retainedMessages,
+    keepRecentTokens: 0,
+    bytesPerToken,
+  })
+}
+
+/** What a thread weighs once compacted from within its run (see compactAgentThreadInRun). */
+export function inRunCompactedTokens(input: {
+  readonly plan: ResolvedAgentExecutionPlan
+  readonly budget: AgentContextBudget
+  readonly threadContext: LoadedAgentThreadModelContext
+  readonly estimateShape: AgentContextEstimateShape
+  readonly bytesPerToken: number
+}): number {
+  const { threadContext, bytesPerToken } = input
+  return compactedRequestTokens({
+    fixedTokens: estimateShapedRequest(input.estimateShape, [], bytesPerToken).tokens,
+    summaryMessageTokens:
+      contextSummaryTextTokens(input.plan, input.budget) + SUMMARY_HEADER_TOKENS,
+    boundary: inRunBoundary(threadContext, bytesPerToken),
+    bytesPerToken,
+  })
 }
 
 /**
