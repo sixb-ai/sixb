@@ -128,6 +128,8 @@ export interface LiveRun {
   readonly parts: readonly Part[]
   readonly keys: readonly string[]
   readonly step: number
+  /** How many parts came before the current step: a step asked again drops the ones after. */
+  readonly stepStart: number
   readonly working: boolean
   readonly compacting: boolean
   /** Set once the run's answer is stored: the transcript then shows it. */
@@ -141,6 +143,7 @@ export function liveRun(runId: string): LiveRun {
     parts: [],
     keys: [],
     step: 0,
+    stepStart: 0,
     working: true,
     compacting: false,
     finalized: false,
@@ -178,7 +181,15 @@ export function reduceLive(state: LiveRun, event: AgentRunStreamEvent): LiveRun 
 function reduceChunk(state: LiveRun, chunk: ModelUiChunk): LiveRun {
   switch (chunk.type) {
     case "start-step":
-      return { ...state, step: state.step + 1 }
+      // A step asked again drops what its first call streamed.
+      if (chunk.retry) {
+        return {
+          ...state,
+          parts: state.parts.slice(0, state.stepStart),
+          keys: state.keys.slice(0, state.stepStart),
+        }
+      }
+      return { ...state, step: state.step + 1, stepStart: state.parts.length }
     case "text-delta": {
       if (!chunk.delta) return state
       const key = `text#${state.step}#${chunk.id}`
