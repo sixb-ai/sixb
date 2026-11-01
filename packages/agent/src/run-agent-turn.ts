@@ -178,7 +178,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           ...step,
           messages: prepared?.messages ?? step.messages,
         })
-        return guarded ?? prepared
+        // The guard's request, when it reduced the one prepared, and the room its answer has.
+        return { ...prepared, ...guarded }
       }
     : context.prepareStep
 
