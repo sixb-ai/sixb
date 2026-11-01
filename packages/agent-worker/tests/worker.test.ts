@@ -15041,4 +15041,59 @@ describe("context within a turn", () => {
       await worker.stop()
     }
   })
+
+  test("anchors the next turn on no call of a run that failed after compacting", async () => {
+    // Reproduce: drop the createdByRunId check in readUsageAnchor; the turn after a run that
+    // failed right after compacting then anchors on the summary's own call, which read the history
+    // before compaction (about 55,800 tokens for a request of about 42,000), and compacts again.
+    const requests: LanguageModelRequest[] = []
+    let refused = false
+    const model = chapterReadingModel({
+      chapters: 2,
+      requests,
+      // The call right after the summary is refused once, as an overloaded provider would.
+      reject: (request) => {
+        if (refused || previousSummary(request) === undefined) return undefined
+
+        refused = true
+        return new ModelProviderError("[test] Overloaded.", "mock", "mock-model", { status: 529 })
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [chapterTool(105_000)],
+    })
+    const storage = agentStorageOf(sixb)
+    const threadId = "failed_after_compaction_thread"
+    await storage.threads.create({ id: threadId, projectId: PROJECT_ID, ownerPrincipal: REQUESTER })
+    // As in the turn that compacts before its second call: about 48,000 tokens before it.
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `failed-in-turn-${index}-${"x".repeat(12_000)}`,
+      })
+    }
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const reading = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Read the book." })
+      const read = await waitForTerminalRun(storage, reading.run.id)
+      expect(read.status).toBe("failed")
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint?.createdByRunId).toBe(read.id)
+
+      const sent = requests.length
+      const next = await requestAgentAs(sixb, REQUESTER, { threadId, text: "Thanks." })
+      const run = await waitForTerminalRun(storage, next.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(requests.slice(sent).some(isSummaryRequest)).toBe(false)
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({ id: checkpoint?.id })
+    } finally {
+      await worker.stop()
+    }
+  })
 })
