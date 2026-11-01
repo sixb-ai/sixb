@@ -196,6 +196,7 @@ export class ChildRunner {
         ? this.host.prepare(prepare, turnSignal)
         : prepare())
       const { context, execution, thread, conversation, plan, budget, history } = prepared
+      const { measuredBytesPerToken } = prepared
       await session.events.publishStarted(run)
       runtime = createAgentTurnRuntime({ signal: turnSignal })
       // A message its parent sent while it was queued is read at its first step. What a paused run
@@ -225,6 +226,7 @@ export class ChildRunner {
         plan,
         contextLimits: {
           budget,
+          measuredBytesPerToken,
           thread: childEnvironment.thread,
           ...(compactInRun ? { compactInRun } : {}),
           ...(bytesPerToken === undefined ? {} : { bytesPerToken }),
@@ -311,7 +313,7 @@ export class ChildRunner {
     const configured = resolveRunPlan(runPlan, {
       model: await session.models.language(runPlan.model),
     })
-    const { model, budget } = prepareAgentModel(configured)
+    const { model, budget, measuredBytesPerToken } = prepareAgentModel(configured)
     const plan = Object.freeze({ ...configured, model })
     const requester = agentRequester(execution.requestedBy, child.names)
     const context: AgentExecutionContext = {
@@ -324,7 +326,16 @@ export class ChildRunner {
       ...(child.task ? { task: child.task } : {}),
       ...(child.paused ? { paused: child.paused } : {}),
     }
-    return { context, execution, thread, conversation: child.conversation, plan, budget, history }
+    return {
+      context,
+      execution,
+      thread,
+      conversation: child.conversation,
+      plan,
+      budget,
+      measuredBytesPerToken,
+      history,
+    }
   }
 }
 
