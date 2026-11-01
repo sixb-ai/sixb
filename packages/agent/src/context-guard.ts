@@ -7,6 +7,8 @@ import {
   type RecoverModelStepInput,
 } from "@sixb/core/internal/agents"
 import {
+  isJsonObject,
+  type JsonValue,
   type LanguageModel,
   type ModelMessage,
   ModelProviderError,
@@ -494,6 +496,7 @@ class ContextGuard {
     excessTokens: number
   ): { readonly messages: readonly ModelMessage[]; readonly calls: readonly ReducedCall[] } {
     const calls = toolCallKeys(messages)
+    const inputs = toolCallInputs(messages)
     const read = messages.map((message) => message.role).lastIndexOf("assistant")
     const unread = new Map<number, Set<number>>()
     let longest = 0
@@ -522,7 +525,7 @@ class ContextGuard {
       const calledFor: ReducedCall[] = []
       cut = replaceToolResults(messages, unread, (part) => {
         const text = toolResultText(part)
-        const kept = cutText(text, limit, part.toolName)
+        const kept = cutToolResult(part, limit, inputs.get(part.toolCallId))
         const call = reducedCall(calls, part.toolCallId)
         if (kept !== text && call) calledFor.push(call)
 
@@ -656,6 +659,19 @@ function reducedCall(
 }
 
 /** What each call in `messages` asked, by its id: its tool and its input. */
+/** What each tool call of `messages` was called with, by its id. */
+function toolCallInputs(messages: readonly ModelMessage[]): ReadonlyMap<string, JsonValue> {
+  const inputs = new Map<string, JsonValue>()
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+
+    for (const part of message.content) {
+      if (part.type === "tool-call") inputs.set(part.toolCallId, part.input)
+    }
+  }
+  return inputs
+}
+
 function toolCallKeys(messages: readonly ModelMessage[]): ReadonlyMap<string, string> {
   const keys = new Map<string, string>()
   for (const message of messages) {
@@ -689,17 +705,84 @@ function toolResultText(part: ModelToolResultPart): string {
 }
 
 /** The text up to its last line within `maxBytes`, saying how much was left out. */
-function cutText(text: string, maxBytes: number, toolName: string): string {
+/**
+ * A tool result cut to about `maxBytes`, with a note on how to read the rest. A `read` of a file
+ * shows whole lines and names the path and the line to go on from, as the read tool pages: a
+ * vaguer note once left a model reading files that did not exist rather than the rest of its own.
+ * A `view_file` names its file, to page through with read. Any other is called again for less.
+ */
+function cutToolResult(
+  part: ModelToolResultPart,
+  maxBytes: number,
+  input: JsonValue | undefined
+): string {
+  const text = toolResultText(part)
+  if (utf8Bytes(text) <= maxBytes) return text
+
+  const page = part.toolName === "read" ? readPage(part) : undefined
+  if (page) return cutReadPage(page, maxBytes)
+
+  const path = isJsonObject(input) && typeof input.path === "string" ? input.path : undefined
+  const rest =
+    part.toolName === "view_file" && path !== undefined
+      ? `Read the rest with read({ path: ${JSON.stringify(path)} }), which pages through the file.`
+      : `Call ${part.toolName} again for a smaller part to read the rest.`
+  const kept = cutLines(text, maxBytes)
+  const omitted = utf8Bytes(text) - utf8Bytes(kept)
+  return `${kept}\n[Cut to fit the model's context: ${omitted.toLocaleString("en-US")} more bytes. ${rest}]`
+}
+
+/** A read tool's page of a file: its lines `startLine` to `endLine`. */
+interface ReadPage {
+  readonly path: string
+  readonly content: string
+  readonly startLine: number
+  readonly endLine: number
+}
+
+function readPage(part: ModelToolResultPart): ReadPage | undefined {
+  if (part.output.type !== "json" || !isJsonObject(part.output.value)) return undefined
+
+  const { path, content, startLine, endLine } = part.output.value
+  if (typeof path !== "string" || typeof content !== "string") return undefined
+  if (typeof startLine !== "number" || typeof endLine !== "number") return undefined
+  return { path, content, startLine, endLine }
+}
+
+/** The page's first lines that fit, and the read call that shows the next. */
+function cutReadPage(page: ReadPage, maxBytes: number): string {
+  const lines = page.content.split("\n")
+  let bytes = 0
+  let count = 0
+  for (const line of lines) {
+    bytes += utf8Bytes(line) + 1
+    if (bytes > maxBytes) break
+    count += 1
+  }
+  const range = (from: number, to: number) =>
+    `${from.toLocaleString("en-US")}–${to.toLocaleString("en-US")}`
+
+  // A first line longer than fits is shown in part, and the rest goes on from the next line.
+  const lastShown = page.startLine + Math.max(count, 1) - 1
+  const kept = count > 0 ? lines.slice(0, count).join("\n") : cutLines(lines[0] ?? "", maxBytes)
+  const shown =
+    count > 0
+      ? `lines ${range(page.startLine, lastShown)} of ${range(page.startLine, page.endLine)} shown`
+      : `line ${page.startLine.toLocaleString("en-US")} shown in part`
+  const next = `read({ path: ${JSON.stringify(page.path)}, offset: ${lastShown + 1} })`
+
+  return `${kept}\n[Cut to fit the model's context: ${shown}. Read the rest with ${next}.]`
+}
+
+/** `text`'s whole lines that fit `maxBytes`, or as much of its first line. */
+function cutLines(text: string, maxBytes: number): string {
   const bytes = new TextEncoder().encode(text)
   if (bytes.byteLength <= maxBytes) return text
 
   // A cut inside a multi-byte character drops it.
   const head = new TextDecoder().decode(bytes.slice(0, maxBytes)).replace(/�$/, "")
   const lastLine = head.lastIndexOf("\n")
-  const kept = (lastLine > 0 ? head.slice(0, lastLine) : head).trimEnd()
-  const omitted = bytes.byteLength - utf8Bytes(kept)
-
-  return `${kept}\n[Cut to fit the model's context: ${omitted.toLocaleString("en-US")} more bytes. Call ${toolName} again for a smaller part to read the rest.]`
+  return (lastLine > 0 ? head.slice(0, lastLine) : head).trimEnd()
 }
 
 /** `messages` with the chosen tool results replaced, every other message as it was. */

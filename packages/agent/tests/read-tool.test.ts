@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
-import type { ModelTool } from "@sixb/core/models"
+import type { JsonValue, ModelMessage, ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
+import { createAgentContextGuard } from "../src/context-guard"
 import { SANDBOX_CONTEXT_DIRECTORY } from "../src/run-sandbox"
 import { createReadTool, type ReadToolInput, type ReadToolOutput } from "../src/tools/read"
 
@@ -15,6 +16,76 @@ afterEach(async () => {
 })
 
 describe("read tool", () => {
+  // Reproduce: cut a read like any other result (the generic note of cutToolResult); it then says
+  // only how many bytes are left, and a model once read files that did not exist, doc15.txt to
+  // doc300.txt, rather than the rest of its own.
+  test("cut by the context guard, says the path and the line to read on from", async () => {
+    const { root, read } = await createHarness()
+    const lines = Array.from({ length: 1_640 }, (_, index) => `doc3 line ${index + 1}`)
+    await writeFile(join(root, "doc3.txt"), lines.join("\n"))
+    const page = await read({ path: "doc3.txt" })
+    const messages: ModelMessage[] = [
+      { role: "system", content: "You read." },
+      { role: "user", content: [{ type: "text", text: "Read doc3.txt." }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "read",
+            input: { path: "doc3.txt" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "read",
+            output: { type: "json", value: page as unknown as JsonValue },
+          },
+        ],
+      },
+    ]
+    const guard = createAgentContextGuard({
+      // The page is about 9,000 tokens at 3 bytes a token: past this 5,000-token limit.
+      budget: {
+        windowTokens: 21_384,
+        inputBudgetTokens: 5_000,
+        reserveTokens: 16_384,
+        keepRecentTokens: 2_000,
+        source: "model",
+        bytesPerToken: 3,
+      },
+      tools: [],
+    })
+
+    const prepared = await guard.prepareStep({
+      stepIndex: 0,
+      messages,
+      steps: [],
+      model: { providerId: "mock", modelId: "model" } as never,
+      signal: new AbortController().signal,
+    })
+
+    const result = prepared?.messages?.at(-1)
+    const output = result?.role === "tool" ? result.content[0]?.output : undefined
+    expect(output?.type).toBe("text")
+    const text = String(output?.value)
+    const note = text.slice(text.lastIndexOf("\n") + 1)
+    const shown = text.slice(0, text.lastIndexOf("\n")).split("\n")
+    expect(shown).toEqual(lines.slice(0, shown.length))
+    expect(note).toBe(
+      `[Cut to fit the model's context: lines 1–${shown.length} of 1–1,640 shown. Read the rest with read({ path: "doc3.txt", offset: ${shown.length + 1} }).]`
+    )
+    // The read it names goes on where the cut stopped.
+    const rest = await read({ path: "doc3.txt", offset: shown.length + 1 })
+    expect(rest.content.split("\n")[0]).toBe(lines[shown.length])
+  })
+
   test("reads and continues through the line cap", async () => {
     const { root, read } = await createHarness()
     const lines = Array.from({ length: 2_002 }, (_, index) => `line ${index + 1}`)

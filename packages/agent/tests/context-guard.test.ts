@@ -589,3 +589,42 @@ describe("the room a first call's answer has", () => {
     expect(prepared?.maxOutputTokens).toBeGreaterThan(budget.windowTokens - counted - 1_000)
   })
 })
+
+describe("a result cut to fit", () => {
+  // Reproduce: give view_file the generic note in cutToolResult; it then says to call view_file
+  // again for a smaller part, which it cannot ask for.
+  test("of view_file names the file to page through with read", async () => {
+    const guard = createAgentContextGuard({ budget: limited(5_000), tools: [] })
+    const messages: ModelMessage[] = [
+      ...HEAD,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "view",
+            toolName: "view_file",
+            input: { path: "report.txt" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "view",
+            toolName: "view_file",
+            output: { type: "text", value: "report line\n".repeat(2_500) },
+          },
+        ],
+      },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    expect(outputs(prepared?.messages ?? messages)[0]).toEndWith(
+      'Read the rest with read({ path: "report.txt" }), which pages through the file.]'
+    )
+  })
+})
