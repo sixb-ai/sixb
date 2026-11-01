@@ -232,6 +232,7 @@ export async function executeWorkflowAgentNode(
       context: environment.turnContext,
       agentStepId: node.agentStep.id,
       plan,
+      budget: prepared.budget,
       agentStep: node.agentStep,
       workflowId: workflow.id,
       workflowRunId: nodeRun.workflowRunId,

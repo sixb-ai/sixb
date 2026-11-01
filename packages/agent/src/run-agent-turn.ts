@@ -345,7 +345,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
  * Mark each step from `fromStep` on as answering a request the turn reduced, for the next turn's
  * estimate not to go by what those calls read.
  */
-function markReducedSteps(
+export function markReducedSteps(
   parts: readonly AgentMessagePart[],
   fromStep: number | undefined
 ): readonly AgentMessagePart[] {
