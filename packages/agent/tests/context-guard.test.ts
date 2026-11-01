@@ -567,3 +567,25 @@ describe("a request nothing more can reduce", () => {
     expect(refused).toMatchObject({ reason: "context-window-exceeded" })
   })
 })
+
+describe("the room a first call's answer has", () => {
+  // Reproduce: size a first call's room by its estimate alone (return this.weighed in
+  // ContextGuard.heaviest when nothing was counted); a request the provider counts 3 % above its
+  // estimate then has input and answer pass the window.
+  test("stays within the window when the provider counts a few percent above the estimate", async () => {
+    const budget = limited(49_152)
+    const guard = createAgentContextGuard({ budget, tools: [] })
+    const messages: ModelMessage[] = [
+      { role: "system", content: "You read." },
+      { role: "user", content: [{ type: "text", text: "word ".repeat(4_400) }] },
+    ]
+
+    const prepared = await guard.prepareStep(step(0, messages))
+
+    // What the provider counts: 3 % more than the estimate, as a thread's rate can run.
+    const counted = Math.ceil(tokens(messages) * 1.03)
+    expect(counted + (prepared?.maxOutputTokens ?? 0)).toBeLessThanOrEqual(budget.windowTokens)
+    // A small share of the room: the answer still has far more than the reserve.
+    expect(prepared?.maxOutputTokens).toBeGreaterThan(budget.windowTokens - counted - 1_000)
+  })
+})

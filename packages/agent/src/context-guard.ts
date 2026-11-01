@@ -281,8 +281,10 @@ class ContextGuard {
 
   /**
    * The most a request may weigh: what the last call read, less what was removed, and what was
-   * added since at one byte a token, the densest any tokenizer reads. Without a call to go by, what
-   * it weighs.
+   * added since at one byte a token, the densest any tokenizer reads. Without a call to go by, its
+   * whole estimate, and the share an estimate may miss (GROWTH_MARGIN): at one byte a token it
+   * would leave a first call little more than the reserve, whatever the turn reads. An estimate
+   * at the thread's own rate has run about 1 % short of the provider's count.
    */
   private heaviest(messages: readonly ModelMessage[], steps: readonly ModelStep[]): number {
     const { fixed, removed, added } = this.measure(
@@ -290,9 +292,10 @@ class ContextGuard {
       steps,
       AGENT_TOKEN_RATE_MIN_BYTES_PER_TOKEN
     )
-    return fixed > 0
-      ? fixed - removed + Math.ceil(added * this.scale)
-      : this.weighed(messages, steps)
+    if (fixed > 0) return fixed - removed + Math.ceil(added * this.scale)
+
+    const tokens = this.weighed(messages, steps)
+    return tokens + Math.ceil(tokens * GROWTH_MARGIN)
   }
 
   /**
