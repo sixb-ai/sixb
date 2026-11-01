@@ -88,6 +88,27 @@ describe("a live run", () => {
     expect(live).toMatchObject({ working: false, finished: { status: "succeeded" } })
   })
 
+  // Reproduce: let reduceChunk handle a retried start-step as any other; the first call's text
+  // then stays above the answer.
+  test("drops what a step's first call streamed when the step is asked again", () => {
+    let live = liveRun(RUN)
+    for (const chunk of [
+      { type: "start-step" },
+      { type: "text-delta", id: "a", delta: "Reading." },
+      { type: "start-step" },
+      { type: "text-delta", id: "a", delta: "Half an ans" },
+      { type: "start-step", retry: true },
+      { type: "text-delta", id: "a", delta: "The answer." },
+    ]) {
+      live = reduceLive(live, event({ type: "agent.ui.chunk", chunk }))
+    }
+
+    expect(live.parts).toEqual([
+      { kind: "text", text: "Reading." },
+      { kind: "text", text: "The answer." },
+    ])
+  })
+
   test("follows a call from its input to its output", () => {
     let live = liveRun(RUN)
     for (const chunk of [

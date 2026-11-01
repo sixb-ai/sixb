@@ -66,6 +66,27 @@ describe("liveRunReducer", () => {
     ).toEqual(["text:Before tool.", "tool:bash", "text:After tool."])
   })
 
+  // Reproduce: let liveRunReducer handle a retried start-step as any other; the first call's text
+  // and tool card then stay above the answer.
+  test("drops what a step's first call streamed when the step is asked again", () => {
+    const state = reduceChunks([
+      { type: "start-step" },
+      { type: "text-delta", id: "text", delta: "Reading." },
+      { type: "tool-output-available", toolCallId: "call-1", toolName: "read", output: "a" },
+      { type: "start-step" },
+      { type: "text-delta", id: "text", delta: "Half an ans" },
+      { type: "tool-input-start", toolCallId: "call-2", toolName: "read" },
+      { type: "start-step", retry: true },
+      { type: "text-delta", id: "text", delta: "The answer." },
+    ])
+
+    expect(state.parts.map((part) => (part.kind === "text" ? part.text : part.kind))).toEqual([
+      "Reading.",
+      "tool",
+      "The answer.",
+    ])
+  })
+
   test("materializes whitespace only after visible text has started", () => {
     const empty = reduceChunks([
       { type: "text-start", id: "empty" },
