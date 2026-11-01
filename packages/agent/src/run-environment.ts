@@ -387,6 +387,7 @@ export async function createConversationAgentEnvironment(
           threadContext,
           memory,
           reason,
+          coldCache: false,
         })
         return (
           compacted &&
@@ -651,6 +652,7 @@ async function startSubagentEnvironment(
         threadContext,
         memory: undefined,
         reason,
+        coldCache: false,
       })
       return (
         compacted && childRequest({ threadContext: compacted.threadContext, memory: undefined })
