@@ -92,6 +92,9 @@ to override catalog definitions.
 
 Sixb records Gateway-reported costs, usage, routing, and request IDs. Local cost estimates are
 retained separately when available; calls without reliable pricing are marked unpriceable.
+Thinking and reasoning options (`anthropic.thinking`, `openai.reasoningEffort`,
+`google.thinkingConfig`) keep a model priced; routing, service tier, speed and other provider
+options leave it unpriceable.
 
 ## Embedding models
 

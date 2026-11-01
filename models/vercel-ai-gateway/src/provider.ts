@@ -12,6 +12,7 @@ import {
   isJsonObject,
   isModelReasoning,
   type JsonObject,
+  type JsonValue,
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
@@ -994,6 +995,35 @@ function fallbackDefinition(modelId: string): LanguageModelDefinition {
   })
 }
 
+/**
+ * Provider options that change how a model works, not what its tokens cost: thinking is billed as
+ * output at the model's own rate. A thinking token budget is not here, as the provider may add it
+ * to the call's output limit, past what a cost reservation covers. Routing, service tiers, speed
+ * and residency are not here either.
+ */
+const TOKEN_NEUTRAL_PROVIDER_OPTIONS: ReadonlyMap<
+  string,
+  (key: string, value: JsonValue) => boolean
+> = new Map([
+  ["gateway", (key) => key === "caching"],
+  [
+    "anthropic",
+    (key, value) =>
+      key === "sendReasoning" ||
+      (key === "thinking" &&
+        isJsonObject(value) &&
+        Object.keys(value).every((field) => field === "type" || field === "display")),
+  ],
+  ["openai", (key) => key === "reasoningEffort" || key === "reasoningSummary"],
+  [
+    "google",
+    (key, value) =>
+      key === "thinkingConfig" &&
+      isJsonObject(value) &&
+      Object.keys(value).every((field) => field === "includeThoughts" || field === "thinkingLevel"),
+  ],
+])
+
 /** Unknown native options may affect billing; only known token-neutral controls are safe. */
 function hasFixedTokenPricing(options: VercelGatewayModelOptions): boolean {
   if (
@@ -1002,13 +1032,14 @@ function hasFixedTokenPricing(options: VercelGatewayModelOptions): boolean {
     )
   )
     return false
-  const providerOptions = options.providerOptions ?? {}
-  if (Object.keys(providerOptions).some((key) => key !== "gateway")) return false
-  const gateway = providerOptions.gateway
-  return (
-    gateway === undefined ||
-    (isJsonObject(gateway) && Object.keys(gateway).every((key) => key === "caching"))
-  )
+  return Object.entries(options.providerOptions ?? {}).every(([provider, value]) => {
+    const neutral = TOKEN_NEUTRAL_PROVIDER_OPTIONS.get(provider)
+    return (
+      neutral !== undefined &&
+      isJsonObject(value) &&
+      Object.entries(value).every(([key, field]) => neutral(key, field))
+    )
+  })
 }
 
 class VercelGatewayLanguageModel implements LanguageModel {

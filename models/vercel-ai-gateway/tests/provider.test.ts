@@ -582,6 +582,15 @@ describe("Vercel AI Gateway provider", () => {
       { request: {} },
       { request: { temperature: 0.2 } },
       { providerOptions: { gateway: { caching: "off" } } },
+      // Removal proof: accept only `gateway` provider options; a Claude binding that sets its
+      // thinking, as most do, becomes unpriceable and its cost limits fail closed.
+      { providerOptions: { anthropic: { thinking: { type: "adaptive", display: "summarized" } } } },
+      { providerOptions: { openai: { reasoningEffort: "high", reasoningSummary: "auto" } } },
+      {
+        providerOptions: {
+          google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } },
+        },
+      },
     ]
     for (const options of safeOptions) {
       // Removal proof: remove the provider's reservation estimator; this fails before inference.
@@ -597,11 +606,19 @@ describe("Vercel AI Gateway provider", () => {
         })
       ).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
     }
-    for (const options of [
+    const unpricedOptions: import("../src/provider").VercelGatewayModelOptions[] = [
       { request: { service_tier: "priority" } },
       { providerOptions: { gateway: { models: ["other/model"] } } },
+      { providerOptions: { anthropic: { thinking: { type: "adaptive" }, speed: "fast" } } },
+      // A thinking budget may raise the call's output limit past what a reservation covers.
+      { providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 8_000 } } } },
+      { providerOptions: { anthropic: { thinking: { type: "adaptive", budgetTokens: 8_000 } } } },
+      { providerOptions: { google: { thinkingConfig: { thinkingBudget: 8_000 } } } },
+      { providerOptions: { openai: { serviceTier: "flex" } } },
+      { providerOptions: { constructor: {} } },
       { providerTools: [{ type: "web_search" }] },
-    ]) {
+    ]
+    for (const options of unpricedOptions) {
       expect(
         provider("test/model", options).costEstimator?.estimate({
           usage: { inputTokens: 1000, outputTokens: 200 },
