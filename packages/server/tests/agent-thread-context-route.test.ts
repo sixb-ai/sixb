@@ -163,18 +163,21 @@ function createFixture() {
   }
 
   /**
-   * What a request of a thread's stored messages weighs at the rate an unmeasured model starts
-   * from, as the worker's estimate counts it, less the system prompt and tools the API cannot
-   * render.
+   * What a request of a thread's stored messages weighs at `bytesPerToken`, by default the rate a
+   * model no run measured starts from, as the worker's estimate counts it, less the system prompt
+   * and tools the API cannot render.
    */
-  async function messagesEstimate(threadId: string, modelId: string): Promise<number> {
+  async function messagesEstimate(
+    threadId: string,
+    bytesPerToken = AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN
+  ): Promise<number> {
     const { messages } = await storage.agents.messages.list({ projectId, threadId, order: "asc" })
     const records: readonly AgentMessageRecord[] = messages
     return estimateAgentContextRequestTokens({
       systemPrompt: "",
       tools: [],
       messages: records,
-      bytesPerToken: AGENT_CONTEXT_DEFAULT_BYTES_PER_TOKEN,
+      bytesPerToken,
     }).tokens
   }
 
@@ -237,7 +240,7 @@ describe("GET /api/agent-threads/:threadId/context", () => {
     expect(small.body).toMatchObject({
       model: { provider: "test", modelId: "small" },
       limitTokens: 200_000 - 16_384,
-      usedTokens: await messagesEstimate("thr_large", "small"),
+      usedTokens: await messagesEstimate("thr_large"),
     })
   })
 
@@ -286,9 +289,31 @@ describe("GET /api/agent-threads/:threadId/context", () => {
     })
 
     const { body } = await read("thr_reduced")
-    expect(body.usedTokens).toBe(await messagesEstimate("thr_reduced", "large"))
+    expect(body.usedTokens).toBe(await messagesEstimate("thr_reduced"))
     // The call is still the one the cache share is read from.
     expect(body).toMatchObject({ lastCall: { inputTokens: 60_000 } })
+  })
+
+  // Removal proof: resolve the budget without the bytes per token readAgentThreadContextUse reads;
+  // the meter then counts at the default 2 while the worker's turn starts from the measured 4.
+  test("counts at the bytes per token the model's runs measured, as the next turn starts from", async () => {
+    const { storage, read, seedTurn, messagesEstimate } = createFixture()
+    await seedTurn("thr_measured", "large", { earlier: true })
+    for (let index = 0; index < 20; index += 1) {
+      await storage.agents.tokenRates.record({
+        projectId,
+        providerId: "test",
+        modelId: "large",
+        runId: `earlier_run_${index}`,
+        bytes: 40_000,
+        tokens: 10_000,
+        measuredAt: at(index),
+      })
+    }
+
+    const { body } = await read("thr_measured")
+    expect(body.usedTokens).toBe(await messagesEstimate("thr_measured", 4))
+    expect(body.usedTokens).toBeLessThan(await messagesEstimate("thr_measured"))
   })
 
   // Removal proof: resolve the budget without the turn's reasoning; the limit keeps the 16,384
