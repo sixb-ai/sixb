@@ -159,9 +159,10 @@ retry runs with the same setting.
 Chat answers and AI workflow steps can use the model's full output limit, reasoning included, as
 long as the conversation leaves room for it in the context window. However long the conversation
 gets, they keep at least 16,384 tokens (or a quarter of the window): older turns are summarized
-before the conversation takes that room. A conversation with an attached file keeps to that minimum,
-since Sixb cannot tell how much of the window a file takes. To spend less per answer, cap it with
-`maxOutputTokens` on the binding, such as `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
+before the conversation takes that room. An attached image counts as about 5,400 tokens and other
+files by their size, so a conversation with files keeps the same room for the answer. To spend less
+per answer, cap it with `maxOutputTokens` on the binding, such as
+`vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`.
 A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
 ## Generate a response
