@@ -146,9 +146,11 @@ export async function runSubagent(input: {
         messages: prepared?.messages ?? step.messages,
       })
       const mail = await inbox.take(step.stepIndex)
-      if (!mail) return guarded ?? prepared
+      // The guard's request, when it reduced the one prepared, and the room its answer has.
+      if (!mail) return { ...prepared, ...guarded }
 
       return {
+        ...guarded,
         messages: [
           ...(guarded?.messages ?? prepared?.messages ?? step.messages),
           ...toModelMessages([mail]),
