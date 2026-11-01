@@ -2023,8 +2023,28 @@ function renderMessage(message, page, options) {
     textChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TEXT_CHARS,
     toolChars: options.whole ? Number.POSITIVE_INFINITY : PAGE_TOOL_CHARS
   };
-  return [`── ${heading}`, ...message.parts.flatMap((part) => renderPart(part, bounds))].join(`
+  return [
+    `── ${heading}`,
+    ...message.parts.flatMap((part, index) => [
+      ...renderPart(part, bounds),
+      ...renderOutputFile(part, message, index)
+    ])
+  ].join(`
 `);
+}
+function renderOutputFile(part, message, index) {
+  const file = part.type === "tool-call" ? record(part.outputFile) : undefined;
+  const fileRef = record(file?.fileRef);
+  if (typeof file?.path !== "string" || typeof fileRef?.sizeBytes !== "number")
+    return [];
+  const contextDir = process.env.SIXB_CONTEXT_DIR;
+  const path = contextDir ? `${contextDir.replace(/\/$/, "")}/${file.path}` : file.path;
+  const apiBaseUrl = process.env.SIXB_API_BASE_URL;
+  const threadId = process.env.SIXB_THREAD_ID;
+  const download = apiBaseUrl && threadId && message.id ? `; else: sixb files download url ${apiBaseUrl.replace(/\/$/, "")}/api/agent-threads/${idSegment(threadId)}/messages/${idSegment(message.id)}/files/content?path=${encodeURIComponent(`/parts/${index}/outputFile/fileRef`)} --output <file>` : "";
+  return [
+    `  [whole output, ${fileRef.sizeBytes.toLocaleString("en-US")} bytes: ${path}, written back to the sandbox at each run while the conversation shows this call${download}]`
+  ];
 }
 function renderPart(part, bounds) {
   const cut = (value, max) => value.length <= max ? value : `${value.slice(0, max)}… [${(value.length - max).toLocaleString("en-US")} more characters: sixb history ${bounds.seq}]`;

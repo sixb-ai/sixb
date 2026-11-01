@@ -108,6 +108,20 @@ turn N's last request sent, on every storage:
   a user's files take the budget first.
 - **Runtime input is derived again.** The `<sixb_tool_files>` message after a step's results is
   rebuilt from the stored trace by the same functions (`replayToolFiles`).
+- **An output too large for the context is saved to a file** ([tool-outputs.ts](../src/tools/tool-outputs.ts)).
+  Past `TOOL_OUTPUT_FILE_MIN_BYTES`, the whole output is stored as a file of the run (its blob
+  store, within `TOOL_OUTPUTS_MAX_BYTES` of its own, identical content counted once: saving gives
+  way before published artifacts and tool files do) and copied to
+  `tool-outputs/<call id>-<digest>.txt` of the context directory; the model reads a preview with
+  that path, the call's `modelOutput`. The tool-call part names the stored file as `outputFile`,
+  which the message's file route serves to the thread's readers, and keeps a bounded copy as
+  `output`: a command's streams cut to 20,000 characters, any other tool's output as it returned
+  it. A runner's `outputFile` is kept only at exactly that path for its own content
+  (`isAgentToolOutputFile`), checked again before a run writes it back. Provisioning writes the
+  history's saved files back while the model starts: those the sandbox lacks, newest within a
+  budget, read a few at a time and no further than their declared size, written oldest first.
+  `read` and `view_file` page by themselves and are never saved; a sandbox or store that cannot
+  take the file leaves the model the part's copy. A cleared preview points at the file.
 - **Attachments stay inline until compaction**, each user message with its own text budget.
 - **A request inlines at most 16 MiB of images, 100 of them** (`AGENT_INLINE_IMAGE_LIMITS`),
   spent in thread order, oldest first: attachments, then the images after each step, then the
@@ -161,8 +175,8 @@ one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one
   does, through `beforeFinalize({ discard: true })`.
 
 A `RunSandbox` also names the run's **context directory** (`$SIXB_CONTEXT_DIR`), where the run's
-files go: skills, ontology docs, memory, attachments, artifacts, tool files, children's files and
-the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
+files go: skills, ontology docs, memory, attachments, artifacts, tool files, saved tool outputs,
+children's files and the agent's `sixb`. Both behaviors keep it at `.sixb/agent` in the working directory, which a
 checkout excludes from Git. Every path the worker writes, checks or names in the prompt comes from
 it, as the agent names it: relative to the working directory, or absolute.
 

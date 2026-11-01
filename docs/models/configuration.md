@@ -177,6 +177,11 @@ The latest turns stay as they are, and the agent can still read the whole conver
 [`agent.context_limit_exceeded`](../errors/overview.md): start a new one, or switch to a model with a
 larger window.
 
+A tool result over 30 KB reaches the agent as a short preview, and the whole of it as a file in
+its sandbox, which it reads in pieces or searches; later turns find the file at the same path. The
+file is stored with the conversation, which keeps a command's output cut to 20,000 characters per
+stream: `sixb history` names the file, and whoever reads the conversation can download it.
+
 The same limit holds within a turn, before each model call, as tool results pile up:
 
 - right before the limit, the oldest tool results the agent has read are cleared in one batch

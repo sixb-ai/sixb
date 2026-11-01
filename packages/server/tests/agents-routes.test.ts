@@ -1522,6 +1522,62 @@ describe("agent routes", () => {
     expect(await ownerFileContent.text()).toBe("owner attachment")
   })
 
+  // Reproduce: leave outputFile out of AgentToolCallOutputSchema; the message then lists no
+  // file, and its route finds nothing at the pointer.
+  test("serves a call's saved output to who reads its thread, and to no one else", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const owner = await seedSession(storage, "usr_owner")
+    const other = await seedSession(storage, "usr_other")
+    const fileRef = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("the whole build log\n"),
+      fileName: "call_1.txt",
+      mediaType: "text/plain",
+    })
+    await storage.agents.threads.create({
+      id: "builds",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+    })
+    await storage.agents.messages.append({
+      id: "work",
+      projectId: sixb.id,
+      threadId: "builds",
+      runId: null,
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "bash",
+          input: { command: "cat build.log" },
+          state: "output-available",
+          output: { exitCode: 0, stdout: "the whole…", stderr: "" },
+          modelOutput: { type: "text", value: "<tool_output_file …>" },
+          outputFile: { fileRef, path: "tool-outputs/call_1.txt" },
+        },
+      ],
+    })
+
+    const listed = await app.fetch(
+      new Request("http://localhost/api/agent-threads/builds/messages", { headers: owner.headers })
+    )
+    const { messages } = (await listed.json()) as {
+      messages: { parts: Record<string, unknown>[] }[]
+    }
+    expect(messages[0]?.parts[1]).toMatchObject({
+      outputFile: { fileRef: { blobId: fileRef.blobId }, path: "tool-outputs/call_1.txt" },
+    })
+    expect(messages[0]?.parts[1]).not.toHaveProperty("modelOutput")
+
+    const url = `http://localhost/api/agent-threads/builds/messages/work/files/content?path=${encodeURIComponent("/parts/1/outputFile/fileRef")}`
+    const hidden = await app.fetch(new Request(url, { headers: other.headers }))
+    expect(hidden.status).toBe(404)
+    const served = await app.fetch(new Request(url, { headers: owner.headers }))
+    expect(served.status).toBe(200)
+    expect(await served.text()).toBe("the whole build log\n")
+  })
+
   test("forks a readable thread into the caller's own, files and diagnostics included", async () => {
     // Removal proof: keep only the thread's own runs in readThreadMessages' diagnostics lookup;
     // the copied answer loses its step-limit annotation.

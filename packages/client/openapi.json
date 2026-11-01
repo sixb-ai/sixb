@@ -25751,6 +25751,43 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "outputFile": {
+                                "type": "object",
+                                "properties": {
+                                  "fileRef": {
+                                    "type": "object",
+                                    "properties": {
+                                      "blobId": {
+                                        "type": "string"
+                                      },
+                                      "digest": {
+                                        "type": "string",
+                                        "pattern": "^sha256:[a-f0-9]{64}$"
+                                      },
+                                      "sizeBytes": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "fileName": {
+                                        "type": "string"
+                                      },
+                                      "mediaType": {
+                                        "type": "string"
+                                      },
+                                      "logicalPath": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["blobId", "digest", "sizeBytes"],
+                                    "additionalProperties": false
+                                  },
+                                  "path": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["fileRef", "path"],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -38448,6 +38485,43 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "outputFile": {
+                                      "type": "object",
+                                      "properties": {
+                                        "fileRef": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "digest": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[a-f0-9]{64}$"
+                                            },
+                                            "sizeBytes": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "fileName": {
+                                              "type": "string"
+                                            },
+                                            "mediaType": {
+                                              "type": "string"
+                                            },
+                                            "logicalPath": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["blobId", "digest", "sizeBytes"],
+                                          "additionalProperties": false
+                                        },
+                                        "path": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["fileRef", "path"],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -47114,6 +47188,43 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "outputFile": {
+                                      "type": "object",
+                                      "properties": {
+                                        "fileRef": {
+                                          "type": "object",
+                                          "properties": {
+                                            "blobId": {
+                                              "type": "string"
+                                            },
+                                            "digest": {
+                                              "type": "string",
+                                              "pattern": "^sha256:[a-f0-9]{64}$"
+                                            },
+                                            "sizeBytes": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "fileName": {
+                                              "type": "string"
+                                            },
+                                            "mediaType": {
+                                              "type": "string"
+                                            },
+                                            "logicalPath": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["blobId", "digest", "sizeBytes"],
+                                          "additionalProperties": false
+                                        },
+                                        "path": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["fileRef", "path"],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [

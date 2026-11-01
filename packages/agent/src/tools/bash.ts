@@ -41,6 +41,9 @@ export interface BashToolOutput extends CommandResult {
  * resolver is awaited on the first command, not at tool-construction time, so
  * sandbox creation can run concurrently with the model's first response instead
  * of blocking the turn. A resolver rejection surfaces as a failed command.
+ *
+ * Its output holds the command's streams whole: the run's tools save an output too large for the
+ * context to a file and keep {@link keptCommandOutput} of it (see tool-outputs.ts).
  */
 export function createBashTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>
@@ -56,7 +59,12 @@ export function createBashTool(
         timeout: normalizeTimeout(input.timeoutMs),
         signal,
       })
-      return truncateCommandResult(result) as unknown as JsonValue
+      const output: BashToolOutput = {
+        ...result,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }
+      return output as unknown as JsonValue
     },
     errorText: () => "The command failed.",
   }
@@ -93,6 +101,14 @@ function normalizeTimeout(timeoutMs: number | undefined): number {
     return DEFAULT_COMMAND_TIMEOUT_MS
   }
   return Math.min(Math.floor(timeoutMs), MAX_COMMAND_TIMEOUT_MS)
+}
+
+/**
+ * What a command's message part keeps of an output saved to a file: each stream within
+ * 20,000 characters, as the app, the TUI and `sixb history` show it.
+ */
+export function keptCommandOutput(output: CommandResult): BashToolOutput {
+  return truncateCommandResult(output)
 }
 
 function truncateCommandResult(result: CommandResult): BashToolOutput {
