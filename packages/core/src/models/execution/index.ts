@@ -4,6 +4,7 @@ export {
   selectLanguageModel,
 } from "../catalog"
 export { reportModelCalls } from "../language-call"
+export { resolvePrice as modelTokenPriceAt } from "../pricing"
 export { resolveLanguageModel } from "../resolve"
 export { isModelCallAccountingFailure, ModelUsageRecordingError } from "./errors"
 export type {
